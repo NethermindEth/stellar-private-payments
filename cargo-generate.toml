@@ -1,0 +1,12 @@
+[template]
+name = "rust-template"
+description = "A template for a new Rust project"
+author = "Nethermind"
+license = "Apache-2.0"
+cargo_generate_version = ">=0.23.0"
+
+# Exclude files from the placeholder generated for the template
+exclude = [
+    ".github/workflows/dependency-audit.yml",
+    "target",
+]

@@ -1,0 +1,82 @@
+name: Semver checks
+
+on:
+  pull_request:
+    branches: [ "main" ]
+    paths: ['**/Cargo.toml']  # Only run when Cargo.toml changes
+  push:
+    tags: ['v*']  # Run on version tags
+
+# Limit permissions to minimum required
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  semver:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        # cargo-semver-checks needs the full git history to compare versions
+        fetch-depth: 0
+    
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-
+    
+    - name: Get latest version tag
+      id: get-baseline
+      run: |
+        # Find the latest version tag (v0.1.0 or higher)
+        latest_tag=$(git describe --tags --abbrev=0 --match='v*' 2>/dev/null || echo "")
+        if [ -z "$latest_tag" ]; then
+          echo "No version tags found - skipping semver check"
+          echo "This is normal for new projects or templates"
+          echo "skip=true" >> $GITHUB_OUTPUT
+        else
+          # Extract version without 'v' prefix for comparison
+          version=${latest_tag#v}
+          
+          # Check if version is >= 0.1.0 (using semver comparison)
+          if printf '%s\n%s\n' "0.1.0" "$version" | sort -V | head -n1 | grep -q "^0\.1\.0$"; then
+            echo "Found suitable baseline tag: $latest_tag (>= v0.1.0)"
+            echo "baseline_rev=$latest_tag" >> $GITHUB_OUTPUT
+            echo "skip=false" >> $GITHUB_OUTPUT
+          else
+            echo "Found tag $latest_tag but it's < v0.1.0 - skipping semver check"
+            echo "Semver checking typically starts from v0.1.0 when APIs stabilize"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          fi
+        fi
+    
+    - name: Check semver compatibility
+      if: steps.get-baseline.outputs.skip == 'false'
+      uses: obi1kenobi/cargo-semver-checks-action@v2
+      with:
+        baseline-rev: ${{ steps.get-baseline.outputs.baseline_rev }}
+        verbose: true
+    
+    - name: Semver check skipped
+      if: steps.get-baseline.outputs.skip == 'true'
+      run: |
+        echo "✅ Semver check skipped - no suitable version tags found"
+        echo "To enable semver checking:"
+        echo "1. Tag your first stable release: git tag v0.1.0"
+        echo "2. Push the tag: git push origin v0.1.0"
+        echo "3. Future changes will be checked against tagged versions"
+        echo ""
+        echo "Note: Semver checking starts from v0.1.0 as this indicates"
+        echo "the beginning of API stability commitments in Rust projects"

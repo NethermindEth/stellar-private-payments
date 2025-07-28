@@ -1,0 +1,34 @@
+name: Coverage
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    types: [opened, synchronize, reopened]
+    
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  coverage:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install cargo-llvm-cov
+      run: cargo install cargo-llvm-cov
+
+    - name: Install llvm-tools
+      run: rustup component add llvm-tools-preview
+
+    - name: Run code coverage
+      run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+
+    - name: Comment PR with coverage
+      continue-on-error: true
+      uses: romeovs/lcov-reporter-action@v0.4.0
+      with:
+        github-token: ${{ secrets.GITHUB_TOKEN }}
+        lcov-file: lcov.info

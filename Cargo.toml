@@ -1,0 +1,35 @@
+
+# TODO(template) update for the crate name
+[workspace]
+members = ["examples", "template_crate"]
+resolver = "2"
+default-members = ["template_crate"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+# TODO(template) update for your repository
+repository = "https://github.com/NethermindEth/rust-template"
+license = "Apache-2.0" # TODO(template) update license if needed
+publish = false
+
+[workspace.dependencies]
+
+[workspace.lints.rust]
+missing_docs = "deny"
+# TODO(template) if you use any unsafe code, then running miri in CI is a must
+# if for a crate in the workspace you need an unsafe code
+# prefer to preserve forbid for the workspace
+# and allowing only at a specific crate level 
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+arithmetic_side_effects = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+needless_return = "deny"
+panicking_overflow_checks = "deny"
+unwrap_used = "deny"

@@ -1,0 +1,56 @@
+name: Docs
+
+# TODO(template)
+# GH pages seems to work properly for public repos
+on:
+  workflow_dispatch:
+
+jobs:
+  # TODO(template) remove docs publishing, when the crate is published to crates.io
+  docs:
+    permissions:
+        contents: write
+    name: Documentation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup pages
+        id: pages
+        uses: actions/configure-pages@v5
+
+      - name: Clean docs folder
+        run: cargo clean --doc
+
+      # Documentation with Latex support
+      # TODO(template) if Latex is not needed
+      # just remove katex-header.html at the root and RUSTDOCFLAGS here
+      # TODO(template) update the crate name
+      - name: Build documentation
+        run: RUSTDOCFLAGS="--html-in-header katex-header.html" cargo doc --no-deps -p template_crate
+
+      - name: Remove lock file
+        run: rm target/doc/.lock
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: target/doc
+
+  publish-docs:
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: docs
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
