@@ -12,12 +12,6 @@
 //! 2. Find all `.circom` files in the `src/` directory
 //! 3. Compile each circuit using the circom compiler
 //! 4. Generate proving keys if the "setup" feature is enabled
-//!
-//! ## Requirements
-//!
-//! - circom compiler must be installed and available in PATH
-//! - npm must be installed for dependency management
-//! - snarkjs must be installed if using the "setup" feature
 
 use std::env;
 use std::fs;
@@ -33,7 +27,7 @@ fn main() {
     fs::create_dir_all(&compiled_dir).expect("Could not create output directory");
 
     // Ensure circomlib dependencies are installed
-    setup_circomlib_dependencies();
+    //setup_circomlib_dependencies();
 
     // Find all .circom files with a main component in the src folder
     let circom_files = find_circom_files(src_dir);

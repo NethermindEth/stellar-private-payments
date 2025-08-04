@@ -15,6 +15,7 @@ bench = false
 setup = []
 
 [dependencies]
+circom = {git = "https://github.com/iden3/circom.git"}
 
 [lints]
 workspace = true
