@@ -69,7 +69,7 @@ template Transaction(levels, nIns, nOuts, zeroLeaf) {
         inSignature[tx].merklePath <== inPathIndices[tx];
 
         // Computes the Nullifier as h(commitment, merklePath, signature)
-        // Cheks it matches the input nullifier
+        // Checks it matches the input nullifier
         inNullifierHasher[tx] = Poseidon(3);
         inNullifierHasher[tx].inputs[0] <== inCommitmentHasher[tx].out;
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];

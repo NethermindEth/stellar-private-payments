@@ -5,6 +5,11 @@ edition.workspace = true
 repository.workspace = true
 license.workspace = true
 publish.workspace = true
+[[bin]]
+name = "build_circuits"
+path = "build_circuits.rs"
+test = false
+bench = false
 
 [features]
 setup = []
@@ -13,8 +18,3 @@ setup = []
 
 [lints]
 workspace = true
-[[bin]]
-name = "build_circuits"
-path = "build_circuits.rs"
-test = false
-bench = false

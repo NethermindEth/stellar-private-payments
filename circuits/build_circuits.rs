@@ -272,7 +272,6 @@ fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
             .arg(&zkey_path)
             .status()
             .expect("Failed to execute snarkjs setup");
-
         if !status.success() {
             panic!("Proving key generation failed for: {}", r1cs_file.display());
         }
