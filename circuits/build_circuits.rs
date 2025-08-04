@@ -25,12 +25,12 @@ use std::path::Path;
 use std::process::Command;
 
 fn main() {
-    let out_dir = env::current_dir().unwrap();
+    let out_dir = env::current_dir().expect("Wrong current directory");
     let src_dir = Path::new("src");
     let compiled_dir = Path::new(&out_dir).join("compiled");
 
     // Create an output directory
-    fs::create_dir_all(&compiled_dir).unwrap();
+    fs::create_dir_all(&compiled_dir).expect("Could not create output directory");
 
     // Ensure circomlib dependencies are installed
     setup_circomlib_dependencies();
@@ -52,18 +52,17 @@ fn find_circom_files(dir: &Path) -> Vec<std::path::PathBuf> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.is_file() && path.extension().map_or(false, |ext| ext == "circom") {
+            if path.is_file() && path.extension().is_some_and(|ext| ext == "circom") {
                 // Check if the file contains a main component
                 if has_main_component(&path) {
                     circom_files.push(path);
-                } else {
                 }
             } else if path.is_dir() {
                 circom_files.extend(find_circom_files(&path));
             }
         }
     } else {
-        println!("Failed to read directory: {:?}", dir);
+        println!("Failed to read directory: {dir:?}");
     }
 
     circom_files
@@ -78,7 +77,7 @@ fn has_main_component(file_path: &Path) -> bool {
             content_lower.contains("component main ")
         }
         Err(e) => {
-            println!("cargo:warning=Failed to read file {:?}: {}", file_path, e);
+            println!("cargo:warning=Failed to read file {file_path:?}: {e}");
             false
         }
     }
@@ -142,10 +141,14 @@ fn is_package_outdated() -> bool {
 }
 
 fn compile_circuit(circom_file: &Path, output_dir: &Path) {
-    let file_stem = circom_file.file_stem().unwrap().to_str().unwrap();
-    let r1cs_path = output_dir.join(format!("{}.r1cs", file_stem));
-    let wasm_path = output_dir.join(format!("{}_js/{}.wasm", file_stem, file_stem));
-    let sym_path = output_dir.join(format!("{}.sym", file_stem));
+    let file_stem = circom_file
+        .file_stem()
+        .expect("No Circom file extension")
+        .to_str()
+        .expect("Filename should be a string");
+    let r1cs_path = output_dir.join(format!("{file_stem}.r1cs"));
+    let wasm_path = output_dir.join(format!("{file_stem}_js/{file_stem}.wasm"));
+    let sym_path = output_dir.join(format!("{file_stem}.sym"));
 
     // Compile circuit with circomlib include path
     let mut cmd = Command::new("circom");
@@ -158,13 +161,13 @@ fn compile_circuit(circom_file: &Path, output_dir: &Path) {
         .arg("--prime")
         .arg("bls12381"); // Targeting BLS12-381
 
-    println!("cargo:warning= Running compilation for: {:?}", circom_file);
+    println!("cargo:warning= Running compilation for: {circom_file:?}");
     let status = cmd
         .status()
         .expect("cargo:warning= Failed to execute circom compiler");
 
     if !status.success() {
-        println!("cargo:warning=NOT SUCCESS: {:?}", circom_file);
+        println!("cargo:warning=NOT SUCCESS: {circom_file:?}");
         panic!(
             "cargo:warning= Circuit compilation failed for: {}",
             circom_file.display()
@@ -175,9 +178,6 @@ fn compile_circuit(circom_file: &Path, output_dir: &Path) {
     assert!(r1cs_path.exists(), "R1CS file not generated");
     assert!(wasm_path.exists(), "WASM file not generated");
     assert!(sym_path.exists(), "SYM file not generated");
-
-    // Tell cargo about the generated files
-    println!("cargo:rerun-if-changed={}", circom_file.display());
 }
 
 #[cfg(feature = "setup")]
@@ -186,13 +186,13 @@ fn setup_proving_keys(output_dir: &Path) {
     // Initiate powers of tau
     // Check if the initial power of tau generation was already done.
     let powers_path = output_dir.join("pot_0001.ptau");
-    println!("cargo:warning= output_dir: {:?}", output_dir);
-    env::set_current_dir(output_dir).unwrap();
+    // Set working directory
+    env::set_current_dir(output_dir).expect("Wrong output directory");
     if !powers_path.exists() {
         // Generate initial powers of Tau
         let degree = 14; // TODO: Update max required degree to be read from the circuit R1CS
         let status = Command::new("snarkjs")
-            .args(&["powersoftau", "new", "BLS12381"])
+            .args(["powersoftau", "new", "BLS12381"])
             .arg(degree.to_string())
             .arg("pot_0000.ptau")
             .status()
@@ -204,7 +204,7 @@ fn setup_proving_keys(output_dir: &Path) {
 
         // Make a single mockup contribution to the ceremony
         let status = Command::new("snarkjs")
-            .args(&["powersoftau", "contribute", "pot_0000.ptau"])
+            .args(["powersoftau", "contribute", "pot_0000.ptau"])
             .arg("pot_0001.ptau")
             .arg("--name=First contribution")
             .status()
@@ -230,7 +230,7 @@ fn find_compiled_circuits(dir: &Path) -> Vec<std::path::PathBuf> {
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            if path.extension().map_or(false, |ext| ext == "r1cs") {
+            if path.extension().is_some_and(|ext| ext == "r1cs") {
                 r1cs_files.push(path);
             }
         }
@@ -241,14 +241,18 @@ fn find_compiled_circuits(dir: &Path) -> Vec<std::path::PathBuf> {
 
 #[cfg(feature = "setup")]
 fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
-    let file_stem = r1cs_file.file_stem().unwrap().to_str().unwrap();
-    let zkey_path = output_dir.join(format!("{}.zkey", file_stem));
-    let vkey_path = output_dir.join(format!("{}_verification_key.json", file_stem));
+    let file_stem = r1cs_file
+        .file_stem()
+        .expect("No R1CS file extension")
+        .to_str()
+        .expect("Filename should be a string");
+    let zkey_path = output_dir.join(format!("{file_stem}.zkey"));
+    let vkey_path = output_dir.join(format!("{file_stem}_verification_key.json"));
 
     if !zkey_path.exists() {
         // This part build on the previous powers of tau ceremony, but it is circuit-specific
         let status = Command::new("snarkjs")
-            .args(&["powersoftau", "prepare", "phase2", "pot_0001.ptau"])
+            .args(["powersoftau", "prepare", "phase2", "pot_0001.ptau"])
             .arg("pot_final.ptau") // Powers of tau file
             .status()
             .expect("Failed to execute snarkjs setup");
@@ -262,7 +266,7 @@ fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
 
         // Generate a proving key
         let status = Command::new("snarkjs")
-            .args(&["groth16", "setup"])
+            .args(["groth16", "setup"])
             .arg(r1cs_file)
             .arg("pot_final.ptau")
             .arg(&zkey_path)
@@ -275,7 +279,7 @@ fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
 
         // Export verification key
         let status = Command::new("snarkjs")
-            .args(&["zkey", "export", "verificationkey"])
+            .args(["zkey", "export", "verificationkey"])
             .arg(&zkey_path)
             .arg(&vkey_path)
             .status()
