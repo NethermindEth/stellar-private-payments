@@ -1,0 +1,20 @@
+[package]
+name = "circuits"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+setup = []
+
+[dependencies]
+
+[lints]
+workspace = true
+[[bin]]
+name = "build_circuits"
+path = "build_circuits.rs"
+test = false
+bench = false
