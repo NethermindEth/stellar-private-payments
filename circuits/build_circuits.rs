@@ -97,8 +97,7 @@ fn setup_circomlib_dependencies() {
             "circomlib": "^2.0.5"
           }
         }"#;
-        fs::write(package_json, package_content)
-            .expect("Failed to create package.json");
+        fs::write(package_json, package_content).expect("Failed to create package.json");
     }
 
     // Install dependencies if node_modules doesn't exist or is outdated
@@ -129,11 +128,13 @@ fn is_package_outdated() -> bool {
         return true;
     }
 
-    let package_modified = package_json.metadata()
+    let package_modified = package_json
+        .metadata()
         .and_then(|m| m.modified())
         .unwrap_or(std::time::UNIX_EPOCH);
 
-    let lock_modified = package_lock.metadata()
+    let lock_modified = package_lock
+        .metadata()
         .and_then(|m| m.modified())
         .unwrap_or(std::time::UNIX_EPOCH);
 
@@ -158,12 +159,16 @@ fn compile_circuit(circom_file: &Path, output_dir: &Path) {
         .arg("bls12381"); // Targeting BLS12-381
 
     println!("cargo:warning= Running compilation for: {:?}", circom_file);
-    let status = cmd.status()
+    let status = cmd
+        .status()
         .expect("cargo:warning= Failed to execute circom compiler");
 
     if !status.success() {
         println!("cargo:warning=NOT SUCCESS: {:?}", circom_file);
-        panic!("cargo:warning= Circuit compilation failed for: {}", circom_file.display());
+        panic!(
+            "cargo:warning= Circuit compilation failed for: {}",
+            circom_file.display()
+        );
     }
 
     // Verify outputs exist
@@ -189,9 +194,9 @@ fn setup_proving_keys(output_dir: &Path) {
         let status = Command::new("snarkjs")
             .args(&["powersoftau", "new", "BLS12381"])
             .arg(degree.to_string())
-            .arg("pot_0000.ptau").
-            status().
-            expect("Failed to execute snarkjs ptn new");
+            .arg("pot_0000.ptau")
+            .status()
+            .expect("Failed to execute snarkjs ptn new");
 
         if !status.success() {
             panic!("Powers of Tau generation failed");
@@ -201,9 +206,9 @@ fn setup_proving_keys(output_dir: &Path) {
         let status = Command::new("snarkjs")
             .args(&["powersoftau", "contribute", "pot_0000.ptau"])
             .arg("pot_0001.ptau")
-            .arg("--name=First contribution").
-            status().
-            expect("Failed to execute snarkjs ptn contribute");
+            .arg("--name=First contribution")
+            .status()
+            .expect("Failed to execute snarkjs ptn contribute");
 
         if !status.success() {
             panic!("Powers of Tau contribution failed");
@@ -224,7 +229,6 @@ fn find_compiled_circuits(dir: &Path) -> Vec<std::path::PathBuf> {
 
     if let Ok(entries) = fs::read_dir(dir) {
         for entry in entries.flatten() {
-
             let path = entry.path();
             if path.extension().map_or(false, |ext| ext == "r1cs") {
                 r1cs_files.push(path);
@@ -245,12 +249,15 @@ fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
         // This part build on the previous powers of tau ceremony, but it is circuit-specific
         let status = Command::new("snarkjs")
             .args(&["powersoftau", "prepare", "phase2", "pot_0001.ptau"])
-            .arg("pot_final.ptau")  // Powers of tau file
+            .arg("pot_final.ptau") // Powers of tau file
             .status()
             .expect("Failed to execute snarkjs setup");
 
         if !status.success() {
-            panic!("Phase 2 of powers of tau failed for: {}", r1cs_file.display());
+            panic!(
+                "Phase 2 of powers of tau failed for: {}",
+                r1cs_file.display()
+            );
         }
 
         // Generate a proving key
@@ -275,7 +282,10 @@ fn generate_keys(r1cs_file: &Path, output_dir: &Path) {
             .expect("Failed to export verification key");
 
         if !status.success() {
-            panic!("Verification key export failed for: {}", r1cs_file.display());
+            panic!(
+                "Verification key export failed for: {}",
+                r1cs_file.display()
+            );
         }
     }
 }
