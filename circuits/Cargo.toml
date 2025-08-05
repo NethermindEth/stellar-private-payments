@@ -15,7 +15,17 @@ bench = false
 setup = []
 
 [dependencies]
-circom = {git = "https://github.com/iden3/circom.git"}
+
+[build-dependencies]
+compiler = { git = "https://github.com/iden3/circom", package = "compiler" }
+program_structure = { git = "https://github.com/iden3/circom", package = "program_structure" }
+code_producers = { git = "https://github.com/iden3/circom", package = "code_producers" }
+circom = { git = "https://github.com/iden3/circom", package = "circom" }
+
+constant_tracking = { git = "https://github.com/iden3/circom", package = "constant_tracking" }
+constraint_generation = { git = "https://github.com/iden3/circom", package = "constraint_generation" }
+constraint_writers = { git = "https://github.com/iden3/circom", package = "constraint_writers" }
+parser = { git = "https://github.com/iden3/circom", package = "parser" }
 
 [lints]
 workspace = true
