@@ -2,9 +2,37 @@ pragma circom 2.2.0;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-include "../node_modules/circomlib/circuits/bitify.circom";
-include "../node_modules/circomlib/circuits/poseidon.circom";
-include "../node_modules/circomlib/circuits/switcher.circom";
+include "./poseidon2/poseidon2_hash.circom";
+
+// Local workaround
+template Num2Bits(n) {
+    signal input in;
+    signal output out[n];
+    var lc1=0;
+
+    var e2=1;
+    for (var i = 0; i<n; i++) {
+        out[i] <-- (in >> i) & 1;
+        out[i] * (out[i] -1 ) === 0;
+        lc1 += out[i] * e2;
+        e2 = e2+e2;
+    }
+
+    lc1 === in;
+}
+template Switcher() {
+    signal input sel;
+    signal input L;
+    signal input R;
+    signal output outL;
+    signal output outR;
+
+    signal aux;
+
+    aux <== (R-L)*sel;    // We create aux in order to have only one multiplication
+    outL <==  aux + L;
+    outR <== -aux + R;
+}
 
 // Verifies that merkle proof is correct for given merkle root and a leaf
 // pathIndices bits is an array of 0/1 selectors telling whether given pathElement is on the left or right side of merkle path
@@ -26,7 +54,7 @@ template MerkleProof(levels) {
         switcher[i].R <== pathElements[i];
         switcher[i].sel <== indexBits.out[i];
 
-        hasher[i] = Poseidon(2);
+        hasher[i] = Poseidon2(2);
         hasher[i].inputs[0] <== switcher[i].outL;
         hasher[i].inputs[1] <== switcher[i].outR;
     }

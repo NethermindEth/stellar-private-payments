@@ -46,10 +46,89 @@ allow = [
 ]
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
+exceptions = [
+    { allow = ["GPL-3.0"], name = "compiler" },
+    { allow = ["GPL-3.0"], name = "constraint_generation" },
+    { allow = ["GPL-3.0"], name = "constraint_writers" },
+    { allow = ["GPL-3.0"], name = "parser" },
+    { allow = ["GPL-3.0"], name = "program_structure" },
+    { allow = ["GPL-3.0"], name = "type_analysis" },
+    { allow = ["GPL-3.0"], name = "dag" },
+    { allow = ["GPL-3.0"], name = "code_producers" },
+    { allow = ["GPL-3.0"], name = "circom_algebra" },
+    { allow = ["GPL-3.0"], name = "constraint_list" },
+    { allow = ["GPL-3.0"], name = "constant_tracking" },
+]
 
 [licenses.private]
 ignore = false
 registries = []
+
+[[licenses.clarify]]
+name = "compiler"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "constraint_generation"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "constraint_writers"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "parser"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "program_structure"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "type_analysis"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "dag"
+version = "2.2.0"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "code_producers"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "circom_algebra"
+version = "2.2.2"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "constraint_list"
+version = "2.1.8"
+expression = "GPL-3.0"
+license-files = []
+
+[[licenses.clarify]]
+name = "constant_tracking"
+version = "2.0.0"
+expression = "GPL-3.0"
+license-files = []
 
 [bans]
 wildcards = "deny"
@@ -65,7 +144,7 @@ unused = 'deny'
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = []
+allow-git = ["https://github.com/iden3/circom"]
 
 [sources.allow-org]
 github = ["NethermindEth"]

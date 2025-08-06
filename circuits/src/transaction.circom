@@ -2,9 +2,44 @@ pragma circom 2.2.0;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-include "../node_modules/circomlib/circuits/poseidon.circom";
+include "./poseidon2/poseidon2_hash.circom";
 include "./merkleProof.circom";
 include "./keypair.circom";
+
+
+// Local workaround
+template IsZero() {
+    signal input in;
+    signal output out;
+
+    signal inv;
+
+    inv <-- in!=0 ? 1/in : 0;
+
+    out <== -in*inv +1;
+    in*out === 0;
+}
+template IsEqual() {
+    signal input in[2];
+    signal output out;
+
+    component isz = IsZero();
+
+    in[1] - in[0] ==> isz.in;
+
+    isz.out ==> out;
+}
+
+template ForceEqualIfEnabled() {
+    signal input enabled;
+    signal input in[2];
+
+    component isz = IsZero();
+
+    in[1] - in[0] ==> isz.in;
+
+    (1 - isz.out)*enabled === 0;
+}
 
 /*
 Utxo structure:
@@ -57,7 +92,7 @@ template Transaction(levels, nIns, nOuts, zeroLeaf) {
         inKeypair[tx].privateKey <== inPrivateKey[tx];
 
         // Computes the leaf commitment as hash(amount, publicKey, blinding)
-        inCommitmentHasher[tx] = Poseidon(3);
+        inCommitmentHasher[tx] = Poseidon2(3);
         inCommitmentHasher[tx].inputs[0] <== inAmount[tx];
         inCommitmentHasher[tx].inputs[1] <== inKeypair[tx].publicKey;
         inCommitmentHasher[tx].inputs[2] <== inBlinding[tx];
@@ -70,7 +105,7 @@ template Transaction(levels, nIns, nOuts, zeroLeaf) {
 
         // Computes the Nullifier as h(commitment, merklePath, signature)
         // Checks it matches the input nullifier
-        inNullifierHasher[tx] = Poseidon(3);
+        inNullifierHasher[tx] = Poseidon2(3);
         inNullifierHasher[tx].inputs[0] <== inCommitmentHasher[tx].out;
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];
         inNullifierHasher[tx].inputs[2] <== inSignature[tx].out;
@@ -103,7 +138,7 @@ template Transaction(levels, nIns, nOuts, zeroLeaf) {
 
     // Verify correctness of transaction outputs
     for (var tx = 0; tx < nOuts; tx++) {
-        outCommitmentHasher[tx] = Poseidon(3);
+        outCommitmentHasher[tx] = Poseidon2(3);
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];

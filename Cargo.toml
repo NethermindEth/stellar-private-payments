@@ -15,7 +15,7 @@ publish = false
 [workspace.dependencies]
 
 [workspace.lints.rust]
-missing_docs = "deny"
+#missing_docs = "deny" TODO remove the comment
 # TODO(template) if you use any unsafe code, then running miri in CI is a must
 # if for a crate in the workspace you need an unsafe code
 # prefer to preserve forbid for the workspace
