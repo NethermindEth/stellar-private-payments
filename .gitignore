@@ -16,3 +16,6 @@ Cargo.lock
 
 # Code coverage output
 lcov.info
+
+# Circom
+circuits/compiled

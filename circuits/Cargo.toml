@@ -11,8 +11,6 @@ publish.workspace = true
 [dependencies]
 
 [build-dependencies]
-
-# TODO remove
 anyhow = "1"
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
