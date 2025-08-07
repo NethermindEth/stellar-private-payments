@@ -48,7 +48,7 @@ fn main() -> Result<()> {
         let (mut program_archive, report_warns) = parser::run_parser(
             circom_file.to_string_lossy().to_string(),
             parse_circom_version("compiler")
-                .unwrap_or("2.2.2".to_string())
+                .expect("Could not parse Circom compiler version")
                 .as_str(),
             vec![],
             &prime,
