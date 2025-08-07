@@ -4,7 +4,7 @@ include "poseidon2_sponge.circom";
 
 //------------------------------------------------------------------------------
 // Hash `n` field elements into 1, with approximately 254 bits of preimage security (?)
-// (assuming bls12381 scalar field. We use capacity=2, rate=1, t=3).
+// (assuming bn128 (or bn254) scalar field. We use capacity=2, rate=1, t=3).
 
 template Poseidon2(n) {
   signal input  inputs[n];

@@ -13,10 +13,11 @@ use compiler::num_bigint::BigInt;
 use constraint_generation::{build_circuit, BuildConfig};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
-use std::env;
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::string::ToString;
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    string::ToString,
+};
 use type_analysis::check_types::check_types;
 
 fn main() -> Result<()> {
@@ -35,13 +36,13 @@ fn main() -> Result<()> {
         // Output file
         let out_file = out_dir.join(circom_file.file_stem().context("Invalid circom filename")?);
 
-        // Hardcoded Values for BLS12-381 and only R1CS and SYM compilation
+        // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM compilation
         let prime = BigInt::parse_bytes(
-            "52435875175126190479447740508185965837690552500527637822603658699938581184513"
+            "21888242871839275222246405745257275088548364400416034343698204186575808495617"
                 .as_bytes(),
             10,
         )
-        .expect("Can not parse  BLS12-381 prime");
+        .expect("Can not parse  BN128 prime");
         let flag_no_init = false;
 
         let (mut program_archive, report_warns) = parser::run_parser(
@@ -75,7 +76,7 @@ fn main() -> Result<()> {
             flag_verbose: false,
             inspect_constraints: false,
             flag_old_heuristics: false,
-            prime: "bls12381".to_string(),
+            prime: "bn128".to_string(),
         };
 
         let custom_gates = program_archive.custom_gates;
