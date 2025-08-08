@@ -1,4 +1,6 @@
 pragma circom 2.2.0;
+// Original circuits from https://github.com/bkomuves/hash-circuits (MIT License)
+// Adapted and modified by Nethermind
 
 include "poseidon2_perm.circom";
 

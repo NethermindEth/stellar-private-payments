@@ -2,7 +2,6 @@ pragma circom 2.2.0;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-// TODO:Update the poseidon implementation to Poseidon2
 include "./poseidon2/poseidon2_hash.circom";
 
 // Since we don't use signatures, the keypair can be based on a simple hash.

@@ -1,4 +1,6 @@
 pragma circom 2.2.0;
+// Original circuits from https://github.com/bkomuves/hash-circuits (MIT License)
+// Adapted and modified by Nethermind
 
 //
 // The Poseidon2 permutation for BN128 (BN254) and t=3

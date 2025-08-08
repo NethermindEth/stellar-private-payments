@@ -91,7 +91,7 @@ fn main() -> Result<()> {
             exporter.as_ref(),
             custom_gates,
         )
-        .expect("R1CS file feneration failed");
+        .expect("R1CS file generation failed");
         generate_output_sym(
             out_file
                 .with_extension("sym")
@@ -104,7 +104,6 @@ fn main() -> Result<()> {
 
     // Tell cargo to rerun if anything changes
     println!("cargo:rerun-if-changed=src/");
-    println!("cargo:rerun-if-env-changed=src/");
     println!("cargo:rerun-if-changed=build.rs");
     Ok(())
 }
