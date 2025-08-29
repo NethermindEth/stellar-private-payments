@@ -1,4 +1,4 @@
-pragma circom 2.2.0;
+pragma circom 2.2.2;
 // Original circuits from https://github.com/bkomuves/hash-circuits (MIT License)
 // Adapted and modified by Nethermind
 
