@@ -7,7 +7,7 @@ default-members = ["template_crate"]
 
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 # TODO(template) update for your repository
 repository = "https://github.com/NethermindEth/rust-template"
 license = "Apache-2.0" # TODO(template) update license if needed
