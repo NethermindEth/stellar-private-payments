@@ -6,41 +6,6 @@ include "./poseidon2/poseidon2_hash.circom";
 include "./merkleProof.circom";
 include "./keypair.circom";
 
-
-// Local workaround
-template IsZero() {
-    signal input in;
-    signal output out;
-
-    signal inv;
-
-    inv <-- in!=0 ? 1/in : 0;
-
-    out <== -in*inv +1;
-    in*out === 0;
-}
-template IsEqual() {
-    signal input in[2];
-    signal output out;
-
-    component isz = IsZero();
-
-    in[1] - in[0] ==> isz.in;
-
-    isz.out ==> out;
-}
-
-template ForceEqualIfEnabled() {
-    signal input enabled;
-    signal input in[2];
-
-    component isz = IsZero();
-
-    in[1] - in[0] ==> isz.in;
-
-    (1 - isz.out)*enabled === 0;
-}
-
 /*
 Utxo structure:
 {

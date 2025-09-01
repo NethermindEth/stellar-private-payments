@@ -18,6 +18,7 @@ use std::{
     path::{Path, PathBuf},
     string::ToString,
 };
+use std::process::{Command, ExitStatus};
 use type_analysis::check_types::check_types;
 
 fn main() -> Result<()> {
@@ -30,7 +31,7 @@ fn main() -> Result<()> {
     fs::create_dir_all(&out_dir).expect("Could not create output directory");
     
     // Import circomlib library
-    
+    get_circomlib(&src_dir)?;
 
     // Find all .circom files with a main component
     let circom_files = find_circom_files(&src_dir);
@@ -219,6 +220,23 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
     None
 }
 
-fn get_circomlib(directory: &PathBuf) {
+fn get_circomlib(directory: &PathBuf) -> Result<ExitStatus> {
+    let circomlib_path = directory.join("circomlib");
     
+    // Check if circomlib already exists
+    if circomlib_path.exists() {
+        println!("cargo:warning=circomlib already exists at {:?}", circomlib_path);
+        return Ok(ExitStatus::default());
+    }
+    
+    // Clone the circomlib repository
+    // git clone --depth 1 --filter=blob:none --sparse https://github.com/iden3/circomlib && cd circomlib && git sparse-checkout set /circuits
+    Command::new("git")
+        .arg("clone")
+        .args(["--depth", "1", "--filter=blob:none", "--sparse"]) // Sparse checkout to only download the circuits folder
+        .arg("https://github.com/iden3/circomlib.git")
+        .arg(&circomlib_path)
+        .an
+        .status()
+        .map_err(|_| anyhow!("Error cloning circomlib depedency"))
 }
