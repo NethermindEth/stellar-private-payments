@@ -230,13 +230,10 @@ fn get_circomlib(directory: &PathBuf) -> Result<ExitStatus> {
     }
     
     // Clone the circomlib repository
-    // git clone --depth 1 --filter=blob:none --sparse https://github.com/iden3/circomlib && cd circomlib && git sparse-checkout set /circuits
     Command::new("git")
         .arg("clone")
-        .args(["--depth", "1", "--filter=blob:none", "--sparse"]) // Sparse checkout to only download the circuits folder
         .arg("https://github.com/iden3/circomlib.git")
         .arg(&circomlib_path)
-        .an
         .status()
         .map_err(|_| anyhow!("Error cloning circomlib depedency"))
 }
