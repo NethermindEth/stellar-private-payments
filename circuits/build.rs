@@ -28,6 +28,9 @@ fn main() -> Result<()> {
 
     // Create an output directory
     fs::create_dir_all(&out_dir).expect("Could not create output directory");
+    
+    // Import circomlib library
+    
 
     // Find all .circom files with a main component
     let circom_files = find_circom_files(&src_dir);
@@ -214,4 +217,8 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
     }
 
     None
+}
+
+fn get_circomlib(directory: &PathBuf) {
+    
 }
