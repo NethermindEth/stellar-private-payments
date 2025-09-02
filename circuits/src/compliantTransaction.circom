@@ -9,18 +9,18 @@ include "./merkleProof.circom";
 
 // Bus definitions
 bus MembershipProof(levels) {
-    signal input leaf;
-    signal input pathElements[levels];
-    signal input pathIndices;
+    signal leaf;
+    signal pathElements[levels];
+    signal pathIndices;
 }
 
 bus NonMembershipProof(levels) {
-    signal input key;
-    signal input value;
-    signal input siblings[levels];
-    signal input oldKey;
-    signal input oldValue;
-    signal input isOld0;
+    signal key;
+    signal value;
+    signal siblings[levels];
+    signal oldKey;
+    signal oldValue;
+    signal isOld0;
 }
 
 /*
@@ -32,11 +32,18 @@ Compliant Transaction Structure:
 */
 
 template CompliantTransaction(levels, nIns, nOuts, zeroLeaf, nMembershipProofs, nNonMembershipProofs, smtLevels) {
+    /** PUBLIC INPUTS **/
     // Base transaction inputs
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
-
+    // Compliance inputs
+    input MembershipProof(levels) membershipProofs[nMembershipProofs]; 
+    input NonMembershipProof(smtLevels) nonMembershipProofs[nNonMembershipProofs];
+    signal input membershipRoots[nMembershipProofs];
+    signal input nonMembershipRoots[nNonMembershipProofs];
+    
+    /** PRIVATE INPUTS **/
     // Transaction input data
     signal input inputNullifier[nIns];
     signal input inAmount[nIns];
@@ -44,19 +51,12 @@ template CompliantTransaction(levels, nIns, nOuts, zeroLeaf, nMembershipProofs, 
     signal input inBlinding[nIns];
     signal input inPathIndices[nIns];
     signal input inPathElements[nIns][levels];
-
     // Transaction output data
     signal input outputCommitment[nOuts];
     signal input outAmount[nOuts];
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
-
-    // Compliance inputs
-    MembershipProof() membershipProofs[nMembershipProofs]; 
-    NonMembershipProof() nonMembershipProofs[nNonMembershipProofs];
     
-    signal input membershipRoots[nMembershipProofs];
-    signal input nonMembershipRoots[nNonMembershipProofs];
    
     // Define base transaction
     component baseTransaction = Transaction(levels, nIns, nOuts, zeroLeaf);
@@ -85,7 +85,10 @@ template CompliantTransaction(levels, nIns, nOuts, zeroLeaf, nMembershipProofs, 
         baseTransaction.outPubkey[i] <== outPubkey[i];
         baseTransaction.outBlinding[i] <== outBlinding[i];
     }
-
+    
+    // TODO: Right now proofs are verified, but not tied together
+    // TODO: We need to make sure the compliance proofs are for the same public keys.
+    
     // Compliance checks
     // 1. Verify membership proofs
     component membershipVerifiers[nMembershipProofs];

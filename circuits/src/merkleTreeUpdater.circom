@@ -10,7 +10,6 @@ include "./merkleTree.circom";
 // zeroSubtreeRoot is a root of a subtree that contains only zeroes
 template MerkleTreeUpdater(levels, subtreeLevels, zeroSubtreeRoot) {
     var remainingLevels = levels - subtreeLevels;
-
     signal input oldRoot;
     signal input newRoot;
     signal input leaves[1 << subtreeLevels];
