@@ -98,7 +98,7 @@ template SMTVerifier(nLevels) {
     }
 
 
-    // Check that if checking for non inclussuin and isOld0==0 then key!=old
+    // Check that if checking for non inclusion and isOld0==0 then key!=old
     component areKeyEquals = IsEqual();
     areKeyEquals.in[0] <== oldKey;
     areKeyEquals.in[1] <== key;
