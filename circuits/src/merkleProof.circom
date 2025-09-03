@@ -4,7 +4,8 @@ pragma circom 2.2.2;
 
 include "./poseidon2/poseidon2_hash.circom";
 
-// Verifies that merkle proof is correct for given merkle root and a leaf
+// Given the leaf, pathElements and pathIndices, it returns the root of the merkle tree.
+// It simply computes the root, and it MUST be checked against the expected root in the circuit using this template.
 // pathIndices bits is an array of 0/1 selectors telling whether given pathElement is on the left or right side of merkle path
 template MerkleProof(levels) {
     signal input leaf;
