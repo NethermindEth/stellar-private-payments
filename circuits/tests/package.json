@@ -1,0 +1,13 @@
+{
+  "name": "circom-tests",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "test": "mocha \"spec/**/*.test.js\""
+  },
+  "devDependencies": {
+    "chai": "^6.0.1",
+    "circom_tester": "^0.0.24",
+    "mocha": "^11.7.2"
+  }
+}

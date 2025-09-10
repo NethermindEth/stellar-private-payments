@@ -19,3 +19,6 @@ lcov.info
 
 # Circom
 circuits/compiled
+
+# Node.js
+**/node_modules/
