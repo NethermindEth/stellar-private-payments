@@ -5,7 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const { wasm: wasm_tester } = require("circom_tester");
 
-describe("Transaction(levels=5, nIns=2, nOuts=2) — circuits/src", function () {
+describe("Transaction(levels=5, nIns=2, nOuts=2)", function () {
     const CIRCUITS_SRC = path.resolve(__dirname, "../../src");
     const TRANSACTION_CIRCUIT = path.join(CIRCUITS_SRC, "transaction.circom");
     const POSEIDON2_HASH_CIRCUIT = path.join(CIRCUITS_SRC, "poseidon2", "poseidon2_hash.circom");

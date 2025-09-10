@@ -5,7 +5,7 @@ const fs = require("fs");
 const os = require("os");
 const { wasm: wasm_tester } = require("circom_tester");
 
-describe("MerkleProof(levels) — circuits/src (isolated JS tests)", function () {
+describe("MerkleProof(levels)", function () {
 
     const CIRCUITS_SRC = path.resolve(__dirname, "../../src");
     const MERKLE_PROOF_CIRCUIT = path.join(CIRCUITS_SRC, "merkleProof.circom");
