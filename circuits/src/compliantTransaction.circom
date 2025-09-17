@@ -5,6 +5,7 @@ pragma circom 2.2.2;
 
 include "./smt/smtverifier.circom";
 include "./merkleProof.circom";
+include "./poseidon2/poseidon2_hash.circom";
 
 // Bus definitions
 bus MembershipProof(levels) {
@@ -26,16 +27,17 @@ bus NonMembershipProof(levels) {
     signal isOld0;
 }
 
-template CompliantDeposit(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels, zeroLeaf) {
+template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels, zeroLeaf) {
     /** PUBLIC INPUTS **/
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
+    
     // Compliance inputs
-    input MembershipProof(levels) membershipProofs[nMembershipProofs]; 
-    input NonMembershipProof(smtLevels) nonMembershipProofs[nNonMembershipProofs];
-    signal input membershipRoots[nMembershipProofs];
-    signal input nonMembershipRoots[nNonMembershipProofs];
+    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs]; 
+    input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
+    signal input membershipRoots[nIns][nMembershipProofs];
+    signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
     
     /** PRIVATE INPUTS **/
@@ -59,10 +61,10 @@ template CompliantDeposit(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, 
     component inNullifierHasher[nIns];
     component inTree[nIns];
     component inCheckRoot[nIns];
-    component complianceMembershipHasher[nMembershipProofs];
-    component complianceNonMembershipHasher[nNonMembershipProofs];
-    component membershipVerifiers[nMembershipProofs];
-    component nonMembershipVerifiers[nNonMembershipProofs];
+    component complianceMembershipHasher[nIns][nMembershipProofs];
+    component complianceNonMembershipHasher[nIns][nNonMembershipProofs];
+    component membershipVerifiers[nIns][nMembershipProofs];
+    component nonMembershipVerifiers[nIns][nNonMembershipProofs];
     var sumIns = 0;
     
     // verify correctness of transaction inputs
@@ -113,48 +115,48 @@ template CompliantDeposit(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, 
         // Compliance checks
         // 1. Verify membership proofs
         for (var i = 0; i < nMembershipProofs; i++) {
-            membershipVerifiers[i] = MerkleProof(levels);
+            membershipVerifiers[tx][i] = MerkleProof(levels);
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceMembershipHasher = Poseidon2(2);
-            complianceMembershipHasher.inputs[0] <== membershipProofs[i].pk;
-            complianceMembershipHasher.inputs[1] <== membershipProofs[i].blinding;
-            membershipProofs[i].leaf === complianceMembershipHasher.out;
-            membershipProofs[i].pk === inKeypair[tx].publicKey;
+            complianceMembershipHasher[tx][i] = Poseidon2(2);
+            complianceMembershipHasher[tx][i].inputs[0] <== membershipProofs[tx][i].pk;
+            complianceMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
+            membershipProofs[tx][i].leaf === complianceMembershipHasher[tx][i].out;
+            membershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
             // Verify Membership
-            membershipVerifiers[i].leaf <== membershipProofs[i].leaf;
-            membershipVerifiers[i].pathIndices <== membershipProofs[i].pathIndices;       
+            membershipVerifiers[tx][i].leaf <== membershipProofs[tx][i].leaf;
+            membershipVerifiers[tx][i].pathIndices <== membershipProofs[tx][i].pathIndices;       
             for (var j = 0; j < levels ; j++) { 
-                membershipVerifiers[i].pathElements[j] <== membershipProofs[i].pathElements[j];
+                membershipVerifiers[tx][i].pathElements[j] <== membershipProofs[tx][i].pathElements[j];
             }
             
             // Verify that the computed root matches the provided root
-            membershipVerifiers[i].root === membershipRoots[i];
+            membershipVerifiers[tx][i].root === membershipRoots[tx][i];
         }
     
         // 2. Verify non-membership proofs using SMT
         for (var i = 0; i < nNonMembershipProofs; i++) {
-            nonMembershipVerifiers[i] = SMTVerifier(smtLevels);
-            nonMembershipVerifiers[i].enabled <== 1; // Always enabled
-            nonMembershipVerifiers[i].root <== nonMembershipRoots[i];
+            nonMembershipVerifiers[tx][i] = SMTVerifier(smtLevels);
+            nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
+            nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
             
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceNonMembershipHasher = Poseidon2(2);
-            complianceNonMembershipHasher.inputs[0] <== nonMembershipProofs[i].pk;
-            complianceNonMembershipHasher.inputs[1] <== nonMembershipProofs[i].blinding;
-            nonMembershipProofs[i].value === complianceNonMembershipHasher.out;
-            nonMembershipProofs[i].pk === inKeypair[tx].publicKey;
+            complianceNonMembershipHasher[tx][i] = Poseidon2(2);
+            complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
+            complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
+            nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
+            nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
             for (var j = 0; j < smtLevels; j++) {
-                nonMembershipVerifiers[i].siblings[j] <== nonMembershipProofs[i].siblings[j];
+                nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
             }
             
-            nonMembershipVerifiers[i].oldKey <== nonMembershipProofs[i].oldKey; 
-            nonMembershipVerifiers[i].oldValue <== nonMembershipProofs[i].oldValue; 
-            nonMembershipVerifiers[i].isOld0 <== nonMembershipProofs[i].isOld0; 
-            nonMembershipVerifiers[i].key <== nonMembershipProofs[i].key; 
-            nonMembershipVerifiers[i].value <== nonMembershipProofs[i].value; 
-            nonMembershipVerifiers[i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
+            nonMembershipVerifiers[tx][i].oldKey <== nonMembershipProofs[tx][i].oldKey; 
+            nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue; 
+            nonMembershipVerifiers[tx][i].isOld0 <== nonMembershipProofs[tx][i].isOld0; 
+            nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
+            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
+            nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
         }
    
             
