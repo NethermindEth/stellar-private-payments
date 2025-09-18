@@ -6,6 +6,7 @@ pragma circom 2.2.2;
 include "./smt/smtverifier.circom";
 include "./merkleProof.circom";
 include "./poseidon2/poseidon2_hash.circom";
+include "./keypair.circom";
 
 // Bus definitions
 bus MembershipProof(levels) {
