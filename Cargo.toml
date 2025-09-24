@@ -1,7 +1,7 @@
 
 # TODO(template) update for the crate name
 [workspace]
-members = ["examples", "template_crate", "contracts/*"]
+members = ["contracts/*", "examples", "template_crate"]
 resolver = "2"
 default-members = ["template_crate"]
 
