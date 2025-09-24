@@ -15,3 +15,5 @@ Cargo.lock
 **/*.rs.bk
 
 lcov.info
+
+contracts/**/test_snapshots
