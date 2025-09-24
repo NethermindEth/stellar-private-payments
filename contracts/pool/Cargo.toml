@@ -1,16 +1,19 @@
 [package]
 name = "pool"
-version = "0.0.0"
-edition = "2021"
-publish = false
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [lib]
 crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
-soroban-sdk = { workspace = true }
+# Inherit the version from the workspace
+soroban-sdk.workspace = true
 
 [dev-dependencies]
-soroban-sdk = { version = "23.0.1", features = ["testutils"] }
-
+# Also inherit for dev, but add the testing feature here (no version!)
+soroban-sdk = { workspace = true, features = ["testutils"] }
