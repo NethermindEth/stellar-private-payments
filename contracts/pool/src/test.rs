@@ -2,9 +2,8 @@
 
 use super::*;
 use soroban_sdk::{
-    symbol_short,
+    Address, Bytes, BytesN, Env, TryFromVal, U256, Val, Vec, symbol_short,
     testutils::{Address as _, Events as _},
-    Address, Bytes, BytesN, Env, TryFromVal, Val, Vec, U256,
 };
 
 // Helper to get 32 bytes

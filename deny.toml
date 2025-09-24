@@ -57,6 +57,7 @@ allow = [
     "WTFPL",
     "Xnet",
     "Zlib",
+    "Apache-2.0 WITH LLVM-exception",
 ]
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
