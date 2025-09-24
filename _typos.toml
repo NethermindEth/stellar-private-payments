@@ -3,3 +3,5 @@ extend-ignore-re = [
     "0x[0-9a-fA-F]+", # Hexadecimal numbers
 ]
 
+[default.extend-words]
+nullifs = "nullifs"

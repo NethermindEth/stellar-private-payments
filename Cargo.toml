@@ -1,7 +1,7 @@
 
 # TODO(template) update for the crate name
 [workspace]
-members = ["examples", "template_crate"]
+members = ["examples", "template_crate", "contracts/*"]
 resolver = "2"
 default-members = ["template_crate"]
 
@@ -14,6 +14,7 @@ license = "Apache-2.0" # TODO(template) update license if needed
 publish = false
 
 [workspace.dependencies]
+soroban-sdk = "23.0.2"
 
 [workspace.lints.rust]
 missing_docs = "deny"
@@ -33,3 +34,18 @@ cast_sign_loss = "deny"
 needless_return = "deny"
 panicking_overflow_checks = "deny"
 unwrap_used = "deny"
+
+[profile.release]
+opt-level = "z"
+overflow-checks = true
+debug = 0
+strip = "symbols"
+debug-assertions = false
+panic = "abort"
+codegen-units = 1
+lto = true
+
+# For more information about this profile see https://soroban.stellar.org/docs/basic-tutorials/logging#cargotoml-profile
+[profile.release-with-logs]
+inherits = "release"
+debug-assertions = true

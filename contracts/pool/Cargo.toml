@@ -1,5 +1,5 @@
 [package]
-name = "hello-world"
+name = "pool"
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -12,4 +12,5 @@ doctest = false
 soroban-sdk = { workspace = true }
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdk = { version = "23.0.1", features = ["testutils"] }
+
