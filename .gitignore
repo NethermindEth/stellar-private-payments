@@ -15,17 +15,3 @@ Cargo.lock
 **/*.rs.bk
 
 lcov.info
-
-# Circom
-circuits/compiled
-
-circuits/**/*.r1cs
-circuits/**/*.sym
-circuits/**/*.wasm
-circuits/**/*.cpp
-circuits/**/*.hpp
-circuits/**/*.asm
-circuits/**/witness_calculator.js
-circuits/**/generate_witness.js
-circuits/**/*.dat
-circuits/**/Makefile
