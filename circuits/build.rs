@@ -220,6 +220,15 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
     None
 }
 
+/// Imports the circomlib dependency without adding any Javascript dependency.
+///
+/// We clone the circomlib repository into the provided repository.
+///
+/// # Arguments
+/// * `directory` - path in which the Circomlib dependency will be cloned.
+///
+/// # Returns
+/// Returns exit status of the import procedure
 fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
     let circomlib_path = directory.join("circomlib");
 

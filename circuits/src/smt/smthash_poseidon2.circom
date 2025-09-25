@@ -12,7 +12,7 @@ template SMTHash1() {
     signal input key;
     signal input value;
     signal output out;
-
+    
     component h = Poseidon2(3);   // Constant
     h.inputs[0] <== key;
     h.inputs[1] <== value;

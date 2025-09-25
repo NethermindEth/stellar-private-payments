@@ -19,7 +19,7 @@ nullifier = hash(commitment, merklePath, sign(privKey, commitment, merklePath))
 */
 
 // Universal JoinSplit transaction with nIns inputs and 2 outputs
-template Transaction(levels, nIns, nOuts, zeroLeaf) {
+template Transaction(levels, nIns, nOuts) {
 
     /** PUBLIC INPUTS **/
     signal input root;

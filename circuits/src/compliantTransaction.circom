@@ -28,7 +28,7 @@ bus NonMembershipProof(levels) {
     signal isOld0;
 }
 
-template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels, zeroLeaf) {
+template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
     /** PUBLIC INPUTS **/
     signal input root;
     signal input publicAmount;
@@ -66,6 +66,8 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
     component complianceNonMembershipHasher[nIns][nNonMembershipProofs];
     component membershipVerifiers[nIns][nMembershipProofs];
     component nonMembershipVerifiers[nIns][nNonMembershipProofs];
+    component n2bs[nIns][nNonMembershipProofs];
+    
     var sumIns = 0;
     
     // verify correctness of transaction inputs
@@ -142,7 +144,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
             
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceNonMembershipHasher[tx][i] = Poseidon2(2);
+            complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
             complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
             complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
             nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
@@ -153,8 +155,12 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             }
             
             nonMembershipVerifiers[tx][i].oldKey <== nonMembershipProofs[tx][i].oldKey; 
-            nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue; 
-            nonMembershipVerifiers[tx][i].isOld0 <== nonMembershipProofs[tx][i].isOld0; 
+            nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue;
+            
+            n2bs[tx][i] = Num2Bits(1);
+            n2bs[tx][i].in <== nonMembershipProofs[tx][i].isOld0;
+            
+            nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
             nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
             nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
             nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 

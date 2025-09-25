@@ -116,7 +116,4 @@ template SMTVerifier(nLevels) {
     checkRoot.enabled <== enabled;
     checkRoot.in[0] <== levels[0].root;
     checkRoot.in[1] <== root;
-
-    // levels[0].root === root;
-
 }
