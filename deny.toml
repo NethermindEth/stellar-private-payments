@@ -57,7 +57,10 @@ allow = [
     "WTFPL",
     "Xnet",
     "Zlib",
-    "Apache-2.0 WITH LLVM-exception",
+]
+exceptions = [
+    { name = "wasmparser", version = "*", allow = ["Apache-2.0 WITH LLVM-exception", "Apache-2.0", "MIT"] },
+    { name = "wasmparser-nostd", version = "*", allow = ["Apache-2.0 WITH LLVM-exception", "Apache-2.0", "MIT"] }
 ]
 confidence-threshold = 0.8
 unused-allowed-license = "allow"
