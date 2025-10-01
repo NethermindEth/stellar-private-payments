@@ -8,9 +8,9 @@
 //! 1. Find all `.circom` files in `src/` directory
 //! 2. Compile each circuit using the circom compiler
 
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use compiler::num_bigint::BigInt;
-use constraint_generation::{build_circuit, BuildConfig};
+use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
 use std::process::{Command, ExitStatus};
