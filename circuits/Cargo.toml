@@ -1,0 +1,23 @@
+[package]
+name = "circuits"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+
+[dependencies]
+
+[build-dependencies]
+anyhow = "1"
+compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+parser = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+
+[lints]
+workspace = true
