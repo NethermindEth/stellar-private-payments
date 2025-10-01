@@ -11,10 +11,8 @@ pub struct PoolContract;
 const COMMITMENTS: Symbol = symbol_short!("commits");
 const NULLIFIERS: Symbol = symbol_short!("nullifs");
 
-
-
 pub const HASH_SIZE: usize = 32;
-type H32 = BytesN<HASH_SIZE>; 
+type H32 = BytesN<HASH_SIZE>;
 
 #[contracttype]
 pub struct Proof {
