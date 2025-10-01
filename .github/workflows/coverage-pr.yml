@@ -1,0 +1,144 @@
+name: Coverage (PR)
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: read
+
+jobs:
+  cov-head:
+    runs-on: ubuntu-latest
+    outputs:
+      pct: ${{ steps.cov.outputs.coverage }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - run: cargo install cargo-llvm-cov
+      - run: rustup component add llvm-tools-preview
+      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+
+      - name: Upload head coverage artifact (for stacked PRs)
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-lcov
+          path: lcov.info
+          retention-days: 21
+
+      - name: Extract total coverage % (head)
+        id: cov
+        shell: bash
+        run: |
+          pct=$(awk -F: '
+            /^LH:/ {lh += $2}
+            /^LF:/ {lf += $2}
+            END { if (lf>0) printf "%.2f", (lh/lf)*100; else print "0.00" }
+          ' lcov.info)
+          echo "coverage=$pct" >> "$GITHUB_OUTPUT"
+
+  compare-and-comment:
+    needs: cov-head
+    runs-on: ubuntu-latest
+    steps:
+      # 1) Try to download base artifact from the base branch
+      - name: Download base branch artifact (if present)
+        id: dl
+        uses: dawidd6/action-download-artifact@ac66b43f0e6a346234dd65d4d0c8fbb31cb316e5
+        with:
+          name: coverage-lcov
+          branch: ${{ github.event.pull_request.base.ref }}
+          if_no_artifact_found: ignore  # don't fail if missing
+
+      - name: Check if base artifact was found
+        id: base_art
+        shell: bash
+        run: |
+          if [ -f "coverage-lcov/lcov.info" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # 2) Fallback: if no artifact, checkout base commit and compute base coverage here
+      - name: Checkout base
+        if: ${{ steps.base_art.outputs.found == 'false' }}
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+
+      - name: Install cargo-llvm-cov (fallback path)
+        if: ${{ steps.base_art.outputs.found == 'false' }}
+        run: cargo install cargo-llvm-cov
+
+      - name: Install llvm-tools (fallback path)
+        if: ${{ steps.base_art.outputs.found == 'false' }}
+        run: rustup component add llvm-tools-preview
+
+      - name: Run base coverage (fallback path)
+        if: ${{ steps.base_art.outputs.found == 'false' }}
+        run: cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
+
+      # 3) Extract base coverage (from artifact or from freshly computed fallback)
+      - name: Extract total coverage % (base)
+        id: basecov
+        shell: bash
+        run: |
+          file="coverage-lcov/lcov.info"
+          if [ "${{ steps.base_art.outputs.found }}" != "true" ]; then
+            file="base.lcov.info"
+          fi
+          pct=$(awk -F: '
+            /^LH:/ {lh += $2}
+            /^LF:/ {lf += $2}
+            END { if (lf>0) printf "%.2f", (lh/lf)*100; else print "0.00" }
+          ' "$file")
+          echo "coverage=$pct" >> "$GITHUB_OUTPUT"
+
+      - name: Find existing coverage comment
+        id: find_comment
+        uses: peter-evans/find-comment@3eae4d37986fb5a8592848f6a574fdf654e61f9e
+        with:
+          issue-number: ${{ github.event.pull_request.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- coverage-bot -->'
+
+      - name: Comment only if head < base
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const base = parseFloat(`${{ steps.basecov.outputs.coverage }}`);
+            const head = parseFloat(`${{ needs.cov-head.outputs.pct }}`);
+            if (!(base >= 0) || !(head >= 0)) {
+              core.setFailed(`Bad coverage values. base=${base} head=${head}`);
+              return;
+            }
+            if (head >= base) {
+              core.info(`No drop (head ${head}% >= base ${base}%).`);
+              return;
+            }
+            const delta = (head - base).toFixed(2);
+            const body = `<!-- coverage-bot -->
+            **Coverage (base → head):** \`${base}% → ${head}%\`  ⬇️ ${Math.abs(delta)} pp
+            _Only posts when PR coverage is lower than the base branch's latest push (or freshly computed base)._
+            `;
+            const commentId = `${{ steps.find_comment.outputs.comment-id }}`;
+            if (commentId) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: parseInt(commentId, 10),
+                body
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.issue.number,
+                body
+              });
+            }

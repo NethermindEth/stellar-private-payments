@@ -14,8 +14,8 @@ if ! cargo deny check; then
 fi
 
 # Formatting check
-if ! cargo fmt --all -- --check; then
-    echo "❌ Formatting issues (run 'cargo fmt --all')"
+if ! cargo +nightly fmt --all -- --check; then
+    echo "❌ Formatting issues (run 'cargo +nightly fmt --all')"
     exit 3
 fi
 

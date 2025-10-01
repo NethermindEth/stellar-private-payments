@@ -9,7 +9,7 @@ jobs:
   # TODO(template) remove docs publishing, when the crate is published to crates.io
   docs:
     permissions:
-        contents: write
+      contents: write
     name: Documentation
     runs-on: ubuntu-latest
     steps:
