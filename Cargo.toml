@@ -2,7 +2,7 @@
 # TODO(template) update for the crate name
 [workspace]
 members = ["contracts/*", "examples", "template_crate"]
-resolver = "2"
+resolver = "3"
 default-members = ["template_crate"]
 
 [workspace.package]

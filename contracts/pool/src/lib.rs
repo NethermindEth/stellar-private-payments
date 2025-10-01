@@ -11,15 +11,20 @@ pub struct PoolContract;
 const COMMITMENTS: Symbol = symbol_short!("commits");
 const NULLIFIERS: Symbol = symbol_short!("nullifs");
 
+
+
+pub const HASH_SIZE: usize = 32;
+type H32 = BytesN<HASH_SIZE>; 
+
 #[contracttype]
 pub struct Proof {
     pub proof: Bytes,
-    pub root: BytesN<32>,
-    pub input_nullifiers: Vec<BytesN<32>>,
-    pub output_commitment0: BytesN<32>,
-    pub output_commitment1: BytesN<32>,
+    pub root: H32,
+    pub input_nullifiers: Vec<H32>,
+    pub output_commitment0: H32,
+    pub output_commitment1: H32,
     pub public_amount: U256,
-    pub ext_data_hash: BytesN<32>,
+    pub ext_data_hash: H32,
 }
 
 #[contractevent(topics = ["withdraw"], data_format = "single-value")]
@@ -30,7 +35,7 @@ struct WithdrawEvent {
 #[contractimpl]
 impl PoolContract {
     pub fn deposit(env: Env, _from: Address, commitment: BytesN<32>, proof: Proof) {
-        if proof.proof.len() == 0 {
+        if proof.proof.is_empty() {
             panic!("invalid proof");
         }
         // Verify proof
@@ -54,7 +59,7 @@ impl PoolContract {
         if nullifs.contains_key(nullifier.clone()) {
             panic!("nullifier already used");
         }
-        nullifs.set(nullifier.clone(), true);
+        nullifs.set(nullifier, true);
         env.storage().instance().set(&NULLIFIERS, &nullifs);
 
         WithdrawEvent { address: to }.publish(&env);
