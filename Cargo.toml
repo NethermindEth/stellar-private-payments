@@ -1,9 +1,9 @@
 
 # TODO(template) update for the crate name
 [workspace]
-members = ["contracts/*", "examples", "template_crate"]
+members = ["circuits", "contracts/*", "examples", "template_crate"]
 resolver = "3"
-default-members = ["template_crate"]
+default-members = ["template_crate", "circuits"]
 
 [workspace.package]
 version = "0.1.0"
@@ -21,7 +21,7 @@ missing_docs = "deny"
 # TODO(template) if you use any unsafe code, then running miri in CI is a must
 # if for a crate in the workspace you need an unsafe code
 # prefer to preserve forbid for the workspace
-# and allowing only at a specific crate level 
+# and allowing only at a specific crate level
 unsafe_code = "forbid"
 
 [workspace.lints.clippy]
