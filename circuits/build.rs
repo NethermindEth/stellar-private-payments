@@ -13,6 +13,7 @@ use compiler::num_bigint::BigInt;
 use constraint_generation::{build_circuit, BuildConfig};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
+use std::process::{Command, ExitStatus};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -28,6 +29,9 @@ fn main() -> Result<()> {
 
     // Create an output directory
     fs::create_dir_all(&out_dir).expect("Could not create output directory");
+
+    // Import circomlib library
+    get_circomlib(&src_dir)?;
 
     // Find all .circom files with a main component
     let circom_files = find_circom_files(&src_dir);
@@ -214,4 +218,34 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
     }
 
     None
+}
+
+/// Imports the circomlib dependency without adding any Javascript dependency.
+///
+/// We clone the circomlib repository into the provided repository.
+///
+/// # Arguments
+/// * `directory` - path in which the Circomlib dependency will be cloned.
+///
+/// # Returns
+/// Returns exit status of the import procedure
+fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
+    let circomlib_path = directory.join("circomlib");
+
+    // Check if circomlib already exists
+    if circomlib_path.exists() {
+        println!(
+            "cargo:warning=circomlib already exists at {:?}",
+            circomlib_path
+        );
+        return Ok(ExitStatus::default());
+    }
+
+    // Clone the circomlib repository
+    Command::new("git")
+        .arg("clone")
+        .arg("https://github.com/iden3/circomlib.git")
+        .arg(&circomlib_path)
+        .status()
+        .map_err(|_| anyhow!("Error cloning circomlib dependency"))
 }

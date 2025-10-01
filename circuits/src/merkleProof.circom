@@ -1,40 +1,11 @@
-pragma circom 2.2.0;
+pragma circom 2.2.2;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
 include "./poseidon2/poseidon2_hash.circom";
 
-// Local workaround
-template Num2Bits(n) {
-    signal input in;
-    signal output out[n];
-    var lc1=0;
-
-    var e2=1;
-    for (var i = 0; i<n; i++) {
-        out[i] <-- (in >> i) & 1;
-        out[i] * (out[i] -1 ) === 0;
-        lc1 += out[i] * e2;
-        e2 = e2+e2;
-    }
-
-    lc1 === in;
-}
-template Switcher() {
-    signal input sel;
-    signal input L;
-    signal input R;
-    signal output outL;
-    signal output outR;
-
-    signal aux;
-
-    aux <== (R-L)*sel;    // We create aux in order to have only one multiplication
-    outL <==  aux + L;
-    outR <== -aux + R;
-}
-
-// Verifies that merkle proof is correct for given merkle root and a leaf
+// Given the leaf, pathElements and pathIndices, it returns the root of the merkle tree.
+// It simply computes the root, and it MUST be checked against the expected root in the circuit using this template.
 // pathIndices bits is an array of 0/1 selectors telling whether given pathElement is on the left or right side of merkle path
 template MerkleProof(levels) {
     signal input leaf;
