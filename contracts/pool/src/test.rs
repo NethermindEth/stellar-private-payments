@@ -7,8 +7,8 @@ use soroban_sdk::{
 };
 
 // Helper to get 32 bytes
-fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
-    BytesN::from_array(env, &[fill; 32])
+fn mk_bytesn32(env: &Env, fill: u8) -> HashBytes {
+    BytesN::from_array(env, &[fill; HASH_SIZE])
 }
 
 // non-empty placeholder proof
@@ -21,14 +21,14 @@ fn mk_proof(env: &Env) -> Proof {
         },
         root: mk_bytesn32(env, 0xAA),
         input_nullifiers: {
-            let mut v: Vec<BytesN<32>> = Vec::new(env);
+            let mut v: Vec<HashBytes> = Vec::new(env);
             v.push_back(mk_bytesn32(env, 0x11));
             v.push_back(mk_bytesn32(env, 0x22));
             v
         },
         output_commitment0: mk_bytesn32(env, 0x33),
         output_commitment1: mk_bytesn32(env, 0x44),
-        public_amount: U256::from_u32(&env, 0),
+        public_amount: U256::from_u32(env, 0),
         ext_data_hash: mk_bytesn32(env, 0x55),
     }
 }
@@ -98,13 +98,13 @@ fn withdraw_records_nullifier() {
 
     for e in env.events().all() {
         let topics: Vec<Val> = e.1.clone();
-        if topics.len() >= 1 {
+        if !topics.is_empty() {
             let topic: Val = topics.get_unchecked(0);
             let topic_sym: Option<Symbol> =
                 <Symbol as TryFromVal<Env, Val>>::try_from_val(&env, &topic).ok();
 
             if topic_sym == Some(symbol_short!("withdraw")) {
-                let data: Val = e.2.clone();
+                let data: Val = e.2;
                 let addr: Option<Address> =
                     <Address as TryFromVal<Env, Val>>::try_from_val(&env, &data).ok();
 
@@ -120,7 +120,7 @@ fn withdraw_records_nullifier() {
 
     // Check nullifier marked as used in storage
     let seen: bool = env.as_contract(&contract_id, || {
-        let nullifs: Map<BytesN<32>, bool> = env.storage().instance().get(&NULLIFIERS).unwrap();
+        let nullifs: Map<HashBytes, bool> = env.storage().instance().get(&NULLIFIERS).unwrap();
         nullifs.get(nullifier.clone()).unwrap()
     });
     assert!(seen);

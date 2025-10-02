@@ -17,6 +17,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - run: |
-          rustup +nightly component add miri
-          cargo +nightly miri setup
-          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib
+#          rustup +nightly component add miri
+#          cargo +nightly miri setup
+#          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib

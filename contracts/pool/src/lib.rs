@@ -12,17 +12,17 @@ const COMMITMENTS: Symbol = symbol_short!("commits");
 const NULLIFIERS: Symbol = symbol_short!("nullifs");
 
 pub const HASH_SIZE: usize = 32;
-type H32 = BytesN<HASH_SIZE>;
+type HashBytes = BytesN<HASH_SIZE>;
 
 #[contracttype]
 pub struct Proof {
     pub proof: Bytes,
-    pub root: H32,
-    pub input_nullifiers: Vec<H32>,
-    pub output_commitment0: H32,
-    pub output_commitment1: H32,
+    pub root: HashBytes,
+    pub input_nullifiers: Vec<HashBytes>,
+    pub output_commitment0: HashBytes,
+    pub output_commitment1: HashBytes,
     pub public_amount: U256,
-    pub ext_data_hash: H32,
+    pub ext_data_hash: HashBytes,
 }
 
 #[contractevent(topics = ["withdraw"], data_format = "single-value")]
