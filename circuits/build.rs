@@ -1,7 +1,7 @@
 //! Build script for compiling Circom circuits
 //!
-//! This build script automatically compiles all `.circom` files in the `src/` directory
-//! into R1CS constraint systems and symbol files.
+//! This build script automatically compiles all `.circom` files in the `src/`
+//! directory into R1CS constraint systems and symbol files.
 //!
 //! ## Usage
 //! The build script runs automatically when you run `cargo build`. It will:
@@ -13,10 +13,10 @@ use compiler::num_bigint::BigInt;
 use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
-use std::process::{Command, ExitStatus};
 use std::{
     env, fs,
     path::{Path, PathBuf},
+    process::{Command, ExitStatus},
     string::ToString,
 };
 use type_analysis::check_types::check_types;
@@ -40,7 +40,8 @@ fn main() -> Result<()> {
         // Output file
         let out_file = out_dir.join(circom_file.file_stem().context("Invalid circom filename")?);
 
-        // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM compilation
+        // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM
+        // compilation
         let prime = BigInt::parse_bytes(
             "21888242871839275222246405745257275088548364400416034343698204186575808495617"
                 .as_bytes(),

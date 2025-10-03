@@ -4,6 +4,7 @@ extend-ignore-re = [
 ]
 
 [default.extend-words]
+nullifs = "nullifs"
 groth16 = "groth16"
 groth = "groth"
 
