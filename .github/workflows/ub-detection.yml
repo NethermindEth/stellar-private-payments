@@ -1,3 +1,6 @@
+# The workflow has been manually disabled until the Soroban SDK team has fixed this issue
+# https://github.com/stellar/rs-soroban-sdk/issues/1582
+
 name: UB (undefined behavior) detection
 
 on: push
