@@ -34,7 +34,17 @@ fn main() -> Result<()> {
     get_circomlib(&src_dir)?;
 
     // Find all .circom files with a main component
-    let circom_files = find_circom_files(&src_dir);
+    let mut circom_files = find_circom_files(&src_dir);
+
+    let build_tests = env::var("BUILD_TESTS").is_ok();
+
+    if build_tests {
+        println!("cargo:warning=Including test circuits in build...");
+        circom_files.extend(find_circom_files(&crate_dir.join("test")));
+    } else {
+        println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
+    }
+
 
     for circom_file in circom_files {
         // Output file
@@ -110,6 +120,8 @@ fn main() -> Result<()> {
     // Tell cargo to rerun if anything changes
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=compiled");
+    println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     Ok(())
 }
 
