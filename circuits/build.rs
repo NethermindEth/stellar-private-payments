@@ -40,11 +40,10 @@ fn main() -> Result<()> {
 
     if build_tests {
         println!("cargo:warning=Including test circuits in build...");
-        circom_files.extend(find_circom_files(&crate_dir.join("test")));
+        circom_files.extend(find_circom_files(&crate_dir.join("src/test")));
     } else {
         println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
     }
-
 
     for circom_file in circom_files {
         // Output file

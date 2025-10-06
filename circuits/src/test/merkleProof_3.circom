@@ -1,3 +1,3 @@
 pragma circom 2.2.0;
-include "../src/merkleProof.circom";
+include "../merkleProof.circom";
 component main = MerkleProof(3);
