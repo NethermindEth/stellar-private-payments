@@ -6,9 +6,7 @@ include "poseidon2_const.circom";
 // The Poseidon2 permutation for BN128/BN254/BN256
 //
 
-//------------------------------------------------------------------------------
 // The S-box
-
 template SBox() {
   signal input  inp;
   signal output out;
@@ -19,9 +17,28 @@ template SBox() {
   out <== inp*x4;
 }
 
-//------------------------------------------------------------------------------
-// partial or internal round
+// Special efficient case for 4x4 matrix multiplication
+// Section 5.1 of the Poseidon2 paper (https://eprint.iacr.org/2023/323.pdf)
+template MatMul_M4() {
+  signal input  inp[4];
+  signal output out[4];
+  
+  signal t_0 <== inp[0] + inp[1];
+  signal t_1 <== inp[2] + inp[3];
+  signal t_2 <== 2*inp[1] + t_1;
+  signal t_3 <== 2*inp[3] + t_0;
+  signal t_4 <== 4*t_1 + t_3;
+  signal t_5 <== 4*t_0 + t_2;
+  signal t_6 <== t_3 + t_5;
+  signal t_7 <== t_2 + t_4;
+  
+  out[0] <== t_6;
+  out[1] <== t_5;
+  out[2] <== t_7;
+  out[3] <== t_4;
+}
 
+// Partial or Internal Round
 template InternalRound(i, t) {
   signal input  inp[t];
   signal output out[t];
@@ -46,9 +63,7 @@ template InternalRound(i, t) {
   }
 }
 
-//------------------------------------------------------------------------------
-// external rounds
-
+// External (or full) Rounds
 template ExternalRound(i, t) {
   signal input  inp[t];
   signal output out[t];
@@ -61,25 +76,23 @@ template ExternalRound(i, t) {
     sbExt[j].inp <== inp[j] + round_consts[i][j];
   }
   
-  var totalExternal = 0;
-  for(var j=0; j<t; j++) {
-      totalExternal += sbExt[j].out;
+  if (t == 4) {
+      component m4 = MatMul_M4();
+      for(var j=0; j<4; j++) { m4.inp[j] <== sbExt[j].out; }
+      for(var j=0; j<4; j++) { out[j] <== m4.out[j]; }
+  } else {
+      var totalExternal = 0;
+      for(var j=0; j<t; j++) {
+          totalExternal += sbExt[j].out;
+      }
+      
+      for(var j=0; j<t; j++) {
+        out[j] <== totalExternal + sbExt[j].out;
+      }
   }
-  
-  for(var j=0; j<t; j++) {
-    out[j] <== totalExternal + sbExt[j].out;
-  }
-
-  /*
-  out[0] <== 2*sb[0].out +   sb[1].out +   sb[2].out;
-  out[1] <==   sb[0].out + 2*sb[1].out +   sb[2].out;
-  out[2] <==   sb[0].out +   sb[1].out + 2*sb[2].out;
-  */
 }
 
-//------------------------------------------------------------------------------
-// the initial linear layer
-
+// Initial linear layer
 template LinearLayer(t) {
   signal input  inp[t];
   signal output out[t];
@@ -90,20 +103,18 @@ template LinearLayer(t) {
       total += inp[j];
   }
   
-  for(var j=0; j<t; j++) {
-    out[j] <== total + inp[j];
+  if (t == 4) {
+      component m4 = MatMul_M4();
+      for(var j=0; j<4; j++) { m4.inp[j] <== inp[j]; }
+      for(var j=0; j<4; j++) { out[j] <== m4.out[j]; }
+  } else {
+      for(var j=0; j<t; j++) {
+        out[j] <== total + inp[j];
+      }
   }
-  
-  /*
-      out[0] <== 2*inp[0] +   inp[1] +   inp[2];
-      out[1] <==   inp[0] + 2*inp[1] +   inp[2];
-      out[2] <==   inp[0] +   inp[1] + 2*inp[2];
-  */
 }
 
-//------------------------------------------------------------------------------
-// the Poseidon2 permutation for t=3
-
+// Poseidon2 permutation
 template Permutation(t) {
   signal input  inp[t];
   signal output out[t];
@@ -141,10 +152,8 @@ template Permutation(t) {
   for(var j=0; j<t; j++) { out[j] <== aux[64][j];  log("OUT =", out[j]);}
 }
 
-//------------------------------------------------------------------------------
 // the "compression function" takes 2 field elements as input and produces
 // 1 field element as output. It is a trivial application of the permutation.
-
 template Compression() {
   signal input  inp[2];
   signal output out;
@@ -156,5 +165,3 @@ template Compression() {
 
   perm.out[0] ==> out;
 }
-
-//------------------------------------------------------------------------------

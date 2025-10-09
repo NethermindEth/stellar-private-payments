@@ -1,7 +1,7 @@
 
 # TODO(template) update for the crate name
 [workspace]
-members = ["circuits", "contracts/*", "examples", "template_crate"]
+members = ["circuits", "contracts/*", "examples", "poseidon2", "template_crate"]
 resolver = "3"
 
 [workspace.package]
