@@ -114,12 +114,20 @@ fn main() -> Result<()> {
             exporter.as_ref(),
         )
         .expect("SYM file generation failed");
+
+        // Additionally, try to generate the WASM witness code with the Circom CLI (if
+        // installed).
+        if let Err(e) = compile_wasm_with_cli(&circom_file, &out_dir) {
+            println!(
+                "cargo:warning=Skipping WASM generation for {:?}: {}",
+                circom_file, e
+            );
+        }
     }
 
     // Tell cargo to rerun if anything changes
     println!("cargo:rerun-if-changed=src/");
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-changed=compiled");
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     Ok(())
 }
@@ -260,4 +268,72 @@ fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
         .arg(&circomlib_path)
         .status()
         .map_err(|_| anyhow!("Error cloning circomlib dependency"))
+}
+
+fn compile_wasm_with_cli(circom_file: &Path, out_dir: &Path) -> Result<()> {
+    let cli = env::var("CIRCOM_CLI").unwrap_or_else(|_| "circom".to_string());
+
+    // Check CLI availability
+    match Command::new(&cli).arg("--version").output() {
+        Ok(_) => {}
+        Err(e) => {
+            return Err(anyhow!(format!("circom CLI not found ({}): {}", cli, e)));
+        }
+    }
+
+    let base = circom_file
+        .file_stem()
+        .ok_or_else(|| anyhow!("Invalid circom filename"))?
+        .to_string_lossy()
+        .to_string();
+
+    // Temporary output directory where circom will write the js folder
+    let temp_root = out_dir.join("wasm_tmp").join(&base);
+    if temp_root.exists() {
+        fs::remove_dir_all(&temp_root)?;
+    }
+    fs::create_dir_all(&temp_root)?;
+
+    let status = Command::new(&cli)
+        .arg(circom_file)
+        .arg("--wasm")
+        .arg("-o")
+        .arg(&temp_root)
+        .status()
+        .context("failed to spawn circom CLI")?;
+
+    if !status.success() {
+        return Err(anyhow!(
+            "circom CLI failed while generating wasm for {}",
+            base
+        ));
+    }
+
+    let src_js_dir = temp_root.join(format!("{}_js", base));
+    if !src_js_dir.is_dir() {
+        return Err(anyhow!("expected folder not found: {:?}", src_js_dir));
+    }
+
+    let dst_js_dir = out_dir.join("wasm").join(format!("{}_js", base));
+    if dst_js_dir.exists() {
+        fs::remove_dir_all(&dst_js_dir).ok();
+    }
+    fs::create_dir_all(&dst_js_dir).context("creating wasm out dir")?;
+
+    // Copy files from src_js_dir to dst_js_dir
+    for entry in fs::read_dir(&src_js_dir).context("reading circom wasm output dir")? {
+        let entry = entry?;
+        let file_type = entry.file_type()?;
+        let src = entry.path();
+        let dst = dst_js_dir.join(entry.file_name());
+        if file_type.is_file() {
+            fs::copy(&src, &dst).with_context(|| format!("copying {:?} -> {:?}", src, dst))?;
+        }
+    }
+
+    println!(
+        "cargo:warning=WASM generated for {} at {:?}",
+        base, dst_js_dir
+    );
+    Ok(())
 }
