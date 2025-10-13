@@ -26,6 +26,13 @@ TODO(template) describe the project
 
 See [examples](./examples/).
 
+### Tests
+For building the testing circom you need to run
+
+```
+BUILD_TESTS=1 cargo build
+```
+
 ## License
 
 TODO(template) - update [license](https://www.notion.so/nethermind/Open-Source-Software-Usage-and-Licensing-Policy-1c3360fc38d080fd9e61c29b35d1d5af) if needed.
