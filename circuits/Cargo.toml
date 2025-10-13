@@ -18,6 +18,7 @@ constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 parser = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+wast = "39.0.0"
 
 [lints]
 workspace = true

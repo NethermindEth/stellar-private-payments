@@ -141,9 +141,7 @@ fn main() -> Result<()> {
         )
         .expect("SYM file generation failed");
 
-        // === WASM GENERATION === WE NEED TO CHOOSE ONE
-        // Attempt to compile WASM via Circom CLI
-        // Prepare include paths for in-process compilation
+        // === WASM GENERATION ===
 
         if let Err(e) = compile_wasm(&circom_file, &out_dir, vcp) {
             println!(
@@ -318,6 +316,7 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
         .to_string();
 
     let js_folder = out_dir.join("wasm").join(format!("{}_js", base));
+    let wat_file = js_folder.join(format!("{}.wat", base));
     let wasm_file = js_folder.join(format!("{}.wasm", base));
 
     if js_folder.exists() {
@@ -331,15 +330,56 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
             .to_str()
             .expect("Failed to convert js folder path to string"),
         &base,
-        wasm_file
+        wat_file
             .to_str()
-            .expect("Failed to convert wasm file to str"),
+            .expect("Failed to convert wat file to str"),
     )
     .map_err(|_| anyhow!("write_wasm failed"))?;
+
+    if let Err(e) = wat_to_wasm(&wat_file, &wasm_file) {
+        println!("cargo:warning=WAT → WASM compilation failed: {}", e);
+        return Ok(());
+    }
 
     println!(
         "cargo:warning=WASM generated for {} at {:?}",
         base, js_folder
     );
+    Ok(())
+}
+
+/// Convert WAT to WASM
+/// Modified by the Nethermind team
+/// https://github.com/iden3/circom/blob/0ecb2c7d154ed8ab72105a9b711815633ca761c5/circom/src/compilation_user.rs#L141
+fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
+    use std::{
+        fs::File,
+        io::{BufWriter, Write},
+    };
+    use wast::{
+        Wat,
+        parser::{self, ParseBuffer},
+    };
+
+    let wat_contents = fs::read_to_string(wat_file)
+        .map_err(|e| anyhow!("read_to_string({}): {e}", wat_file.display()))?;
+
+    let buf =
+        ParseBuffer::new(&wat_contents).map_err(|e| anyhow!("ParseBuffer::new failed: {e}"))?;
+
+    let mut wat = parser::parse::<Wat>(&buf).map_err(|e| anyhow!("WAT parse failed: {e}"))?;
+
+    let wasm_bytes = wat
+        .module
+        .encode()
+        .map_err(|e| anyhow!("WASM encode failed: {e}"))?;
+
+    let f = File::create(wasm_file)
+        .map_err(|e| anyhow!("File::create({}): {e}", wasm_file.display()))?;
+    let mut w = BufWriter::new(f);
+    w.write_all(&wasm_bytes)?;
+    w.flush()?;
+
+    fs::remove_file(wat_file).expect("Failed to remove WAT");
     Ok(())
 }
