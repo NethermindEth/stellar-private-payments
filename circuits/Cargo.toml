@@ -6,9 +6,22 @@ repository.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[features]
+[[bin]]
+name = "prove_merkle"
+path = "src/test/prove_merkle.rs"
 
 [dependencies]
+anyhow = "1"
+ark-bn254 = "0.5.0"
+ark-circom = "0.5.0"
+ark-ff = "0.5"
+ark-groth16 = "0.5.0"
+ark-snark = "0.5.1"
+ark-std = "0.5.0"
+color-eyre = "0.6.5"
+num-bigint = "0.4.6"
+tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
+
 
 [build-dependencies]
 anyhow = "1"
