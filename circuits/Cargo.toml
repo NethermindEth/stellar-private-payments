@@ -22,7 +22,6 @@ color-eyre = "0.6.5"
 num-bigint = "0.4.6"
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
-
 [build-dependencies]
 anyhow = "1"
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
