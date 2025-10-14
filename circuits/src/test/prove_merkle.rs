@@ -8,6 +8,7 @@ use ark_groth16::Groth16;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use num_bigint::ToBigInt;
+use std::env;
 
 use anyhow::{Result, anyhow};
 
@@ -15,10 +16,14 @@ use anyhow::{Result, anyhow};
 async fn main() -> Result<()> {
     color_eyre::install().ok();
 
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let out_dir = PathBuf::from(env::var("CIRCUIT_OUT_DIR").expect("CIRCUIT_OUT_DIR not set"));
 
-    let wasm = root.join("compiled/wasm/merkleProof_3_js/merkleProof_3.wasm");
-    let r1cs = root.join("compiled/merkleProof_3.r1cs");
+    let wasm = out_dir.join("wasm/merkleProof_3_js/merkleProof_3.wasm");
+    let r1cs = out_dir.join("merkleProof_3.r1cs");
+
+    println!("{}", wasm.display());
+    println!("{}", r1cs.display());
+
 
     let cfg = CircomConfig::<Fr>::new(wasm, r1cs).map_err(|e| anyhow!(e))?;
     let mut builder = CircomBuilder::new(cfg);
