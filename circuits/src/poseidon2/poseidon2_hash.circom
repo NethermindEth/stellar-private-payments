@@ -1,20 +1,15 @@
-pragma circom 2.2.0;
-// Original circuits from https://github.com/bkomuves/hash-circuits (MIT License)
-// Adapted and modified by Nethermind
+pragma circom 2.2.2;
 
-include "poseidon2_sponge.circom";
+include "poseidon2_perm.circom";
 
-//------------------------------------------------------------------------------
-// Hash `n` field elements into 1, with approximately 254 bits of preimage security (?)
-// (assuming bn128 (or bn254) scalar field. We use capacity=2, rate=1, t=3).
-
+// Please note that we expose ONLY the permutation argument.
+// As it is common for most ZK applications (e.g. the default implementation for Poseidon1 in circomlib)
+// We do not provide the full sponge construction, but it can be build from the permutation.
 template Poseidon2(n) {
-  signal input  inputs[n];
+  signal input inputs[n];
   signal output out;
-
-  component sponge = PoseidonSponge(3,2,n,1);
-  sponge.inp    <== inputs;
-  sponge.out[0] ==> out;
+  
+  component perm = Permutation(n);
+  perm.inp    <== inputs;
+  perm.out[0] ==> out;
 }
-
-//------------------------------------------------------------------------------

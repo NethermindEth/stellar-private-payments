@@ -13,8 +13,9 @@ template Keypair() {
     /** PUBLIC OUTPUTS **/
     signal output publicKey;
 
-    component hasher = Poseidon2(1);
+    component hasher = Poseidon2(2);
     hasher.inputs[0] <== privateKey;
+    hasher.inputs[1] <== 0;
     publicKey <== hasher.out;
 }
 
