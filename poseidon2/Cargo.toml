@@ -1,0 +1,61 @@
+[package]
+name = "zkhash"
+version = "0.2.0"
+authors = [
+    "Markus Schofnegger <mschofnegger@horizenlabs.io>",
+    "Roman Walch <roman.walch@iaik.tugraz.at>",
+]
+description = "Rust implementations of Poseidon2 and similar arithmetization-oriented primitives"
+edition = "2018"
+
+[features]
+default = []
+asm = ["sha2/asm", "ark-ff/asm"]
+
+[dependencies]
+ark-ff = { version = "^0.4.0", default-features = false }
+ark-std = { version = "^0.4.0", default-features = false }
+blake2 = { version = "0.10", default-features = false }
+cfg-if = "1.0"
+hex = "0.4"
+lazy_static = "1.4"
+rand = "0.8.5"
+sha2 = "0.10"
+
+[profile.release]
+# Enable link-time optimization, eliminates more code and inlines across crate boundaries.
+# Default: false
+lto = true
+
+# codegen-units of 1 gives best optimization, but disables parallel building.
+# Default: 16
+codegen-units = 1
+
+# Includes debug information in release builds. Necessary for profiling. Does not
+# slow down the executable.
+debug = true
+
+# The default optimization level is 3 for release mode builds.
+# 0 means disable optimization and is the default for debug mode buids.
+# (Setting opt-level=1 for debug builds is a good way of speeding them up a bit.)
+# "s" means optimize for size, "z" reduces size even more.
+opt-level = 3
+
+[profile.bench]
+# Enable link-time optimization, eliminates more code and inlines across crate boundaries.
+# Default: false
+lto = true
+
+# codegen-units of 1 gives best optimization, but disables parallel building.
+# Default: 16
+codegen-units = 1
+
+# Includes debug information in release builds. Necessary for profiling. Does not
+# slow down the executable.
+debug = true
+
+# The default optimization level is 3 for release mode builds.
+# 0 means disable optimization and is the default for debug mode buids.
+# (Setting opt-level=1 for debug builds is a good way of speeding them up a bit.)
+# "s" means optimize for size, "z" reduces size even more.
+opt-level = 3
