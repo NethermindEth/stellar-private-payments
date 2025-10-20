@@ -144,10 +144,7 @@ fn main() -> Result<()> {
         // === WASM GENERATION ===
 
         if let Err(e) = compile_wasm(&circom_file, &out_dir, vcp) {
-            println!(
-                "cargo:warning=Skipping in-process WASM generation for {:?}: {}",
-                circom_file, e
-            );
+            println!("cargo:warning=Skipping in-process WASM generation for {circom_file:?}: {e}");
         }
     }
 
@@ -277,10 +274,7 @@ fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
 
     // Check if circomlib already exists
     if circomlib_path.exists() {
-        println!(
-            "cargo:warning=circomlib already exists at {:?}",
-            circomlib_path
-        );
+        println!("cargo:warning=circomlib already exists at {circomlib_path:?}");
         return Ok(ExitStatus::default());
     }
 
@@ -315,9 +309,9 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
         .to_string_lossy()
         .to_string();
 
-    let js_folder = out_dir.join("wasm").join(format!("{}_js", base));
-    let wat_file = js_folder.join(format!("{}.wat", base));
-    let wasm_file = js_folder.join(format!("{}.wasm", base));
+    let js_folder = out_dir.join("wasm").join(format!("{base}_js"));
+    let wat_file = js_folder.join(format!("{base}.wat"));
+    let wasm_file = js_folder.join(format!("{base}.wasm"));
 
     if js_folder.exists() {
         fs::remove_dir_all(&js_folder)?;
@@ -337,14 +331,11 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
     .map_err(|_| anyhow!("write_wasm failed"))?;
 
     if let Err(e) = wat_to_wasm(&wat_file, &wasm_file) {
-        println!("cargo:warning=WAT → WASM compilation failed: {}", e);
+        println!("cargo:warning=WAT → WASM compilation failed: {e}");
         return Ok(());
     }
 
-    println!(
-        "cargo:warning=WASM generated for {} at {:?}",
-        base, js_folder
-    );
+    println!("cargo:warning=WASM generated for {base} at {js_folder:?}");
     Ok(())
 }
 

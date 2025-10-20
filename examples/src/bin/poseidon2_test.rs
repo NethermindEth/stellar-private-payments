@@ -18,7 +18,7 @@ fn main() {
     println!(
         "POSEIDON2 (t={t}) HASH(0,1): { }",
         perm.iter()
-            .map(|x| format!("{ }", x))
+            .map(|x| format!("{x}"))
             .collect::<Vec<String>>()
             .join(", ")
     );
@@ -31,7 +31,7 @@ fn main() {
     println!(
         "POSEIDON2 (t={t}) HASH(0, 1, 2): { }",
         perm.iter()
-            .map(|x| format!("{ }", x))
+            .map(|x| format!("{x}"))
             .collect::<Vec<String>>()
             .join(", ")
     );
@@ -44,7 +44,7 @@ fn main() {
     println!(
         "POSEIDON2 (t={t}) HASH(0, 1, 2, 3): { }",
         perm.iter()
-            .map(|x| format!("{ }", x))
+            .map(|x| format!("{x}"))
             .collect::<Vec<String>>()
             .join(", ")
     );

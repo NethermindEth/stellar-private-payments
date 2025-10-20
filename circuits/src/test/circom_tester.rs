@@ -8,6 +8,7 @@ use std::{collections::HashMap, path::Path};
 use anyhow::{Result, anyhow};
 use ark_snark::SNARK;
 
+#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum InputValue {
     Single(BigInt),
