@@ -121,15 +121,15 @@ async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // Run cases
     for &idx in &indices {
         run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS)
-            .with_context(|| format!("Case A failed at index {}", idx))?;
+            .with_context(|| format!("Case A failed at index {idx}"))?;
         run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS)
-            .with_context(|| format!("Case B failed at index {}", idx))?;
+            .with_context(|| format!("Case B failed at index {idx}"))?;
         run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS)
-            .with_context(|| format!("Case C failed at index {}", idx))?;
+            .with_context(|| format!("Case C failed at index {idx}"))?;
         run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS)
-            .with_context(|| format!("Case D failed at index {}", idx))?;
+            .with_context(|| format!("Case D failed at index {idx}"))?;
     }
 
-    println!("All test cases passed for {LEVELS} levels ({} leaves).", N);
+    println!("All test cases passed for {LEVELS} levels ({N} leaves).");
     Ok(())
 }
