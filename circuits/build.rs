@@ -47,7 +47,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
 
     // === CIRCOMLIB DEPENDENCY ===
-    // Import circomlib library
+    // Import circomlib library (only if not already present)
     get_circomlib(&src_dir)?;
 
     // === FIND CIRCOM FILES ===
@@ -63,11 +63,36 @@ fn main() -> Result<()> {
         println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
     }
 
+    // Skip circom compilation if no files to compile
+    if circom_files.is_empty() {
+        println!("cargo:warning=No circom files found to compile");
+        return Ok(());
+    }
+
     // === COMPILE EACH CIRCUIT ===
     for circom_file in circom_files {
         println!("cargo:rerun-if-changed={}", circom_file.display());
+
         // Output file
         let out_file = out_dir.join(circom_file.file_stem().context("Invalid circom filename")?);
+
+        // Check if output files already exist and are newer than source
+        let r1cs_file = out_file.with_extension("r1cs");
+        let sym_file = out_file.with_extension("sym");
+
+        if r1cs_file.exists() && sym_file.exists() {
+            let source_modified = fs::metadata(&circom_file)?.modified()?;
+            let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
+            let sym_modified = fs::metadata(&sym_file)?.modified()?;
+
+            if source_modified < r1cs_modified && source_modified < sym_modified {
+                println!(
+                    "cargo:warning=Skipping {} (already compiled)",
+                    circom_file.display()
+                );
+                continue;
+            }
+        }
 
         // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM
         // compilation
@@ -272,15 +297,23 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
 fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
     let circomlib_path = directory.join("circomlib");
 
-    // Check if circomlib already exists
+    // Check if circomlib already exists and is a valid git repository
     if circomlib_path.exists() {
-        println!("cargo:warning=circomlib already exists at {circomlib_path:?}");
-        return Ok(ExitStatus::default());
+        // Verify it's a valid git repository by checking for .git directory
+        if circomlib_path.join(".git").exists() {
+            println!("cargo:warning=circomlib already exists at {circomlib_path:?}");
+            return Ok(ExitStatus::default());
+        } else {
+            // Remove invalid directory and re-clone
+            fs::remove_dir_all(&circomlib_path)?;
+        }
     }
 
     // Clone the circomlib repository
+    println!("cargo:warning=Cloning circomlib repository...");
     Command::new("git")
         .arg("clone")
+        .arg("--depth=1") // Shallow clone to reduce size of build
         .arg("https://github.com/iden3/circomlib.git")
         .arg(&circomlib_path)
         .status()
@@ -334,8 +367,6 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
         println!("cargo:warning=WAT → WASM compilation failed: {e}");
         return Ok(());
     }
-
-    println!("cargo:warning=WASM generated for {base} at {js_folder:?}");
     Ok(())
 }
 
