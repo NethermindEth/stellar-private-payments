@@ -1,9 +1,8 @@
 //! Temp Comment
-mod circom_tester;
 
-use crate::circom_tester::{InputValue, prove_and_verify};
+use super::circom_tester::{InputValue, prove_and_verify};
+use super::sparse_merkle_tree::{SMTMemDB, SparseMerkleTree};
 use anyhow::{Context, Result};
-use circuits::test::utils::sparse_merkle_tree::{SMTMemDB, SparseMerkleTree};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use std::{collections::HashMap, env, path::PathBuf};
 

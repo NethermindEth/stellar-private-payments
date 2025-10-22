@@ -1,4 +1,3 @@
-//! Temp Comment
 use super::{
     circom_tester::{InputValue, prove_and_verify},
     merkle_tree::{merkle_proof, merkle_root},

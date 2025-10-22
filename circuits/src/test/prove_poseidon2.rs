@@ -1,7 +1,6 @@
 //! Temp Comment
 
-mod circom_tester;
-use crate::circom_tester::{InputValue, prove_and_verify};
+use super::circom_tester::{InputValue, prove_and_verify};
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::{collections::HashMap, env, path::PathBuf};
