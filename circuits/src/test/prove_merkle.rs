@@ -70,9 +70,8 @@ fn run_case(
     let path_idx = BigInt::from(path_indices_u64);
 
     // === Prepare Circom inputs ===
-    // - `leaf` and `pathElements` are usually private
-    // - `root` is typically declared `signal public` in the circuit
-    // - `pathIndices` is private unless your circuit exposes it
+    // - `leaf` and `pathElements`, `pathIndices` are private
+    // - `root` is public
     let mut inputs: HashMap<String, InputValue> = HashMap::new();
     inputs.insert("leaf".into(), InputValue::Single(leaf_val));
     inputs.insert("root".into(), InputValue::Single(root_val.clone())); // public
