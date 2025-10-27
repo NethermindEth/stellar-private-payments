@@ -116,13 +116,13 @@ template LinearLayer(t) {
 
 // Poseidon2 permutation
 template Permutation(t) {
-  signal input  inp[t];
+  signal input  inputs[t];
   signal output out[t];
 
   signal aux[65][t];
 
   component ll = LinearLayer(t);
-  for(var j=0; j<t; j++) { ll.inp[j] <== inp[j];    }
+  for(var j=0; j<t; j++) { ll.inp[j] <== inputs[j];    }
   for(var j=0; j<t; j++) { ll.out[j] ==> aux[0][j]; }
 
   component ext[8];
@@ -150,18 +150,4 @@ template Permutation(t) {
   }
 
   for(var j=0; j<t; j++) { out[j] <== aux[64][j];  log("OUT =", out[j]);}
-}
-
-// the "compression function" takes 2 field elements as input and produces
-// 1 field element as output. It is a trivial application of the permutation.
-template Compression() {
-  signal input  inp[2];
-  signal output out;
-
-  component perm = Permutation(3);
-  perm.inp[0] <== inp[0];
-  perm.inp[1] <== inp[1];
-  perm.inp[2] <== 0;
-
-  perm.out[0] ==> out;
 }
