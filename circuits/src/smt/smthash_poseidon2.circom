@@ -3,9 +3,10 @@ pragma circom 2.2.2;
 // Adapted and modified by Nethermind
 
 include "../poseidon2/poseidon2_hash.circom";
+include "../poseidon2/poseidon2_compress.circom";
 
 /*
-    Hash1 = H(1 | key | value)
+    Hash1 = H(key | value | 1)
  */
 
 template SMTHash1() {
@@ -13,10 +14,10 @@ template SMTHash1() {
     signal input value;
     signal output out;
     
-    component h = Poseidon2(3);   // Constant
+    component h = Poseidon2(2);   // Constant
     h.inputs[0] <== key;
     h.inputs[1] <== value;
-    h.inputs[2] <== 1;
+    h.domainSeparation <== 1;
 
     out <== h.out;
 }
@@ -32,7 +33,7 @@ template SMTHash2() {
     signal input R;
     signal output out;
 
-    component h = Poseidon2(2);   // Constant
+    component h = PoseidonCompress();   // Constant
     h.inputs[0] <== L;
     h.inputs[1] <== R;
 

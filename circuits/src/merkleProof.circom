@@ -2,7 +2,7 @@ pragma circom 2.2.2;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-include "./poseidon2/poseidon2_hash.circom";
+include "./poseidon2/poseidon2_compress.circom";
 
 // Given the leaf, pathElements and pathIndices, it returns the root of the merkle tree.
 // It simply computes the root, and it MUST be checked against the expected root in the circuit using this template.
@@ -25,7 +25,7 @@ template MerkleProof(levels) {
         switcher[i].R <== pathElements[i];
         switcher[i].sel <== indexBits.out[i];
 
-        hasher[i] = Poseidon2(2);
+        hasher[i] = PoseidonCompress();
         hasher[i].inputs[0] <== switcher[i].outL;
         hasher[i].inputs[1] <== switcher[i].outR;
     }

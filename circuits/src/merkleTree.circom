@@ -2,7 +2,7 @@ pragma circom 2.2.2;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-include "./poseidon2/poseidon2_hash.circom";
+include "./poseidon2/poseidon2_compress.circom";
 
 // Helper template that computes hashes of the next tree layer
 template TreeLayer(height) {
@@ -12,7 +12,7 @@ template TreeLayer(height) {
 
   component hash[nItems];
   for(var i = 0; i < nItems; i++) {
-    hash[i] = Poseidon2(2);
+    hash[i] = PoseidonCompress();
     hash[i].inputs[0] <== ins[i * 2];
     hash[i].inputs[1] <== ins[i * 2 + 1];
     hash[i].out ==> outs[i];
