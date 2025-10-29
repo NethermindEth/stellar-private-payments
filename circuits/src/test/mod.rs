@@ -1,6 +1,7 @@
-pub mod circom_tester;
-pub mod merkle_tree;
 mod prove_merkle;
 mod prove_poseidon2;
 mod prove_sparse;
-pub mod sparse_merkle_tree;
+
+pub mod utils;
+
+pub use utils::{circom_tester, merkle_tree, sparse_merkle_tree};
