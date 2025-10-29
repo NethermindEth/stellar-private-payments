@@ -76,7 +76,6 @@ fn run_case(
 async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    // If your build outputs differently, tweak these two lines:
     let wasm = out_dir.join("wasm/merkleProof_5_js/merkleProof_5.wasm");
     let r1cs = out_dir.join("merkleProof_5.r1cs");
 
@@ -129,6 +128,5 @@ async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
             .with_context(|| format!("Case D failed at index {idx}"))?;
     }
 
-    println!("All test cases passed for {LEVELS} levels ({N} leaves).");
     Ok(())
 }

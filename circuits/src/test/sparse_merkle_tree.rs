@@ -19,16 +19,6 @@ use zkhash::{
     },
 };
 
-/// Main function for testing
-pub fn main() {
-    let db = SMTMemDB::new();
-    let root = BigUint::from(0u32);
-    let mut tree = SparseMerkleTree::new(db, root);
-
-    let key = BigUint::from(1u32);
-    let value = BigUint::from(2u32);
-    let _ = tree.update(&key, &value).expect("Update failed");
-}
 /// Poseidon2 hash function for 2 inputs (left, right) - hash0
 pub fn poseidon2_hash_2(left: &BigUint, right: &BigUint) -> BigUint {
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
@@ -72,8 +62,10 @@ pub trait SMTDatabase {
     /// Get a value from the database
     fn get(&self, key: &BigUint) -> Option<Vec<BigUint>>;
     /// Set a value in the database
+    #[allow(dead_code)]
     fn set(&mut self, key: BigUint, value: Vec<BigUint>);
     /// Delete a value from the database
+    #[allow(dead_code)]
     fn delete(&mut self, key: &BigUint);
     /// Get the current root
     fn get_root(&self) -> BigUint;
