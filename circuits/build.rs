@@ -365,7 +365,6 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
 
     if let Err(e) = wat_to_wasm(&wat_file, &wasm_file) {
         println!("cargo:warning=WAT → WASM compilation failed: {e}");
-        return Ok(());
     }
     Ok(())
 }
