@@ -1,22 +1,13 @@
 use super::{
     circom_tester::{InputValue, prove_and_verify},
     merkle_tree::{merkle_proof, merkle_root},
+    utils::general::scalar_to_bigint,
 };
 
 use anyhow::{Context, Result};
-use num_bigint::{BigInt, BigUint};
+use num_bigint::BigInt;
 use std::{collections::HashMap, env, path::PathBuf};
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField},
-    fields::bn256::FpBN256 as Scalar,
-};
-
-fn scalar_to_bigint(s: Scalar) -> BigInt {
-    let bi = s.into_bigint();
-    let bytes_le = bi.to_bytes_le();
-    let u = BigUint::from_bytes_le(&bytes_le);
-    BigInt::from(u)
-}
+use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_case(
     wasm: &PathBuf,

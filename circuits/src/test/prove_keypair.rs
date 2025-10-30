@@ -1,36 +1,32 @@
-use super::{circom_tester::{InputValue, prove_and_verify}, keypair::{derive_public_key, sign}};
-
-use anyhow::{Context, Result};
-use num_bigint::{BigInt, BigUint};
-use std::{collections::HashMap, env, path::PathBuf};
-use zkhash::{
-    ark_ff::{BigInteger, PrimeField},
-    fields::bn256::FpBN256 as Scalar,
+use super::{
+    circom_tester::{InputValue, prove_and_verify},
+    keypair::{derive_public_key, sign},
+    utils::general::scalar_to_bigint,
 };
 
-fn scalar_to_bigint(s: Scalar) -> BigInt {
-    let bi = s.into_bigint();
-    let bytes_le = bi.to_bytes_le();
-    let u = BigUint::from_bytes_le(&bytes_le);
-    BigInt::from(u)
-}
-
+use anyhow::{Context, Result};
+use std::{collections::HashMap, env, path::PathBuf};
+use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {
-    // 1) compute expected in Rust
+    // compute expected in Rust
     let expected_pk = derive_public_key(private_key);
 
-    // 2) build inputs, including the expected value
+    // build inputs, including the expected value
     let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert("privateKey".into(), InputValue::Single(scalar_to_bigint(private_key)));
-    inputs.insert("expectedPublicKey".into(), InputValue::Single(scalar_to_bigint(expected_pk)));
+    inputs.insert(
+        "privateKey".into(),
+        InputValue::Single(scalar_to_bigint(private_key)),
+    );
+    inputs.insert(
+        "expectedPublicKey".into(),
+        InputValue::Single(scalar_to_bigint(expected_pk)),
+    );
 
-    // 3) prove & verify, then compare public output if you expose one (not needed here)
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
     anyhow::ensure!(res.verified, "Keypair proof did not verify");
     Ok(())
 }
-
 
 fn run_signature_case(
     wasm: &PathBuf,
@@ -39,22 +35,32 @@ fn run_signature_case(
     commitment: Scalar,
     merkle_path: Scalar,
 ) -> Result<()> {
-    // 1) compute expected in Rust
+    // compute expected in Rust
     let expected_sig = sign(private_key, commitment, merkle_path);
 
-    // 2) inputs incl. expected
+    //inputs incl. expected
     let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert("privateKey".into(), InputValue::Single(scalar_to_bigint(private_key)));
-    inputs.insert("commitment".into(), InputValue::Single(scalar_to_bigint(commitment)));
-    inputs.insert("merklePath".into(), InputValue::Single(scalar_to_bigint(merkle_path)));
-    inputs.insert("expectedSig".into(), InputValue::Single(scalar_to_bigint(expected_sig)));
+    inputs.insert(
+        "privateKey".into(),
+        InputValue::Single(scalar_to_bigint(private_key)),
+    );
+    inputs.insert(
+        "commitment".into(),
+        InputValue::Single(scalar_to_bigint(commitment)),
+    );
+    inputs.insert(
+        "merklePath".into(),
+        InputValue::Single(scalar_to_bigint(merkle_path)),
+    );
+    inputs.insert(
+        "expectedSig".into(),
+        InputValue::Single(scalar_to_bigint(expected_sig)),
+    );
 
-    // 3) prove & verify
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
     anyhow::ensure!(res.verified, "Signature proof did not verify");
     Ok(())
 }
-
 
 #[tokio::test]
 async fn test_keypair_test_matrix() -> anyhow::Result<()> {
@@ -70,11 +76,11 @@ async fn test_keypair_test_matrix() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
     }
 
-    // Simple test set (feel free to expand)
+    // Simple test set
     let cases: [u64; 8] = [0, 1, 2, 7, 8, 15, 16, 23];
 
     for &x in &cases {
-        let sk = Scalar::from(x as u64);
+        let sk = Scalar::from(x);
         run_keypair_case(&wasm, &r1cs, sk)
             .with_context(|| format!("Keypair case failed for sk={x}"))?;
     }
@@ -89,7 +95,6 @@ async fn test_signature_test_matrix() -> anyhow::Result<()> {
     let wasm = out_dir.join("wasm/signature_test_js/signature_test.wasm");
     let r1cs = out_dir.join("signature_test.r1cs");
 
-
     if !wasm.exists() {
         return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
     }
@@ -97,7 +102,6 @@ async fn test_signature_test_matrix() -> anyhow::Result<()> {
         return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
     }
 
-    // Deterministic, mildly varied inputs
     let triples: [(u64, u64, u64); 8] = [
         (0, 0, 0),
         (1, 2, 3),
@@ -114,8 +118,9 @@ async fn test_signature_test_matrix() -> anyhow::Result<()> {
         let cm = Scalar::from(cm_u);
         let mp = Scalar::from(mp_u);
 
-        run_signature_case(&wasm, &r1cs, sk, cm, mp)
-            .with_context(|| format!("Signature case failed for (sk,cm,mp)=({sk_u},{cm_u},{mp_u})"))?;
+        run_signature_case(&wasm, &r1cs, sk, cm, mp).with_context(|| {
+            format!("Signature case failed for (sk,cm,mp)=({sk_u},{cm_u},{mp_u})")
+        })?;
     }
 
     Ok(())
