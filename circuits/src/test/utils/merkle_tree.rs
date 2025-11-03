@@ -1,20 +1,22 @@
+use std::ops::AddAssign;
 use zkhash::{
     fields::bn256::FpBN256 as Scalar,
     poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
 };
 
-/// Poseidon2 hash of two field elements (t = 2), returning the first lane
-/// (state[0]).
-pub fn poseidon2_hash2(left: Scalar, right: Scalar) -> Scalar {
+/// Poseidon2 hash of two field elements. Optimized compression mode.
+pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let out = h.permutation(&[left, right]);
-    out[0]
+    let mut perm = h.permutation(&[left, right]);
+    perm[0].add_assign(&left);
+    perm[1].add_assign(&right);
+    perm[0] // By default, we truncate to one element
 }
 
 /// Compute the Merkle parent from ordered children (left, right).
 #[inline]
 pub fn merkle_parent(left: Scalar, right: Scalar) -> Scalar {
-    poseidon2_hash2(left, right)
+    poseidon2_compression(left, right)
 }
 
 /// Build a Merkle root from a full list of leaves (length must be a power of
@@ -23,7 +25,7 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     while leaves.len() > 1 {
         let mut next = Vec::with_capacity(leaves.len() / 2);
         for pair in leaves.chunks_exact(2) {
-            next.push(poseidon2_hash2(pair[0], pair[1]));
+            next.push(poseidon2_compression(pair[0], pair[1]));
         }
         leaves = next;
     }

@@ -10,6 +10,7 @@
 use anyhow::{Result, anyhow};
 use num_bigint::BigUint;
 use std::collections::HashMap;
+use std::ops::AddAssign;
 use zkhash::{
     ark_ff::{BigInteger, Fp256, PrimeField},
     fields::bn256::FpBN256,
@@ -18,21 +19,6 @@ use zkhash::{
         poseidon2_instance_bn256::{POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3},
     },
 };
-
-/// Poseidon2 hash function for 2 inputs (left, right) - hash0
-pub fn poseidon2_hash_2(left: &BigUint, right: &BigUint) -> BigUint {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-
-    // Convert BigUint to FpBN256
-    let left_fp = Fp256::from(left.clone());
-    let right_fp = Fp256::from(right.clone());
-
-    let input = vec![left_fp, right_fp];
-    let result = poseidon2.permutation(&input);
-
-    // Convert result back to BigUint
-    fp_bn256_to_big_uint(&result[0])
-}
 
 /// Poseidon2 hash function for 3 inputs (key, value, 1) - hash1 for leaf nodes
 pub fn poseidon2_hash_3(key: &BigUint, value: &BigUint) -> BigUint {
@@ -48,6 +34,20 @@ pub fn poseidon2_hash_3(key: &BigUint, value: &BigUint) -> BigUint {
 
     // Convert result back to BigUint
     fp_bn256_to_big_uint(&result[0])
+}
+
+/// Poseidon2 hash function for leaf nodes. Optimized compression mode
+pub fn poseidon2_compression(left: &BigUint, right: &BigUint) -> BigUint {
+    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
+
+    // Convert BigUint to FpBN256
+    let left_fp = Fp256::from(left.clone());
+    let right_fp = Fp256::from(right.clone());
+
+    let mut perm = h.permutation(&[left_fp, right_fp]);
+    perm[0].add_assign(&left_fp);
+    perm[1].add_assign(&right_fp);
+    fp_bn256_to_big_uint(&perm[0]) // By default, we truncate to one element
 }
 
 /// Convert FpBN256 to BigUint
@@ -245,8 +245,8 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
                 )
             };
 
-            current_rt_old = poseidon2_hash_2(&old_node[0], &old_node[1]);
-            current_rt_new = poseidon2_hash_2(&new_node[0], &new_node[1]);
+            current_rt_old = poseidon2_compression(&old_node[0], &old_node[1]);
+            current_rt_new = poseidon2_compression(&new_node[0], &new_node[1]);
             deletes.push(current_rt_old.clone());
             inserts.push((current_rt_new.clone(), new_node));
         }
@@ -322,9 +322,9 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
             let old_sibling = res_find.siblings[level].clone();
 
             if key_bits[level] {
-                rt_old = poseidon2_hash_2(&old_sibling, &rt_old);
+                rt_old = poseidon2_compression(&old_sibling, &rt_old);
             } else {
-                rt_old = poseidon2_hash_2(&rt_old, &old_sibling);
+                rt_old = poseidon2_compression(&rt_old, &old_sibling);
             }
             deletes.push(rt_old.clone());
 
@@ -339,7 +339,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
                 } else {
                     vec![rt_new.clone(), new_sibling]
                 };
-                rt_new = poseidon2_hash_2(&new_node[0], &new_node[1]);
+                rt_new = poseidon2_compression(&new_node[0], &new_node[1]);
                 inserts.push((rt_new.clone(), new_node));
             }
         }
@@ -413,17 +413,17 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
             if mixed {
                 let old_sibling = res_find.siblings[i].clone();
                 if new_key_bits[i] {
-                    rt_old = poseidon2_hash_2(&old_sibling, &rt_old);
+                    rt_old = poseidon2_compression(&old_sibling, &rt_old);
                 } else {
-                    rt_old = poseidon2_hash_2(&rt_old, &old_sibling);
+                    rt_old = poseidon2_compression(&rt_old, &old_sibling);
                 }
                 deletes.push(rt_old.clone());
             }
 
             let new_rt = if new_key_bits[i] {
-                poseidon2_hash_2(&res.siblings[i], &rt)
+                poseidon2_compression(&res.siblings[i], &rt)
             } else {
-                poseidon2_hash_2(&rt, &res.siblings[i])
+                poseidon2_compression(&rt, &res.siblings[i])
             };
             let new_node = if new_key_bits[i] {
                 vec![res.siblings[i].clone(), rt.clone()]
@@ -703,7 +703,7 @@ mod tests {
             .insert(&BigUint::from(2u32), &BigUint::from(324u32))
             .expect("Insert method failed");
         let expected_root = BigUint::from_str(
-            "13721430606214473784210748322771049059587409085681494932247814833036842469183",
+            "3902199042378325593738217753401508381332249645815458444537710669740236044308",
         )
         .expect("Could not transform expected root into str");
         assert_eq!(result.new_root, expected_root);
@@ -749,23 +749,23 @@ mod tests {
             find_result.siblings,
             vec![
                 BigUint::from_str(
-                    "18001364035378701276654838573729843872118344251098890017664318456831338682915"
+                    "13574531720454277968647792690830483941675832953896828594235298772144774821296"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "7038461515186380356972482065826990678027071056420028822404624728029290741398"
+                    "21822809487696252201955801325867744685997250399099680635153759270255930459663"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "5355661679688155050582380201632249214542300996120959660326266586645038859069"
+                    "2754153135680204810467520704946512020375848021263220175499310526007694622282"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "10932817550203138464236988095552506649318094587459797132194816589551233877274"
+                    "10988861352769866873810486166013377894828418574939430507195536235545006158559"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "12415874803161218002586616801064519780202140362773818607137499639372156553670"
+                    "8745716775239175067716679510281198940457427271514031231047764147465936999003"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
@@ -792,27 +792,27 @@ mod tests {
             find_result.siblings,
             vec![
                 BigUint::from_str(
-                    "18001364035378701276654838573729843872118344251098890017664318456831338682915"
+                    "13574531720454277968647792690830483941675832953896828594235298772144774821296"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "16670196950377750979639744727913904867276363859476671003203442710920257775644"
+                    "1861627833931474771540567070469758409892599524239975114190647783254280704182"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "2656865691394026186020538621074834161764236767099567445743020690179155608304"
+                    "6337427217730761905851800753670222511821931828056363511575004194996678792977"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "15135662244973144170490539328743418723015464256278866695178079470229676468740"
+                    "142387899434338503423141257579632358202650467916673674727273804791475103923"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "2214982880516384550536262847617704529824432811971065318643115114470961110593"
+                    "6499651114777582205199364701529028639517158867351868744143839420261663269505"
                 )
                 .expect("Could not transform sibling into str"),
                 BigUint::from_str(
-                    "16589074329529517589291571372694136384503643071367722157138405341606810121079"
+                    "4733877433413380505912252732407068279835546218946596975085447307151515063172"
                 )
                 .expect("Could not transform sibling into str"),
             ]
@@ -830,7 +830,7 @@ mod tests {
             },
         };
         let hash_result = poseidon2_hash_3(&BigUint::from(0u32), &BigUint::from(1u32));
-        let hash_result2 = poseidon2_hash_2(&BigUint::from(0u32), &BigUint::from(1u32));
+        let hash_result2 = poseidon2_compression(&BigUint::from(0u32), &BigUint::from(1u32));
 
         type Scalar = FpBN256;
         // T = 2
