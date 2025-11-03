@@ -3,6 +3,8 @@ pragma circom 2.2.2;
 // Adapted and modified by Nethermind
 
 include "./poseidon2/poseidon2_compress.circom";
+include "./circomlib/circuits/bitify.circom";
+include "./circomlib/circuits/switcher.circom";
 
 // Given the leaf, pathElements and pathIndices, it returns the root of the merkle tree.
 // It simply computes the root, and it MUST be checked against the expected root in the circuit using this template.

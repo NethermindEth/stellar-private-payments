@@ -149,5 +149,5 @@ template Permutation(t) {
     for(var j=0; j<t; j++) { ext[k+4].out[j] ==> aux[k+61][j]; }
   }
 
-  for(var j=0; j<t; j++) { out[j] <== aux[64][j];  log("OUT =", out[j]);}
+  for(var j=0; j<t; j++) { out[j] <== aux[64][j];}
 }
