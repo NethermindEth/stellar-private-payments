@@ -13,3 +13,52 @@ pub(crate) fn commitment(amount: Scalar, pubkey: Scalar, blinding: Scalar) -> Sc
 pub(crate) fn nullifier(commitment: Scalar, path_indices: Scalar, signature: Scalar) -> Scalar {
     poseidon2_hash3(commitment, path_indices, signature)
 }
+
+
+// --- tiny deterministic RNG (xorshift64) ---
+#[derive(Clone)]
+struct Rng64(u64);
+impl Rng64 {
+    fn new(seed: u64) -> Self { Self(seed) }
+    fn next(&mut self) -> u64 {
+        let mut x = self.0;
+        x ^= x << 13;
+        x ^= x >> 7;
+        x ^= x << 17;
+        self.0 = x;
+        x
+    }
+}
+fn rand_scalar(rng: &mut Rng64) -> zkhash::fields::bn256::FpBN256 { Scalar::from(rng.next()) }
+
+// Generate a random-looking commitment (not tied to a real privkey; fine for filler leaves)
+fn rand_commitment(rng: &mut Rng64) -> Scalar {
+    let amount  = Scalar::from(rng.next() % 1_000_000); // keep small-ish
+    let pubkey  = Scalar::from(rng.next());
+    let blinding= Scalar::from(rng.next());
+    // Reuse your commitment function
+    super::transaction::commitment(amount, pubkey, blinding)
+}
+
+/// Build a pre-populated leaves vector of length 2^levels.
+/// - `exclude_indices`: do not populate these, we’ll overwrite them with the case’s inputs.
+/// - `fill_count`: how many random notes to sprinkle in.
+pub fn prepopulated_leaves(levels: usize, seed: u64, exclude_indices: &[usize], fill_count: usize) -> Vec<Scalar> {
+    let n = 1usize << levels;
+    let mut leaves = vec![Scalar::from(0u64); n];
+
+    let mut rng = Rng64::new(seed);
+    let mut placed = 0usize;
+
+    'outer: while placed < fill_count {
+        let idx = (rng.next() as usize) % n;
+        // skip reserved spots & already-filled slots
+        if exclude_indices.iter().any(|&e| e == idx) { continue 'outer; }
+        if leaves[idx] != Scalar::from(0u64) { continue 'outer; }
+
+        leaves[idx] = rand_commitment(&mut rng);
+        placed += 1;
+    }
+
+    leaves
+}
