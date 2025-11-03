@@ -14,12 +14,13 @@ pub(crate) fn nullifier(commitment: Scalar, path_indices: Scalar, signature: Sca
     poseidon2_hash3(commitment, path_indices, signature)
 }
 
-
 // --- tiny deterministic RNG (xorshift64) ---
 #[derive(Clone)]
 struct Rng64(u64);
 impl Rng64 {
-    fn new(seed: u64) -> Self { Self(seed) }
+    fn new(seed: u64) -> Self {
+        Self(seed)
+    }
     fn next(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x << 13;
@@ -29,13 +30,12 @@ impl Rng64 {
         x
     }
 }
-fn rand_scalar(rng: &mut Rng64) -> zkhash::fields::bn256::FpBN256 { Scalar::from(rng.next()) }
 
 // Generate a random-looking commitment (not tied to a real privkey; fine for filler leaves)
 fn rand_commitment(rng: &mut Rng64) -> Scalar {
-    let amount  = Scalar::from(rng.next() % 1_000_000); // keep small-ish
-    let pubkey  = Scalar::from(rng.next());
-    let blinding= Scalar::from(rng.next());
+    let amount = Scalar::from(rng.next() % 1_000_000); // keep small-ish
+    let pubkey = Scalar::from(rng.next());
+    let blinding = Scalar::from(rng.next());
     // Reuse your commitment function
     super::transaction::commitment(amount, pubkey, blinding)
 }
@@ -43,7 +43,12 @@ fn rand_commitment(rng: &mut Rng64) -> Scalar {
 /// Build a pre-populated leaves vector of length 2^levels.
 /// - `exclude_indices`: do not populate these, we’ll overwrite them with the case’s inputs.
 /// - `fill_count`: how many random notes to sprinkle in.
-pub fn prepopulated_leaves(levels: usize, seed: u64, exclude_indices: &[usize], fill_count: usize) -> Vec<Scalar> {
+pub fn prepopulated_leaves(
+    levels: usize,
+    seed: u64,
+    exclude_indices: &[usize],
+    fill_count: usize,
+) -> Vec<Scalar> {
     let n = 1usize << levels;
     let mut leaves = vec![Scalar::from(0u64); n];
 
@@ -51,13 +56,19 @@ pub fn prepopulated_leaves(levels: usize, seed: u64, exclude_indices: &[usize], 
     let mut placed = 0usize;
 
     'outer: while placed < fill_count {
-        let idx = (rng.next() as usize) % n;
-        // skip reserved spots & already-filled slots
-        if exclude_indices.iter().any(|&e| e == idx) { continue 'outer; }
-        if leaves[idx] != Scalar::from(0u64) { continue 'outer; }
+        let idx = usize::try_from(rng.next())
+            .expect("cast to usize failed in prepopulated_leaves")
+            .checked_rem(n)
+            .expect("n must not be zero");
+        if exclude_indices.contains(&idx) {
+            continue 'outer;
+        }
+        if leaves[idx] != Scalar::from(0u64) {
+            continue 'outer;
+        }
 
         leaves[idx] = rand_commitment(&mut rng);
-        placed += 1;
+        placed = placed.checked_add(1).expect("placed counter overflowed");
     }
 
     leaves
