@@ -1,15 +1,6 @@
-use zkhash::{
-    fields::bn256::FpBN256 as Scalar,
-    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
-};
+use zkhash::fields::bn256::FpBN256 as Scalar;
 
-/// Poseidon2 hash of two field elements (t = 2), returning the first lane
-/// (state[0]).
-pub fn poseidon2_hash2(left: Scalar, right: Scalar) -> Scalar {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let out = h.permutation(&[left, right]);
-    out[0]
-}
+use super::general::poseidon2_hash2;
 
 /// Compute the Merkle parent from ordered children (left, right).
 #[inline]
