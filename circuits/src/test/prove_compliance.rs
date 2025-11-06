@@ -1,10 +1,10 @@
 use super::prove_transaction::{InputNote, OutputNote, TxCase};
-use crate::test::utils::circom_tester::{InputValue, obj, prove_and_verify};
+use crate::test::utils::circom_tester::{InputValue, prove_and_verify};
 use crate::test::utils::general::{poseidon2_hash2, scalar_to_bigint};
 use crate::test::utils::keypair::{derive_public_key, sign};
 use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
 use crate::test::utils::transaction::{commitment, nullifier, prepopulated_leaves};
-use anyhow::{anyhow, Context, Result};
+use anyhow::{Context, Result, anyhow};
 use num_bigint::BigInt;
 use std::collections::HashMap;
 use std::panic;
@@ -14,7 +14,6 @@ use zkhash::ark_ff::Zero;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 const LEVELS: usize = 5;
-
 
 fn run_case(
     wasm: &PathBuf,
@@ -78,137 +77,59 @@ fn run_case(
     inputs.insert("extDataHash".into(), InputValue::Single(BigInt::from(0u32)));
 
     /////////////////////////////////
-
-    // H(pk, blinding) - blinding is zero
-    let membership_leaf0 = poseidon2_hash2(in0_pub, Scalar::zero());
-    let membership_leaf1 = poseidon2_hash2(in1_pub, Scalar::zero());
-    inputs.insert(
-        "membershipProofs.leaf".into(),
-        InputValue::Array(vec![scalar_to_bigint(membership_leaf0), scalar_to_bigint(membership_leaf1)]),
-    );
-    inputs.insert(
-        "membershipProofs.pk".into(),
-        InputValue::Array(vec![scalar_to_bigint(in0_pub), scalar_to_bigint(in1_pub)]),
-    );
-    inputs.insert(
-        "membershipProofs.blinding".into(),
-        InputValue::Array(vec![scalar_to_bigint(Scalar::zero()), scalar_to_bigint(Scalar::zero())]),
-    );
-
+    let nIns = 2;
+    let n_membership_proofs = 1;
+    let in_pubs = [in0_pub, in1_pub];
+    let mut memb_leafs = vec![];
     let mut mem_proof_leaves = leaves.clone();
-    mem_proof_leaves[0] = membership_leaf0;
-    mem_proof_leaves[case.real_idx] = membership_leaf1;
-    let (mp0, mpath_idx0, _) = merkle_proof(&mem_proof_leaves, 0);
-    let (mp1, mpath_idx1, _) = merkle_proof(&mem_proof_leaves, case.real_idx);
-    let mem_path_elems0: Vec<BigInt> = mp0.into_iter().map(scalar_to_bigint).collect();
-    let mem_path_elems1: Vec<BigInt> = mp1.into_iter().map(scalar_to_bigint).collect();
-    let mem_path_idx0 = Scalar::from(mpath_idx0);
-    let mem_path_idx1 = Scalar::from(mpath_idx1);
+    for i in 0..nIns {
+        for j in 0..n_membership_proofs {
+            let membership_leaf = poseidon2_hash2(in_pubs[i], Scalar::zero());
+            memb_leafs.push(membership_leaf);
+            inputs.insert(
+                format!("membershipProofs[{i}][{j}].leaf"),
+                InputValue::Single(scalar_to_bigint(membership_leaf)),
+            );
+            inputs.insert(
+                format!("membershipProofs[{i}][{j}].pk"),
+                InputValue::Single(scalar_to_bigint(in_pubs[i])),
+            );
+            inputs.insert(
+                format!("membershipProofs[{i}][{j}].blinding"),
+                InputValue::Single(scalar_to_bigint(Scalar::zero())),
+            );
+        }
+    }
+    let idxs = [0, case.real_idx];
+    mem_proof_leaves[0] = memb_leafs[0];
+    mem_proof_leaves[case.real_idx] = memb_leafs[1];
+    let mut merkle_roots = vec![];
+    for i in 0..nIns {
+        for j in 0..n_membership_proofs {
+            let (mp, mpath_idx, _) = merkle_proof(&mem_proof_leaves, idxs[i]);
+            let mp_elems = mp.into_iter().map(scalar_to_bigint).collect();
+            let mp_idx = scalar_to_bigint(Scalar::from(mpath_idx));
+            merkle_roots.push(merkle_root(mem_proof_leaves.clone()));
+            inputs.insert(
+                format!("membershipProofs[{i}][{j}].pathElements"),
+                InputValue::Array(mp_elems),
+            );
+            inputs.insert(
+                format!("membershipProofs[{i}][{j}].pathIndices"),
+                InputValue::Single(mp_idx),
+            );
+        }
+    }
 
     inputs.insert(
-        "membershipProofs".into(),
-        obj(Vec::from(&[(
-            "0",
-            obj(Vec::from(&[(
-                "pathElements",
-                InputValue::Array(mem_path_elems0),
-            )])),
-        ),
-            (
-                "1",
-                obj(Vec::from(&[(
-                    "pathElements",
-                    InputValue::Array(mem_path_elems1),
-                )])),
-            )
-        ])),
-    );
-
-    inputs.insert(
-        "membershipProofs.pathIndices".into(),
+        "membershipRoots".into(),
         InputValue::Array(vec![
-            scalar_to_bigint(mem_path_idx0),
-            scalar_to_bigint(mem_path_idx1),
+            scalar_to_bigint(merkle_roots[0]),
+            scalar_to_bigint(merkle_roots[1]),
         ]),
     );
 
-
-
-    /////////////////////////////////////////////////////
-
-    // inputs.insert(
-    //     "nonMembershipProofs.key".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.value".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.pk".into(),
-    //     InputValue::Array(vec![scalar_to_bigint(in0_pub), scalar_to_bigint(in1_pub)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.blinding".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs".into(),
-    //     obj(Vec::from(&[(
-    //         "0",
-    //         obj(Vec::from(&[(
-    //             "siblings",
-    //             InputValue::Array(vec![
-    //                 BigInt::from(0u32),
-    //                 BigInt::from(0u32),
-    //                 BigInt::from(0u32),
-    //                 BigInt::from(0u32),
-    //                 BigInt::from(0u32),
-    //             ]),
-    //         )])),
-    //     ),
-    //         (
-    //             "1",
-    //             obj(Vec::from(&[(
-    //                 "siblings",
-    //                 InputValue::Array(vec![
-    //                     BigInt::from(0u32),
-    //                     BigInt::from(0u32),
-    //                     BigInt::from(0u32),
-    //                     BigInt::from(0u32),
-    //                     BigInt::from(0u32),
-    //                 ]),
-    //             )])),
-    //         )])),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.oldKey".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.oldValue".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-    // inputs.insert(
-    //     "nonMembershipProofs.isOld0".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-
     /////////////////////////////////////////
-
-
-    // inputs.insert(
-    //     "membershipRoots".into(),
-    //     InputValue::Array(vec![scalar_to_bigint(mem_root),scalar_to_bigint(mem_root)]),
-    // );
-
-    // inputs.insert(
-    //     "nonMembershipRoots".into(),
-    //     InputValue::Array(vec![BigInt::from(0u32), BigInt::from(0u32)]),
-    // );
-
-    /////////////////////////////////////////
-
 
     inputs.insert(
         "inputNullifier".into(),
@@ -287,7 +208,7 @@ fn run_case(
         ]),
     );
 
-
+    println!("inputs: {:?}", inputs);
     // === PROVE & VERIFY ===
     let prove_result =
         panic::catch_unwind(AssertUnwindSafe(|| prove_and_verify(wasm, r1cs, &inputs)));
@@ -346,7 +267,7 @@ async fn test_tx_1in_1out() -> Result<()> {
             amount: Scalar::from(0u64),
         }, // dummy
         InputNote {
-            priv_key: Scalar::from(111u64),
+            priv_key: Scalar::from(101u64),
             blinding: Scalar::from(211u64),
             amount: Scalar::from(13u64),
         }, // real
@@ -363,6 +284,47 @@ async fn test_tx_1in_1out() -> Result<()> {
     );
 
     let leaves = prepopulated_leaves(LEVELS, 0xDEAD_BEEFu64, &[0, case.real_idx], 24);
+
+    run_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64))
+}
+
+#[tokio::test]
+async fn test_tx_2in_2out_split() -> Result<()> {
+    // Two real inputs; two outputs splitting the sum.
+    let (wasm, r1cs) = load_artifacts()?;
+
+    let a = Scalar::from(15u64);
+    let b = Scalar::from(8u64);
+    let sum = a + b;
+
+    let out_a = Scalar::from(10u64);
+    let out_b = sum - out_a;
+
+    let case = TxCase::new(
+        30,
+        InputNote {
+            priv_key: Scalar::from(401u64),
+            blinding: Scalar::from(501u64),
+            amount: a,
+        },
+        InputNote {
+            priv_key: Scalar::from(411u64),
+            blinding: Scalar::from(511u64),
+            amount: b,
+        },
+        OutputNote {
+            pub_key: Scalar::from(1101u64),
+            blinding: Scalar::from(1201u64),
+            amount: out_a,
+        },
+        OutputNote {
+            pub_key: Scalar::from(1102u64),
+            blinding: Scalar::from(1202u64),
+            amount: out_b,
+        },
+    );
+
+    let leaves = prepopulated_leaves(LEVELS, 0xBEEFu64, &[0, case.real_idx], 24);
 
     run_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64))
 }
