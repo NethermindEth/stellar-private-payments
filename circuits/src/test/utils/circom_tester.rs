@@ -1,15 +1,13 @@
+use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, Proof, VerifyingKey};
-use ark_std::rand::thread_rng;
-use num_bigint::BigInt;
-use std::{collections::HashMap, fmt, path::Path};
-use std::fmt::Display;
-use anyhow::{Result, anyhow};
 use ark_relations::r1cs::{ConstraintSynthesizer, ConstraintSystem};
 use ark_snark::SNARK;
-
-
+use ark_std::rand::thread_rng;
+use num_bigint::BigInt;
+use std::fmt::Display;
+use std::{collections::HashMap, fmt, path::Path};
 
 #[derive(Clone, Debug)]
 pub struct SignalKey(String);
@@ -45,13 +43,19 @@ pub trait IntoInputValue {
 }
 
 impl IntoInputValue for BigInt {
-    fn into_input_value(self) -> InputValue { InputValue::Single(self) }
+    fn into_input_value(self) -> InputValue {
+        InputValue::Single(self)
+    }
 }
 impl IntoInputValue for &BigInt {
-    fn into_input_value(self) -> InputValue { InputValue::Single(self.clone()) }
+    fn into_input_value(self) -> InputValue {
+        InputValue::Single(self.clone())
+    }
 }
 impl IntoInputValue for Vec<BigInt> {
-    fn into_input_value(self) -> InputValue { InputValue::Array(self) }
+    fn into_input_value(self) -> InputValue {
+        InputValue::Array(self)
+    }
 }
 
 #[derive(Default)]
@@ -59,9 +63,12 @@ pub struct Inputs {
     inner: HashMap<String, InputValue>,
 }
 
-
 impl Inputs {
-    pub fn new() -> Self { Self { inner: HashMap::new() } }
+    pub fn new() -> Self {
+        Self {
+            inner: HashMap::new(),
+        }
+    }
 
     /// Set with a plain string key (e.g., "root").
     pub fn set<K, V>(&mut self, key: K, value: V)
@@ -79,6 +86,11 @@ impl Inputs {
     {
         self.inner.insert(key.to_string(), value.into_input_value());
     }
+}
+
+impl Inputs {
+    pub fn as_map(&self) -> &HashMap<String, InputValue> { &self.inner }
+    pub fn into_map(self) -> HashMap<String, InputValue> { self.inner }
 }
 
 #[allow(dead_code)]
@@ -130,10 +142,14 @@ pub fn prove_and_verify(
     let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
+    println!("{:?}", builder.inputs);
     let circuit = builder.build().map_err(|e| anyhow!("build failed: {e}"))?;
 
     let cs = ConstraintSystem::<Fr>::new_ref();
-    circuit.clone().generate_constraints(cs.clone()).map_err(|e| anyhow!("generate_constraints failed: {e}"))?;
+    circuit
+        .clone()
+        .generate_constraints(cs.clone())
+        .map_err(|e| anyhow!("generate_constraints failed: {e}"))?;
 
     let proof = Groth16::<Bn254, CircomReduction>::prove(&pk, circuit.clone(), &mut rng)
         .map_err(|e| anyhow!("prove failed: {e}"))?;
