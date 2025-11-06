@@ -1,6 +1,6 @@
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-use super::general::poseidon2_hash2;
+use super::general::poseidon2_compression;
 
 /// Compute the Merkle parent from ordered children (left, right).
 #[inline]

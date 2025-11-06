@@ -5,13 +5,13 @@ use super::general::poseidon2_hash3;
 /// commitment = Poseidon2(3)(amount, pubkey, blinding)
 #[inline]
 pub(crate) fn commitment(amount: Scalar, pubkey: Scalar, blinding: Scalar) -> Scalar {
-    poseidon2_hash3(amount, pubkey, blinding)
+    poseidon2_hash3(amount, pubkey, blinding, Some(Scalar::from(1))) // We use 1 as domain separation for Commitment
 }
 
 /// nullifier = Poseidon2(3)(commitment, pathIndices, signature)
 #[inline]
 pub(crate) fn nullifier(commitment: Scalar, path_indices: Scalar, signature: Scalar) -> Scalar {
-    poseidon2_hash3(commitment, path_indices, signature)
+    poseidon2_hash3(commitment, path_indices, signature, Some(Scalar::from(2))) // We use 2 as domain separation for Nullifier
 }
 
 // --- tiny deterministic RNG (xorshift64) ---
@@ -37,7 +37,7 @@ fn rand_commitment(rng: &mut Rng64) -> Scalar {
     let pubkey = Scalar::from(rng.next());
     let blinding = Scalar::from(rng.next());
     // Reuse your commitment function
-    super::transaction::commitment(amount, pubkey, blinding)
+    commitment(amount, pubkey, blinding)
 }
 
 /// Build a pre-populated leaves vector of length 2^levels.

@@ -110,7 +110,7 @@ template Transaction(levels, nIns, nOuts) {
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];
-        outCommitmentHasher[tx].domainSeparation <== 0x03; // Output Commitment;
+        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment;
         
         outCommitmentHasher[tx].out === outputCommitment[tx];
 
