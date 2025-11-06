@@ -16,30 +16,30 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 const LEVELS: usize = 5;
 
 #[derive(Clone, Debug)]
-struct InputNote {
-    priv_key: Scalar,
-    blinding: Scalar,
-    amount: Scalar,
+pub struct InputNote {
+    pub priv_key: Scalar,
+    pub blinding: Scalar,
+    pub amount: Scalar,
 }
 
 #[derive(Clone, Debug)]
-struct OutputNote {
-    pub_key: Scalar,
-    blinding: Scalar,
-    amount: Scalar,
+pub struct OutputNote {
+    pub pub_key: Scalar,
+    pub blinding: Scalar,
+    pub amount: Scalar,
 }
 
-struct TxCase {
-    real_idx: usize,
-    in0: InputNote,
-    in1: InputNote,
-    out0: OutputNote,
-    out1: OutputNote,
+pub struct TxCase {
+    pub real_idx: usize,
+    pub in0: InputNote,
+    pub in1: InputNote,
+    pub out0: OutputNote,
+    pub out1: OutputNote,
 }
 
 #[allow(clippy::too_many_arguments)]
 impl TxCase {
-    fn new(
+    pub fn new(
         real_idx: usize,
         in0: InputNote,
         in1: InputNote,

@@ -17,16 +17,16 @@ bus MembershipProof(levels) {
     signal pathIndices;
 }
 
-bus NonMembershipProof(levels) {
-    signal key;
-    signal value;
-    signal pk;
-    signal blinding;
-    signal siblings[levels];
-    signal oldKey;
-    signal oldValue;
-    signal isOld0;
-}
+// bus NonMembershipProof(levels) {
+//     signal key;
+//     signal value;
+//     signal pk;
+//     signal blinding;
+//     signal siblings[levels];
+//     signal oldKey;
+//     signal oldValue;
+//     signal isOld0;
+// }
 
 template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
     /** PUBLIC INPUTS **/
@@ -36,9 +36,9 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
     
     // Compliance inputs
     input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs]; 
-    input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
+    // input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     signal input membershipRoots[nIns][nMembershipProofs];
-    signal input nonMembershipRoots[nIns][nNonMembershipProofs];
+    // signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
     
     /** PRIVATE INPUTS **/
@@ -137,34 +137,34 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             membershipVerifiers[tx][i].root === membershipRoots[tx][i];
         }
     
-        // 2. Verify non-membership proofs using SMT
-        for (var i = 0; i < nNonMembershipProofs; i++) {
-            nonMembershipVerifiers[tx][i] = SMTVerifier(smtLevels);
-            nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
-            nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
+        // // 2. Verify non-membership proofs using SMT
+        // for (var i = 0; i < nNonMembershipProofs; i++) {
+        //     nonMembershipVerifiers[tx][i] = SMTVerifier(smtLevels);
+        //     nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
+        //     nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
             
-            // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
-            complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
-            complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
-            nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
-            nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
+        //     // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
+        //     complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
+        //     complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
+        //     complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
+        //     nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
+        //     nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
-            for (var j = 0; j < smtLevels; j++) {
-                nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
-            }
+        //     for (var j = 0; j < smtLevels; j++) {
+        //         nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
+        //     }
             
-            nonMembershipVerifiers[tx][i].oldKey <== nonMembershipProofs[tx][i].oldKey; 
-            nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue;
+        //     nonMembershipVerifiers[tx][i].oldKey <== nonMembershipProofs[tx][i].oldKey; 
+        //     nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue;
             
-            n2bs[tx][i] = Num2Bits(1);
-            n2bs[tx][i].in <== nonMembershipProofs[tx][i].isOld0;
+        //     n2bs[tx][i] = Num2Bits(1);
+        //     n2bs[tx][i].in <== nonMembershipProofs[tx][i].isOld0;
             
-            nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
-            nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
-            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
-            nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
-        }
+        //     nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
+        //     nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
+        //     nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
+        //     nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
+        // }
    
             
         sumIns += inAmount[tx];
