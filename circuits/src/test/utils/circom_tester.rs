@@ -89,8 +89,12 @@ impl Inputs {
 }
 
 impl Inputs {
-    pub fn as_map(&self) -> &HashMap<String, InputValue> { &self.inner }
-    pub fn into_map(self) -> HashMap<String, InputValue> { self.inner }
+    pub fn as_map(&self) -> &HashMap<String, InputValue> {
+        &self.inner
+    }
+    pub fn into_map(self) -> HashMap<String, InputValue> {
+        self.inner
+    }
 }
 
 #[allow(dead_code)]
