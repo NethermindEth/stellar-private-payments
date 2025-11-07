@@ -137,7 +137,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             membershipVerifiers[tx][i].root === membershipRoots[tx][i];
         }
     
-        // // 2. Verify non-membership proofs using SMT
+        // 2. Verify non-membership proofs using SMT
         for (var i = 0; i < nNonMembershipProofs; i++) {
             nonMembershipVerifiers[tx][i] = SMTVerifier(smtLevels);
             nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
