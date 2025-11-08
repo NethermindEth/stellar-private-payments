@@ -1,3 +1,4 @@
+use super::general::scalar_to_bigint;
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
@@ -7,6 +8,7 @@ use ark_std::rand::thread_rng;
 use num_bigint::BigInt;
 use std::fmt::Display;
 use std::{collections::HashMap, fmt, path::Path};
+use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[derive(Clone, Debug)]
 pub struct SignalKey(String);
@@ -37,25 +39,42 @@ impl Display for SignalKey {
 }
 
 /// Allow common types to be converted into InputValue.
-pub trait IntoInputValue {
-    fn into_input_value(self) -> InputValue;
+impl From<BigInt> for InputValue {
+    fn from(value: BigInt) -> Self {
+        InputValue::Single(value)
+    }
 }
 
-impl IntoInputValue for BigInt {
-    fn into_input_value(self) -> InputValue {
-        InputValue::Single(self)
+impl From<&BigInt> for InputValue {
+    fn from(value: &BigInt) -> Self {
+        InputValue::Single(value.clone())
     }
 }
-impl IntoInputValue for &BigInt {
-    fn into_input_value(self) -> InputValue {
-        InputValue::Single(self.clone())
+
+impl From<Vec<BigInt>> for InputValue {
+    fn from(value: Vec<BigInt>) -> Self {
+        InputValue::Array(value)
     }
 }
-impl IntoInputValue for Vec<BigInt> {
-    fn into_input_value(self) -> InputValue {
-        InputValue::Array(self)
+
+impl From<Scalar> for InputValue {
+    fn from(value: Scalar) -> Self {
+        InputValue::Single(scalar_to_bigint(value))
     }
 }
+
+impl From<&Scalar> for InputValue {
+    fn from(value: &Scalar) -> Self {
+        InputValue::Single(scalar_to_bigint(*value))
+    }
+}
+
+impl From<Vec<Scalar>> for InputValue {
+    fn from(values: Vec<Scalar>) -> Self {
+        InputValue::Array(values.into_iter().map(scalar_to_bigint).collect())
+    }
+}
+
 
 #[derive(Default)]
 pub struct Inputs {
@@ -73,17 +92,17 @@ impl Inputs {
     pub fn set<K, V>(&mut self, key: K, value: V)
     where
         K: Into<String>,
-        V: IntoInputValue,
+        V: Into<InputValue>,
     {
-        self.inner.insert(key.into(), value.into_input_value());
+        self.inner.insert(key.into(), value.into());
     }
 
     /// Set using a SignalKey path (e.g., membershipProofs[0][0].leaf).
     pub fn set_key<V>(&mut self, key: &SignalKey, value: V)
     where
-        V: IntoInputValue,
+        V: Into<InputValue>,
     {
-        self.inner.insert(key.to_string(), value.into_input_value());
+        self.inner.insert(key.to_string(), value.into());
     }
 }
 
@@ -91,11 +110,15 @@ impl Inputs {
     pub fn into_map(self) -> HashMap<String, InputValue> {
         self.inner
     }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&String, &InputValue)> {
+        self.inner.iter()
+    }
 }
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub enum InputValue {
+enum InputValue {
     Single(BigInt),
     Array(Vec<BigInt>),
 }
@@ -125,14 +148,14 @@ fn push_value(builder: &mut CircomBuilder<Fr>, path: &str, value: &InputValue) {
 pub fn prove_and_verify(
     wasm_path: impl AsRef<Path>,
     r1cs_path: impl AsRef<Path>,
-    inputs: &HashMap<String, InputValue>,
+    inputs: &Inputs,
 ) -> Result<CircomResult> {
     let cfg = CircomConfig::<Fr>::new(wasm_path.as_ref(), r1cs_path.as_ref())
         .map_err(|e| anyhow!("CircomConfig error: {e}"))?;
 
     let mut builder = CircomBuilder::new(cfg);
 
-    for (signal, value) in inputs {
+    for (signal, value) in inputs.iter() {
         push_value(&mut builder, signal, value);
     }
 
@@ -147,7 +170,6 @@ pub fn prove_and_verify(
     let proof = Groth16::<Bn254, CircomReduction>::prove(&pk, circuit.clone(), &mut rng)
         .map_err(|e| anyhow!("prove failed: {e}"))?;
 
-    // Extract public inputs and verify
     let public_inputs = circuit
         .get_public_inputs()
         .ok_or_else(|| anyhow!("get_public_inputs returned None"))?;

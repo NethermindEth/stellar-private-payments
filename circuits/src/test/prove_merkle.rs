@@ -1,12 +1,13 @@
 use super::{
-    circom_tester::{InputValue, prove_and_verify},
+    circom_tester::prove_and_verify,
     merkle_tree::{merkle_proof, merkle_root},
     utils::general::scalar_to_bigint,
 };
 
+use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{env, path::PathBuf};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_case(
@@ -36,11 +37,11 @@ fn run_case(
         .collect();
     let path_idx = BigInt::from(path_indices_u64);
 
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert("leaf".into(), InputValue::Single(leaf_val));
-    inputs.insert("root".into(), InputValue::Single(root_val.clone())); // public
-    inputs.insert("pathElements".into(), InputValue::Array(path_elems));
-    inputs.insert("pathIndices".into(), InputValue::Single(path_idx));
+    let mut inputs = Inputs::new();
+    inputs.set("leaf", leaf_val);
+    inputs.set("root", &root_val);
+    inputs.set("pathElements", path_elems);
+    inputs.set("pathIndices", path_idx);
 
     // Prove and verify
     let res =

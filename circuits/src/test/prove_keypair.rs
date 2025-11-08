@@ -1,9 +1,9 @@
 use super::{
-    circom_tester::{InputValue, prove_and_verify},
+    circom_tester::prove_and_verify,
     keypair::{derive_public_key, sign},
-    utils::general::scalar_to_bigint,
 };
 
+use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use std::{collections::HashMap, env, path::PathBuf};
 use zkhash::fields::bn256::FpBN256 as Scalar;
@@ -13,18 +13,12 @@ fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Resu
     let expected_pk = derive_public_key(private_key);
 
     // build inputs, including the expected value
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert(
-        "privateKey".into(),
-        InputValue::Single(scalar_to_bigint(private_key)),
-    );
-    inputs.insert(
-        "expectedPublicKey".into(),
-        InputValue::Single(scalar_to_bigint(expected_pk)),
-    );
+    let mut inputs = Inputs::new();
+    inputs.set("privateKey", private_key);
+    inputs.set("expectedPublicKey", expected_pk);
 
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
-    anyhow::ensure!(res.verified, "Keypair proof did not verify");
+    assert!(res.verified, "Keypair proof did not verify");
     Ok(())
 }
 
@@ -39,23 +33,11 @@ fn run_signature_case(
     let expected_sig = sign(private_key, commitment, merkle_path);
 
     //inputs incl. expected
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert(
-        "privateKey".into(),
-        InputValue::Single(scalar_to_bigint(private_key)),
-    );
-    inputs.insert(
-        "commitment".into(),
-        InputValue::Single(scalar_to_bigint(commitment)),
-    );
-    inputs.insert(
-        "merklePath".into(),
-        InputValue::Single(scalar_to_bigint(merkle_path)),
-    );
-    inputs.insert(
-        "expectedSig".into(),
-        InputValue::Single(scalar_to_bigint(expected_sig)),
-    );
+    let mut inputs = Inputs::new();
+    inputs.set("privateKey", private_key);
+    inputs.set("commitment", commitment);
+    inputs.set("merklePath", merkle_path);
+    inputs.set("expectedSig", expected_sig);
 
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
     anyhow::ensure!(res.verified, "Signature proof did not verify");

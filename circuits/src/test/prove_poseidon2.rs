@@ -1,18 +1,18 @@
 //! Poseidon2 circuit test
 
 use super::circom_tester::{InputValue, prove_and_verify};
+use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::{collections::HashMap, path::PathBuf};
 
 fn run_case(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
     // Prepare circuit inputs
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
+    let mut inputs = Inputs::new();
     let value_inputs: Vec<BigInt> = vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
-    inputs.insert("inputs".into(), InputValue::Array(value_inputs));
+    inputs.set("inputs", value_inputs);
 
-    let res =
-        prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
+    let res = prove_and_verify(wasm, r1cs, &inputs)?;
 
     assert!(
         res.verified,

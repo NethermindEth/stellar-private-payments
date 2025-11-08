@@ -2,6 +2,7 @@
 
 use super::circom_tester::{InputValue, prove_and_verify};
 use super::sparse_merkle_tree::{SMTMemDB, SparseMerkleTree};
+use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::{BigInt, BigUint, ToBigInt};
 use std::{collections::HashMap, path::PathBuf};
@@ -78,28 +79,22 @@ fn run_case(wasm: &PathBuf, r1cs: &PathBuf, queried_key: BigUint, max_levels: us
         .map(|v| v.to_bigint().context("Failed to convert sibling to BigInt"))
         .collect::<Result<_>>()?;
 
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert("enabled".into(), InputValue::Single(enabled));
-    inputs.insert("root".into(), InputValue::Single(root));
-    inputs.insert("siblings".into(), InputValue::Array(siblings_bigint));
-    inputs.insert(
-        "oldKey".into(),
-        InputValue::Single(old_key.to_bigint().expect("oldKey -> BigInt")),
+    let mut inputs = Inputs::new();
+    inputs.set("enabled", enabled);
+    inputs.set("root", root);
+    inputs.set("siblings", siblings_bigint);
+    inputs.set("oldKey", old_key.to_bigint().expect("oldKey -> BigInt"));
+    inputs.set(
+        "oldValue",
+        old_value.to_bigint().expect("oldValue -> BigInt"),
     );
-    inputs.insert(
-        "oldValue".into(),
-        InputValue::Single(old_value.to_bigint().expect("oldValue -> BigInt")),
+    inputs.set("isOld0", is_old0);
+    inputs.set("key", key_for_circuit.to_bigint().expect("key -> BigInt"));
+    inputs.set(
+        "value",
+        value_for_circuit.to_bigint().expect("value -> BigInt"),
     );
-    inputs.insert("isOld0".into(), InputValue::Single(is_old0));
-    inputs.insert(
-        "key".into(),
-        InputValue::Single(key_for_circuit.to_bigint().expect("key -> BigInt")),
-    );
-    inputs.insert(
-        "value".into(),
-        InputValue::Single(value_for_circuit.to_bigint().expect("value -> BigInt")),
-    );
-    inputs.insert("fnc".into(), InputValue::Single(fnc));
+    inputs.set("fnc", fnc);
 
     let res =
         prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
