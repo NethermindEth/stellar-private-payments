@@ -191,14 +191,14 @@ where
     let mut non_membership_roots: Vec<BigInt> = Vec::with_capacity(N_INPUTS * N_NON_PROOFS);
 
     for _ in 0..N_INPUTS {
-        nmp_key.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_value.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_old_key.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_old_value.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_is_old0.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_siblings.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_pk.push(Vec::with_capacity(N_MEM_PROOFS));
-        nmp_blinding.push(Vec::with_capacity(N_MEM_PROOFS));
+        nmp_key.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_value.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_old_key.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_old_value.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_is_old0.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_siblings.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_pk.push(Vec::with_capacity(N_NON_PROOFS));
+        nmp_blinding.push(Vec::with_capacity(N_NON_PROOFS));
     }
 
     // --- For each j, compute a shared root (like membership), then per input fill fields ---
