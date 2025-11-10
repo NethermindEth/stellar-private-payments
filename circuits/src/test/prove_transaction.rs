@@ -481,28 +481,19 @@ async fn test_tx_chained_spend() -> Result<()> {
 
 #[tokio::test]
 async fn test_tx_randomized_stress() -> Result<()> {
-    let (wasm, r1cs) = load_artifacts()?;
+    use ark_std::rand::{
+        RngCore, SeedableRng,
+        distributions::{Distribution, Uniform},
+        rngs::StdRng,
+    };
 
-    #[inline]
-    fn next_u64(state: &mut u128) -> u64 {
-        *state = state
-            .wrapping_mul(6364136223846793005u128)
-            .wrapping_add(1442695040888963407u128);
-        (*state >> 64) as u64
-    }
-    #[inline]
-    fn rand_scalar(state: &mut u128) -> Scalar {
-        Scalar::from(next_u64(state))
-    }
-    #[inline]
-    fn nonzero_amount_u64(state: &mut u128, max: u64) -> u64 {
-        1 + (next_u64(state) % max.max(1))
-    }
+    use ark_ff::UniformRand; // for Scalar::rand
+    let (wasm, r1cs) = load_artifacts()?;
 
     const N_ITERS: usize = 100;
     const TREE_LEVELS: usize = LEVELS; // 5
     const N: usize = 1 << TREE_LEVELS;
-    let mut rng: u128 = 0xA9_5EED_1337_D3AD_B33Fu128; // seed
+    let mut rng = StdRng::seed_from_u64(0x5EED_1337_D3AD_B33Fu64);
 
     for _ in 0..N_ITERS {
         // Scenarios:
@@ -510,41 +501,32 @@ async fn test_tx_randomized_stress() -> Result<()> {
         // 1: 1 real in, 2 real outs (split)
         // 2: 2 real ins, 1 real out (sum), 1 dummy out
         // 3: 2 real ins, 2 real outs (split)
-        let scenario = (next_u64(&mut rng) % 4) as u8;
+        let scenario: u8 = Uniform::new_inclusive(0u8, 3u8).sample(&mut rng);
+        let real_idx = Uniform::new(1usize, N).sample(&mut rng);
 
-        // Choose real_idx != 0
-        let real_idx = {
-            let mut idx = usize::try_from(next_u64(&mut rng))? % N;
-
-            if idx == 0 {
-                idx = 1;
-            }
-            idx
-        };
-
-        let leaves_seed = next_u64(&mut rng);
+        let leaves_seed: u64 = rng.next_u64();
         let leaves = prepopulated_leaves(TREE_LEVELS, leaves_seed, &[0, real_idx], 24);
 
         // Input 0 dummy (disables root check for in0)
         let in0_dummy = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(0u64),
         };
 
         // Real input 1
-        let in1_amt_u64 = nonzero_amount_u64(&mut rng, 1_000);
+        let in1_amt_u64 = Uniform::new_inclusive(1, 1_000).sample(&mut rng);
         let in1_real = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(in1_amt_u64),
         };
 
         // Optional second real input
-        let in0_alt_amt_u64 = nonzero_amount_u64(&mut rng, 1_000);
+        let in0_alt_amt_u64 = Uniform::new_inclusive(1, 1_000).sample(&mut rng);
         let in0_real_alt = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(in0_alt_amt_u64),
         };
 
@@ -556,7 +538,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
             }
             1 => {
                 // 1 real in, split to 2 outs
-                let x = next_u64(&mut rng) % (in1_amt_u64 + 1);
+                let x = Uniform::new_inclusive(0, in1_amt_u64).sample(&mut rng);
                 let y = in1_amt_u64 - x;
                 (in0_dummy.clone(), in1_real.clone(), x, y)
             }
@@ -568,20 +550,20 @@ async fn test_tx_randomized_stress() -> Result<()> {
             _ => {
                 // 2 real ins, 2 real outs (split)
                 let sum = in0_alt_amt_u64 + in1_amt_u64;
-                let x = next_u64(&mut rng) % (sum + 1);
+                let x = Uniform::new_inclusive(0, sum).sample(&mut rng);
                 let y = sum - x;
                 (in0_real_alt.clone(), in1_real.clone(), x, y)
             }
         };
 
         let out0 = OutputNote {
-            pub_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            pub_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(out0_amt_u64),
         };
         let out1 = OutputNote {
-            pub_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            pub_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(out1_amt_u64),
         };
 

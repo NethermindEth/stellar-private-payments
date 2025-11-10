@@ -129,7 +129,8 @@ where
             let index = k
                 .checked_mul(N_MEM_PROOFS)
                 .and_then(|v| v.checked_add(j))
-                .expect("index overflow in membership_trees");
+                .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
+
             let tree = &membership_trees[index];
             let leaf = poseidon2_hash2(pk_scalar, tree.blinding); // H(pk_k, blinding_{k,j})
             frozen_leaves[tree.index] = leaf;
@@ -143,7 +144,8 @@ where
             let idx = i
                 .checked_mul(N_MEM_PROOFS)
                 .and_then(|v| v.checked_add(j))
-                .expect("index overflow");
+                .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
+
             let t = &membership_trees[idx];
             let pk_scalar = pubs[i];
             let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding);
@@ -200,10 +202,10 @@ where
     }
 
     // --- For each j, compute a shared root (like membership), then per input fill fields ---
-    for _ in 0..N_NON_PROOFS {
+    for j in 0..N_NON_PROOFS {
         // Shared root for this j We just need the root value.
         let tmp = prepare_smt_proof_with_overrides(
-            &BigUint::from(non_membership[0].key_non_inclusion),
+            &BigUint::from(non_membership[j].key_non_inclusion),
             &overrides,
         );
 
@@ -433,7 +435,7 @@ pub fn prepare_smt_proof_with_overrides(key: &BigUint, overrides: &[(u32, BigInt
 
     // pad siblings to requested length
     let mut siblings = find_result.siblings.clone();
-    while siblings.len() < 1 << LEVELS {
+    while siblings.len() < LEVELS {
         siblings.push(BigUint::from(0u32));
     }
 
