@@ -1,16 +1,15 @@
 use super::{
-    circom_tester::prove_and_verify,
+    circom_tester::{InputValue, prove_and_verify},
     keypair::{derive_public_key, sign},
     merkle_tree::{merkle_proof, merkle_root},
     transaction::{commitment, nullifier, prepopulated_leaves},
 };
 use crate::test::utils::general::scalar_to_bigint;
 
-use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::panic::AssertUnwindSafe;
-use std::{env, panic, path::PathBuf};
+use std::{collections::HashMap, env, panic, path::PathBuf};
 use zkhash::ark_ff::Zero;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -102,74 +101,89 @@ fn run_case(
     let out1_commit = commitment(case.out1.amount, case.out1.pub_key, case.out1.blinding);
 
     // === WITNESS MAP ===
-    let mut inputs = Inputs::new();
+    let mut inputs: HashMap<String, InputValue> = HashMap::new();
 
     // === Public signals ===
-    inputs.set("root", root_scalar);
-    inputs.set("publicAmount", public_amount);
-    inputs.set("extDataHash", BigInt::from(0u32));
+    inputs.insert(
+        "root".into(),
+        InputValue::Single(scalar_to_bigint(root_scalar)),
+    );
+    inputs.insert(
+        "publicAmount".into(),
+        InputValue::Single(scalar_to_bigint(public_amount)),
+    );
+    inputs.insert("extDataHash".into(), InputValue::Single(BigInt::from(0u32)));
 
     // === Private signals ===
-    inputs.set(
-        "inputNullifier",
-        vec![scalar_to_bigint(in0_null), scalar_to_bigint(in1_null)],
+    inputs.insert(
+        "inputNullifier".into(),
+        InputValue::Array(vec![scalar_to_bigint(in0_null), scalar_to_bigint(in1_null)]),
     );
-    inputs.set(
-        "inAmount",
-        vec![
+    inputs.insert(
+        "inAmount".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.in0.amount),
             scalar_to_bigint(case.in1.amount),
-        ],
+        ]),
     );
-    inputs.set(
-        "inPrivateKey",
-        vec![
+    inputs.insert(
+        "inPrivateKey".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.in0.priv_key),
             scalar_to_bigint(case.in1.priv_key),
-        ],
+        ]),
     );
-    inputs.set(
-        "inBlinding",
-        vec![
+    inputs.insert(
+        "inBlinding".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.in0.blinding),
             scalar_to_bigint(case.in1.blinding),
-        ],
+        ]),
     );
-    inputs.set(
-        "inPathIndices",
-        vec![scalar_to_bigint(path_idx0), scalar_to_bigint(path_idx1)],
+    inputs.insert(
+        "inPathIndices".into(),
+        InputValue::Array(vec![
+            scalar_to_bigint(path_idx0),
+            scalar_to_bigint(path_idx1),
+        ]),
     );
 
     // Flattened path elements
     let mut in_path_elements_flat = Vec::with_capacity(path_elems0.len() + path_elems1.len());
     in_path_elements_flat.extend(path_elems0);
     in_path_elements_flat.extend(path_elems1);
-    inputs.set("inPathElements", in_path_elements_flat);
-
-    inputs.set(
-        "outputCommitment",
-        vec![scalar_to_bigint(out0_commit), scalar_to_bigint(out1_commit)],
+    inputs.insert(
+        "inPathElements".into(),
+        InputValue::Array(in_path_elements_flat),
     );
-    inputs.set(
-        "outAmount",
-        vec![
+
+    inputs.insert(
+        "outputCommitment".into(),
+        InputValue::Array(vec![
+            scalar_to_bigint(out0_commit),
+            scalar_to_bigint(out1_commit),
+        ]),
+    );
+    inputs.insert(
+        "outAmount".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.out0.amount),
             scalar_to_bigint(case.out1.amount),
-        ],
+        ]),
     );
-    inputs.set(
-        "outPubkey",
-        vec![
+    inputs.insert(
+        "outPubkey".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.out0.pub_key),
             scalar_to_bigint(case.out1.pub_key),
-        ],
+        ]),
     );
-    inputs.set(
-        "outBlinding",
-        vec![
+    inputs.insert(
+        "outBlinding".into(),
+        InputValue::Array(vec![
             scalar_to_bigint(case.out0.blinding),
             scalar_to_bigint(case.out1.blinding),
-        ],
+        ]),
     );
 
     // === PROVE & VERIFY ===
@@ -467,28 +481,19 @@ async fn test_tx_chained_spend() -> Result<()> {
 
 #[tokio::test]
 async fn test_tx_randomized_stress() -> Result<()> {
-    let (wasm, r1cs) = load_artifacts()?;
+    use ark_std::rand::{
+        RngCore, SeedableRng,
+        distributions::{Distribution, Uniform},
+        rngs::StdRng,
+    };
 
-    #[inline]
-    fn next_u64(state: &mut u128) -> u64 {
-        *state = state
-            .wrapping_mul(6364136223846793005u128)
-            .wrapping_add(1442695040888963407u128);
-        (*state >> 64) as u64
-    }
-    #[inline]
-    fn rand_scalar(state: &mut u128) -> Scalar {
-        Scalar::from(next_u64(state))
-    }
-    #[inline]
-    fn nonzero_amount_u64(state: &mut u128, max: u64) -> u64 {
-        1 + (next_u64(state) % max.max(1))
-    }
+    use ark_ff::UniformRand; // for Scalar::rand
+    let (wasm, r1cs) = load_artifacts()?;
 
     const N_ITERS: usize = 100;
     const TREE_LEVELS: usize = LEVELS; // 5
     const N: usize = 1 << TREE_LEVELS;
-    let mut rng: u128 = 0xA9_5EED_1337_D3AD_B33Fu128; // seed
+    let mut rng = StdRng::seed_from_u64(0x5EED_1337_D3AD_B33Fu64);
 
     for _ in 0..N_ITERS {
         // Scenarios:
@@ -496,41 +501,32 @@ async fn test_tx_randomized_stress() -> Result<()> {
         // 1: 1 real in, 2 real outs (split)
         // 2: 2 real ins, 1 real out (sum), 1 dummy out
         // 3: 2 real ins, 2 real outs (split)
-        let scenario = (next_u64(&mut rng) % 4) as u8;
+        let scenario: u8 = Uniform::new_inclusive(0u8, 3u8).sample(&mut rng);
+        let real_idx = Uniform::new(1usize, N).sample(&mut rng);
 
-        // Choose real_idx != 0
-        let real_idx = {
-            let mut idx = usize::try_from(next_u64(&mut rng))? % N;
-
-            if idx == 0 {
-                idx = 1;
-            }
-            idx
-        };
-
-        let leaves_seed = next_u64(&mut rng);
+        let leaves_seed: u64 = rng.next_u64();
         let leaves = prepopulated_leaves(TREE_LEVELS, leaves_seed, &[0, real_idx], 24);
 
         // Input 0 dummy (disables root check for in0)
         let in0_dummy = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(0u64),
         };
 
         // Real input 1
-        let in1_amt_u64 = nonzero_amount_u64(&mut rng, 1_000);
+        let in1_amt_u64 = Uniform::new_inclusive(1, 1_000).sample(&mut rng);
         let in1_real = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(in1_amt_u64),
         };
 
         // Optional second real input
-        let in0_alt_amt_u64 = nonzero_amount_u64(&mut rng, 1_000);
+        let in0_alt_amt_u64 = Uniform::new_inclusive(1, 1_000).sample(&mut rng);
         let in0_real_alt = InputNote {
-            priv_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            priv_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(in0_alt_amt_u64),
         };
 
@@ -542,7 +538,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
             }
             1 => {
                 // 1 real in, split to 2 outs
-                let x = next_u64(&mut rng) % (in1_amt_u64 + 1);
+                let x = Uniform::new_inclusive(0, in1_amt_u64).sample(&mut rng);
                 let y = in1_amt_u64 - x;
                 (in0_dummy.clone(), in1_real.clone(), x, y)
             }
@@ -554,20 +550,20 @@ async fn test_tx_randomized_stress() -> Result<()> {
             _ => {
                 // 2 real ins, 2 real outs (split)
                 let sum = in0_alt_amt_u64 + in1_amt_u64;
-                let x = next_u64(&mut rng) % (sum + 1);
+                let x = Uniform::new_inclusive(0, sum).sample(&mut rng);
                 let y = sum - x;
                 (in0_real_alt.clone(), in1_real.clone(), x, y)
             }
         };
 
         let out0 = OutputNote {
-            pub_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            pub_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(out0_amt_u64),
         };
         let out1 = OutputNote {
-            pub_key: rand_scalar(&mut rng),
-            blinding: rand_scalar(&mut rng),
+            pub_key: Scalar::rand(&mut rng),
+            blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(out1_amt_u64),
         };
 

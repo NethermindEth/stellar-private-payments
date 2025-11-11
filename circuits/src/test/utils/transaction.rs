@@ -52,19 +52,22 @@ pub fn prepopulated_leaves(
     let n = 1usize << levels;
     let mut leaves = vec![Scalar::from(0u64); n];
 
+    let capacity = n.saturating_sub(exclude_indices.len());
+    assert!(
+        fill_count <= capacity,
+        "prepopulated_leaves: fill_count ({fill_count}) exceeds available capacity ({capacity}), causing an infinite loop",
+    );
+
     let mut rng = Rng64::new(seed);
     let mut placed = 0usize;
 
-    'outer: while placed < fill_count {
+    while placed < fill_count {
         let idx = usize::try_from(rng.next())
             .expect("cast to usize failed in prepopulated_leaves")
             .checked_rem(n)
             .expect("n must not be zero");
-        if exclude_indices.contains(&idx) {
-            continue 'outer;
-        }
-        if leaves[idx] != Scalar::from(0u64) {
-            continue 'outer;
+        if exclude_indices.contains(&idx) || leaves[idx] != Scalar::from(0u64) {
+            continue;
         }
 
         leaves[idx] = rand_commitment(&mut rng);
