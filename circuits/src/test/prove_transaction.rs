@@ -16,30 +16,30 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 const LEVELS: usize = 5;
 
 #[derive(Clone, Debug)]
-struct InputNote {
-    priv_key: Scalar,
-    blinding: Scalar,
-    amount: Scalar,
+pub struct InputNote {
+    pub priv_key: Scalar,
+    pub blinding: Scalar,
+    pub amount: Scalar,
 }
 
 #[derive(Clone, Debug)]
-struct OutputNote {
-    pub_key: Scalar,
-    blinding: Scalar,
-    amount: Scalar,
+pub struct OutputNote {
+    pub pub_key: Scalar,
+    pub blinding: Scalar,
+    pub amount: Scalar,
 }
 
-struct TxCase {
-    real_idx: usize,
-    in0: InputNote,
-    in1: InputNote,
-    out0: OutputNote,
-    out1: OutputNote,
+pub struct TxCase {
+    pub real_idx: usize,
+    pub in0: InputNote,
+    pub in1: InputNote,
+    pub out0: OutputNote,
+    pub out1: OutputNote,
 }
 
 #[allow(clippy::too_many_arguments)]
 impl TxCase {
-    fn new(
+    pub fn new(
         real_idx: usize,
         in0: InputNote,
         in1: InputNote,
@@ -478,16 +478,16 @@ async fn test_tx_chained_spend() -> Result<()> {
     // Now Tx2 should verify because the tree contains Tx1.out0 at `chain_idx`
     run_case(&wasm, &r1cs, &tx2, leaves, Scalar::from(0u64))
 }
-use ark_std::rand::{
-    RngCore, SeedableRng,
-    distributions::{Distribution, Uniform},
-    rngs::StdRng,
-};
-
-use ark_ff::UniformRand; // for Scalar::rand
 
 #[tokio::test]
 async fn test_tx_randomized_stress() -> Result<()> {
+    use ark_std::rand::{
+        RngCore, SeedableRng,
+        distributions::{Distribution, Uniform},
+        rngs::StdRng,
+    };
+
+    use ark_ff::UniformRand; // for Scalar::rand
     let (wasm, r1cs) = load_artifacts()?;
 
     const N_ITERS: usize = 100;
@@ -501,10 +501,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
         // 1: 1 real in, 2 real outs (split)
         // 2: 2 real ins, 1 real out (sum), 1 dummy out
         // 3: 2 real ins, 2 real outs (split)
-        // let scenario = (next_u64(&mut rng) % 4) as u8;
         let scenario: u8 = Uniform::new_inclusive(0u8, 3u8).sample(&mut rng);
-
-        // Choose real_idx != 0
         let real_idx = Uniform::new(1usize, N).sample(&mut rng);
 
         let leaves_seed: u64 = rng.next_u64();
@@ -524,6 +521,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
             blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(in1_amt_u64),
         };
+
         // Optional second real input
         let in0_alt_amt_u64 = Uniform::new_inclusive(1, 1_000).sample(&mut rng);
         let in0_real_alt = InputNote {
@@ -568,6 +566,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
             blinding: Scalar::rand(&mut rng),
             amount: Scalar::from(out1_amt_u64),
         };
+
         let case = TxCase::new(real_idx, in0_used, in1_used, out0, out1);
 
         run_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64)).with_context(|| {
