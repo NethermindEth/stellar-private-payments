@@ -5,7 +5,7 @@ use super::{
 
 use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
-use std::{collections::HashMap, env, path::PathBuf};
+use std::{env, path::PathBuf};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {

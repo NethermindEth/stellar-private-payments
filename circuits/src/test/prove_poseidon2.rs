@@ -1,10 +1,10 @@
 //! Poseidon2 circuit test
 
-use super::circom_tester::{InputValue, prove_and_verify};
+use super::circom_tester::prove_and_verify;
 use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 fn run_case(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
     // Prepare circuit inputs

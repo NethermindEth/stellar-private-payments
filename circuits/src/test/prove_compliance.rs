@@ -432,7 +432,7 @@ pub fn prepare_smt_proof_with_overrides(key: &BigUint, overrides: &[(u32, BigInt
 
     // pad siblings to requested length
     let mut siblings = find_result.siblings.clone();
-    while siblings.len() < 1 << LEVELS {
+    while siblings.len() < LEVELS {
         siblings.push(BigUint::from(0u32));
     }
 

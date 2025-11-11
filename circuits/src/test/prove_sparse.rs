@@ -1,11 +1,11 @@
 //! Sparse Merkle Tree circuit test
 
-use super::circom_tester::{InputValue, prove_and_verify};
+use super::circom_tester::prove_and_verify;
 use super::sparse_merkle_tree::{SMTMemDB, SparseMerkleTree};
 use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::{BigInt, BigUint, ToBigInt};
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
 /// Proof data for Sparse Merkle Tree verification
 pub struct SMTProof {

@@ -75,7 +75,6 @@ impl From<Vec<Scalar>> for InputValue {
     }
 }
 
-
 #[derive(Default)]
 pub struct Inputs {
     inner: HashMap<String, InputValue>,
@@ -107,10 +106,6 @@ impl Inputs {
 }
 
 impl Inputs {
-    pub fn into_map(self) -> HashMap<String, InputValue> {
-        self.inner
-    }
-
     pub fn iter(&self) -> impl Iterator<Item = (&String, &InputValue)> {
         self.inner.iter()
     }
@@ -118,7 +113,7 @@ impl Inputs {
 
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-enum InputValue {
+pub(crate) enum InputValue {
     Single(BigInt),
     Array(Vec<BigInt>),
 }
