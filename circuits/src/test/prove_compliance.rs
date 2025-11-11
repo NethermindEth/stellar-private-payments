@@ -132,7 +132,7 @@ where
                 .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
 
             let tree = &membership_trees[index];
-            let leaf = poseidon2_hash2(pk_scalar, tree.blinding); // H(pk_k, blinding_{k,j})
+            let leaf = poseidon2_hash2(pk_scalar, tree.blinding, Some(Scalar::from(1u64))); // H(pk_k, blinding_{k,j})
             frozen_leaves[tree.index] = leaf;
         }
 
@@ -148,7 +148,7 @@ where
 
             let t = &membership_trees[idx];
             let pk_scalar = pubs[i];
-            let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding);
+            let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
 
             let (siblings, path_idx_u64, depth) = merkle_proof(&frozen_leaves, t.index);
             assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
@@ -166,8 +166,8 @@ where
     // === NON MEMBERSHIP PROOF ===
 
     // This will be modified as part of the sparse tree test refactoring
-    let leaf_exist_0 = poseidon2_hash2(pubs[0], Scalar::zero());
-    let leaf_exist_1 = poseidon2_hash2(pubs[1], Scalar::zero());
+    let leaf_exist_0 = poseidon2_hash2(pubs[0], Scalar::zero(), Some(Scalar::from(1u64)));
+    let leaf_exist_1 = poseidon2_hash2(pubs[1], Scalar::zero(), Some(Scalar::from(1u64)));
     let overrides: Vec<(u32, BigInt)> = vec![
         (
             non_membership[0].key_of_leaf,
@@ -212,7 +212,7 @@ where
         for i in 0..N_INPUTS {
             // Leaf is computed *per (i,j)* just like membership (H(pk_i, blinding_{i,j})).
             // If your non-membership leaf uses a different blinding, replace Scalar::zero() as needed.
-            let leaf_ij = poseidon2_hash2(pubs[i], Scalar::zero());
+            let leaf_ij = poseidon2_hash2(pubs[i], Scalar::zero(), Some(Scalar::from(1u64)));
 
             // Proof at the queried key (expecting non-inclusion)
             let proof = prepare_smt_proof_with_overrides(

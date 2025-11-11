@@ -3,7 +3,7 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use super::general::{poseidon2_hash2, poseidon2_hash3};
 
-/// publicKey = Poseidon2(privatekey, 0,)
+/// publicKey = Poseidon2(privatekey, 0)
 pub fn derive_public_key(private_key: Scalar) -> Scalar {
     poseidon2_hash2(private_key, Scalar::zero(), Some(Scalar::from(3))) // We use 3 as domain separation for Keypair
 }

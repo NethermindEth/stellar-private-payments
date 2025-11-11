@@ -10,44 +10,36 @@
 use anyhow::{Result, anyhow};
 use num_bigint::BigUint;
 use std::collections::HashMap;
-use std::ops::AddAssign;
 use zkhash::{
     ark_ff::{BigInteger, Fp256, PrimeField},
     fields::bn256::FpBN256,
-    poseidon2::{
-        poseidon2::Poseidon2,
-        poseidon2_instance_bn256::{POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3},
-    },
 };
 
-/// Poseidon2 hash function for 3 inputs (key, value, 1) - hash1 for leaf nodes
-pub fn poseidon2_hash_3(key: &BigUint, value: &BigUint) -> BigUint {
-    let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
+use crate::test::utils::general::{
+    poseidon2_compression as poseidon2_compression_bn256, poseidon2_hash2 as poseidon2_hash2_bn256,
+};
 
+/// Poseidon2 hash function wrapper to work with the BigUints used in the SMT
+pub fn poseidon2_hash_3(key: &BigUint, value: &BigUint) -> BigUint {
     // Convert BigUint to FpBN256
     let key_fp = Fp256::from(key.clone());
     let value_fp = Fp256::from(value.clone());
     let one_fp = FpBN256::from(1u64);
 
-    let input = vec![key_fp, value_fp, one_fp];
-    let result = poseidon2.permutation(&input);
+    let result = poseidon2_hash2_bn256(key_fp, value_fp, Some(one_fp));
 
     // Convert result back to BigUint
-    fp_bn256_to_big_uint(&result[0])
+    fp_bn256_to_big_uint(&result)
 }
 
-/// Poseidon2 hash function for leaf nodes. Optimized compression mode
+/// Poseidon2 hash function wrapper to work with the BigUints used in the SMT. Optimized compression mode
 pub fn poseidon2_compression(left: &BigUint, right: &BigUint) -> BigUint {
-    let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-
     // Convert BigUint to FpBN256
     let left_fp = Fp256::from(left.clone());
     let right_fp = Fp256::from(right.clone());
 
-    let mut perm = h.permutation(&[left_fp, right_fp]);
-    perm[0].add_assign(&left_fp);
-    perm[1].add_assign(&right_fp);
-    fp_bn256_to_big_uint(&perm[0]) // By default, we truncate to one element
+    let perm = poseidon2_compression_bn256(left_fp, right_fp);
+    fp_bn256_to_big_uint(&perm) // By default, we truncate to one element
 }
 
 /// Convert FpBN256 to BigUint
