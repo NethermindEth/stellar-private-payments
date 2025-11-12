@@ -82,6 +82,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
         inCommitmentHasher[tx].inputs[0] <== inAmount[tx];
         inCommitmentHasher[tx].inputs[1] <== inKeypair[tx].publicKey;
         inCommitmentHasher[tx].inputs[2] <== inBlinding[tx];
+        inCommitmentHasher[tx].domainSeparation <== 0x01; // Leaf commitment
 
         // Computes the signature as hash(privateKey, commitment, merklePath)
         inSignature[tx] = Signature();
@@ -95,6 +96,8 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
         inNullifierHasher[tx].inputs[0] <== inCommitmentHasher[tx].out;
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];
         inNullifierHasher[tx].inputs[2] <== inSignature[tx].out;
+        inNullifierHasher[tx].domainSeparation <== 0x02; // Input Nullifier
+        
         inNullifierHasher[tx].out === inputNullifier[tx];
 
         // Verifies the merkle proofs
@@ -123,6 +126,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             complianceMembershipHasher[tx][i] = Poseidon2(2);
             complianceMembershipHasher[tx][i].inputs[0] <== membershipProofs[tx][i].pk;
             complianceMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
+            complianceMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
             membershipProofs[tx][i].leaf === complianceMembershipHasher[tx][i].out;
             membershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
@@ -147,6 +151,8 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
             complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
             complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
+            complianceNonMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for non-membership proof
+            
             nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
             nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
@@ -180,6 +186,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];
+        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment;
         outCommitmentHasher[tx].out === outputCommitment[tx];
 
         // Check that amount fits into 248 bits to prevent overflow
