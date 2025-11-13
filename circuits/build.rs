@@ -204,7 +204,7 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
     ];
 
     // Regex for Circom includes
-    let include_pattern = Regex::new(r#"include\s+["']([^"']+)["']"#)?;
+    let include_pattern = Regex::new(r#"^\s*include\s+["']([^"']+)["']"#)?;
 
     while let Some(current_file) = to_process.pop() {
         if !visited.insert(current_file.clone()) {
