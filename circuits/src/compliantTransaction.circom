@@ -19,9 +19,6 @@ bus MembershipProof(levels) {
 
 bus NonMembershipProof(levels) {
     signal key;
-    signal value;
-    signal pk;
-    signal blinding;
     signal siblings[levels];
     signal oldKey;
     signal oldValue;
@@ -63,7 +60,6 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
     component inTree[nIns];
     component inCheckRoot[nIns];
     component complianceMembershipHasher[nIns][nMembershipProofs];
-    component complianceNonMembershipHasher[nIns][nNonMembershipProofs];
     component membershipVerifiers[nIns][nMembershipProofs];
     component nonMembershipVerifiers[nIns][nNonMembershipProofs];
     component n2bs[nIns][nNonMembershipProofs];
@@ -143,12 +139,8 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
             nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
             
-            // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
-            complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
-            complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
-            nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
-            nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
+            // Check that the leaf is under the same public key as the valid transaction tree
+            nonMembershipProofs[tx][i].key === inKeypair[tx].publicKey;
             
             for (var j = 0; j < smtLevels; j++) {
                 nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
@@ -162,7 +154,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             
             nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
             nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
-            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
+            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].key; 
             nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
         }
    
