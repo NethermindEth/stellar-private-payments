@@ -158,7 +158,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             
             nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
             nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
-            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].key; 
+            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].key; // We do not actually use value. We only need to check that the key is not present in the tree.
             nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
         }
    

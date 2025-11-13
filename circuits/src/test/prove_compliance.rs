@@ -1133,6 +1133,96 @@ async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_tx_same_nullifier_should_fail() -> Result<()> {
+    let (wasm, r1cs) = load_artifacts()?;
+
+    // Same note material used twice
+    let privk = Scalar::from(7777u64);
+    let blind = Scalar::from(4242u64);
+    let amount = Scalar::from(33u64);
+
+    let same_note = InputNote {
+        real_id: 0,
+        priv_key: privk,
+        blinding: blind,
+        amount,
+    };
+
+    let out_real = OutputNote {
+        pub_key: Scalar::from(9001u64),
+        blinding: Scalar::from(8001u64),
+        amount,
+    };
+    let out_dummy = OutputNote {
+        pub_key: Scalar::from(0u64),
+        blinding: Scalar::from(0u64),
+        amount: Scalar::from(0u64),
+    };
+
+    let case = TxCase::new(
+        same_note.clone(), // in0 @ real_id=0
+        InputNote {
+            real_id: 5,
+            ..same_note.clone()
+        }, // in1 @ real_id=5 (same note material)
+        out_real,
+        out_dummy,
+    );
+
+    let leaves = prepopulated_leaves(
+        LEVELS,
+        0xC0FFEEu64,
+        &[case.input[0].real_id, case.input[1].real_id],
+        24,
+    );
+
+    let mut membership_trees: Vec<MembershipTree> = Vec::with_capacity(N_INPUTS * N_MEM_PROOFS);
+    for j in 0..N_MEM_PROOFS {
+        let seed_j: u64 = 0xFEED_FACEu64 ^ ((j as u64) << 40) ^ 0xFEFE_FEF1u64;
+        let base_mem_leaves_j = prepopulated_leaves(LEVELS, seed_j, &[], 24);
+        for i in 0..N_INPUTS {
+            membership_trees.push(MembershipTree {
+                leaves: base_mem_leaves_j
+                    .clone()
+                    .try_into()
+                    .expect("Failed to convert into list"),
+                index: case.input[i].real_id,
+                blinding: Scalar::zero(),
+            });
+        }
+    }
+
+    let keys = [
+        NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.input[0].priv_key)),
+        },
+        NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.input[1].priv_key)),
+        },
+    ];
+
+    let res = run_case(
+        &wasm,
+        &r1cs,
+        &case,
+        leaves,
+        Scalar::from(0u64),
+        &membership_trees,
+        &keys,
+        None::<fn(&mut Inputs)>,
+    );
+    assert!(
+        res.is_err(),
+        "Same-nullifier case unexpectedly verified; expected rejection due to duplicate nullifiers"
+    );
+
+    if let Err(e) = res {
+        println!("same-nullifier correctly rejected: {e:?}");
+    }
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_membership_should_fail_wrong_pk() -> Result<()> {
     let (wasm, r1cs) = load_artifacts()?;
 

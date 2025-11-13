@@ -686,3 +686,53 @@ async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
 
     run_case(&wasm, &r1cs, &case, leaves, neg_sum)
 }
+
+#[tokio::test]
+async fn test_tx_same_nullifier_should_fail() -> Result<()> {
+    let (wasm, r1cs) = load_artifacts()?;
+
+    // Make one real note and reuse it for BOTH inputs -> identical commitments, signatures, and nullifiers
+    let privk = Scalar::from(7777u64);
+    let blind = Scalar::from(4242u64);
+    let amount = Scalar::from(33u64);
+
+    let same_note = InputNote {
+        priv_key: privk,
+        blinding: blind,
+        amount,
+    };
+
+    let out_real = OutputNote {
+        pub_key: Scalar::from(9001u64),
+        blinding: Scalar::from(8001u64),
+        amount,
+    };
+    let out_dummy = OutputNote {
+        pub_key: Scalar::from(0u64),
+        blinding: Scalar::from(0u64),
+        amount: Scalar::from(0u64),
+    };
+
+    let real_idx = 5usize;
+    let case = TxCase::new(
+        real_idx,
+        same_note.clone(), // in0
+        same_note.clone(), // in1 (same nullifier)
+        out_real,
+        out_dummy,
+    );
+
+    let leaves = prepopulated_leaves(LEVELS, 0xC0FFEEu64, &[0, real_idx], 24);
+
+    // Run: should fail because circuit enforces all input nullifiers to be distinct
+    let res = run_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64));
+    assert!(
+        res.is_err(),
+        "Same-nullifier case unexpectedly verified; expected rejection due to duplicate nullifiers"
+    );
+
+    if let Err(e) = res {
+        println!("same-nullifier correctly rejected: {e:?}");
+    }
+    Ok(())
+}
