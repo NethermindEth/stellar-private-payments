@@ -62,6 +62,7 @@ template Transaction(levels, nIns, nOuts) {
         inCommitmentHasher[tx].inputs[0] <== inAmount[tx];
         inCommitmentHasher[tx].inputs[1] <== inKeypair[tx].publicKey;
         inCommitmentHasher[tx].inputs[2] <== inBlinding[tx];
+        inCommitmentHasher[tx].domainSeparation <== 0x01; // Leaf Commitment
 
         // Computes the signature as hash(privateKey, commitment, merklePath)
         inSignature[tx] = Signature();
@@ -75,6 +76,7 @@ template Transaction(levels, nIns, nOuts) {
         inNullifierHasher[tx].inputs[0] <== inCommitmentHasher[tx].out;
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];
         inNullifierHasher[tx].inputs[2] <== inSignature[tx].out;
+        inNullifierHasher[tx].domainSeparation <== 0x02; // Input Nullifier
         inNullifierHasher[tx].out === inputNullifier[tx];
 
         // Verifies the merkle proofs
@@ -108,6 +110,8 @@ template Transaction(levels, nIns, nOuts) {
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];
+        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment;
+        
         outCommitmentHasher[tx].out === outputCommitment[tx];
 
         // Check that amount fits into 248 bits to prevent overflow

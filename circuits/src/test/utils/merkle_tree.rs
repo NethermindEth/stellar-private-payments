@@ -1,11 +1,11 @@
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-use super::general::poseidon2_hash2;
+use super::general::poseidon2_compression;
 
 /// Compute the Merkle parent from ordered children (left, right).
 #[inline]
 pub fn merkle_parent(left: Scalar, right: Scalar) -> Scalar {
-    poseidon2_hash2(left, right)
+    poseidon2_compression(left, right)
 }
 
 /// Build a Merkle root from a full list of leaves (length must be a power of
@@ -14,7 +14,7 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     while leaves.len() > 1 {
         let mut next = Vec::with_capacity(leaves.len() / 2);
         for pair in leaves.chunks_exact(2) {
-            next.push(poseidon2_hash2(pair[0], pair[1]));
+            next.push(poseidon2_compression(pair[0], pair[1]));
         }
         leaves = next;
     }
