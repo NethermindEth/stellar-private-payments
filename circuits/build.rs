@@ -22,6 +22,7 @@ use compiler::{
 use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
+use regex::Regex;
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -80,20 +81,6 @@ fn main() -> Result<()> {
         let r1cs_file = out_file.with_extension("r1cs");
         let sym_file = out_file.with_extension("sym");
 
-        if r1cs_file.exists() && sym_file.exists() {
-            let source_modified = fs::metadata(&circom_file)?.modified()?;
-            let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
-            let sym_modified = fs::metadata(&sym_file)?.modified()?;
-
-            if source_modified < r1cs_modified && source_modified < sym_modified {
-                println!(
-                    "cargo:warning=Skipping {} (already compiled)",
-                    circom_file.display()
-                );
-                continue;
-            }
-        }
-
         // Hardcoded Values for BN128 (also known as BN254) and only R1CS and SYM
         // compilation
         let prime = BigInt::parse_bytes(
@@ -119,6 +106,33 @@ fn main() -> Result<()> {
             anyhow!("Parser failed to run on {}", circom_file.to_string_lossy())
         })?;
         Report::print_reports(&report_warns, &program_archive.file_library);
+
+        // === CHECK DEPENDENCIES ===
+        // We now extract all included files from the parsed circuit and check if rebuild is needed
+        // This prevents situations where a circuit is not updated, but its dependencies are
+        let dependencies = extract_circom_dependencies(&circom_file, &crate_dir)?;
+        for dep_path in &dependencies {
+            // Register each dependency file with cargo so it knows to rebuild when they change
+            println!("cargo:rerun-if-changed={}", dep_path.display());
+        }
+
+        if r1cs_file.exists() && sym_file.exists() {
+            let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
+            let sym_modified = fs::metadata(&sym_file)?.modified()?;
+            let newest_artifact = r1cs_modified.max(sym_modified);
+
+            // Check if any dependency (including the main file) is newer than artifacts
+            let needs_rebuild =
+                check_dependencies_need_rebuild(&dependencies, &circom_file, newest_artifact)?;
+
+            if !needs_rebuild {
+                println!(
+                    "cargo:warning=Skipping {} (already compiled, all dependencies up to date)",
+                    circom_file.display()
+                );
+                continue;
+            }
+        }
 
         // === TYPECHECK ===
         let report_warns = check_types(&mut program_archive).map_err(|report_errors| {
@@ -174,6 +188,99 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+/// Recursively extract all .circom file dependencies by parsing all include statements
+fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut dependencies = Vec::new();
+    let mut visited = std::collections::HashSet::new();
+    let mut to_process = vec![main_file.to_path_buf()];
+
+    // Precompute search directories for non-relative includes
+    let search_dirs = vec![
+        base_dir.to_path_buf(),
+        base_dir.join("src"),
+        base_dir.join("node_modules"),
+    ];
+
+    // Regex for Circom includes
+    let include_pattern = Regex::new(r#"^\s*include\s+["']([^"']+)["']"#)?;
+
+    while let Some(current_file) = to_process.pop() {
+        if !visited.insert(current_file.clone()) {
+            continue;
+        }
+
+        let content = fs::read_to_string(&current_file)?;
+
+        for cap in include_pattern.captures_iter(&content) {
+            let include_path = cap
+                .get(1)
+                .expect("No string matching the regex was found")
+                .as_str();
+
+            let resolved_path = resolve_include_path(
+                include_path,
+                current_file.parent().expect("No parent directory found"),
+                &search_dirs,
+            )?;
+
+            if let Some(path) = resolved_path {
+                dependencies.push(path.clone());
+                to_process.push(path);
+            }
+        }
+    }
+
+    Ok(dependencies)
+}
+
+fn resolve_include_path(
+    include_path: &str,
+    current_dir: &Path,
+    search_dirs: &[PathBuf],
+) -> Result<Option<PathBuf>> {
+    // Relative paths
+    if include_path.starts_with("./") || include_path.starts_with("../") {
+        let path = current_dir.join(include_path);
+        if path.exists() {
+            return Ok(Some(path.canonicalize()?));
+        }
+    } else {
+        // Search in library directories
+        for dir in search_dirs {
+            let path = dir.join(include_path);
+            if path.exists() {
+                return Ok(Some(path.canonicalize()?));
+            }
+        }
+    }
+
+    // Not found
+    eprintln!("Warning: Could not resolve include: {include_path}");
+    Ok(None)
+}
+
+fn check_dependencies_need_rebuild(
+    dependencies: &[PathBuf],
+    main_file: &Path,
+    artifact_modified: std::time::SystemTime,
+) -> Result<bool> {
+    // Combine the main file with dependencies to avoid duplication
+    let all_files = std::iter::once(main_file).chain(dependencies.iter().map(|p| p.as_path()));
+
+    for file_path in all_files {
+        let modified = fs::metadata(file_path)?.modified()?;
+        if modified > artifact_modified {
+            println!(
+                "cargo:warning=File {} is newer than artifacts, rebuilding...",
+                file_path.display()
+            );
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
 }
 
 fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
