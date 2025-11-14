@@ -11,7 +11,6 @@ include "./keypair.circom";
 // Bus definitions
 bus MembershipProof(levels) {
     signal leaf;
-    signal pk;
     signal blinding;
     signal pathElements[levels];
     signal pathIndices;
@@ -120,11 +119,10 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             membershipVerifiers[tx][i] = MerkleProof(levels);
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
             complianceMembershipHasher[tx][i] = Poseidon2(2);
-            complianceMembershipHasher[tx][i].inputs[0] <== membershipProofs[tx][i].pk;
+            complianceMembershipHasher[tx][i].inputs[0] <== inKeypair[tx].publicKey;
             complianceMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
             complianceMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
             membershipProofs[tx][i].leaf === complianceMembershipHasher[tx][i].out;
-            membershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
             // Verify Membership
             membershipVerifiers[tx][i].leaf <== membershipProofs[tx][i].leaf;

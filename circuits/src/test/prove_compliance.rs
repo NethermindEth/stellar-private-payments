@@ -107,7 +107,6 @@ where
 
     // === MEMBERSHIP PROOF ===
     let mut mp_leaf: Vec<Vec<BigInt>> = Vec::with_capacity(N_INPUTS);
-    let mut mp_pk: Vec<Vec<BigInt>> = Vec::with_capacity(N_INPUTS);
     let mut mp_blinding: Vec<Vec<BigInt>> = Vec::with_capacity(N_INPUTS);
     let mut mp_path_indices: Vec<Vec<BigInt>> = Vec::with_capacity(N_INPUTS);
     let mut mp_path_elements: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(N_INPUTS);
@@ -115,7 +114,6 @@ where
 
     for _ in 0..N_INPUTS {
         mp_leaf.push(Vec::with_capacity(N_MEM_PROOFS));
-        mp_pk.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_blinding.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_path_indices.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_path_elements.push(Vec::with_capacity(N_MEM_PROOFS));
@@ -154,7 +152,6 @@ where
             assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
 
             mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
-            mp_pk[i].push(scalar_to_bigint(pk_scalar));
             mp_blinding[i].push(scalar_to_bigint(t.blinding));
             mp_path_indices[i].push(scalar_to_bigint(Scalar::from(path_idx_u64)));
             mp_path_elements[i].push(siblings.into_iter().map(scalar_to_bigint).collect());
@@ -307,7 +304,6 @@ where
                     .field(field)
             };
             inputs.set_key(&key("leaf"), mp_leaf[i][j].clone());
-            inputs.set_key(&key("pk"), mp_pk[i][j].clone());
             inputs.set_key(&key("blinding"), mp_blinding[i][j].clone());
             inputs.set_key(&key("pathIndices"), mp_path_indices[i][j].clone());
             inputs.set_key(&key("pathElements"), mp_path_elements[i][j].clone());
@@ -1223,7 +1219,7 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_membership_should_fail_wrong_pk() -> Result<()> {
+async fn test_membership_should_fail_wrong_privkey() -> Result<()> {
     let (wasm, r1cs) = load_artifacts()?;
 
     let case = TxCase::new(
@@ -1283,7 +1279,15 @@ async fn test_membership_should_fail_wrong_pk() -> Result<()> {
         },
     ];
 
-    // Tamper: set membershipProofs[1][0].pk to a bogus value
+    // Set inPrivateKey[0] to the wrong value
+    let original_keys: Vec<BigInt> = case
+        .input
+        .iter()
+        .map(|n| scalar_to_bigint(n.priv_key))
+        .collect();
+    let mut modified_keys = original_keys.clone();
+    modified_keys[0] = scalar_to_bigint(Scalar::from(999u64)); // Wrong private key for index 0
+
     let res = run_case(
         &wasm,
         &r1cs,
@@ -1293,13 +1297,7 @@ async fn test_membership_should_fail_wrong_pk() -> Result<()> {
         &membership_trees,
         &keys,
         Some(|inputs: &mut Inputs| {
-            let key = |field: &str| {
-                SignalKey::new("membershipProofs")
-                    .idx(1)
-                    .idx(0)
-                    .field(field)
-            };
-            inputs.set_key(&key("pk"), scalar_to_bigint(Scalar::from(42u64)));
+            inputs.set("inPrivateKey", modified_keys.clone());
         }),
     );
 
