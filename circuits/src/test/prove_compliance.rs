@@ -390,9 +390,8 @@ where
         f(&mut inputs);
     }
     // --- Prove & verify ---
-    let prove_result = panic::catch_unwind(AssertUnwindSafe(|| {
-        prove_and_verify(wasm, r1cs, &inputs.into_map())
-    }));
+    let prove_result =
+        panic::catch_unwind(AssertUnwindSafe(|| prove_and_verify(wasm, r1cs, &inputs)));
     match prove_result {
         Ok(Ok(res)) if res.verified => Ok(()),
         Ok(Ok(_)) => Err(anyhow::anyhow!(

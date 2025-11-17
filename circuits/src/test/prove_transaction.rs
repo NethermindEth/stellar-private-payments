@@ -1,15 +1,16 @@
 use super::{
-    circom_tester::{InputValue, prove_and_verify},
+    circom_tester::prove_and_verify,
     keypair::{derive_public_key, sign},
     merkle_tree::{merkle_proof, merkle_root},
     transaction::{commitment, nullifier, prepopulated_leaves},
 };
 use crate::test::utils::general::scalar_to_bigint;
 
+use crate::test::utils::circom_tester::Inputs;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::panic::AssertUnwindSafe;
-use std::{collections::HashMap, env, panic, path::PathBuf};
+use std::{env, panic, path::PathBuf};
 use zkhash::ark_ff::Zero;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -101,90 +102,33 @@ fn run_case(
     let out1_commit = commitment(case.out1.amount, case.out1.pub_key, case.out1.blinding);
 
     // === WITNESS MAP ===
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
+    let mut inputs = Inputs::new();
 
     // === Public signals ===
-    inputs.insert(
-        "root".into(),
-        InputValue::Single(scalar_to_bigint(root_scalar)),
-    );
-    inputs.insert(
-        "publicAmount".into(),
-        InputValue::Single(scalar_to_bigint(public_amount)),
-    );
-    inputs.insert("extDataHash".into(), InputValue::Single(BigInt::from(0u32)));
+    inputs.set("root", scalar_to_bigint(root_scalar));
+    inputs.set("publicAmount", scalar_to_bigint(public_amount));
+    inputs.set("extDataHash", BigInt::from(0u32));
 
     // === Private signals ===
-    inputs.insert(
-        "inputNullifier".into(),
-        InputValue::Array(vec![scalar_to_bigint(in0_null), scalar_to_bigint(in1_null)]),
-    );
-    inputs.insert(
-        "inAmount".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.in0.amount),
-            scalar_to_bigint(case.in1.amount),
-        ]),
-    );
-    inputs.insert(
-        "inPrivateKey".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.in0.priv_key),
-            scalar_to_bigint(case.in1.priv_key),
-        ]),
-    );
-    inputs.insert(
-        "inBlinding".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.in0.blinding),
-            scalar_to_bigint(case.in1.blinding),
-        ]),
-    );
-    inputs.insert(
-        "inPathIndices".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(path_idx0),
-            scalar_to_bigint(path_idx1),
-        ]),
-    );
+    inputs.set("inputNullifier", vec![in0_null, in1_null]);
+    inputs.set("inAmount", vec![case.in0.amount, case.in1.amount]);
+    inputs.set("inPrivateKey", vec![case.in0.priv_key, case.in1.priv_key]);
+    inputs.set("inBlinding", vec![case.in0.blinding, case.in1.blinding]);
+    inputs.set("inPathIndices", vec![path_idx0, path_idx1]);
 
     // Flattened path elements
     let mut in_path_elements_flat = Vec::with_capacity(path_elems0.len() + path_elems1.len());
     in_path_elements_flat.extend(path_elems0);
     in_path_elements_flat.extend(path_elems1);
-    inputs.insert(
-        "inPathElements".into(),
-        InputValue::Array(in_path_elements_flat),
-    );
+    inputs.set("inPathElements", in_path_elements_flat);
 
-    inputs.insert(
-        "outputCommitment".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(out0_commit),
-            scalar_to_bigint(out1_commit),
-        ]),
+    inputs.set(
+        "outputCommitment",
+        vec![scalar_to_bigint(out0_commit), scalar_to_bigint(out1_commit)],
     );
-    inputs.insert(
-        "outAmount".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.out0.amount),
-            scalar_to_bigint(case.out1.amount),
-        ]),
-    );
-    inputs.insert(
-        "outPubkey".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.out0.pub_key),
-            scalar_to_bigint(case.out1.pub_key),
-        ]),
-    );
-    inputs.insert(
-        "outBlinding".into(),
-        InputValue::Array(vec![
-            scalar_to_bigint(case.out0.blinding),
-            scalar_to_bigint(case.out1.blinding),
-        ]),
-    );
+    inputs.set("outAmount", vec![case.out0.amount, case.out1.amount]);
+    inputs.set("outPubkey", vec![case.out0.pub_key, case.out1.pub_key]);
+    inputs.set("outBlinding", vec![case.out0.blinding, case.out1.blinding]);
 
     // === PROVE & VERIFY ===
     let prove_result =
