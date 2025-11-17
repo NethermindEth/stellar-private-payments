@@ -4,9 +4,12 @@ use super::{
     utils::general::scalar_to_bigint,
 };
 
-use crate::test::utils::circom_tester::Inputs;
+use crate::test::utils::circom_tester::{
+    CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys,
+};
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
+use std::collections::hash_map::Keys;
 use std::{env, path::PathBuf};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -16,6 +19,7 @@ fn run_case(
     leaves: Vec<Scalar>,
     leaf_index: usize,
     expected_levels: usize,
+    keys: &CircuitKeys,
 ) -> Result<()> {
     // Compute root and proof in Rust
     let root_scalar = merkle_root(leaves.clone());
@@ -44,8 +48,8 @@ fn run_case(
     inputs.set("pathIndices", path_idx);
 
     // Prove and verify
-    let res =
-        prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
+    let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, &keys)
+        .context("Failed to prove and verify circuit")?;
 
     if !res.verified {
         anyhow::bail!("Proof did not verify");
@@ -108,15 +112,17 @@ async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // Indices to try (cover left/right edges and middle)
     let indices = [0usize, 1, 7, 8, 15, 16, 23, 31];
 
+    let keys = generate_keys(&wasm, &r1cs)?;
+
     // Run cases
     for &idx in &indices {
-        run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case A failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case B failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case C failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case D failed at index {idx}"))?;
     }
 
