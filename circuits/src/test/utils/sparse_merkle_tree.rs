@@ -593,13 +593,13 @@ pub fn prepare_smt_proof(key: &BigInt, max_levels: usize) -> SMTProof {
 
     // Tree can address at most 2^max_levels leaves.
     let max_leaves = 1usize
-        .checked_shl(max_levels as u32)
+        .checked_shl(u32::try_from(max_levels).expect("Failed to cast max_levels to u32"))
         .unwrap_or(usize::MAX);
 
     let num_leaves = 100usize.min(max_leaves);
 
     for i in 0..num_leaves {
-        let bi = BigInt::from(i as u32);
+        let bi = BigInt::from(i);
         smt.insert(&bi, &bi).expect("Failed to insert key");
     }
 

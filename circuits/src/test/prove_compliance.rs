@@ -2,7 +2,7 @@ use crate::test::utils::circom_tester::{Inputs, SignalKey, prove_and_verify};
 use crate::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
 use crate::test::utils::keypair::derive_public_key;
 use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
-use crate::test::utils::sparse_merkle_tree::prepare_smt_proof_with_overrides;
+use crate::test::utils::sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides};
 use crate::test::utils::transaction::{commitment, prepopulated_leaves};
 use crate::test::utils::transaction_case::{
     InputNote, OutputNote, TxCase, build_base_inputs, prepare_transaction_witness,
@@ -59,6 +59,36 @@ fn default_membership_trees(case: &TxCase, suffix: u64) -> Vec<MembershipTree> {
     build_membership_trees(case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40) ^ suffix)
 }
 
+fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigInt)> {
+    pubs.iter()
+        .enumerate()
+        .map(|(i, pk)| {
+            // Make the +1 explicit and checked
+            let idx = u64::try_from(i)
+                .expect("Failed to cast i")
+                .checked_add(1)
+                .expect("idx overflow");
+
+            // Make the mul + add explicit and checked
+            let override_factor: u64 = 100_000;
+            let override_idx = idx
+                .checked_mul(override_factor)
+                .and_then(|v| v.checked_add(idx))
+                .expect("override_idx overflow");
+
+            let override_key = Scalar::from(override_idx);
+
+            let leaf = poseidon2_hash2(*pk, Scalar::zero(), Some(Scalar::from(1u64)));
+            (scalar_to_bigint(override_key), scalar_to_bigint(leaf))
+        })
+        .collect()
+}
+
+fn default_non_membership_proof_builder(key: &BigInt, pubs: &[Scalar]) -> SMTProof {
+    let overrides = non_membership_overrides_from_pubs(pubs);
+    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn run_case<F>(
     wasm: &PathBuf,
@@ -72,6 +102,35 @@ fn run_case<F>(
 ) -> Result<()>
 where
     F: FnOnce(&mut Inputs),
+{
+    run_case_with_non_membership_builder(
+        wasm,
+        r1cs,
+        case,
+        leaves,
+        public_amount,
+        membership_trees,
+        non_membership,
+        default_non_membership_proof_builder,
+        mutate_inputs,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn run_case_with_non_membership_builder<F, G>(
+    wasm: &PathBuf,
+    r1cs: &PathBuf,
+    case: &TxCase,
+    leaves: Vec<Scalar>,
+    public_amount: Scalar,
+    membership_trees: &[MembershipTree],
+    non_membership: &[NonMembership],
+    build_non_membership_proof: G,
+    mutate_inputs: Option<F>,
+) -> Result<()>
+where
+    F: FnOnce(&mut Inputs),
+    G: Fn(&BigInt, &[Scalar]) -> SMTProof,
 {
     let n_inputs = case.inputs.len();
     ensure!(
@@ -150,20 +209,6 @@ where
 
     // === NON MEMBERSHIP PROOF ===
 
-    // This will be modified as part of the sparse tree test refactoring
-    let leaf_exist_0 = poseidon2_hash2(pubs[0], Scalar::zero(), Some(Scalar::from(1u64)));
-    let leaf_exist_1 = poseidon2_hash2(pubs[1], Scalar::zero(), Some(Scalar::from(1u64)));
-    let overrides: Vec<(BigInt, BigInt)> = vec![
-        (
-            scalar_to_bigint(Scalar::from(100001u64)),
-            scalar_to_bigint(leaf_exist_0),
-        ),
-        (
-            scalar_to_bigint(Scalar::from(200002u64)),
-            scalar_to_bigint(leaf_exist_1),
-        ),
-    ];
-
     let mut nmp_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_old_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_old_value: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
@@ -179,27 +224,9 @@ where
         nmp_siblings.push(Vec::with_capacity(N_NON_PROOFS));
     }
 
-    for j in 0..N_NON_PROOFS {
-        let idx_mod = j
-            .checked_rem(n_inputs)
-            .expect("j % n_inputs overflowed or n_inputs == 0");
-
-        let last_valid_idx = n_inputs.checked_sub(1).expect("n_inputs must be > 0");
-
-        let idx = idx_mod.min(last_valid_idx);
-        let nm_root = &non_membership[idx];
-        let tmp = prepare_smt_proof_with_overrides(
-            &nm_root.key_non_inclusion.clone(),
-            &overrides,
-            LEVELS,
-        );
-
+    for _ in 0..N_NON_PROOFS {
         for i in 0..n_inputs {
-            let proof = prepare_smt_proof_with_overrides(
-                &non_membership[i].key_non_inclusion.clone(),
-                &overrides,
-                LEVELS,
-            );
+            let proof = build_non_membership_proof(&non_membership[i].key_non_inclusion, pubs);
 
             nmp_key[i].push(scalar_to_bigint(pubs[i]));
 
@@ -215,7 +242,7 @@ where
 
             nmp_siblings[i].push(proof.siblings.clone());
 
-            non_membership_roots.push(tmp.root.clone());
+            non_membership_roots.push(proof.root.clone());
         }
     }
 
@@ -935,7 +962,7 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
         },
     ];
 
-    let res = run_case(
+    let res = run_case_with_non_membership_builder(
         &wasm,
         &r1cs,
         &case,
@@ -943,6 +970,10 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
         Scalar::from(0u64),
         &membership_trees,
         &keys,
+        |key, pubs| {
+            let overrides = non_membership_overrides_from_pubs(pubs);
+            prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+        },
         None::<fn(&mut Inputs)>,
     );
     assert!(
@@ -1242,7 +1273,7 @@ async fn test_non_membership_fails() -> Result<()> {
         },
     ];
 
-    let res = run_case(
+    let res = run_case_with_non_membership_builder(
         &wasm,
         &r1cs,
         &case,
@@ -1250,6 +1281,26 @@ async fn test_non_membership_fails() -> Result<()> {
         Scalar::from(0u64),
         &membership_trees,
         &keys,
+        |key, pubs| {
+            assert!(
+                pubs.len() >= 2,
+                "non-membership failure test expects two input notes"
+            );
+            let leaf_exist_0 = poseidon2_hash2(pubs[0], Scalar::zero(), Some(Scalar::from(1u64)));
+            let leaf_exist_1 = poseidon2_hash2(pubs[1], Scalar::zero(), Some(Scalar::from(1u64)));
+            let overrides: Vec<(BigInt, BigInt)> = vec![
+                (
+                    scalar_to_bigint(Scalar::from(100001u64)),
+                    scalar_to_bigint(leaf_exist_0),
+                ),
+                (
+                    scalar_to_bigint(Scalar::from(200002u64)),
+                    scalar_to_bigint(leaf_exist_1),
+                ),
+            ];
+
+            prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+        },
         None::<fn(&mut Inputs)>,
     );
 
