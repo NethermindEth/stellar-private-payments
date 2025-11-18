@@ -2,7 +2,7 @@ pragma circom 2.2.2;
 // Original circuits from https://github.com/tornadocash/tornado-nova
 // Adapted and modified by Nethermind
 
-include "./poseidon2/poseidon2_hash.circom";
+include "./poseidon2/poseidon2_compress.circom";
 include "./circomlib/circuits/bitify.circom";
 include "./circomlib/circuits/switcher.circom";
 
@@ -27,7 +27,7 @@ template MerkleProof(levels) {
         switcher[i].R <== pathElements[i];
         switcher[i].sel <== indexBits.out[i];
 
-        hasher[i] = Poseidon2(2);
+        hasher[i] = PoseidonCompress();
         hasher[i].inputs[0] <== switcher[i].outL;
         hasher[i].inputs[1] <== switcher[i].outR;
     }

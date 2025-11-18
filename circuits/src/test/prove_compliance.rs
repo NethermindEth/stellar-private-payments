@@ -26,8 +26,7 @@ pub struct MembershipTree {
 }
 
 pub struct NonMembership {
-    pub key_non_inclusion: u32,
-    pub key_of_leaf: u32,
+    pub key_non_inclusion: BigInt,
 }
 
 fn build_membership_trees<F>(case: &TxCase, seed_fn: F) -> Vec<MembershipTree>
@@ -87,7 +86,6 @@ where
 
     // === MEMBERSHIP PROOF ===
     let mut mp_leaf: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut mp_pk: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut mp_blinding: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut mp_path_indices: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut mp_path_elements: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
@@ -95,7 +93,6 @@ where
 
     for _ in 0..n_inputs {
         mp_leaf.push(Vec::with_capacity(N_MEM_PROOFS));
-        mp_pk.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_blinding.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_path_indices.push(Vec::with_capacity(N_MEM_PROOFS));
         mp_path_elements.push(Vec::with_capacity(N_MEM_PROOFS));
@@ -123,7 +120,7 @@ where
             let tree = membership_trees.get(index).ok_or_else(|| {
                 anyhow::anyhow!("missing membership tree for input {k}, proof {j}")
             })?;
-            let leaf = poseidon2_hash2(pk_scalar, tree.blinding);
+            let leaf = poseidon2_hash2(pk_scalar, tree.blinding, Some(Scalar::from(1u64))); // H(pk_k, blinding_{k,j})
             frozen_leaves[tree.index] = leaf;
         }
 
@@ -137,13 +134,12 @@ where
 
             let t = &membership_trees[idx];
             let pk_scalar = pubs[i];
-            let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding);
+            let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
 
             let (siblings, path_idx_u64, depth) = merkle_proof(&frozen_leaves, t.index);
             assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
 
             mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
-            mp_pk[i].push(scalar_to_bigint(pk_scalar));
             mp_blinding[i].push(scalar_to_bigint(t.blinding));
             mp_path_indices[i].push(scalar_to_bigint(Scalar::from(path_idx_u64)));
             mp_path_elements[i].push(siblings.into_iter().map(scalar_to_bigint).collect());
@@ -154,36 +150,33 @@ where
 
     // === NON MEMBERSHIP PROOF ===
 
-    let overrides: Vec<(u32, BigInt)> = non_membership
-        .iter()
-        .zip(pubs.iter())
-        .map(|(nm, &pk_scalar)| {
-            (
-                nm.key_of_leaf,
-                scalar_to_bigint(poseidon2_hash2(pk_scalar, Scalar::zero())),
-            )
-        })
-        .collect();
+    // This will be modified as part of the sparse tree test refactoring
+    let leaf_exist_0 = poseidon2_hash2(pubs[0], Scalar::zero(), Some(Scalar::from(1u64)));
+    let leaf_exist_1 = poseidon2_hash2(pubs[1], Scalar::zero(), Some(Scalar::from(1u64)));
+    let overrides: Vec<(BigInt, BigInt)> = vec![
+        (
+            scalar_to_bigint(Scalar::from(100001u64)),
+            scalar_to_bigint(leaf_exist_0),
+        ),
+        (
+            scalar_to_bigint(Scalar::from(200002u64)),
+            scalar_to_bigint(leaf_exist_1),
+        ),
+    ];
 
     let mut nmp_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_value: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_old_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_old_value: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_is_old0: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut nmp_siblings: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
-    let mut nmp_pk: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_blinding: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
     let mut non_membership_roots: Vec<BigInt> = Vec::with_capacity(n_inputs * N_NON_PROOFS);
 
     for _ in 0..n_inputs {
         nmp_key.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_value.push(Vec::with_capacity(N_NON_PROOFS));
         nmp_old_key.push(Vec::with_capacity(N_NON_PROOFS));
         nmp_old_value.push(Vec::with_capacity(N_NON_PROOFS));
         nmp_is_old0.push(Vec::with_capacity(N_NON_PROOFS));
         nmp_siblings.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_pk.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_blinding.push(Vec::with_capacity(N_NON_PROOFS));
     }
 
     for j in 0..N_NON_PROOFS {
@@ -196,22 +189,19 @@ where
         let idx = idx_mod.min(last_valid_idx);
         let nm_root = &non_membership[idx];
         let tmp = prepare_smt_proof_with_overrides(
-            &BigInt::from(nm_root.key_non_inclusion),
+            &nm_root.key_non_inclusion.clone(),
             &overrides,
             LEVELS,
         );
 
         for i in 0..n_inputs {
-            let leaf_ij = poseidon2_hash2(pubs[i], Scalar::zero());
-
             let proof = prepare_smt_proof_with_overrides(
-                &BigInt::from(non_membership[i].key_non_inclusion),
+                &non_membership[i].key_non_inclusion.clone(),
                 &overrides,
                 LEVELS,
             );
 
-            nmp_key[i].push(BigInt::from(non_membership[i].key_non_inclusion));
-            nmp_value[i].push(scalar_to_bigint(leaf_ij));
+            nmp_key[i].push(scalar_to_bigint(pubs[i]));
 
             if proof.is_old0 {
                 nmp_old_key[i].push(BigInt::from(0u32));
@@ -224,9 +214,6 @@ where
             }
 
             nmp_siblings[i].push(proof.siblings.clone());
-
-            nmp_pk[i].push(scalar_to_bigint(pubs[i]));
-            nmp_blinding[i].push(BigInt::from(0u32));
 
             non_membership_roots.push(tmp.root.clone());
         }
@@ -241,7 +228,6 @@ where
                     .field(field)
             };
             inputs.set_key(&key("leaf"), mp_leaf[i][j].clone());
-            inputs.set_key(&key("pk"), mp_pk[i][j].clone());
             inputs.set_key(&key("blinding"), mp_blinding[i][j].clone());
             inputs.set_key(&key("pathIndices"), mp_path_indices[i][j].clone());
             inputs.set_key(&key("pathElements"), mp_path_elements[i][j].clone());
@@ -259,13 +245,10 @@ where
             };
 
             inputs.set_key(&key("key"), nmp_key[i][j].clone());
-            inputs.set_key(&key("value"), nmp_value[i][j].clone());
             inputs.set_key(&key("oldKey"), nmp_old_key[i][j].clone());
             inputs.set_key(&key("oldValue"), nmp_old_value[i][j].clone());
             inputs.set_key(&key("isOld0"), nmp_is_old0[i][j].clone());
             inputs.set_key(&key("siblings"), nmp_siblings[i][j].clone());
-            inputs.set_key(&key("pk"), nmp_pk[i][j].clone());
-            inputs.set_key(&key("blinding"), nmp_blinding[i][j].clone());
         }
     }
     inputs.set("nonMembershipRoots", non_membership_roots);
@@ -318,7 +301,7 @@ async fn test_tx_1in_1out() -> Result<()> {
             },
             InputNote {
                 leaf_index: 7,
-                priv_key: Scalar::from(101u64),
+                priv_key: Scalar::from(102u64),
                 blinding: Scalar::from(211u64),
                 amount: Scalar::from(13u64),
             },
@@ -347,12 +330,10 @@ async fn test_tx_1in_1out() -> Result<()> {
     let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -416,12 +397,10 @@ async fn test_tx_2in_1out() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -485,12 +464,10 @@ async fn test_tx_1in_2out_split() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -557,12 +534,10 @@ async fn test_tx_2in_2out_split() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -629,12 +604,10 @@ async fn test_tx_chained_spend() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 10,
-            key_of_leaf: 2,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(tx1.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 20,
-            key_of_leaf: 16,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(tx1.inputs[1].priv_key)),
         },
     ];
 
@@ -688,12 +661,10 @@ async fn test_tx_chained_spend() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(tx2.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(tx2.inputs[1].priv_key)),
         },
     ];
 
@@ -755,12 +726,10 @@ async fn test_tx_only_adds_notes_deposit() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -823,12 +792,10 @@ async fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -893,12 +860,10 @@ async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -963,12 +928,10 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -994,7 +957,7 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_membership_should_fail_wrong_pk() -> Result<()> {
+async fn test_membership_should_fail_wrong_privkey() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
     let case = TxCase::new(
@@ -1037,16 +1000,22 @@ async fn test_membership_should_fail_wrong_pk() -> Result<()> {
     let membership_trees = default_membership_trees(&case, 0x1111_2222u64);
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
-    // Tamper: set membershipProofs[1][0].pk to a bogus value
+    // Set inPrivateKey[0] to the wrong value
+    let original_keys: Vec<BigInt> = case
+        .inputs
+        .iter()
+        .map(|n| scalar_to_bigint(n.priv_key))
+        .collect();
+    let mut modified_keys = original_keys.clone();
+    modified_keys[0] = scalar_to_bigint(Scalar::from(999u64)); // Wrong private key for index 0
+
     let res = run_case(
         &wasm,
         &r1cs,
@@ -1056,13 +1025,7 @@ async fn test_membership_should_fail_wrong_pk() -> Result<()> {
         &membership_trees,
         &keys,
         Some(|inputs: &mut Inputs| {
-            let key = |field: &str| {
-                SignalKey::new("membershipProofs")
-                    .idx(1)
-                    .idx(0)
-                    .field(field)
-            };
-            inputs.set_key(&key("pk"), scalar_to_bigint(Scalar::from(42u64)));
+            inputs.set("inPrivateKey", modified_keys.clone());
         }),
     );
 
@@ -1117,12 +1080,10 @@ async fn test_membership_should_fail_wrong_path() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -1198,12 +1159,10 @@ async fn test_membership_should_fail_wrong_root() -> Result<()> {
 
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 1,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -1247,7 +1206,7 @@ async fn test_non_membership_fails() -> Result<()> {
             },
             InputNote {
                 leaf_index: 7,
-                priv_key: Scalar::from(101u64),
+                priv_key: Scalar::from(102u64),
                 blinding: Scalar::from(211u64),
                 amount: Scalar::from(13u64),
             },
@@ -1276,12 +1235,10 @@ async fn test_non_membership_fails() -> Result<()> {
     let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
     let keys = vec![
         NonMembership {
-            key_non_inclusion: 2,
-            key_of_leaf: 2,
+            key_non_inclusion: BigInt::from(100001u64), // This will make the proof of non-membership fail
         },
         NonMembership {
-            key_non_inclusion: 12,
-            key_of_leaf: 10,
+            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
         },
     ];
 
@@ -1320,96 +1277,6 @@ async fn test_tx_randomized_stress() -> Result<()> {
     fn nonzero_amount_u64(state: &mut u128, max: u64) -> u64 {
         1 + (next_u64(state) % max.max(1))
     }
-
-    // --- Key fuzzing (bounded to 0..(1<<LEVELS)) ---------------------------
-    // Keep pairs with key_of_leaf < key_non_inclusion (matches your examples).
-    #[inline]
-    fn gen_key_pair(state: &mut u128, max_k_exclusive: u64, max_gap: u64) -> (u64, u64) {
-        // need a domain of at least {0,1}
-        let max_k_exclusive = max_k_exclusive.max(2);
-        let max_gap = max_gap.max(1);
-
-        // pick k in [1, max_k_exclusive-1] so there’s room for a smaller leaf
-        let k = 1 + (next_u64(state) % (max_k_exclusive - 1));
-
-        // gap in [1, max_gap]
-        let gap = 1 + (next_u64(state) % max_gap);
-
-        // candidate l = k - gap, clamped to [0, k-1]
-        let mut l = k.saturating_sub(gap);
-        if l >= k {
-            // just in case (shouldn’t happen with saturating_sub), force l < k
-            l = k - 1;
-        }
-        // final guard: ensure strict inequality
-        if l == k {
-            l = k - 1;
-        }
-
-        (k, l)
-    }
-
-    #[inline]
-    fn gen_keys_for_iteration(state: &mut u128, max_k_exclusive: u64) -> [NonMembership; 2] {
-        let which = (next_u64(state) % 5) as u8;
-
-        let small_gap = (max_k_exclusive / 128).max(3);
-        let med_gap = (max_k_exclusive / 32).max(8);
-        let wide_gap = (max_k_exclusive / 8).max(16);
-
-        let (k1, l1, k2, l2) = match which {
-            // Tiny values, tight adjacency (cap the domain to 32 if available)
-            0 => {
-                let cap = max_k_exclusive.min(32);
-                let (k1, l1) = gen_key_pair(state, cap, 3);
-                let (k2, l2) = gen_key_pair(state, cap, 1);
-                (k1, l1, k2, l2)
-            }
-            // Values across full domain with moderate gaps
-            1 => {
-                let (k1, l1) = gen_key_pair(state, max_k_exclusive, med_gap);
-                let (k2, l2) = gen_key_pair(state, max_k_exclusive, small_gap);
-                (k1, l1, k2, l2)
-            }
-            // Neighbor-ish cases (gap 1 or very small)
-            2 => {
-                let (k1, l1) = gen_key_pair(state, max_k_exclusive, 1);
-                let (k2, l2) = gen_key_pair(state, max_k_exclusive, 2);
-                (k1, l1, k2, l2)
-            }
-            // Edge near the top of the domain (still < max_k_exclusive)
-            3 => {
-                #[allow(clippy::manual_clamp)]
-                let window = max_k_exclusive.min(1024).max(2);
-                let top_k = max_k_exclusive - 1 - (next_u64(state) % (window - 1));
-                let gap1 = 1 + (next_u64(state) % med_gap);
-                let gap2 = 1 + (next_u64(state) % wide_gap);
-                let k1 = top_k;
-                let l1 = k1.saturating_sub(gap1).min(k1.saturating_sub(1));
-                let k2 = top_k.saturating_sub(1 + (next_u64(state) % (window / 2).max(1)));
-                let l2 = k2.saturating_sub(gap2).min(k2.saturating_sub(1));
-                (k1, l1, k2, l2)
-            }
-            // Default: full domain, mixed gaps
-            _ => {
-                let (k1, l1) = gen_key_pair(state, max_k_exclusive, wide_gap);
-                let (k2, l2) = gen_key_pair(state, max_k_exclusive, med_gap);
-                (k1, l1, k2, l2)
-            }
-        };
-
-        [
-            NonMembership {
-                key_non_inclusion: u32::try_from(k1).expect("usize overflow"),
-                key_of_leaf: u32::try_from(l1).expect("usize overflow"),
-            },
-            NonMembership {
-                key_non_inclusion: u32::try_from(k2).expect("usize overflow"),
-                key_of_leaf: u32::try_from(l2).expect("usize overflow"),
-            },
-        ]
-    }
-    // -----------------------------------------------------------------------
 
     const N_ITERS: usize = 20;
 
@@ -1490,13 +1357,20 @@ async fn test_tx_randomized_stress() -> Result<()> {
             build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40) ^ leaves_seed);
 
         // Keys strictly in 0..(1<<LEVELS)
-        let keys = gen_keys_for_iteration(&mut rng, N as u64);
+        let keys = [
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
+            },
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
+            },
+        ];
 
         run_case(&wasm, &r1cs, &case, leaves, Scalar::from(0u64), &membership_trees, &keys, None::<fn(&mut Inputs)>).with_context(|| {
             format!(
                 "randomized iteration failed (seed=0x{leaves_seed:x}, scenario={scenario}, real_idx={real_idx}, \
-                 keys=[({}, {}), ({}, {})])",
-                keys[0].key_non_inclusion, keys[0].key_of_leaf, keys[1].key_non_inclusion, keys[1].key_of_leaf
+                                  keys=[{}, {}])",
+                keys[0].key_non_inclusion, keys[1].key_non_inclusion
             )
         })?;
     }
