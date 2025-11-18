@@ -2,6 +2,7 @@
 
 use super::circom_tester::prove_and_verify;
 use crate::test::utils::circom_tester::Inputs;
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::path::PathBuf;
@@ -25,16 +26,7 @@ fn run_case(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<(
 #[tokio::test]
 async fn test_poseidon2_hash_2_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/poseidon2_hash_2_js/poseidon2_hash_2.wasm");
-    let r1cs = out_dir.join("poseidon2_hash_2.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("poseidon2_hash_2")?;
 
     // === TEST MATRIX ===
     let cases: &[(u64, u64)] = &[

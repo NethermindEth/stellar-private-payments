@@ -4,8 +4,9 @@ use super::{
 };
 
 use crate::test::utils::circom_tester::Inputs;
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {
@@ -47,16 +48,7 @@ fn run_signature_case(
 #[tokio::test]
 async fn test_keypair_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/keypair_test_js/keypair_test.wasm");
-    let r1cs = out_dir.join("keypair_test.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("keypair_test")?;
 
     // Simple test set
     let cases: [u64; 8] = [0, 1, 2, 7, 8, 15, 16, 23];
@@ -73,16 +65,7 @@ async fn test_keypair_test_matrix() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_signature_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/signature_test_js/signature_test.wasm");
-    let r1cs = out_dir.join("signature_test.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("signature_test")?;
 
     let triples: [(u64, u64, u64); 8] = [
         (0, 0, 0),

@@ -1,5 +1,4 @@
 use super::{
-    circom_tester::prove_and_verify,
     merkle_tree::{merkle_proof, merkle_root},
     utils::general::scalar_to_bigint,
 };
@@ -7,10 +6,10 @@ use super::{
 use crate::test::utils::circom_tester::{
     CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys,
 };
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
-use std::collections::hash_map::Keys;
-use std::{env, path::PathBuf};
+use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_case(
@@ -48,7 +47,7 @@ fn run_case(
     inputs.set("pathIndices", path_idx);
 
     // Prove and verify
-    let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, &keys)
+    let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, keys)
         .context("Failed to prove and verify circuit")?;
 
     if !res.verified {
@@ -71,16 +70,7 @@ fn run_case(
 #[tokio::test]
 async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/merkleProof_5_js/merkleProof_5.wasm");
-    let r1cs = out_dir.join("merkleProof_5.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("merkleProof_5")?;
 
     // === TEST MATRIX (5 levels => 32 leaves) ===
     const LEVELS: usize = 5;
