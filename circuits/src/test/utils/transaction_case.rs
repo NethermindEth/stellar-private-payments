@@ -15,14 +15,16 @@ use std::{
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[derive(Clone, Debug)]
+/// Description of a note spent by the tested transaction.
 pub struct InputNote {
-    pub leaf_index: usize,
-    pub priv_key: Scalar,
-    pub blinding: Scalar,
-    pub amount: Scalar,
+    pub leaf_index: usize, // We need to place the note in the tree, and hold the index to know where it is
+    pub priv_key: Scalar,  // Used to derive its public key and to sign nullifiers for spends.
+    pub blinding: Scalar,  // Keeps the commitment hiding so tests match the production circuit.
+    pub amount: Scalar,    // Amount being spent; required for balance and commitment inputs.
 }
 
 #[derive(Clone, Debug)]
+/// Description of a note created by the tested transaction.
 pub struct OutputNote {
     pub pub_key: Scalar,
     pub blinding: Scalar,
@@ -30,6 +32,8 @@ pub struct OutputNote {
 }
 
 #[derive(Clone, Debug)]
+/// Convenience container holding a single test transaction scenario.
+/// We use `Vec` because we usually have more than one input and output. The test defines how many
 pub struct TxCase {
     pub inputs: Vec<InputNote>,
     pub outputs: Vec<OutputNote>,
@@ -49,6 +53,8 @@ pub struct TransactionWitness {
     pub path_elements_flat: Vec<BigInt>,
 }
 
+/// Builds the witnesses needed to exercise a `TxCase`.
+/// The helper populates commitment leaves, derives Merkle proofs, and computes nullifiers.
 pub fn prepare_transaction_witness(
     case: &TxCase,
     mut leaves: Vec<Scalar>,
@@ -78,6 +84,7 @@ pub fn prepare_transaction_witness(
             "unexpected depth for input {i}, expected {expected_levels}, got {depth}"
         );
 
+        // Flatten sibling nodes into the format the Circom tester expects.
         path_elements_flat.extend(siblings.into_iter().map(scalar_to_bigint));
 
         let path_idx = Scalar::from(path_idx_u64);
@@ -97,6 +104,7 @@ pub fn prepare_transaction_witness(
     })
 }
 
+/// Populates Circom tester inputs for compliant and regular tx.
 pub fn build_base_inputs(
     case: &TxCase,
     witness: &TransactionWitness,
@@ -165,6 +173,7 @@ pub fn build_base_inputs(
     inputs
 }
 
+/// Runs a Circom proof/verify cycle for a transaction test case with the given public inputs.
 pub fn prove_transaction_case(
     wasm: &PathBuf,
     r1cs: &PathBuf,
@@ -186,6 +195,7 @@ pub fn prove_transaction_case(
         )),
         Ok(Err(e)) => Err(anyhow::anyhow!("Prover error: {e:?}")),
         Err(panic_info) => {
+            // Tests expect panics for invalid proofs; convert any panic into a typed error.
             let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
                 s.to_string()
             } else if let Some(s) = panic_info.downcast_ref::<String>() {

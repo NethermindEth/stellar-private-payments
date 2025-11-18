@@ -18,6 +18,7 @@ use zkhash::{
     fields::bn256::FpBN256,
 };
 /// Reduce a num_bigint::BigInt modulo the BN256 field modulus and convert to FpBN256.
+/// Circom circuits operate inside the BN256 scalar field, so every BigInt we hash must be reduced.
 fn big_int_to_fp(x: &BigInt) -> FpBN256 {
     // Get the field modulus as a num_bigint::BigInt
     let modulus_bytes = FpBN256::MODULUS.to_bytes_be();
@@ -45,6 +46,7 @@ pub fn poseidon2_compression_sparse(left: &BigInt, right: &BigInt) -> BigInt {
 }
 
 /// Poseidon2 hash function for 3 inputs (key, value, 1) - hash1 for leaf nodes
+/// Mirrors circomlibjs "hash1" so a root generated here matches the JS prover/test tooling.
 pub fn poseidon2_hash3_sparse(key: &BigInt, value: &BigInt) -> BigInt {
     let key_fp = big_int_to_fp(key);
     let value_fp = big_int_to_fp(value);
@@ -82,6 +84,7 @@ pub trait SMTDatabase {
 }
 
 /// In-memory database implementation
+/// Stores every node (leaves and internal nodes) as raw BigInt vectors, matching circomlibjs layout.
 pub struct SMTMemDB {
     data: HashMap<BigInt, Vec<BigInt>>, // key -> [value, sibling1, sibling2, ...]
     root: BigInt,
@@ -137,6 +140,8 @@ impl SMTDatabase for SMTMemDB {
 }
 
 /// Sparse Merkle Tree implementation matching circomlibjs/smt.js
+/// Provides insert/update/delete/find helpers that operate entirely over BigInts so test harnesses
+/// can generate witnesses identical to the JavaScript reference implementation.
 pub struct SparseMerkleTree<DB: SMTDatabase> {
     db: DB,
     root: BigInt,
@@ -193,6 +198,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
 
     /// Split key into bits (256 bits total)
     /// This should match the JavaScript implementation which uses Scalar.bits()
+    /// so we traverse identical paths for a given key.
     fn split_bits(&self, key: &BigInt) -> Vec<bool> {
         let mut bits = Vec::with_capacity(256);
         let mut key = key.clone();
@@ -207,6 +213,9 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Update a key-value pair in the tree
+    /// Recomputes all nodes along the path and persists them in the backing database.
+    /// This mirrors circomlibjs' update logic where we first delete the old leaf and then
+    /// rebuild the path with the new value while tracking every intermediate node for witnesses.
     pub fn update(&mut self, key: &BigInt, new_value: &BigInt) -> Result<SMTResult> {
         let res_find = self.find(key)?;
         let mut res = SMTResult {
@@ -237,6 +246,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
 
         for level in (0..res_find.siblings.len()).rev() {
             let sibling = &res_find.siblings[level];
+            // Rebuild nodes from the bottom up; depending on the bit we decide left/right order.
             let (old_node, new_node) = if key_bits[level] {
                 (
                     vec![sibling.clone(), current_rt_old.clone()],
@@ -266,6 +276,8 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Delete a key from the tree
+    /// Handles both sparse branches (single child) and mixed branches (two populated children).
+    /// The logic follows smt.js closely: collapse empty branches while keeping collision nodes.
     pub fn delete(&mut self, key: &BigInt) -> Result<SMTResult> {
         let res_find = self.find(key)?;
         if !res_find.found {
@@ -325,6 +337,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
             }
             let old_sibling = res_find.siblings[level].clone();
 
+            // Remove the old branch hash because the leaf is being deleted.
             if key_bits[level] {
                 rt_old = poseidon2_compression_sparse(&old_sibling, &rt_old);
             } else {
@@ -337,6 +350,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
             }
 
             if mixed {
+                // Once we hit a mixed branch we need to keep rebuilding upwards.
                 res.siblings.insert(0, res_find.siblings[level].clone());
                 let new_node = if key_bits[level] {
                     vec![new_sibling, rt_new.clone()]
@@ -360,6 +374,7 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Insert a new key-value pair
+    /// Builds any missing intermediate nodes so the resulting tree mirrors the JS SMT.
     pub fn insert(&mut self, key: &BigInt, value: &BigInt) -> Result<SMTResult> {
         let mut res = SMTResult {
             old_root: self.root.clone(),
@@ -462,12 +477,17 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Find a key in the tree
+    /// Returns the Merkle siblings required to reconstruct the path in circuits/tests.
+    /// Also surfaces whether the path ended in a leaf collision (non-existent key with same path).
     pub fn find(&self, key: &BigInt) -> Result<FindResult> {
         let key_bits = self.split_bits(key);
         self._find(key, &key_bits, &self.root, 0)
     }
 
     /// Internal find method
+    /// Recurses through the DB-stored nodes, replicating smt.js behavior exactly.
+    /// It walks the tree using the bit-decomposed key, returning collision data when the search
+    /// stops early (i.e. we reached a leaf whose key differs from the query).
     fn _find(
         &self,
         key: &BigInt,
@@ -571,9 +591,16 @@ pub fn prepare_smt_proof(key: &BigInt, max_levels: usize) -> SMTProof {
     let db = SMTMemDB::new();
     let mut smt = SparseMerkleTree::new(db, BigInt::from(0u32));
 
-    for i in 0u32..100 {
-        smt.insert(&BigInt::from(i), &BigInt::from(i))
-            .expect("Failed to insert key");
+    // Tree can address at most 2^max_levels leaves.
+    let max_leaves = 1usize
+        .checked_shl(max_levels as u32)
+        .unwrap_or(usize::MAX);
+
+    let num_leaves = 100usize.min(max_leaves);
+
+    for i in 0..num_leaves {
+        let bi = BigInt::from(i as u32);
+        smt.insert(&bi, &bi).expect("Failed to insert key");
     }
 
     finalize_proof(&smt, key, max_levels)

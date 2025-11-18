@@ -44,6 +44,9 @@ pub fn poseidon2_hash3(a: Scalar, b: Scalar, c: Scalar, dom_sep: Option<Scalar>)
     perm[0]
 }
 
+/// Convert a field `Scalar` into a signed `BigInt`.
+/// This goes through little-endian bytes because `Scalar::into_bigint`
+/// returns an internal representation not directly compatible with `BigInt`.
 pub fn scalar_to_bigint(s: Scalar) -> BigInt {
     let bi = s.into_bigint();
     let bytes_le = bi.to_bytes_le();
@@ -51,6 +54,9 @@ pub fn scalar_to_bigint(s: Scalar) -> BigInt {
     BigInt::from(u)
 }
 
+/// Load the compiled WASM and R1CS artifacts for a circuit by name.
+/// This expects files to be located under the `CIRCUIT_OUT_DIR` tree
+/// as produced by the build system.
 pub fn load_artifacts(name: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
     let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
     let wasm = out_dir.join(format!("wasm/{name}_js/{name}.wasm"));

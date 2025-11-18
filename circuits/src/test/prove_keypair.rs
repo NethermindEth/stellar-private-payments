@@ -13,7 +13,6 @@ fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Resu
     // compute expected in Rust
     let expected_pk = derive_public_key(private_key);
 
-    // build inputs, including the expected value
     let mut inputs = Inputs::new();
     inputs.set("privateKey", private_key);
     inputs.set("expectedPublicKey", expected_pk);
@@ -33,7 +32,6 @@ fn run_signature_case(
     // compute expected in Rust
     let expected_sig = sign(private_key, commitment, merkle_path);
 
-    //inputs incl. expected
     let mut inputs = Inputs::new();
     inputs.set("privateKey", private_key);
     inputs.set("commitment", commitment);
