@@ -9,7 +9,7 @@ use crate::test::utils::general::{
     poseidon2_compression as poseidon2_compression_bn256, poseidon2_hash2 as poseidon2_hash2_bn256,
 };
 use anyhow::{Result, anyhow};
-use num_bigint::{BigInt, BigUint, ToBigInt};
+use num_bigint::{BigInt, BigUint};
 use num_integer::Integer;
 use std::collections::HashMap;
 use std::ops::Shr;
@@ -33,7 +33,8 @@ fn big_int_to_fp(x: &BigInt) -> FpBN256 {
     FpBN256::from(as_biguint)
 }
 
-/// Poseidon2 hash function for 2 inputs (left, right) - hash0
+/// Poseidon2 hash of two field elements. Optimized compression mode. For use with BigInts.
+/// Only to be used with inner nodes of the tree
 pub fn poseidon2_compression_sparse(left: &BigInt, right: &BigInt) -> BigInt {
     let left_fp = big_int_to_fp(left);
     let right_fp = big_int_to_fp(right);
@@ -561,10 +562,7 @@ fn finalize_proof(tree: &SparseMerkleTree<SMTMemDB>, key: &BigInt, max_levels: u
         not_found_key: find_result.not_found_key,
         not_found_value: find_result.not_found_value,
         is_old0: find_result.is_old0,
-        root: tree
-            .root()
-            .to_bigint()
-            .expect("Failed to convert root to BigInt"),
+        root: tree.root().clone(),
     }
 }
 
@@ -592,7 +590,7 @@ pub fn prepare_smt_proof_with_overrides(
     let mut smt = SparseMerkleTree::new(db, BigInt::from(0u32));
 
     for (k, v) in overrides {
-        smt.insert(&k.clone(), v).expect("SMT insert failed");
+        smt.insert(k, v).expect("SMT insert failed");
     }
 
     finalize_proof(&smt, key, max_levels)
