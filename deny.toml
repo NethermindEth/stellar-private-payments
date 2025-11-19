@@ -76,7 +76,6 @@ highlight = "all"
 
 [bans.workspace-dependencies]
 duplicates = 'deny'
-# TODO(template) you should provide an example with the lib usage
 unused = 'deny'
 
 [sources]

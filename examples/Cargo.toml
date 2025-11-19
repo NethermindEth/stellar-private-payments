@@ -7,6 +7,4 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-# TODO(template) update the crate name
-template_crate = { path = "../template_crate" }
 zkhash = { path = "../poseidon2" }
