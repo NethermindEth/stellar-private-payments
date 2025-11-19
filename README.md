@@ -18,7 +18,7 @@ for a specific deposit and thus regulate the pool.
 For building the testing circom you need to run
 
 ```
-cargo test
+BUILD_TESTS=1 cargo build
 ```
 
 ## License
