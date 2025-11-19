@@ -191,6 +191,11 @@ fn main() -> Result<()> {
 }
 
 /// Recursively extract all .circom file dependencies by parsing all include statements
+///
+/// # Arguments
+///
+/// * `main_file` - Circom file from where include dependencies will be parsed.
+/// * `base_dir` - Base directory to look for other Circom dependencies
 fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut dependencies = Vec::new();
     let mut visited = std::collections::HashSet::new();
@@ -235,6 +240,21 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
     Ok(dependencies)
 }
 
+/// Resolve an include path to an absolute file path
+///
+/// Handles both relative paths (starting with `./` or `../`) and library paths
+/// by searching in the provided search directories.
+///
+/// # Arguments
+///
+/// * `include_path` - The include path string from the Circom file
+/// * `current_dir` - Directory of the file containing the include statement
+/// * `search_dirs` - List of directories to search for non-relative includes
+///
+/// # Returns
+///
+/// Returns `Ok(Some(PathBuf))` if the path is found and resolved, `Ok(None)` if not found,
+/// or an error if file system operations fail.
 fn resolve_include_path(
     include_path: &str,
     current_dir: &Path,
@@ -261,6 +281,23 @@ fn resolve_include_path(
     Ok(None)
 }
 
+/// Check if any dependency file is newer than the build artifacts
+///
+/// Compares the modification time of the main file and all dependencies
+/// against the modification time of the build artifacts to determine if
+/// a rebuild is necessary.
+///
+/// # Arguments
+///
+/// * `dependencies` - List of dependency file paths
+/// * `main_file` - Main Circom file being compiled
+/// * `artifact_modified` - Modification time of the newest build artifact
+///
+/// # Returns
+///
+/// Returns `Ok(true)` if any file is newer than artifacts (rebuild needed),
+/// `Ok(false)` if all files are older or equal (no rebuild needed),
+/// or an error if file system operations fail.
 fn check_dependencies_need_rebuild(
     dependencies: &[PathBuf],
     main_file: &Path,
@@ -283,6 +320,18 @@ fn check_dependencies_need_rebuild(
     Ok(false)
 }
 
+/// Recursively find all .circom files with a main component in a directory
+///
+/// Searches the provided directory and all subdirectories for `.circom` files
+/// that contain a main component definition.
+///
+/// # Arguments
+///
+/// * `dir` - Directory to search for Circom files
+///
+/// # Returns
+///
+/// Returns a vector of paths to Circom files that contain a main component.
 fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
     let mut circom_files = Vec::new();
 
@@ -306,6 +355,19 @@ fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
     circom_files
 }
 
+/// Check if a Circom file contains a main component definition
+///
+/// Reads the file and searches for the string "component main "
+/// to determine if the file defines a main component.
+///
+/// # Arguments
+///
+/// * `file_path` - Path to the Circom file to check
+///
+/// # Returns
+///
+/// Returns `true` if the file contains a main component, `false` otherwise.
+/// Prints a warning if the file cannot be read.
 fn has_main_component(file_path: &Path) -> bool {
     match fs::read_to_string(file_path) {
         Ok(content) => {
@@ -321,6 +383,19 @@ fn has_main_component(file_path: &Path) -> bool {
     }
 }
 
+/// Generate and write the R1CS (Rank-1 Constraint System) output file
+///
+/// Writes the constraint system to a binary R1CS file format.
+///
+/// # Arguments
+///
+/// * `file` - Output file name for the R1CS file
+/// * `exporter` - Constraint exporter containing the compiled circuit
+/// * `custom_gates` - Whether the circuit uses custom gates
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, `Err(())` if writing the file fails.
 fn generate_output_r1cs(
     file: &str,
     exporter: &dyn ConstraintExporter,
@@ -335,6 +410,18 @@ fn generate_output_r1cs(
     }
 }
 
+/// Generate and write the symbol table output file
+///
+/// Writes the symbol table to a file for debugging and constraint inspection.
+///
+/// # Arguments
+///
+/// * `file` - Output file path for the symbol file
+/// * `exporter` - Constraint exporter containing the compiled circuit
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, `Err(())` if writing fails.
 fn generate_output_sym(file: &str, exporter: &dyn ConstraintExporter) -> Result<(), ()> {
     if let Ok(()) = exporter.sym(file) {
         println!("Written successfully: {file}");
@@ -345,6 +432,20 @@ fn generate_output_sym(file: &str, exporter: &dyn ConstraintExporter) -> Result<
     }
 }
 
+/// Parse the Circom compiler version from Cargo.toml
+///
+/// Searches the Cargo.toml file for the specified package in either
+/// `[build-dependencies]` or `[dependencies]` sections and extracts
+/// the version tag.
+///
+/// # Arguments
+///
+/// * `package_name` - Name of the package to find (e.g., "compiler")
+///
+/// # Returns
+///
+/// Returns `Some(String)` with the version tag (with "v" prefix removed)
+/// if found, or `None` if the package or version cannot be found.
 fn parse_circom_version(package_name: &str) -> Option<String> {
     let cargo_toml = match fs::read_to_string("Cargo.toml") {
         Ok(content) => content,
@@ -427,7 +528,21 @@ fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
         .map_err(|_| anyhow!("Error cloning circomlib dependency"))
 }
 
-/// Compile wasm using rust through Circom lib
+/// Compile WASM using Rust through Circom library
+///
+/// Compiles a Circom circuit to WebAssembly format for witness generation.
+/// The process involves running the compiler, generating WAT (WebAssembly Text),
+/// and converting it to WASM binary format.
+///
+/// # Arguments
+///
+/// * `entry_file` - Path to the main Circom circuit file
+/// * `out_dir` - Output directory for generated WASM files
+/// * `vcp` - Verified Circuit Program structure from the parsed circuit
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if compilation fails.
 pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
     let config = Config {
         produce_input_log: false,
@@ -476,9 +591,22 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
     Ok(())
 }
 
-/// Convert WAT to WASM
-/// Modified by the Nethermind team
-/// https://github.com/iden3/circom/blob/0ecb2c7d154ed8ab72105a9b711815633ca761c5/circom/src/compilation_user.rs#L141
+/// Convert WAT (WebAssembly Text) to WASM binary format
+///
+/// Parses a WAT file, encodes it as binary WASM, and writes the result.
+/// The original WAT file is removed after successful conversion.
+///
+/// Modified by the Nethermind team.
+/// Original source: https://github.com/iden3/circom/blob/0ecb2c7d154ed8ab72105a9b711815633ca761c5/circom/src/compilation_user.rs#L141
+///
+/// # Arguments
+///
+/// * `wat_file` - Path to the input WAT text file
+/// * `wasm_file` - Path to the output WASM binary file
+///
+/// # Returns
+///
+/// Returns `Ok(())` on success, or an error if parsing, encoding, or writing fails.
 fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
     use std::{
         fs::File,

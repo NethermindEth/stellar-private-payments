@@ -9,21 +9,31 @@ include "./poseidon2/poseidon2_hash.circom";
 include "./keypair.circom";
 
 // Bus definitions
+
+// Membership Proof
 bus MembershipProof(levels) {
-    signal leaf;
-    signal blinding;
-    signal pathElements[levels];
-    signal pathIndices;
+    signal leaf;                    // Leaf commitment
+    signal blinding;                // Blinding factor used in the leaf hash
+    signal pathElements[levels];    // Merkle path sibling elements required to go from leaf to root
+    signal pathIndices;             // Indices off the path that signal if the node is a left or right child
 }
 
+// Non-Membership Proof
 bus NonMembershipProof(levels) {
-    signal key;
-    signal siblings[levels];
-    signal oldKey;
-    signal oldValue;
-    signal isOld0;
+    signal key;                     // Key to be checked in the Sparse merkle Tree
+    signal siblings[levels];        // List of sibling nodes
+    signal oldKey;                  // Old key to be checked in the Sparse merkle Tree (might be 0)
+    signal oldValue;                // Old value to be checked in the Sparse merkle Tree (might be 0)
+    signal isOld0;                  // Boolean indicator that checks if the old value is 0
 }
 
+// Compliant Transaction Circuit
+// * nIns: Number of inputs
+// * nOuts: Number of outputs
+// * nMembershipProofs: Number of membership proofs for each input
+// * nNonMembershipProofs: Number of non-membership proofs for each input
+// * levels: Number of levels in the Merkle tree
+// * smtLevels: Number of levels in the Sparse Merkle Tree
 template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
     /** PUBLIC INPUTS **/
     signal input root;
@@ -197,10 +207,10 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
       }
     }
 
-    // verify amount invariant
+    // Verify amount invariant
     sumIns + publicAmount === sumOuts;
 
-    // optional safety constraint to make sure extDataHash cannot be changed
+    // Optional safety constraint to make sure extDataHash cannot be changed
     signal extDataSquare <== extDataHash * extDataHash;
        
 }

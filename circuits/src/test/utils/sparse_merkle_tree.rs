@@ -34,8 +34,20 @@ fn big_int_to_fp(x: &BigInt) -> FpBN256 {
     FpBN256::from(as_biguint)
 }
 
-/// Poseidon2 hash of two field elements. Optimized compression mode. For use with BigInts.
-/// Only to be used with inner nodes of the tree
+/// Poseidon2 hash of two field elements using optimized compression mode
+///
+/// Hash function for BigInt values, used for inner nodes of the sparse Merkle tree.
+/// Converts BigInt inputs to field elements, performs Poseidon2 compression,
+/// and converts the result back to BigInt.
+///
+/// # Arguments
+///
+/// * `left` - Left input as BigInt
+/// * `right` - Right input as BigInt
+///
+/// # Returns
+///
+/// Returns the hash result as a BigInt value.
 pub fn poseidon2_compression_sparse(left: &BigInt, right: &BigInt) -> BigInt {
     let left_fp = big_int_to_fp(left);
     let right_fp = big_int_to_fp(right);
@@ -45,8 +57,20 @@ pub fn poseidon2_compression_sparse(left: &BigInt, right: &BigInt) -> BigInt {
     fp_bn256_to_big_int(&perm)
 }
 
-/// Poseidon2 hash function for 3 inputs (key, value, 1) - hash1 for leaf nodes
-/// Mirrors circomlibjs "hash1" so a root generated here matches the JS prover/test tooling.
+/// Poseidon2 hash function for leaf nodes (key, value, 1)
+///
+/// Computes the hash for leaf nodes using Poseidon2 with three inputs.
+/// Mirrors circomlibjs "hash1" function so roots generated here match
+/// the JavaScript prover and test tooling.
+///
+/// # Arguments
+///
+/// * `key` - Leaf key as BigInt
+/// * `value` - Leaf value as BigInt
+///
+/// # Returns
+///
+/// Returns the leaf hash as a BigInt value.
 pub fn poseidon2_hash3_sparse(key: &BigInt, value: &BigInt) -> BigInt {
     let key_fp = big_int_to_fp(key);
     let value_fp = big_int_to_fp(value);
@@ -187,11 +211,24 @@ pub struct FindResult {
 
 impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     /// Create a new Sparse Merkle Tree
+    ///
+    /// # Arguments
+    ///
+    /// * `db` - Database implementation for storing tree nodes
+    /// * `root` - Initial root value (typically BigInt::from(0) for empty tree)
+    ///
+    /// # Returns
+    ///
+    /// Returns a new `SparseMerkleTree` instance.
     pub fn new(db: DB, root: BigInt) -> Self {
         Self { db, root }
     }
 
-    /// Get the current root
+    /// Get the current root of the tree
+    ///
+    /// # Returns
+    ///
+    /// Returns a reference to the current root BigInt value.
     pub fn root(&self) -> &BigInt {
         &self.root
     }
@@ -213,9 +250,20 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Update a key-value pair in the tree
+    ///
     /// Recomputes all nodes along the path and persists them in the backing database.
     /// This mirrors circomlibjs' update logic where we first delete the old leaf and then
     /// rebuild the path with the new value while tracking every intermediate node for witnesses.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Key to update
+    /// * `new_value` - New value to associate with the key
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(SMTResult)` containing the old and new roots, siblings, and operation
+    /// metadata, or an error if the key is not found or database operations fail.
     pub fn update(&mut self, key: &BigInt, new_value: &BigInt) -> Result<SMTResult> {
         let res_find = self.find(key)?;
         let mut res = SMTResult {
@@ -276,8 +324,18 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Delete a key from the tree
+    ///
     /// Handles both sparse branches (single child) and mixed branches (two populated children).
     /// The logic follows smt.js closely: collapse empty branches while keeping collision nodes.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Key to delete from the tree
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(SMTResult)` containing the old and new roots, siblings, and operation
+    /// metadata, or an error if the key does not exist or database operations fail.
     pub fn delete(&mut self, key: &BigInt) -> Result<SMTResult> {
         let res_find = self.find(key)?;
         if !res_find.found {
@@ -374,7 +432,18 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Insert a new key-value pair
+    ///
     /// Builds any missing intermediate nodes so the resulting tree mirrors the JS SMT.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Key to insert
+    /// * `value` - Value to associate with the key
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(SMTResult)` containing the old and new roots, siblings, and operation
+    /// metadata, or an error if the key already exists or database operations fail.
     pub fn insert(&mut self, key: &BigInt, value: &BigInt) -> Result<SMTResult> {
         let mut res = SMTResult {
             old_root: self.root.clone(),
@@ -477,8 +546,18 @@ impl<DB: SMTDatabase> SparseMerkleTree<DB> {
     }
 
     /// Find a key in the tree
+    ///
     /// Returns the Merkle siblings required to reconstruct the path in circuits/tests.
     /// Also surfaces whether the path ended in a leaf collision (non-existent key with same path).
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - Key to search for in the tree
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(FindResult)` containing whether the key was found, siblings along the path,
+    /// and collision information, or an error if database operations fail.
     pub fn find(&self, key: &BigInt) -> Result<FindResult> {
         let key_bits = self.split_bits(key);
         self._find(key, &key_bits, &self.root, 0)
@@ -586,7 +665,20 @@ fn finalize_proof(tree: &SparseMerkleTree<SMTMemDB>, key: &BigInt, max_levels: u
     }
 }
 
-/// Prepare an SMT proof after pre-populating the tree with values 0..100.
+/// Prepare an SMT proof after pre-populating the tree with values 0..100
+///
+/// Creates a new sparse Merkle tree, inserts values from 0 to 100 (or up to 2^max_levels),
+/// and generates a proof for the specified key. The proof includes siblings padded
+/// to max_levels with zeros.
+///
+/// # Arguments
+///
+/// * `key` - Key to generate a proof for
+/// * `max_levels` - Maximum number of tree levels (siblings will be padded to this length)
+///
+/// # Returns
+///
+/// Returns an `SMTProof` containing the proof data for the specified key.
 pub fn prepare_smt_proof(key: &BigInt, max_levels: usize) -> SMTProof {
     let db = SMTMemDB::new();
     let mut smt = SparseMerkleTree::new(db, BigInt::from(0u32));

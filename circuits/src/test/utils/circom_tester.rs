@@ -241,6 +241,23 @@ fn push_value(builder: &mut CircomBuilder<Fr>, path: &str, value: &InputValue) {
     }
 }
 
+/// Proves and verifies a Circom circuit, generating keys on each call
+///
+/// Convenience function that generates Groth16 keys and then proves and verifies
+/// the circuit. This is simpler to use but less efficient for repeated proofs
+/// since key generation is expensive. For multiple proofs with the same circuit,
+/// use `generate_keys` once and then call `prove_and_verify_with_keys` repeatedly.
+///
+/// # Arguments
+///
+/// * `wasm_path` - Path to the compiled WASM file for witness generation
+/// * `r1cs_path` - Path to the R1CS constraint system file
+/// * `inputs` - Circuit input values to use for proving
+///
+/// # Returns
+///
+/// Returns `Ok(CircomResult)` containing the verification result, proof, public inputs,
+/// and verifying key, or an error if key generation, proving, or verification fails.
 pub fn prove_and_verify(
     wasm_path: impl AsRef<Path>,
     r1cs_path: impl AsRef<Path>,
