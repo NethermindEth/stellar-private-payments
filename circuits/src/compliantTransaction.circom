@@ -24,7 +24,7 @@ bus NonMembershipProof(levels) {
     signal siblings[levels];        // List of sibling nodes
     signal oldKey;                  // Old key to be checked in the Sparse merkle Tree (might be 0)
     signal oldValue;                // Old value to be checked in the Sparse merkle Tree (might be 0)
-    signal isOld0;                  // Boolean indicator that checks if the old value is 0
+    signal isOld0;                  // Boolean indicator to signal if the oldKey should be used or not (0 for not using it)
 }
 
 // Compliant Transaction Circuit
