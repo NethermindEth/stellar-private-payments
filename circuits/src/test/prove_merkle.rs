@@ -1,12 +1,15 @@
 use super::{
-    circom_tester::{InputValue, prove_and_verify},
     merkle_tree::{merkle_proof, merkle_root},
     utils::general::scalar_to_bigint,
 };
 
+use crate::test::utils::circom_tester::{
+    CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys,
+};
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
-use std::{collections::HashMap, env, path::PathBuf};
+use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_case(
@@ -15,6 +18,7 @@ fn run_case(
     leaves: Vec<Scalar>,
     leaf_index: usize,
     expected_levels: usize,
+    keys: &CircuitKeys,
 ) -> Result<()> {
     // Compute root and proof in Rust
     let root_scalar = merkle_root(leaves.clone());
@@ -36,15 +40,15 @@ fn run_case(
         .collect();
     let path_idx = BigInt::from(path_indices_u64);
 
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert("leaf".into(), InputValue::Single(leaf_val));
-    inputs.insert("root".into(), InputValue::Single(root_val.clone())); // public
-    inputs.insert("pathElements".into(), InputValue::Array(path_elems));
-    inputs.insert("pathIndices".into(), InputValue::Single(path_idx));
+    let mut inputs = Inputs::new();
+    inputs.set("leaf", leaf_val);
+    inputs.set("root", &root_val);
+    inputs.set("pathElements", path_elems);
+    inputs.set("pathIndices", path_idx);
 
     // Prove and verify
-    let res =
-        prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
+    let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, keys)
+        .context("Failed to prove and verify circuit")?;
 
     if !res.verified {
         anyhow::bail!("Proof did not verify");
@@ -66,16 +70,7 @@ fn run_case(
 #[tokio::test]
 async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/merkleProof_5_js/merkleProof_5.wasm");
-    let r1cs = out_dir.join("merkleProof_5.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("merkleProof_5")?;
 
     // === TEST MATRIX (5 levels => 32 leaves) ===
     const LEVELS: usize = 5;
@@ -107,15 +102,17 @@ async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // Indices to try (cover left/right edges and middle)
     let indices = [0usize, 1, 7, 8, 15, 16, 23, 31];
 
+    let keys = generate_keys(&wasm, &r1cs)?;
+
     // Run cases
     for &idx in &indices {
-        run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case A failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case B failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case C failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS)
+        run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS, &keys)
             .with_context(|| format!("Case D failed at index {idx}"))?;
     }
 

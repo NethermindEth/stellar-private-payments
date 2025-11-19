@@ -1,30 +1,24 @@
 use super::{
-    circom_tester::{InputValue, prove_and_verify},
+    circom_tester::prove_and_verify,
     keypair::{derive_public_key, sign},
-    utils::general::scalar_to_bigint,
 };
 
+use crate::test::utils::circom_tester::Inputs;
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
-use std::{collections::HashMap, env, path::PathBuf};
+use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {
     // compute expected in Rust
     let expected_pk = derive_public_key(private_key);
 
-    // build inputs, including the expected value
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert(
-        "privateKey".into(),
-        InputValue::Single(scalar_to_bigint(private_key)),
-    );
-    inputs.insert(
-        "expectedPublicKey".into(),
-        InputValue::Single(scalar_to_bigint(expected_pk)),
-    );
+    let mut inputs = Inputs::new();
+    inputs.set("privateKey", private_key);
+    inputs.set("expectedPublicKey", expected_pk);
 
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
-    anyhow::ensure!(res.verified, "Keypair proof did not verify");
+    assert!(res.verified, "Keypair proof did not verify");
     Ok(())
 }
 
@@ -38,24 +32,11 @@ fn run_signature_case(
     // compute expected in Rust
     let expected_sig = sign(private_key, commitment, merkle_path);
 
-    //inputs incl. expected
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
-    inputs.insert(
-        "privateKey".into(),
-        InputValue::Single(scalar_to_bigint(private_key)),
-    );
-    inputs.insert(
-        "commitment".into(),
-        InputValue::Single(scalar_to_bigint(commitment)),
-    );
-    inputs.insert(
-        "merklePath".into(),
-        InputValue::Single(scalar_to_bigint(merkle_path)),
-    );
-    inputs.insert(
-        "expectedSig".into(),
-        InputValue::Single(scalar_to_bigint(expected_sig)),
-    );
+    let mut inputs = Inputs::new();
+    inputs.set("privateKey", private_key);
+    inputs.set("commitment", commitment);
+    inputs.set("merklePath", merkle_path);
+    inputs.set("expectedSig", expected_sig);
 
     let res = prove_and_verify(wasm, r1cs, &inputs)?;
     anyhow::ensure!(res.verified, "Signature proof did not verify");
@@ -65,16 +46,7 @@ fn run_signature_case(
 #[tokio::test]
 async fn test_keypair_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/keypair_test_js/keypair_test.wasm");
-    let r1cs = out_dir.join("keypair_test.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("keypair_test")?;
 
     // Simple test set
     let cases: [u64; 8] = [0, 1, 2, 7, 8, 15, 16, 23];
@@ -91,16 +63,7 @@ async fn test_keypair_test_matrix() -> anyhow::Result<()> {
 #[tokio::test]
 async fn test_signature_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/signature_test_js/signature_test.wasm");
-    let r1cs = out_dir.join("signature_test.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("signature_test")?;
 
     let triples: [(u64, u64, u64); 8] = [
         (0, 0, 0),

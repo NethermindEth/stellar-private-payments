@@ -31,7 +31,7 @@ impl Rng64 {
     }
 }
 
-// Generate a random-looking commitment (not tied to a real privkey; fine for filler leaves)
+/// Generate a random-looking commitment (not tied to a real privkey; fine for filler leaves)
 fn rand_commitment(rng: &mut Rng64) -> Scalar {
     let amount = Scalar::from(rng.next() % 1_000_000); // keep small-ish
     let pubkey = Scalar::from(rng.next());
