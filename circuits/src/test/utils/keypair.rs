@@ -13,7 +13,7 @@ use super::general::{poseidon2_hash2, poseidon2_hash3};
 /// * `private_key` - Private key scalar value
 ///
 /// # Returns
-/// 
+///
 /// Returns the derived public key as a scalar value.
 pub fn derive_public_key(private_key: Scalar) -> Scalar {
     poseidon2_hash2(private_key, Scalar::zero(), Some(Scalar::from(3))) // We use 3 as domain separation for Keypair
