@@ -7,7 +7,7 @@ We ask you to please not publicly disclose any details of the vulnerability unti
 
 **Please do not report security vulnerabilities through public GitHub issues.**
 
-Instead, please use GitHub's <!-- TODO(template) update repository url --> [report vulnerability](https://github.com/NethermindEth/rust-template/security/advisories/new) tool to create a draft advisory.
+Instead, please use GitHub's  [report vulnerability](https://github.com/NethermindEth/stellar-private-transactions/security/advisories/new) tool to create a draft advisory.
 Please include as much information as you can provide (listed below) to help us better understand the nature and scope of the possible issue:
 
 * Type of issue.
@@ -16,13 +16,7 @@ Please include as much information as you can provide (listed below) to help us 
 * Step-by-step instructions to reproduce the issue and any additional configuration that might be needed.
 * Severity of the issue.
 
-Alternatively, please email <!-- TODO(template) update the email address if needed --> [security@nethermind.io](mailto:security@nethermind.io).
-In case of using the email, please also specify the affected repository.
-
-We will try to address your email as soon as possible.
-But if you have not received an answer after a couple of days, please follow up via email to ensure we received your original message.
-
 ## Fixes
 
 We will release fixes for verified security vulnerabilities.
-We expect to publish vulnerabilities using GitHub <!-- TODO(template) update repo information --> [security advisories](https://github.com/NethermindEth/rust-template/security/advisories).
+We expect to publish vulnerabilities using GitHub [security advisories](https://github.com/NethermindEth/stellar-private-transactions/security/advisories).
