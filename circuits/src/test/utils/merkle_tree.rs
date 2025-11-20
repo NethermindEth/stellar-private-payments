@@ -2,14 +2,35 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use super::general::poseidon2_compression;
 
-/// Compute the Merkle parent from ordered children (left, right).
+/// Compute the Merkle parent from ordered children (left, right)
+///
+/// Uses Poseidon2 compression to combine two child nodes into a parent node.
+///
+/// # Arguments
+///
+/// * `left` - Left child node scalar value
+/// * `right` - Right child node scalar value
+///
+/// # Returns
+///
+/// Returns the parent node scalar value.
 #[inline]
 pub fn merkle_parent(left: Scalar, right: Scalar) -> Scalar {
     poseidon2_compression(left, right)
 }
 
-/// Build a Merkle root from a full list of leaves (length must be a power of
-/// 2).
+/// Build a Merkle root from a full list of leaves
+///
+/// Computes the Merkle root by repeatedly hashing pairs of nodes until
+/// a single root remains.
+///
+/// # Arguments
+///
+/// * `leaves` - Vector of leaf scalar values (length must be a power of 2)
+///
+/// # Returns
+///
+/// Returns the computed Merkle root scalar value.
 pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     while leaves.len() > 1 {
         let mut next = Vec::with_capacity(leaves.len() / 2);
@@ -21,8 +42,23 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     leaves[0]
 }
 
-/// Compute the Merkle path (siblings) and path index bits (LSB-first) for a
-/// given leaf index. Returns (path_elements, path_indices, levels).
+/// Compute the Merkle path (siblings) and path index bits for a given leaf index
+///
+/// Generates the Merkle proof for a leaf at the given index, including all
+/// sibling nodes along the path to the root and the path indices encoded as
+/// a bit pattern.
+///
+/// # Arguments
+///
+/// * `leaves` - Array of leaf scalar values (length must be a power of 2)
+/// * `index` - Index of the leaf to generate a proof for
+///
+/// # Returns
+///
+/// Returns a tuple containing:
+/// - `path_elements`: Vector of sibling scalar values along the path
+/// - `path_indices`: Path indices encoded as a u64 bit pattern
+/// - `levels`: Number of levels in the tree
 pub fn merkle_proof(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, usize) {
     assert!(!leaves.is_empty() && leaves.len().is_power_of_two());
     let mut level_nodes = leaves.to_vec();

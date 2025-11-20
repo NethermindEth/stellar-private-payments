@@ -19,7 +19,7 @@ template TreeLayer(height) {
   }
 }
 
-// Builds a merkle tree from leaf array
+// Builds a merkle tree root from leaves array
 template MerkleTree(levels) {
   signal input leaves[1 << levels];
   signal output root;

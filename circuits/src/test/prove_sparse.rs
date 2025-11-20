@@ -7,6 +7,21 @@ use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::path::PathBuf;
 
+/// Run a sparse Merkle tree test case
+///
+/// Tests the sparse Merkle tree circuit by preparing an SMT proof (either inclusion
+/// or non-inclusion) and verifying the circuit correctly validates the proof.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `queried_key` - Key to query in the sparse Merkle tree
+/// * `max_levels` - Maximum number of levels in the tree
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
 fn run_case(wasm: &PathBuf, r1cs: &PathBuf, queried_key: BigInt, max_levels: usize) -> Result<()> {
     let smt_proof = prepare_smt_proof(&queried_key, max_levels);
 

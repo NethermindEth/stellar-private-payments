@@ -9,6 +9,20 @@ use anyhow::{Context, Result};
 use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
+/// Run a keypair test case
+///
+/// Tests the keypair circuit by deriving a public key from a private key
+/// and verifying the circuit produces the expected result.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `private_key` - Private key scalar value to test
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
 fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {
     // compute expected in Rust
     let expected_pk = derive_public_key(private_key);
@@ -22,6 +36,22 @@ fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Resu
     Ok(())
 }
 
+/// Run a signature test case
+///
+/// Tests the signature circuit by generating a signature from a private key,
+/// commitment, and merkle path, then verifying the circuit produces the expected result.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `private_key` - Private key scalar value
+/// * `commitment` - Commitment scalar value
+/// * `merkle_path` - Merkle path scalar value
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
 fn run_signature_case(
     wasm: &PathBuf,
     r1cs: &PathBuf,

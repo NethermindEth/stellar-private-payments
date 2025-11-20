@@ -2,8 +2,9 @@ pragma circom 2.2.2;
 // Original circuits from https://github.com/iden3/circomlib.git
 // Adapted and modified by Nethermind
 
-/******
+include "./smthash_poseidon2.circom";
 
+/*
 SMTVerifierLevel
 This circuit has 1 hash
 Outputs according to the state.
@@ -17,10 +18,7 @@ inew         new1leaf
 na           0
 
 H' is the Hash function with the inputs shifted accordingly.
-*****/
-
-include "./smthash_poseidon2.circom";
-
+*/
 template SMTVerifierLevel() {
     signal input st_top;
     signal input st_i0;

@@ -2,17 +2,6 @@ pragma circom 2.2.2;
 // Original circuits from https://github.com/iden3/circomlib.git
 // Adapted and modified by Nethermind
 
-/*
-
-SMTVerifier is a component to verify inclusion/exclusion of an element in the tree
-
-
-fnc:  0 -> VERIFY INCLUSION
-      1 -> VERIFY NOT INCLUSION
-
- */
-
-
 include "../circomlib/circuits/gates.circom";
 include "../circomlib/circuits/bitify.circom";
 include "../circomlib/circuits/comparators.circom";
@@ -22,6 +11,11 @@ include "../circomlib/circuits/smt/smtverifiersm.circom";
 include "./smtverifierlevel.circom";
 include "./smthash_poseidon2.circom";
 
+/*
+SMTVerifier is a component to verify inclusion/exclusion of an element in the sparse merkle tree.
+fnc:  0 -> VERIFY INCLUSION
+      1 -> VERIFY NOT INCLUSION
+ */
 template SMTVerifier(nLevels) {
     signal input enabled;
     signal input root;

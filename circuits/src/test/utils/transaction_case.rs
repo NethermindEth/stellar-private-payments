@@ -53,8 +53,23 @@ pub struct TransactionWitness {
     pub path_elements_flat: Vec<BigInt>,
 }
 
-/// Builds the witnesses needed to exercise a `TxCase`.
-/// The helper populates commitment leaves, derives Merkle proofs, and computes nullifiers.
+/// Builds the witnesses needed to exercise a `TxCase`
+///
+/// Populates commitment leaves in the Merkle tree, derives Merkle proofs for each
+/// input note, and computes nullifiers. This prepares all the witness data
+/// required for proving a transaction.
+///
+/// # Arguments
+///
+/// * `case` - Transaction case containing input and output notes
+/// * `leaves` - Initial leaves vector (will be modified with commitments)
+/// * `expected_levels` - Expected number of levels in the Merkle tree
+///
+/// # Returns
+///
+/// Returns `Ok(TransactionWitness)` containing the root, public keys, nullifiers,
+/// path indices, and flattened path elements, or an error if the tree depth
+/// doesn't match expectations.
 pub fn prepare_transaction_witness(
     case: &TxCase,
     mut leaves: Vec<Scalar>,
@@ -104,7 +119,21 @@ pub fn prepare_transaction_witness(
     })
 }
 
-/// Populates Circom tester inputs for compliant and regular tx.
+/// Populates Circom tester inputs for compliant and regular transactions
+///
+/// Builds the input structure required by the Circom circuit tester from a
+/// transaction case and its witness data. Includes all public and private
+/// inputs needed for proving.
+///
+/// # Arguments
+///
+/// * `case` - Transaction case containing input and output notes
+/// * `witness` - Transaction witness containing Merkle proofs and nullifiers
+/// * `public_amount` - Public amount scalar value (net public input/output)
+///
+/// # Returns
+///
+/// Returns an `Inputs` structure populated with all circuit inputs.
 pub fn build_base_inputs(
     case: &TxCase,
     witness: &TransactionWitness,
@@ -173,7 +202,24 @@ pub fn build_base_inputs(
     inputs
 }
 
-/// Runs a Circom proof/verify cycle for a transaction test case with the given public inputs.
+/// Runs a Circom proof/verify cycle for a transaction test case
+///
+/// Prepares the transaction witness, builds circuit inputs, and executes
+/// a proof generation and verification cycle.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `case` - Transaction case to prove
+/// * `leaves` - Initial leaves vector for the Merkle tree
+/// * `public_amount` - Public amount scalar value
+/// * `expected_levels` - Expected number of levels in the Merkle tree
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof is generated and verified successfully,
+/// or an error if witness preparation, proving, or verification fails.
 pub fn prove_transaction_case(
     wasm: &PathBuf,
     r1cs: &PathBuf,

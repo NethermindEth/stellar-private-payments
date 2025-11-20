@@ -12,6 +12,25 @@ use num_bigint::BigInt;
 use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
+/// Run a Merkle proof test case
+///
+/// Tests the Merkle proof circuit by computing a Merkle root and proof in Rust,
+/// then verifying the circuit produces matching results. Uses precomputed keys
+/// for efficiency when running multiple test cases.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `leaves` - Vector of leaf scalar values
+/// * `leaf_index` - Index of the leaf to generate a proof for
+/// * `expected_levels` - Expected number of levels in the tree
+/// * `keys` - Precomputed circuit keys for efficient proving
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies and the computed root matches the circuit output,
+/// or an error if verification fails or roots don't match.
 fn run_case(
     wasm: &PathBuf,
     r1cs: &PathBuf,
