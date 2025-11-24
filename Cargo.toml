@@ -13,7 +13,7 @@ license = "Apache-2.0" # TODO(template) update license if needed
 publish = false
 
 [workspace.dependencies]
-soroban-sdk = "23.0.2"
+soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat"] }
 
 [workspace.lints.rust]
 missing_docs = "deny"
