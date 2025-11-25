@@ -7,4 +7,4 @@ repository.workspace = true
 license.workspace = true
 
 [dependencies]
-zkhash = { path = "../poseidon2" }
+zkhash = { workspace = true }
