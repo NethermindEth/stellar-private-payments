@@ -9,25 +9,31 @@ include "./poseidon2/poseidon2_hash.circom";
 include "./keypair.circom";
 
 // Bus definitions
+
+// Membership Proof
 bus MembershipProof(levels) {
-    signal leaf;
-    signal pk;
-    signal blinding;
-    signal pathElements[levels];
-    signal pathIndices;
+    signal leaf;                    // Leaf commitment
+    signal blinding;                // Blinding factor used in the leaf hash
+    signal pathElements[levels];    // Merkle path sibling elements required to go from leaf to root
+    signal pathIndices;             // Indices off the path that signal if the node is a left or right child
 }
 
+// Non-Membership Proof
 bus NonMembershipProof(levels) {
-    signal key;
-    signal value;
-    signal pk;
-    signal blinding;
-    signal siblings[levels];
-    signal oldKey;
-    signal oldValue;
-    signal isOld0;
+    signal key;                     // Key to be checked in the Sparse merkle Tree
+    signal siblings[levels];        // List of sibling nodes
+    signal oldKey;                  // Old key to be checked in the Sparse merkle Tree (might be 0)
+    signal oldValue;                // Old value to be checked in the Sparse merkle Tree (might be 0)
+    signal isOld0;                  // Boolean indicator to signal if the oldKey should be used or not (0 for not using it)
 }
 
+// Compliant Transaction Circuit
+// * nIns: Number of inputs
+// * nOuts: Number of outputs
+// * nMembershipProofs: Number of membership proofs for each input
+// * nNonMembershipProofs: Number of non-membership proofs for each input
+// * levels: Number of levels in the Merkle tree
+// * smtLevels: Number of levels in the Sparse Merkle Tree
 template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
     /** PUBLIC INPUTS **/
     signal input root;
@@ -63,7 +69,6 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
     component inTree[nIns];
     component inCheckRoot[nIns];
     component complianceMembershipHasher[nIns][nMembershipProofs];
-    component complianceNonMembershipHasher[nIns][nNonMembershipProofs];
     component membershipVerifiers[nIns][nMembershipProofs];
     component nonMembershipVerifiers[nIns][nNonMembershipProofs];
     component n2bs[nIns][nNonMembershipProofs];
@@ -124,11 +129,10 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             membershipVerifiers[tx][i] = MerkleProof(levels);
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
             complianceMembershipHasher[tx][i] = Poseidon2(2);
-            complianceMembershipHasher[tx][i].inputs[0] <== membershipProofs[tx][i].pk;
+            complianceMembershipHasher[tx][i].inputs[0] <== inKeypair[tx].publicKey;
             complianceMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
             complianceMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
             membershipProofs[tx][i].leaf === complianceMembershipHasher[tx][i].out;
-            membershipProofs[tx][i].pk === inKeypair[tx].publicKey;
             
             // Verify Membership
             membershipVerifiers[tx][i].leaf <== membershipProofs[tx][i].leaf;
@@ -147,14 +151,8 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
             nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
             
-            // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceNonMembershipHasher[tx][i] = Poseidon2(2); 
-            complianceNonMembershipHasher[tx][i].inputs[0] <== nonMembershipProofs[tx][i].pk;
-            complianceNonMembershipHasher[tx][i].inputs[1] <== nonMembershipProofs[tx][i].blinding;
-            complianceNonMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for non-membership proof
-            
-            nonMembershipProofs[tx][i].value === complianceNonMembershipHasher[tx][i].out;
-            nonMembershipProofs[tx][i].pk === inKeypair[tx].publicKey;
+            // Check that the leaf is under the same public key as the valid transaction tree
+            nonMembershipProofs[tx][i].key === inKeypair[tx].publicKey;
             
             for (var j = 0; j < smtLevels; j++) {
                 nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
@@ -168,7 +166,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
             
             nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
             nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
-            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].value; 
+            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].key; // We do not actually use value. We only need to check that the key is not present in the tree.
             nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
         }
    
@@ -209,10 +207,10 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
       }
     }
 
-    // verify amount invariant
+    // Verify amount invariant
     sumIns + publicAmount === sumOuts;
 
-    // optional safety constraint to make sure extDataHash cannot be changed
+    // Optional safety constraint to make sure extDataHash cannot be changed
     signal extDataSquare <== extDataHash * extDataHash;
        
 }

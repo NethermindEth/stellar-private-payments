@@ -5,6 +5,7 @@ include "poseidon2_perm.circom";
 // Please note that we expose ONLY fixed-sized hashes.
 // As it is common for most ZK applications (e.g. the default implementation for Poseidon1 in circomlib)
 // We do not provide the full sponge construction, but it can be built from the exposed permutation.
+// Poseidon2 Hashing
 template Poseidon2(n) {
   signal input inputs[n];
   signal input domainSeparation; // Additional capacity bit

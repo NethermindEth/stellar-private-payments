@@ -13,7 +13,6 @@ Utxo structure:
     pubkey,
     blinding, // random number
 }
-
 commitment = hash(amount, pubKey, blinding)
 nullifier = hash(commitment, merklePath, sign(privKey, commitment, merklePath))
 */

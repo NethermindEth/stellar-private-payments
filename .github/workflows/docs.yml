@@ -1,12 +1,9 @@
 name: Docs
 
-# TODO(template)
-# GH pages seems to work properly for public repos
 on:
   workflow_dispatch:
 
 jobs:
-  # TODO(template) remove docs publishing, when the crate is published to crates.io
   docs:
     permissions:
       contents: write
@@ -26,12 +23,8 @@ jobs:
       - name: Clean docs folder
         run: cargo clean --doc
 
-      # Documentation with Latex support
-      # TODO(template) if Latex is not needed
-      # just remove katex-header.html at the root and RUSTDOCFLAGS here
-      # TODO(template) update the crate name
       - name: Build documentation
-        run: RUSTDOCFLAGS="--html-in-header katex-header.html" cargo doc --no-deps -p template_crate
+        run: RUSTDOCFLAGS="--html-in-header" cargo doc --no-deps -p circuits
 
       - name: Remove lock file
         run: rm target/doc/.lock

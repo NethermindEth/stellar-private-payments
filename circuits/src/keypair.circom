@@ -7,7 +7,6 @@ include "./poseidon2/poseidon2_hash.circom";
 // Since we don't use signatures, the keypair can be based on a simple hash.
 // Checks if the public key is the hash of the private key.
 template Keypair() {
-
     /** PRIVATE INPUTS **/
     signal input privateKey;
     /** PUBLIC OUTPUTS **/

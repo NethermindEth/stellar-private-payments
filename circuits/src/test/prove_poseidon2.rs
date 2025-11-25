@@ -1,10 +1,26 @@
 //! Poseidon2 circuit test
 
-use super::circom_tester::{InputValue, prove_and_verify};
+use super::circom_tester::prove_and_verify;
+use crate::test::utils::circom_tester::Inputs;
+use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
-use std::{collections::HashMap, path::PathBuf};
+use std::path::PathBuf;
 
+/// Run a Poseidon2 hash test case
+///
+/// Tests the Poseidon2 hash circuit with two inputs and a domain separation value.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `inputs_pair` - Tuple of two u64 input values to test the hash function
+/// * `domain_separation` - Domain separation value
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
 fn run_case_hash(
     wasm: &PathBuf,
     r1cs: &PathBuf,
@@ -12,14 +28,11 @@ fn run_case_hash(
     domain_separation: u64,
 ) -> Result<()> {
     // Prepare circuit inputs
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
+    let mut inputs = Inputs::new();
     let value_inputs: Vec<BigInt> = vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
     let domain_separation: BigInt = BigInt::from(domain_separation);
-    inputs.insert("inputs".into(), InputValue::Array(value_inputs));
-    inputs.insert(
-        "domainSeparation".into(),
-        InputValue::Single(domain_separation),
-    );
+    inputs.set("inputs", value_inputs);
+    inputs.set("domainSeparation", domain_separation);
 
     let res =
         prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
@@ -32,14 +45,26 @@ fn run_case_hash(
     Ok(())
 }
 
+/// Run a Poseidon2 compression test case
+///
+/// Tests the Poseidon2 compression circuit with two input values.
+///
+/// # Arguments
+///
+/// * `wasm` - Path to the compiled WASM file
+/// * `r1cs` - Path to the R1CS constraint system file
+/// * `inputs_pair` - Tuple of two u64 input values to test the compression function
+///
+/// # Returns
+///
+/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
 fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
     // Prepare circuit inputs
-    let mut inputs: HashMap<String, InputValue> = HashMap::new();
+    let mut inputs = Inputs::new();
     let value_inputs: Vec<BigInt> = vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
-    inputs.insert("inputs".into(), InputValue::Array(value_inputs));
+    inputs.set("inputs", value_inputs);
 
-    let res =
-        prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
+    let res = prove_and_verify(wasm, r1cs, &inputs)?;
 
     assert!(
         res.verified,
@@ -52,16 +77,7 @@ fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) ->
 #[tokio::test]
 async fn test_poseidon2_hash_2_matrix() -> Result<()> {
     // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/poseidon2_hash_2_js/poseidon2_hash_2.wasm");
-    let r1cs = out_dir.join("poseidon2_hash_2.r1cs");
-
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
-    }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
+    let (wasm, r1cs) = load_artifacts("poseidon2_hash_2")?;
 
     // === TEST MATRIX ===
     let cases: &[((u64, u64), u64)] = &[
