@@ -15,5 +15,5 @@ doctest = false
 soroban-sdk.workspace = true
 
 [dev-dependencies]
-# Also inherit for dev, but add the testing feature here (no version!)
-soroban-sdk = { workspace = true, features = ["testutils"] }
+soroban-sdk = { workspace = true }
+soroban-utils = { path = "../soroban-utils" }
