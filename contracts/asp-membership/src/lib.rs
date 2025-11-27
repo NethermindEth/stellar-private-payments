@@ -1,7 +1,7 @@
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
-use soroban_utils::{get_zeroes, hash_pair as hash_pair_util};
+use soroban_utils::{get_zeroes, poseidon2_compress};
 
 #[contracttype]
 #[derive(Clone, Debug)]
@@ -66,7 +66,7 @@ impl ASPMembership {
     }
 
     pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
-        hash_pair_util(env, left, right)
+        poseidon2_compress(env, left, right)
     }
 
     pub fn insert_leaf(env: Env, admin: Address, leaf: U256) -> Result<(), Error> {
@@ -88,12 +88,12 @@ impl ASPMembership {
                 let is_right = current_index & 1 == 1;
                 if is_right {
                     let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
-                    current_hash = hash_pair_util(&env, left, current_hash);
+                    current_hash = poseidon2_compress(&env, left, current_hash);
                 } else {
                     // We store the filled subtree at the current level with the current hash
                     store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
                     let zero_val = zeros.get(lvl).unwrap();
-                    current_hash = hash_pair_util(&env, current_hash, zero_val);
+                    current_hash = poseidon2_compress(&env, current_hash, zero_val);
                 }
                 // Divide the index by 2 to move up in the tree
                 current_index >>= 1;
