@@ -116,11 +116,11 @@ impl PoolContract {
         let zero = I256::from_i32(env, 0);
 
         // Must be >= 0
-        assert!(*v >= zero, "{} must be >= 0", context);
+        assert!(*v >= zero, "{context} must be >= 0",);
 
         // Must fit into i128 (token amount type)
         v.to_i128().unwrap_or_else(|| {
-            panic!("{} does not fit into i128", context);
+            panic!("{context} does not fit into i128",);
         })
     }
 

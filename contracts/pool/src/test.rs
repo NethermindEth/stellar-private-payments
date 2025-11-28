@@ -1,40 +1,13 @@
-#![cfg(test)]
-
 use crate::merkle_with_history::MerkleTreeWithHistoryClient;
 use crate::merkle_with_history::{DataKey as MerkleKey, MerkleTreeWithHistory};
 use crate::{DataKey, ExtData, HASH_SIZE, HashBytes, PoolContract, PoolContractClient, Proof};
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{
-    Address, Bytes, BytesN, Env, TryFromVal, U256, Val, Vec, symbol_short,
-    testutils::{Address as _, Events as _},
-};
-use soroban_sdk::{I256, Map, Symbol, contract, contractimpl};
+use soroban_sdk::{Address, Bytes, BytesN, Env, U256, Vec, testutils::Address as _};
+use soroban_sdk::{I256, Map, contract, contractimpl};
 
 // Helper to get 32 bytes
 fn mk_bytesn32(env: &Env, fill: u8) -> HashBytes {
     BytesN::from_array(env, &[fill; HASH_SIZE])
-}
-
-// non-empty placeholder proof
-fn mk_proof(env: &Env) -> Proof {
-    Proof {
-        proof: {
-            let mut b = Bytes::new(env);
-            b.push_back(1u8);
-            b
-        },
-        root: mk_bytesn32(env, 0xAA),
-        input_nullifiers: {
-            let mut v: Vec<HashBytes> = Vec::new(env);
-            v.push_back(mk_bytesn32(env, 0x11));
-            v.push_back(mk_bytesn32(env, 0x22));
-            v
-        },
-        output_commitment0: mk_bytesn32(env, 0x33),
-        output_commitment1: mk_bytesn32(env, 0x44),
-        public_amount: U256::from_u32(env, 0),
-        ext_data_hash: mk_bytesn32(env, 0x55),
-    }
 }
 
 fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32, fee: u32) -> ExtData {

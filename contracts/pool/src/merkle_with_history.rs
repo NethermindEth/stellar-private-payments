@@ -1,5 +1,3 @@
-#![no_std]
-
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256, Vec, contract, contractimpl, contracttype};
 
 use soroban_utils::{get_zeroes, hash_pair};
