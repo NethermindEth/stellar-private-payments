@@ -81,7 +81,12 @@ unused = 'deny'
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
-allow-git = []
+allow-git = [
+    "https://github.com/stellar/rs-soroban-sdk",
+    "https://github.com/stellar/rs-soroban-env",
+    "https://github.com/stellar/wasmi",
+    "https://github.com/stellar/rs-stellar-xdr"
+]
 
 [sources.allow-org]
 github = ["NethermindEth"]

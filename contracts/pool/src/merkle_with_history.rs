@@ -1,6 +1,6 @@
 #![no_std]
 
-use soroban_sdk::{contract, contractimpl, contracttype, Address, Bytes, BytesN, Env, Vec, U256};
+use soroban_sdk::{Address, Bytes, BytesN, Env, U256, Vec, contract, contractimpl, contracttype};
 
 use soroban_utils::{get_zeroes, hash_pair};
 
@@ -32,11 +32,7 @@ impl MerkleTreeWithHistory {
         let storage = env.storage().instance();
 
         // Prevent re-init
-        if storage
-            .get::<DataKey, u32>(&DataKey::Levels)
-            .unwrap_or(0)
-            != 0
-        {
+        if storage.get::<DataKey, u32>(&DataKey::Levels).unwrap_or(0) != 0 {
             panic!("already initialized");
         }
 
@@ -72,25 +68,19 @@ impl MerkleTreeWithHistory {
         let storage = env.storage().instance();
 
         // only the initializing contract may mutate
-        let controller: Address = storage
-            .get(&DataKey::Controller)
-            .expect("not initialized");
+        let controller: Address = storage.get(&DataKey::Controller).expect("not initialized");
         assert_eq!(
             controller,
             env.current_contract_address(),
             "unauthorized merkle access"
         );
 
-        let levels: u32 = storage
-            .get(&DataKey::Levels)
-            .expect("tree not initialized");
+        let levels: u32 = storage.get(&DataKey::Levels).expect("tree not initialized");
 
         let mut next_index: u32 = storage.get(&DataKey::NextIndex).unwrap_or(0);
 
         // require(_nextIndex != uint32(2)**levels, "Merkle tree is full...")
-        let max_leaves = 1u32
-            .checked_shl(levels)
-            .expect("levels too large");
+        let max_leaves = 1u32.checked_shl(levels).expect("levels too large");
         assert_ne!(
             next_index, max_leaves,
             "Merkle tree is full. No more leaves can be added"
@@ -112,9 +102,7 @@ impl MerkleTreeWithHistory {
                 // even index -> new hash goes on the left, zero on the right
                 left = current_level_hash.clone();
 
-                let z_u256: U256 = zeros_u256
-                    .get(level)
-                    .expect("zero value missing");
+                let z_u256: U256 = zeros_u256.get(level).expect("zero value missing");
                 right = Self::u256_to_bytesn(&env, &z_u256);
 
                 // filledSubtrees[level] = currentLevelHash;
@@ -133,8 +121,7 @@ impl MerkleTreeWithHistory {
         }
 
         // Update root history
-        let mut current_root_index: u32 =
-            storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
+        let mut current_root_index: u32 = storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
         let new_root_index = (current_root_index + 1) % ROOT_HISTORY_SIZE;
 
         current_root_index = new_root_index;
@@ -156,8 +143,7 @@ impl MerkleTreeWithHistory {
 
         let storage = env.storage().instance();
 
-        let current_root_index: u32 =
-            storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
+        let current_root_index: u32 = storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
 
         let mut i = current_root_index;
 
@@ -184,8 +170,7 @@ impl MerkleTreeWithHistory {
 
     pub fn get_last_root(env: Env) -> BytesN<32> {
         let storage = env.storage().instance();
-        let current_root_index: u32 =
-            storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
+        let current_root_index: u32 = storage.get(&DataKey::CurrentRootIndex).unwrap_or(0);
 
         storage
             .get::<DataKey, BytesN<32>>(&DataKey::Root(current_root_index))
@@ -208,7 +193,6 @@ impl MerkleTreeWithHistory {
         // [u8; 32] -> BytesN<32>
         BytesN::from_array(env, &arr)
     }
-
 
     fn hash_left_right(env: &Env, left: &BytesN<32>, right: &BytesN<32>) -> BytesN<32> {
         let l = Self::bytesn_to_u256(env, left);

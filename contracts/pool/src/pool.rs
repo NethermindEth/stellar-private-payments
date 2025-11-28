@@ -1,11 +1,11 @@
 #![allow(clippy::too_many_arguments)]
 
-use soroban_sdk::{
-    contract, contractevent, contractimpl, contracttype, Address, Bytes, BytesN, Env,
-    I256, Map, U256, Vec,
-};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{
+    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractevent, contractimpl,
+    contracttype,
+};
 
 use crate::merkle_with_history::MerkleTreeWithHistory;
 pub const HASH_SIZE: usize = 32;
@@ -87,7 +87,9 @@ impl PoolContract {
             panic!("already initialized");
         }
         env.storage().persistent().set(&DataKey::Token, &token);
-        env.storage().persistent().set(&DataKey::Verifier, &verifier);
+        env.storage()
+            .persistent()
+            .set(&DataKey::Verifier, &verifier);
         env.storage()
             .persistent()
             .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
@@ -227,7 +229,10 @@ impl PoolContract {
         if ext_data.ext_amount > zero {
             let deposit_u = Self::i256_abs_to_u256(&env, &ext_data.ext_amount);
             let max = Self::get_maximum_deposit(&env);
-            assert!(deposit_u <= max, "amount is larger than maximumDepositAmount");
+            assert!(
+                deposit_u <= max,
+                "amount is larger than maximumDepositAmount"
+            );
 
             let this = env.current_contract_address();
             let amount = Self::i256_to_i128_nonneg(&env, &ext_data.ext_amount, "ext_amount");
@@ -261,7 +266,6 @@ impl PoolContract {
             Self::calculate_public_amount(&env, ext_data.ext_amount.clone(), ext_data.fee.clone()),
             "bad public amount"
         );
-
 
         // 5. zk proof verification
         assert!(Self::verify_proof(&env, &proof), "invalid proof");

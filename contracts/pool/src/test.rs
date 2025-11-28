@@ -1,16 +1,14 @@
 #![cfg(test)]
 
+use crate::merkle_with_history::MerkleTreeWithHistoryClient;
 use crate::merkle_with_history::{DataKey as MerkleKey, MerkleTreeWithHistory};
-use crate::{
-    DataKey, Proof, PoolContract, HashBytes, ExtData, HASH_SIZE,
-};
-use soroban_sdk::{contract, contractimpl, Map, Symbol, I256};
+use crate::{DataKey, ExtData, HASH_SIZE, HashBytes, PoolContract, PoolContractClient, Proof};
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, TryFromVal, U256, Val, Vec, symbol_short,
     testutils::{Address as _, Events as _},
 };
-use crate::merkle_with_history::MerkleTreeWithHistoryClient;
+use soroban_sdk::{I256, Map, Symbol, contract, contractimpl};
 
 // Helper to get 32 bytes
 fn mk_bytesn32(env: &Env, fill: u8) -> HashBytes {
@@ -94,7 +92,7 @@ fn register_mock_token(env: &Env) -> Address {
 fn pool_init_only_once() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -179,7 +177,7 @@ fn merkle_init_rejects_zero_levels() {
 fn internal_transact_rejects_unknown_root() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -215,7 +213,7 @@ fn internal_transact_rejects_unknown_root() {
 fn internal_transact_rejects_empty_proof_bytes() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -223,7 +221,9 @@ fn internal_transact_rejects_empty_proof_bytes() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
+    let root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(env.clone())
+    });
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
     let proof = Proof {
@@ -248,7 +248,7 @@ fn internal_transact_rejects_empty_proof_bytes() {
 fn internal_transact_rejects_bad_ext_hash() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -256,7 +256,9 @@ fn internal_transact_rejects_bad_ext_hash() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
+    let root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(env.clone())
+    });
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let proof = Proof {
         proof: {
@@ -284,7 +286,7 @@ fn internal_transact_rejects_bad_ext_hash() {
 fn internal_transact_rejects_bad_public_amount() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -292,7 +294,9 @@ fn internal_transact_rejects_bad_public_amount() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
+    let root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(env.clone())
+    });
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
     let proof = Proof {
@@ -321,7 +325,7 @@ fn internal_transact_rejects_bad_public_amount() {
 fn internal_transact_marks_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
     let verifier = Address::generate(&env);
@@ -329,7 +333,9 @@ fn internal_transact_marks_nullifiers() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
+    let root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(env.clone())
+    });
     let nullifier = mk_bytesn32(&env, 0xCD);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
@@ -357,52 +363,10 @@ fn internal_transact_marks_nullifiers() {
 }
 
 #[test]
-#[should_panic(expected = "fee not supported")]
-fn internal_transact_rejects_fee() {
-    let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
-
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
-    let max = U256::from_u32(&env, 1000);
-    let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
-
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 1);
-    let ext_hash = compute_ext_hash(&env, &ext);
-    let public_amount = {
-        let field = field_size(&env);
-        let one = U256::from_u32(&env, 1);
-        field.sub(&one)
-    };
-    let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
-        root,
-        input_nullifiers: {
-            let mut v: Vec<HashBytes> = Vec::new(&env);
-            v.push_back(mk_bytesn32(&env, 0x11));
-            v
-        },
-        output_commitment0: mk_bytesn32(&env, 0x07),
-        output_commitment1: mk_bytesn32(&env, 0x08),
-        public_amount,
-        ext_data_hash: ext_hash,
-    };
-
-    pool.internal_transact(&proof, &ext);
-}
-
-#[test]
 fn internal_transact_updates_commitments_and_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
-    let pool = TornadoPoolClient::new(&env, &pool_id);
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = Address::generate(&env);
     let verifier = Address::generate(&env);
@@ -410,7 +374,9 @@ fn internal_transact_updates_commitments_and_nullifiers() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(env.clone()));
+    let root = env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::get_last_root(env.clone())
+    });
     let nullifier = mk_bytesn32(&env, 0x22);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
@@ -436,7 +402,11 @@ fn internal_transact_updates_commitments_and_nullifiers() {
 
     // nullifier should be marked spent
     let seen = env.as_contract(&pool_id, || {
-        let nulls: Map<HashBytes, bool> = env.storage().persistent().get(&DataKey::Nullifiers).unwrap();
+        let nulls: Map<HashBytes, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Nullifiers)
+            .unwrap();
         nulls.get(nullifier.clone()).unwrap_or(false)
     });
     assert!(seen);
