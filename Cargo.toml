@@ -10,7 +10,8 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-soroban-sdk = "23.0.2"
+soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat", "testutils"] }
+zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]
 missing_docs = "deny"
