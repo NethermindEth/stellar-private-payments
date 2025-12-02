@@ -42,6 +42,67 @@ fn test_init_invalid_levels_too_large() {
 }
 
 #[test]
+#[should_panic(expected = "Error(Contract, #3")]
+fn test_init_twice_fails() {
+    let env = Env::default();
+    let contract_id = env.register(ASPMembership, ());
+    let admin = Address::generate(&env);
+    let admin2 = Address::generate(&env);
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // First initialization should succeed
+    client.init(&admin, &3u32);
+
+    // Second initialization should fail with AlreadyInitialized error
+    client.init(&admin2, &5u32);
+}
+
+#[test]
+fn test_get_root() {
+    let env = Env::default();
+    let contract_id = env.register(ASPMembership, ());
+    let admin = Address::generate(&env);
+    let client = ASPMembershipClient::new(&env, &contract_id);
+
+    // Initialize contract with 3 levels
+    client.init(&admin, &3u32);
+
+    // Get the initial root
+    let initial_root = client.get_root();
+    let zero = U256::from_u32(&env, 0u32);
+    assert_ne!(initial_root, zero, "Initial root should not be zero"); // As we define zero in a different way
+
+    // Verify initial root matches what's in storage
+    let stored_root: U256 = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&DataKey::Root).unwrap()
+    });
+    assert_eq!(
+        initial_root, stored_root,
+        "get_root should match stored root"
+    );
+
+    // Insert a leaf and verify root changes
+    env.mock_all_auths();
+    let leaf = U256::from_u32(&env, 100u32);
+    client.insert_leaf(&leaf);
+
+    let new_root = client.get_root();
+    assert_ne!(
+        new_root, initial_root,
+        "Root should change after inserting a leaf"
+    );
+
+    // Verify new root also matches storage
+    let stored_new_root: U256 = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&DataKey::Root).unwrap()
+    });
+    assert_eq!(
+        new_root, stored_new_root,
+        "get_root should match updated stored root"
+    );
+}
+
+#[test]
 fn test_hash_pair() {
     let env = Env::default();
     let contract_id = env.register(ASPMembership, ());
@@ -82,14 +143,14 @@ fn test_insert_leaf() {
 
     // Insert first leaf
     let leaf1 = U256::from_u32(&env, 100u32);
-    client.insert_leaf(&admin, &leaf1);
+    client.insert_leaf(&leaf1);
 
     // Insert the second leaf
     let leaf2 = U256::from_u32(&env, 200u32);
-    client.insert_leaf(&admin, &leaf2);
+    client.insert_leaf(&leaf2);
 
     // Check NextIndex after both insertions
-    let next_index1: u32 = env.as_contract(&contract_id, || {
+    let next_index1: u64 = env.as_contract(&contract_id, || {
         env.storage().persistent().get(&DataKey::NextIndex).unwrap()
     });
     assert_eq!(next_index1, 2, "NextIndex should be 2 after two insertions");
@@ -101,16 +162,15 @@ fn test_insert_leaf_requires_admin() {
     let env = Env::default();
     let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-    let non_admin = Address::generate(&env);
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     // Initialize contract
     client.init(&admin, &3u32);
 
-    // Try to insert leaf as non-admin
+    // Try to insert leaf
     // It should fail as we did not call mock_all_auths()
     let leaf = U256::from_u32(&env, 100u32);
-    client.insert_leaf(&non_admin, &leaf);
+    client.insert_leaf(&leaf);
 }
 
 #[test]
@@ -130,12 +190,12 @@ fn test_insert_leaf_merkle_tree_full() {
     // Insert 4 leaves
     for i in 0..4 {
         let leaf = U256::from_u32(&env, (i + 1) as u32);
-        client.insert_leaf(&admin, &leaf);
+        client.insert_leaf(&leaf);
     }
 
     // Try to insert one more leaf, which should fail as the tree is full
     let leaf5 = U256::from_u32(&env, 5u32);
-    client.insert_leaf(&admin, &leaf5);
+    client.insert_leaf(&leaf5);
 }
 
 #[test]
@@ -157,7 +217,7 @@ fn test_update_admin() {
 
     // Update admin (using mock_all_auths to authorize the update)
     env.mock_all_auths();
-    client.update_admin(&admin, &new_admin);
+    client.update_admin(&new_admin);
 
     // Verify admin was updated in storage
     let stored_admin_after: Address = env.as_contract(&contract_id, || {
@@ -178,15 +238,15 @@ fn test_new_admin_can_insert_after_update() {
     client.init(&admin, &3u32);
     env.mock_all_auths();
     // Update admin
-    client.update_admin(&admin, &new_admin);
+    client.update_admin(&new_admin);
 
     // Verify the new admin can insert a leaf (using mock_all_auths to authorize)
 
     let leaf = U256::from_u32(&env, 100u32);
-    client.insert_leaf(&new_admin, &leaf);
+    client.insert_leaf(&leaf);
 
     // Verify the insertion succeeded
-    let next_index: u32 = env.as_contract(&contract_id, || {
+    let next_index: u64 = env.as_contract(&contract_id, || {
         env.storage().persistent().get(&DataKey::NextIndex).unwrap()
     });
     assert_eq!(
@@ -210,11 +270,11 @@ fn test_multiple_insertions() {
     // Insert 5 leaves
     for i in 0..5 {
         let leaf = U256::from_u32(&env, (i + 1) as u32 * 100u32);
-        client.insert_leaf(&admin, &leaf);
+        client.insert_leaf(&leaf);
     }
 
     // Verify NextIndex was updated correctly
-    let next_index: u32 = env.as_contract(&contract_id, || {
+    let next_index: u64 = env.as_contract(&contract_id, || {
         env.storage().persistent().get(&DataKey::NextIndex).unwrap()
     });
     assert_eq!(
@@ -393,7 +453,7 @@ fn test_merkle_consistency() {
     // Insert all leaves on-chain
     for i in 0..num_leaves {
         let leaf = U256::from_u32(&env, (i + 1) * 100u32);
-        client.insert_leaf(&admin, &leaf);
+        client.insert_leaf(&leaf);
 
         // Get the on-chain root
         let on_chain_root: U256 = env.as_contract(&contract_id, || {
