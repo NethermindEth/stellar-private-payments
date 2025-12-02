@@ -1,10 +1,10 @@
-//! Sparse Merkle Tree implementation for Soroban smart contracts
+//! Sparse Merkle Tree implementation
 //!
 //! This is a Soroban-compatible port of the Sparse Merkle Tree implementation from:
 //! - circuits/src/test/utils/sparse_merkle_tree.rs (Rust reference implementation)
 //! - circomlibjs: <https://github.com/iden3/circomlibjs/blob/main/src/smt.js>
 //!
-//! This implementation uses Poseidon2 hash function for compatibility with
+//! This implementation uses Poseidon2 hash function for compatibility with the
 //! circomlib circuits
 //!
 //! # Design Considerations
@@ -43,9 +43,9 @@ pub struct FindResult {
     pub siblings: Vec<U256>,
     /// Value associated with the key (if found), zero otherwise
     pub found_value: U256,
-    /// Key at the collision point (for non-membership proofs)
+    /// Key at the collision point
     pub not_found_key: U256,
-    /// Value at the collision point (for non-membership proofs)
+    /// Value at the collision point
     pub not_found_value: U256,
     /// True if the path ended at an empty branch, false if collision with existing leaf
     pub is_old0: bool,
@@ -104,10 +104,6 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(())` on success, or `Error::AlreadyInitialized` if the contract
     /// has already been initialized.
-    ///
-    /// # Errors
-    ///
-    /// * `Error::AlreadyInitialized` - Contract has already been initialized
     pub fn init(env: Env, admin: Address) -> Result<(), Error> {
         let store = env.storage().persistent();
         // Contract can only be initialized once
@@ -142,7 +138,7 @@ impl ASPNonMembership {
     /// Computes the hash for leaf nodes using Poseidon2 with three inputs:
     /// hash(key, value, 1). The domain separator of 1 distinguishes leaf nodes
     /// from internal nodes. Mirrors circomlibjs "hash1" function so roots generated
-    /// here match the circuits prover and test tooling.
+    /// here match the circuits.
     ///
     /// # Arguments
     ///
