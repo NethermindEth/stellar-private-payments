@@ -196,7 +196,7 @@ impl ASPMembership {
                 } else {
                     // Leaf is left child, store it and pair with zero hash
                     store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                    let zero_val = zeros.get(lvl).unwrap();
+                    let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
                     current_hash = poseidon2_compress(&env, current_hash, zero_val);
                 }
                 current_index >>= 1;
