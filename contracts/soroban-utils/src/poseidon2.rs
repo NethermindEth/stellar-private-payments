@@ -1,5 +1,6 @@
 //! Poseidon2 hash functions for Soroban contracts
-use crate::constants::{bn256_modulus, get_round_constants};
+
+use crate::constants::{bn256_modulus, get_round_constants_t2, get_round_constants_t3};
 use soroban_sdk::{Bytes, Env, U256, Vec, symbol_short, vec};
 
 /// Hash a pair of U256 values using Poseidon2 compression mode
@@ -17,7 +18,7 @@ use soroban_sdk::{Bytes, Env, U256, Vec, symbol_short, vec};
 ///
 /// # Panics
 /// Panics if either input is >= BN256 modulus
-pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
+pub fn poseidon2_compress(env: &Env, left: U256, right: U256) -> U256 {
     // Check inputs are within field range
     let bn256_mod = bn256_modulus(env);
     if left >= bn256_mod || right >= bn256_mod {
@@ -25,7 +26,7 @@ pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
     }
 
     // Get round constants
-    let round_constants = get_round_constants(env);
+    let round_constants = get_round_constants_t2(env);
     let crypto_hazmat = env.crypto_hazmat();
 
     // Permutation and compression
@@ -48,6 +49,59 @@ pub fn hash_pair(env: &Env, left: U256, right: U256) -> U256 {
     }
     // Note we do not consider the second element of the output vector as we truncate to the first element
     compressed_0
+}
+
+/// Hash a pair of U256 values and a domain separation tag using Poseidon2
+///
+/// This function performs Poseidon2 hash on three field elements.
+/// The inputs must be within the BN256 field range [0, p-1).
+///
+/// # Arguments
+/// * `env` - The Soroban environment
+/// * `a` - First input value (must be < BN256 modulus)
+/// * `b` - Second input value (must be < BN256 modulus)
+/// * `sep` - Domain separation value (must be < BN256 modulus)
+/// # Returns
+/// The hash result as U256
+///
+/// # Panics
+/// Panics if either input is >= BN256 modulus
+pub fn poseidon2_hash2(env: &Env, a: U256, b: U256, sep: Option<U256>) -> U256 {
+    // Check inputs are within field range
+    let bn256_mod = bn256_modulus(env);
+    // If not provided, we use 0 as domain separation
+    let sep = if let Some(sep) = sep {
+        sep
+    } else {
+        U256::from_u32(env, 0u32)
+    };
+    if a >= bn256_mod || b >= bn256_mod || sep >= bn256_mod {
+        panic!("Hash inputs must be within the BN256 range [0.p-1)");
+    }
+
+    // Get round constants
+    let round_constants = get_round_constants_t3(env);
+    let crypto_hazmat = env.crypto_hazmat();
+
+    // Permutation and compression
+    let out = crypto_hazmat.poseidon2_permutation(
+        &vec![env, a.clone(), b.clone(), sep.clone()],
+        symbol_short!("BN254"),
+        3,
+        5,
+        8,
+        56,
+        &vec![
+            env,
+            U256::from_u32(env, 1u32),
+            U256::from_u32(env, 1u32),
+            U256::from_u32(env, 2u32),
+        ],
+        &round_constants,
+    );
+
+    // We get the first element as output
+    out.get(0).unwrap()
 }
 
 /// Get the zero hash values for each level of a Merkle tree
