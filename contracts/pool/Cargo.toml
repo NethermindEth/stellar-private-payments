@@ -13,7 +13,6 @@ doctest = false
 [dependencies]
 # Inherit the version from the workspace
 soroban-sdk.workspace = true
-soroban-utils = { path = "../soroban-utils" }
+soroban-utils = {workspace = true}
 
-[dev-dependencies]
-soroban-sdk = { workspace = true }
+

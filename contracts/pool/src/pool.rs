@@ -97,7 +97,7 @@ impl PoolContract {
             .persistent()
             .set(&DataKey::Nullifiers, &Map::<HashBytes, bool>::new(&env));
 
-        MerkleTreeWithHistory::init(env, levels);
+        MerkleTreeWithHistory::init(&env, levels);
     }
 
     /// Maximum abs(ext_amount) allowed (2^248)
