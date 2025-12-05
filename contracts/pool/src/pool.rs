@@ -17,7 +17,7 @@ pub struct ExtData {
     pub recipient: Address,
     pub ext_amount: I256,
     pub fee: U256,
-    pub encrypted_output0: Bytes,
+    pub encrypted_output0: Bytes, // By default, we support 2 outputs.
     pub encrypted_output1: Bytes,
 }
 

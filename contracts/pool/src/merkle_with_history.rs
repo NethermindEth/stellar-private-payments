@@ -1,7 +1,8 @@
 //! Merkle Tree with History Module
 //!
 //! This module implements a fixed-depth binary Merkle tree with root history
-//! for privacy-preserving transactions.
+//! for privacy-preserving transactions. It uses the Poseidon2 hash function
+//! for ZK-circuit compatibility.
 //!
 //! - Maintains a ring buffer of recent roots for membership proof verification
 //! - Auto-expands to new trees when capacity is reached
@@ -90,7 +91,7 @@ impl MerkleTreeWithHistory {
         storage.set(&MerkleDataKey::NextIndex, &0u64);
     }
 
-    /// Insert a new leaf into the Merkle tree
+    /// Insert two leaves into the Merkle tree as siblings
     ///
     /// Adds a new leaf to the Merkle tree and updates the root. The leaf is
     /// inserted at the next available index, and the tree is updated efficiently
@@ -103,12 +104,13 @@ impl MerkleTreeWithHistory {
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `leaf` - The leaf value to insert (typically a commitment hash)
+    /// * `leaf_1` - The left leaf value to insert (at even index)
+    /// * `leaf_2` - The right leaf value to insert (at odd index)
     ///
     /// # Returns
     ///
-    /// Returns the index at which the leaf was inserted
-    pub fn insert_leaf(env: &Env, leaf: U256) -> u32 {
+    /// Returns the indexes where leaves were inserted
+    pub fn insert_two_leaves(env: &Env, leaf_1: U256, leaf_2: U256) -> (u32, u32) {
         let storage = env.storage().persistent();
 
         let levels: u32 = storage
@@ -122,9 +124,13 @@ impl MerkleTreeWithHistory {
             .expect("Tree not initialized");
         let max_leaves = 1u64.checked_shl(levels).expect("Levels too large");
 
-        let mut current_hash = leaf.clone();
+        // Ensure next_index is even
+        assert_eq!(next_index % 2, 0, "NextIndex must be even for two-leaf insertion");
 
-        if next_index >= max_leaves {
+        // Hash the two leaves to form their parent node at level 1
+        let mut current_hash = poseidon2_compress(env, leaf_1, leaf_2);
+
+        if (next_index + 2) > max_leaves {
             // Tree is full - create a new tree in next history slot
             root_index = (root_index + 1) % ROOT_HISTORY_SIZE;
             storage.set(&MerkleDataKey::CurrentRootIndex, &root_index);
@@ -141,13 +147,15 @@ impl MerkleTreeWithHistory {
             next_index = 0;
         }
 
-        let mut current_index = next_index;
+        // Calculate the parent index at level 1 (since we already hashed the two leaves)
+        let mut current_index = next_index >> 1;
 
         // Update the tree by recomputing hashes along the path to root
-        for lvl in 0..levels {
+        // Start at level 1 since current_hash is already the parent of the two leaves
+        for lvl in 1..levels {
             let is_right = current_index & 1 == 1;
             if is_right {
-                // Leaf is a right child, get the stored left sibling
+                // Leaf is right child, get the stored left sibling
                 let left: U256 = storage
                     .get(&MerkleDataKey::FilledSubtree(lvl))
                     .expect("Filled subtree missing");
@@ -166,17 +174,17 @@ impl MerkleTreeWithHistory {
         // Update the root with the computed hash
         storage.set(&MerkleDataKey::Root(root_index), &current_hash);
 
-        // Update NextIndex
-        storage.set(&MerkleDataKey::NextIndex, &(next_index + 1));
+        // Update NextIndex (advance by 2 since we inserted two leaves)
+        storage.set(&MerkleDataKey::NextIndex, &(next_index + 2));
 
-        // Return the index at which the leaf was inserted
-        next_index as u32
+        // Return the index of the left leaf
+        (next_index as u32, (next_index + 1) as u32)
     }
 
     /// Check if a root exists in the recent history
     ///
     /// Searches the root history ring buffer to verify if a given root is valid.
-    /// This allows proofs generated against recent three states to be verified,
+    /// This allows proofs generated against recent tree states to be verified,
     /// providing some tolerance for latency between proof generation and submission.
     ///
     /// # Arguments
@@ -187,9 +195,13 @@ impl MerkleTreeWithHistory {
     /// # Returns
     ///
     /// Returns `true` if the root exists in the history buffer, `false` otherwise.
-    /// Zero roots always return `false`.
+    /// Zero root always returns `false`.
+    ///
+    /// # Panics
+    ///
+    /// * Panics if the tree has not been initialized
     pub fn is_known_root(env: &Env, root: &U256) -> bool {
-        // Zero root is never valid
+        // Zero root is never valid as define zero in a different way
         if *root == U256::from_u32(env, 0u32) {
             return false;
         }
@@ -228,6 +240,10 @@ impl MerkleTreeWithHistory {
     /// # Returns
     ///
     /// Returns the current Merkle root as U256
+    ///
+    /// # Panics
+    ///
+    /// * Panics if the tree has not been initialized
     pub fn get_last_root(env: &Env) -> U256 {
         let storage = env.storage().persistent();
         let current_root_index: u32 = storage
