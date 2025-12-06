@@ -13,6 +13,6 @@ doctest = false
 [dependencies]
 # Inherit the version from the workspace
 soroban-sdk.workspace = true
-soroban-utils = {workspace = true}
+soroban-utils = { workspace = true }
 
 

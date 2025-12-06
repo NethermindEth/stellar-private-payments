@@ -70,9 +70,6 @@ impl ASPMembership {
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or an error if already initialized
-    ///
-    /// # Panics
-    /// Panics if levels is 0 or greater than 32
     pub fn init(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
 
