@@ -223,18 +223,18 @@ impl ASPNonMembership {
     fn find_key_internal(
         env: &Env,
         store: &soroban_sdk::storage::Persistent,
-        key: U256,
-        root: U256,
+        key: &U256,
+        root: &U256,
         level: u32,
     ) -> Result<FindResult, Error> {
         let zero = U256::from_u32(env, 0u32);
         // Empty tree
-        if root == zero {
+        if *root == zero {
             return Ok(FindResult {
                 found: false,
                 siblings: Vec::new(env),
                 found_value: zero.clone(),
-                not_found_key: key,
+                not_found_key: key.clone(),
                 not_found_value: zero.clone(),
                 is_old0: true,
             });
@@ -248,7 +248,7 @@ impl ASPNonMembership {
         if node_data.len() == 3 && node_data.get(0).unwrap() == U256::from_u32(env, 1u32) {
             let stored_key = node_data.get(1).unwrap();
             let stored_value = node_data.get(2).unwrap();
-            if stored_key == key {
+            if stored_key == *key {
                 // Key found
                 return Ok(FindResult {
                     found: true,
@@ -271,17 +271,17 @@ impl ASPNonMembership {
             }
         } else if node_data.len() == 2 {
             // Internal node (2 elements: [left, right])
-            let key_bits = Self::split_bits(env, &key);
+            let key_bits = Self::split_bits(env, key);
             let left = node_data.get(0).unwrap();
             let right = node_data.get(1).unwrap();
 
             let level_idx = level;
             let mut result = if !key_bits.get(level_idx).unwrap() {
                 // Go left
-                Self::find_key_internal(env, store, key, left.clone(), level + 1)?
+                Self::find_key_internal(env, store, key, &left, level + 1)?
             } else {
                 // Go right
-                Self::find_key_internal(env, store, key, right.clone(), level + 1)?
+                Self::find_key_internal(env, store, key, &right, level + 1)?
             };
 
             // Add sibling to path
@@ -322,7 +322,7 @@ impl ASPNonMembership {
         let root: U256 = store
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
-        Self::find_key_internal(&env, &store, key, root, 0u32)
+        Self::find_key_internal(&env, &store, &key, &root, 0u32)
     }
 
     /// Insert a new key-value pair into the tree
@@ -355,7 +355,7 @@ impl ASPNonMembership {
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &root, 0u32)?;
 
         if find_result.found {
             return Err(Error::KeyAlreadyExists);
@@ -496,7 +496,7 @@ impl ASPNonMembership {
         let root: U256 = store.get(&DataKey::Root).unwrap();
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &root, 0u32)?;
 
         if !find_result.found {
             return Err(Error::KeyNotFound);
@@ -628,7 +628,7 @@ impl ASPNonMembership {
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &root, 0u32)?;
 
         if !find_result.found {
             return Err(Error::KeyNotFound);
@@ -729,7 +729,7 @@ impl ASPNonMembership {
             .unwrap_or(U256::from_u32(&env, 0u32));
 
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &root, 0u32)?;
 
         if find_result.found {
             return Ok(false); // Key exists, so non-membership is false

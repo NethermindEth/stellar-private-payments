@@ -78,31 +78,31 @@ impl ASPMembership {
 
         // Check if the contract is already initialized
         if store.has(&DataKey::Admin) {
-            Err(Error::AlreadyInitialized)
-        } else {
-            if levels == 0 || levels > 32 {
-                panic!("Levels must be within the range [1..32]");
-            }
-
-            // Initialize admin and tree parameters
-            store.set(&DataKey::Admin, &admin);
-            store.set(&DataKey::Levels, &levels);
-            store.set(&DataKey::NextIndex, &0u64);
-
-            // Initialize an empty tree with zero hashes at each level
-            let zeros: Vec<U256> = get_zeroes(&env);
-            for lvl in 0..levels + 1 {
-                let zero_val = zeros.get(lvl).unwrap();
-                store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
-                store.set(&DataKey::Zeroes(lvl), &zero_val);
-            }
-
-            // Set initial root to the zero hash at the top level
-            let root_val = zeros.get(levels).unwrap();
-            store.set(&DataKey::Root, &root_val);
-
-            Ok(())
+            return Err(Error::AlreadyInitialized);
         }
+
+        if levels == 0 || levels > 32 {
+            panic!("Levels must be within the range [1..32]");
+        }
+
+        // Initialize admin and tree parameters
+        store.set(&DataKey::Admin, &admin);
+        store.set(&DataKey::Levels, &levels);
+        store.set(&DataKey::NextIndex, &0u64);
+
+        // Initialize an empty tree with zero hashes at each level
+        let zeros: Vec<U256> = get_zeroes(&env);
+        for lvl in 0..levels + 1 {
+            let zero_val = zeros.get(lvl).unwrap();
+            store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
+            store.set(&DataKey::Zeroes(lvl), &zero_val);
+        }
+
+        // Set initial root to the zero hash at the top level
+        let root_val = zeros.get(levels).unwrap();
+        store.set(&DataKey::Root, &root_val);
+
+        Ok(())
     }
 
     /// Update the contract administrator
@@ -182,41 +182,40 @@ impl ASPMembership {
 
         // Check if tree is full (capacity is 2^levels leaves)
         if current_index >= (1 << levels) {
-            Err(Error::MerkleTreeFull)
-        } else {
-            let mut current_hash = leaf.clone();
-
-            // Update tree by recomputing hashes along the path to root
-            for lvl in 0..levels {
-                let is_right = current_index & 1 == 1;
-                if is_right {
-                    // Leaf is right child, get the stored left sibling
-                    let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
-                    current_hash = poseidon2_compress(&env, left, current_hash);
-                } else {
-                    // Leaf is left child, store it and pair with zero hash
-                    store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                    let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
-                    current_hash = poseidon2_compress(&env, current_hash, zero_val);
-                }
-                current_index >>= 1;
-            }
-
-            // Update the root with the computed hash
-            store.set(&DataKey::Root, &current_hash);
-
-            // Emit event with leaf details
-            LeafAddedEvent {
-                leaf: leaf.clone(),
-                index: actual_index,
-                root: current_hash,
-            }
-            .publish(&env);
-
-            // Update NextIndex
-            store.set(&DataKey::NextIndex, &(actual_index + 1));
-            Ok(())
+            return Err(Error::MerkleTreeFull);
         }
+        let mut current_hash = leaf.clone();
+
+        // Update tree by recomputing hashes along the path to root
+        for lvl in 0..levels {
+            let is_right = current_index & 1 == 1;
+            if is_right {
+                // Leaf is right child, get the stored left sibling
+                let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
+                current_hash = poseidon2_compress(&env, left, current_hash);
+            } else {
+                // Leaf is left child, store it and pair with zero hash
+                store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
+                let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
+                current_hash = poseidon2_compress(&env, current_hash, zero_val);
+            }
+            current_index >>= 1;
+        }
+
+        // Update the root with the computed hash
+        store.set(&DataKey::Root, &current_hash);
+
+        // Emit event with leaf details
+        LeafAddedEvent {
+            leaf: leaf.clone(),
+            index: actual_index,
+            root: current_hash,
+        }
+        .publish(&env);
+
+        // Update NextIndex
+        store.set(&DataKey::NextIndex, &(actual_index + 1));
+        Ok(())
     }
 }
 
