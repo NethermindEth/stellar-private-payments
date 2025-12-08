@@ -4,7 +4,7 @@
 //! hash function for Anonymous Service Provider (ASP) membership tracking.
 //! The contract maintains a Merkle tree where each leaf represents a member,
 //! and the root serves as a commitment to the entire membership set.
-
+#![no_std]
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
@@ -39,6 +39,8 @@ pub enum Error {
     MerkleTreeFull = 2,
     /// Contract has already been initialized
     AlreadyInitialized = 3,
+    /// Wrong Number of levels specified
+    WrongLevels = 4,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -82,7 +84,7 @@ impl ASPMembership {
         }
 
         if levels == 0 || levels > 32 {
-            panic!("Levels must be within the range [1..32]");
+            return Err(Error::WrongLevels);
         }
 
         // Initialize admin and tree parameters
@@ -117,12 +119,7 @@ impl ASPMembership {
     /// # Panics
     /// Panics if the caller is not the current admin
     pub fn update_admin(env: Env, new_admin: Address) {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-
-        // Update admin address
-        store.set(&DataKey::Admin, &new_admin);
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
     }
 
     /// Get the current Merkle root
