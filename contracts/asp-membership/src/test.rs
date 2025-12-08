@@ -1,9 +1,9 @@
 #![cfg(test)]
 
 use super::*;
+use core::ops::Add;
 use num_bigint::BigUint;
 use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
-use std::ops::AddAssign;
 use zkhash::{
     ark_ff::{BigInteger, Fp256, PrimeField},
     fields::bn256::FpBN256 as Scalar,
@@ -22,7 +22,7 @@ fn test_init_valid() {
 }
 
 #[test]
-#[should_panic(expected = "Levels must be within the range")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_init_invalid_levels_zero() {
     let env = Env::default();
     let contract_id = env.register(ASPMembership, ());
@@ -32,7 +32,7 @@ fn test_init_invalid_levels_zero() {
 }
 
 #[test]
-#[should_panic(expected = "Levels must be within the range [1..32]")]
+#[should_panic(expected = "Error(Contract, #4)")]
 fn test_init_invalid_levels_too_large() {
     let env = Env::default();
     let contract_id = env.register(ASPMembership, ());
@@ -287,8 +287,8 @@ fn test_multiple_insertions() {
 fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
     let mut perm = h.permutation(&[left, right]);
-    perm[0].add_assign(&left);
-    perm[1].add_assign(&right);
+    perm[0] = perm[0].add(left);
+    perm[1] = perm[1].add(right);
     perm[0] // By default, we truncate to one element
 }
 
