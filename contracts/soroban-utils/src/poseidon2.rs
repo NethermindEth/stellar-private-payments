@@ -70,11 +70,7 @@ pub fn poseidon2_hash2(env: &Env, a: U256, b: U256, sep: Option<U256>) -> U256 {
     // Check inputs are within field range
     let bn256_mod = bn256_modulus(env);
     // If not provided, we use 0 as domain separation
-    let sep = if let Some(sep) = sep {
-        sep
-    } else {
-        U256::from_u32(env, 0u32)
-    };
+    let sep = sep.unwrap_or_else(|| U256::from_u32(env, 0u32));
     if a >= bn256_mod || b >= bn256_mod || sep >= bn256_mod {
         panic!("Hash inputs must be within the BN256 range [0.p-1)");
     }

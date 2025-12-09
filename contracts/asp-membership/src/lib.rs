@@ -4,7 +4,7 @@
 //! hash function for Anonymous Service Provider (ASP) membership tracking.
 //! The contract maintains a Merkle tree where each leaf represents a member,
 //! and the root serves as a commitment to the entire membership set.
-
+#![no_std]
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };
@@ -39,6 +39,8 @@ pub enum Error {
     MerkleTreeFull = 2,
     /// Contract has already been initialized
     AlreadyInitialized = 3,
+    /// Wrong Number of levels specified
+    WrongLevels = 4,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -70,36 +72,39 @@ impl ASPMembership {
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or an error if already initialized
+    ///
+    /// # Panics
+    /// Panics if levels is 0 or greater than 32
     pub fn init(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
 
         // Check if the contract is already initialized
         if store.has(&DataKey::Admin) {
-            Err(Error::AlreadyInitialized)
-        } else {
-            if levels == 0 || levels > 32 {
-                panic!("Levels must be within the range [1..32]");
-            }
-
-            // Initialize admin and tree parameters
-            store.set(&DataKey::Admin, &admin);
-            store.set(&DataKey::Levels, &levels);
-            store.set(&DataKey::NextIndex, &0u64);
-
-            // Initialize an empty tree with zero hashes at each level
-            let zeros: Vec<U256> = get_zeroes(&env);
-            for lvl in 0..levels + 1 {
-                let zero_val = zeros.get(lvl).unwrap();
-                store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
-                store.set(&DataKey::Zeroes(lvl), &zero_val);
-            }
-
-            // Set initial root to the zero hash at the top level
-            let root_val = zeros.get(levels).unwrap();
-            store.set(&DataKey::Root, &root_val);
-
-            Ok(())
+            return Err(Error::AlreadyInitialized);
         }
+
+        if levels == 0 || levels > 32 {
+            return Err(Error::WrongLevels);
+        }
+
+        // Initialize admin and tree parameters
+        store.set(&DataKey::Admin, &admin);
+        store.set(&DataKey::Levels, &levels);
+        store.set(&DataKey::NextIndex, &0u64);
+
+        // Initialize an empty tree with zero hashes at each level
+        let zeros: Vec<U256> = get_zeroes(&env);
+        for lvl in 0..levels + 1 {
+            let zero_val = zeros.get(lvl).unwrap();
+            store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
+            store.set(&DataKey::Zeroes(lvl), &zero_val);
+        }
+
+        // Set initial root to the zero hash at the top level
+        let root_val = zeros.get(levels).unwrap();
+        store.set(&DataKey::Root, &root_val);
+
+        Ok(())
     }
 
     /// Update the contract administrator
@@ -114,12 +119,7 @@ impl ASPMembership {
     /// # Panics
     /// Panics if the caller is not the current admin
     pub fn update_admin(env: Env, new_admin: Address) {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-
-        // Update admin address
-        store.set(&DataKey::Admin, &new_admin);
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
     }
 
     /// Get the current Merkle root
@@ -179,41 +179,40 @@ impl ASPMembership {
 
         // Check if tree is full (capacity is 2^levels leaves)
         if current_index >= (1 << levels) {
-            Err(Error::MerkleTreeFull)
-        } else {
-            let mut current_hash = leaf.clone();
-
-            // Update tree by recomputing hashes along the path to root
-            for lvl in 0..levels {
-                let is_right = current_index & 1 == 1;
-                if is_right {
-                    // Leaf is right child, get the stored left sibling
-                    let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
-                    current_hash = poseidon2_compress(&env, left, current_hash);
-                } else {
-                    // Leaf is left child, store it and pair with zero hash
-                    store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                    let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
-                    current_hash = poseidon2_compress(&env, current_hash, zero_val);
-                }
-                current_index >>= 1;
-            }
-
-            // Update the root with the computed hash
-            store.set(&DataKey::Root, &current_hash);
-
-            // Emit event with leaf details
-            LeafAddedEvent {
-                leaf: leaf.clone(),
-                index: actual_index,
-                root: current_hash,
-            }
-            .publish(&env);
-
-            // Update NextIndex
-            store.set(&DataKey::NextIndex, &(actual_index + 1));
-            Ok(())
+            return Err(Error::MerkleTreeFull);
         }
+        let mut current_hash = leaf.clone();
+
+        // Update tree by recomputing hashes along the path to root
+        for lvl in 0..levels {
+            let is_right = current_index & 1 == 1;
+            if is_right {
+                // Leaf is right child, get the stored left sibling
+                let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
+                current_hash = poseidon2_compress(&env, left, current_hash);
+            } else {
+                // Leaf is left child, store it and pair with zero hash
+                store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
+                let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
+                current_hash = poseidon2_compress(&env, current_hash, zero_val);
+            }
+            current_index >>= 1;
+        }
+
+        // Update the root with the computed hash
+        store.set(&DataKey::Root, &current_hash);
+
+        // Emit event with leaf details
+        LeafAddedEvent {
+            leaf: leaf.clone(),
+            index: actual_index,
+            root: current_hash,
+        }
+        .publish(&env);
+
+        // Update NextIndex
+        store.set(&DataKey::NextIndex, &(actual_index + 1));
+        Ok(())
     }
 }
 

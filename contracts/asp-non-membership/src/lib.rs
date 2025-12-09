@@ -127,10 +127,7 @@ impl ASPNonMembership {
     /// * `env` - The Soroban environment
     /// * `new_admin` - New address that will have permission to modify the tree
     pub fn update_admin(env: Env, new_admin: Address) {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
-        admin.require_auth();
-        store.set(&DataKey::Admin, &new_admin);
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
     }
 
     /// Hash a leaf node using Poseidon2
@@ -213,6 +210,7 @@ impl ASPNonMembership {
     /// * `env` - The Soroban environment
     /// * `store` - Persistent storage reference
     /// * `key` - Key to search for
+    /// * `key_bits` - Pre-computed bits of the key
     /// * `root` - Root hash to start search from
     /// * `level` - Current tree level (0 = root)
     ///
@@ -223,18 +221,19 @@ impl ASPNonMembership {
     fn find_key_internal(
         env: &Env,
         store: &soroban_sdk::storage::Persistent,
-        key: U256,
-        root: U256,
+        key: &U256,
+        key_bits: &Vec<bool>,
+        root: &U256,
         level: u32,
     ) -> Result<FindResult, Error> {
         let zero = U256::from_u32(env, 0u32);
         // Empty tree
-        if root == zero {
+        if *root == zero {
             return Ok(FindResult {
                 found: false,
                 siblings: Vec::new(env),
                 found_value: zero.clone(),
-                not_found_key: key,
+                not_found_key: key.clone(),
                 not_found_value: zero.clone(),
                 is_old0: true,
             });
@@ -248,7 +247,7 @@ impl ASPNonMembership {
         if node_data.len() == 3 && node_data.get(0).unwrap() == U256::from_u32(env, 1u32) {
             let stored_key = node_data.get(1).unwrap();
             let stored_value = node_data.get(2).unwrap();
-            if stored_key == key {
+            if stored_key == *key {
                 // Key found
                 return Ok(FindResult {
                     found: true,
@@ -271,17 +270,16 @@ impl ASPNonMembership {
             }
         } else if node_data.len() == 2 {
             // Internal node (2 elements: [left, right])
-            let key_bits = Self::split_bits(env, &key);
             let left = node_data.get(0).unwrap();
             let right = node_data.get(1).unwrap();
 
             let level_idx = level;
             let mut result = if !key_bits.get(level_idx).unwrap() {
                 // Go left
-                Self::find_key_internal(env, store, key, left.clone(), level + 1)?
+                Self::find_key_internal(env, store, key, key_bits, &left, level + 1)?
             } else {
                 // Go right
-                Self::find_key_internal(env, store, key, right.clone(), level + 1)?
+                Self::find_key_internal(env, store, key, key_bits, &right, level + 1)?
             };
 
             // Add sibling to path
@@ -322,7 +320,8 @@ impl ASPNonMembership {
         let root: U256 = store
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
-        Self::find_key_internal(&env, &store, key, root, 0u32)
+        let key_bits = Self::split_bits(&env, &key);
+        Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)
     }
 
     /// Insert a new key-value pair into the tree
@@ -354,15 +353,17 @@ impl ASPNonMembership {
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
 
+        // Compute key bits
+        let key_bits = Self::split_bits(&env, &key);
+
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
 
         if find_result.found {
             return Err(Error::KeyAlreadyExists);
         }
 
         let zero = U256::from_u32(&env, 0u32);
-        let new_key_bits = Self::split_bits(&env, &key);
         let mut siblings = find_result.siblings.clone();
         let mut mixed = false;
         let mut rt_old = zero.clone();
@@ -374,8 +375,8 @@ impl ASPNonMembership {
             let mut i = siblings.len();
             // Extend siblings with zeros for common prefix bits
             while i < old_key_bits.len()
-                && i < new_key_bits.len()
-                && old_key_bits.get(i).unwrap() == new_key_bits.get(i).unwrap()
+                && i < key_bits.len()
+                && old_key_bits.get(i).unwrap() == key_bits.get(i).unwrap()
             {
                 siblings.push_back(zero.clone());
                 i += 1;
@@ -418,7 +419,7 @@ impl ASPNonMembership {
                 } else {
                     zero.clone()
                 };
-                let bit = new_key_bits.get(i as u32).unwrap();
+                let bit = key_bits.get(i as u32).unwrap();
                 rt_old = if bit {
                     Self::hash_internal(&env, old_sibling.clone(), rt_old.clone())
                 } else {
@@ -428,7 +429,7 @@ impl ASPNonMembership {
             }
 
             // Build a new internal node
-            let bit = new_key_bits.get(i as u32).unwrap();
+            let bit = key_bits.get(i as u32).unwrap();
             let (left_hash, right_hash) = if bit {
                 (sibling.clone(), rt.clone())
             } else {
@@ -495,8 +496,11 @@ impl ASPNonMembership {
         admin.require_auth();
         let root: U256 = store.get(&DataKey::Root).unwrap();
 
+        // Compute key bits once for both find and delete operations
+        let key_bits = Self::split_bits(&env, &key);
+
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
 
         if !find_result.found {
             return Err(Error::KeyNotFound);
@@ -504,14 +508,12 @@ impl ASPNonMembership {
 
         let zero = U256::from_u32(&env, 0u32);
         let one = U256::from_u32(&env, 1u32);
-        let key_bits = Self::split_bits(&env, &key);
 
         // Track nodes to delete (old path if any)
         let mut rt_old = Self::hash_leaf(&env, key.clone(), find_result.found_value.clone());
         store.remove(&DataKey::Node(rt_old.clone()));
 
         let mut rt_new: U256;
-        let is_old0: bool;
         let mut siblings_to_use = find_result.siblings.clone();
 
         // Check if the last sibling is a leaf that should be promoted
@@ -522,13 +524,11 @@ impl ASPNonMembership {
                 if node_data.len() == 3 && node_data.get(0).unwrap() == one {
                     // Last sibling is a leaf - promote it
                     rt_new = last_sibling.clone();
-                    is_old0 = false;
                     // Remove the last sibling from the list since we're promoting it
                     siblings_to_use.pop_back();
                 } else if node_data.len() == 2 {
                     // Last sibling is an internal node - replace with zero
                     rt_new = zero.clone();
-                    is_old0 = true;
                 } else {
                     return Err(Error::KeyNotFound); // Invalid node
                 }
@@ -538,7 +538,6 @@ impl ASPNonMembership {
         } else {
             // No siblings - The tree becomes empty
             rt_new = zero.clone();
-            is_old0 = true;
         }
 
         // Rebuild the tree from the deletion point upwards
@@ -549,14 +548,8 @@ impl ASPNonMembership {
             let level = siblings_len - 1 - level_idx; // Process from leaf to root
             let sibling = siblings_to_use.get(level).unwrap();
 
-            // Determine the new sibling value
-            let is_first_level = level_idx == 0;
-            let new_sibling = if is_first_level && !is_old0 {
-                // At the level where we promoted a leaf, use zero instead of the promoted leaf
-                zero.clone()
-            } else {
-                sibling.clone()
-            };
+            // Use actual sibling value
+            let new_sibling = sibling.clone();
 
             // Delete old internal node along the old path
             let bit = key_bits.get(level).unwrap();
@@ -627,8 +620,11 @@ impl ASPNonMembership {
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
 
+        // Compute key bits once
+        let key_bits = Self::split_bits(&env, &key);
+
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
 
         if !find_result.found {
             return Err(Error::KeyNotFound);
@@ -649,7 +645,6 @@ impl ASPNonMembership {
         store.remove(&DataKey::Node(old_leaf_hash.clone()));
 
         // Rebuild path from leaf to root (process siblings in reverse)
-        let key_bits = Self::split_bits(&env, &key);
         let mut current_hash = new_leaf_hash;
         let mut old_current_hash = old_leaf_hash;
 
@@ -728,8 +723,11 @@ impl ASPNonMembership {
             .get(&DataKey::Root)
             .unwrap_or(U256::from_u32(&env, 0u32));
 
+        // Compute key bits once
+        let key_bits = Self::split_bits(&env, &key);
+
         // Find the key
-        let find_result = Self::find_key_internal(&env, &store, key.clone(), root.clone(), 0u32)?;
+        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
 
         if find_result.found {
             return Ok(false); // Key exists, so non-membership is false
@@ -754,7 +752,6 @@ impl ASPNonMembership {
         }
 
         // Reconstruct root from proof (process siblings in reverse: leaf to root)
-        let key_bits = Self::split_bits(&env, &key);
         let mut computed_root =
             if not_found_key != key && not_found_value != U256::from_u32(&env, 0u32) {
                 Self::hash_leaf(&env, not_found_key, not_found_value)
