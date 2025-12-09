@@ -21,7 +21,6 @@ use soroban_sdk::{
 };
 use soroban_utils::constants::bn256_modulus;
 
-
 /// Contract error types for the privacy pool
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]

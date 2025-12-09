@@ -1,8 +1,8 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
 use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
+use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
-use soroban_sdk::testutils::{Address as _};
+use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractimpl};
 use soroban_utils::constants::bn256_modulus;
 
 // Helper to get 32 bytes
