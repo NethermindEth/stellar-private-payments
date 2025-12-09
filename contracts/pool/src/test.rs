@@ -1,142 +1,395 @@
-#![cfg(test)]
-
-use super::*;
-use soroban_sdk::{
-    Address, Bytes, BytesN, Env, TryFromVal, U256, Val, Vec, symbol_short,
-    testutils::{Address as _, Events as _},
-};
+use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
+use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
+use soroban_sdk::testutils::Address as _;
+use soroban_sdk::xdr::ToXdr;
+use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractimpl};
+use soroban_utils::constants::bn256_modulus;
 
 // Helper to get 32 bytes
-fn mk_bytesn32(env: &Env, fill: u8) -> HashBytes {
-    BytesN::from_array(env, &[fill; HASH_SIZE])
+fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[fill; 32])
 }
 
-// non-empty placeholder proof
-fn mk_proof(env: &Env) -> Proof {
-    Proof {
+fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32, fee: u32) -> ExtData {
+    ExtData {
+        recipient,
+        ext_amount: I256::from_i32(env, ext_amount),
+        fee: U256::from_u32(env, fee),
+        encrypted_output0: Bytes::new(env),
+        encrypted_output1: Bytes::new(env),
+    }
+}
+
+fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
+    let payload = ext.clone().to_xdr(env);
+    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
+    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
+    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
+    let mut buf = [0u8; 32];
+    reduced.to_be_bytes().copy_into_slice(&mut buf);
+    BytesN::from_array(env, &buf)
+}
+
+#[contract]
+struct MockToken;
+
+#[contractimpl]
+impl MockToken {
+    pub fn balance(_env: Env, _id: Address) -> i128 {
+        0
+    }
+    pub fn transfer(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+    pub fn transfer_from(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+    pub fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128) {}
+    pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
+}
+
+fn register_mock_token(env: &Env) -> Address {
+    env.register(MockToken, ())
+}
+
+#[test]
+#[should_panic]
+fn pool_init_only_once() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 100);
+    let levels = 8u32;
+    pool.init(&token, &verifier, &max, &levels);
+
+    // second init should panic
+    pool.init(&token, &verifier, &max, &levels);
+}
+
+#[test]
+fn merkle_init_only_once() {
+    let env = Env::default();
+    // As MerkleTreeWithHistory is now a module
+    // We need to register the contract first to access the env.storage of a smart contract
+    let pool_id = env.register(PoolContract, ());
+    let levels = 8u32;
+
+    env.as_contract(&pool_id, || {
+        // First init should succeed
+        let result1 = MerkleTreeWithHistory::init(&env, levels);
+        assert!(result1.is_ok());
+
+        // Second init should return AlreadyInitialized error
+        let result2 = MerkleTreeWithHistory::init(&env, levels);
+        assert!(result2.is_err());
+    });
+}
+
+#[test]
+fn merkle_insert_updates_root_and_index() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let levels = 3u32;
+
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::init(&env, levels).unwrap();
+
+        let leaf1 = U256::from_u32(&env, 0x01);
+        let leaf2 = U256::from_u32(&env, 0x02);
+
+        let (idx_0, idx_1) = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1, leaf2).unwrap();
+        assert_eq!(idx_0, 0);
+        assert_eq!(idx_1, 1);
+
+        // last root must be known
+        let root = MerkleTreeWithHistory::get_last_root(&env);
+        assert!(MerkleTreeWithHistory::is_known_root(&env, &root));
+
+        // nextIndex should now be 2 (stored in persistent storage)
+        let next: u64 = env
+            .storage()
+            .persistent()
+            .get(&MerkleDataKey::NextIndex)
+            .unwrap();
+        assert_eq!(next, 2);
+    });
+}
+
+#[test]
+fn merkle_insert_fails_when_full() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+
+    // levels=1 => capacity of 2 leaves (one insert call)
+    let levels = 1u32;
+
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::init(&env, levels).unwrap();
+
+        let leaf1 = U256::from_u32(&env, 0x0A);
+        let leaf2 = U256::from_u32(&env, 0x0B);
+
+        // First insert should succeed
+        let result1 = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1.clone(), leaf2.clone());
+        assert!(result1.is_ok());
+
+        // Second insert should fail with MerkleTreeFull error
+        let result2 = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1, leaf2);
+        assert!(result2.is_err());
+    });
+}
+
+#[test]
+fn merkle_init_rejects_zero_levels() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let levels = 0u32;
+
+    env.as_contract(&pool_id, || {
+        let result = MerkleTreeWithHistory::init(&env, levels);
+        assert!(result.is_err());
+    });
+}
+
+#[test]
+#[should_panic]
+fn transact_rejects_unknown_root() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    let root = U256::from_u32(&env, 0xFF); // not a known root
+    pool.init(&token, &verifier, &max, &levels);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let proof = Proof {
         proof: {
-            let mut b = Bytes::new(env);
+            let mut b = Bytes::new(&env);
             b.push_back(1u8);
             b
         },
-        root: mk_bytesn32(env, 0xAA),
+        root,
         input_nullifiers: {
-            let mut v: Vec<HashBytes> = Vec::new(env);
-            v.push_back(mk_bytesn32(env, 0x11));
-            v.push_back(mk_bytesn32(env, 0x22));
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xAB));
             v
         },
-        output_commitment0: mk_bytesn32(env, 0x33),
-        output_commitment1: mk_bytesn32(env, 0x44),
-        public_amount: U256::from_u32(env, 0),
-        ext_data_hash: mk_bytesn32(env, 0x55),
-    }
-}
-
-#[test]
-#[should_panic(expected = "invalid proof")]
-fn deposit_rejects_empty_proof() {
-    let env = Env::default();
-    let contract_id = env.register(PoolContract, ());
-    let client = PoolContractClient::new(&env, &contract_id);
-
-    let from = Address::generate(&env);
-    let commitment = mk_bytesn32(&env, 0x01);
-
-    // Empty proof, it should panic in the check
-    let empty_proof = Proof {
-        proof: Bytes::new(&env),
-        root: mk_bytesn32(&env, 0xAA),
-        input_nullifiers: Vec::new(&env),
-        output_commitment0: mk_bytesn32(&env, 0xBB),
-        output_commitment1: mk_bytesn32(&env, 0xCC),
+        output_commitment0: U256::from_u32(&env, 0x01),
+        output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: mk_bytesn32(&env, 0xDD),
+        ext_data_hash: mk_bytesn32(&env, 0xEE),
     };
 
-    client.deposit(&from, &commitment, &empty_proof);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
-fn deposit_appends_commitment() {
+#[should_panic]
+fn transact_rejects_empty_proof_bytes() {
     let env = Env::default();
-    let contract_id = env.register(PoolContract, ());
-    let client = PoolContractClient::new(&env, &contract_id);
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
 
-    let from = Address::generate(&env);
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    pool.init(&token, &verifier, &max, &levels);
 
-    let comm1 = mk_bytesn32(&env, 0x01);
-    let comm2 = mk_bytesn32(&env, 0x02);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+    let proof = Proof {
+        proof: Bytes::new(&env), // empty proof should be rejected
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xBA));
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x01),
+        output_commitment1: U256::from_u32(&env, 0x02),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+    };
 
-    client.deposit(&from, &comm1, &mk_proof(&env));
-    client.deposit(&from, &comm2, &mk_proof(&env));
-
-    let commits: Vec<BytesN<32>> = env.as_contract(&contract_id, || {
-        env.storage().instance().get(&COMMITMENTS).unwrap()
-    });
-
-    assert_eq!(commits.len(), 2);
-    assert_eq!(commits.get(0).unwrap(), comm1);
-    assert_eq!(commits.get(1).unwrap(), comm2);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
-fn withdraw_records_nullifier() {
+#[should_panic]
+fn transact_rejects_bad_ext_hash() {
     let env = Env::default();
-    let contract_id = env.register(PoolContract, ());
-    let client = PoolContractClient::new(&env, &contract_id);
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
 
-    let to = Address::generate(&env);
-    let nullifier = mk_bytesn32(&env, 0xAB);
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    pool.init(&token, &verifier, &max, &levels);
 
-    client.withdraw(&to, &nullifier);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let proof = Proof {
+        proof: {
+            let mut b = Bytes::new(&env);
+            b.push_back(1u8);
+            b
+        },
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xCC));
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x03),
+        output_commitment1: U256::from_u32(&env, 0x04),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: mk_bytesn32(&env, 0x99), // mismatched hash
+    };
 
-    // Check that a Withdraw event was emitted with `to`
-    let mut found = false;
-    let events = env.events().all();
-    assert!(!events.is_empty(), "no events recorded");
+    pool.transact(&proof, &ext, &sender);
+}
 
-    for e in env.events().all() {
-        let topics: Vec<Val> = e.1.clone();
-        if !topics.is_empty() {
-            let topic: Val = topics.get_unchecked(0);
-            let topic_sym: Option<Symbol> =
-                <Symbol as TryFromVal<Env, Val>>::try_from_val(&env, &topic).ok();
+#[test]
+#[should_panic]
+fn transact_rejects_bad_public_amount() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
 
-            if topic_sym == Some(symbol_short!("withdraw")) {
-                let data: Val = e.2;
-                let addr: Option<Address> =
-                    <Address as TryFromVal<Env, Val>>::try_from_val(&env, &data).ok();
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    pool.init(&token, &verifier, &max, &levels);
 
-                if addr == Some(to.clone()) {
-                    found = true;
-                    break;
-                }
-            }
-        }
-    }
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+    let proof = Proof {
+        proof: {
+            let mut b = Bytes::new(&env);
+            b.push_back(1u8);
+            b
+        },
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xDD));
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x05),
+        output_commitment1: U256::from_u32(&env, 0x06),
+        public_amount: U256::from_u32(&env, 1), // should be 0 for ext_amount=0, fee=0
+        ext_data_hash: ext_hash,
+    };
 
-    assert!(found, "expected Withdraw event with recipient");
+    pool.transact(&proof, &ext, &sender);
+}
 
-    // Check nullifier marked as used in storage
-    let seen: bool = env.as_contract(&contract_id, || {
-        let nullifs: Map<HashBytes, bool> = env.storage().instance().get(&NULLIFIERS).unwrap();
-        nullifs.get(nullifier.clone()).unwrap()
+#[test]
+#[should_panic]
+fn transact_marks_nullifiers() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    pool.init(&token, &verifier, &max, &levels);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let nullifier = U256::from_u32(&env, 0xCD);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+    let proof = Proof {
+        proof: {
+            let mut b = Bytes::new(&env);
+            b.push_back(1u8);
+            b
+        },
+        root: root.clone(),
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(nullifier.clone());
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x05),
+        output_commitment1: U256::from_u32(&env, 0x06),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash.clone(),
+    };
+
+    pool.transact(&proof, &ext, &sender);
+    // second call with same nullifier should panic
+    pool.transact(&proof, &ext, &sender);
+}
+
+#[test]
+fn transact_updates_commitments_and_nullifiers() {
+    let env = Env::default();
+    let pool_id = env.register(PoolContract, ());
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    let token = register_mock_token(&env);
+    let verifier = Address::generate(&env);
+    let max = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    pool.init(&token, &verifier, &max, &levels);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let nullifier = U256::from_u32(&env, 0x22);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+    let proof = Proof {
+        proof: {
+            let mut b = Bytes::new(&env);
+            b.push_back(1u8);
+            b
+        },
+        root: root.clone(),
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(nullifier.clone());
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x09),
+        output_commitment1: U256::from_u32(&env, 0x0A),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+    };
+
+    pool.transact(&proof, &ext, &sender);
+
+    // nullifier should be marked spent
+    let seen = env.as_contract(&pool_id, || {
+        let nulls: Map<U256, bool> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Nullifiers)
+            .unwrap();
+        nulls.get(nullifier.clone()).unwrap_or(false)
     });
     assert!(seen);
-}
-
-#[test]
-#[should_panic(expected = "nullifier already used")]
-fn withdraw_double_spend_panics() {
-    let env = Env::default();
-    let contract_id = env.register(PoolContract, ());
-    let client = PoolContractClient::new(&env, &contract_id);
-
-    let to = Address::generate(&env);
-    let nullifier = mk_bytesn32(&env, 0xEF);
-
-    client.withdraw(&to, &nullifier);
-    // Using the same nullifier again should panic
-    client.withdraw(&to, &nullifier);
 }

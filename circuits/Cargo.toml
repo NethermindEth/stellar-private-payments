@@ -6,10 +6,13 @@ repository.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[features]
+circom-tests = ["ark-circom"]
+
 [dependencies]
 anyhow = "1"
 ark-bn254 = "0.5.0"
-ark-circom = "0.5.0"
+ark-circom = { version = "0.5.0", optional = true }
 ark-ff = "0.5"
 ark-groth16 = "0.5.0"
 ark-snark = "0.5.1"

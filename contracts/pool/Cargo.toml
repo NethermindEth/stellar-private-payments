@@ -13,7 +13,6 @@ doctest = false
 [dependencies]
 # Inherit the version from the workspace
 soroban-sdk.workspace = true
+soroban-utils = { workspace = true }
 
-[dev-dependencies]
-# Also inherit for dev, but add the testing feature here (no version!)
-soroban-sdk = { workspace = true, features = ["testutils"] }
+
