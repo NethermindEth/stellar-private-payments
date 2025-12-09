@@ -1,13 +1,13 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
-use crate::{DataKey, ExtData, HASH_SIZE, HashBytes, PoolContract, PoolContractClient, Proof};
+use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{Address, Bytes, BytesN, Env, U256, Vec, testutils::Address as _};
-use soroban_sdk::{I256, Map, contract, contractimpl};
+use soroban_sdk::{contract, contractimpl, Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
+use soroban_sdk::testutils::{Address as _};
 use soroban_utils::constants::bn256_modulus;
 
 // Helper to get 32 bytes
-fn mk_bytesn32(env: &Env, fill: u8) -> HashBytes {
-    BytesN::from_array(env, &[fill; HASH_SIZE])
+fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
+    BytesN::from_array(env, &[fill; 32])
 }
 
 fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32, fee: u32) -> ExtData {
@@ -154,7 +154,7 @@ fn merkle_init_rejects_zero_levels() {
 
 #[test]
 #[should_panic]
-fn internal_transact_rejects_unknown_root() {
+fn transact_rejects_unknown_root() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -166,6 +166,8 @@ fn internal_transact_rejects_unknown_root() {
     let root = U256::from_u32(&env, 0xFF); // not a known root
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let proof = Proof {
         proof: {
@@ -185,12 +187,12 @@ fn internal_transact_rejects_unknown_root() {
         ext_data_hash: mk_bytesn32(&env, 0xEE),
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
 #[should_panic]
-fn internal_transact_rejects_empty_proof_bytes() {
+fn transact_rejects_empty_proof_bytes() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -201,6 +203,8 @@ fn internal_transact_rejects_empty_proof_bytes() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
@@ -218,12 +222,12 @@ fn internal_transact_rejects_empty_proof_bytes() {
         ext_data_hash: ext_hash,
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
 #[should_panic]
-fn internal_transact_rejects_bad_ext_hash() {
+fn transact_rejects_bad_ext_hash() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -234,6 +238,8 @@ fn internal_transact_rejects_bad_ext_hash() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let proof = Proof {
@@ -254,12 +260,12 @@ fn internal_transact_rejects_bad_ext_hash() {
         ext_data_hash: mk_bytesn32(&env, 0x99), // mismatched hash
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
 #[should_panic]
-fn internal_transact_rejects_bad_public_amount() {
+fn transact_rejects_bad_public_amount() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -270,6 +276,8 @@ fn internal_transact_rejects_bad_public_amount() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
@@ -291,12 +299,12 @@ fn internal_transact_rejects_bad_public_amount() {
         ext_data_hash: ext_hash,
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
 #[should_panic]
-fn internal_transact_marks_nullifiers() {
+fn transact_marks_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -307,6 +315,8 @@ fn internal_transact_marks_nullifiers() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
     let nullifier = U256::from_u32(&env, 0xCD);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
@@ -329,13 +339,13 @@ fn internal_transact_marks_nullifiers() {
         ext_data_hash: ext_hash.clone(),
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
     // second call with same nullifier should panic
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 }
 
 #[test]
-fn internal_transact_updates_commitments_and_nullifiers() {
+fn transact_updates_commitments_and_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -346,6 +356,8 @@ fn internal_transact_updates_commitments_and_nullifiers() {
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
 
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
     let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
     let nullifier = U256::from_u32(&env, 0x22);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
@@ -368,7 +380,7 @@ fn internal_transact_updates_commitments_and_nullifiers() {
         ext_data_hash: ext_hash,
     };
 
-    pool.internal_transact(&proof, &ext);
+    pool.transact(&proof, &ext, &sender);
 
     // nullifier should be marked spent
     let seen = env.as_contract(&pool_id, || {

@@ -21,11 +21,6 @@ use soroban_sdk::{
 };
 use soroban_utils::constants::bn256_modulus;
 
-/// Size of hash outputs in bytes (32 bytes = 256 bits)
-pub const HASH_SIZE: usize = 32;
-
-/// Type alias for 32-byte hash values
-pub type HashBytes = BytesN<HASH_SIZE>;
 
 /// Contract error types for the privacy pool
 #[contracterror]
@@ -108,7 +103,7 @@ pub struct Proof {
     /// Net public amount (deposit - withdrawal - fee, modulo field size)
     pub public_amount: U256,
     /// Hash of the external data (binds proof to transaction parameters)
-    pub ext_data_hash: HashBytes,
+    pub ext_data_hash: BytesN<32>,
 }
 
 /// User account registration data
@@ -460,7 +455,7 @@ impl PoolContract {
     /// 4. Verify external data hash matches
     /// 5. Verify public amount calculation
     /// 6. Verify zero-knowledge proof
-    pub fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
+    fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
         // 1. Check proof is not empty
         if proof.proof.is_empty() {
             return Err(Error::InvalidProof);
