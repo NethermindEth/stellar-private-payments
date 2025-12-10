@@ -16,6 +16,11 @@ soroban-sdk.workspace = true
 soroban-utils.workspace = true
 circom-groth16-verifier.workspace = true
 
+groth16-verifier.workspace = true
+risc0-interface.workspace = true
+
+hex = "0.4.3"
+
 [dev-dependencies]
 ark-bn254 = "=0.4.0"
 ark-ec = "=0.4.2"
