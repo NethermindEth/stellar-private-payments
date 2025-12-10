@@ -1,9 +1,15 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
 use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
+use asp_membership::{ASPMembership, ASPMembershipClient};
+use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractimpl};
+use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
 use soroban_utils::constants::bn256_modulus;
+use soroban_utils::utils::MockToken;
+
+/// Number of levels for the ASP Membership Merkle tree in tests
+const ASP_MEMBERSHIP_LEVELS: u32 = 8;
 
 // Helper to get 32 bytes
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
@@ -30,24 +36,44 @@ fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
     BytesN::from_array(env, &buf)
 }
 
-#[contract]
-struct MockToken;
-
-#[contractimpl]
-impl MockToken {
-    pub fn balance(_env: Env, _id: Address) -> i128 {
-        0
-    }
-    pub fn transfer(_env: Env, _from: Address, _to: Address, _amount: i128) {}
-    pub fn transfer_from(_env: Env, _from: Address, _to: Address, _amount: i128) {}
-    pub fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128) {}
-    pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
-        0
-    }
-}
-
 fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
+}
+
+/// Helper struct to hold all test setup
+struct TestSetup {
+    admin: Address,
+    token: Address,
+    verifier: Address,
+    asp_membership_address: Address,
+    asp_non_membership_address: Address,
+    asp_membership_client: ASPMembershipClient<'static>,
+    asp_non_membership_client: ASPNonMembershipClient<'static>,
+}
+
+/// Creates and initializes all contracts needed for testing
+fn setup_test_contracts(env: &Env) -> TestSetup {
+    let admin = Address::generate(env);
+
+    // Register and initialize ASP Membership contract
+    let asp_membership_address = env.register(ASPMembership, ());
+    let asp_membership_client = ASPMembershipClient::new(env, &asp_membership_address);
+    asp_membership_client.init(&admin, &ASP_MEMBERSHIP_LEVELS);
+
+    // Register and initialize ASP Non-Membership contract
+    let asp_non_membership_address = env.register(ASPNonMembership, ());
+    let asp_non_membership_client = ASPNonMembershipClient::new(env, &asp_non_membership_address);
+    asp_non_membership_client.init(&admin);
+
+    TestSetup {
+        admin,
+        token: register_mock_token(env),
+        verifier: Address::generate(env),
+        asp_membership_address,
+        asp_non_membership_address,
+        asp_membership_client,
+        asp_non_membership_client,
+    }
 }
 
 #[test]
@@ -57,14 +83,29 @@ fn pool_init_only_once() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     // second init should panic
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 }
 
 #[test]
@@ -159,16 +200,28 @@ fn transact_rejects_unknown_root() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: {
             let mut b = Bytes::new(&env);
@@ -185,6 +238,8 @@ fn transact_rejects_unknown_root() {
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: mk_bytesn32(&env, 0xEE),
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);
@@ -197,17 +252,29 @@ fn transact_rejects_empty_proof_bytes() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: Bytes::new(&env), // empty proof should be rejected
         root,
@@ -220,6 +287,8 @@ fn transact_rejects_empty_proof_bytes() {
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);
@@ -232,16 +301,28 @@ fn transact_rejects_bad_ext_hash() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: {
             let mut b = Bytes::new(&env);
@@ -258,6 +339,8 @@ fn transact_rejects_bad_ext_hash() {
         output_commitment1: U256::from_u32(&env, 0x04),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: mk_bytesn32(&env, 0x99), // mismatched hash
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);
@@ -270,17 +353,29 @@ fn transact_rejects_bad_public_amount() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = pool.get_root();
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: {
             let mut b = Bytes::new(&env);
@@ -297,6 +392,8 @@ fn transact_rejects_bad_public_amount() {
         output_commitment1: U256::from_u32(&env, 0x06),
         public_amount: U256::from_u32(&env, 1), // should be 0 for ext_amount=0, fee=0
         ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);
@@ -309,18 +406,30 @@ fn transact_marks_nullifiers() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = pool.get_root();
     let nullifier = U256::from_u32(&env, 0xCD);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: {
             let mut b = Bytes::new(&env);
@@ -337,6 +446,8 @@ fn transact_marks_nullifiers() {
         output_commitment1: U256::from_u32(&env, 0x06),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: ext_hash.clone(),
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);
@@ -350,18 +461,30 @@ fn transact_updates_commitments_and_nullifiers() {
     let pool_id = env.register(PoolContract, ());
     let pool = PoolContractClient::new(&env, &pool_id);
 
-    let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(
+        &setup.admin,
+        &setup.token,
+        &setup.verifier,
+        &setup.asp_membership_address,
+        &setup.asp_non_membership_address,
+        &max,
+        &levels,
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = pool.get_root();
     let nullifier = U256::from_u32(&env, 0x22);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
+
+    // Get actual roots
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
     let proof = Proof {
         proof: {
             let mut b = Bytes::new(&env);
@@ -378,6 +501,8 @@ fn transact_updates_commitments_and_nullifiers() {
         output_commitment1: U256::from_u32(&env, 0x0A),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
     };
 
     pool.transact(&proof, &ext, &sender);

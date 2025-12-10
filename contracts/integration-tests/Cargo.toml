@@ -1,22 +1,22 @@
 [package]
-name = "pool"
+name = "integration-tests"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
+publish = false
 license.workspace = true
-repository.workspace = true
 
+# This crate is only for testing, no output needed
 [lib]
-crate-type = ["lib", "cdylib"]
+path = "src/lib.rs"
 doctest = false
 
 [dependencies]
-
-# ASP contracts for cross-contract calls
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
-# Inherit the version from the workspace
-soroban-sdk.workspace = true
+pool = { path = "../pool" }
+
+# Soroban SDK for test infrastructure
+soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }
 
 

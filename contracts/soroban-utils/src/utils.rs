@@ -1,5 +1,4 @@
-use soroban_sdk::{Address, Env, IntoVal, TryFromVal, Val};
-
+use soroban_sdk::{Address, Env, IntoVal, TryFromVal, Val, contract, contractimpl};
 /// Update the contract administrator
 ///
 /// Changes the admin address to a new address. Only the current admin
@@ -22,4 +21,21 @@ where
 
     // Update admin address
     store.set(admin_key, new_admin);
+}
+
+/// Mock token contract for testing purposes
+#[contract]
+pub struct MockToken;
+
+#[contractimpl]
+impl MockToken {
+    pub fn balance(_env: Env, _id: Address) -> i128 {
+        0
+    }
+    pub fn transfer(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+    pub fn transfer_from(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+    pub fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128) {}
+    pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
+        0
+    }
 }
