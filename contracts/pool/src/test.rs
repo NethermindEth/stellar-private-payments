@@ -1,7 +1,8 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
-use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
+use crate::{DataKey, ExtData, Groth16Proof, PoolContract, PoolContractClient, Proof};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
+use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
@@ -38,6 +39,37 @@ fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
 
 fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
+}
+
+/// Create a mock Groth16 proof for testing
+///
+/// This creates a dummy proof with valid curve points.
+/// The actual proof validity is not checked in unit tests for now
+fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
+    // G1 generator point
+    let g1_bytes = {
+        let mut bytes = [0u8; 64];
+        bytes[31] = 1; // x = 1 (big-endian)
+        bytes[63] = 2; // y = 2 (big-endian)
+        bytes
+    };
+
+    // G2 generator point
+    let g2_bytes = {
+        let mut bytes = [0u8; 128];
+        // Set some non-zero values for a valid-looking G2 point
+        bytes[31] = 1;
+        bytes[63] = 1;
+        bytes[95] = 1;
+        bytes[127] = 1;
+        bytes
+    };
+
+    Groth16Proof {
+        a: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
+        b: G2Affine::from_bytes(env, &Bytes::from_slice(env, &g2_bytes)),
+        c: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
+    }
 }
 
 /// Helper struct to hold all test setup
@@ -223,11 +255,7 @@ fn transact_rejects_unknown_root() {
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -238,55 +266,6 @@ fn transact_rejects_unknown_root() {
         output_commitment1: U256::from_u32(&env, 0x02),
         public_amount: U256::from_u32(&env, 0),
         ext_data_hash: mk_bytesn32(&env, 0xEE),
-        asp_membership_root,
-        asp_non_membership_root,
-    };
-
-    pool.transact(&proof, &ext, &sender);
-}
-
-#[test]
-#[should_panic]
-fn transact_rejects_empty_proof_bytes() {
-    let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    let setup = setup_test_contracts(&env);
-    let max = U256::from_u32(&env, 1000);
-    let levels = 3u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
-    );
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let root = pool.get_root();
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
-
-    // Get actual roots
-    let asp_membership_root = setup.asp_membership_client.get_root();
-    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
-
-    let proof = Proof {
-        proof: Bytes::new(&env), // empty proof should be rejected
-        root,
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(U256::from_u32(&env, 0xBA));
-            v
-        },
-        output_commitment0: U256::from_u32(&env, 0x01),
-        output_commitment1: U256::from_u32(&env, 0x02),
-        public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: ext_hash,
         asp_membership_root,
         asp_non_membership_root,
     };
@@ -324,11 +303,7 @@ fn transact_rejects_bad_ext_hash() {
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -377,11 +352,7 @@ fn transact_rejects_bad_public_amount() {
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -431,11 +402,7 @@ fn transact_marks_nullifiers() {
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root: root.clone(),
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -486,11 +453,7 @@ fn transact_updates_commitments_and_nullifiers() {
     let asp_non_membership_root = setup.asp_non_membership_client.get_root();
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root: root.clone(),
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);

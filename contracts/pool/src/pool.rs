@@ -15,11 +15,12 @@
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
+use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contracterror, contractevent,
-    contractimpl, contracttype,
+    contract, contracterror, contractevent, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, Vec,
+    I256, U256,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -85,6 +86,17 @@ pub struct ExtData {
     pub encrypted_output1: Bytes,
 }
 
+/// Groth16 zero-knowledge proof structure
+///
+/// Contains the three elliptic curve points that make up a Groth16 proof
+#[contracttype]
+#[derive(Clone)]
+pub struct Groth16Proof {
+    pub a: G1Affine,
+    pub b: G2Affine,
+    pub c: G1Affine,
+}
+
 /// Zero-knowledge proof data for a transaction
 ///
 /// Contains all the cryptographic data needed to verify a transaction,
@@ -92,7 +104,7 @@ pub struct ExtData {
 #[contracttype]
 pub struct Proof {
     /// The serialized zero-knowledge proof
-    pub proof: Bytes,
+    pub proof: Groth16Proof,
     /// Merkle root the proof was generated against
     pub root: U256,
     /// Nullifiers for spent input UTXOs (prevents double-spending)
@@ -480,37 +492,32 @@ impl PoolContract {
     /// 5. Verify public amount calculation
     /// 6. Verify zero-knowledge proof
     fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
-        // 1. Check proof is not empty
-        if proof.proof.is_empty() {
-            return Err(Error::InvalidProof);
-        }
-
-        // 2. Merkle root check
+        // 1. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root) {
             return Err(Error::UnknownRoot);
         }
 
-        // 3. Nullifier checks (prevent double-spending)
+        // 2. Nullifier checks (prevent double-spending)
         for n in proof.input_nullifiers.iter() {
             if Self::is_spent(env, &n) {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
 
-        // 4. External data hash check
+        // 3. External data hash check
         let ext_hash = Self::hash_ext_data(env, &ext_data);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }
 
-        // 5. Public amount check
+        // 4. Public amount check
         let expected_public_amount =
             Self::calculate_public_amount(env, ext_data.ext_amount.clone(), ext_data.fee.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
 
-        // Get public inputs from contracts
+        // ASP root validation
         let member_root = Self::get_asp_membership_root(env);
         let non_member_root = Self::get_asp_non_membership_root(env);
         if member_root != proof.asp_membership_root
@@ -519,18 +526,18 @@ impl PoolContract {
             return Err(Error::InvalidProof);
         }
 
-        // 6. ZK proof verification
+        // 5. ZK proof verification
         if !Self::verify_proof(env, &proof) {
             return Err(Error::InvalidProof);
         }
 
-        // 7. Mark nullifiers as spent
+        // 6. Mark nullifiers as spent
         for n in proof.input_nullifiers.iter() {
             Self::mark_spent(env, &n);
             NewNullifierEvent { nullifier: n }.publish(env);
         }
 
-        // 8. Process withdrawal if ext_amount < 0
+        // 7. Process withdrawal if ext_amount < 0
         let token = Self::get_token(env);
         let token_client = TokenClient::new(env, &token);
         let this = env.current_contract_address();

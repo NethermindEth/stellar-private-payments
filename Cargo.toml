@@ -1,5 +1,5 @@
 [workspace]
-members = ["circuits", "contracts/*", "examples", "poseidon2"]
+members = ["circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
 resolver = "3"
 
 [workspace.package]

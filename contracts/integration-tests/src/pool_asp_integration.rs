@@ -5,7 +5,8 @@
 
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use pool::{ExtData, PoolContract, PoolContractClient, Proof};
+use pool::{ExtData, Groth16Proof, PoolContract, PoolContractClient, Proof};
+use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec};
@@ -19,6 +20,36 @@ const POOL_MERKLE_LEVELS: u32 = 8;
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
 /// Maximum deposit amount for the pool
 const MAX_DEPOSIT: u32 = 1_000_000;
+
+/// Create a mock Groth16 proof for testing
+///
+/// This creates a dummy proof with valid curve points.
+/// The actual cryptographic validity is not checked in unit tests (check e2e tests for that)
+fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
+    // G1 generator point
+    let g1_bytes = {
+        let mut bytes = [0u8; 64];
+        bytes[31] = 1; // x = 1 (big-endian)
+        bytes[63] = 2; // y = 2 (big-endian)
+        bytes
+    };
+
+    // G2 generator point
+    let g2_bytes = {
+        let mut bytes = [0u8; 128];
+        bytes[31] = 1;
+        bytes[63] = 1;
+        bytes[95] = 1;
+        bytes[127] = 1;
+        bytes
+    };
+
+    Groth16Proof {
+        a: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
+        b: G2Affine::from_bytes(env, &Bytes::from_slice(env, &g2_bytes)),
+        c: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
+    }
+}
 
 // Test Environment Setup
 /// Complete test environment with all deployed contracts
@@ -223,11 +254,7 @@ fn test_transact_fails_with_wrong_asp_membership_root() {
     let ext_hash = test_env.compute_ext_hash(&ext_data);
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root: pool_root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -272,11 +299,7 @@ fn test_transact_fails_with_wrong_asp_non_membership_root() {
     let ext_hash = test_env.compute_ext_hash(&ext_data);
 
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root: pool_root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
@@ -323,11 +346,7 @@ fn test_transact_fails_with_stale_asp_roots() {
 
     // Use OLD (stale) membership root
     let proof = Proof {
-        proof: {
-            let mut b = Bytes::new(&env);
-            b.push_back(1u8);
-            b
-        },
+        proof: mk_mock_groth16_proof(&env),
         root: pool_root,
         input_nullifiers: {
             let mut v: Vec<U256> = Vec::new(&env);
