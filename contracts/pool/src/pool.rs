@@ -13,6 +13,8 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
+use asp_membership::ASPMembershipClient;
+use asp_non_membership::ASPNonMembershipClient;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -99,10 +101,14 @@ pub struct Proof {
     pub output_commitment0: U256,
     /// Commitment for the second output UTXO
     pub output_commitment1: U256,
-    /// Net public amount (deposit - withdrawal - fee, modulo field size)
+    /// Net public amount (deposit - withdrawal - fee)
     pub public_amount: U256,
     /// Hash of the external data (binds proof to transaction parameters)
     pub ext_data_hash: BytesN<32>,
+    /// Merkle root the compliance membership proof was generated against
+    pub asp_membership_root: U256,
+    /// Merkle root the compliance NON-membership proof was generated against
+    pub asp_non_membership_root: U256,
 }
 
 /// User account registration data
@@ -122,7 +128,9 @@ pub struct Account {
 /// Storage keys for contract persistent data
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum DataKey {
+pub(crate) enum DataKey {
+    /// Administrator address with permissions to modify contract settings
+    Admin,
     /// Address of the token contract used for deposits/withdrawals
     Token,
     /// Address of the ZK proof verifier contract
@@ -131,6 +139,10 @@ pub enum DataKey {
     MaximumDepositAmount,
     /// Map of spent nullifiers (nullifier -> bool)
     Nullifiers,
+    /// Address of the ASP Membership contract
+    ASPMembership,
+    /// Address of the ASP Non-Membership contract
+    ASPNonMembership,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -192,8 +204,11 @@ impl PoolContract {
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
+    /// * `admin` - Address of the contract administrator
     /// * `token` - Address of the token contract for deposits/withdrawals
     /// * `verifier` - Address of the ZK proof verifier contract
+    /// * `asp_membership` - Address of the ASP Membership contract
+    /// * `asp_non_membership` - Address of the ASP Non-Membership contract
     /// * `maximum_deposit_amount` - Maximum allowed deposit per transaction
     /// * `levels` - Number of levels in the commitment Merkle tree (1-32)
     ///
@@ -203,18 +218,28 @@ impl PoolContract {
     /// invalid configuration
     pub fn init(
         env: Env,
+        admin: Address,
         token: Address,
         verifier: Address,
+        asp_membership: Address,
+        asp_non_membership: Address,
         maximum_deposit_amount: U256,
         levels: u32,
     ) -> Result<(), Error> {
-        if env.storage().persistent().has(&DataKey::Token) {
+        if env.storage().persistent().has(&DataKey::Admin) {
             return Err(Error::AlreadyInitialized);
         }
+        env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()
             .persistent()
             .set(&DataKey::Verifier, &verifier);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPMembership, &asp_membership);
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPNonMembership, &asp_non_membership);
         env.storage()
             .persistent()
             .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
@@ -485,6 +510,15 @@ impl PoolContract {
             return Err(Error::WrongExtAmount);
         }
 
+        // Get public inputs from contracts
+        let member_root = Self::get_asp_membership_root(env);
+        let non_member_root = Self::get_asp_non_membership_root(env);
+        if member_root != proof.asp_membership_root
+            || non_member_root != proof.asp_non_membership_root
+        {
+            return Err(Error::InvalidProof);
+        }
+
         // 6. ZK proof verification
         if !Self::verify_proof(env, &proof) {
             return Err(Error::InvalidProof);
@@ -578,5 +612,117 @@ impl PoolContract {
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
             .expect("Pool contract not initialized")
+    }
+
+    /// Get the admin address
+    fn get_admin(env: &Env) -> Address {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Pool contract not initialized")
+    }
+
+    /// Get the latest root of the Merkle tree that defines the pool
+    pub fn get_root(env: &Env) -> U256 {
+        MerkleTreeWithHistory::get_last_root(env)
+    }
+
+    /// Update the contract administrator
+    ///
+    /// Transfers administrative control to a new address. Requires authorization
+    /// from the current admin.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `new_admin` - New address that will have administrative permissions
+    pub fn update_admin(env: Env, new_admin: Address) {
+        soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
+    }
+
+    // ========== ASP Contract Functions ==========
+
+    /// Get the ASP Membership contract address
+    fn get_asp_membership(env: &Env) -> Address {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ASPMembership)
+            .expect("Pool contract not initialized")
+    }
+
+    /// Get the ASP Non-Membership contract address
+    fn get_asp_non_membership(env: &Env) -> Address {
+        env.storage()
+            .persistent()
+            .get(&DataKey::ASPNonMembership)
+            .expect("Pool contract not initialized")
+    }
+
+    /// Update the ASP Membership contract address
+    ///
+    /// Changes the ASP Membership contract address. Requires admin authorization.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `new_asp_membership` - New ASP Membership contract address
+    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) {
+        let admin = Self::get_admin(env);
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPMembership, &new_asp_membership);
+    }
+
+    /// Update the ASP Non-Membership contract address
+    ///
+    /// Changes the ASP Non-Membership contract address. Requires admin authorization.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `new_asp_non_membership` - New ASP Non-Membership contract address
+    pub fn update_asp_non_membership(env: &Env, new_asp_non_membership: Address) {
+        let admin = Self::get_admin(env);
+        admin.require_auth();
+        env.storage()
+            .persistent()
+            .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+    }
+
+    /// Get the current Merkle root from the ASP Membership contract
+    ///
+    /// Makes a cross-contract call to retrieve the current root of the
+    /// membership Merkle tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// The current membership Merkle root as U256
+    pub fn get_asp_membership_root(env: &Env) -> U256 {
+        let asp_address = Self::get_asp_membership(env);
+        let client = ASPMembershipClient::new(env, &asp_address);
+        client.get_root()
+    }
+
+    /// Get the current Merkle root from the ASP Non-Membership contract
+    ///
+    /// Makes a cross-contract call to retrieve the current root of the
+    /// non-membership Sparse Merkle tree.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    ///
+    /// # Returns
+    ///
+    /// The current non-membership Merkle root as U256
+    pub fn get_asp_non_membership_root(env: &Env) -> U256 {
+        let asp_address = Self::get_asp_non_membership(env);
+        let client = ASPNonMembershipClient::new(env, &asp_address);
+        client.get_root()
     }
 }
