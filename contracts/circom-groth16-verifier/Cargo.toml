@@ -1,23 +1,20 @@
 [package]
-name = "pool"
+name = "circom-groth16-verifier"
 version.workspace = true
 edition.workspace = true
-publish.workspace = true
 license.workspace = true
-repository.workspace = true
+publish = false
 
 [lib]
 crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
-# Inherit the version from the workspace
-soroban-sdk.workspace = true
-soroban-utils.workspace = true
-circom-groth16-verifier.workspace = true
-
-[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["alloc"] }
 ark-bn254 = "=0.4.0"
 ark-ec = "=0.4.2"
 ark-ff = "=0.4.2"
+
+[dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
+

@@ -1,5 +1,11 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
 use crate::{DataKey, ExtData, PoolContract, PoolContractClient, Proof};
+use ark_bn254::{G1Affine as ArkG1Affine, G1Projective, G2Affine as ArkG2Affine, G2Projective};
+use ark_ec::Group;
+use ark_ff::{BigInteger, PrimeField};
+use circom_groth16_verifier::{
+    CircomGroth16Verifier, CircomGroth16VerifierClient, VerificationKeyBytes,
+};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractimpl};
@@ -50,6 +56,60 @@ fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
 }
 
+fn g1_bytes_from_ark(p: ArkG1Affine) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    let x_bytes: [u8; 32] = p.x.into_bigint().to_bytes_be().try_into().unwrap();
+    let y_bytes: [u8; 32] = p.y.into_bigint().to_bytes_be().try_into().unwrap();
+    out[..32].copy_from_slice(&x_bytes);
+    out[32..].copy_from_slice(&y_bytes);
+    out
+}
+
+fn g2_bytes_from_ark(p: ArkG2Affine) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    let x0: [u8; 32] = p.x.c0.into_bigint().to_bytes_be().try_into().unwrap();
+    let x1: [u8; 32] = p.x.c1.into_bigint().to_bytes_be().try_into().unwrap();
+    let y0: [u8; 32] = p.y.c0.into_bigint().to_bytes_be().try_into().unwrap();
+    let y1: [u8; 32] = p.y.c1.into_bigint().to_bytes_be().try_into().unwrap();
+
+    out[..32].copy_from_slice(&x0);
+    out[32..64].copy_from_slice(&x1);
+    out[64..96].copy_from_slice(&y0);
+    out[96..].copy_from_slice(&y1);
+    out
+}
+
+fn dummy_vk_bytes(env: &Env) -> VerificationKeyBytes {
+    let g1 = ArkG1Affine::from(G1Projective::generator());
+    let g2 = ArkG2Affine::from(G2Projective::generator());
+
+    let g1_bytes = g1_bytes_from_ark(g1);
+    let g2_bytes = g2_bytes_from_ark(g2);
+
+    let g1_bn = BytesN::from_array(env, &g1_bytes);
+    let g2_bn = BytesN::from_array(env, &g2_bytes);
+
+    let mut ic = Vec::new(env);
+    for _ in 0..6 {
+        ic.push_back(g1_bn.clone());
+    }
+
+    VerificationKeyBytes {
+        alpha: g1_bn,
+        beta: g2_bn.clone(),
+        gamma: g2_bn.clone(),
+        delta: g2_bn,
+        ic,
+    }
+}
+
+fn register_circom_verifier(env: &Env) -> Address {
+    let id = env.register(CircomGroth16Verifier, ());
+    let client = CircomGroth16VerifierClient::new(env, &id);
+    client.init(&dummy_vk_bytes(env));
+    id
+}
+
 #[test]
 #[should_panic]
 fn pool_init_only_once() {
@@ -58,7 +118,7 @@ fn pool_init_only_once() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
     pool.init(&token, &verifier, &max, &levels);
@@ -160,7 +220,7 @@ fn transact_rejects_unknown_root() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
@@ -198,7 +258,7 @@ fn transact_rejects_empty_proof_bytes() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
@@ -233,7 +293,7 @@ fn transact_rejects_bad_ext_hash() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
@@ -271,7 +331,7 @@ fn transact_rejects_bad_public_amount() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
@@ -310,7 +370,7 @@ fn transact_marks_nullifiers() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
@@ -351,7 +411,7 @@ fn transact_updates_commitments_and_nullifiers() {
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let token = register_mock_token(&env);
-    let verifier = Address::generate(&env);
+    let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     pool.init(&token, &verifier, &max, &levels);
