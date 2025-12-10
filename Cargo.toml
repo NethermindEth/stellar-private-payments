@@ -10,11 +10,19 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat", "testutils"] }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
-soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat", "testutils"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }
+
+groth16-verifier = { path = "../stellar/stellar-risc0-verifier/contracts/groth16-verifier" }
+risc0-interface  = { path = "../stellar/stellar-risc0-verifier/contracts/interface" }
+circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+ark-bn254 = "=0.4.0"
+ark-ec = "=0.4.2"
+ark-ff = "=0.4.2"
+
 [workspace.lints.rust]
 missing_docs = "deny"
 unsafe_code = "forbid"

@@ -16,11 +16,12 @@ use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
+use circom_groth16_verifier::CircomGroth16VerifierClient;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    contract, contracterror, contractevent, contractimpl, contracttype, Address, Bytes, BytesN, Env, Map, Vec,
-    I256, U256,
+    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contracterror, contractevent,
+    contractimpl, contracttype, crypto::bn254::Fr,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -113,7 +114,7 @@ pub struct Proof {
     pub output_commitment0: U256,
     /// Commitment for the second output UTXO
     pub output_commitment1: U256,
-    /// Net public amount (deposit - withdrawal - fee)
+    /// Net public amount (deposit - withdrawal - fee, modulo field size)
     pub public_amount: U256,
     /// Hash of the external data (binds proof to transaction parameters)
     pub ext_data_hash: BytesN<32>,
@@ -382,9 +383,32 @@ impl PoolContract {
     ///
     /// # Note
     ///
-    /// TODO: Implement actual ZK proof verification
-    fn verify_proof(_env: &Env, _proof: &Proof) -> bool {
-        true
+    fn verify_proof(env: &Env, proof: &Proof) -> bool {
+        let verifier = Self::get_verifier(env);
+        let client = CircomGroth16VerifierClient::new(env, &verifier);
+
+        // Public inputs expected by the Circom Transaction circuit:
+        // [root, publicAmount, extDataHash, inputNullifier..., outputCommitment0, outputCommitment1]
+        let mut public_inputs: Vec<Fr> = Vec::new(env);
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.public_amount,
+        )));
+        public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
+        for nullifier in proof.input_nullifiers.iter() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+        }
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment0,
+        )));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment1,
+        )));
+
+        client.verify(&proof.proof, &public_inputs)
     }
 
     /// Hash external data using Keccak256
@@ -619,6 +643,21 @@ impl PoolContract {
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
             .expect("Pool contract not initialized")
+    }
+
+    /// Get the verifier contract address
+    fn get_verifier(env: &Env) -> Address {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Verifier)
+            .expect("Verifier not configured")
+    }
+
+    /// Convert a U256 into a 32-byte big-endian field element
+    fn u256_to_bytes(env: &Env, v: &U256) -> BytesN<32> {
+        let mut buf = [0u8; 32];
+        v.to_be_bytes().copy_into_slice(&mut buf);
+        BytesN::from_array(env, &buf)
     }
 
     /// Get the admin address
