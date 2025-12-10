@@ -56,7 +56,6 @@ fn register_circom_verifier(env: &Env) -> Address {
 }
 
 #[test]
-#[should_panic]
 fn pool_init_only_once() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -66,10 +65,10 @@ fn pool_init_only_once() {
     let verifier = register_circom_verifier(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    pool.init(&token, &verifier, &max, &levels);
+    pool.init(&token, &verifier, &max, &levels).unwrap();
 
-    // second init should panic
-    pool.init(&token, &verifier, &max, &levels);
+    // second init should error
+    assert!(pool.init(&token, &verifier, &max, &levels).is_err());
 }
 
 #[test]
@@ -108,8 +107,8 @@ fn merkle_insert_updates_root_and_index() {
         assert_eq!(idx_1, 1);
 
         // last root must be known
-        let root = MerkleTreeWithHistory::get_last_root(&env);
-        assert!(MerkleTreeWithHistory::is_known_root(&env, &root));
+        let root = MerkleTreeWithHistory::get_last_root(&env).unwrap();
+        assert!(MerkleTreeWithHistory::is_known_root(&env, &root).unwrap());
 
         // nextIndex should now be 2 (stored in persistent storage)
         let next: u64 = env
@@ -158,7 +157,6 @@ fn merkle_init_rejects_zero_levels() {
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_unknown_root() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -192,11 +190,10 @@ fn transact_rejects_unknown_root() {
         ext_data_hash: mk_bytesn32(&env, 0xEE),
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_empty_proof_bytes() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -210,7 +207,7 @@ fn transact_rejects_empty_proof_bytes() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env).unwrap());
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
     let proof = Proof {
@@ -227,11 +224,10 @@ fn transact_rejects_empty_proof_bytes() {
         ext_data_hash: ext_hash,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_bad_ext_hash() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -245,7 +241,7 @@ fn transact_rejects_bad_ext_hash() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env).unwrap());
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let proof = Proof {
         proof: {
@@ -265,11 +261,10 @@ fn transact_rejects_bad_ext_hash() {
         ext_data_hash: mk_bytesn32(&env, 0x99), // mismatched hash
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_bad_public_amount() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -283,7 +278,7 @@ fn transact_rejects_bad_public_amount() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env).unwrap());
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
     let proof = Proof {
@@ -304,11 +299,10 @@ fn transact_rejects_bad_public_amount() {
         ext_data_hash: ext_hash,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_marks_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -322,7 +316,7 @@ fn transact_marks_nullifiers() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env).unwrap());
     let nullifier = U256::from_u32(&env, 0xCD);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);
@@ -344,9 +338,9 @@ fn transact_marks_nullifiers() {
         ext_data_hash: ext_hash.clone(),
     };
 
-    pool.transact(&proof, &ext, &sender);
-    // second call with same nullifier should panic
-    pool.transact(&proof, &ext, &sender);
+    pool.transact(&proof, &ext, &sender).unwrap();
+    let second = pool.transact(&proof, &ext, &sender);
+    assert!(second.is_err());
 }
 
 #[test]
@@ -363,7 +357,7 @@ fn transact_updates_commitments_and_nullifiers() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env));
+    let root = env.as_contract(&pool_id, || MerkleTreeWithHistory::get_last_root(&env).unwrap());
     let nullifier = U256::from_u32(&env, 0x22);
     let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
     let ext_hash = compute_ext_hash(&env, &ext);

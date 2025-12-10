@@ -24,6 +24,7 @@ pub enum Error {
     WrongLevels,
     MerkleTreeFull,
     NextIndexNotEven,
+    NotInitialized,
 }
 /// Storage keys for Merkle tree persistent data
 #[contracttype]
@@ -85,13 +86,13 @@ impl MerkleTreeWithHistory {
 
         // Initialize filledSubtrees[i] = zeros(i) for each level
         for i in 0..levels + 1 {
-            let z: U256 = zeros.get(i).expect("Zero hash missing");
+            let z: U256 = zeros.get(i).ok_or(Error::NotInitialized)?;
             storage.set(&MerkleDataKey::FilledSubtree(i), &z);
             storage.set(&MerkleDataKey::Zeroes(i), &z);
         }
 
         // Set initial root to zero hash at top level
-        let root_0: U256 = zeros.get(levels).expect("Zero hash for root missing");
+        let root_0: U256 = zeros.get(levels).ok_or(Error::NotInitialized)?;
         storage.set(&MerkleDataKey::Root(0), &root_0);
         storage.set(&MerkleDataKey::CurrentRootIndex, &0u32);
         storage.set(&MerkleDataKey::NextIndex, &0u64);
@@ -123,14 +124,14 @@ impl MerkleTreeWithHistory {
 
         let levels: u32 = storage
             .get(&MerkleDataKey::Levels)
-            .expect("Tree not initialized");
+            .ok_or(Error::NotInitialized)?;
         let next_index: u64 = storage
             .get(&MerkleDataKey::NextIndex)
-            .expect("Tree not initialized");
+            .ok_or(Error::NotInitialized)?;
         let mut root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
-            .expect("Tree not initialized");
-        let max_leaves = 1u64.checked_shl(levels).expect("Levels too large");
+            .ok_or(Error::NotInitialized)?;
+        let max_leaves = 1u64.checked_shl(levels).ok_or(Error::WrongLevels)?;
 
         // NextIndex must be even for two-leaf insertion
         if next_index % 2 != 0 {
@@ -155,14 +156,14 @@ impl MerkleTreeWithHistory {
                 // Leaf is right child, get the stored left sibling
                 let left: U256 = storage
                     .get(&MerkleDataKey::FilledSubtree(lvl))
-                    .expect("Filled subtree missing");
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
                 storage.set(&MerkleDataKey::FilledSubtree(lvl), &current_hash);
                 let zero_val: U256 = storage
                     .get(&MerkleDataKey::Zeroes(lvl))
-                    .expect("Zero hash missing");
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(env, current_hash, zero_val);
             }
             current_index >>= 1;
@@ -200,16 +201,16 @@ impl MerkleTreeWithHistory {
     /// # Panics
     ///
     /// * Panics if the tree has not been initialized
-    pub fn is_known_root(env: &Env, root: &U256) -> bool {
+    pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
         // Zero root is never valid as define zero in a different way
         if *root == U256::from_u32(env, 0u32) {
-            return false;
+            return Ok(false);
         }
 
         let storage = env.storage().persistent();
         let current_root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
-            .expect("Tree not initialized");
+            .ok_or(Error::NotInitialized)?;
 
         // Search the ring buffer for the root
         let mut i = current_root_index;
@@ -217,7 +218,7 @@ impl MerkleTreeWithHistory {
             // roots[i]
             if let Some(r) = storage.get::<MerkleDataKey, U256>(&MerkleDataKey::Root(i)) {
                 if &r == root {
-                    return true;
+                    return Ok(true);
                 }
             }
             i = (i + 1) % ROOT_HISTORY_SIZE;
@@ -226,7 +227,7 @@ impl MerkleTreeWithHistory {
                 break;
             }
         }
-        false
+        Ok(false)
     }
 
     /// Get the current Merkle root
@@ -244,15 +245,15 @@ impl MerkleTreeWithHistory {
     /// # Panics
     ///
     /// * Panics if the tree has not been initialized
-    pub fn get_last_root(env: &Env) -> U256 {
+    pub fn get_last_root(env: &Env) -> Result<U256, Error> {
         let storage = env.storage().persistent();
         let current_root_index: u32 = storage
             .get(&MerkleDataKey::CurrentRootIndex)
-            .expect("Tree not initialized");
+            .ok_or(Error::NotInitialized)?;
 
         storage
             .get(&MerkleDataKey::Root(current_root_index))
-            .expect("Root not set")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Hash two U256 values using Poseidon2 compression

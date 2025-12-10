@@ -114,7 +114,11 @@ impl CircomGroth16Verifier {
             return Err(Groth16Error::MalformedPublicInputs);
         }
 
-        let mut vk_x = vk.ic.first().cloned().unwrap();
+        let mut vk_x = vk
+            .ic
+            .first()
+            .cloned()
+            .ok_or(Groth16Error::MalformedPublicInputs)?;
         for (s, v) in pub_inputs.iter().zip(vk.ic.iter().skip(1)) {
             let prod = bn.g1_mul(v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);

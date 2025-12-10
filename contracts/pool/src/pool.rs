@@ -29,6 +29,8 @@ use soroban_utils::constants::bn256_modulus;
 pub enum Error {
     /// Caller is not authorized to perform this operation
     NotAuthorized = 1,
+    /// Contract is not initialized
+    NotInitialized = 12,
     /// Merkle tree has reached maximum capacity
     MerkleTreeFull = 2,
     /// Contract has already been initialized
@@ -60,6 +62,7 @@ impl From<MerkleError> for Error {
             MerkleError::MerkleTreeFull => Error::MerkleTreeFull,
             MerkleError::WrongLevels => Error::WrongLevels,
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
+            MerkleError::NotInitialized => Error::NotInitialized,
         }
     }
 }
@@ -346,8 +349,8 @@ impl PoolContract {
     ///
     /// # Note
     ///
-    fn verify_proof(env: &Env, proof: &Proof) -> bool {
-        let verifier = Self::get_verifier(env);
+    fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
+        let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
 
         // Public inputs expected by the Circom Transaction circuit:
@@ -371,7 +374,7 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
-        client.try_verify(&proof.proof, &public_inputs).is_ok()
+        Ok(client.try_verify(&proof.proof, &public_inputs).is_ok())
     }
 
     /// Hash external data using Keccak256
@@ -436,14 +439,14 @@ impl PoolContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
-        let token = Self::get_token(env);
+        let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
 
         // Handle deposit if ext_amount > 0
         if ext_data.ext_amount > zero {
             let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
-            let max = Self::get_maximum_deposit(env);
+            let max = Self::get_maximum_deposit(env)?;
             if deposit_u > max {
                 return Err(Error::WrongExtAmount);
             }
@@ -485,7 +488,7 @@ impl PoolContract {
         }
 
         // 2. Merkle root check
-        if !MerkleTreeWithHistory::is_known_root(env, &proof.root) {
+        if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
 
@@ -510,7 +513,7 @@ impl PoolContract {
         }
 
         // 6. ZK proof verification
-        if !Self::verify_proof(env, &proof) {
+        if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
 
@@ -521,7 +524,7 @@ impl PoolContract {
         }
 
         // 8. Process withdrawal if ext_amount < 0
-        let token = Self::get_token(env);
+        let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let this = env.current_contract_address();
         let zero = I256::from_i32(env, 0);
@@ -592,24 +595,27 @@ impl PoolContract {
     }
 
     /// Get the token contract address
-    fn get_token(env: &Env) -> Address {
-        env.storage().persistent().get(&DataKey::Token).unwrap()
+    fn get_token(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the maximum deposit amount
-    fn get_maximum_deposit(env: &Env) -> U256 {
+    fn get_maximum_deposit(env: &Env) -> Result<U256, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
-            .expect("Pool contract not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the verifier contract address
-    fn get_verifier(env: &Env) -> Address {
+    fn get_verifier(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Verifier)
-            .expect("Verifier not configured")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Convert a U256 into a 32-byte big-endian field element
