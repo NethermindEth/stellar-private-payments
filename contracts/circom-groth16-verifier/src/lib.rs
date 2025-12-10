@@ -3,6 +3,7 @@
 //! Groth16 verifier contract for Circom proofs on Soroban using the native
 //! BN254 precompile.
 
+// Use Soroban's allocator for heap allocations
 extern crate alloc;
 
 use alloc::vec::Vec as StdVec;
@@ -84,22 +85,21 @@ pub struct CircomGroth16Verifier;
 #[contractimpl]
 impl CircomGroth16Verifier {
 
-    /// Groth16 verification key for the RISC Zero system.
+    /// Groth16 verification key generated from the Circom `vk.json`.
     ///
-    /// This verification key is generated at build time from `vk.json`
+    /// The bytes are emitted in `build.rs` from `circuits/vk.json` at compile time.
     const VERIFICATION_KEY: VerificationKeyBytes =
         include!(concat!(env!("OUT_DIR"), "/verification_key.rs"));
 
     /// Verify a Groth16 proof using the stored verification key.
-    pub fn verify(env: Env, proof_bytes: Bytes, public_inputs: Vec<Fr>) -> bool {
+    ///
+    /// Returns `Ok(())` on success or a [`Groth16Error`] describing the failure.
+    pub fn verify(env: Env, proof_bytes: Bytes, public_inputs: Vec<Fr>) -> Result<(), Groth16Error> {
         let vk = Self::VERIFICATION_KEY.verification_key(&env);
 
-        let proof = match Groth16Proof::try_from(proof_bytes) {
-            Ok(p) => p,
-            Err(_) => return false,
-        };
+        let proof = Groth16Proof::try_from(proof_bytes)?;
 
-        Self::verify_with_vk(&env, &vk, proof, public_inputs).unwrap_or(false)
+        Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 
     fn verify_with_vk(
@@ -107,7 +107,7 @@ impl CircomGroth16Verifier {
         vk: &VerificationKey,
         proof: Groth16Proof,
         pub_inputs: Vec<Fr>,
-    ) -> Result<bool, Groth16Error> {
+    ) -> Result<(), Groth16Error> {
         let bn = env.crypto().bn254();
 
         if pub_inputs.len() + 1 != vk.ic.len() as u32 {
@@ -127,7 +127,11 @@ impl CircomGroth16Verifier {
         let g1_points = vec![env, neg_a, vk.alpha.clone(), vk_x, proof.c];
         let g2_points = vec![env, proof.b, vk.beta.clone(), vk.gamma.clone(), vk.delta.clone()];
 
-        Ok(bn.pairing_check(g1_points, g2_points))
+        if bn.pairing_check(g1_points, g2_points) {
+            Ok(())
+        } else {
+            Err(Groth16Error::InvalidProof)
+        }
     }
 }
 

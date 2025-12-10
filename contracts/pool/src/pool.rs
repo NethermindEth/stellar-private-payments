@@ -371,7 +371,7 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
-        client.verify(&proof.proof, &public_inputs)
+        client.try_verify(&proof.proof, &public_inputs).is_ok()
     }
 
     /// Hash external data using Keccak256
