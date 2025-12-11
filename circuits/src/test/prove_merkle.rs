@@ -1,3 +1,7 @@
+// Since we only compile the test module when the `circom-tests` feature is enabled,
+// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
+// to avoid warnings during cargo build.
+#![allow(unused_imports)]
 use super::{
     merkle_tree::{merkle_proof, merkle_root},
     utils::general::scalar_to_bigint,

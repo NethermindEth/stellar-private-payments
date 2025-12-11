@@ -1,3 +1,8 @@
+// Since we only compile the test module when the `circom-tests` feature is enabled,
+// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
+// to avoid warnings during cargo build.
+#![allow(unused_imports)]
+
 use crate::test::utils::circom_tester::{Inputs, SignalKey, prove_and_verify};
 use crate::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
 use crate::test::utils::keypair::derive_public_key;

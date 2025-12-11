@@ -19,14 +19,12 @@ use circuits::test::utils::transaction_case::{
     InputNote, OutputNote, TxCase, build_base_inputs, prepare_transaction_witness,
 };
 use num_bigint::{BigInt, BigUint};
-use pool::{ExtData, PoolContract, PoolContractClient, Proof};
+use pool::{PoolContract, PoolContractClient, Proof};
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec as SorobanVec};
-use soroban_utils::constants::bn256_modulus;
-use soroban_utils::utils::{MockToken, g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark};
-use zkhash::ark_ff::{BigInteger as BigInteger04, PrimeField, Zero}; // For zkhash Scalar (0.4)
+use soroban_utils::utils::{MockToken, g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark, ExtData, hash_ext_data};
+use zkhash::ark_ff::{BigInteger as BigInteger04, PrimeField, Zero}; // For zkhash Scalar (ark-ff 0.4)
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 /// Circuit configuration constants (MUST match the compliant_test in the circuit crate)
@@ -89,17 +87,6 @@ fn deploy_contracts(
         asp_membership,
         asp_non_membership,
     }
-}
-
-/// Compute ext data hash
-fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
 }
 
 /// Membership tree data for proof generation
@@ -339,13 +326,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
     };
 
     // Compute ext_data_hash as the contract would
-    let payload = ext_data.clone().to_xdr(&env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(&env, &Bytes::from(digest.clone()));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(&env));
-    let mut ext_hash_buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut ext_hash_buf);
-    let ext_data_hash_bytes = BytesN::from_array(&env, &ext_hash_buf);
+    let ext_data_hash_bytes = hash_ext_data(&env, &ext_data);
     let ext_data_hash_bigint = bytes32_to_bigint(&ext_data_hash_bytes);
 
     // Create transaction case
@@ -489,7 +470,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
             pool::merkle_with_history::MerkleTreeWithHistory::insert_two_leaves(
                 &env, leaf_1, leaf_2,
             )
-                .unwrap();
+            .unwrap();
         });
     }
     // Check if roots match
@@ -499,7 +480,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
         circuit_root, pool_root,
         "Pool root should match circuit root. Otherwise, the verification will fail"
     );
-    
+
     // Get ASP roots from deployed contracts
     let asp_membership_root = asp_membership_client.get_root();
     let asp_non_membership_root = asp_non_membership_client.get_root();
@@ -539,9 +520,6 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
         ),
     );
 
-    // Compute ext_data_hash
-    let ext_hash = compute_ext_hash(&env, &ext_data);
-
     // Build the complete Proof struct
     let proof = Proof {
         proof: groth16_proof,
@@ -550,7 +528,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
         output_commitment0,
         output_commitment1,
         public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: ext_hash,
+        ext_data_hash: ext_data_hash_bytes,
         asp_membership_root,
         asp_non_membership_root,
     };

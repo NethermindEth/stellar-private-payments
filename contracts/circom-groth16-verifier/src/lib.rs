@@ -1,4 +1,4 @@
-//#![no_std]
+#![no_std]
 
 //! Groth16 verifier contract for Circom proofs on Soroban using the native
 //! BN254 precompile.
@@ -99,15 +99,12 @@ impl CircomGroth16Verifier {
 
     /// Verify a Groth16 proof using the stored verification key.
     pub fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>) -> bool {
-        println!("Verifying proof");
         let vk_bytes: VerificationKeyBytes =
             match env.storage().persistent().get(&DataKey::VerificationKey) {
                 Some(vk) => vk,
                 None => return false,
             };
-        println!("Verifying key before");
         let vk = vk_bytes.verification_key(&env);
-        println!("Verifying key after");
         Self::verify_with_vk(&env, &vk, proof, public_inputs).unwrap_or(false)
     }
 
@@ -118,23 +115,15 @@ impl CircomGroth16Verifier {
         pub_inputs: Vec<Fr>,
     ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
-        println!("We are so back");
-        println!("Pub Inputs len {:?}", pub_inputs.len());
-        for pi in pub_inputs.clone() {
-            println!("Pub Input {:#?}", pi.as_u256().to_be_bytes());
-        }
-        println!("VK len {:?}", vk.ic.len());
         if pub_inputs.len() + 1 != vk.ic.len() as u32 {
             return Err(Groth16Error::MalformedPublicInputs);
         }
-        println!("Malformed inputs passed");
 
         let mut vk_x = vk.ic.first().cloned().unwrap();
         for (s, v) in pub_inputs.iter().zip(vk.ic.iter().skip(1)) {
             let prod = bn.g1_mul(v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);
         }
-        println!("Before doing the pairing check");
 
         // Compute the pairing check:
         // e(-A, B) * e(alpha, beta) * e(vk_x, gamma) * e(C, delta) == 1
@@ -148,7 +137,6 @@ impl CircomGroth16Verifier {
             vk.gamma.clone(),
             vk.delta.clone(),
         ];
-        println!("Before calling the pairing check");
         Ok(bn.pairing_check(g1_points, g2_points))
     }
 }
