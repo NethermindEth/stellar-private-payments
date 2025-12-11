@@ -125,7 +125,7 @@ impl Inputs {
 /// Represents a single Circom input value
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum InputValue {
+pub enum InputValue {
     Single(BigInt),
     Array(Vec<BigInt>),
 }

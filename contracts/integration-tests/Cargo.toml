@@ -14,7 +14,7 @@ doctest = false
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 pool = { path = "../pool" }
-
+circom-groth16-verifier.workspace = true
 # Soroban SDK for test infrastructure
 soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }

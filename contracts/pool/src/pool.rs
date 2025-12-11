@@ -15,8 +15,8 @@
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
-use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
-use circom_groth16_verifier::CircomGroth16VerifierClient;
+use circom_groth16_verifier::{CircomGroth16VerifierClient, Groth16Proof};
+use soroban_sdk::testutils::arbitrary::std::println;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -85,17 +85,6 @@ pub struct ExtData {
     pub encrypted_output0: Bytes,
     /// Encrypted data for the second output UTXO
     pub encrypted_output1: Bytes,
-}
-
-/// Groth16 zero-knowledge proof structure
-///
-/// Contains the three elliptic curve points that make up a Groth16 proof
-#[contracttype]
-#[derive(Clone)]
-pub struct Groth16Proof {
-    pub a: G1Affine,
-    pub b: G2Affine,
-    pub c: G1Affine,
 }
 
 /// Zero-knowledge proof data for a transaction
@@ -374,21 +363,18 @@ impl PoolContract {
     ///
     /// # Arguments
     ///
-    /// * `_env` - The Soroban environment
-    /// * `_proof` - The proof to verify
+    /// * `env` - The Soroban environment
+    /// * `proof` - The proof to verify
     ///
     /// # Returns
     ///
     /// Returns `true` if the proof is valid, `false` otherwise
-    ///
-    /// # Note
-    ///
     fn verify_proof(env: &Env, proof: &Proof) -> bool {
         let verifier = Self::get_verifier(env);
         let client = CircomGroth16VerifierClient::new(env, &verifier);
 
         // Public inputs expected by the Circom Transaction circuit:
-        // [root, publicAmount, extDataHash, inputNullifier..., outputCommitment0, outputCommitment1]
+        // Order is important. Order is defined by the order in which the signals were declared in the circuit.
         let mut public_inputs: Vec<Fr> = Vec::new(env);
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
@@ -396,6 +382,19 @@ impl PoolContract {
             &proof.public_amount,
         )));
         public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
+        // Add compliance roots. Order is important.
+        for _ in 0..proof.input_nullifiers.len() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+                env,
+                &proof.asp_membership_root,
+            )));
+        }
+        for _ in 0..proof.input_nullifiers.len() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+                env,
+                &proof.asp_non_membership_root,
+            )));
+        }
         for nullifier in proof.input_nullifiers.iter() {
             public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
         }
@@ -408,6 +407,7 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
+        println!("CLIENT VERIFY");
         client.verify(&proof.proof, &public_inputs)
     }
 
@@ -509,12 +509,11 @@ impl PoolContract {
     ///
     /// # Validation Steps
     ///
-    /// 1. Verify proof is not empty
-    /// 2. Verify Merkle root is in recent history
-    /// 3. Verify no nullifiers have been spent
-    /// 4. Verify external data hash matches
-    /// 5. Verify public amount calculation
-    /// 6. Verify zero-knowledge proof
+    /// 1. Verify Merkle root is in recent history
+    /// 2. Verify no nullifiers have been spent
+    /// 3. Verify external data hash matches
+    /// 4. Verify public amount calculation
+    /// 5. Verify zero-knowledge proof
     fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
         // 1. Merkle root check
         if !MerkleTreeWithHistory::is_known_root(env, &proof.root) {
@@ -547,6 +546,13 @@ impl PoolContract {
         if member_root != proof.asp_membership_root
             || non_member_root != proof.asp_non_membership_root
         {
+            println!(
+                "ASP roots do not match: {:?} vs. {:?}  vs. {:?}  vs. {:?} ",
+                member_root,
+                proof.asp_membership_root,
+                non_member_root,
+                proof.asp_non_membership_root
+            );
             return Err(Error::InvalidProof);
         }
 
@@ -572,14 +578,14 @@ impl PoolContract {
             let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
             token_client.transfer(&this, &ext_data.recipient, &amount);
         }
-
+        println!("Before inserting the pool");
         // 9. Insert new commitments into Merkle tree
         let (idx_0, idx_1) = MerkleTreeWithHistory::insert_two_leaves(
             env,
             proof.output_commitment0.clone(),
             proof.output_commitment1.clone(),
         )?;
-
+        println!("Before events");
         // 10. Emit commitment events
         NewCommitmentEvent {
             commitment: proof.output_commitment0,

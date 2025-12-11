@@ -5,7 +5,8 @@
 
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use pool::{ExtData, Groth16Proof, PoolContract, PoolContractClient, Proof};
+use circom_groth16_verifier::Groth16Proof;
+use pool::{ExtData, PoolContract, PoolContractClient, Proof};
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
@@ -24,7 +25,7 @@ const MAX_DEPOSIT: u32 = 1_000_000;
 /// Create a mock Groth16 proof for testing
 ///
 /// This creates a dummy proof with valid curve points.
-/// The actual cryptographic validity is not checked in unit tests (check e2e tests for that)
+/// The actual proof validity is not checked in unit tests for now
 fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     // G1 generator point
     let g1_bytes = {
@@ -37,6 +38,7 @@ fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     // G2 generator point
     let g2_bytes = {
         let mut bytes = [0u8; 128];
+        // Set some non-zero values for a valid-looking G2 point
         bytes[31] = 1;
         bytes[63] = 1;
         bytes[95] = 1;
@@ -45,9 +47,9 @@ fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     };
 
     Groth16Proof {
-        a: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
-        b: G2Affine::from_bytes(env, &Bytes::from_slice(env, &g2_bytes)),
-        c: G1Affine::from_bytes(env, &Bytes::from_slice(env, &g1_bytes)),
+        a: G1Affine::from_array(env, &g1_bytes),
+        b: G2Affine::from_array(env, &g2_bytes),
+        c: G1Affine::from_array(env, &g1_bytes),
     }
 }
 

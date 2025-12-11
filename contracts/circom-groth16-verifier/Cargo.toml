@@ -11,9 +11,6 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true, features = ["alloc"] }
-ark-bn254 = "=0.4.0"
-ark-ec = "=0.4.2"
-ark-ff = "=0.4.2"
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
