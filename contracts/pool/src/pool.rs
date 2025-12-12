@@ -351,7 +351,7 @@ impl PoolContract {
     /// # Returns
     ///
     /// Returns `true` if the proof is valid, `false` otherwise
-    fn verify_proof(env: &Env, proof: &Proof) -> bool {
+    fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
 
@@ -491,7 +491,7 @@ impl PoolContract {
     /// 5. Verify zero-knowledge proof
     fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
         // 1. Merkle root check
-        if !MerkleTreeWithHistory::is_known_root(env, &proof.root) {
+        if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
 
@@ -516,8 +516,8 @@ impl PoolContract {
         }
 
         // ASP root validation
-        let member_root = Self::get_asp_membership_root(env);
-        let non_member_root = Self::get_asp_non_membership_root(env);
+        let member_root = Self::get_asp_membership_root(env)?;
+        let non_member_root = Self::get_asp_non_membership_root(env)?;
         if member_root != proof.asp_membership_root
             || non_member_root != proof.asp_non_membership_root
         {
@@ -646,8 +646,8 @@ impl PoolContract {
     }
 
     /// Get the latest root of the Merkle tree that defines the pool
-    pub fn get_root(env: &Env) -> U256 {
-        MerkleTreeWithHistory::get_last_root(env)
+    pub fn get_root(env: &Env) -> Result<U256, Error> {
+        Ok(MerkleTreeWithHistory::get_last_root(env)?)
     }
 
     /// Update the contract administrator
@@ -666,7 +666,7 @@ impl PoolContract {
     // ========== ASP Contract Functions ==========
 
     /// Get the ASP Membership contract address
-    fn get_asp_membership(env: &Env) -> Address {
+    fn get_asp_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::ASPMembership)
@@ -674,7 +674,7 @@ impl PoolContract {
     }
 
     /// Get the ASP Non-Membership contract address
-    fn get_asp_non_membership(env: &Env) -> Address {
+    fn get_asp_non_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::ASPNonMembership)
@@ -689,12 +689,13 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
-    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) {
-        let admin = Self::get_admin(env);
+    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error>{
+        let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPMembership, &new_asp_membership);
+        Ok(())
     }
 
     /// Update the ASP Non-Membership contract address
@@ -705,12 +706,13 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_non_membership` - New ASP Non-Membership contract address
-    pub fn update_asp_non_membership(env: &Env, new_asp_non_membership: Address) {
-        let admin = Self::get_admin(env);
+    pub fn update_asp_non_membership(env: &Env, new_asp_non_membership: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+        Ok(())
     }
 
     /// Get the current Merkle root from the ASP Membership contract
@@ -725,10 +727,10 @@ impl PoolContract {
     /// # Returns
     ///
     /// The current membership Merkle root as U256
-    pub fn get_asp_membership_root(env: &Env) -> U256 {
-        let asp_address = Self::get_asp_membership(env);
+    pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
+        let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
-        client.get_root()
+        Ok(client.get_root())
     }
 
     /// Get the current Merkle root from the ASP Non-Membership contract
@@ -743,9 +745,9 @@ impl PoolContract {
     /// # Returns
     ///
     /// The current non-membership Merkle root as U256
-    pub fn get_asp_non_membership_root(env: &Env) -> U256 {
-        let asp_address = Self::get_asp_non_membership(env);
+    pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
+        let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
-        client.get_root()
+        Ok(client.get_root())
     }
 }

@@ -21,7 +21,7 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark};
-use soroban_utils::utils::{MockToken, vk_bytes_from_ark};
+use soroban_utils::utils::{MockToken};
 use zkhash::ark_ff::{BigInteger, PrimeField, Zero};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -65,16 +65,14 @@ pub struct DeployedContracts {
 /// A `DeployedContracts` struct containing all deployed contract addresses
 pub fn deploy_contracts(
     env: &Env,
-    vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>,
 ) -> DeployedContracts {
     let admin = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
 
     let verifier_address = env.register(CircomGroth16Verifier, ());
-    let verifier_client = CircomGroth16VerifierClient::new(env, &verifier_address);
-    let vk_bytes = vk_bytes_from_ark(env, vk);
-    verifier_client.init(&vk_bytes);
+    CircomGroth16VerifierClient::new(env, &verifier_address);
+  
 
     let asp_membership = env.register(ASPMembership, ());
     ASPMembershipClient::new(env, &asp_membership).init(&admin, &ASP_MEMBERSHIP_LEVELS);

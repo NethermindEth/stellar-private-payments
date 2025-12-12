@@ -1,12 +1,10 @@
 use crate::bn256_modulus;
-use ark_bn254::{G1Affine as ArkG1Affine, G1Projective, G2Affine as ArkG2Affine, G2Projective};
-use ark_ec::PrimeGroup;
+use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::BigInteger;
 use ark_ff::fields::PrimeField;
-use circom_groth16_verifier::VerificationKeyBytes;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, IntoVal, TryFromVal, U256, Val, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, I256, IntoVal, TryFromVal, U256, Val, contract, contractimpl,
     contracttype,
 };
 
@@ -74,62 +72,6 @@ pub fn g2_bytes_from_ark(p: ArkG2Affine) -> [u8; 128] {
     out[64..96].copy_from_slice(&y1); // y.c1 (imaginary)
     out[96..].copy_from_slice(&y0); // y.c0 (real)
     out
-}
-
-pub fn dummy_vk_bytes(env: &Env) -> VerificationKeyBytes {
-    let g1 = ArkG1Affine::from(G1Projective::generator());
-    let g2 = ArkG2Affine::from(G2Projective::generator());
-
-    let g1_bytes = g1_bytes_from_ark(g1);
-    let g2_bytes = g2_bytes_from_ark(g2);
-
-    let g1_bn = BytesN::from_array(env, &g1_bytes);
-    let g2_bn = BytesN::from_array(env, &g2_bytes);
-
-    let mut ic = Vec::new(env);
-    for _ in 0..6 {
-        ic.push_back(g1_bn.clone());
-    }
-
-    VerificationKeyBytes {
-        alpha: g1_bn,
-        beta: g2_bn.clone(),
-        gamma: g2_bn.clone(),
-        delta: g2_bn,
-        ic,
-    }
-}
-
-/// Convert an ark-groth16 VerifyingKey to Soroban VerificationKeyBytes
-///
-/// # Arguments
-/// * `env` - The Soroban environment
-/// * `vk` - The ark-groth16 VerifyingKey<Bn254>
-///
-/// # Returns
-/// A VerificationKeyBytes struct suitable for use with the CircomGroth16Verifier contract
-pub fn vk_bytes_from_ark(
-    env: &Env,
-    vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>,
-) -> VerificationKeyBytes {
-    let alpha_bytes = g1_bytes_from_ark(vk.alpha_g1);
-    let beta_bytes = g2_bytes_from_ark(vk.beta_g2);
-    let gamma_bytes = g2_bytes_from_ark(vk.gamma_g2);
-    let delta_bytes = g2_bytes_from_ark(vk.delta_g2);
-
-    let mut ic = Vec::new(env);
-    for ic_point in &vk.gamma_abc_g1 {
-        let ic_bytes = g1_bytes_from_ark(*ic_point);
-        ic.push_back(BytesN::from_array(env, &ic_bytes));
-    }
-
-    VerificationKeyBytes {
-        alpha: BytesN::from_array(env, &alpha_bytes),
-        beta: BytesN::from_array(env, &beta_bytes),
-        gamma: BytesN::from_array(env, &gamma_bytes),
-        delta: BytesN::from_array(env, &delta_bytes),
-        ic,
-    }
 }
 
 /// External data for a transaction

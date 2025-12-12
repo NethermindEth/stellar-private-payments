@@ -8,7 +8,7 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
 use soroban_utils::constants::bn256_modulus;
-use soroban_utils::utils::{ExtData, MockToken, dummy_vk_bytes};
+use soroban_utils::utils::{ExtData, MockToken};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -101,8 +101,7 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 
     // Register and initialize CircomGroth16Verifier contract
     let verifier_address = env.register(CircomGroth16Verifier, ());
-    let client = CircomGroth16VerifierClient::new(env, &verifier_address);
-    client.init(&dummy_vk_bytes(env));
+    CircomGroth16VerifierClient::new(env, &verifier_address);
 
     TestSetup {
         admin,
@@ -116,6 +115,7 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 }
 
 #[test]
+#[should_panic]
 fn pool_init_only_once() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -124,7 +124,6 @@ fn pool_init_only_once() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    pool.init(&token, &verifier, &max, &levels).unwrap();
     pool.init(
         &setup.admin,
         &setup.token,
@@ -133,10 +132,10 @@ fn pool_init_only_once() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).unwrap();
+    );
 
     // second init should error
-    assert!(pool.init(
+    pool.init(
         &setup.admin,
         &setup.token,
         &setup.verifier,
@@ -144,7 +143,7 @@ fn pool_init_only_once() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).is_err());
+    );
 }
 
 #[test]
@@ -250,7 +249,7 @@ fn transact_rejects_unknown_root() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).unwrap();
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -276,7 +275,7 @@ fn transact_rejects_unknown_root() {
         asp_non_membership_root,
     };
 
-    assert!(pool.transact(&proof, &ext, &sender).is_err());
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
@@ -296,7 +295,7 @@ fn transact_rejects_bad_ext_hash() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).unwrap();
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -323,7 +322,7 @@ fn transact_rejects_bad_ext_hash() {
         asp_non_membership_root,
     };
 
-    assert!(pool.transact(&proof, &ext, &sender).is_err());
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
@@ -343,7 +342,7 @@ fn transact_rejects_bad_public_amount() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).unwrap();
+    );
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -371,7 +370,7 @@ fn transact_rejects_bad_public_amount() {
         asp_non_membership_root,
     };
 
-    assert!(pool.transact(&proof, &ext, &sender).is_err());
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
@@ -420,9 +419,9 @@ fn transact_marks_nullifiers() {
         asp_non_membership_root,
     };
 
-    pool.transact(&proof, &ext, &sender).unwrap();
-    // second call with same nullifier should panic
-     assert!(pool.transact(&proof, &ext, &sender).is_err());
+    pool.transact(&proof, &ext, &sender);
+    // second call with same nullifier should fail
+    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
@@ -445,7 +444,7 @@ fn transact_updates_commitments_and_nullifiers() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    ).unwrap();
+    );
 
     env.mock_all_auths();
 

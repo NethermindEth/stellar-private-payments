@@ -128,7 +128,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
 
     // Deploy contracts. Including the verifier with the real verification key
     env.mock_all_auths();
-    let contracts = deploy_contracts(&env, &result.vk);
+    let contracts = deploy_contracts(&env);
     println!("Contracts deployed!");
 
     // Sync on-chain state with off-chain proof data

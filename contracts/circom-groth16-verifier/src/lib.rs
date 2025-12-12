@@ -94,11 +94,9 @@ impl CircomGroth16Verifier {
     /// Verify a Groth16 proof using the stored verification key.
     ///
     /// Returns `Ok(())` on success or a [`Groth16Error`] describing the failure.
-    pub fn verify(env: Env, proof_bytes: Bytes, public_inputs: Vec<Fr>) -> Result<(), Groth16Error> {
+    pub fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>) -> Result<(), Groth16Error> {
         let vk = Self::VERIFICATION_KEY.verification_key(&env);
-
-        let proof = Groth16Proof::try_from(proof_bytes)?;
-
+        
         Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 

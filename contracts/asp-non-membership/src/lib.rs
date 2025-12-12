@@ -61,6 +61,7 @@ pub enum Error {
     KeyAlreadyExists = 3,
     InvalidProof = 4,
     AlreadyInitialized = 5,
+    NotInitialized = 6,
 }
 
 // Events
@@ -791,11 +792,11 @@ impl ASPNonMembership {
     /// # Returns
     ///
     /// Returns the current root hash as a U256 value, or zero if empty
-    pub fn get_root(env: Env) -> U256 {
+    pub fn get_root(env: Env) -> Result<U256, Error> {
         let store = env.storage().persistent();
         store
             .get(&DataKey::Root)
-            .unwrap_or(U256::from_u32(&env, 0u32))
+            .ok_or(Error::NotInitialized)
     }
 }
 
