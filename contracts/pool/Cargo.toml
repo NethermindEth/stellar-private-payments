@@ -20,5 +20,10 @@ circom-groth16-verifier.workspace = true
 soroban-sdk.workspace = true
 soroban-utils.workspace = true
 
+groth16-verifier.workspace = true
+risc0-interface.workspace = true
+
+hex = "0.4.3"
+
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }

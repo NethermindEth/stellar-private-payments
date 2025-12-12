@@ -42,6 +42,7 @@ fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
 }
 
+
 /// Create a mock Groth16 proof for testing
 ///
 /// This creates a dummy proof with valid curve points.
@@ -115,7 +116,6 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 }
 
 #[test]
-#[should_panic]
 fn pool_init_only_once() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -124,6 +124,7 @@ fn pool_init_only_once() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
+    pool.init(&token, &verifier, &max, &levels).unwrap();
     pool.init(
         &setup.admin,
         &setup.token,
@@ -132,10 +133,10 @@ fn pool_init_only_once() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).unwrap();
 
-    // second init should panic
-    pool.init(
+    // second init should error
+    assert!(pool.init(
         &setup.admin,
         &setup.token,
         &setup.verifier,
@@ -143,7 +144,7 @@ fn pool_init_only_once() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).is_err());
 }
 
 #[test]
@@ -182,8 +183,8 @@ fn merkle_insert_updates_root_and_index() {
         assert_eq!(idx_1, 1);
 
         // last root must be known
-        let root = MerkleTreeWithHistory::get_last_root(&env);
-        assert!(MerkleTreeWithHistory::is_known_root(&env, &root));
+        let root = MerkleTreeWithHistory::get_last_root(&env).unwrap();
+        assert!(MerkleTreeWithHistory::is_known_root(&env, &root).unwrap());
 
         // nextIndex should now be 2 (stored in persistent storage)
         let next: u64 = env
@@ -232,7 +233,6 @@ fn merkle_init_rejects_zero_levels() {
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_unknown_root() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -250,7 +250,7 @@ fn transact_rejects_unknown_root() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).unwrap();
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -276,11 +276,10 @@ fn transact_rejects_unknown_root() {
         asp_non_membership_root,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_bad_ext_hash() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -297,7 +296,7 @@ fn transact_rejects_bad_ext_hash() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).unwrap();
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -324,11 +323,10 @@ fn transact_rejects_bad_ext_hash() {
         asp_non_membership_root,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_rejects_bad_public_amount() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -345,7 +343,7 @@ fn transact_rejects_bad_public_amount() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).unwrap();
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -373,11 +371,10 @@ fn transact_rejects_bad_public_amount() {
         asp_non_membership_root,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
-#[should_panic]
 fn transact_marks_nullifiers() {
     let env = Env::default();
     let pool_id = env.register(PoolContract, ());
@@ -423,9 +420,9 @@ fn transact_marks_nullifiers() {
         asp_non_membership_root,
     };
 
-    pool.transact(&proof, &ext, &sender);
+    pool.transact(&proof, &ext, &sender).unwrap();
     // second call with same nullifier should panic
-    pool.transact(&proof, &ext, &sender);
+     assert!(pool.transact(&proof, &ext, &sender).is_err());
 }
 
 #[test]
@@ -448,7 +445,7 @@ fn transact_updates_commitments_and_nullifiers() {
         &setup.asp_non_membership_address,
         &max,
         &levels,
-    );
+    ).unwrap();
 
     env.mock_all_auths();
 
