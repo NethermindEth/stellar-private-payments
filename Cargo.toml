@@ -10,13 +10,14 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-ark-bn254 = "=0.4.0"
-ark-ec = "=0.4.2"
-ark-ff = "=0.4.2"
+ark-bn254 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+ark-groth16 = "0.5.0"
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-
+num-bigint = "0.4.6"
 soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat", "testutils"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }

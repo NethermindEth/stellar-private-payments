@@ -12,15 +12,15 @@ circom-tests = ["circuits/circom-tests"]
 
 [dependencies]
 anyhow = "1"
-ark-bn254 = "0.5"
-ark-ff = "0.5"
-ark-groth16 = "0.5"
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
 circuits = { path = "../circuits", features = ["circom-tests"] }
-num-bigint = "0.4"
+num-bigint = { workspace = true }
 
 # Contract dependencies
 pool = { path = "../contracts/pool" }

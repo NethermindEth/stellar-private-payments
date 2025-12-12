@@ -11,9 +11,9 @@ crate-type = ["lib"]
 doctest = false
 
 [dependencies]
-ark-bn254 = "0.5.0"
-ark-ec = "0.5.0"
-ark-ff = "0.5.0"
-ark-groth16 = "0.5.0"
+ark-bn254 = { workspace = true }
+ark-ec = { workspace = true }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 soroban-sdk = { workspace = true }

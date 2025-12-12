@@ -16,9 +16,7 @@ use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
 use circom_groth16_verifier::{CircomGroth16VerifierClient, Groth16Proof};
-use soroban_sdk::testutils::arbitrary::std::println;
 use soroban_sdk::token::TokenClient;
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contracterror, contractevent,
     contractimpl, contracttype, crypto::bn254::Fr,
@@ -388,7 +386,6 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
-        println!("CLIENT VERIFY");
         client.verify(&proof.proof, &public_inputs)
     }
 
@@ -521,13 +518,6 @@ impl PoolContract {
         if member_root != proof.asp_membership_root
             || non_member_root != proof.asp_non_membership_root
         {
-            println!(
-                "ASP roots do not match: {:?} vs. {:?}  vs. {:?}  vs. {:?} ",
-                member_root,
-                proof.asp_membership_root,
-                non_member_root,
-                proof.asp_non_membership_root
-            );
             return Err(Error::InvalidProof);
         }
 
@@ -553,14 +543,14 @@ impl PoolContract {
             let amount: i128 = Self::i256_to_i128_nonneg(env, &abs)?;
             token_client.transfer(&this, &ext_data.recipient, &amount);
         }
-        println!("Before inserting the pool");
+
         // 9. Insert new commitments into Merkle tree
         let (idx_0, idx_1) = MerkleTreeWithHistory::insert_two_leaves(
             env,
             proof.output_commitment0.clone(),
             proof.output_commitment1.clone(),
         )?;
-        println!("Before events");
+
         // 10. Emit commitment events
         NewCommitmentEvent {
             commitment: proof.output_commitment0,

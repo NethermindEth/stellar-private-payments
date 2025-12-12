@@ -1,11 +1,14 @@
+use crate::bn256_modulus;
 use ark_bn254::{G1Affine as ArkG1Affine, G1Projective, G2Affine as ArkG2Affine, G2Projective};
 use ark_ec::PrimeGroup;
 use ark_ff::BigInteger;
 use ark_ff::fields::PrimeField;
 use circom_groth16_verifier::VerificationKeyBytes;
-use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contract, contractimpl, U256, Bytes, contracttype, I256};
 use soroban_sdk::xdr::ToXdr;
-use crate::bn256_modulus;
+use soroban_sdk::{
+    Address, Bytes, BytesN, Env, I256, IntoVal, TryFromVal, U256, Val, Vec, contract, contractimpl,
+    contracttype,
+};
 
 /// Update the contract administrator
 ///
