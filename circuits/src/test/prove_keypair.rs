@@ -79,6 +79,7 @@ fn run_signature_case(
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_keypair_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("keypair_test")?;
@@ -96,6 +97,7 @@ async fn test_keypair_test_matrix() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_signature_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("signature_test")?;

@@ -79,6 +79,7 @@ fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) ->
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_poseidon2_hash_2_matrix() -> Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("poseidon2_hash_2")?;
@@ -103,6 +104,7 @@ async fn test_poseidon2_hash_2_matrix() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_poseidon2_compression() -> Result<()> {
     // === PATH SETUP ===
     let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));

@@ -3,6 +3,8 @@
 #![allow(clippy::arithmetic_side_effects)]
 
 use anyhow::Result;
+use ark_bn254::Bn254;
+use ark_groth16::VerifyingKey;
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
@@ -17,11 +19,11 @@ use circuits::test::utils::transaction_case::{
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use pool::{PoolContract, PoolContractClient};
+use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
-use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
+use soroban_utils::utils::{MockToken, vk_bytes_from_ark};
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark};
-use soroban_utils::utils::{MockToken};
 use zkhash::ark_ff::{BigInteger, PrimeField, Zero};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -63,16 +65,14 @@ pub struct DeployedContracts {
 /// # Returns
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
-pub fn deploy_contracts(
-    env: &Env,
-) -> DeployedContracts {
+pub fn deploy_contracts(env: &Env, vk: &VerifyingKey<Bn254>) -> DeployedContracts {
     let admin = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
 
     let verifier_address = env.register(CircomGroth16Verifier, ());
-    CircomGroth16VerifierClient::new(env, &verifier_address);
-  
+    let vk_bytes = vk_bytes_from_ark(env, vk);
+    CircomGroth16VerifierClient::new(env, &verifier_address).init(&vk_bytes);
 
     let asp_membership = env.register(ASPMembership, ());
     ASPMembershipClient::new(env, &asp_membership).init(&admin, &ASP_MEMBERSHIP_LEVELS);

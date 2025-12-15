@@ -5,7 +5,11 @@
 //! integration from proof generation to on-chain verification.
 //!
 //! It bridges the gap between the different crates and versions.
-use super::utils::{LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint, deploy_contracts, generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, u256_to_scalar, wrap_groth16_proof};
+use super::utils::{
+    LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint, deploy_contracts,
+    generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, u256_to_scalar,
+    wrap_groth16_proof,
+};
 use anyhow::Result;
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
@@ -125,14 +129,13 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
         Some(ext_data_hash_bigint),
     )?;
     assert!(result.verified, "Proof should verify locally");
-
     // Deploy contracts. Including the verifier with the real verification key
     env.mock_all_auths();
-    let contracts = deploy_contracts(&env);
+    let contracts = deploy_contracts(&env, &result.vk);
     println!("Contracts deployed!");
 
     // Sync on-chain state with off-chain proof data
-    // Since contracts were just deployed, their merkle trees are basically empty. We need to insert leaves into them to have an state 
+    // Since contracts were just deployed, their merkle trees are basically empty. We need to insert leaves into them to have an state
     // equivalent to what we used to generate the proof off-chain.
     // Insert membership leaves into ASP Membership contract
     let asp_membership_client = ASPMembershipClient::new(&env, &contracts.asp_membership);
@@ -203,7 +206,7 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
     // Get ASP roots from deployed contracts
     let asp_membership_root = asp_membership_client.get_root();
     let asp_non_membership_root = asp_non_membership_client.get_root();
-    
+
     let groth16_proof = wrap_groth16_proof(&env, result);
 
     // Build input nullifiers

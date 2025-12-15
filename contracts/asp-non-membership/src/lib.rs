@@ -794,9 +794,7 @@ impl ASPNonMembership {
     /// Returns the current root hash as a U256 value, or zero if empty
     pub fn get_root(env: Env) -> Result<U256, Error> {
         let store = env.storage().persistent();
-        store
-            .get(&DataKey::Root)
-            .ok_or(Error::NotInitialized)
+        store.get(&DataKey::Root).ok_or(Error::NotInitialized)
     }
 }
 

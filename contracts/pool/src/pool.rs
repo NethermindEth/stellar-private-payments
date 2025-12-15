@@ -689,7 +689,7 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
-    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error>{
+    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
@@ -706,7 +706,10 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_non_membership` - New ASP Non-Membership contract address
-    pub fn update_asp_non_membership(env: &Env, new_asp_non_membership: Address) -> Result<(), Error> {
+    pub fn update_asp_non_membership(
+        env: &Env,
+        new_asp_non_membership: Address,
+    ) -> Result<(), Error> {
         let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()

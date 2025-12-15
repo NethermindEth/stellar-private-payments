@@ -26,6 +26,7 @@ pub enum Error {
     NextIndexNotEven,
     NotInitialized,
 }
+
 /// Storage keys for Merkle tree persistent data
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -62,11 +63,6 @@ impl MerkleTreeWithHistory {
     ///
     /// * `env` - The Soroban environment
     /// * `levels` - Number of levels in the Merkle tree (must be in range [1..32])
-    ///
-    /// # Panics
-    ///
-    /// * Panics if `levels` is 0 or greater than 32
-    /// * Panics if the tree has already been initialized
     pub fn init(env: &Env, levels: u32) -> Result<(), Error> {
         if levels == 0 || levels > 32 {
             return Err(Error::WrongLevels);
@@ -197,10 +193,6 @@ impl MerkleTreeWithHistory {
     ///
     /// Returns `true` if the root exists in the history buffer, `false` otherwise.
     /// Zero root always returns `false`.
-    ///
-    /// # Panics
-    ///
-    /// * Panics if the tree has not been initialized
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
         // Zero root is never valid as define zero in a different way
         if *root == U256::from_u32(env, 0u32) {
@@ -241,10 +233,6 @@ impl MerkleTreeWithHistory {
     /// # Returns
     ///
     /// Returns the current Merkle root as U256
-    ///
-    /// # Panics
-    ///
-    /// * Panics if the tree has not been initialized
     pub fn get_last_root(env: &Env) -> Result<U256, Error> {
         let storage = env.storage().persistent();
         let current_root_index: u32 = storage

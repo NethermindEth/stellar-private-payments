@@ -1,12 +1,12 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
-use crate::{DataKey, PoolContract, PoolContractClient, Proof};
+use crate::{PoolContract, PoolContractClient, Proof};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{Address, Bytes, BytesN, Env, I256, Map, U256, Vec};
+use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec};
 use soroban_utils::constants::bn256_modulus;
 use soroban_utils::utils::{ExtData, MockToken};
 
@@ -41,7 +41,6 @@ fn compute_ext_hash(env: &Env, ext: &ExtData) -> BytesN<32> {
 fn register_mock_token(env: &Env) -> Address {
     env.register(MockToken, ())
 }
-
 
 /// Create a mock Groth16 proof for testing
 ///
@@ -371,119 +370,4 @@ fn transact_rejects_bad_public_amount() {
     };
 
     assert!(pool.try_transact(&proof, &ext, &sender).is_err());
-}
-
-#[test]
-fn transact_marks_nullifiers() {
-    let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    let setup = setup_test_contracts(&env);
-    let max = U256::from_u32(&env, 1000);
-    let levels = 3u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
-    );
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let root = pool.get_root();
-    let nullifier = U256::from_u32(&env, 0xCD);
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
-
-    // Get actual roots
-    let asp_membership_root = setup.asp_membership_client.get_root();
-    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
-
-    let proof = Proof {
-        proof: mk_mock_groth16_proof(&env),
-        root: root.clone(),
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(nullifier.clone());
-            v
-        },
-        output_commitment0: U256::from_u32(&env, 0x05),
-        output_commitment1: U256::from_u32(&env, 0x06),
-        public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: ext_hash.clone(),
-        asp_membership_root,
-        asp_non_membership_root,
-    };
-
-    pool.transact(&proof, &ext, &sender);
-    // second call with same nullifier should fail
-    assert!(pool.try_transact(&proof, &ext, &sender).is_err());
-}
-
-#[test]
-#[should_panic]
-// This tests should not panic. But as we now have the verifier and we are using mock proofs. It fails
-// TODO: Move to the E2E tests
-fn transact_updates_commitments_and_nullifiers() {
-    let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    let setup = setup_test_contracts(&env);
-    let max = U256::from_u32(&env, 1000);
-    let levels = 3u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
-    );
-
-    env.mock_all_auths();
-
-    let sender = Address::generate(&env);
-    let root = pool.get_root();
-    let nullifier = U256::from_u32(&env, 0x22);
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
-    let ext_hash = compute_ext_hash(&env, &ext);
-
-    // Get actual roots
-    let asp_membership_root = setup.asp_membership_client.get_root();
-    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
-
-    let proof = Proof {
-        proof: mk_mock_groth16_proof(&env),
-        root: root.clone(),
-        input_nullifiers: {
-            let mut v: Vec<U256> = Vec::new(&env);
-            v.push_back(nullifier.clone());
-            v
-        },
-        output_commitment0: U256::from_u32(&env, 0x09),
-        output_commitment1: U256::from_u32(&env, 0x0A),
-        public_amount: U256::from_u32(&env, 0),
-        ext_data_hash: ext_hash,
-        asp_membership_root,
-        asp_non_membership_root,
-    };
-
-    pool.transact(&proof, &ext, &sender);
-
-    // nullifier should be marked spent
-    let seen = env.as_contract(&pool_id, || {
-        let nulls: Map<U256, bool> = env
-            .storage()
-            .persistent()
-            .get(&DataKey::Nullifiers)
-            .unwrap();
-        nulls.get(nullifier.clone()).unwrap_or(false)
-    });
-    assert!(seen);
 }

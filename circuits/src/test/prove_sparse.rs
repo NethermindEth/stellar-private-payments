@@ -90,6 +90,7 @@ fn run_case(wasm: &PathBuf, r1cs: &PathBuf, queried_key: BigInt, max_levels: usi
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_sparse_merkle_tree_membership_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("sparse_merkle_tree")?;

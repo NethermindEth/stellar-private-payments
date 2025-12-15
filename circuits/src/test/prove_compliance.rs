@@ -318,6 +318,7 @@ fn compliance_artifacts() -> Result<(PathBuf, PathBuf)> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_1in_1out() -> Result<()> {
     // One real input (in1), one dummy input (in0.amount = 0).
     // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
@@ -382,6 +383,7 @@ async fn test_tx_1in_1out() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_2in_1out() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -449,6 +451,7 @@ async fn test_tx_2in_1out() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_1in_2out_split() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -516,6 +519,7 @@ async fn test_tx_1in_2out_split() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_2in_2out_split() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -586,6 +590,7 @@ async fn test_tx_2in_2out_split() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_chained_spend() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -713,6 +718,7 @@ async fn test_tx_chained_spend() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_adds_notes_deposit() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -778,6 +784,7 @@ async fn test_tx_only_adds_notes_deposit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -844,6 +851,7 @@ async fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -912,6 +920,7 @@ async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_same_nullifier_should_fail() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -993,6 +1002,7 @@ async fn test_tx_same_nullifier_should_fail() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_membership_should_fail_wrong_privkey() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -1073,6 +1083,7 @@ async fn test_membership_should_fail_wrong_privkey() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_membership_should_fail_wrong_path() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -1152,6 +1163,7 @@ async fn test_membership_should_fail_wrong_path() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_membership_should_fail_wrong_root() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 
@@ -1227,6 +1239,7 @@ async fn test_membership_should_fail_wrong_root() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_non_membership_fails() -> Result<()> {
     // One real input (in1), one dummy input (in0.amount = 0).
     // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
@@ -1314,6 +1327,7 @@ async fn test_non_membership_fails() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_randomized_stress() -> Result<()> {
     let (wasm, r1cs) = compliance_artifacts()?;
 

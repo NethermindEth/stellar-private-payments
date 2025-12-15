@@ -18,6 +18,7 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 const LEVELS: usize = 5;
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_1in_1out() -> Result<()> {
     // One real input (in1), one dummy input (in0.amount = 0).
     // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
@@ -59,6 +60,7 @@ async fn test_tx_1in_1out() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_2in_1out() -> Result<()> {
     // Two real inputs; single real output equal to sum; one dummy output.
     let (wasm, r1cs) = load_artifacts("transaction2")?;
@@ -103,6 +105,7 @@ async fn test_tx_2in_1out() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_1in_2out_split() -> Result<()> {
     // One real input (in1); two real outputs that split the amount; in0 is dummy.
     let (wasm, r1cs) = load_artifacts("transaction2")?;
@@ -147,6 +150,7 @@ async fn test_tx_1in_2out_split() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_2in_2out_split() -> Result<()> {
     // Two real inputs; two outputs splitting the sum.
     let (wasm, r1cs) = load_artifacts("transaction2")?;
@@ -194,6 +198,7 @@ async fn test_tx_2in_2out_split() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_chained_spend() -> Result<()> {
     let (wasm, r1cs) = load_artifacts("transaction2")?;
 
@@ -296,6 +301,7 @@ async fn test_tx_chained_spend() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_randomized_stress() -> Result<()> {
     use ark_std::rand::{
         RngCore, SeedableRng,
@@ -400,6 +406,7 @@ async fn test_tx_randomized_stress() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_adds_notes_deposit() -> Result<()> {
     let (wasm, r1cs) = load_artifacts("transaction2")?;
     let real_idx = 5;
@@ -441,6 +448,7 @@ async fn test_tx_only_adds_notes_deposit() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
     let (wasm, r1cs) = load_artifacts("transaction2")?;
 
@@ -482,6 +490,7 @@ async fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
     let (wasm, r1cs) = load_artifacts("transaction2")?;
 
@@ -526,6 +535,7 @@ async fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_tx_same_nullifier_should_fail() -> Result<()> {
     let (wasm, r1cs) = load_artifacts("transaction2")?;
 

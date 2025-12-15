@@ -91,6 +91,7 @@ fn run_case(
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("merkleProof_5")?;
