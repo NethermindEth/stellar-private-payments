@@ -15,6 +15,6 @@ soroban-sdk = { workspace = true }
 soroban-utils = { workspace = true }
 
 [dev-dependencies]
-num-bigint = "0.4"
+num-bigint = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 zkhash = { workspace = true }

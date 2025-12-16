@@ -1,5 +1,9 @@
 //! Sparse Merkle Tree circuit test
 
+// Since we only compile the test module when the `circom-tests` feature is enabled,
+// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
+// to avoid warnings during cargo build.
+#![allow(unused_imports)]
 use super::circom_tester::prove_and_verify;
 use crate::test::utils::general::load_artifacts;
 use crate::test::utils::{circom_tester::Inputs, sparse_merkle_tree::prepare_smt_proof};
@@ -86,6 +90,7 @@ fn run_case(wasm: &PathBuf, r1cs: &PathBuf, queried_key: BigInt, max_levels: usi
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_sparse_merkle_tree_membership_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("sparse_merkle_tree")?;

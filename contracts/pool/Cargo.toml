@@ -15,8 +15,10 @@ doctest = false
 # ASP contracts for cross-contract calls
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
+circom-groth16-verifier.workspace = true
 # Inherit the version from the workspace
 soroban-sdk.workspace = true
-soroban-utils = { workspace = true }
+soroban-utils.workspace = true
 
-
+[dev-dependencies]
+soroban-sdk = { workspace = true, features = ["testutils"] }

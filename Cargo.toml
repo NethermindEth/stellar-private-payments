@@ -1,5 +1,5 @@
 [workspace]
-members = ["circuits", "contracts/*", "examples", "poseidon2"]
+members = ["circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
 resolver = "3"
 
 [workspace.package]
@@ -10,11 +10,18 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
+ark-bn254 = "0.5.0"
+ark-ec = "0.5.0"
+ark-ff = "0.5.0"
+ark-groth16 = "0.5.0"
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
-soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat", "testutils"] }
+circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+num-bigint = "0.4.6"
+soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat", "testutils"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }
+
 [workspace.lints.rust]
 missing_docs = "deny"
 unsafe_code = "forbid"

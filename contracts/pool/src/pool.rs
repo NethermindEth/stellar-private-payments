@@ -15,11 +15,12 @@
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
+use circom_groth16_verifier::{CircomGroth16VerifierClient, Groth16Proof};
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contracterror, contractevent,
-    contractimpl, contracttype,
+    contractimpl, contracttype, crypto::bn254::Fr,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -40,16 +41,16 @@ pub enum Error {
     NextIndexNotEven = 5,
     /// External amount is invalid (negative or exceeds 2^248)
     WrongExtAmount = 6,
-    /// Fee exceeds the maximum allowed value (2^248)
-    WrongFee = 7,
     /// Zero-knowledge proof verification failed or proof is empty
-    InvalidProof = 8,
+    InvalidProof = 7,
     /// Provided Merkle root is not in the recent history
-    UnknownRoot = 9,
+    UnknownRoot = 8,
     /// Nullifier has already been spent (double-spend attempt)
-    AlreadySpentNullifier = 10,
+    AlreadySpentNullifier = 9,
     /// External data hash does not match the provided data
-    WrongExtHash = 11,
+    WrongExtHash = 10,
+    /// Contract is not initialized
+    NotInitialized = 11,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -61,8 +62,35 @@ impl From<MerkleError> for Error {
             MerkleError::MerkleTreeFull => Error::MerkleTreeFull,
             MerkleError::WrongLevels => Error::WrongLevels,
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
+            MerkleError::NotInitialized => Error::NotInitialized,
         }
     }
+}
+
+/// Zero-knowledge proof data for a transaction
+///
+/// Contains all the cryptographic data needed to verify a transaction,
+/// including the proof itself, public inputs, and nullifiers.
+#[contracttype]
+pub struct Proof {
+    /// The serialized zero-knowledge proof
+    pub proof: Groth16Proof,
+    /// Merkle root the proof was generated against
+    pub root: U256,
+    /// Nullifiers for spent input UTXOs (prevents double-spending)
+    pub input_nullifiers: Vec<U256>,
+    /// Commitment for the first output UTXO
+    pub output_commitment0: U256,
+    /// Commitment for the second output UTXO
+    pub output_commitment1: U256,
+    /// Net public amount (deposit - withdrawal, modulo field size)
+    pub public_amount: U256,
+    /// Hash of the external data (binds proof to transaction parameters)
+    pub ext_data_hash: BytesN<32>,
+    /// Merkle root the compliance membership proof was generated against
+    pub asp_membership_root: U256,
+    /// Merkle root the compliance NON-membership proof was generated against
+    pub asp_non_membership_root: U256,
 }
 
 /// External data for a transaction
@@ -77,38 +105,33 @@ pub struct ExtData {
     pub recipient: Address,
     /// External amount: positive for deposits, negative for withdrawals
     pub ext_amount: I256,
-    /// Relayer fee (paid from the withdrawal amount)
-    pub fee: U256,
     /// Encrypted data for the first output UTXO
     pub encrypted_output0: Bytes,
     /// Encrypted data for the second output UTXO
     pub encrypted_output1: Bytes,
 }
 
-/// Zero-knowledge proof data for a transaction
+/// Hash external data using Keccak256
 ///
-/// Contains all the cryptographic data needed to verify a transaction,
-/// including the proof itself, public inputs, and nullifiers.
-#[contracttype]
-pub struct Proof {
-    /// The serialized zero-knowledge proof
-    pub proof: Bytes,
-    /// Merkle root the proof was generated against
-    pub root: U256,
-    /// Nullifiers for spent input UTXOs (prevents double-spending)
-    pub input_nullifiers: Vec<U256>,
-    /// Commitment for the first output UTXO
-    pub output_commitment0: U256,
-    /// Commitment for the second output UTXO
-    pub output_commitment1: U256,
-    /// Net public amount (deposit - withdrawal - fee)
-    pub public_amount: U256,
-    /// Hash of the external data (binds proof to transaction parameters)
-    pub ext_data_hash: BytesN<32>,
-    /// Merkle root the compliance membership proof was generated against
-    pub asp_membership_root: U256,
-    /// Merkle root the compliance NON-membership proof was generated against
-    pub asp_non_membership_root: U256,
+/// Serializes the external data to XDR, hashes it with Keccak256,
+/// and reduces the result modulo the BN256 field size.
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment
+/// * `ext` - The external data to hash
+///
+/// # Returns
+///
+/// Returns the 32-byte hash of the external data
+pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
+    let payload = ext.clone().to_xdr(env);
+    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
+    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
+    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
+    let mut buf = [0u8; 32];
+    reduced.to_be_bytes().copy_into_slice(&mut buf);
+    BytesN::from_array(env, &buf)
 }
 
 /// User account registration data
@@ -260,13 +283,6 @@ impl PoolContract {
         U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
     }
 
-    /// Maximum fee allowed (2^248)
-    ///
-    /// This limit ensures fees fit within field arithmetic constraints.
-    fn max_fee(env: &Env) -> U256 {
-        U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
-    }
-
     /// Convert a non-negative I256 to i128 with bounds checking
     ///
     /// # Arguments
@@ -285,9 +301,9 @@ impl PoolContract {
         v.to_i128().ok_or(Error::WrongExtAmount)
     }
 
-    /// Calculate the public amount from external amount and fee
+    /// Calculate the public amount from external amount
     ///
-    /// Computes `public_amount = ext_amount - fee` in the BN256 field.
+    /// Computes `public_amount = ext_amount` in the BN256 field.
     /// For positive results, returns the value directly.
     /// For negative results, returns `FIELD_SIZE - |public_amount|`.
     ///
@@ -295,33 +311,25 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `ext_amount` - External amount (positive for deposit, negative for withdrawal)
-    /// * `fee` - Relayer fee
     ///
     /// # Returns
     ///
     /// Returns the public amount as U256 in the BN256 field, or an error
     /// if the amounts exceed limits
-    fn calculate_public_amount(env: &Env, ext_amount: I256, fee: U256) -> Result<U256, Error> {
-        if fee >= Self::max_fee(env) {
-            return Err(Error::WrongFee);
-        }
-
+    fn calculate_public_amount(env: &Env, ext_amount: I256) -> Result<U256, Error> {
         let abs_ext = Self::i256_abs_to_u256(env, &ext_amount);
         if abs_ext >= Self::max_ext_amount(env) {
             return Err(Error::WrongExtAmount);
         }
 
-        let fee_bytes = fee.to_be_bytes();
-        let fee_i256 = I256::from_be_bytes(env, &fee_bytes);
-        let public_amount = ext_amount.sub(&fee_i256);
         let zero = I256::from_i32(env, 0);
 
-        if public_amount >= zero {
-            let pa_bytes = public_amount.to_be_bytes();
+        if ext_amount >= zero {
+            let pa_bytes = ext_amount.to_be_bytes();
             Ok(U256::from_be_bytes(env, &pa_bytes))
         } else {
-            // Negative: compute FIELD_SIZE - |public_amount|
-            let neg = zero.sub(&public_amount);
+            // Negative: compute FIELD_SIZE - |ext_amount|
+            let neg = zero.sub(&ext_amount);
             let neg_bytes = neg.to_be_bytes();
             let neg_u256 = U256::from_be_bytes(env, &neg_bytes);
 
@@ -340,9 +348,9 @@ impl PoolContract {
     /// # Returns
     ///
     /// Returns `true` if the nullifier has been spent, `false` otherwise
-    fn is_spent(env: &Env, n: &U256) -> bool {
-        let nulls = Self::get_nullifiers(env);
-        nulls.get(n.clone()).unwrap_or(false)
+    fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
+        let nulls = Self::get_nullifiers(env)?;
+        Ok(nulls.get(n.clone()).unwrap_or(false))
     }
 
     /// Mark a nullifier as spent
@@ -351,28 +359,70 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `n` - The nullifier to mark as spent
-    fn mark_spent(env: &Env, n: &U256) {
-        let mut nulls = Self::get_nullifiers(env);
+    fn mark_spent(env: &Env, n: &U256) -> Result<(), Error> {
+        let mut nulls = Self::get_nullifiers(env)?;
         nulls.set(n.clone(), true);
         Self::set_nullifiers(env, &nulls);
+        Ok(())
     }
 
     /// Verify a zero-knowledge proof
     ///
     /// # Arguments
     ///
-    /// * `_env` - The Soroban environment
-    /// * `_proof` - The proof to verify
+    /// * `env` - The Soroban environment
+    /// * `proof` - The proof to verify
     ///
     /// # Returns
     ///
     /// Returns `true` if the proof is valid, `false` otherwise
-    ///
-    /// # Note
-    ///
-    /// TODO: Implement actual ZK proof verification
-    fn verify_proof(_env: &Env, _proof: &Proof) -> bool {
-        true
+    fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
+        // Check proof is not empty
+        if proof.proof.a.to_bytes().is_empty()
+            || proof.proof.b.to_bytes().is_empty()
+            || proof.proof.c.to_bytes().is_empty()
+        {
+            return Err(Error::InvalidProof);
+        }
+        let verifier = Self::get_verifier(env)?;
+        let client = CircomGroth16VerifierClient::new(env, &verifier);
+
+        // Public inputs expected by the Circom Transaction circuit:
+        // Order is important. Order is defined by the order in which the signals were declared in the circuit.
+        // The current order is [root, public_amount, ext_data_hash, asp_membership_root, asp_non_membership_root, input nullifiers, output_commitment0, output_commitment1]
+        let mut public_inputs: Vec<Fr> = Vec::new(env);
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.public_amount,
+        )));
+        public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
+        // Add compliance roots. Order is important.
+        for _ in 0..proof.input_nullifiers.len() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+                env,
+                &proof.asp_membership_root,
+            )));
+        }
+        for _ in 0..proof.input_nullifiers.len() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+                env,
+                &proof.asp_non_membership_root,
+            )));
+        }
+        for nullifier in proof.input_nullifiers.iter() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+        }
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment0,
+        )));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment1,
+        )));
+
+        Ok(client.try_verify(&proof.proof, &public_inputs).is_ok())
     }
 
     /// Hash external data using Keccak256
@@ -389,13 +439,7 @@ impl PoolContract {
     ///
     /// Returns the 32-byte hash of the external data
     fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
-        let payload = ext.clone().to_xdr(env);
-        let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-        let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-        let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-        let mut buf = [0u8; 32];
-        reduced.to_be_bytes().copy_into_slice(&mut buf);
-        BytesN::from_array(env, &buf)
+        hash_ext_data(env, ext)
     }
 
     /// Convert I256 to its absolute value as U256
@@ -437,14 +481,14 @@ impl PoolContract {
         sender: Address,
     ) -> Result<(), Error> {
         sender.require_auth();
-        let token = Self::get_token(env);
+        let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let zero = I256::from_i32(env, 0);
 
         // Handle deposit if ext_amount > 0
         if ext_data.ext_amount > zero {
             let deposit_u = U256::from_be_bytes(env, &ext_data.ext_amount.to_be_bytes());
-            let max = Self::get_maximum_deposit(env);
+            let max = Self::get_maximum_deposit(env)?;
             if deposit_u > max {
                 return Err(Error::WrongExtAmount);
             }
@@ -473,65 +517,57 @@ impl PoolContract {
     ///
     /// # Validation Steps
     ///
-    /// 1. Verify proof is not empty
-    /// 2. Verify Merkle root is in recent history
-    /// 3. Verify no nullifiers have been spent
-    /// 4. Verify external data hash matches
-    /// 5. Verify public amount calculation
-    /// 6. Verify zero-knowledge proof
+    /// 1. Verify Merkle root is in recent history
+    /// 2. Verify no nullifiers have been spent
+    /// 3. Verify external data hash matches
+    /// 4. Verify public amount calculation
+    /// 5. Verify zero-knowledge proof
     fn internal_transact(env: &Env, proof: Proof, ext_data: ExtData) -> Result<(), Error> {
-        // 1. Check proof is not empty
-        if proof.proof.is_empty() {
-            return Err(Error::InvalidProof);
-        }
-
-        // 2. Merkle root check
-        if !MerkleTreeWithHistory::is_known_root(env, &proof.root) {
+        // 1. Merkle root check
+        if !MerkleTreeWithHistory::is_known_root(env, &proof.root)? {
             return Err(Error::UnknownRoot);
         }
-
-        // 3. Nullifier checks (prevent double-spending)
+        // 2. Nullifier checks (prevent double-spending)
         for n in proof.input_nullifiers.iter() {
-            if Self::is_spent(env, &n) {
+            if Self::is_spent(env, &n)? {
                 return Err(Error::AlreadySpentNullifier);
             }
         }
-
-        // 4. External data hash check
+        // 3. External data hash check
         let ext_hash = Self::hash_ext_data(env, &ext_data);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
         }
 
-        // 5. Public amount check
+        // 4. Public amount check
         let expected_public_amount =
-            Self::calculate_public_amount(env, ext_data.ext_amount.clone(), ext_data.fee.clone())?;
+            Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
 
-        // Get public inputs from contracts
-        let member_root = Self::get_asp_membership_root(env);
-        let non_member_root = Self::get_asp_non_membership_root(env);
+        // ASP root validation
+        let member_root = Self::get_asp_membership_root(env)?;
+        let non_member_root = Self::get_asp_non_membership_root(env)?;
         if member_root != proof.asp_membership_root
             || non_member_root != proof.asp_non_membership_root
         {
             return Err(Error::InvalidProof);
         }
 
-        // 6. ZK proof verification
-        if !Self::verify_proof(env, &proof) {
+        // 5. ZK proof verification
+        if !Self::verify_proof(env, &proof)? {
             return Err(Error::InvalidProof);
         }
 
-        // 7. Mark nullifiers as spent
+        // 6. Mark nullifiers as spent
         for n in proof.input_nullifiers.iter() {
-            Self::mark_spent(env, &n);
+            let _ = Self::mark_spent(env, &n);
             NewNullifierEvent { nullifier: n }.publish(env);
         }
 
-        // 8. Process withdrawal if ext_amount < 0
-        let token = Self::get_token(env);
+        // 7. Process withdrawal if ext_amount < 0
+        let token = Self::get_token(env)?;
         let token_client = TokenClient::new(env, &token);
         let this = env.current_contract_address();
         let zero = I256::from_i32(env, 0);
@@ -589,11 +625,11 @@ impl PoolContract {
     // ========== Storage Getters and Setters ==========
 
     /// Get the nullifiers map from storage
-    fn get_nullifiers(env: &Env) -> Map<U256, bool> {
+    fn get_nullifiers(env: &Env) -> Result<Map<U256, bool>, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Nullifiers)
-            .unwrap_or(Map::new(env))
+            .ok_or(Error::NotInitialized)
     }
 
     /// Save the nullifiers map to storage
@@ -602,29 +638,47 @@ impl PoolContract {
     }
 
     /// Get the token contract address
-    fn get_token(env: &Env) -> Address {
-        env.storage().persistent().get(&DataKey::Token).unwrap()
+    fn get_token(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Token)
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the maximum deposit amount
-    fn get_maximum_deposit(env: &Env) -> U256 {
+    fn get_maximum_deposit(env: &Env) -> Result<U256, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::MaximumDepositAmount)
-            .expect("Pool contract not initialized")
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Get the verifier contract address
+    fn get_verifier(env: &Env) -> Result<Address, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Verifier)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Convert a U256 into a 32-byte big-endian field element
+    fn u256_to_bytes(env: &Env, v: &U256) -> BytesN<32> {
+        let mut buf = [0u8; 32];
+        v.to_be_bytes().copy_into_slice(&mut buf);
+        BytesN::from_array(env, &buf)
     }
 
     /// Get the admin address
-    fn get_admin(env: &Env) -> Address {
+    fn get_admin(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::Admin)
-            .expect("Pool contract not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool
-    pub fn get_root(env: &Env) -> U256 {
-        MerkleTreeWithHistory::get_last_root(env)
+    pub fn get_root(env: &Env) -> Result<U256, Error> {
+        Ok(MerkleTreeWithHistory::get_last_root(env)?)
     }
 
     /// Update the contract administrator
@@ -636,26 +690,30 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_admin` - New address that will have administrative permissions
-    pub fn update_admin(env: Env, new_admin: Address) {
+    pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        if !env.storage().persistent().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
+        Ok(())
     }
 
     // ========== ASP Contract Functions ==========
 
     /// Get the ASP Membership contract address
-    fn get_asp_membership(env: &Env) -> Address {
+    fn get_asp_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::ASPMembership)
-            .expect("Pool contract not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the ASP Non-Membership contract address
-    fn get_asp_non_membership(env: &Env) -> Address {
+    fn get_asp_non_membership(env: &Env) -> Result<Address, Error> {
         env.storage()
             .persistent()
             .get(&DataKey::ASPNonMembership)
-            .expect("Pool contract not initialized")
+            .ok_or(Error::NotInitialized)
     }
 
     /// Update the ASP Membership contract address
@@ -666,12 +724,13 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_membership` - New ASP Membership contract address
-    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) {
-        let admin = Self::get_admin(env);
+    pub fn update_asp_membership(env: &Env, new_asp_membership: Address) -> Result<(), Error> {
+        let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPMembership, &new_asp_membership);
+        Ok(())
     }
 
     /// Update the ASP Non-Membership contract address
@@ -682,12 +741,16 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `new_asp_non_membership` - New ASP Non-Membership contract address
-    pub fn update_asp_non_membership(env: &Env, new_asp_non_membership: Address) {
-        let admin = Self::get_admin(env);
+    pub fn update_asp_non_membership(
+        env: &Env,
+        new_asp_non_membership: Address,
+    ) -> Result<(), Error> {
+        let admin = Self::get_admin(env)?;
         admin.require_auth();
         env.storage()
             .persistent()
             .set(&DataKey::ASPNonMembership, &new_asp_non_membership);
+        Ok(())
     }
 
     /// Get the current Merkle root from the ASP Membership contract
@@ -702,10 +765,10 @@ impl PoolContract {
     /// # Returns
     ///
     /// The current membership Merkle root as U256
-    pub fn get_asp_membership_root(env: &Env) -> U256 {
-        let asp_address = Self::get_asp_membership(env);
+    pub fn get_asp_membership_root(env: &Env) -> Result<U256, Error> {
+        let asp_address = Self::get_asp_membership(env)?;
         let client = ASPMembershipClient::new(env, &asp_address);
-        client.get_root()
+        Ok(client.get_root())
     }
 
     /// Get the current Merkle root from the ASP Non-Membership contract
@@ -720,9 +783,9 @@ impl PoolContract {
     /// # Returns
     ///
     /// The current non-membership Merkle root as U256
-    pub fn get_asp_non_membership_root(env: &Env) -> U256 {
-        let asp_address = Self::get_asp_non_membership(env);
+    pub fn get_asp_non_membership_root(env: &Env) -> Result<U256, Error> {
+        let asp_address = Self::get_asp_non_membership(env)?;
         let client = ASPNonMembershipClient::new(env, &asp_address);
-        client.get_root()
+        Ok(client.get_root())
     }
 }

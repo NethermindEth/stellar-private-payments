@@ -24,7 +24,10 @@ feature-depth = 1
 db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
-ignore = []
+# RUSTSEC-2025-0055: tracing-subscriber ANSI escape sequence vulnerability
+# This is a transitive dependency we cannot directly update.
+# We ignore it because only affects log output and does not impact cryptographic operations.
+ignore = ["RUSTSEC-2025-0055"]
 unmaintained = "workspace"
 
 [licenses]
