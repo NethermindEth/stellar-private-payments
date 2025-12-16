@@ -322,15 +322,14 @@ impl PoolContract {
             return Err(Error::WrongExtAmount);
         }
 
-        let public_amount = ext_amount;
         let zero = I256::from_i32(env, 0);
 
-        if public_amount >= zero {
-            let pa_bytes = public_amount.to_be_bytes();
+        if ext_amount >= zero {
+            let pa_bytes = ext_amount.to_be_bytes();
             Ok(U256::from_be_bytes(env, &pa_bytes))
         } else {
-            // Negative: compute FIELD_SIZE - |public_amount|
-            let neg = zero.sub(&public_amount);
+            // Negative: compute FIELD_SIZE - |ext_amount|
+            let neg = zero.sub(&ext_amount);
             let neg_bytes = neg.to_be_bytes();
             let neg_u256 = U256::from_be_bytes(env, &neg_bytes);
 
