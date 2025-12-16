@@ -195,3 +195,6 @@ impl TryFrom<Bytes> for Groth16Proof {
         Ok(Self { a, b, c })
     }
 }
+
+#[cfg(test)]
+mod test;
