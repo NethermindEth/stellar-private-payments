@@ -1,5 +1,3 @@
-
-
 use super::*;
 use ark_bn254::{Bn254, Fr as ArkFr};
 use ark_ff::{BigInteger, Field, PrimeField};
@@ -8,7 +6,7 @@ use ark_relations::{
     lc,
     r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
 };
-use ark_std::rand::{rngs::StdRng, SeedableRng};
+use ark_std::rand::{SeedableRng, rngs::StdRng};
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark};
 
@@ -68,23 +66,15 @@ fn serialize_proof(env: &Env, proof: &Groth16Proof) -> Bytes {
     data
 }
 
-fn build_test(
-    env: &Env,
-) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr; 11]) {
+fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr; 11]) {
     let mut rng = seeded_rng();
     let inputs = [ArkFr::from(33u64); 11];
     let circuit = ElevenInputCircuit { inputs };
-    let params = Groth16::<Bn254>::generate_random_parameters_with_reduction(
-        circuit.clone(),
-        &mut rng,
-    )
-    .expect("params failed to generate");
-    let proof = Groth16::<Bn254>::create_random_proof_with_reduction(
-        circuit,
-        &params,
-        &mut rng,
-    )
-    .expect("proof failed");
+    let params =
+        Groth16::<Bn254>::generate_random_parameters_with_reduction(circuit.clone(), &mut rng)
+            .expect("params failed to generate");
+    let proof = Groth16::<Bn254>::create_random_proof_with_reduction(circuit, &params, &mut rng)
+        .expect("proof failed");
 
     let mut public_inputs: Vec<Fr> = Vec::new(env);
     for value in inputs {
@@ -100,7 +90,12 @@ fn build_test(
         ic: vk_bytes_ext.ic,
     };
 
-    (vk_bytes, groth16_proof_from_ark(env, &proof), public_inputs, inputs)
+    (
+        vk_bytes,
+        groth16_proof_from_ark(env, &proof),
+        public_inputs,
+        inputs,
+    )
 }
 
 #[test]

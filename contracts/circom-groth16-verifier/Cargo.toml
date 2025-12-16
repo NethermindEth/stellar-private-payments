@@ -15,10 +15,10 @@ soroban-sdk = { workspace = true, features = ["alloc"] }
 [build-dependencies]
 
 [dev-dependencies]
-soroban-sdk = { workspace = true, features = ["testutils"] }
 ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-relations = "0.5.0"
 ark-std = "0.5.0"
+soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }

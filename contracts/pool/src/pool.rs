@@ -540,7 +540,8 @@ impl PoolContract {
         }
 
         // 4. Public amount check
-        let expected_public_amount = Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
+        let expected_public_amount =
+            Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }
