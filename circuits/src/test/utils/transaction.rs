@@ -17,7 +17,7 @@ use super::general::poseidon2_hash3;
 ///
 /// Returns the commitment scalar value.
 #[inline]
-pub(crate) fn commitment(amount: Scalar, pubkey: Scalar, blinding: Scalar) -> Scalar {
+pub fn commitment(amount: Scalar, pubkey: Scalar, blinding: Scalar) -> Scalar {
     poseidon2_hash3(amount, pubkey, blinding, Some(Scalar::from(1))) // We use 1 as domain separation for Commitment
 }
 

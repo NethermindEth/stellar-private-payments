@@ -6,10 +6,10 @@
 // Use Soroban's allocator for heap allocations
 extern crate alloc;
 
-use alloc::vec::Vec as StdVec;
+use core::array;
 
 use soroban_sdk::{
-    Bytes, Env, Vec, contract, contracterror, contractimpl, contracttype,
+    Bytes, BytesN, Env, Vec, contract, contracterror, contractimpl, contracttype,
     crypto::bn254::{Fr, G1Affine, G2Affine},
     vec,
 };
@@ -25,7 +25,10 @@ pub enum Groth16Error {
     MalformedPublicInputs = 1,
     /// The proof bytes are malformed.
     MalformedProof = 2,
-
+    /// The contract was already initialized
+    AlreadyInitialized = 3,
+    /// The contract was not initialized
+    NotInitialized = 4,
 }
 
 /// Groth16 verification key for BN254 curve.
@@ -35,36 +38,33 @@ pub struct VerificationKey {
     pub beta: G2Affine,
     pub gamma: G2Affine,
     pub delta: G2Affine,
-    pub ic: StdVec<G1Affine>,
+    pub ic: [G1Affine; 12],
 }
 
-/// Byte-oriented version of the verification key generated at build time.
-///
-/// Soroban's BN254 affine types are not `const` constructible, so we emit the
-/// key as raw byte arrays in `build.rs` and reconstruct the affine points at
-/// runtime inside the contract via [`verification_key`]. This keeps the key
-/// embeddable with `include!` while still avoiding any serialization support on
-/// the `VerificationKey` itself.
+/// Byte-oriented verification key generated at build time.
+#[contracttype]
 pub struct VerificationKeyBytes {
-    pub alpha: [u8; G1_SIZE as usize],
-    pub beta: [u8; G2_SIZE as usize],
-    pub gamma: [u8; G2_SIZE as usize],
-    pub delta: [u8; G2_SIZE as usize],
-    pub ic: &'static [[u8; G1_SIZE as usize]],
+    pub alpha: BytesN<64>,
+    pub beta: BytesN<128>,
+    pub gamma: BytesN<128>,
+    pub delta: BytesN<128>,
+    pub ic: Vec<BytesN<64>>,
 }
 
 impl VerificationKeyBytes {
-    pub fn verification_key(&self, env: &Env) -> VerificationKey {
+    pub fn verification_key(&self, _env: &Env) -> VerificationKey {
+        let ic_vec = &self.ic;
+        let ic_array: [G1Affine; 12] = array::from_fn(|i| {
+            let bytes = ic_vec.get(i as u32).unwrap();
+            G1Affine::from_bytes(bytes.clone())
+        });
+
         VerificationKey {
-            alpha: G1Affine::from_array(env, &self.alpha),
-            beta: G2Affine::from_array(env, &self.beta),
-            gamma: G2Affine::from_array(env, &self.gamma),
-            delta: G2Affine::from_array(env, &self.delta),
-            ic: self
-                .ic
-                .iter()
-                .map(|coords| G1Affine::from_array(env, coords))
-                .collect(),
+            alpha: G1Affine::from_bytes(self.alpha.clone()),
+            beta: G2Affine::from_bytes(self.beta.clone()),
+            gamma: G2Affine::from_bytes(self.gamma.clone()),
+            delta: G2Affine::from_bytes(self.delta.clone()),
+            ic: ic_array,
         }
     }
 }
@@ -78,27 +78,40 @@ pub struct Groth16Proof {
     pub c: G1Affine,
 }
 
+#[contracttype]
+#[derive(Clone)]
+enum DataKey {
+    VerificationKey,
+}
+
 /// Groth16 verifier for BN254/Circom proofs.
 #[contract]
 pub struct CircomGroth16Verifier;
 
 #[contractimpl]
 impl CircomGroth16Verifier {
-
-    /// Groth16 verification key generated from the Circom `vk.json`.
-    ///
-    /// The bytes are emitted in `build.rs` from `circuits/vk.json` at compile time.
-    const VERIFICATION_KEY: VerificationKeyBytes =
-        include!(concat!(env!("OUT_DIR"), "/verification_key.rs"));
+    /// Initialize the contract with a verification key.
+    pub fn init(env: Env, vk: VerificationKeyBytes) -> Result<(), Groth16Error> {
+        let storage = env.storage().persistent();
+        if storage.has(&DataKey::VerificationKey) {
+            return Err(Groth16Error::AlreadyInitialized);
+        }
+        storage.set(&DataKey::VerificationKey, &vk);
+        Ok(())
+    }
 
     /// Verify a Groth16 proof using the stored verification key.
-    ///
-    /// Returns `Ok(())` on success or a [`Groth16Error`] describing the failure.
-    pub fn verify(env: Env, proof_bytes: Bytes, public_inputs: Vec<Fr>) -> Result<(), Groth16Error> {
-        let vk = Self::VERIFICATION_KEY.verification_key(&env);
-
-        let proof = Groth16Proof::try_from(proof_bytes)?;
-
+    pub fn verify(
+        env: Env,
+        proof: Groth16Proof,
+        public_inputs: Vec<Fr>,
+    ) -> Result<bool, Groth16Error> {
+        let vk_bytes: VerificationKeyBytes = env
+            .storage()
+            .persistent()
+            .get(&DataKey::VerificationKey)
+            .ok_or(Groth16Error::NotInitialized)?;
+        let vk = vk_bytes.verification_key(&env);
         Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 
@@ -107,7 +120,7 @@ impl CircomGroth16Verifier {
         vk: &VerificationKey,
         proof: Groth16Proof,
         pub_inputs: Vec<Fr>,
-    ) -> Result<(), Groth16Error> {
+    ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
 
         if pub_inputs.len() + 1 != vk.ic.len() as u32 {
@@ -129,10 +142,15 @@ impl CircomGroth16Verifier {
         let neg_a = -proof.a;
 
         let g1_points = vec![env, neg_a, vk.alpha.clone(), vk_x, proof.c];
-        let g2_points = vec![env, proof.b, vk.beta.clone(), vk.gamma.clone(), vk.delta.clone()];
-
+        let g2_points = vec![
+            env,
+            proof.b,
+            vk.beta.clone(),
+            vk.gamma.clone(),
+            vk.delta.clone(),
+        ];
         if bn.pairing_check(g1_points, g2_points) {
-            Ok(())
+            Ok(true)
         } else {
             Err(Groth16Error::InvalidProof)
         }
@@ -146,7 +164,6 @@ const FIELD_ELEMENT_SIZE: u32 = 32;
 const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
 const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
 const PROOF_SIZE: u32 = G1_SIZE + G2_SIZE + G1_SIZE;
-
 
 impl TryFrom<Bytes> for Groth16Proof {
     type Error = Groth16Error;

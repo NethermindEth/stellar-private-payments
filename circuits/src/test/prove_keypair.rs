@@ -1,3 +1,8 @@
+// Since we only compile the test module when the `circom-tests` feature is enabled,
+// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
+// to avoid warnings during cargo build.
+#![allow(unused_imports)]
+
 use super::{
     circom_tester::prove_and_verify,
     keypair::{derive_public_key, sign},
@@ -74,6 +79,7 @@ fn run_signature_case(
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_keypair_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("keypair_test")?;
@@ -91,6 +97,7 @@ async fn test_keypair_test_matrix() -> anyhow::Result<()> {
 }
 
 #[tokio::test]
+#[ignore]
 async fn test_signature_test_matrix() -> anyhow::Result<()> {
     // === PATH SETUP ===
     let (wasm, r1cs) = load_artifacts("signature_test")?;

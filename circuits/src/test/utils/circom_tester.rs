@@ -83,7 +83,10 @@ impl From<Vec<Scalar>> for InputValue {
 /// Wraps a hashmap of `String → InputValue`.
 ///
 /// Example:
+///
 /// ```
+/// use circuits::test::utils::circom_tester::{Inputs, SignalKey};
+/// use zkhash::fields::bn256::FpBN256 as Scalar;
 /// let mut inputs = Inputs::new();
 /// inputs.set("root", Scalar::from(5));
 /// inputs.set_key(&SignalKey::new("arr").idx(0), Scalar::from(10));
@@ -125,7 +128,7 @@ impl Inputs {
 /// Represents a single Circom input value
 #[allow(dead_code)]
 #[derive(Clone, Debug)]
-pub(crate) enum InputValue {
+pub enum InputValue {
     Single(BigInt),
     Array(Vec<BigInt>),
 }
