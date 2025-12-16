@@ -20,10 +20,9 @@ use circuits::test::utils::transaction::{commitment, prepopulated_leaves};
 use circuits::test::utils::transaction_case::{
     InputNote, OutputNote, TxCase, prepare_transaction_witness,
 };
-use pool::{PoolContractClient, Proof};
+use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec};
-use soroban_utils::utils::{ExtData, hash_ext_data};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 /// Full E2E test: Generate a real proof, deploy contracts, and call transact which verifies the zk-proof

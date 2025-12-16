@@ -1,5 +1,5 @@
 use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
-use crate::{PoolContract, PoolContractClient, Proof};
+use crate::{ExtData, PoolContract, PoolContractClient, Proof};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
@@ -8,7 +8,7 @@ use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec};
 use soroban_utils::constants::bn256_modulus;
-use soroban_utils::utils::{ExtData, MockToken};
+use soroban_utils::utils::MockToken;
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
