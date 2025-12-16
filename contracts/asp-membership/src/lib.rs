@@ -41,6 +41,8 @@ pub enum Error {
     AlreadyInitialized = 3,
     /// Wrong Number of levels specified
     WrongLevels = 4,
+    /// The contract has not been yet initialized
+    NotInitialized = 5,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -115,11 +117,12 @@ impl ASPMembership {
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `new_admin` - Address of the new administrator
-    ///
-    /// # Panics
-    /// Panics if the caller is not the current admin
-    pub fn update_admin(env: Env, new_admin: Address) {
+    pub fn update_admin(env: Env, new_admin: Address) -> Result<(), Error> {
+        if !env.storage().persistent().has(&DataKey::Admin) {
+            return Err(Error::NotInitialized);
+        }
         soroban_utils::update_admin(&env, &DataKey::Admin, &new_admin);
+        Ok(())
     }
 
     /// Get the current Merkle root
@@ -134,9 +137,11 @@ impl ASPMembership {
     ///
     /// # Panics
     /// Panics if the contract has not been initialized
-    pub fn get_root(env: Env) -> U256 {
-        let store = env.storage().persistent();
-        store.get(&DataKey::Root).unwrap()
+    pub fn get_root(env: Env) -> Result<U256, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Root)
+            .ok_or(Error::NotInitialized)
     }
 
     /// Hash two U256 values using Poseidon2 compression
