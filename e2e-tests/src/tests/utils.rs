@@ -243,7 +243,7 @@ pub fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigIn
 ///
 /// * `case` - Transaction case with input and output notes
 /// * `leaves` - Current Merkle tree leaves for the pool
-/// * `public_amount` - Net public amount (deposit - withdrawal - fee)
+/// * `public_amount` - Net public amount (deposit - withdrawal)
 /// * `membership_trees` - Membership tree data for each input
 /// * `non_membership` - Non-membership proof data for each input
 /// * `ext_data_hash` - Optional external data hash to bind to the proof

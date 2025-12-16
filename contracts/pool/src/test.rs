@@ -18,11 +18,10 @@ fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
     BytesN::from_array(env, &[fill; 32])
 }
 
-fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32, fee: u32) -> ExtData {
+fn mk_ext_data(env: &Env, recipient: Address, ext_amount: i32) -> ExtData {
     ExtData {
         recipient,
         ext_amount: I256::from_i32(env, ext_amount),
-        fee: U256::from_u32(env, fee),
         encrypted_output0: Bytes::new(env),
         encrypted_output1: Bytes::new(env),
     }
@@ -252,7 +251,7 @@ fn transact_rejects_unknown_root() {
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
 
     // Get actual roots
     let asp_membership_root = setup.asp_membership_client.get_root();
@@ -299,7 +298,7 @@ fn transact_rejects_bad_ext_hash() {
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let root = pool.get_root();
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
 
     // Get actual roots
     let asp_membership_root = setup.asp_membership_client.get_root();
@@ -346,7 +345,7 @@ fn transact_rejects_bad_public_amount() {
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let root = pool.get_root();
-    let ext = mk_ext_data(&env, Address::generate(&env), 0, 0);
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
     let ext_hash = compute_ext_hash(&env, &ext);
 
     // Get actual roots

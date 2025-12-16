@@ -41,18 +41,16 @@ pub enum Error {
     NextIndexNotEven = 5,
     /// External amount is invalid (negative or exceeds 2^248)
     WrongExtAmount = 6,
-    /// Fee exceeds the maximum allowed value (2^248)
-    WrongFee = 7,
     /// Zero-knowledge proof verification failed or proof is empty
-    InvalidProof = 8,
+    InvalidProof = 7,
     /// Provided Merkle root is not in the recent history
-    UnknownRoot = 9,
+    UnknownRoot = 8,
     /// Nullifier has already been spent (double-spend attempt)
-    AlreadySpentNullifier = 10,
+    AlreadySpentNullifier = 9,
     /// External data hash does not match the provided data
-    WrongExtHash = 11,
+    WrongExtHash = 10,
     /// Contract is not initialized
-    NotInitialized = 12,
+    NotInitialized = 11,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -85,7 +83,7 @@ pub struct Proof {
     pub output_commitment0: U256,
     /// Commitment for the second output UTXO
     pub output_commitment1: U256,
-    /// Net public amount (deposit - withdrawal - fee, modulo field size)
+    /// Net public amount (deposit - withdrawal, modulo field size)
     pub public_amount: U256,
     /// Hash of the external data (binds proof to transaction parameters)
     pub ext_data_hash: BytesN<32>,
@@ -107,8 +105,6 @@ pub struct ExtData {
     pub recipient: Address,
     /// External amount: positive for deposits, negative for withdrawals
     pub ext_amount: I256,
-    /// Relayer fee (paid from the withdrawal amount)
-    pub fee: U256,
     /// Encrypted data for the first output UTXO
     pub encrypted_output0: Bytes,
     /// Encrypted data for the second output UTXO
@@ -287,13 +283,6 @@ impl PoolContract {
         U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
     }
 
-    /// Maximum fee allowed (2^248)
-    ///
-    /// This limit ensures fees fit within field arithmetic constraints.
-    fn max_fee(env: &Env) -> U256 {
-        U256::from_parts(env, 0x0100_0000_0000_0000, 0, 0, 0)
-    }
-
     /// Convert a non-negative I256 to i128 with bounds checking
     ///
     /// # Arguments
@@ -312,9 +301,9 @@ impl PoolContract {
         v.to_i128().ok_or(Error::WrongExtAmount)
     }
 
-    /// Calculate the public amount from external amount and fee
+    /// Calculate the public amount from external amount
     ///
-    /// Computes `public_amount = ext_amount - fee` in the BN256 field.
+    /// Computes `public_amount = ext_amount` in the BN256 field.
     /// For positive results, returns the value directly.
     /// For negative results, returns `FIELD_SIZE - |public_amount|`.
     ///
@@ -322,25 +311,18 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `ext_amount` - External amount (positive for deposit, negative for withdrawal)
-    /// * `fee` - Relayer fee
     ///
     /// # Returns
     ///
     /// Returns the public amount as U256 in the BN256 field, or an error
     /// if the amounts exceed limits
-    fn calculate_public_amount(env: &Env, ext_amount: I256, fee: U256) -> Result<U256, Error> {
-        if fee >= Self::max_fee(env) {
-            return Err(Error::WrongFee);
-        }
-
+    fn calculate_public_amount(env: &Env, ext_amount: I256) -> Result<U256, Error> {
         let abs_ext = Self::i256_abs_to_u256(env, &ext_amount);
         if abs_ext >= Self::max_ext_amount(env) {
             return Err(Error::WrongExtAmount);
         }
 
-        let fee_bytes = fee.to_be_bytes();
-        let fee_i256 = I256::from_be_bytes(env, &fee_bytes);
-        let public_amount = ext_amount.sub(&fee_i256);
+        let public_amount = ext_amount;
         let zero = I256::from_i32(env, 0);
 
         if public_amount >= zero {
@@ -559,8 +541,7 @@ impl PoolContract {
         }
 
         // 4. Public amount check
-        let expected_public_amount =
-            Self::calculate_public_amount(env, ext_data.ext_amount.clone(), ext_data.fee.clone())?;
+        let expected_public_amount = Self::calculate_public_amount(env, ext_data.ext_amount.clone())?;
         if proof.public_amount != expected_public_amount {
             return Err(Error::WrongExtAmount);
         }

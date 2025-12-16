@@ -42,7 +42,6 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
     let ext_data = ExtData {
         recipient: temp_recipient.clone(),
         ext_amount: I256::from_i32(&env, 0),
-        fee: U256::from_u32(&env, 0),
         encrypted_output0: Bytes::new(&env),
         encrypted_output1: Bytes::new(&env),
     };
