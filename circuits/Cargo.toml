@@ -10,20 +10,20 @@ publish.workspace = true
 circom-tests = ["ark-circom"]
 
 [dependencies]
-anyhow = "1"
-ark-bn254 = "0.5.0"
+anyhow = { workspace = true }
+ark-bn254 = { workspace = true }
 ark-circom = { version = "0.5.0", optional = true }
-ark-ff = "0.5"
+ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
-ark-snark = "0.5.1"
-ark-std = "0.5.0"
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
 num-bigint = { workspace = true }
-num-integer = "0.1.46"
+num-integer = { workspace = true }
 tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 zkhash = { path = "../poseidon2" }
 
 [build-dependencies]
-anyhow = "1"
+anyhow = { workspace = true }
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
