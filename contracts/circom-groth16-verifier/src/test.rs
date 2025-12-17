@@ -3,8 +3,8 @@ use ark_bn254::{Bn254, Fr as ArkFr};
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
 use ark_relations::{
+    gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
     lc,
-    r1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
 };
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
@@ -30,10 +30,10 @@ impl<F: Field> ConstraintSynthesizer<F> for ElevenInputCircuit<F> {
 
         // Constrain a witness to equal the first public input: w * 1 = input_0
         let witness = cs.new_witness_variable(|| Ok(self.inputs[0]))?;
-        cs.enforce_constraint(
-            lc!() + witness,
-            lc!() + Variable::One,
-            lc!() + input_vars[0],
+        cs.enforce_r1cs_constraint(
+            || lc!() + witness,
+            || lc!() + Variable::One,
+            || lc!() + input_vars[0],
         )?;
         Ok(())
     }

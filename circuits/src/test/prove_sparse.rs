@@ -1,11 +1,4 @@
-//! Sparse Merkle Tree circuit test
-
-// Since we only compile the test module when the `circom-tests` feature is enabled,
-// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
-// to avoid warnings during cargo build.
-#![allow(unused_imports)]
 use super::circom_tester::prove_and_verify;
-use crate::test::utils::general::load_artifacts;
 use crate::test::utils::{circom_tester::Inputs, sparse_merkle_tree::prepare_smt_proof};
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
@@ -89,28 +82,34 @@ fn run_case(wasm: &PathBuf, r1cs: &PathBuf, queried_key: BigInt, max_levels: usi
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_sparse_merkle_tree_membership_matrix() -> anyhow::Result<()> {
-    // === PATH SETUP ===
-    let (wasm, r1cs) = load_artifacts("sparse_merkle_tree")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::utils::general::load_artifacts;
 
-    // === TEST MATRIX ===
-    const MAX_LEVELS: usize = 254;
+    #[test]
+    #[ignore]
+    fn test_sparse_merkle_tree_membership_matrix() -> anyhow::Result<()> {
+        // === PATH SETUP ===
+        let (wasm, r1cs) = load_artifacts("sparse_merkle_tree")?;
 
-    // Inclusion cases
-    let inclusion_keys = [0u32, 1, 50, 99];
-    for k in inclusion_keys {
-        run_case(&wasm, &r1cs, BigInt::from(k), MAX_LEVELS)
-            .with_context(|| format!("Inclusion case failed for key {k}"))?;
+        // === TEST MATRIX ===
+        const MAX_LEVELS: usize = 254;
+
+        // Inclusion cases
+        let inclusion_keys = [0u32, 1, 50, 99];
+        for k in inclusion_keys {
+            run_case(&wasm, &r1cs, BigInt::from(k), MAX_LEVELS)
+                .with_context(|| format!("Inclusion case failed for key {k}"))?;
+        }
+
+        // Non-inclusion cases
+        let non_inclusion_keys = [100u32, 200, 123_456];
+        for k in non_inclusion_keys {
+            run_case(&wasm, &r1cs, BigInt::from(k), MAX_LEVELS)
+                .with_context(|| format!("Non-inclusion case failed for key {k}"))?;
+        }
+
+        Ok(())
     }
-
-    // Non-inclusion cases
-    let non_inclusion_keys = [100u32, 200, 123_456];
-    for k in non_inclusion_keys {
-        run_case(&wasm, &r1cs, BigInt::from(k), MAX_LEVELS)
-            .with_context(|| format!("Non-inclusion case failed for key {k}"))?;
-    }
-
-    Ok(())
 }

@@ -26,7 +26,6 @@ num-bigint = { workspace = true }
 pool = { path = "../contracts/pool" }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }
-tokio = { version = "1", features = ["rt", "rt-multi-thread"] }
 
 # Shared deps
 zkhash = { workspace = true }

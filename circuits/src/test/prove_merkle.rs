@@ -1,16 +1,9 @@
-// Since we only compile the test module when the `circom-tests` feature is enabled,
-// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
-// to avoid warnings during cargo build.
-#![allow(unused_imports)]
 use super::{
     merkle_tree::{merkle_proof, merkle_root},
     utils::general::scalar_to_bigint,
 };
 
-use crate::test::utils::circom_tester::{
-    CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys,
-};
-use crate::test::utils::general::load_artifacts;
+use crate::test::utils::circom_tester::{CircuitKeys, Inputs, prove_and_verify_with_keys};
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::path::PathBuf;
@@ -90,55 +83,61 @@ fn run_case(
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
-    // === PATH SETUP ===
-    let (wasm, r1cs) = load_artifacts("merkleProof_5")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::utils::{circom_tester::generate_keys, general::load_artifacts};
 
-    // === TEST MATRIX (5 levels => 32 leaves) ===
-    const LEVELS: usize = 5;
-    const N: usize = 1 << LEVELS;
+    #[test]
+    #[ignore]
+    fn test_merkle_5_levels_matrix() -> anyhow::Result<()> {
+        // === PATH SETUP ===
+        let (wasm, r1cs) = load_artifacts("merkleProof_5")?;
 
-    // Case A: sequential 0..N
-    let leaves_a: Vec<Scalar> = (0u64..N as u64).map(Scalar::from).collect();
+        // === TEST MATRIX (5 levels => 32 leaves) ===
+        const LEVELS: usize = 5;
+        const N: usize = 1 << LEVELS;
 
-    // Case B: affine progression to mix values a bit
-    let leaves_b: Vec<Scalar> = (0u64..N as u64)
-        .map(|i| Scalar::from(i.wrapping_mul(7).wrapping_add(3)))
-        .collect();
+        // Case A: sequential 0..N
+        let leaves_a: Vec<Scalar> = (0u64..N as u64).map(Scalar::from).collect();
 
-    // Case C: reversed 0..N-1
-    let leaves_c: Vec<Scalar> = (0u64..N as u64).rev().map(Scalar::from).collect();
+        // Case B: affine progression to mix values a bit
+        let leaves_b: Vec<Scalar> = (0u64..N as u64)
+            .map(|i| Scalar::from(i.wrapping_mul(7).wrapping_add(3)))
+            .collect();
 
-    // Case D: simple LCG-style mix (deterministic, no extra deps)
-    let leaves_d: Vec<Scalar> = {
-        let mut x: u64 = 0xDEADBEEFCAFEBABE;
-        (0..N)
-            .map(|_| {
-                // x = x * 2862933555777941757 + 3037000493  (64-bit LCG-ish)
-                x = x.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
-                Scalar::from(x)
-            })
-            .collect()
-    };
+        // Case C: reversed 0..N-1
+        let leaves_c: Vec<Scalar> = (0u64..N as u64).rev().map(Scalar::from).collect();
 
-    // Indices to try (cover left/right edges and middle)
-    let indices = [0usize, 1, 7, 8, 15, 16, 23, 31];
+        // Case D: simple LCG-style mix (deterministic, no extra deps)
+        let leaves_d: Vec<Scalar> = {
+            let mut x: u64 = 0xDEADBEEFCAFEBABE;
+            (0..N)
+                .map(|_| {
+                    // x = x * 2862933555777941757 + 3037000493  (64-bit LCG-ish)
+                    x = x.wrapping_mul(2862933555777941757).wrapping_add(3037000493);
+                    Scalar::from(x)
+                })
+                .collect()
+        };
 
-    let keys = generate_keys(&wasm, &r1cs)?;
+        // Indices to try (cover left/right edges and middle)
+        let indices = [0usize, 1, 7, 8, 15, 16, 23, 31];
 
-    // Run cases
-    for &idx in &indices {
-        run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS, &keys)
-            .with_context(|| format!("Case A failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS, &keys)
-            .with_context(|| format!("Case B failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS, &keys)
-            .with_context(|| format!("Case C failed at index {idx}"))?;
-        run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS, &keys)
-            .with_context(|| format!("Case D failed at index {idx}"))?;
+        let keys = generate_keys(&wasm, &r1cs)?;
+
+        // Run cases
+        for &idx in &indices {
+            run_case(&wasm, &r1cs, leaves_a.clone(), idx, LEVELS, &keys)
+                .with_context(|| format!("Case A failed at index {idx}"))?;
+            run_case(&wasm, &r1cs, leaves_b.clone(), idx, LEVELS, &keys)
+                .with_context(|| format!("Case B failed at index {idx}"))?;
+            run_case(&wasm, &r1cs, leaves_c.clone(), idx, LEVELS, &keys)
+                .with_context(|| format!("Case C failed at index {idx}"))?;
+            run_case(&wasm, &r1cs, leaves_d.clone(), idx, LEVELS, &keys)
+                .with_context(|| format!("Case D failed at index {idx}"))?;
+        }
+
+        Ok(())
     }
-
-    Ok(())
 }
