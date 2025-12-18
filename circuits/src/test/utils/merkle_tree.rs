@@ -68,7 +68,7 @@ pub fn merkle_proof(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, u
     let mut path_indices_bits_lsb = Vec::with_capacity(levels);
 
     for _level in 0..levels {
-        let sib_index = if index % 2 == 0 {
+        let sib_index = if index.is_multiple_of(2) {
             index.checked_add(1).expect("sibling index overflow")
         } else {
             index.checked_sub(1).expect("sibling index underflow")
