@@ -1,16 +1,10 @@
-// Since we only compile the test module when the `circom-tests` feature is enabled,
-// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
-// to avoid warnings during cargo build.
-#![allow(unused_imports)]
-
 use super::{
     circom_tester::prove_and_verify,
     keypair::{derive_public_key, sign},
 };
 
 use crate::test::utils::circom_tester::Inputs;
-use crate::test::utils::general::load_artifacts;
-use anyhow::{Context, Result};
+use anyhow::Result;
 use std::path::PathBuf;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -78,50 +72,56 @@ fn run_signature_case(
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_keypair_test_matrix() -> anyhow::Result<()> {
-    // === PATH SETUP ===
-    let (wasm, r1cs) = load_artifacts("keypair_test")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::utils::general::load_artifacts;
+    use anyhow::Context;
 
-    // Simple test set
-    let cases: [u64; 8] = [0, 1, 2, 7, 8, 15, 16, 23];
+    #[test]
+    fn test_keypair_test_matrix() -> anyhow::Result<()> {
+        // === PATH SETUP ===
+        let (wasm, r1cs) = load_artifacts("keypair_test")?;
 
-    for &x in &cases {
-        let sk = Scalar::from(x);
-        run_keypair_case(&wasm, &r1cs, sk)
-            .with_context(|| format!("Keypair case failed for sk={x}"))?;
+        // Simple test set
+        let cases: [u64; 8] = [0, 1, 2, 7, 8, 15, 16, 23];
+
+        for &x in &cases {
+            let sk = Scalar::from(x);
+            run_keypair_case(&wasm, &r1cs, sk)
+                .with_context(|| format!("Keypair case failed for sk={x}"))?;
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
+    #[test]
+    #[ignore]
+    fn test_signature_test_matrix() -> anyhow::Result<()> {
+        // === PATH SETUP ===
+        let (wasm, r1cs) = load_artifacts("signature_test")?;
 
-#[tokio::test]
-#[ignore]
-async fn test_signature_test_matrix() -> anyhow::Result<()> {
-    // === PATH SETUP ===
-    let (wasm, r1cs) = load_artifacts("signature_test")?;
+        let triples: [(u64, u64, u64); 8] = [
+            (0, 0, 0),
+            (1, 2, 3),
+            (7, 8, 9),
+            (15, 16, 17),
+            (23, 24, 25),
+            (31, 1, 2),
+            (127, 255, 511),
+            (0xDEAD, 0xBEEF, 0xCAFE),
+        ];
 
-    let triples: [(u64, u64, u64); 8] = [
-        (0, 0, 0),
-        (1, 2, 3),
-        (7, 8, 9),
-        (15, 16, 17),
-        (23, 24, 25),
-        (31, 1, 2),
-        (127, 255, 511),
-        (0xDEAD, 0xBEEF, 0xCAFE),
-    ];
+        for &(sk_u, cm_u, mp_u) in &triples {
+            let sk = Scalar::from(sk_u);
+            let cm = Scalar::from(cm_u);
+            let mp = Scalar::from(mp_u);
 
-    for &(sk_u, cm_u, mp_u) in &triples {
-        let sk = Scalar::from(sk_u);
-        let cm = Scalar::from(cm_u);
-        let mp = Scalar::from(mp_u);
+            run_signature_case(&wasm, &r1cs, sk, cm, mp).with_context(|| {
+                format!("Signature case failed for (sk,cm,mp)=({sk_u},{cm_u},{mp_u})")
+            })?;
+        }
 
-        run_signature_case(&wasm, &r1cs, sk, cm, mp).with_context(|| {
-            format!("Signature case failed for (sk,cm,mp)=({sk_u},{cm_u},{mp_u})")
-        })?;
+        Ok(())
     }
-
-    Ok(())
 }

@@ -14,4 +14,4 @@ mod prove_keypair;
 mod prove_transaction;
 pub mod utils;
 
-use utils::{circom_tester, keypair, merkle_tree, transaction};
+use utils::{circom_tester, keypair, merkle_tree};

@@ -1,5 +1,5 @@
 [workspace]
-members = ["circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
+members = ["app", "circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
 resolver = "3"
 
 [workspace.package]
@@ -10,14 +10,20 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-ark-bn254 = "0.5.0"
-ark-ec = "0.5.0"
-ark-ff = "0.5.0"
-ark-groth16 = "0.5.0"
+anyhow = { version = "1", default-features = false }
+ark-bn254 = { version = "0.5.0", default-features = false }
+ark-ec = { version = "0.5.0", default-features = false }
+ark-ff = { version = "0.5.0", default-features = false }
+ark-groth16 = { version = "0.5.0", default-features = false }
+ark-relations = { version = "0.5.1", default-features = false }
+ark-snark = { version = "0.5.1", default-features = false }
+ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-num-bigint = "0.4.6"
+num-bigint = { version = "0.4.6", default-features = false }
+num-integer = { version = "0.1.46", default-features = false }
+# TODO update for the release
 soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat", "testutils"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }
@@ -51,3 +57,15 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+
+[patch.crates-io]
+ark-relations = { git = "https://github.com/arkworks-rs/snark.git" }
+ark-snark = { git = "https://github.com/arkworks-rs/snark.git" }
+ark-crypto-primitives = { git = "https://github.com/arkworks-rs/crypto-primitives.git" }
+ark-ff = { git = "https://github.com/arkworks-rs/algebra.git" }
+ark-ec = { git = "https://github.com/arkworks-rs/algebra.git" }
+ark-poly = { git = "https://github.com/arkworks-rs/algebra.git" }
+ark-serialize = { git = "https://github.com/arkworks-rs/algebra.git" }
+ark-bn254 = { git = "https://github.com/arkworks-rs/algebra.git" }
+ark-r1cs-std = { git = "https://github.com/arkworks-rs/r1cs-std.git" }
+ark-groth16 = { git = "https://github.com/arkworks-rs/groth16.git" }

@@ -1,12 +1,5 @@
-//! Poseidon2 circuit test
-// Since we only compile the test module when the `circom-tests` feature is enabled,
-// and tokio tests aonly compile when cargo test is run, we need to allow unused imports
-// to avoid warnings during cargo build.
-#![allow(unused_imports)]
-
 use super::circom_tester::prove_and_verify;
 use crate::test::utils::circom_tester::Inputs;
-use crate::test::utils::general::load_artifacts;
 use anyhow::{Context, Result};
 use num_bigint::BigInt;
 use std::path::PathBuf;
@@ -78,61 +71,67 @@ fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) ->
     Ok(())
 }
 
-#[tokio::test]
-#[ignore]
-async fn test_poseidon2_hash_2_matrix() -> Result<()> {
-    // === PATH SETUP ===
-    let (wasm, r1cs) = load_artifacts("poseidon2_hash_2")?;
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test::utils::general::load_artifacts;
 
-    // === TEST MATRIX ===
-    let cases: &[((u64, u64), u64)] = &[
-        ((0, 0), 0),
-        ((1, 2), 1),
-        ((2, 1), 2),
-        ((42, 1337), 3),
-        ((u64::from(u32::MAX), 7), 4),
-        ((123456789, 987654321), 5),
-        ((2025, 10), 6),
-    ];
+    #[test]
+    #[ignore]
+    fn test_poseidon2_hash_2_matrix() -> Result<()> {
+        // === PATH SETUP ===
+        let (wasm, r1cs) = load_artifacts("poseidon2_hash_2")?;
 
-    for (pair, domain_separation) in cases {
-        run_case_hash(&wasm, &r1cs, *pair, *domain_separation)
-            .with_context(|| format!("Poseidon2 case failed: {pair:?}",))?;
+        // === TEST MATRIX ===
+        let cases: &[((u64, u64), u64)] = &[
+            ((0, 0), 0),
+            ((1, 2), 1),
+            ((2, 1), 2),
+            ((42, 1337), 3),
+            ((u64::from(u32::MAX), 7), 4),
+            ((123456789, 987654321), 5),
+            ((2025, 10), 6),
+        ];
+
+        for (pair, domain_separation) in cases {
+            run_case_hash(&wasm, &r1cs, *pair, *domain_separation)
+                .with_context(|| format!("Poseidon2 case failed: {pair:?}",))?;
+        }
+
+        Ok(())
     }
 
-    Ok(())
-}
+    #[test]
+    #[ignore]
+    fn test_poseidon2_compression() -> Result<()> {
+        // === PATH SETUP ===
+        let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
+        let wasm = out_dir.join("wasm/poseidon2_compress_js/poseidon2_compress.wasm");
+        let r1cs = out_dir.join("poseidon2_compress.r1cs");
 
-#[tokio::test]
-#[ignore]
-async fn test_poseidon2_compression() -> Result<()> {
-    // === PATH SETUP ===
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join("wasm/poseidon2_compress_js/poseidon2_compress.wasm");
-    let r1cs = out_dir.join("poseidon2_compress.r1cs");
+        if !wasm.exists() {
+            return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
+        }
+        if !r1cs.exists() {
+            return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
+        }
 
-    if !wasm.exists() {
-        return Err(anyhow::anyhow!("WASM file not found at {}", wasm.display()));
+        // === TEST MATRIX ===
+        let cases: &[(u64, u64)] = &[
+            (0, 0),
+            (1, 2),
+            (2, 1),
+            (42, 1337),
+            (u64::from(u32::MAX), 7),
+            (123456789, 987654321),
+            (2025, 10),
+        ];
+
+        for pair in cases {
+            run_case_compress(&wasm, &r1cs, *pair)
+                .with_context(|| format!("Poseidon2 case failed: {pair:?}",))?;
+        }
+
+        Ok(())
     }
-    if !r1cs.exists() {
-        return Err(anyhow::anyhow!("R1CS file not found at {}", r1cs.display()));
-    }
-
-    // === TEST MATRIX ===
-    let cases: &[(u64, u64)] = &[
-        (0, 0),
-        (1, 2),
-        (2, 1),
-        (42, 1337),
-        (u64::from(u32::MAX), 7),
-        (123456789, 987654321),
-        (2025, 10),
-    ];
-
-    for pair in cases {
-        run_case_compress(&wasm, &r1cs, *pair)
-            .with_context(|| format!("Poseidon2 case failed: {pair:?}",))?;
-    }
-
-    Ok(())
 }

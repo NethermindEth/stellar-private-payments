@@ -33,8 +33,8 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 /// 3. Deploys all contracts (Pool, ASP Membership, ASP Non-Membership, Verifier) and syncs the state
 /// 4. Initializes the verifier with the real verification key from proof generation
 /// 5. Calls the `transact` function on the pool contract
-#[tokio::test]
-async fn test_e2e_transact_with_real_proof() -> Result<()> {
+#[test]
+fn test_e2e_transact_with_real_proof() -> Result<()> {
     // Create ExtData and compute its hash
     let env = Env::default();
     let temp_recipient = Address::generate(&env);
@@ -116,8 +116,10 @@ async fn test_e2e_transact_with_real_proof() -> Result<()> {
     ];
 
     // Generate the Groth16 proof using Circom
-    println!("Generating Groth16 proof...");
+    println!("Prepare transaction witness...");
     let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
+
+    println!("Generating Groth16 proof...");
     let result = generate_proof(
         &case,
         leaves.clone(),

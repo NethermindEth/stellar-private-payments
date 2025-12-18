@@ -1,0 +1,690 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="PoolStellar - A privacy-preserving transaction system for Stellar blockchain with compliant zero-knowledge proofs.">
+    <meta name="keywords" content="Stellar, privacy, blockchain, zero-knowledge proofs, ZK, cryptocurrency, compliant">
+    <meta name="author" content="PoolStellar">
+    <meta name="robots" content="index, follow">
+    
+    <!-- Open Graph / Social Media -->
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="PoolStellar - Compliant Private System">
+    <meta property="og:description" content="Privacy-preserving transactions on Stellar with zero-knowledge proofs.">
+    <meta property="og:image" content="/assets/og-image.png">
+    <meta name="twitter:card" content="summary_large_image">
+    
+    <!-- Favicon -->
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
+    <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
+    <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
+    
+    <title>PoolStellar - Compliant Private System</title>
+    
+    <!-- Tailwind CSS -->
+    <link href="css/app.css" rel="stylesheet">
+    
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
+    <!-- Skip to main content for accessibility -->
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:top-4 focus:left-4 bg-brand-500 text-dark-950 px-4 py-2 rounded-lg font-semibold z-50">
+        Skip to main content
+    </a>
+
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col gap-4 sm:gap-6 min-h-screen">
+        
+        <!-- Header -->
+        <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl" role="banner">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg shadow-lg shadow-brand-500/25" aria-hidden="true">
+                    <svg class="w-6 h-6 text-dark-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <path d="M12 6v12M8 10l4-4 4 4"/>
+                        <circle cx="12" cy="15" r="2" fill="currentColor"/>
+                    </svg>
+                </div>
+                <h1 class="text-lg sm:text-xl font-semibold">
+                    PoolStellar <span class="text-dark-400 font-normal">Compliant Private System</span>
+                </h1>
+            </div>
+            <div class="flex items-center gap-3">
+                <div class="flex items-center gap-2 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-sm text-dark-300">
+                    <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse-dot shadow-sm shadow-emerald-500" aria-hidden="true"></span>
+                    <span id="network-name">Testnet</span>
+                </div>
+                <button 
+                    type="button"
+                    id="wallet-btn"
+                    class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
+                    aria-label="Connect wallet"
+                >
+                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <rect x="2" y="6" width="20" height="14" rx="2"/>
+                        <path d="M22 10h-4a2 2 0 0 0 0 4h4"/>
+                        <circle cx="18" cy="12" r="1" fill="currentColor"/>
+                        <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>
+                    </svg>
+                    <span id="wallet-text">Connect Freighter</span>
+                </button>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main id="main-content" class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
+            
+            <!-- Transaction Panel -->
+            <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="transaction-heading">
+                <h2 id="transaction-heading" class="sr-only">Transaction Controls</h2>
+                
+                <!-- Tab Navigation -->
+                <nav class="flex p-1.5 gap-1 bg-dark-900 border-b border-dark-800" role="tablist" aria-label="Transaction type">
+                    <button 
+                        type="button"
+                        role="tab"
+                        id="tab-deposit"
+                        aria-selected="true"
+                        aria-controls="panel-deposit"
+                        class="tab-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset bg-dark-800 text-brand-500 border border-brand-500/30 shadow-lg shadow-brand-500/10"
+                        data-tab="deposit"
+                    >
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M12 3v18M5 10l7-7 7 7"/>
+                        </svg>
+                        Deposit
+                    </button>
+                    <button 
+                        type="button"
+                        role="tab"
+                        id="tab-withdraw"
+                        aria-selected="false"
+                        aria-controls="panel-withdraw"
+                        class="tab-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset text-dark-400 hover:text-dark-200 hover:bg-dark-800"
+                        data-tab="withdraw"
+                    >
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M12 21V3M5 14l7 7 7-7"/>
+                        </svg>
+                        Withdraw
+                    </button>
+                    <button 
+                        type="button"
+                        role="tab"
+                        id="tab-transfer"
+                        aria-selected="false"
+                        aria-controls="panel-transfer"
+                        class="tab-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset text-dark-400 hover:text-dark-200 hover:bg-dark-800"
+                        data-tab="transfer"
+                    >
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M17 7l-10 10M7 7h10v10"/>
+                        </svg>
+                        Transfer
+                    </button>
+                    <button 
+                        type="button"
+                        role="tab"
+                        id="tab-transact"
+                        aria-selected="false"
+                        aria-controls="panel-transact"
+                        class="tab-btn flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset text-dark-400 hover:text-dark-200 hover:bg-dark-800"
+                        data-tab="transact"
+                    >
+                        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M7 16V4M7 4L3 8M7 4l4 4"/>
+                            <path d="M17 8v12m0 0l4-4m-4 4l-4-4"/>
+                        </svg>
+                        Transact
+                        <span class="text-[10px] font-semibold px-1.5 py-0.5 bg-brand-500/20 text-brand-400 rounded uppercase tracking-wide">Advanced</span>
+                    </button>
+                </nav>
+
+                <!-- Tab Panels -->
+                <div class="p-4 sm:p-6">
+                    
+                    <!-- Deposit Panel -->
+                    <article 
+                        role="tabpanel"
+                        id="panel-deposit"
+                        aria-labelledby="tab-deposit"
+                        class="tab-panel space-y-6"
+                    >
+                        <!-- Amount Input -->
+                        <div>
+                            <label for="deposit-amount" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                XLM Amount to Deposit
+                            </label>
+                            <div class="flex items-center gap-4">
+                                <input 
+                                    type="range"
+                                    id="deposit-slider"
+                                    min="0"
+                                    max="1000"
+                                    value="10"
+                                    step="1"
+                                    class="flex-1 h-1.5 bg-dark-700 rounded-full appearance-none cursor-pointer"
+                                    aria-label="Deposit amount slider"
+                                >
+                                <div class="relative">
+                                    <input 
+                                        type="number"
+                                        id="deposit-amount"
+                                        value="10"
+                                        min="0"
+                                        step="0.0000001"
+                                        class="w-28 px-3 py-2 pr-8 bg-dark-800 border border-dark-700 rounded-lg text-right font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                        aria-describedby="deposit-amount-desc"
+                                    >
+                                    <span id="deposit-amount-desc" class="sr-only">Enter amount in XLM</span>
+                                    <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                        <button type="button" class="spinner-up p-0.5 text-dark-500 hover:text-brand-500" aria-label="Increase amount" data-target="deposit-amount">
+                                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
+                                        </button>
+                                        <button type="button" class="spinner-down p-0.5 text-dark-500 hover:text-brand-500" aria-label="Decrease amount" data-target="deposit-amount">
+                                            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Balance Equation -->
+                        <div id="deposit-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="input">Deposit: 10</span>
+                            <span class="text-dark-500">=</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 10</span>
+                            <span class="ml-2" data-eq="status" aria-label="Equation balanced">
+                                <svg class="w-5 h-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                            </span>
+                        </div>
+
+                        <!-- Output Notes -->
+                        <fieldset>
+                            <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Output Notes <span class="normal-case text-dark-500">(how to split your deposit)</span>
+                            </legend>
+                            <div id="deposit-outputs" class="space-y-2">
+                                <!-- Output rows will be created from template -->
+                            </div>
+                        </fieldset>
+
+                        <!-- Submit Button -->
+                        <button 
+                            type="button"
+                            id="btn-deposit"
+                            class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="btn-text">Deposit</span>
+                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </article>
+
+                    <!-- Withdraw Panel -->
+                    <article 
+                        role="tabpanel"
+                        id="panel-withdraw"
+                        aria-labelledby="tab-withdraw"
+                        class="tab-panel hidden space-y-6"
+                    >
+                        <!-- Input Notes -->
+                        <fieldset>
+                            <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Input Notes <span class="normal-case text-dark-500">(notes to spend)</span>
+                            </legend>
+                            <div id="withdraw-inputs" class="space-y-2">
+                                <!-- Input rows will be created from template -->
+                            </div>
+                            <div class="flex justify-between items-center mt-3 p-3 bg-dark-800 rounded-lg">
+                                <span class="text-sm text-dark-400">Total to withdraw:</span>
+                                <span id="withdraw-total" class="font-mono text-lg font-semibold text-brand-400">0 XLM</span>
+                            </div>
+                        </fieldset>
+
+                        <!-- Recipient Address -->
+                        <div>
+                            <label for="withdraw-recipient" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Recipient Address
+                            </label>
+                            <input 
+                                type="text"
+                                id="withdraw-recipient"
+                                placeholder="G..."
+                                class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button 
+                            type="button"
+                            id="btn-withdraw"
+                            class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="btn-text">Withdraw</span>
+                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </article>
+
+                    <!-- Transfer Panel -->
+                    <article 
+                        role="tabpanel"
+                        id="panel-transfer"
+                        aria-labelledby="tab-transfer"
+                        class="tab-panel hidden space-y-6"
+                    >
+                        <!-- Recipient Public Key -->
+                        <div>
+                            <label for="transfer-recipient-key" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Recipient Public Key <span class="normal-case text-dark-500">(who will own the new notes)</span>
+                            </label>
+                            <input 
+                                type="text"
+                                id="transfer-recipient-key"
+                                placeholder="G..."
+                                class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+
+                        <!-- Balance Equation -->
+                        <div id="transfer-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="inputs">Inputs: 0</span>
+                            <span class="text-dark-500">=</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 0</span>
+                            <span class="ml-2" data-eq="status">
+                                <svg class="w-5 h-5 text-emerald-500 hidden" data-icon="valid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                <svg class="w-5 h-5 text-red-500 hidden" data-icon="invalid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </span>
+                        </div>
+
+                        <!-- Inputs / Outputs Grid -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Inputs Column -->
+                            <fieldset>
+                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
+                                    Your Input Notes <span class="normal-case text-dark-500">(notes to spend)</span>
+                                </legend>
+                                <div id="transfer-inputs" class="space-y-2">
+                                    <!-- Input rows will be created from template -->
+                                </div>
+                            </fieldset>
+
+                            <!-- Outputs Column -->
+                            <fieldset>
+                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
+                                    Recipient's Output Notes <span class="normal-case text-dark-500">(notes they will receive)</span>
+                                </legend>
+                                <div id="transfer-outputs" class="space-y-2">
+                                    <!-- Output rows will be created from template -->
+                                </div>
+                            </fieldset>
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button 
+                            type="button"
+                            id="btn-transfer"
+                            class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="btn-text">Transfer</span>
+                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </article>
+
+                    <!-- Transact Panel -->
+                    <article 
+                        role="tabpanel"
+                        id="panel-transact"
+                        aria-labelledby="tab-transact"
+                        class="tab-panel hidden space-y-6"
+                    >
+                        <!-- Public Amount -->
+                        <div>
+                            <label for="transact-amount" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Public Amount <span class="normal-case text-dark-500">(+ deposit, − withdraw)</span>
+                            </label>
+                            <div class="flex items-center gap-4">
+                                <input 
+                                    type="range"
+                                    id="transact-slider"
+                                    min="-500"
+                                    max="500"
+                                    value="0"
+                                    step="1"
+                                    class="flex-1 h-1.5 bg-gradient-to-r from-red-500 via-dark-700 to-emerald-500 rounded-full appearance-none cursor-pointer"
+                                    aria-label="Public amount slider"
+                                >
+                                <div class="flex items-center gap-2">
+                                    <div class="relative">
+                                        <input 
+                                            type="number"
+                                            id="transact-amount"
+                                            value="0"
+                                            step="0.0000001"
+                                            class="w-24 px-3 py-2 pr-6 bg-dark-800 border border-dark-700 rounded-lg text-right font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
+                                        >
+                                        <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
+                                            <button type="button" class="spinner-up p-0.5 text-dark-500 hover:text-brand-500" aria-label="Increase amount" data-target="transact-amount">
+                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
+                                            </button>
+                                            <button type="button" class="spinner-down p-0.5 text-dark-500 hover:text-brand-500" aria-label="Decrease amount" data-target="transact-amount">
+                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <span class="text-sm text-dark-500">XLM</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Balance Equation -->
+                        <div id="transact-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="inputs">Inputs: 0</span>
+                            <span class="text-dark-500">+</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="public">Public: +0</span>
+                            <span class="text-dark-500">=</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 0</span>
+                            <span class="ml-2" data-eq="status">
+                                <svg class="w-5 h-5 text-emerald-500 hidden" data-icon="valid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
+                                <svg class="w-5 h-5 text-red-500 hidden" data-icon="invalid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
+                            </span>
+                        </div>
+
+                        <!-- Inputs / Outputs Grid -->
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <!-- Inputs Column -->
+                            <fieldset>
+                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
+                                    Inputs <span class="normal-case text-dark-500">(notes to spend)</span>
+                                </legend>
+                                <div id="transact-inputs" class="space-y-2">
+                                    <!-- Input rows will be created from template -->
+                                </div>
+                            </fieldset>
+
+                            <!-- Outputs Column -->
+                            <fieldset>
+                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
+                                    Outputs <span class="normal-case text-dark-500">(new notes to create)</span>
+                                </legend>
+                                <div id="transact-outputs" class="space-y-2">
+                                    <!-- Output rows will be created from template -->
+                                </div>
+                                <!-- Outputs Recipient Key -->
+                                <div class="mt-3 p-3 bg-dark-700/50 rounded-lg">
+                                    <label for="transact-outputs-recipient" class="block text-xs font-medium text-dark-400 mb-2">
+                                        Output Notes Owner <span class="normal-case text-dark-500">(leave empty for yourself)</span>
+                                    </label>
+                                    <input 
+                                        type="text"
+                                        id="transact-outputs-recipient"
+                                        placeholder="G... (your key if empty)"
+                                        class="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                        autocomplete="off"
+                                        spellcheck="false"
+                                    >
+                                </div>
+                            </fieldset>
+                        </div>
+
+                        <!-- Recipient Address for Withdrawals -->
+                        <div>
+                            <label for="transact-recipient" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
+                                Withdrawal Recipient <span class="normal-case text-dark-500">(for public amount if negative)</span>
+                            </label>
+                            <input 
+                                type="text"
+                                id="transact-recipient"
+                                placeholder="G..."
+                                class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                        </div>
+
+                        <!-- Submit Button -->
+                        <button 
+                            type="button"
+                            id="btn-transact"
+                            class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                            <span class="btn-text">Transact</span>
+                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
+                            </svg>
+                        </button>
+                    </article>
+                </div>
+            </section>
+
+            <!-- Sidebar -->
+            <aside class="flex flex-col gap-4 sm:gap-6 lg:sticky lg:top-6 lg:self-start">
+                
+                <!-- Stats Panel -->
+                <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="stats-heading">
+                    <h3 id="stats-heading" class="flex items-center gap-2 px-4 py-3 bg-dark-900 border-b border-dark-800 text-sm font-semibold">
+                        <svg class="w-4 h-4 text-brand-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M18 20V10M12 20V4M6 20v-6"/>
+                        </svg>
+                        Stats
+                    </h3>
+                    <div class="p-4 space-y-4">
+                        <div>
+                            <p class="text-xs text-dark-500 uppercase tracking-wide mb-2">Recent transactions</p>
+                            <ul id="recent-tx" class="space-y-1.5" aria-label="Recent transactions">
+                                <!-- Populated by template -->
+                            </ul>
+                        </div>
+                        <div>
+                            <p class="text-xs text-dark-500 uppercase tracking-wide mb-1">Total in pool</p>
+                            <p class="font-mono text-2xl font-semibold text-brand-400" id="pool-total">
+                                <span class="pool-value">1,250,000</span>
+                                <span class="text-sm text-dark-500 font-normal">XLM</span>
+                            </p>
+                        </div>
+                    </div>
+                </section>
+
+                <!-- Compliance Panel -->
+                <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="compliance-heading">
+                    <h3 id="compliance-heading" class="flex items-center gap-2 px-4 py-3 bg-dark-900 border-b border-dark-800 text-sm font-semibold">
+                        <svg class="w-4 h-4 text-brand-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                            <path d="M9 12l2 2 4-4"/>
+                        </svg>
+                        Compliance Contracts
+                    </h3>
+                    <div class="p-4 space-y-3">
+                        <div class="p-3 bg-dark-800 rounded-lg">
+                            <p class="text-xs font-semibold text-dark-200 mb-2">Membership</p>
+                            <dl class="space-y-1 text-xs">
+                                <div class="flex justify-between">
+                                    <dt class="text-dark-500">Address</dt>
+                                    <dd class="font-mono text-dark-300" id="compliance-membership-addr">CA3D...X7YZ</dd>
+                                </div>
+                                <div class="flex justify-between">
+                                    <dt class="text-dark-500">Root</dt>
+                                    <dd class="font-mono text-dark-300" id="compliance-membership-root">0x8f3a...2b1c</dd>
+                                </div>
+                            </dl>
+                        </div>
+                        <div class="p-3 bg-dark-800 rounded-lg">
+                            <p class="text-xs font-semibold text-dark-200 mb-2">Non-Membership</p>
+                            <dl class="space-y-1 text-xs">
+                                <div class="flex justify-between">
+                                    <dt class="text-dark-500">Address</dt>
+                                    <dd class="font-mono text-dark-300" id="compliance-nonmember-addr">CB7E...P9QR</dd>
+                                </div>
+                                <div class="flex justify-between">
+                                    <dt class="text-dark-500">Root</dt>
+                                    <dd class="font-mono text-dark-300" id="compliance-nonmember-root">0x4c7d...9e2a</dd>
+                                </div>
+                            </dl>
+                        </div>
+                    </div>
+                </section>
+            </aside>
+        </main>
+
+        <!-- Notes Table -->
+        <section class="flex-1 flex flex-col bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="notes-heading">
+            <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-4 py-3 bg-dark-900 border-b border-dark-800">
+                <h3 id="notes-heading" class="flex items-center gap-2 text-sm font-semibold">
+                    <svg class="w-4 h-4 text-brand-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                        <line x1="16" y1="13" x2="8" y2="13"/>
+                        <line x1="16" y1="17" x2="8" y2="17"/>
+                    </svg>
+                    Your Notes
+                </h3>
+                <div class="flex gap-1 p-0.5 bg-dark-800 rounded-lg" role="tablist" aria-label="Filter notes">
+                    <button type="button" role="tab" aria-selected="true" class="filter-btn px-3 py-1 text-xs font-medium rounded bg-dark-700 text-dark-50" data-filter="all">All</button>
+                    <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="unspent">Unspent</button>
+                    <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="spent">Spent</button>
+                </div>
+            </header>
+            <div class="flex-1 overflow-auto min-h-[200px]">
+                <table class="w-full min-w-[600px]" aria-describedby="notes-heading">
+                    <thead class="bg-dark-800 sticky top-0">
+                        <tr>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Note ID</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Amount</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Created</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Status</th>
+                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="notes-tbody" class="divide-y divide-dark-800">
+                        <!-- Rows created from template -->
+                    </tbody>
+                </table>
+                <div id="empty-notes" class="hidden flex-1 flex-col items-center justify-center py-12 text-dark-500">
+                    <svg class="w-12 h-12 mb-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                        <polyline points="14 2 14 8 20 8"/>
+                    </svg>
+                    <p class="text-sm">No notes yet. Make a deposit to create your first note.</p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Toast Container -->
+        <div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-50" role="region" aria-label="Notifications" aria-live="polite"></div>
+    </div>
+
+    <!-- Templates -->
+    
+    <!-- Deposit/Transact Output Row Template -->
+    <template id="tpl-output-row">
+        <div class="output-row flex flex-wrap items-center gap-2 p-2 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
+            <div class="relative flex-shrink-0">
+                <input 
+                    type="number"
+                    class="output-amount w-20 px-2 py-1.5 pr-6 bg-dark-700 border border-dark-600 rounded text-right font-mono text-sm focus:outline-none focus:border-brand-500"
+                    value="0"
+                    min="0"
+                    placeholder="XLM"
+                    aria-label="Output amount"
+                >
+                <div class="absolute right-0.5 top-1/2 -translate-y-1/2 flex flex-col">
+                    <button type="button" class="mini-up p-0.5 text-dark-500 hover:text-brand-500" aria-label="Increase">
+                        <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
+                    </button>
+                    <button type="button" class="mini-down p-0.5 text-dark-500 hover:text-brand-500" aria-label="Decrease">
+                        <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+                    </button>
+                </div>
+            </div>
+            <span class="dummy-badge hidden text-[10px] font-semibold px-2 py-1 bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded uppercase tracking-wide">Dummy</span>
+            <input 
+                type="text"
+                class="output-note-id flex-1 min-w-[120px] px-2 py-1.5 bg-dark-900 border border-dark-700 rounded font-mono text-xs text-brand-400 focus:outline-none"
+                placeholder="Note ID..."
+                readonly
+                aria-label="Generated note ID"
+            >
+            <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" title="Copy" aria-label="Copy note ID" disabled>
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+            </button>
+            <button type="button" class="download-btn px-2 py-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-xs text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" aria-label="Download note" disabled>Download</button>
+        </div>
+    </template>
+
+    <!-- Input Note Row Template (Withdraw/Transact) -->
+    <template id="tpl-input-row">
+        <div class="input-row flex flex-wrap items-center gap-2 p-2 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
+            <div class="flex-1 min-w-[200px] relative">
+                <input 
+                    type="text"
+                    class="note-input w-full px-3 py-2 pr-10 bg-dark-700 border border-dark-600 rounded font-mono text-sm focus:outline-none focus:border-brand-500 placeholder:font-sans placeholder:text-dark-500"
+                    placeholder="Paste or upload Note ID"
+                    autocomplete="off"
+                    spellcheck="false"
+                    aria-label="Note ID"
+                >
+                <input type="file" class="file-input hidden" accept=".json,.txt" aria-label="Upload note file">
+                <button type="button" class="upload-btn absolute right-2 top-1/2 -translate-y-1/2 p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Upload note file" aria-label="Upload note file">
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                </button>
+            </div>
+            <span class="value-display font-mono text-xs px-2 py-1 bg-dark-700 rounded text-dark-500 min-w-[70px] text-right">0 XLM</span>
+        </div>
+    </template>
+
+    <!-- Transaction Item Template -->
+    <template id="tpl-tx-item">
+        <li class="flex justify-between items-center p-2 bg-dark-800 rounded text-xs">
+            <span class="font-mono text-dark-300 tx-hash"></span>
+            <span class="text-dark-500 tx-time"></span>
+        </li>
+    </template>
+
+    <!-- Note Table Row Template -->
+    <template id="tpl-note-row">
+        <tr class="note-row hover:bg-dark-800/50 transition-colors" data-status="" data-id="">
+            <td class="px-4 py-3 font-mono text-xs text-dark-300 note-id"></td>
+            <td class="px-4 py-3 text-sm font-medium note-amount"></td>
+            <td class="px-4 py-3 text-sm text-dark-400 note-date"></td>
+            <td class="px-4 py-3">
+                <span class="status-badge inline-flex px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded-full"></span>
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex gap-1">
+                    <button type="button" class="use-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use in withdraw" aria-label="Use in withdraw">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V3M5 14l7 7 7-7"/></svg>
+                    </button>
+                    <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy" aria-label="Copy note ID">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    </button>
+                </div>
+            </td>
+        </tr>
+    </template>
+
+    <!-- Toast Template -->
+    <template id="tpl-toast">
+        <div class="toast flex items-center gap-3 px-4 py-3 bg-dark-800 border rounded-lg shadow-xl max-w-sm animate-slide-in" role="alert">
+            <svg class="toast-icon w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
+            <p class="toast-message flex-1 text-sm"></p>
+            <button type="button" class="toast-close p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Dismiss">
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+        </div>
+    </template>
+
+    <script src="js/app.js" type="module"></script>
+</body>
+</html>

@@ -22,3 +22,30 @@ Install a pre-push git hook:
 ```sh
 git config core.hooksPath .githooks
 ```
+
+## App development
+
+### Prerequisites
+
+* Node.js
+* npm
+* python3 (for the static server)
+
+The whole app:
+
+```sh
+$ make install
+$ make serve
+```
+
+The Rust part - check compilation
+
+```sh
+$ make wasm
+```
+
+Prepare a production build (TODO: enable optimizations and minification)
+
+```sh
+$ make dist
+```

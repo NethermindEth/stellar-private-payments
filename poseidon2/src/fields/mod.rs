@@ -13,8 +13,6 @@ pub mod bn256;
 #[allow(clippy::too_many_arguments)]
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[allow(non_local_definitions)]
-#[allow(clippy::too_many_arguments)]
-#[allow(clippy::derived_hash_with_manual_eq)]
 pub mod goldilocks;
 #[allow(non_local_definitions)]
 pub mod pallas;

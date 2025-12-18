@@ -130,7 +130,7 @@ impl MerkleTreeWithHistory {
         let max_leaves = 1u64.checked_shl(levels).ok_or(Error::WrongLevels)?;
 
         // NextIndex must be even for two-leaf insertion
-        if next_index % 2 != 0 {
+        if !next_index.is_multiple_of(2) {
             return Err(Error::NextIndexNotEven);
         }
 
@@ -208,10 +208,10 @@ impl MerkleTreeWithHistory {
         let mut i = current_root_index;
         loop {
             // roots[i]
-            if let Some(r) = storage.get::<MerkleDataKey, U256>(&MerkleDataKey::Root(i)) {
-                if &r == root {
-                    return Ok(true);
-                }
+            if let Some(r) = storage.get::<MerkleDataKey, U256>(&MerkleDataKey::Root(i))
+                && &r == root
+            {
+                return Ok(true);
             }
             i = (i + 1) % ROOT_HISTORY_SIZE;
             if i == current_root_index {

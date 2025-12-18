@@ -267,6 +267,5 @@ pub fn prove_and_verify(
     inputs: &Inputs,
 ) -> Result<CircomResult> {
     let keys = generate_keys(&wasm_path, &r1cs_path)?;
-
     prove_and_verify_with_keys(wasm_path, r1cs_path, inputs, &keys)
 }
