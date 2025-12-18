@@ -7,11 +7,11 @@ extern crate alloc;
 pub mod prover;
 
 use crate::prover::Prover;
-use wasm_bindgen::{JsValue, prelude::*};
-use anyhow::Result;
 use alloc::vec::Vec;
+use anyhow::Result;
+use wasm_bindgen::{JsValue, prelude::*};
 
-/// An initialization function 
+/// An initialization function
 /// - to print panics in the console
 /// - to initialize the prover
 #[wasm_bindgen(js_name = init)]

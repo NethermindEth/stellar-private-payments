@@ -12,7 +12,7 @@ circom-tests = ["ark-circom"]
 [dependencies]
 anyhow = { workspace = true }
 ark-bn254 = { workspace = true }
-ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev="09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false, optional = true }
+ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false, optional = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-snark = { workspace = true }
