@@ -92,10 +92,8 @@ pub trait SMTDatabase {
     /// Get a value from the database
     fn get(&self, key: &BigInt) -> Option<Vec<BigInt>>;
     /// Set a value in the database
-    #[allow(dead_code)]
     fn set(&mut self, key: BigInt, value: Vec<BigInt>);
     /// Delete a value from the database
-    #[allow(dead_code)]
     fn delete(&mut self, key: &BigInt);
     /// Get the current root
     fn get_root(&self) -> BigInt;

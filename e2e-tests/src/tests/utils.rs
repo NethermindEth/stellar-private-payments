@@ -1,7 +1,5 @@
 //! Utility functions and types for end-to-end tests
 
-#![allow(clippy::arithmetic_side_effects)]
-
 use anyhow::Result;
 use ark_bn254::Bn254;
 use ark_groth16::VerifyingKey;
@@ -224,8 +222,14 @@ pub fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigIn
     pubs.iter()
         .enumerate()
         .map(|(i, pk)| {
-            let idx = (i as u64) + 1;
-            let override_idx = idx * 100_000 + idx;
+            let idx = (i as u64)
+                .checked_add(1)
+                .expect("Failed to calculate override index: public key index exceeds u64::MAX");
+            let override_idx = idx
+                .checked_mul(100_000)
+                .expect("Failed to calculate override index multiplication")
+                .checked_add(idx)
+                .expect("Failed to calculate override index addition");
             let override_key = Scalar::from(override_idx);
             let leaf = poseidon2_hash2(*pk, Scalar::zero(), Some(Scalar::from(1u64)));
             (scalar_to_bigint(override_key), scalar_to_bigint(leaf))
@@ -282,11 +286,17 @@ pub fn generate_proof(
     let mut membership_roots: Vec<BigInt> = Vec::new();
 
     for j in 0..N_MEM_PROOFS {
-        let base_idx = j * n_inputs;
+        let base_idx = j
+            .checked_mul(n_inputs)
+            .expect("Failed to calculate base index");
         let mut frozen_leaves = membership_trees[base_idx].leaves;
 
         for (k, &pk_scalar) in pubs.iter().enumerate() {
-            let index = k * N_MEM_PROOFS + j;
+            let index = k
+                .checked_mul(N_MEM_PROOFS)
+                .expect("Failed to calculate membership tree index multiplication")
+                .checked_add(j)
+                .expect("Failed to calculate membership tree index addition");
             let tree = &membership_trees[index];
             let leaf = poseidon2_hash2(pk_scalar, tree.blinding, Some(Scalar::from(1u64)));
             frozen_leaves[tree.index] = leaf;
@@ -295,7 +305,11 @@ pub fn generate_proof(
         let root_scalar = merkle_root(frozen_leaves.to_vec());
 
         for i in 0..n_inputs {
-            let idx = i * N_MEM_PROOFS + j;
+            let idx = i
+                .checked_mul(N_MEM_PROOFS)
+                .expect("Failed to calculate membership tree index multiplication")
+                .checked_add(j)
+                .expect("Failed to calculate membership tree index addition");
             let t = &membership_trees[idx];
             let pk_scalar = pubs[i];
             let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));

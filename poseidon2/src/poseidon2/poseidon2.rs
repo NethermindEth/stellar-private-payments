@@ -27,14 +27,14 @@ impl<F: PrimeField> Poseidon2<F> {
         // Linear layer at beginning
         self.matmul_external(&mut current_state);
 
-        for r in 0..self.params.rounds_f_beginning {
+        for r in 0..self.params.rounds_f_div_2 {
             current_state = self.add_rc(&current_state, &self.params.round_constants[r]);
             current_state = self.sbox(&current_state);
             self.matmul_external(&mut current_state);
         }
 
-        let p_end = self.params.rounds_f_beginning + self.params.rounds_p;
-        for r in self.params.rounds_f_beginning..p_end {
+        let p_end = self.params.rounds_f_div_2 + self.params.rounds_p;
+        for r in self.params.rounds_f_div_2..p_end {
             current_state[0].add_assign(&self.params.round_constants[r][0]);
             current_state[0] = self.sbox_p(&current_state[0]);
             self.matmul_internal(&mut current_state, &self.params.mat_internal_diag_m_1);
