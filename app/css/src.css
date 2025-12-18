@@ -1,5 +1,12 @@
 @import "tailwindcss";
 
+@source not "../node_modules";
+@source not "../../circuits";
+@source not "../../contracts";
+@source not "../../e2e-tests";
+@source not "../../poseidon2";
+@source not "../../dist";
+
 @theme {
   /* Brand Colors */
   --color-brand-50: #fffbeb;
