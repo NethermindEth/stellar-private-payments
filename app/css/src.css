@@ -1,0 +1,92 @@
+@import "tailwindcss";
+
+@theme {
+  /* Brand Colors */
+  --color-brand-50: #fffbeb;
+  --color-brand-100: #fef3c7;
+  --color-brand-200: #fde68a;
+  --color-brand-300: #fcd34d;
+  --color-brand-400: #fbbf24;
+  --color-brand-500: #f59e0b;
+  --color-brand-600: #d97706;
+  --color-brand-700: #b45309;
+  --color-brand-800: #92400e;
+  --color-brand-900: #78350f;
+
+  /* Dark Colors */
+  --color-dark-50: #f8fafc;
+  --color-dark-100: #f1f5f9;
+  --color-dark-200: #e2e8f0;
+  --color-dark-300: #cbd5e1;
+  --color-dark-400: #94a3b8;
+  --color-dark-500: #64748b;
+  --color-dark-600: #475569;
+  --color-dark-700: #334155;
+  --color-dark-800: #1e293b;
+  --color-dark-900: #0f172a;
+  --color-dark-950: #020617;
+
+  /* Fonts */
+  --font-sans: "Outfit", ui-sans-serif, system-ui;
+  --font-mono: "JetBrains Mono", monospace;
+
+  /* Fix for the white border issue: Set default border color */
+  --color-border: var(--color-dark-800);
+}
+
+@layer utilities {
+    [x-cloak] { display: none !important; }
+
+    input[type="range"]::-webkit-slider-thumb {
+        -webkit-appearance: none;
+        width: 20px;
+        height: 20px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        border-radius: 50%;
+        cursor: grab;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+    }
+
+    input[type="range"]::-moz-range-thumb {
+        width: 20px;
+        height: 20px;
+        background: linear-gradient(135deg, #f59e0b, #d97706);
+        border: none;
+        border-radius: 50%;
+        cursor: grab;
+        box-shadow: 0 2px 8px rgba(245, 158, 11, 0.4);
+    }
+
+    input[type="number"]::-webkit-outer-spin-button,
+    input[type="number"]::-webkit-inner-spin-button {
+        -webkit-appearance: none;
+        margin: 0;
+    }
+
+    input[type="number"] {
+        -moz-appearance: textfield;
+    }
+
+    @keyframes pulse-dot {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+    }
+
+    .animate-pulse-dot {
+        animation: pulse-dot 2s infinite;
+    }
+
+    @keyframes spin {
+        to { transform: rotate(360deg); }
+    }
+
+    .animate-spin-slow {
+        animation: spin 1s linear infinite;
+    }
+}
+
+@layer base {
+  *, ::before, ::after {
+    border-color: var(--color-border);
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "name": "app",
+  "version": "0.1.0",
+  "description": "Private payments app on Stellar",
+  "main": "js/app.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "Apache-2.0",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.18",
+    "esbuild": "^0.27.2",
+    "tailwindcss": "^4.1.18"
+  },
+  "dependencies": {
+    "@stellar/freighter-api": "^6.0.1",
+    "@stellar/stellar-sdk": "^14.4.2",
+    "bignumber.js": "^9.3.1"
+  }
+}

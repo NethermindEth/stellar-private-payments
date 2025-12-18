@@ -5,7 +5,6 @@
 # Rust/Cargo
 debug/
 target/
-Cargo.lock
 
 # MSVC Windows builds of rustc generate these, which store debugging information
 *.pdb
@@ -34,3 +33,7 @@ contracts/**/test_snapshots
 
 # Tests artefacts
 e2e-tests/test_snapshots/*
+
+# App
+app/node_modules
+dist/
