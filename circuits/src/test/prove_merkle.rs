@@ -1,92 +1,88 @@
-use super::{
-    merkle_tree::{merkle_proof, merkle_root},
-    utils::general::scalar_to_bigint,
-};
-
-use crate::test::utils::circom_tester::{CircuitKeys, Inputs, prove_and_verify_with_keys};
-use anyhow::{Context, Result};
-use num_bigint::BigInt;
-use std::path::PathBuf;
-use zkhash::fields::bn256::FpBN256 as Scalar;
-
-/// Run a Merkle proof test case
-///
-/// Tests the Merkle proof circuit by computing a Merkle root and proof in Rust,
-/// then verifying the circuit produces matching results. Uses precomputed keys
-/// for efficiency when running multiple test cases.
-///
-/// # Arguments
-///
-/// * `wasm` - Path to the compiled WASM file
-/// * `r1cs` - Path to the R1CS constraint system file
-/// * `leaves` - Vector of leaf scalar values
-/// * `leaf_index` - Index of the leaf to generate a proof for
-/// * `expected_levels` - Expected number of levels in the tree
-/// * `keys` - Precomputed circuit keys for efficient proving
-///
-/// # Returns
-///
-/// Returns `Ok(())` if the proof verifies and the computed root matches the circuit output,
-/// or an error if verification fails or roots don't match.
-fn run_case(
-    wasm: &PathBuf,
-    r1cs: &PathBuf,
-    leaves: Vec<Scalar>,
-    leaf_index: usize,
-    expected_levels: usize,
-    keys: &CircuitKeys,
-) -> Result<()> {
-    // Compute root and proof in Rust
-    let root_scalar = merkle_root(leaves.clone());
-    let leaf_scalar = leaves[leaf_index];
-    let (path_elements_scalar, path_indices_u64, levels) = merkle_proof(&leaves, leaf_index);
-
-    // Ensure proof depth matches the circuit’s expected depth
-    assert_eq!(
-        levels, expected_levels,
-        "This executable expects a {expected_levels}-level circuit"
-    );
-
-    // Convert to BigInt for Circom witness
-    let leaf_val = scalar_to_bigint(leaf_scalar);
-    let root_val = scalar_to_bigint(root_scalar);
-    let path_elems: Vec<BigInt> = path_elements_scalar
-        .into_iter()
-        .map(scalar_to_bigint)
-        .collect();
-    let path_idx = BigInt::from(path_indices_u64);
-
-    let mut inputs = Inputs::new();
-    inputs.set("leaf", leaf_val);
-    inputs.set("root", &root_val);
-    inputs.set("pathElements", path_elems);
-    inputs.set("pathIndices", path_idx);
-
-    // Prove and verify
-    let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, keys)
-        .context("Failed to prove and verify circuit")?;
-
-    if !res.verified {
-        anyhow::bail!("Proof did not verify");
-    }
-
-    // Compare public root
-    let circom_root_dec = res
-        .public_inputs
-        .first()
-        .expect("missing public root from circuit")
-        .to_string();
-
-    let rust_root_dec = root_val.to_string();
-    assert_eq!(circom_root_dec, rust_root_dec, "Circom root != Rust root");
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::test::utils::general::scalar_to_bigint;
+    use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
     use crate::test::utils::{circom_tester::generate_keys, general::load_artifacts};
+
+    use crate::test::utils::circom_tester::{CircuitKeys, Inputs, prove_and_verify_with_keys};
+    use anyhow::{Context, Result};
+    use num_bigint::BigInt;
+    use std::path::PathBuf;
+    use zkhash::fields::bn256::FpBN256 as Scalar;
+
+    /// Run a Merkle proof test case
+    ///
+    /// Tests the Merkle proof circuit by computing a Merkle root and proof in Rust,
+    /// then verifying the circuit produces matching results. Uses precomputed keys
+    /// for efficiency when running multiple test cases.
+    ///
+    /// # Arguments
+    ///
+    /// * `wasm` - Path to the compiled WASM file
+    /// * `r1cs` - Path to the R1CS constraint system file
+    /// * `leaves` - Vector of leaf scalar values
+    /// * `leaf_index` - Index of the leaf to generate a proof for
+    /// * `expected_levels` - Expected number of levels in the tree
+    /// * `keys` - Precomputed circuit keys for efficient proving
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the proof verifies and the computed root matches the circuit output,
+    /// or an error if verification fails or roots don't match.
+    fn run_case(
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        leaves: Vec<Scalar>,
+        leaf_index: usize,
+        expected_levels: usize,
+        keys: &CircuitKeys,
+    ) -> Result<()> {
+        // Compute root and proof in Rust
+        let root_scalar = merkle_root(leaves.clone());
+        let leaf_scalar = leaves[leaf_index];
+        let (path_elements_scalar, path_indices_u64, levels) = merkle_proof(&leaves, leaf_index);
+
+        // Ensure proof depth matches the circuit’s expected depth
+        assert_eq!(
+            levels, expected_levels,
+            "This executable expects a {expected_levels}-level circuit"
+        );
+
+        // Convert to BigInt for Circom witness
+        let leaf_val = scalar_to_bigint(leaf_scalar);
+        let root_val = scalar_to_bigint(root_scalar);
+        let path_elems: Vec<BigInt> = path_elements_scalar
+            .into_iter()
+            .map(scalar_to_bigint)
+            .collect();
+        let path_idx = BigInt::from(path_indices_u64);
+
+        let mut inputs = Inputs::new();
+        inputs.set("leaf", leaf_val);
+        inputs.set("root", &root_val);
+        inputs.set("pathElements", path_elems);
+        inputs.set("pathIndices", path_idx);
+
+        // Prove and verify
+        let res = prove_and_verify_with_keys(wasm, r1cs, &inputs, keys)
+            .context("Failed to prove and verify circuit")?;
+
+        if !res.verified {
+            anyhow::bail!("Proof did not verify");
+        }
+
+        // Compare public root
+        let circom_root_dec = res
+            .public_inputs
+            .first()
+            .expect("missing public root from circuit")
+            .to_string();
+
+        let rust_root_dec = root_val.to_string();
+        assert_eq!(circom_root_dec, rust_root_dec, "Circom root != Rust root");
+
+        Ok(())
+    }
 
     #[test]
     #[ignore]

@@ -4,12 +4,10 @@ use crate::utils;
 
 #[derive(Clone, Debug)]
 pub struct Poseidon2Params<F: PrimeField> {
-    pub(crate) t: usize, // statesize
-    pub(crate) d: usize, // sbox degree
-    pub(crate) rounds_f_beginning: usize,
+    pub(crate) t: usize,              // statesize
+    pub(crate) d: usize,              // sbox degree
+    pub(crate) rounds_f_div_2: usize, // Full rounds divided by 2
     pub(crate) rounds_p: usize,
-    #[allow(dead_code)]
-    pub(crate) rounds_f_end: usize,
     pub(crate) rounds: usize,
     pub(crate) mat_internal_diag_m_1: Vec<F>,
     pub(crate) _mat_internal: Vec<Vec<F>>,
@@ -37,9 +35,8 @@ impl<F: PrimeField> Poseidon2Params<F> {
         Poseidon2Params {
             t,
             d,
-            rounds_f_beginning: r,
+            rounds_f_div_2: r,
             rounds_p,
-            rounds_f_end: r,
             rounds,
             mat_internal_diag_m_1: mat_internal_diag_m_1.to_owned(),
             _mat_internal: mat_internal.to_owned(),

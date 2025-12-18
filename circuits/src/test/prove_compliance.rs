@@ -1,326 +1,324 @@
-use crate::test::utils::circom_tester::{Inputs, SignalKey, prove_and_verify};
-use crate::test::utils::general::load_artifacts;
-use crate::test::utils::general::{poseidon2_hash2, scalar_to_bigint};
-use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
-use crate::test::utils::sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides};
-use crate::test::utils::transaction::prepopulated_leaves;
-use crate::test::utils::transaction_case::{
-    TxCase, build_base_inputs, prepare_transaction_witness,
-};
-use anyhow::{Result, ensure};
-use num_bigint::BigInt;
-use std::convert::TryInto;
-use std::panic::{self, AssertUnwindSafe};
-use std::path::PathBuf;
-use zkhash::ark_ff::Zero;
-use zkhash::fields::bn256::FpBN256 as Scalar;
-
-const LEVELS: usize = 5;
-const N_MEM_PROOFS: usize = 1;
-const N_NON_PROOFS: usize = 1;
-
-pub struct MembershipTree {
-    pub leaves: [Scalar; 1 << LEVELS],
-    pub index: usize,
-    pub blinding: Scalar,
-}
-
-pub struct NonMembership {
-    pub key_non_inclusion: BigInt,
-}
-
-fn build_membership_trees<F>(case: &TxCase, seed_fn: F) -> Vec<MembershipTree>
-where
-    F: Fn(usize) -> u64,
-{
-    let n_inputs = case.inputs.len();
-    let mut membership_trees = Vec::with_capacity(n_inputs * N_MEM_PROOFS);
-
-    for j in 0..N_MEM_PROOFS {
-        let seed_j = seed_fn(j);
-        let base_mem_leaves_j = prepopulated_leaves(LEVELS, seed_j, &[], 24);
-
-        for input in &case.inputs {
-            membership_trees.push(MembershipTree {
-                leaves: base_mem_leaves_j
-                    .clone()
-                    .try_into()
-                    .expect("Failed to convert into list"),
-                index: input.leaf_index,
-                blinding: Scalar::zero(),
-            });
-        }
-    }
-
-    membership_trees
-}
-
-fn default_membership_trees(case: &TxCase, suffix: u64) -> Vec<MembershipTree> {
-    build_membership_trees(case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40) ^ suffix)
-}
-
-fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigInt)> {
-    pubs.iter()
-        .enumerate()
-        .map(|(i, pk)| {
-            // Make the +1 explicit and checked
-            let idx = u64::try_from(i)
-                .expect("Failed to cast i")
-                .checked_add(1)
-                .expect("idx overflow");
-
-            // Make the mul + add explicit and checked
-            let override_factor: u64 = 100_000;
-            let override_idx = idx
-                .checked_mul(override_factor)
-                .and_then(|v| v.checked_add(idx))
-                .expect("override_idx overflow");
-
-            let override_key = Scalar::from(override_idx);
-
-            let leaf = poseidon2_hash2(*pk, Scalar::zero(), Some(Scalar::from(1u64)));
-            (scalar_to_bigint(override_key), scalar_to_bigint(leaf))
-        })
-        .collect()
-}
-
-fn default_non_membership_proof_builder(key: &BigInt, pubs: &[Scalar]) -> SMTProof {
-    let overrides = non_membership_overrides_from_pubs(pubs);
-    prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_case<F>(
-    wasm: &PathBuf,
-    r1cs: &PathBuf,
-    case: &TxCase,
-    leaves: Vec<Scalar>,
-    public_amount: Scalar,
-    membership_trees: &[MembershipTree],
-    non_membership: &[NonMembership],
-    mutate_inputs: Option<F>,
-) -> Result<()>
-where
-    F: FnOnce(&mut Inputs),
-{
-    run_case_with_non_membership_builder(
-        wasm,
-        r1cs,
-        case,
-        leaves,
-        public_amount,
-        membership_trees,
-        non_membership,
-        default_non_membership_proof_builder,
-        mutate_inputs,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn run_case_with_non_membership_builder<F, G>(
-    wasm: &PathBuf,
-    r1cs: &PathBuf,
-    case: &TxCase,
-    leaves: Vec<Scalar>,
-    public_amount: Scalar,
-    membership_trees: &[MembershipTree],
-    non_membership: &[NonMembership],
-    build_non_membership_proof: G,
-    mutate_inputs: Option<F>,
-) -> Result<()>
-where
-    F: FnOnce(&mut Inputs),
-    G: Fn(&BigInt, &[Scalar]) -> SMTProof,
-{
-    let n_inputs = case.inputs.len();
-    ensure!(
-        n_inputs == non_membership.len(),
-        "non-membership entries ({}) must match number of inputs ({n_inputs})",
-        non_membership.len()
-    );
-
-    let witness = prepare_transaction_witness(case, leaves, LEVELS)?;
-    let mut inputs = build_base_inputs(case, &witness, public_amount);
-    let pubs = &witness.public_keys;
-
-    // === MEMBERSHIP PROOF ===
-    let mut mp_leaf: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut mp_blinding: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut mp_path_indices: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut mp_path_elements: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
-    let mut membership_roots: Vec<BigInt> = Vec::with_capacity(n_inputs * N_MEM_PROOFS);
-
-    for _ in 0..n_inputs {
-        mp_leaf.push(Vec::with_capacity(N_MEM_PROOFS));
-        mp_blinding.push(Vec::with_capacity(N_MEM_PROOFS));
-        mp_path_indices.push(Vec::with_capacity(N_MEM_PROOFS));
-        mp_path_elements.push(Vec::with_capacity(N_MEM_PROOFS));
-    }
-
-    ensure!(
-        membership_trees.len() == n_inputs * N_MEM_PROOFS,
-        "expected {} membership trees, found {}",
-        n_inputs * N_MEM_PROOFS,
-        membership_trees.len()
-    );
-
-    for j in 0..N_MEM_PROOFS {
-        let base_idx = j
-            .checked_mul(n_inputs)
-            .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
-        let mut frozen_leaves = membership_trees[base_idx].leaves;
-
-        for (k, &pk_scalar) in pubs.iter().enumerate() {
-            let index = k
-                .checked_mul(N_MEM_PROOFS)
-                .and_then(|v| v.checked_add(j))
-                .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
-
-            let tree = membership_trees.get(index).ok_or_else(|| {
-                anyhow::anyhow!("missing membership tree for input {k}, proof {j}")
-            })?;
-            let leaf = poseidon2_hash2(pk_scalar, tree.blinding, Some(Scalar::from(1u64))); // H(pk_k, blinding_{k,j})
-            frozen_leaves[tree.index] = leaf;
-        }
-
-        let root_scalar = merkle_root(frozen_leaves.to_vec().clone());
-
-        for i in 0..n_inputs {
-            let idx = i
-                .checked_mul(N_MEM_PROOFS)
-                .and_then(|v| v.checked_add(j))
-                .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
-
-            let t = &membership_trees[idx];
-            let pk_scalar = pubs[i];
-            let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
-
-            let (siblings, path_idx_u64, depth) = merkle_proof(&frozen_leaves, t.index);
-            assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
-
-            mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
-            mp_blinding[i].push(scalar_to_bigint(t.blinding));
-            mp_path_indices[i].push(scalar_to_bigint(Scalar::from(path_idx_u64)));
-            mp_path_elements[i].push(siblings.into_iter().map(scalar_to_bigint).collect());
-
-            membership_roots.push(scalar_to_bigint(root_scalar));
-        }
-    }
-
-    // === NON MEMBERSHIP PROOF ===
-
-    let mut nmp_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_old_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_old_value: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_is_old0: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
-    let mut nmp_siblings: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
-    let mut non_membership_roots: Vec<BigInt> = Vec::with_capacity(n_inputs * N_NON_PROOFS);
-
-    for _ in 0..n_inputs {
-        nmp_key.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_old_key.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_old_value.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_is_old0.push(Vec::with_capacity(N_NON_PROOFS));
-        nmp_siblings.push(Vec::with_capacity(N_NON_PROOFS));
-    }
-
-    for _ in 0..N_NON_PROOFS {
-        for i in 0..n_inputs {
-            let proof = build_non_membership_proof(&non_membership[i].key_non_inclusion, pubs);
-
-            nmp_key[i].push(scalar_to_bigint(pubs[i]));
-
-            if proof.is_old0 {
-                nmp_old_key[i].push(BigInt::from(0u32));
-                nmp_old_value[i].push(BigInt::from(0u32));
-                nmp_is_old0[i].push(BigInt::from(1u32));
-            } else {
-                nmp_old_key[i].push(proof.not_found_key.clone());
-                nmp_old_value[i].push(proof.not_found_value.clone());
-                nmp_is_old0[i].push(BigInt::from(0u32));
-            }
-
-            nmp_siblings[i].push(proof.siblings.clone());
-
-            non_membership_roots.push(proof.root.clone());
-        }
-    }
-
-    for i in 0..n_inputs {
-        for j in 0..N_MEM_PROOFS {
-            let key = |field: &str| {
-                SignalKey::new("membershipProofs")
-                    .idx(i)
-                    .idx(j)
-                    .field(field)
-            };
-            inputs.set_key(&key("leaf"), mp_leaf[i][j].clone());
-            inputs.set_key(&key("blinding"), mp_blinding[i][j].clone());
-            inputs.set_key(&key("pathIndices"), mp_path_indices[i][j].clone());
-            inputs.set_key(&key("pathElements"), mp_path_elements[i][j].clone());
-        }
-    }
-    inputs.set("membershipRoots", membership_roots);
-
-    for i in 0..n_inputs {
-        for j in 0..N_NON_PROOFS {
-            let key = |field: &str| {
-                SignalKey::new("nonMembershipProofs")
-                    .idx(i)
-                    .idx(j)
-                    .field(field)
-            };
-
-            inputs.set_key(&key("key"), nmp_key[i][j].clone());
-            inputs.set_key(&key("oldKey"), nmp_old_key[i][j].clone());
-            inputs.set_key(&key("oldValue"), nmp_old_value[i][j].clone());
-            inputs.set_key(&key("isOld0"), nmp_is_old0[i][j].clone());
-            inputs.set_key(&key("siblings"), nmp_siblings[i][j].clone());
-        }
-    }
-    inputs.set("nonMembershipRoots", non_membership_roots);
-
-    // Add inputs from test
-    if let Some(f) = mutate_inputs {
-        f(&mut inputs);
-    }
-    // --- Prove & verify ---
-    let prove_result =
-        panic::catch_unwind(AssertUnwindSafe(|| prove_and_verify(wasm, r1cs, &inputs)));
-    match prove_result {
-        Ok(Ok(res)) if res.verified => Ok(()),
-        Ok(Ok(_)) => Err(anyhow::anyhow!(
-            "Proof failed to verify (res.verified=false)"
-        )),
-        Ok(Err(e)) => Err(anyhow::anyhow!("Prover error: {e:?}")),
-        Err(panic_info) => {
-            let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
-                s.to_string()
-            } else if let Some(s) = panic_info.downcast_ref::<String>() {
-                s.clone()
-            } else {
-                "Unknown panic".to_string()
-            };
-            Err(anyhow::anyhow!(
-                "Prover panicked (expected on invalid proof): {msg}"
-            ))
-        }
-    }
-}
-
-fn compliance_artifacts() -> Result<(PathBuf, PathBuf)> {
-    load_artifacts("compliant_test")
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::test::utils::circom_tester::{Inputs, SignalKey, prove_and_verify};
+    use crate::test::utils::general::load_artifacts;
+    use crate::test::utils::general::{poseidon2_hash2, scalar_to_bigint};
+    use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
+    use crate::test::utils::sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides};
+    use crate::test::utils::transaction::prepopulated_leaves;
+    use crate::test::utils::transaction_case::{
+        TxCase, build_base_inputs, prepare_transaction_witness,
+    };
     use crate::test::utils::{
         keypair::derive_public_key,
         transaction::commitment,
         transaction_case::{InputNote, OutputNote},
     };
     use anyhow::Context;
+    use anyhow::{Result, ensure};
+    use num_bigint::BigInt;
+    use std::convert::TryInto;
+    use std::panic::{self, AssertUnwindSafe};
+    use std::path::PathBuf;
+    use zkhash::ark_ff::Zero;
+    use zkhash::fields::bn256::FpBN256 as Scalar;
+
+    const LEVELS: usize = 5;
+    const N_MEM_PROOFS: usize = 1;
+    const N_NON_PROOFS: usize = 1;
+
+    pub struct MembershipTree {
+        pub leaves: [Scalar; 1 << LEVELS],
+        pub index: usize,
+        pub blinding: Scalar,
+    }
+
+    pub struct NonMembership {
+        pub key_non_inclusion: BigInt,
+    }
+
+    fn build_membership_trees<F>(case: &TxCase, seed_fn: F) -> Vec<MembershipTree>
+    where
+        F: Fn(usize) -> u64,
+    {
+        let n_inputs = case.inputs.len();
+        let mut membership_trees = Vec::with_capacity(n_inputs * N_MEM_PROOFS);
+
+        for j in 0..N_MEM_PROOFS {
+            let seed_j = seed_fn(j);
+            let base_mem_leaves_j = prepopulated_leaves(LEVELS, seed_j, &[], 24);
+
+            for input in &case.inputs {
+                membership_trees.push(MembershipTree {
+                    leaves: base_mem_leaves_j
+                        .clone()
+                        .try_into()
+                        .expect("Failed to convert into list"),
+                    index: input.leaf_index,
+                    blinding: Scalar::zero(),
+                });
+            }
+        }
+
+        membership_trees
+    }
+
+    fn default_membership_trees(case: &TxCase, suffix: u64) -> Vec<MembershipTree> {
+        build_membership_trees(case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40) ^ suffix)
+    }
+
+    fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigInt)> {
+        pubs.iter()
+            .enumerate()
+            .map(|(i, pk)| {
+                // Make the +1 explicit and checked
+                let idx = u64::try_from(i)
+                    .expect("Failed to cast i")
+                    .checked_add(1)
+                    .expect("idx overflow");
+
+                // Make the mul + add explicit and checked
+                let override_factor: u64 = 100_000;
+                let override_idx = idx
+                    .checked_mul(override_factor)
+                    .and_then(|v| v.checked_add(idx))
+                    .expect("override_idx overflow");
+
+                let override_key = Scalar::from(override_idx);
+
+                let leaf = poseidon2_hash2(*pk, Scalar::zero(), Some(Scalar::from(1u64)));
+                (scalar_to_bigint(override_key), scalar_to_bigint(leaf))
+            })
+            .collect()
+    }
+
+    fn default_non_membership_proof_builder(key: &BigInt, pubs: &[Scalar]) -> SMTProof {
+        let overrides = non_membership_overrides_from_pubs(pubs);
+        prepare_smt_proof_with_overrides(key, &overrides, LEVELS)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_case<F>(
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        case: &TxCase,
+        leaves: Vec<Scalar>,
+        public_amount: Scalar,
+        membership_trees: &[MembershipTree],
+        non_membership: &[NonMembership],
+        mutate_inputs: Option<F>,
+    ) -> Result<()>
+    where
+        F: FnOnce(&mut Inputs),
+    {
+        run_case_with_non_membership_builder(
+            wasm,
+            r1cs,
+            case,
+            leaves,
+            public_amount,
+            membership_trees,
+            non_membership,
+            default_non_membership_proof_builder,
+            mutate_inputs,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn run_case_with_non_membership_builder<F, G>(
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        case: &TxCase,
+        leaves: Vec<Scalar>,
+        public_amount: Scalar,
+        membership_trees: &[MembershipTree],
+        non_membership: &[NonMembership],
+        build_non_membership_proof: G,
+        mutate_inputs: Option<F>,
+    ) -> Result<()>
+    where
+        F: FnOnce(&mut Inputs),
+        G: Fn(&BigInt, &[Scalar]) -> SMTProof,
+    {
+        let n_inputs = case.inputs.len();
+        ensure!(
+            n_inputs == non_membership.len(),
+            "non-membership entries ({}) must match number of inputs ({n_inputs})",
+            non_membership.len()
+        );
+
+        let witness = prepare_transaction_witness(case, leaves, LEVELS)?;
+        let mut inputs = build_base_inputs(case, &witness, public_amount);
+        let pubs = &witness.public_keys;
+
+        // === MEMBERSHIP PROOF ===
+        let mut mp_leaf: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut mp_blinding: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut mp_path_indices: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut mp_path_elements: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
+        let mut membership_roots: Vec<BigInt> = Vec::with_capacity(n_inputs * N_MEM_PROOFS);
+
+        for _ in 0..n_inputs {
+            mp_leaf.push(Vec::with_capacity(N_MEM_PROOFS));
+            mp_blinding.push(Vec::with_capacity(N_MEM_PROOFS));
+            mp_path_indices.push(Vec::with_capacity(N_MEM_PROOFS));
+            mp_path_elements.push(Vec::with_capacity(N_MEM_PROOFS));
+        }
+
+        ensure!(
+            membership_trees.len() == n_inputs * N_MEM_PROOFS,
+            "expected {} membership trees, found {}",
+            n_inputs * N_MEM_PROOFS,
+            membership_trees.len()
+        );
+
+        for j in 0..N_MEM_PROOFS {
+            let base_idx = j
+                .checked_mul(n_inputs)
+                .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
+            let mut frozen_leaves = membership_trees[base_idx].leaves;
+
+            for (k, &pk_scalar) in pubs.iter().enumerate() {
+                let index = k
+                    .checked_mul(N_MEM_PROOFS)
+                    .and_then(|v| v.checked_add(j))
+                    .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
+
+                let tree = membership_trees.get(index).ok_or_else(|| {
+                    anyhow::anyhow!("missing membership tree for input {k}, proof {j}")
+                })?;
+                let leaf = poseidon2_hash2(pk_scalar, tree.blinding, Some(Scalar::from(1u64))); // H(pk_k, blinding_{k,j})
+                frozen_leaves[tree.index] = leaf;
+            }
+
+            let root_scalar = merkle_root(frozen_leaves.to_vec().clone());
+
+            for i in 0..n_inputs {
+                let idx = i
+                    .checked_mul(N_MEM_PROOFS)
+                    .and_then(|v| v.checked_add(j))
+                    .ok_or_else(|| anyhow::anyhow!("index overflow in membership_trees"))?;
+
+                let t = &membership_trees[idx];
+                let pk_scalar = pubs[i];
+                let leaf_scalar = poseidon2_hash2(pk_scalar, t.blinding, Some(Scalar::from(1u64)));
+
+                let (siblings, path_idx_u64, depth) = merkle_proof(&frozen_leaves, t.index);
+                assert_eq!(depth, LEVELS, "unexpected membership depth for input {i}");
+
+                mp_leaf[i].push(scalar_to_bigint(leaf_scalar));
+                mp_blinding[i].push(scalar_to_bigint(t.blinding));
+                mp_path_indices[i].push(scalar_to_bigint(Scalar::from(path_idx_u64)));
+                mp_path_elements[i].push(siblings.into_iter().map(scalar_to_bigint).collect());
+
+                membership_roots.push(scalar_to_bigint(root_scalar));
+            }
+        }
+
+        // === NON MEMBERSHIP PROOF ===
+
+        let mut nmp_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut nmp_old_key: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut nmp_old_value: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut nmp_is_old0: Vec<Vec<BigInt>> = Vec::with_capacity(n_inputs);
+        let mut nmp_siblings: Vec<Vec<Vec<BigInt>>> = Vec::with_capacity(n_inputs);
+        let mut non_membership_roots: Vec<BigInt> = Vec::with_capacity(n_inputs * N_NON_PROOFS);
+
+        for _ in 0..n_inputs {
+            nmp_key.push(Vec::with_capacity(N_NON_PROOFS));
+            nmp_old_key.push(Vec::with_capacity(N_NON_PROOFS));
+            nmp_old_value.push(Vec::with_capacity(N_NON_PROOFS));
+            nmp_is_old0.push(Vec::with_capacity(N_NON_PROOFS));
+            nmp_siblings.push(Vec::with_capacity(N_NON_PROOFS));
+        }
+
+        for _ in 0..N_NON_PROOFS {
+            for i in 0..n_inputs {
+                let proof = build_non_membership_proof(&non_membership[i].key_non_inclusion, pubs);
+
+                nmp_key[i].push(scalar_to_bigint(pubs[i]));
+
+                if proof.is_old0 {
+                    nmp_old_key[i].push(BigInt::from(0u32));
+                    nmp_old_value[i].push(BigInt::from(0u32));
+                    nmp_is_old0[i].push(BigInt::from(1u32));
+                } else {
+                    nmp_old_key[i].push(proof.not_found_key.clone());
+                    nmp_old_value[i].push(proof.not_found_value.clone());
+                    nmp_is_old0[i].push(BigInt::from(0u32));
+                }
+
+                nmp_siblings[i].push(proof.siblings.clone());
+
+                non_membership_roots.push(proof.root.clone());
+            }
+        }
+
+        for i in 0..n_inputs {
+            for j in 0..N_MEM_PROOFS {
+                let key = |field: &str| {
+                    SignalKey::new("membershipProofs")
+                        .idx(i)
+                        .idx(j)
+                        .field(field)
+                };
+                inputs.set_key(&key("leaf"), mp_leaf[i][j].clone());
+                inputs.set_key(&key("blinding"), mp_blinding[i][j].clone());
+                inputs.set_key(&key("pathIndices"), mp_path_indices[i][j].clone());
+                inputs.set_key(&key("pathElements"), mp_path_elements[i][j].clone());
+            }
+        }
+        inputs.set("membershipRoots", membership_roots);
+
+        for i in 0..n_inputs {
+            for j in 0..N_NON_PROOFS {
+                let key = |field: &str| {
+                    SignalKey::new("nonMembershipProofs")
+                        .idx(i)
+                        .idx(j)
+                        .field(field)
+                };
+
+                inputs.set_key(&key("key"), nmp_key[i][j].clone());
+                inputs.set_key(&key("oldKey"), nmp_old_key[i][j].clone());
+                inputs.set_key(&key("oldValue"), nmp_old_value[i][j].clone());
+                inputs.set_key(&key("isOld0"), nmp_is_old0[i][j].clone());
+                inputs.set_key(&key("siblings"), nmp_siblings[i][j].clone());
+            }
+        }
+        inputs.set("nonMembershipRoots", non_membership_roots);
+
+        // Add inputs from test
+        if let Some(f) = mutate_inputs {
+            f(&mut inputs);
+        }
+        // --- Prove & verify ---
+        let prove_result =
+            panic::catch_unwind(AssertUnwindSafe(|| prove_and_verify(wasm, r1cs, &inputs)));
+        match prove_result {
+            Ok(Ok(res)) if res.verified => Ok(()),
+            Ok(Ok(_)) => Err(anyhow::anyhow!(
+                "Proof failed to verify (res.verified=false)"
+            )),
+            Ok(Err(e)) => Err(anyhow::anyhow!("Prover error: {e:?}")),
+            Err(panic_info) => {
+                let msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                    s.to_string()
+                } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                    s.clone()
+                } else {
+                    "Unknown panic".to_string()
+                };
+                Err(anyhow::anyhow!(
+                    "Prover panicked (expected on invalid proof): {msg}"
+                ))
+            }
+        }
+    }
+
+    fn compliance_artifacts() -> Result<(PathBuf, PathBuf)> {
+        load_artifacts("compliant_test")
+    }
 
     #[test]
     #[ignore]
