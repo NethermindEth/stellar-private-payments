@@ -1,5 +1,4 @@
 use super::*;
-use contract_types::PROOF_SIZE;
 use ark_bn254::{Bn254, Fr as ArkFr};
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
@@ -8,6 +7,7 @@ use ark_relations::{
     lc,
 };
 use ark_std::rand::{SeedableRng, rngs::StdRng};
+use contract_types::PROOF_SIZE;
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, vk_bytes_from_ark};
 

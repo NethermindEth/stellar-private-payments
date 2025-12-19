@@ -153,21 +153,14 @@ pub trait ASPMembershipInterface {
     fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
 }
 
-#[contractclient(
-    crate_path = "soroban_sdk",
-    name = "ASPNonMembershipClient"
-)]
+#[contractclient(crate_path = "soroban_sdk", name = "ASPNonMembershipClient")]
 pub trait ASPNonMembershipInterface {
     fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
 }
 
-#[contractclient(
-    crate_path = "soroban_sdk",
-    name = "CircomGroth16VerifierClient"
-)]
+#[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
 pub trait CircomGroth16VerifierInterface {
-    fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>)
-        -> Result<bool, Groth16Error>;
+    fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>) -> Result<bool, Groth16Error>;
 }
 
 /// Storage keys for contract persistent data

@@ -45,9 +45,7 @@ pub struct Groth16Proof {
 impl Groth16Proof {
     /// Returns true if any of the embedded points is empty.
     pub fn is_empty(&self) -> bool {
-        self.a.to_bytes().is_empty()
-            || self.b.to_bytes().is_empty()
-            || self.c.to_bytes().is_empty()
+        self.a.to_bytes().is_empty() || self.b.to_bytes().is_empty() || self.c.to_bytes().is_empty()
     }
 }
 
