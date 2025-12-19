@@ -1,0 +1,27 @@
+name: Contracts Build
+
+on:
+  pull_request:
+  push:
+    branches: ["main"]
+
+jobs:
+  build-contracts:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Stellar CLI
+        run: cargo install --locked stellar-cli
+
+      - name: Build contracts
+        run: |
+          mkdir -p target/stellar
+          for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+            stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize \
+              --package "$pkg"
+          done
