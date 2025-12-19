@@ -1,4 +1,5 @@
 use super::*;
+use contract_types::PROOF_SIZE;
 use ark_bn254::{Bn254, Fr as ArkFr};
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};

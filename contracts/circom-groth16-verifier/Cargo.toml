@@ -10,6 +10,7 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
+contract-types = { workspace = true }
 soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [build-dependencies]

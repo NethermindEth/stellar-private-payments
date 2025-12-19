@@ -13,9 +13,8 @@
 
 #![allow(clippy::too_many_arguments)]
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
-use asp_membership::ASPMembershipClient;
-use asp_non_membership::ASPNonMembershipClient;
-use circom_groth16_verifier::{CircomGroth16VerifierClient, Groth16Proof};
+use contract_types::{Groth16Error, Groth16Proof};
+use soroban_sdk::contractclient;
 use soroban_sdk::token::TokenClient;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
@@ -146,6 +145,29 @@ pub struct Account {
     pub owner: Address,
     /// Public encryption key for receiving encrypted outputs
     pub public_key: Bytes,
+}
+
+// Contract clients for cross-contract dependencies
+#[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
+pub trait ASPMembershipInterface {
+    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
+}
+
+#[contractclient(
+    crate_path = "soroban_sdk",
+    name = "ASPNonMembershipClient"
+)]
+pub trait ASPNonMembershipInterface {
+    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
+}
+
+#[contractclient(
+    crate_path = "soroban_sdk",
+    name = "CircomGroth16VerifierClient"
+)]
+pub trait CircomGroth16VerifierInterface {
+    fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>)
+        -> Result<bool, Groth16Error>;
 }
 
 /// Storage keys for contract persistent data
@@ -378,10 +400,7 @@ impl PoolContract {
     /// Returns `true` if the proof is valid, `false` otherwise
     fn verify_proof(env: &Env, proof: &Proof) -> Result<bool, Error> {
         // Check proof is not empty
-        if proof.proof.a.to_bytes().is_empty()
-            || proof.proof.b.to_bytes().is_empty()
-            || proof.proof.c.to_bytes().is_empty()
-        {
+        if proof.proof.is_empty() {
             return Err(Error::InvalidProof);
         }
         let verifier = Self::get_verifier(env)?;
@@ -422,7 +441,13 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
-        Ok(client.try_verify(&proof.proof, &public_inputs).is_ok())
+        let is_valid = client
+            .try_verify(&proof.proof, &public_inputs)
+            .ok()
+            .and_then(|res| res.ok())
+            .unwrap_or(false);
+
+        Ok(is_valid)
     }
 
     /// Hash external data using Keccak256

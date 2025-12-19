@@ -11,7 +11,7 @@ publish = false
 
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
-ark-bn254 = { version = "0.5.0", default-features = false }
+ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
 ark-ec = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
 ark-groth16 = { version = "0.5.0", default-features = false }
@@ -21,10 +21,11 @@ ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+contract-types = { path = "contracts/types" }
 num-bigint = { version = "0.4.6", default-features = false }
 num-integer = { version = "0.1.46", default-features = false }
 # TODO update for the release
-soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat", "testutils"] }
+soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }
 

@@ -15,5 +15,5 @@ ark-bn254 = { workspace = true }
 ark-ec = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
-circom-groth16-verifier = { workspace = true }
+contract-types = { workspace = true }
 soroban-sdk = { workspace = true }

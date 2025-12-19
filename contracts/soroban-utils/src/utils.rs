@@ -1,7 +1,7 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
 use ark_ff::BigInteger;
 use ark_ff::fields::PrimeField;
-use circom_groth16_verifier::VerificationKeyBytes;
+use contract_types::VerificationKeyBytes;
 use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contract, contractimpl};
 
 /// Update the contract administrator

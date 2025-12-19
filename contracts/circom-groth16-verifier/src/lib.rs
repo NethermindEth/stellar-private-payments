@@ -8,28 +8,12 @@ extern crate alloc;
 
 use core::array;
 
+pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
-    Bytes, BytesN, Env, Vec, contract, contracterror, contractimpl, contracttype,
+    Env, Vec, contract, contractimpl, contracttype,
     crypto::bn254::{Fr, G1Affine, G2Affine},
     vec,
 };
-
-/// Errors that can occur during Groth16 proof verification.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum Groth16Error {
-    /// The pairing product did not equal identity.
-    InvalidProof = 0,
-    /// The public inputs length does not match the verification key.
-    MalformedPublicInputs = 1,
-    /// The proof bytes are malformed.
-    MalformedProof = 2,
-    /// The contract was already initialized
-    AlreadyInitialized = 3,
-    /// The contract was not initialized
-    NotInitialized = 4,
-}
 
 /// Groth16 verification key for BN254 curve.
 #[derive(Clone)]
@@ -41,41 +25,20 @@ pub struct VerificationKey {
     pub ic: [G1Affine; 12],
 }
 
-/// Byte-oriented verification key generated at build time.
-#[contracttype]
-pub struct VerificationKeyBytes {
-    pub alpha: BytesN<64>,
-    pub beta: BytesN<128>,
-    pub gamma: BytesN<128>,
-    pub delta: BytesN<128>,
-    pub ic: Vec<BytesN<64>>,
-}
+fn verification_key_from_bytes(vk_bytes: &VerificationKeyBytes) -> VerificationKey {
+    let ic_vec = &vk_bytes.ic;
+    let ic_array: [G1Affine; 12] = array::from_fn(|i| {
+        let bytes = ic_vec.get(i as u32).unwrap();
+        G1Affine::from_bytes(bytes.clone())
+    });
 
-impl VerificationKeyBytes {
-    pub fn verification_key(&self, _env: &Env) -> VerificationKey {
-        let ic_vec = &self.ic;
-        let ic_array: [G1Affine; 12] = array::from_fn(|i| {
-            let bytes = ic_vec.get(i as u32).unwrap();
-            G1Affine::from_bytes(bytes.clone())
-        });
-
-        VerificationKey {
-            alpha: G1Affine::from_bytes(self.alpha.clone()),
-            beta: G2Affine::from_bytes(self.beta.clone()),
-            gamma: G2Affine::from_bytes(self.gamma.clone()),
-            delta: G2Affine::from_bytes(self.delta.clone()),
-            ic: ic_array,
-        }
+    VerificationKey {
+        alpha: G1Affine::from_bytes(vk_bytes.alpha.clone()),
+        beta: G2Affine::from_bytes(vk_bytes.beta.clone()),
+        gamma: G2Affine::from_bytes(vk_bytes.gamma.clone()),
+        delta: G2Affine::from_bytes(vk_bytes.delta.clone()),
+        ic: ic_array,
     }
-}
-
-/// Groth16 proof composed of points A, B, and C.
-#[derive(Clone)]
-#[contracttype]
-pub struct Groth16Proof {
-    pub a: G1Affine,
-    pub b: G2Affine,
-    pub c: G1Affine,
 }
 
 #[contracttype]
@@ -111,7 +74,7 @@ impl CircomGroth16Verifier {
             .persistent()
             .get(&DataKey::VerificationKey)
             .ok_or(Groth16Error::NotInitialized)?;
-        let vk = vk_bytes.verification_key(&env);
+        let vk = verification_key_from_bytes(&vk_bytes);
         Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 
@@ -154,45 +117,6 @@ impl CircomGroth16Verifier {
         } else {
             Err(Groth16Error::InvalidProof)
         }
-    }
-}
-
-// === Proof parsing from bytes ===
-
-// Layout: a.x | a.y | b.x_0 | b.x_1 | b.y_0 | b.y_1 | c.x | c.y (all 32-byte big-endian)
-const FIELD_ELEMENT_SIZE: u32 = 32;
-const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
-const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
-const PROOF_SIZE: u32 = G1_SIZE + G2_SIZE + G1_SIZE;
-
-impl TryFrom<Bytes> for Groth16Proof {
-    type Error = Groth16Error;
-
-    fn try_from(value: Bytes) -> Result<Self, Self::Error> {
-        if value.len() != PROOF_SIZE {
-            return Err(Groth16Error::MalformedProof);
-        }
-
-        let a = G1Affine::from_bytes(
-            value
-                .slice(0..G1_SIZE)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-        let b = G2Affine::from_bytes(
-            value
-                .slice(G1_SIZE..G1_SIZE + G2_SIZE)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-        let c = G1Affine::from_bytes(
-            value
-                .slice(G1_SIZE + G2_SIZE..)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-
-        Ok(Self { a, b, c })
     }
 }
 
