@@ -6,10 +6,9 @@ use soroban_sdk::{Address, Bytes, Env, U256, testutils::Address as _};
 #[test]
 fn test_init() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
-    client.init(&admin);
 
     // Verify root is zero (empty tree)
     let root = client.get_root();
@@ -19,13 +18,10 @@ fn test_init() {
 #[test]
 fn test_insert_leaf() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
     env.mock_all_auths();
-
-    // Initialize contract with admin address
-    client.init(&admin);
 
     // Insert leaf
     let key = U256::from_u32(&env, 1u32);
@@ -40,13 +36,10 @@ fn test_insert_leaf() {
 #[test]
 fn test_update_leaf() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     env.mock_all_auths();
     let client = ASPNonMembershipClient::new(&env, &contract_id);
-
-    // Initialize contract with admin address
-    client.init(&admin);
     // Insert and update leaf
     let key = U256::from_u32(&env, 1u32);
     let value1 = U256::from_u32(&env, 42u32);
@@ -65,12 +58,11 @@ fn test_update_leaf() {
 #[test]
 fn test_insert_multiple_keys() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
     // Mock all auths for testing purposes
     env.mock_all_auths();
-    client.init(&admin);
 
     // Insert multiple keys
     for i in 1..=5 {
@@ -88,12 +80,11 @@ fn test_insert_multiple_keys() {
 #[should_panic]
 fn test_duplicate_insert_fails() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
-    // Mock auth and init the contract
+    // Mock auth for the contract
     env.mock_all_auths();
-    client.init(&admin);
 
     let key = U256::from_u32(&env, 1u32);
     let value = U256::from_u32(&env, 42u32);
@@ -110,12 +101,11 @@ fn test_duplicate_insert_fails() {
 #[should_panic]
 fn test_update_nonexistent_key_fails() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
-    // Mock auth and init the contract
+    // Mock auth for the contract
     env.mock_all_auths();
-    client.init(&admin);
 
     let key = U256::from_u32(&env, 1u32);
     let value = U256::from_u32(&env, 42u32);
@@ -127,12 +117,10 @@ fn test_update_nonexistent_key_fails() {
 #[test]
 fn test_root_consistency_with_circuits_insert_1_42() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
     env.mock_all_auths();
-    // Initialize contract with admin address
-    client.init(&admin);
 
     // Insert leaf
     let key = U256::from_u32(&env, 1u32);
@@ -155,11 +143,10 @@ fn test_root_consistency_with_circuits_insert_1_42() {
 #[test]
 fn test_root_consistency_with_circuits_update_1_100() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
     env.mock_all_auths();
-    client.init(&admin);
 
     let key = U256::from_u32(&env, 1u32);
     let value1 = U256::from_u32(&env, 42u32);
@@ -191,12 +178,11 @@ fn test_root_consistency_with_circuits_update_1_100() {
 #[test]
 fn test_root_consistency_with_circuits_insert_2_324() {
     let env = Env::default();
-    let contract_id = env.register(ASPNonMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
     env.mock_all_auths();
-    client.init(&admin);
 
     // Insert key=1, value=42
     let key1 = U256::from_u32(&env, 1u32);
@@ -228,11 +214,9 @@ fn test_root_consistency_with_circuits_insert_2_324() {
 fn test_find_key_public_method() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize the contract and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Test 1: Find in empty tree
@@ -315,11 +299,9 @@ fn test_find_key_public_method() {
 fn test_delete_single_leaf() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a single key
@@ -355,11 +337,9 @@ fn test_delete_single_leaf() {
 fn test_delete_from_two_keys() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert two keys
@@ -402,11 +382,9 @@ fn test_delete_from_two_keys() {
 fn test_delete_from_multiple_keys() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert multiple keys
@@ -443,11 +421,9 @@ fn test_delete_from_multiple_keys() {
 fn test_delete_nonexistent_key_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a key
@@ -465,11 +441,9 @@ fn test_delete_nonexistent_key_fails() {
 fn test_delete_from_empty_tree_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Try to delete from empty tree
@@ -484,10 +458,8 @@ fn test_delete_from_empty_tree_fails() {
 fn test_verify_non_membership_empty_tree() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
-
-    client.init(&admin);
 
     // In an empty tree, any key should have valid non-membership proof
     let key = U256::from_u32(&env, 42u32);
@@ -512,11 +484,9 @@ fn test_verify_non_membership_empty_tree() {
 fn test_verify_non_membership_single_leaf_collision() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    // Initialize and mock auths
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a single leaf
@@ -561,10 +531,9 @@ fn test_verify_non_membership_single_leaf_collision() {
 fn test_verify_non_membership_key_exists_returns_false() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a leaf
@@ -595,10 +564,9 @@ fn test_verify_non_membership_key_exists_returns_false() {
 fn test_verify_non_membership_multiple_leaves_collision() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert multiple leaves
@@ -632,10 +600,9 @@ fn test_verify_non_membership_multiple_leaves_collision() {
 fn test_verify_non_membership_wrong_siblings_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert leaves
@@ -667,10 +634,9 @@ fn test_verify_non_membership_wrong_siblings_fails() {
 fn test_verify_non_membership_wrong_not_found_key_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a leaf
@@ -698,10 +664,9 @@ fn test_verify_non_membership_wrong_not_found_key_fails() {
 fn test_verify_non_membership_wrong_not_found_value_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert a leaf
@@ -729,10 +694,9 @@ fn test_verify_non_membership_wrong_not_found_value_fails() {
 fn test_verify_non_membership_wrong_siblings_length_fails() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert leaves
@@ -761,10 +725,9 @@ fn test_verify_non_membership_wrong_siblings_length_fails() {
 fn test_verify_non_membership_after_deletion() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert multiple leaves
@@ -802,10 +765,9 @@ fn test_verify_non_membership_after_deletion() {
 fn test_verify_non_membership_after_all_deleted() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     // Insert and delete a single key
@@ -839,10 +801,9 @@ fn test_verify_non_membership_after_all_deleted() {
 fn test_verify_non_membership_comprehensive_scenario() {
     let env = Env::default();
     let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, ());
+    let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
 
-    client.init(&admin);
     env.mock_all_auths();
 
     let key_a = U256::from_u32(&env, 10u32);

@@ -2,7 +2,7 @@ use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
 use crate::{ExtData, PoolContract, PoolContractClient, Proof};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
@@ -72,6 +72,24 @@ fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     }
 }
 
+fn dummy_vk_bytes(env: &Env) -> VerificationKeyBytes {
+    let alpha = BytesN::from_array(env, &[0u8; 64]);
+    let beta = BytesN::from_array(env, &[0u8; 128]);
+    let gamma = BytesN::from_array(env, &[0u8; 128]);
+    let delta = BytesN::from_array(env, &[0u8; 128]);
+    let mut ic = Vec::new(env);
+    for _ in 0..12 {
+        ic.push_back(BytesN::from_array(env, &[0u8; 64]));
+    }
+    VerificationKeyBytes {
+        alpha,
+        beta,
+        gamma,
+        delta,
+        ic,
+    }
+}
+
 /// Helper struct to hold all test setup
 struct TestSetup {
     admin: Address,
@@ -83,23 +101,21 @@ struct TestSetup {
     asp_non_membership_client: ASPNonMembershipClient<'static>,
 }
 
-/// Creates and initializes all contracts needed for testing
+/// Creates and deploys all contracts needed for testing
 fn setup_test_contracts(env: &Env) -> TestSetup {
     let admin = Address::generate(env);
 
-    // Register and initialize ASP Membership contract
-    let asp_membership_address = env.register(ASPMembership, ());
+    // Register ASP Membership contract
+    let asp_membership_address =
+        env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
     let asp_membership_client = ASPMembershipClient::new(env, &asp_membership_address);
-    asp_membership_client.init(&admin, &ASP_MEMBERSHIP_LEVELS);
 
-    // Register and initialize ASP Non-Membership contract
-    let asp_non_membership_address = env.register(ASPNonMembership, ());
+    // Register ASP Non-Membership contract
+    let asp_non_membership_address = env.register(ASPNonMembership, (admin.clone(),));
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &asp_non_membership_address);
-    asp_non_membership_client.init(&admin);
 
-    // Register and initialize CircomGroth16Verifier contract
-    let verifier_address = env.register(CircomGroth16Verifier, ());
-    CircomGroth16VerifierClient::new(env, &verifier_address);
+    // Register CircomGroth16Verifier contract
+    let verifier_address = env.register(CircomGroth16Verifier, (dummy_vk_bytes(env),));
 
     TestSetup {
         admin,
@@ -113,35 +129,47 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
 }
 
 #[test]
-#[should_panic]
-fn pool_init_only_once() {
+fn pool_constructor_sets_state() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
     );
+    let pool = PoolContractClient::new(&env, &pool_id);
 
-    // second init should error
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
-    );
+    let stored_admin: Address = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&crate::pool::DataKey::Admin)
+            .unwrap()
+    });
+    let stored_max: U256 = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .get(&crate::pool::DataKey::MaximumDepositAmount)
+            .unwrap()
+    });
+    let has_merkle_root = env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .has(&MerkleDataKey::CurrentRootIndex)
+    });
+
+    assert_eq!(stored_admin, setup.admin);
+    assert_eq!(stored_max, max);
+    assert!(has_merkle_root);
+    let _root = pool.get_root();
 }
 
 #[test]
@@ -149,7 +177,7 @@ fn merkle_init_only_once() {
     let env = Env::default();
     // As MerkleTreeWithHistory is now a module
     // We need to register the contract first to access the env.storage of a smart contract
-    let pool_id = env.register(PoolContract, ());
+    let pool_id = register_mock_token(&env);
     let levels = 8u32;
 
     env.as_contract(&pool_id, || {
@@ -166,7 +194,7 @@ fn merkle_init_only_once() {
 #[test]
 fn merkle_insert_updates_root_and_index() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
+    let pool_id = register_mock_token(&env);
     let levels = 3u32;
 
     env.as_contract(&pool_id, || {
@@ -196,7 +224,7 @@ fn merkle_insert_updates_root_and_index() {
 #[test]
 fn merkle_insert_fails_when_full() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
+    let pool_id = register_mock_token(&env);
 
     // levels=1 => capacity of 2 leaves (one insert call)
     let levels = 1u32;
@@ -220,7 +248,7 @@ fn merkle_insert_fails_when_full() {
 #[test]
 fn merkle_init_rejects_zero_levels() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
+    let pool_id = register_mock_token(&env);
     let levels = 0u32;
 
     env.as_contract(&pool_id, || {
@@ -232,22 +260,23 @@ fn merkle_init_rejects_zero_levels() {
 #[test]
 fn transact_rejects_unknown_root() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
     );
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -279,21 +308,22 @@ fn transact_rejects_unknown_root() {
 #[test]
 fn transact_rejects_bad_ext_hash() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
     );
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -326,21 +356,22 @@ fn transact_rejects_bad_ext_hash() {
 #[test]
 fn transact_rejects_bad_public_amount() {
     let env = Env::default();
-    let pool_id = env.register(PoolContract, ());
-    let pool = PoolContractClient::new(&env, &pool_id);
-
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    pool.init(
-        &setup.admin,
-        &setup.token,
-        &setup.verifier,
-        &setup.asp_membership_address,
-        &setup.asp_non_membership_address,
-        &max,
-        &levels,
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
     );
+    let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
     let sender = Address::generate(&env);

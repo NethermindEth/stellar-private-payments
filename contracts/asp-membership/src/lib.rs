@@ -62,7 +62,7 @@ pub struct ASPMembership;
 
 #[contractimpl]
 impl ASPMembership {
-    /// Initialize the ASP Membership contract
+    /// Constructor: initialize the ASP Membership contract
     ///
     /// Creates a new Merkle tree with the specified number of levels and sets
     /// the admin address. The tree is initialized with zero hashes at each level.
@@ -77,7 +77,7 @@ impl ASPMembership {
     ///
     /// # Panics
     /// Panics if levels is 0 or greater than 32
-    pub fn init(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
+    pub fn __constructor(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
 
         // Check if the contract is already initialized

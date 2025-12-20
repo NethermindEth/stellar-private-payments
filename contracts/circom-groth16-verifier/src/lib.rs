@@ -53,8 +53,8 @@ pub struct CircomGroth16Verifier;
 
 #[contractimpl]
 impl CircomGroth16Verifier {
-    /// Initialize the contract with a verification key.
-    pub fn init(env: Env, vk: VerificationKeyBytes) -> Result<(), Groth16Error> {
+    /// Constructor: initialize the contract with a verification key.
+    pub fn __constructor(env: Env, vk: VerificationKeyBytes) -> Result<(), Groth16Error> {
         let storage = env.storage().persistent();
         if storage.has(&DataKey::VerificationKey) {
             return Err(Groth16Error::AlreadyInitialized);

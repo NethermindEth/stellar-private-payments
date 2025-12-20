@@ -91,7 +91,7 @@ pub struct ASPNonMembership;
 
 #[contractimpl]
 impl ASPNonMembership {
-    /// Initialize the contract with an admin address and an empty tree
+    /// Constructor: initialize the contract with an admin address and an empty tree
     ///
     /// Sets up the contract with the specified admin and initializes an empty
     /// Sparse Merkle Tree with root = 0. This function can only be called once.
@@ -105,7 +105,7 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(())` on success, or `Error::AlreadyInitialized` if the contract
     /// has already been initialized.
-    pub fn init(env: Env, admin: Address) -> Result<(), Error> {
+    pub fn __constructor(env: Env, admin: Address) -> Result<(), Error> {
         let store = env.storage().persistent();
         // Contract can only be initialized once
         if store.has(&DataKey::Admin) {

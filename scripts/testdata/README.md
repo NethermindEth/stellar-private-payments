@@ -4,7 +4,7 @@ This folder contains sample inputs you can pass to the deploy script. The values
 here are placeholders and will not verify real proofs.
 
 Files:
-- `vk.json`: Dummy VerificationKeyBytes payload for the circom verifier init.
+- `vk.json`: Dummy VerificationKeyBytes payload for the circom verifier constructor.
 
 Details:
 - `vk.json` uses the `VerificationKeyBytes` shape expected by the verifier

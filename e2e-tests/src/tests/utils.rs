@@ -5,9 +5,9 @@
 use anyhow::Result;
 use ark_bn254::Bn254;
 use ark_groth16::VerifyingKey;
-use asp_membership::{ASPMembership, ASPMembershipClient};
-use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
+use asp_membership::ASPMembership;
+use asp_non_membership::ASPNonMembership;
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use circuits::test::utils::circom_tester::{CircomResult, SignalKey, prove_and_verify};
 use circuits::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
 use circuits::test::utils::merkle_tree::{merkle_proof, merkle_root};
@@ -18,7 +18,7 @@ use circuits::test::utils::transaction_case::{
 };
 use num_bigint::BigInt;
 use num_bigint::BigUint;
-use pool::{PoolContract, PoolContractClient};
+use pool::PoolContract;
 use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
@@ -54,7 +54,7 @@ pub struct DeployedContracts {
 
 /// Deploy all contracts required for E2E testing
 ///
-/// Deploys and initializes the Pool, ASP Membership, ASP Non-Membership,
+/// Deploys and runs constructors for the Pool, ASP Membership, ASP Non-Membership,
 /// and Groth16 Verifier contracts with the provided verification key.
 ///
 /// # Arguments
@@ -70,26 +70,25 @@ pub fn deploy_contracts(env: &Env, vk: &VerifyingKey<Bn254>) -> DeployedContract
 
     let token_address = env.register(MockToken, ());
 
-    let verifier_address = env.register(CircomGroth16Verifier, ());
     let vk_bytes = vk_bytes_from_ark(env, vk);
-    CircomGroth16VerifierClient::new(env, &verifier_address).init(&vk_bytes);
+    let verifier_address = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
 
-    let asp_membership = env.register(ASPMembership, ());
-    ASPMembershipClient::new(env, &asp_membership).init(&admin, &ASP_MEMBERSHIP_LEVELS);
+    let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
 
-    let asp_non_membership = env.register(ASPNonMembership, ());
-    ASPNonMembershipClient::new(env, &asp_non_membership).init(&admin);
+    let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
 
-    let pool = env.register(PoolContract, ());
     let max_deposit = U256::from_u32(env, MAX_DEPOSIT);
-    PoolContractClient::new(env, &pool).init(
-        &admin,
-        &token_address,
-        &verifier_address,
-        &asp_membership,
-        &asp_non_membership,
-        &max_deposit,
-        &u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
+    let pool = env.register(
+        PoolContract,
+        (
+            admin,
+            token_address.clone(),
+            verifier_address.clone(),
+            asp_membership.clone(),
+            asp_non_membership.clone(),
+            max_deposit,
+            u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
+        ),
     );
 
     DeployedContracts {
