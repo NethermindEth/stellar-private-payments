@@ -1,8 +1,6 @@
-const LEVELS: usize = 5;
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    const LEVELS: usize = 5;
 
     use crate::test::utils::{
         general::load_artifacts,

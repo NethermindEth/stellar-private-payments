@@ -126,7 +126,6 @@ impl Inputs {
 }
 
 /// Represents a single Circom input value
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub enum InputValue {
     Single(BigInt),
@@ -143,7 +142,6 @@ pub struct CircuitKeys {
 }
 
 /// Result of proving + verifying a Circom circuit
-#[allow(dead_code)]
 #[derive(Clone, Debug)]
 pub struct CircomResult {
     pub verified: bool,

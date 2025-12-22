@@ -1,80 +1,79 @@
-use super::circom_tester::prove_and_verify;
-use crate::test::utils::circom_tester::Inputs;
-use anyhow::{Context, Result};
-use num_bigint::BigInt;
-use std::path::PathBuf;
-
-/// Run a Poseidon2 hash test case
-///
-/// Tests the Poseidon2 hash circuit with two inputs and a domain separation value.
-///
-/// # Arguments
-///
-/// * `wasm` - Path to the compiled WASM file
-/// * `r1cs` - Path to the R1CS constraint system file
-/// * `inputs_pair` - Tuple of two u64 input values to test the hash function
-/// * `domain_separation` - Domain separation value
-///
-/// # Returns
-///
-/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
-fn run_case_hash(
-    wasm: &PathBuf,
-    r1cs: &PathBuf,
-    inputs_pair: (u64, u64),
-    domain_separation: u64,
-) -> Result<()> {
-    // Prepare circuit inputs
-    let mut inputs = Inputs::new();
-    let value_inputs: Vec<BigInt> = vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
-    let domain_separation: BigInt = BigInt::from(domain_separation);
-    inputs.set("inputs", value_inputs);
-    inputs.set("domainSeparation", domain_separation);
-
-    let res =
-        prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
-
-    assert!(
-        res.verified,
-        "Proof did not verify for inputs {inputs_pair:?}"
-    );
-
-    Ok(())
-}
-
-/// Run a Poseidon2 compression test case
-///
-/// Tests the Poseidon2 compression circuit with two input values.
-///
-/// # Arguments
-///
-/// * `wasm` - Path to the compiled WASM file
-/// * `r1cs` - Path to the R1CS constraint system file
-/// * `inputs_pair` - Tuple of two u64 input values to test the compression function
-///
-/// # Returns
-///
-/// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
-fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
-    // Prepare circuit inputs
-    let mut inputs = Inputs::new();
-    let value_inputs: Vec<BigInt> = vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
-    inputs.set("inputs", value_inputs);
-
-    let res = prove_and_verify(wasm, r1cs, &inputs)?;
-
-    assert!(
-        res.verified,
-        "Proof did not verify for inputs {inputs_pair:?}"
-    );
-
-    Ok(())
-}
-
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::test::utils::circom_tester::{Inputs, prove_and_verify};
     use crate::test::utils::general::load_artifacts;
+    use anyhow::{Context, Result};
+    use num_bigint::BigInt;
+    use std::path::PathBuf;
+
+    /// Run a Poseidon2 hash test case
+    ///
+    /// Tests the Poseidon2 hash circuit with two inputs and a domain separation value.
+    ///
+    /// # Arguments
+    ///
+    /// * `wasm` - Path to the compiled WASM file
+    /// * `r1cs` - Path to the R1CS constraint system file
+    /// * `inputs_pair` - Tuple of two u64 input values to test the hash function
+    /// * `domain_separation` - Domain separation value
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    fn run_case_hash(
+        wasm: &PathBuf,
+        r1cs: &PathBuf,
+        inputs_pair: (u64, u64),
+        domain_separation: u64,
+    ) -> Result<()> {
+        // Prepare circuit inputs
+        let mut inputs = Inputs::new();
+        let value_inputs: Vec<BigInt> =
+            vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
+        let domain_separation: BigInt = BigInt::from(domain_separation);
+        inputs.set("inputs", value_inputs);
+        inputs.set("domainSeparation", domain_separation);
+
+        let res =
+            prove_and_verify(wasm, r1cs, &inputs).context("Failed to prove and verify circuit")?;
+
+        assert!(
+            res.verified,
+            "Proof did not verify for inputs {inputs_pair:?}"
+        );
+
+        Ok(())
+    }
+
+    /// Run a Poseidon2 compression test case
+    ///
+    /// Tests the Poseidon2 compression circuit with two input values.
+    ///
+    /// # Arguments
+    ///
+    /// * `wasm` - Path to the compiled WASM file
+    /// * `r1cs` - Path to the R1CS constraint system file
+    /// * `inputs_pair` - Tuple of two u64 input values to test the compression function
+    ///
+    /// # Returns
+    ///
+    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
+        // Prepare circuit inputs
+        let mut inputs = Inputs::new();
+        let value_inputs: Vec<BigInt> =
+            vec![BigInt::from(inputs_pair.0), BigInt::from(inputs_pair.1)];
+        inputs.set("inputs", value_inputs);
+
+        let res = prove_and_verify(wasm, r1cs, &inputs)?;
+
+        assert!(
+            res.verified,
+            "Proof did not verify for inputs {inputs_pair:?}"
+        );
+
+        Ok(())
+    }
 
     #[test]
     #[ignore]

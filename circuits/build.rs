@@ -480,8 +480,8 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
         if (in_build_deps || in_deps) && trimmed.starts_with(package_name) {
             // Look for tag = "..." in this line or continue reading
             if let Some(tag_start) = trimmed.find(r#"tag = ""#) {
-                #[allow(clippy::arithmetic_side_effects)]
-                let after_tag = &trimmed[tag_start + 7..]; // Skip 'tag = "'
+                let start_index = tag_start.checked_add(7)?;
+                let after_tag = &trimmed[start_index..]; // Skip 'tag = "'
                 if let Some(end_quote) = after_tag.find('"') {
                     let tag = &after_tag[..end_quote];
                     return Some(tag.to_string().replace("v", ""));
