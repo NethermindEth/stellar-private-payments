@@ -19,7 +19,7 @@ fn test_init_valid() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_zero() {
     let env = Env::default();
     let admin = Address::generate(&env);
@@ -27,7 +27,7 @@ fn test_init_invalid_levels_zero() {
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_too_large() {
     let env = Env::default();
     let admin = Address::generate(&env);

@@ -37,12 +37,10 @@ pub enum Error {
     NotAuthorized = 1,
     /// Merkle tree has reached maximum capacity
     MerkleTreeFull = 2,
-    /// Contract has already been initialized
-    AlreadyInitialized = 3,
     /// Wrong Number of levels specified
-    WrongLevels = 4,
+    WrongLevels = 3,
     /// The contract has not been yet initialized
-    NotInitialized = 5,
+    NotInitialized = 4,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -79,11 +77,6 @@ impl ASPMembership {
     /// Panics if levels is 0 or greater than 32
     pub fn __constructor(env: Env, admin: Address, levels: u32) -> Result<(), Error> {
         let store = env.storage().persistent();
-
-        // Check if the contract is already initialized
-        if store.has(&DataKey::Admin) {
-            return Err(Error::AlreadyInitialized);
-        }
 
         if levels == 0 || levels > 32 {
             return Err(Error::WrongLevels);

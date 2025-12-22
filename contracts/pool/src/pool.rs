@@ -264,9 +264,6 @@ impl PoolContract {
         maximum_deposit_amount: U256,
         levels: u32,
     ) -> Result<(), Error> {
-        if env.storage().persistent().has(&DataKey::Admin) {
-            return Err(Error::AlreadyInitialized);
-        }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()

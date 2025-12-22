@@ -177,29 +177,50 @@ fn merkle_init_only_once() {
     let env = Env::default();
     // As MerkleTreeWithHistory is now a module
     // We need to register the contract first to access the env.storage of a smart contract
-    let pool_id = register_mock_token(&env);
+    let setup = setup_test_contracts(&env);
+    let max = U256::from_u32(&env, 100);
     let levels = 8u32;
+    // First init should succeed
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
+    );
 
     env.as_contract(&pool_id, || {
-        // First init should succeed
-        let result1 = MerkleTreeWithHistory::init(&env, levels);
-        assert!(result1.is_ok());
-
         // Second init should return AlreadyInitialized error
-        let result2 = MerkleTreeWithHistory::init(&env, levels);
-        assert!(result2.is_err());
+        let result = MerkleTreeWithHistory::init(&env, levels);
+        assert!(result.is_err());
     });
 }
 
 #[test]
 fn merkle_insert_updates_root_and_index() {
     let env = Env::default();
-    let pool_id = register_mock_token(&env);
-    let levels = 3u32;
+    let setup = setup_test_contracts(&env);
+    let max = U256::from_u32(&env, 100);
+    let levels = 8u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
+    );
 
     env.as_contract(&pool_id, || {
-        MerkleTreeWithHistory::init(&env, levels).unwrap();
-
         let leaf1 = U256::from_u32(&env, 0x01);
         let leaf2 = U256::from_u32(&env, 0x02);
 
@@ -224,14 +245,23 @@ fn merkle_insert_updates_root_and_index() {
 #[test]
 fn merkle_insert_fails_when_full() {
     let env = Env::default();
-    let pool_id = register_mock_token(&env);
-
-    // levels=1 => capacity of 2 leaves (one insert call)
+    let setup = setup_test_contracts(&env);
+    let max = U256::from_u32(&env, 100);
     let levels = 1u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
+    );
 
     env.as_contract(&pool_id, || {
-        MerkleTreeWithHistory::init(&env, levels).unwrap();
-
         let leaf1 = U256::from_u32(&env, 0x0A);
         let leaf2 = U256::from_u32(&env, 0x0B);
 
@@ -248,7 +278,21 @@ fn merkle_insert_fails_when_full() {
 #[test]
 fn merkle_init_rejects_zero_levels() {
     let env = Env::default();
-    let pool_id = register_mock_token(&env);
+    let setup = setup_test_contracts(&env);
+    let max = U256::from_u32(&env, 100);
+    let levels = 8u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            max.clone(),
+            levels,
+        ),
+    );
     let levels = 0u32;
 
     env.as_contract(&pool_id, || {

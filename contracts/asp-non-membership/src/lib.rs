@@ -60,8 +60,7 @@ pub enum Error {
     KeyNotFound = 2,
     KeyAlreadyExists = 3,
     InvalidProof = 4,
-    AlreadyInitialized = 5,
-    NotInitialized = 6,
+    NotInitialized = 5,
 }
 
 // Events
@@ -103,14 +102,9 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, or `Error::AlreadyInitialized` if the contract
-    /// has already been initialized.
+    /// Returns `Ok(())` on success
     pub fn __constructor(env: Env, admin: Address) -> Result<(), Error> {
         let store = env.storage().persistent();
-        // Contract can only be initialized once
-        if store.has(&DataKey::Admin) {
-            return Err(Error::AlreadyInitialized);
-        }
         store.set(&DataKey::Admin, &admin);
         // Initialize with empty root (zero)
         let zero = U256::from_u32(&env, 0u32);
