@@ -234,7 +234,7 @@ pub struct PoolContract;
 
 #[contractimpl]
 impl PoolContract {
-    /// Initialize the privacy pool contract
+    /// Constructor: initialize the privacy pool contract
     ///
     /// Sets up the contract with the specified token, verifier, and Merkle tree
     /// configuration. This function can only be called once.
@@ -254,7 +254,7 @@ impl PoolContract {
     ///
     /// Returns `Ok(())` on success, or an error if already initialized or
     /// invalid configuration
-    pub fn init(
+    pub fn __constructor(
         env: Env,
         admin: Address,
         token: Address,
@@ -264,9 +264,6 @@ impl PoolContract {
         maximum_deposit_amount: U256,
         levels: u32,
     ) -> Result<(), Error> {
-        if env.storage().persistent().has(&DataKey::Admin) {
-            return Err(Error::AlreadyInitialized);
-        }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()

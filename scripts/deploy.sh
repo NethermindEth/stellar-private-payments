@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Deploy all Stellar private transaction contracts and optionally initialize them.
+# Deploy all Stellar private transaction contracts and optionally run constructors.
 # Usage: deploy.sh <network> [options]
 
 set -euo pipefail
@@ -14,7 +14,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: deploy.sh <network> [OPTIONS]
 
-Deploys and initializes the ASP membership, ASP non-membership,
+Deploys and runs constructors for the ASP membership, ASP non-membership,
 Circom Groth16 verifier, and Pool contracts.
 
 Arguments:
@@ -27,9 +27,9 @@ Options:
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
-  --vk-json JSON        VerificationKeyBytes JSON for circom verifier init
+  --vk-json JSON        VerificationKeyBytes JSON for circom verifier constructor
   --vk-file PATH        JSON file containing VerificationKeyBytes
-  --skip-init           Deploy only, do not call init
+  --skip-init           Deploy only, do not call constructors
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
@@ -179,8 +179,13 @@ POOL_WASM="$WASM_DIR/pool.wasm"
 deploy_contract() {
   local name="$1"
   local wasm="$2"
+  shift 2
   local output
-  output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" 2>&1)"
+  if [[ $# -gt 0 ]]; then
+    output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" -- "$@" 2>&1)"
+  else
+    output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" 2>&1)"
+  fi
   local id
   id="$(grep -Eo 'C[A-Z0-9]{55}' <<<"$output" | head -1 || true)"
   [[ -n "$id" ]] || { echo "$output" >&2; die "failed to parse contract id for $name"; }
@@ -188,35 +193,34 @@ deploy_contract() {
 }
 
 step "deploy asp-membership"
-ASP_MEMBERSHIP_ID="$(deploy_contract asp-membership "$ASP_MEMBERSHIP_WASM")"
+if [[ "$SKIP_INIT" != "true" ]]; then
+  ASP_MEMBERSHIP_ID="$(deploy_contract asp-membership "$ASP_MEMBERSHIP_WASM" --admin "$ADMIN_ADDR" --levels "$ASP_LEVELS")"
+else
+  ASP_MEMBERSHIP_ID="$(deploy_contract asp-membership "$ASP_MEMBERSHIP_WASM")"
+fi
 
 step "deploy asp-non-membership"
-ASP_NON_MEMBERSHIP_ID="$(deploy_contract asp-non-membership "$ASP_NON_MEMBERSHIP_WASM")"
+if [[ "$SKIP_INIT" != "true" ]]; then
+  ASP_NON_MEMBERSHIP_ID="$(deploy_contract asp-non-membership "$ASP_NON_MEMBERSHIP_WASM" --admin "$ADMIN_ADDR")"
+else
+  ASP_NON_MEMBERSHIP_ID="$(deploy_contract asp-non-membership "$ASP_NON_MEMBERSHIP_WASM")"
+fi
 
 step "deploy circom-groth16-verifier"
-VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
+if [[ "$SKIP_INIT" != "true" ]]; then
+  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM" --vk "$VK_JSON")"
+else
+  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
+fi
 
 step "deploy pool"
-POOL_ID="$(deploy_contract pool "$POOL_WASM")"
-
 if [[ "$SKIP_INIT" != "true" ]]; then
-  step "init asp-membership"
-  stellar contract invoke --id "$ASP_MEMBERSHIP_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    init --admin "$ADMIN_ADDR" --levels "$ASP_LEVELS" >/dev/null
-
-  step "init asp-non-membership"
-  stellar contract invoke --id "$ASP_NON_MEMBERSHIP_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    init --admin "$ADMIN_ADDR" >/dev/null
-
-  step "init circom-groth16-verifier"
-  stellar contract invoke --id "$VERIFIER_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    init --vk "$VK_JSON" >/dev/null
-
-  step "init pool"
-  stellar contract invoke --id "$POOL_ID" --source-account "$DEPLOYER" --network "$NETWORK" -- \
-    init --admin "$ADMIN_ADDR" --token "$TOKEN" --verifier "$VERIFIER_ID" \
+  POOL_ID="$(deploy_contract pool "$POOL_WASM" \
+    --admin "$ADMIN_ADDR" --token "$TOKEN" --verifier "$VERIFIER_ID" \
     --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
-    --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" >/dev/null
+    --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS")"
+else
+  POOL_ID="$(deploy_contract pool "$POOL_WASM")"
 fi
 
 cat >&2 <<EOF
@@ -233,7 +237,7 @@ Deployment complete
   ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
   Verifier:            $VERIFIER_ID
   Pool:                $POOL_ID
-  Initialized:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
+  Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
 EOF
 
 DEPLOY_JSON="$(printf '{"network":"%s","deployer":"%s","admin":"%s","asp_membership":"%s","asp_non_membership":"%s","verifier":"%s","pool":"%s","initialized":%s}\n' \

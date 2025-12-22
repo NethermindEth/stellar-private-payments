@@ -102,11 +102,10 @@ fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr
 #[test]
 fn verifies_valid_proof() {
     let env = Env::default();
-    let contract_id = env.register(CircomGroth16Verifier, ());
     let (vk_bytes, proof, public_inputs, _) = build_test(&env);
+    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
     let client = CircomGroth16VerifierClient::new(&env, &contract_id);
 
-    client.init(&vk_bytes);
     let result = client.try_verify(&proof, &public_inputs);
 
     assert_eq!(result, Ok(Ok(true)));
@@ -115,10 +114,9 @@ fn verifies_valid_proof() {
 #[test]
 fn rejects_wrong_public_input_length() {
     let env = Env::default();
-    let contract_id = env.register(CircomGroth16Verifier, ());
     let (vk_bytes, proof, _public_inputs, inputs) = build_test(&env);
+    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
     let client = CircomGroth16VerifierClient::new(&env, &contract_id);
-    client.init(&vk_bytes);
 
     // Provide too few public inputs (length 5 instead of 11)
     let mut short_inputs: Vec<Fr> = Vec::new(&env);
@@ -131,17 +129,6 @@ fn rejects_wrong_public_input_length() {
         result,
         Err(Ok(Groth16Error::MalformedPublicInputs))
     ));
-}
-
-#[test]
-fn verify_requires_initialization() {
-    let env = Env::default();
-    let contract_id = env.register(CircomGroth16Verifier, ());
-    let (_vk_bytes, proof, public_inputs, _) = build_test(&env);
-    let client = CircomGroth16VerifierClient::new(&env, &contract_id);
-
-    let result = client.try_verify(&proof, &public_inputs);
-    assert!(matches!(result, Err(Ok(Groth16Error::NotInitialized))));
 }
 
 #[test]
