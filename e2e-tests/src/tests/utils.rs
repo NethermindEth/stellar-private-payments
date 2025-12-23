@@ -6,7 +6,9 @@ use ark_groth16::VerifyingKey;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
-use circuits::test::utils::circom_tester::{CircomResult, SignalKey, prove_and_verify};
+use circuits::test::utils::circom_tester::{
+    CircomResult, SignalKey, load_keys, prove_and_verify_with_keys,
+};
 use circuits::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
 use circuits::test::utils::merkle_tree::{merkle_proof, merkle_root};
 use circuits::test::utils::sparse_merkle_tree::prepare_smt_proof_with_overrides;
@@ -39,6 +41,17 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 5;
 
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
+
+/// Returns the path to the pre-generated proving key for the compliant_test circuit.
+/// Uses CARGO_MANIFEST_DIR to find the workspace root.
+fn proving_key_path() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
+    manifest_dir
+        .parent()
+        .expect("Failed to get workspace root")
+        .join("scripts/testdata/compliant_test_proving_key.bin")
+}
 
 /// Addresses of deployed contracts for E2E tests
 pub struct DeployedContracts {
@@ -390,7 +403,9 @@ pub fn generate_proof(
     }
     inputs.set("nonMembershipRoots", non_membership_roots);
 
-    prove_and_verify(&wasm, &r1cs, &inputs)
+    // Load pre-generated keys from testdata
+    let keys = load_keys(proving_key_path())?;
+    prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)
 }
 
 pub fn wrap_groth16_proof(env: &Env, result: CircomResult) -> Groth16Proof {
