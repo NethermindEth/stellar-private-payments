@@ -23,12 +23,21 @@ zkhash = { path = "../poseidon2" }
 
 [build-dependencies]
 anyhow = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
+ark-serialize = "0.5.0"
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+num-bigint = { workspace = true }
 parser = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 regex = "1"
+serde_json = "1.0"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 wast = "39.0.0"
 
