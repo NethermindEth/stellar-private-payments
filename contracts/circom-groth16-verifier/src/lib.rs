@@ -6,8 +6,6 @@
 // Use Soroban's allocator for heap allocations
 extern crate alloc;
 
-use core::array;
-
 pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
     Env, Vec, contract, contractimpl, contracttype,
@@ -22,22 +20,22 @@ pub struct VerificationKey {
     pub beta: G2Affine,
     pub gamma: G2Affine,
     pub delta: G2Affine,
-    pub ic: [G1Affine; 12],
+    pub ic: Vec<G1Affine>,
 }
 
-fn verification_key_from_bytes(vk_bytes: &VerificationKeyBytes) -> VerificationKey {
-    let ic_vec = &vk_bytes.ic;
-    let ic_array: [G1Affine; 12] = array::from_fn(|i| {
-        let bytes = ic_vec.get(i as u32).unwrap();
-        G1Affine::from_bytes(bytes.clone())
-    });
+fn verification_key_from_bytes(env: &Env, vk_bytes: &VerificationKeyBytes) -> VerificationKey {
+    let mut ic_vec: Vec<G1Affine> = Vec::new(env);
+    for i in 0..vk_bytes.ic.len() {
+        let bytes = vk_bytes.ic.get(i).unwrap();
+        ic_vec.push_back(G1Affine::from_bytes(bytes));
+    }
 
     VerificationKey {
         alpha: G1Affine::from_bytes(vk_bytes.alpha.clone()),
         beta: G2Affine::from_bytes(vk_bytes.beta.clone()),
         gamma: G2Affine::from_bytes(vk_bytes.gamma.clone()),
         delta: G2Affine::from_bytes(vk_bytes.delta.clone()),
-        ic: ic_array,
+        ic: ic_vec,
     }
 }
 
@@ -71,7 +69,7 @@ impl CircomGroth16Verifier {
             .persistent()
             .get(&DataKey::VerificationKey)
             .ok_or(Groth16Error::NotInitialized)?;
-        let vk = verification_key_from_bytes(&vk_bytes);
+        let vk = verification_key_from_bytes(&env, &vk_bytes);
         Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 
@@ -83,17 +81,16 @@ impl CircomGroth16Verifier {
     ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
 
-        if pub_inputs.len() + 1 != vk.ic.len() as u32 {
+        if pub_inputs.len() + 1 != vk.ic.len() {
             return Err(Groth16Error::MalformedPublicInputs);
         }
 
-        let mut vk_x = vk
-            .ic
-            .first()
-            .cloned()
-            .ok_or(Groth16Error::MalformedPublicInputs)?;
-        for (s, v) in pub_inputs.iter().zip(vk.ic.iter().skip(1)) {
-            let prod = bn.g1_mul(v, &s);
+        let mut vk_x = vk.ic.get(0).ok_or(Groth16Error::MalformedPublicInputs)?;
+
+        for i in 0..pub_inputs.len() {
+            let s = pub_inputs.get(i).unwrap();
+            let v = vk.ic.get(i + 1).unwrap();
+            let prod = bn.g1_mul(&v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);
         }
 

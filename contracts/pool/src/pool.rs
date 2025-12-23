@@ -431,11 +431,7 @@ impl PoolContract {
             &proof.output_commitment1,
         )));
 
-        let is_valid = client
-            .try_verify(&proof.proof, &public_inputs)
-            .ok()
-            .and_then(|res| res.ok())
-            .unwrap_or(false);
+        let is_valid = client.verify(&proof.proof, &public_inputs);
 
         Ok(is_valid)
     }
