@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     Bytes, BytesN, Vec, contracterror, contracttype,
-    crypto::bn254::{G1Affine, G2Affine},
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
 };
 
 /// Errors that can occur during Groth16 proof verification.

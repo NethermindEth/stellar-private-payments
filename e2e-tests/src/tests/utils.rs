@@ -17,7 +17,7 @@ use circuits::test::utils::transaction_case::{
 use num_bigint::BigInt;
 use num_bigint::BigUint;
 use pool::PoolContract;
-use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
+use soroban_sdk::crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
 use soroban_utils::utils::{MockToken, vk_bytes_from_ark};

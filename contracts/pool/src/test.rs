@@ -3,7 +3,7 @@ use crate::{ExtData, PoolContract, PoolContractClient, Proof};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof, VerificationKeyBytes};
-use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
+use soroban_sdk::crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec};

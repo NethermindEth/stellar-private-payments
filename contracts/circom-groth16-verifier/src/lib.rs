@@ -11,7 +11,7 @@ use core::array;
 pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
     Env, Vec, contract, contractimpl, contracttype,
-    crypto::bn254::{Fr, G1Affine, G2Affine},
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine, Fr},
     vec,
 };
 

@@ -24,8 +24,7 @@ circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 contract-types = { path = "contracts/types" }
 num-bigint = { version = "0.4.6", default-features = false }
 num-integer = { version = "0.1.46", default-features = false }
-# TODO update for the release
-soroban-sdk = { git = "https://github.com/NethermindEth/rs-soroban-sdk", branch = "feature/bn254-neg-trait", features = ["hazmat"] }
+soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 zkhash = { path = "poseidon2" }
 
