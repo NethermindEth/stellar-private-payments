@@ -25,8 +25,7 @@ pub struct VerificationKey {
 
 fn verification_key_from_bytes(env: &Env, vk_bytes: &VerificationKeyBytes) -> VerificationKey {
     let mut ic_vec: Vec<G1Affine> = Vec::new(env);
-    for i in 0..vk_bytes.ic.len() {
-        let bytes = vk_bytes.ic.get(i).unwrap();
+    for bytes in vk_bytes.ic.iter() {
         ic_vec.push_back(G1Affine::from_bytes(bytes));
     }
 
