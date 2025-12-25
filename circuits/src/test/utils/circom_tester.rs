@@ -1,12 +1,15 @@
 use super::general::scalar_to_bigint;
-use anyhow::{Result, anyhow};
+use anyhow::{Context, Result, anyhow};
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use num_bigint::BigInt;
 use std::fmt::Display;
+use std::fs::File;
+use std::io::BufReader;
 use std::{collections::HashMap, fmt, path::Path};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -170,6 +173,38 @@ pub fn generate_keys(
     let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
+    let pvk = Groth16::<Bn254, CircomReduction>::process_vk(&vk)
+        .map_err(|e| anyhow!("process_vk failed: {e}"))?;
+
+    Ok(CircuitKeys { pk, vk, pvk })
+}
+
+/// Loads Groth16 keys from a binary proving key file.
+///
+/// The proving key file should be serialized using `ark_serialize::CanonicalSerialize`.
+/// The verification key is extracted from the proving key, and the prepared
+/// verification key is computed for efficient verification.
+///
+/// # Arguments
+///
+/// * `pk_path` - Path to the binary proving key file
+///
+/// # Returns
+///
+/// Returns `Ok(CircuitKeys)` containing the proving key, verification key,
+/// and prepared verification key, or an error if loading fails.
+pub fn load_keys(pk_path: impl AsRef<Path>) -> Result<CircuitKeys> {
+    let file = File::open(pk_path.as_ref())
+        .with_context(|| format!("Failed to open proving key file: {:?}", pk_path.as_ref()))?;
+    let mut reader = BufReader::new(file);
+
+    let pk: ProvingKey<Bn254> = ProvingKey::deserialize_compressed(&mut reader)
+        .map_err(|e| anyhow!("Failed to deserialize proving key: {e}"))?;
+
+    // Extract verification key from proving key
+    let vk = pk.vk.clone();
+
+    // Compute prepared verification key for efficient verification
     let pvk = Groth16::<Bn254, CircomReduction>::process_vk(&vk)
         .map_err(|e| anyhow!("process_vk failed: {e}"))?;
 

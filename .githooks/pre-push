@@ -37,4 +37,18 @@ if ! cargo test --workspace --verbose; then
     exit 6
 fi
 
+# Contracts build (Soroban)
+if ! command -v stellar >/dev/null 2>&1; then
+    echo "❌ Missing 'stellar' CLI (required for contract build)"
+    exit 7
+fi
+
+mkdir -p target/stellar
+for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+    if ! stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package "$pkg"; then
+        echo "❌ Contract build failed for package: $pkg"
+        exit 8
+    fi
+done
+
 echo "✅ All checks passed!"

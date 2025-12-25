@@ -11,10 +11,20 @@
 //!
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
+//! The script also generates Groth16 proving and verification
+//! keys for the main test circuit (compliant_test) and outputs them to `scripts/testdata/`.
+//!
 //! The output directory is exposed as en environment variable
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
 use anyhow::{Context, Result, anyhow};
+use ark_bn254::{Bn254, Fq, G1Affine, G2Affine};
+use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
+use ark_ff::{BigInteger, PrimeField};
+use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
+use ark_serialize::CanonicalSerialize;
+use ark_snark::SNARK;
+use ark_std::rand::thread_rng;
 use compiler::{
     compiler_interface::{Config, VCP, run_compiler, write_wasm},
     num_bigint::BigInt,
@@ -23,6 +33,7 @@ use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
 use regex::Regex;
+use serde_json::{Value, json};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -116,6 +127,13 @@ fn main() -> Result<()> {
             println!("cargo:rerun-if-changed={}", dep_path.display());
         }
 
+        // Get circuit name for key generation check
+        let circuit_name = circom_file
+            .file_stem()
+            .context("Invalid circom filename")?
+            .to_string_lossy()
+            .to_string();
+
         if r1cs_file.exists() && sym_file.exists() {
             let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
             let sym_modified = fs::metadata(&sym_file)?.modified()?;
@@ -130,6 +148,11 @@ fn main() -> Result<()> {
                     "cargo:warning=Skipping {} (already compiled, all dependencies up to date)",
                     circom_file.display()
                 );
+
+                // Still check if we need to generate keys for compliant_test
+                if circuit_name == "compliant_test" {
+                    generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file)?;
+                }
                 continue;
             }
         }
@@ -184,6 +207,12 @@ fn main() -> Result<()> {
 
         if let Err(e) = compile_wasm(&circom_file, &out_dir, vcp) {
             println!("cargo:warning=Skipping in-process WASM generation for {circom_file:?}: {e}");
+        }
+
+        // === GROTH16 Proving/Verifying key generation for test circuits ===
+        // For now we only generate keys for the compliant test circuit.
+        if circuit_name == "compliant_test" {
+            generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file)?;
         }
     }
 
@@ -638,4 +667,179 @@ fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
 
     fs::remove_file(wat_file).expect("Failed to remove WAT");
     Ok(())
+}
+
+// Groth16 Key Generation Utility Functions
+/// Generate Groth16 proving and verification keys from circuit artifacts.
+///
+/// Performs a trusted setup for the circuit using random parameters.
+///
+/// # Arguments
+///
+/// * `wasm_path` - Path to the compiled WASM file for witness generation
+/// * `r1cs_path` - Path to the R1CS constraint system file
+///
+/// # Returns
+///
+/// Returns `Ok((ProvingKey, VerifyingKey))` on success.
+fn generate_groth16_keys(
+    wasm_path: &Path,
+    r1cs_path: &Path,
+) -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>)> {
+    let cfg =
+        CircomConfig::new(wasm_path, r1cs_path).map_err(|e| anyhow!("CircomConfig error: {e}"))?;
+
+    let builder = CircomBuilder::new(cfg);
+    let empty = builder.setup();
+    let mut rng = thread_rng();
+
+    let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
+        .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
+
+    Ok((pk, vk))
+}
+
+/// Generate Groth16 keys if they don't exist or are older than the R1CS file.
+///
+/// This function checks if the proving and verification keys exist and are up-to-date.
+/// If not, it generates new keys and writes them to the `scripts/testdata/` directory.
+///
+/// # Arguments
+///
+/// * `crate_dir` - The circuits crate directory
+/// * `out_dir` - The output directory containing WASM files
+/// * `circuit_name` - Name of the circuit (e.g., "compliant_test")
+/// * `r1cs_file` - Path to the R1CS file for freshness comparison
+fn generate_keys_if_needed(
+    crate_dir: &Path,
+    out_dir: &Path,
+    circuit_name: &str,
+    r1cs_file: &Path,
+) -> Result<()> {
+    // Output keys to scripts/testdata/
+    let keys_dir = crate_dir.join("../scripts/testdata");
+    fs::create_dir_all(&keys_dir).context("Could not create scripts/testdata")?;
+
+    let pk_path = keys_dir.join(format!("{circuit_name}_proving_key.bin"));
+    let vk_path = keys_dir.join(format!("{circuit_name}_vk.json"));
+
+    // Check if keys already exist and are newer than the r1cs
+    if pk_path.exists() && vk_path.exists() && r1cs_file.exists() {
+        let pk_modified = fs::metadata(&pk_path)?.modified()?;
+        let vk_modified = fs::metadata(&vk_path)?.modified()?;
+        let r1cs_modified = fs::metadata(r1cs_file)?.modified()?;
+
+        if pk_modified > r1cs_modified && vk_modified > r1cs_modified {
+            println!(
+                "cargo:warning=Skipping key generation for {} (keys up to date)",
+                circuit_name
+            );
+            return Ok(());
+        }
+    }
+
+    // Generate keys
+    let wasm_path = out_dir
+        .join("wasm")
+        .join(format!("{circuit_name}_js"))
+        .join(format!("{circuit_name}.wasm"));
+
+    if !wasm_path.exists() {
+        println!(
+            "cargo:warning=Skipping key generation for {} (WASM not found at {})",
+            circuit_name,
+            wasm_path.display()
+        );
+        return Ok(());
+    }
+
+    println!("cargo:warning=Generating Groth16 keys for {circuit_name}...");
+    match generate_groth16_keys(&wasm_path, r1cs_file) {
+        Ok((pk, vk)) => {
+            // Write proving key (binary)
+            if let Err(e) = write_proving_key(&pk, &pk_path) {
+                println!("cargo:warning=Failed to write proving key: {e}");
+            } else {
+                println!("cargo:warning=Proving key written to {}", pk_path.display());
+            }
+
+            // Write verification key (JSON)
+            if let Err(e) = write_verification_key(&vk, &vk_path) {
+                println!("cargo:warning=Failed to write verification key: {e}");
+            } else {
+                println!(
+                    "cargo:warning=Verification key written to {}",
+                    vk_path.display()
+                );
+            }
+        }
+        Err(e) => {
+            println!("cargo:warning=Failed to generate keys for {circuit_name}: {e}");
+        }
+    }
+
+    Ok(())
+}
+
+/// Write the proving key to a binary file using compressed serialization.
+///
+/// # Arguments
+///
+/// * `pk` - The proving key to serialize
+/// * `path` - Output file path
+fn write_proving_key(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
+    // Serialize to Vec<u8>
+    let mut bytes = Vec::new();
+    pk.serialize_compressed(&mut bytes)
+        .map_err(|e| anyhow!("Failed to serialize proving key: {e}"))?;
+    fs::write(path, &bytes).context("Failed to write proving key file")?;
+    Ok(())
+}
+
+/// Write the verification key to a JSON file in snarkjs-compatible format.
+///
+/// # Arguments
+///
+/// * `vk` - The verification key to serialize
+/// * `path` - Output file path
+fn write_verification_key(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
+    let vk_json = vk_to_snarkjs_json(vk);
+    let json_str = serde_json::to_string_pretty(&vk_json)?;
+    fs::write(path, json_str).context("Failed to write verification key")?;
+    Ok(())
+}
+
+/// Convert an ark-groth16 VerifyingKey to snarkjs-compatible JSON format.
+fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
+    json!({
+        "protocol": "groth16",
+        "curve": "bn128",
+        "nPublic": vk.gamma_abc_g1.len().saturating_sub(1),
+        "vk_alpha_1": g1_to_snarkjs(&vk.alpha_g1),
+        "vk_beta_2": g2_to_snarkjs(&vk.beta_g2),
+        "vk_gamma_2": g2_to_snarkjs(&vk.gamma_g2),
+        "vk_delta_2": g2_to_snarkjs(&vk.delta_g2),
+        "IC": vk.gamma_abc_g1.iter().map(g1_to_snarkjs).collect::<Vec<_>>()
+    })
+}
+
+/// Convert a G1Affine point to snarkjs JSON format.
+fn g1_to_snarkjs(p: &G1Affine) -> Value {
+    json!([fq_to_decimal(&p.x), fq_to_decimal(&p.y), "1"])
+}
+
+/// Convert a G2Affine point to snarkjs JSON format.
+fn g2_to_snarkjs(p: &G2Affine) -> Value {
+    json!([
+        [fq_to_decimal(&p.x.c0), fq_to_decimal(&p.x.c1)],
+        [fq_to_decimal(&p.y.c0), fq_to_decimal(&p.y.c1)],
+        ["1", "0"]
+    ])
+}
+
+/// Convert an Fq field element to a decimal string.
+fn fq_to_decimal(f: &Fq) -> String {
+    let bigint = f.into_bigint();
+    let bytes = bigint.to_bytes_be();
+    num_bigint::BigUint::from_bytes_be(&bytes).to_string()
 }

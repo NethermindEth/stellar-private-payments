@@ -1,6 +1,6 @@
 pragma circom 2.2.2;
-
-include "../../compliantTransaction.circom";
+// Moved to the top level folder to ensure the main test is always compiled.
+include "./compliantTransaction.circom";
 
 // CompliantTransaction(
 //   nIns, nOuts,

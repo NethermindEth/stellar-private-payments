@@ -14,58 +14,50 @@ use zkhash::{
 #[test]
 fn test_init_valid() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-
-    // Test valid initialization
-    ASPMembershipClient::new(&env, &contract_id).init(&admin, &3u32);
+    env.register(ASPMembership, (admin, 3u32));
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_zero() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-
-    ASPMembershipClient::new(&env, &contract_id).init(&admin, &0u32);
+    env.register(ASPMembership, (admin, 0u32));
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #4)")]
+#[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_too_large() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-
-    ASPMembershipClient::new(&env, &contract_id).init(&admin, &33u32);
+    env.register(ASPMembership, (admin, 33u32));
 }
 
 #[test]
-#[should_panic(expected = "Error(Contract, #3")]
-fn test_init_twice_fails() {
+fn test_constructor_sets_admin_and_levels() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-    let admin2 = Address::generate(&env);
-    let client = ASPMembershipClient::new(&env, &contract_id);
+    let levels = 3u32;
+    let contract_id = env.register(ASPMembership, (admin.clone(), levels));
 
-    // First initialization should succeed
-    client.init(&admin, &3u32);
+    let stored_admin: Address = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&DataKey::Admin).unwrap()
+    });
+    let stored_levels: u32 = env.as_contract(&contract_id, || {
+        env.storage().persistent().get(&DataKey::Levels).unwrap()
+    });
 
-    // Second initialization should fail with AlreadyInitialized error
-    client.init(&admin2, &5u32);
+    assert_eq!(stored_admin, admin);
+    assert_eq!(stored_levels, levels);
 }
 
 #[test]
 fn test_get_root() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize contract with 3 levels
-    client.init(&admin, &3u32);
 
     // Get the initial root
     let initial_root = client.get_root();
@@ -105,7 +97,8 @@ fn test_get_root() {
 #[test]
 fn test_hash_pair() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     // Test hash_pair with two U256 values
@@ -131,12 +124,9 @@ fn test_hash_pair() {
 #[test]
 fn test_insert_leaf() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize contract
-    client.init(&admin, &3u32);
 
     // Mock all auths for testing purposes
     env.mock_all_auths();
@@ -160,12 +150,9 @@ fn test_insert_leaf() {
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_insert_leaf_requires_admin() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize contract
-    client.init(&admin, &3u32);
 
     // Try to insert leaf
     // It should fail as we did not call mock_all_auths()
@@ -177,12 +164,9 @@ fn test_insert_leaf_requires_admin() {
 #[should_panic]
 fn test_insert_leaf_merkle_tree_full() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 2u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize with 2 levels
-    client.init(&admin, &2u32);
 
     // Mock all auths for testing purposes
     env.mock_all_auths();
@@ -201,13 +185,10 @@ fn test_insert_leaf_merkle_tree_full() {
 #[test]
 fn test_update_admin() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize contract
-    client.init(&admin, &3u32);
 
     // Verify admin was set correctly
     let stored_admin: Address = env.as_contract(&contract_id, || {
@@ -229,13 +210,11 @@ fn test_update_admin() {
 #[test]
 fn test_new_admin_can_insert_after_update() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
-    // Initialize contract
-    client.init(&admin, &3u32);
     env.mock_all_auths();
     // Update admin
     client.update_admin(&new_admin);
@@ -258,12 +237,9 @@ fn test_new_admin_can_insert_after_update() {
 #[test]
 fn test_multiple_insertions() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
-
-    // Initialize with 3 levels (max 8 leaves)
-    client.init(&admin, &3u32);
 
     env.mock_all_auths();
 
@@ -310,7 +286,8 @@ fn u256_to_scalar(_env: &Env, u256: &U256) -> Scalar {
 fn test_hash_pair_consistency_1() {
     // Verify that hash_pair on-chain matches poseidon2_compression off-chain
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     // Test on-chain hash
@@ -337,7 +314,8 @@ fn test_hash_pair_consistency_1() {
 fn test_hash_pair_consistency_2() {
     // Verify that hash_pair on-chain matches poseidon2_compression off-chain
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
 
     let a_bytes = [
@@ -374,14 +352,12 @@ fn test_hash_pair_consistency_2() {
 #[test]
 fn test_merkle_consistency() {
     let env = Env::default();
-    let contract_id = env.register(ASPMembership, ());
     let admin = Address::generate(&env);
-    let client = ASPMembershipClient::new(&env, &contract_id);
-
     // Initialize with 2 levels (4 leaves)
     let levels = 2u32;
+    let contract_id = env.register(ASPMembership, (admin, levels));
+    let client = ASPMembershipClient::new(&env, &contract_id);
     let num_leaves = 1u32 << levels;
-    client.init(&admin, &levels);
 
     // Mock all auths for testing
     env.mock_all_auths();

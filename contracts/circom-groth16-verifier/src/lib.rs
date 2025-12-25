@@ -6,30 +6,12 @@
 // Use Soroban's allocator for heap allocations
 extern crate alloc;
 
-use core::array;
-
+pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
-    Bytes, BytesN, Env, Vec, contract, contracterror, contractimpl, contracttype,
-    crypto::bn254::{Fr, G1Affine, G2Affine},
+    Env, Vec, contract, contractimpl, contracttype,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine, Fr},
     vec,
 };
-
-/// Errors that can occur during Groth16 proof verification.
-#[contracterror]
-#[derive(Copy, Clone, Debug, Eq, PartialEq, PartialOrd, Ord)]
-#[repr(u32)]
-pub enum Groth16Error {
-    /// The pairing product did not equal identity.
-    InvalidProof = 0,
-    /// The public inputs length does not match the verification key.
-    MalformedPublicInputs = 1,
-    /// The proof bytes are malformed.
-    MalformedProof = 2,
-    /// The contract was already initialized
-    AlreadyInitialized = 3,
-    /// The contract was not initialized
-    NotInitialized = 4,
-}
 
 /// Groth16 verification key for BN254 curve.
 #[derive(Clone)]
@@ -38,44 +20,22 @@ pub struct VerificationKey {
     pub beta: G2Affine,
     pub gamma: G2Affine,
     pub delta: G2Affine,
-    pub ic: [G1Affine; 12],
+    pub ic: Vec<G1Affine>,
 }
 
-/// Byte-oriented verification key generated at build time.
-#[contracttype]
-pub struct VerificationKeyBytes {
-    pub alpha: BytesN<64>,
-    pub beta: BytesN<128>,
-    pub gamma: BytesN<128>,
-    pub delta: BytesN<128>,
-    pub ic: Vec<BytesN<64>>,
-}
-
-impl VerificationKeyBytes {
-    pub fn verification_key(&self, _env: &Env) -> VerificationKey {
-        let ic_vec = &self.ic;
-        let ic_array: [G1Affine; 12] = array::from_fn(|i| {
-            let bytes = ic_vec.get(i as u32).unwrap();
-            G1Affine::from_bytes(bytes.clone())
-        });
-
-        VerificationKey {
-            alpha: G1Affine::from_bytes(self.alpha.clone()),
-            beta: G2Affine::from_bytes(self.beta.clone()),
-            gamma: G2Affine::from_bytes(self.gamma.clone()),
-            delta: G2Affine::from_bytes(self.delta.clone()),
-            ic: ic_array,
-        }
+fn verification_key_from_bytes(env: &Env, vk_bytes: &VerificationKeyBytes) -> VerificationKey {
+    let mut ic_vec: Vec<G1Affine> = Vec::new(env);
+    for bytes in vk_bytes.ic.iter() {
+        ic_vec.push_back(G1Affine::from_bytes(bytes));
     }
-}
 
-/// Groth16 proof composed of points A, B, and C.
-#[derive(Clone)]
-#[contracttype]
-pub struct Groth16Proof {
-    pub a: G1Affine,
-    pub b: G2Affine,
-    pub c: G1Affine,
+    VerificationKey {
+        alpha: G1Affine::from_bytes(vk_bytes.alpha.clone()),
+        beta: G2Affine::from_bytes(vk_bytes.beta.clone()),
+        gamma: G2Affine::from_bytes(vk_bytes.gamma.clone()),
+        delta: G2Affine::from_bytes(vk_bytes.delta.clone()),
+        ic: ic_vec,
+    }
 }
 
 #[contracttype]
@@ -90,12 +50,9 @@ pub struct CircomGroth16Verifier;
 
 #[contractimpl]
 impl CircomGroth16Verifier {
-    /// Initialize the contract with a verification key.
-    pub fn init(env: Env, vk: VerificationKeyBytes) -> Result<(), Groth16Error> {
+    /// Constructor: initialize the contract with a verification key.
+    pub fn __constructor(env: Env, vk: VerificationKeyBytes) -> Result<(), Groth16Error> {
         let storage = env.storage().persistent();
-        if storage.has(&DataKey::VerificationKey) {
-            return Err(Groth16Error::AlreadyInitialized);
-        }
         storage.set(&DataKey::VerificationKey, &vk);
         Ok(())
     }
@@ -111,7 +68,7 @@ impl CircomGroth16Verifier {
             .persistent()
             .get(&DataKey::VerificationKey)
             .ok_or(Groth16Error::NotInitialized)?;
-        let vk = vk_bytes.verification_key(&env);
+        let vk = verification_key_from_bytes(&env, &vk_bytes);
         Self::verify_with_vk(&env, &vk, proof, public_inputs)
     }
 
@@ -123,17 +80,16 @@ impl CircomGroth16Verifier {
     ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
 
-        if pub_inputs.len() + 1 != vk.ic.len() as u32 {
+        if pub_inputs.len() + 1 != vk.ic.len() {
             return Err(Groth16Error::MalformedPublicInputs);
         }
 
-        let mut vk_x = vk
-            .ic
-            .first()
-            .cloned()
-            .ok_or(Groth16Error::MalformedPublicInputs)?;
-        for (s, v) in pub_inputs.iter().zip(vk.ic.iter().skip(1)) {
-            let prod = bn.g1_mul(v, &s);
+        let mut vk_x = vk.ic.get(0).ok_or(Groth16Error::MalformedPublicInputs)?;
+
+        for i in 0..pub_inputs.len() {
+            let s = pub_inputs.get(i).unwrap();
+            let v = vk.ic.get(i + 1).unwrap();
+            let prod = bn.g1_mul(&v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);
         }
 
@@ -154,45 +110,6 @@ impl CircomGroth16Verifier {
         } else {
             Err(Groth16Error::InvalidProof)
         }
-    }
-}
-
-// === Proof parsing from bytes ===
-
-// Layout: a.x | a.y | b.x_0 | b.x_1 | b.y_0 | b.y_1 | c.x | c.y (all 32-byte big-endian)
-const FIELD_ELEMENT_SIZE: u32 = 32;
-const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
-const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
-const PROOF_SIZE: u32 = G1_SIZE + G2_SIZE + G1_SIZE;
-
-impl TryFrom<Bytes> for Groth16Proof {
-    type Error = Groth16Error;
-
-    fn try_from(value: Bytes) -> Result<Self, Self::Error> {
-        if value.len() != PROOF_SIZE {
-            return Err(Groth16Error::MalformedProof);
-        }
-
-        let a = G1Affine::from_bytes(
-            value
-                .slice(0..G1_SIZE)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-        let b = G2Affine::from_bytes(
-            value
-                .slice(G1_SIZE..G1_SIZE + G2_SIZE)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-        let c = G1Affine::from_bytes(
-            value
-                .slice(G1_SIZE + G2_SIZE..)
-                .try_into()
-                .map_err(|_| Groth16Error::MalformedProof)?,
-        );
-
-        Ok(Self { a, b, c })
     }
 }
 

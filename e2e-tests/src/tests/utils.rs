@@ -3,10 +3,12 @@
 use anyhow::Result;
 use ark_bn254::Bn254;
 use ark_groth16::VerifyingKey;
-use asp_membership::{ASPMembership, ASPMembershipClient};
-use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use circom_groth16_verifier::{CircomGroth16Verifier, CircomGroth16VerifierClient, Groth16Proof};
-use circuits::test::utils::circom_tester::{CircomResult, SignalKey, prove_and_verify};
+use asp_membership::ASPMembership;
+use asp_non_membership::ASPNonMembership;
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
+use circuits::test::utils::circom_tester::{
+    CircomResult, SignalKey, load_keys, prove_and_verify_with_keys,
+};
 use circuits::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
 use circuits::test::utils::merkle_tree::{merkle_proof, merkle_root};
 use circuits::test::utils::sparse_merkle_tree::prepare_smt_proof_with_overrides;
@@ -16,8 +18,8 @@ use circuits::test::utils::transaction_case::{
 };
 use num_bigint::BigInt;
 use num_bigint::BigUint;
-use pool::{PoolContract, PoolContractClient};
-use soroban_sdk::crypto::bn254::{G1Affine, G2Affine};
+use pool::PoolContract;
+use soroban_sdk::crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine};
 use soroban_sdk::testutils::Address as _;
 use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
 use soroban_utils::utils::{MockToken, vk_bytes_from_ark};
@@ -40,6 +42,17 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 5;
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
 
+/// Returns the path to the pre-generated proving key for the compliant_test circuit.
+/// Uses CARGO_MANIFEST_DIR to find the workspace root.
+fn proving_key_path() -> std::path::PathBuf {
+    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
+    manifest_dir
+        .parent()
+        .expect("Failed to get workspace root")
+        .join("scripts/testdata/compliant_test_proving_key.bin")
+}
+
 /// Addresses of deployed contracts for E2E tests
 pub struct DeployedContracts {
     /// Address of the pool contract
@@ -52,7 +65,7 @@ pub struct DeployedContracts {
 
 /// Deploy all contracts required for E2E testing
 ///
-/// Deploys and initializes the Pool, ASP Membership, ASP Non-Membership,
+/// Deploys and runs constructors for the Pool, ASP Membership, ASP Non-Membership,
 /// and Groth16 Verifier contracts with the provided verification key.
 ///
 /// # Arguments
@@ -68,26 +81,25 @@ pub fn deploy_contracts(env: &Env, vk: &VerifyingKey<Bn254>) -> DeployedContract
 
     let token_address = env.register(MockToken, ());
 
-    let verifier_address = env.register(CircomGroth16Verifier, ());
     let vk_bytes = vk_bytes_from_ark(env, vk);
-    CircomGroth16VerifierClient::new(env, &verifier_address).init(&vk_bytes);
+    let verifier_address = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
 
-    let asp_membership = env.register(ASPMembership, ());
-    ASPMembershipClient::new(env, &asp_membership).init(&admin, &ASP_MEMBERSHIP_LEVELS);
+    let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
 
-    let asp_non_membership = env.register(ASPNonMembership, ());
-    ASPNonMembershipClient::new(env, &asp_non_membership).init(&admin);
+    let asp_non_membership = env.register(ASPNonMembership, (admin.clone(),));
 
-    let pool = env.register(PoolContract, ());
     let max_deposit = U256::from_u32(env, MAX_DEPOSIT);
-    PoolContractClient::new(env, &pool).init(
-        &admin,
-        &token_address,
-        &verifier_address,
-        &asp_membership,
-        &asp_non_membership,
-        &max_deposit,
-        &u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
+    let pool = env.register(
+        PoolContract,
+        (
+            admin,
+            token_address.clone(),
+            verifier_address.clone(),
+            asp_membership.clone(),
+            asp_non_membership.clone(),
+            max_deposit,
+            u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
+        ),
     );
 
     DeployedContracts {
@@ -391,7 +403,9 @@ pub fn generate_proof(
     }
     inputs.set("nonMembershipRoots", non_membership_roots);
 
-    prove_and_verify(&wasm, &r1cs, &inputs)
+    // Load pre-generated keys from testdata
+    let keys = load_keys(proving_key_path())?;
+    prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)
 }
 
 pub fn wrap_groth16_proof(env: &Env, result: CircomResult) -> Groth16Proof {
