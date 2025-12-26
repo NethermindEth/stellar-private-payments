@@ -36,6 +36,4 @@ jobs:
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Run audit-check action
-        run: |
-          cargo install cargo-deny --locked --version 0.18.9
-          cargo deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
