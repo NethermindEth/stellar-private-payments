@@ -1,7 +1,9 @@
 //! Sparse Merkle Tree implementation
 //!
-//! This is a Soroban-compatible port of the Sparse Merkle Tree implementation from:
-//! - circuits/src/test/utils/sparse_merkle_tree.rs (Rust reference implementation)
+//! This is a Soroban-compatible port of the Sparse Merkle Tree implementation
+//! from:
+//! - circuits/src/test/utils/sparse_merkle_tree.rs (Rust reference
+//!   implementation)
 //! - circomlibjs: <https://github.com/iden3/circomlibjs/blob/main/src/smt.js>
 //!
 //! This implementation uses Poseidon2 hash function for compatibility with the
@@ -9,15 +11,16 @@
 //!
 //! # Design Considerations
 //!
-//! This is a full on-chain implementation where all tree nodes are stored in contract storage.
-//! While not the most cost-efficient approach, it provides:
+//! This is a full on-chain implementation where all tree nodes are stored in
+//! contract storage. While not the most cost-efficient approach, it provides:
 //! - Easy interaction and verification for users
 //! - Complete on-chain state for non-membership proofs
 //! - Flexibility to migrate to IPFS-based storage later if needed
 //!
-//! For scalability with large blocked key lists, consider the hybrid approach from:
-//! <https://www.newswise.com/pdf_docs/170903654855378_1-s2.0-S2096720923000519-main.pdf>
-//! We still present this implementation, as it allows making the decision to switch to IPFS-based storage later if needed.
+//! For scalability with large blocked key lists, consider the hybrid approach
+//! from: <https://www.newswise.com/pdf_docs/170903654855378_1-s2.0-S2096720923000519-main.pdf>
+//! We still present this implementation, as it allows making the decision to
+//! switch to IPFS-based storage later if needed.
 
 #![no_std]
 use soroban_sdk::{
@@ -47,7 +50,8 @@ pub struct FindResult {
     pub not_found_key: U256,
     /// Value at the collision point
     pub not_found_value: U256,
-    /// True if the path ended at an empty branch, false if collision with existing leaf
+    /// True if the path ended at an empty branch, false if collision with
+    /// existing leaf
     pub is_old0: bool,
 }
 
@@ -90,7 +94,8 @@ pub struct ASPNonMembership;
 
 #[contractimpl]
 impl ASPNonMembership {
-    /// Constructor: initialize the contract with an admin address and an empty tree
+    /// Constructor: initialize the contract with an admin address and an empty
+    /// tree
     ///
     /// Sets up the contract with the specified admin and initializes an empty
     /// Sparse Merkle Tree with root = 0. This function can only be called once.
@@ -114,8 +119,8 @@ impl ASPNonMembership {
 
     /// Update the admin address
     ///
-    /// Transfers administrative control to a new address. Requires authorization
-    /// from the current admin.
+    /// Transfers administrative control to a new address. Requires
+    /// authorization from the current admin.
     ///
     /// # Arguments
     ///
@@ -129,8 +134,8 @@ impl ASPNonMembership {
     ///
     /// Computes the hash for leaf nodes using Poseidon2 with three inputs:
     /// hash(key, value, 1). The domain separator of 1 distinguishes leaf nodes
-    /// from internal nodes. Mirrors circomlibjs "hash1" function so roots generated
-    /// here match the circuits.
+    /// from internal nodes. Mirrors circomlibjs "hash1" function so roots
+    /// generated here match the circuits.
     ///
     /// # Arguments
     ///
@@ -168,8 +173,8 @@ impl ASPNonMembership {
     /// Split a key into 256 bits from LSB to MSB
     ///
     /// Extracts the binary representation of a key for tree path traversal.
-    /// Bits are ordered from least significant (index 0) to most significant (index 255)
-    /// to match the circuits implementation.
+    /// Bits are ordered from least significant (index 0) to most significant
+    /// (index 255) to match the circuits implementation.
     ///
     /// # Arguments
     ///
@@ -195,10 +200,11 @@ impl ASPNonMembership {
 
     /// Internal recursive find method
     ///
-    /// Traverses the tree from the given root to find a key, collecting sibling hashes
-    /// along the path. Returns detailed information about the search result including
-    /// whether the key was found, collision information for non-membership proofs,
-    /// and siblings required for witness generation.
+    /// Traverses the tree from the given root to find a key, collecting sibling
+    /// hashes along the path. Returns detailed information about the search
+    /// result including whether the key was found, collision information
+    /// for non-membership proofs, and siblings required for witness
+    /// generation.
     ///
     /// # Arguments
     ///
@@ -292,9 +298,9 @@ impl ASPNonMembership {
 
     /// Find a key in the tree
     ///
-    /// Public entry point for searching the tree. Returns comprehensive information
-    /// about the key including whether it exists, its value, and the Merkle path
-    /// siblings required for proof generation.
+    /// Public entry point for searching the tree. Returns comprehensive
+    /// information about the key including whether it exists, its value,
+    /// and the Merkle path siblings required for proof generation.
     ///
     /// # Arguments
     ///
@@ -303,13 +309,14 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(FindResult)` containing whether the key was found, siblings along
-    /// the path, and collision information for non-membership proofs, or an error
-    /// if database operations fail.
+    /// Returns `Ok(FindResult)` containing whether the key was found, siblings
+    /// along the path, and collision information for non-membership proofs,
+    /// or an error if database operations fail.
     ///
     /// # Errors
     ///
-    /// * `Error::KeyNotFound` - Database operations failed or invalid node structure
+    /// * `Error::KeyNotFound` - Database operations failed or invalid node
+    ///   structure
     pub fn find_key(env: Env, key: U256) -> Result<FindResult, Error> {
         let store = env.storage().persistent();
         let root: U256 = store
@@ -321,9 +328,10 @@ impl ASPNonMembership {
 
     /// Insert a new key-value pair into the tree
     ///
-    /// Adds a new leaf to the Sparse Merkle tree, building any missing intermediate
-    /// nodes. Handles collision cases where a new key shares a path prefix with an
-    /// existing leaf by extending the tree depth. Requires admin authorization.
+    /// Adds a new leaf to the Sparse Merkle tree, building any missing
+    /// intermediate nodes. Handles collision cases where a new key shares a
+    /// path prefix with an existing leaf by extending the tree depth.
+    /// Requires admin authorization.
     ///
     /// # Arguments
     ///
@@ -333,7 +341,8 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, emitting a `LeafInsertedEvent` with the new root.
+    /// Returns `Ok(())` on success, emitting a `LeafInsertedEvent` with the new
+    /// root.
     ///
     /// # Errors
     ///
@@ -399,7 +408,8 @@ impl ASPNonMembership {
         let siblings_len = siblings.len();
         for (i, sibling) in siblings.iter().enumerate().rev() {
             // Check if we need to delete old nodes (mixed case)
-            // Skip the last index if added_one=true (it's the old leaf, not an internal node)
+            // Skip the last index if added_one=true (it's the old leaf, not an internal
+            // node)
             let is_last_added_leaf = added_one && (i == (siblings_len - 1) as usize);
             if !is_last_added_leaf
                 && (i as u32) < siblings_len.saturating_sub(1)
@@ -468,10 +478,11 @@ impl ASPNonMembership {
 
     /// Delete a key from the tree
     ///
-    /// Removes a leaf from the Sparse Merkle tree, handling both sparse branches
-    /// (single child) and mixed branches (two populated children). When a leaf is deleted,
-    /// its sibling may be promoted to replace the parent node, collapsing the tree structure.
-    /// Requires admin authorization.
+    /// Removes a leaf from the Sparse Merkle tree, handling both sparse
+    /// branches (single child) and mixed branches (two populated children).
+    /// When a leaf is deleted, its sibling may be promoted to replace the
+    /// parent node, collapsing the tree structure. Requires admin
+    /// authorization.
     ///
     /// # Arguments
     ///
@@ -480,11 +491,13 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, emitting a `LeafDeletedEvent` with the new root.
+    /// Returns `Ok(())` on success, emitting a `LeafDeletedEvent` with the new
+    /// root.
     ///
     /// # Errors
     ///
-    /// * `Error::KeyNotFound` - Key does not exist in the tree or database operations failed
+    /// * `Error::KeyNotFound` - Key does not exist in the tree or database
+    ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).unwrap();
@@ -590,9 +603,9 @@ impl ASPNonMembership {
 
     /// Update a key-value pair in the tree
     ///
-    /// Changes the value associated with an existing key. Recomputes all nodes along
-    /// the path from the leaf to the root, removing old nodes and creating new ones.
-    /// Requires admin authorization.
+    /// Changes the value associated with an existing key. Recomputes all nodes
+    /// along the path from the leaf to the root, removing old nodes and
+    /// creating new ones. Requires admin authorization.
     ///
     /// # Arguments
     ///
@@ -602,11 +615,13 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, emitting a `LeafUpdatedEvent` with the new root.
+    /// Returns `Ok(())` on success, emitting a `LeafUpdatedEvent` with the new
+    /// root.
     ///
     /// # Errors
     ///
-    /// * `Error::KeyNotFound` - Key does not exist in the tree or database operations failed
+    /// * `Error::KeyNotFound` - Key does not exist in the tree or database
+    ///   operations failed
     pub fn update_leaf(env: Env, key: U256, new_value: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).unwrap();
@@ -689,18 +704,20 @@ impl ASPNonMembership {
 
     /// Verify non-membership proof for a key
     ///
-    /// Verifies that a key is NOT in the tree by checking the provided Merkle proof.
-    /// The proof includes siblings along the path and collision information
-    /// (not_found_key/value at the leaf). Reconstructs the root from the proof
-    /// and compares it with the stored root.
+    /// Verifies that a key is NOT in the tree by checking the provided Merkle
+    /// proof. The proof includes siblings along the path and collision
+    /// information (not_found_key/value at the leaf). Reconstructs the root
+    /// from the proof and compares it with the stored root.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
     /// * `key` - Key to verify is not in the tree
     /// * `siblings` - Sibling hashes along the path from root to leaf
-    /// * `not_found_key` - Key at the collision point (or queried key if empty path)
-    /// * `not_found_value` - Value at the collision point (or zero if empty path)
+    /// * `not_found_key` - Key at the collision point (or queried key if empty
+    ///   path)
+    /// * `not_found_value` - Value at the collision point (or zero if empty
+    ///   path)
     ///
     /// # Returns
     ///
@@ -776,8 +793,8 @@ impl ASPNonMembership {
 
     /// Get the current root of the tree
     ///
-    /// Returns the root hash of the Sparse Merkle tree. Returns zero if the tree
-    /// is empty or hasn't been initialized yet.
+    /// Returns the root hash of the Sparse Merkle tree. Returns zero if the
+    /// tree is empty or hasn't been initialized yet.
     ///
     /// # Arguments
     ///

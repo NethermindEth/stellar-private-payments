@@ -1,14 +1,17 @@
-use crate::merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory};
-use crate::{ExtData, PoolContract, PoolContractClient, Proof};
+use crate::{
+    ExtData, PoolContract, PoolContractClient, Proof,
+    merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof, VerificationKeyBytes};
-use soroban_sdk::crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine};
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::xdr::ToXdr;
-use soroban_sdk::{Address, Bytes, BytesN, Env, I256, U256, Vec};
-use soroban_utils::constants::bn256_modulus;
-use soroban_utils::utils::MockToken;
+use soroban_sdk::{
+    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    testutils::Address as _,
+    xdr::ToXdr,
+};
+use soroban_utils::{constants::bn256_modulus, utils::MockToken};
 
 /// Number of levels for the ASP Membership Merkle tree in tests
 const ASP_MEMBERSHIP_LEVELS: u32 = 8;
@@ -176,7 +179,8 @@ fn pool_constructor_sets_state() {
 fn merkle_init_only_once() {
     let env = Env::default();
     // As MerkleTreeWithHistory is now a module
-    // We need to register the contract first to access the env.storage of a smart contract
+    // We need to register the contract first to access the env.storage of a smart
+    // contract
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;

@@ -7,10 +7,7 @@ use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use num_bigint::BigInt;
-use std::fmt::Display;
-use std::fs::File;
-use std::io::BufReader;
-use std::{collections::HashMap, fmt, path::Path};
+use std::{collections::HashMap, fmt, fmt::Display, fs::File, io::BufReader, path::Path};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[derive(Clone, Debug)]
@@ -181,9 +178,10 @@ pub fn generate_keys(
 
 /// Loads Groth16 keys from a binary proving key file.
 ///
-/// The proving key file should be serialized using `ark_serialize::CanonicalSerialize`.
-/// The verification key is extracted from the proving key, and the prepared
-/// verification key is computed for efficient verification.
+/// The proving key file should be serialized using
+/// `ark_serialize::CanonicalSerialize`. The verification key is extracted from
+/// the proving key, and the prepared verification key is computed for efficient
+/// verification.
 ///
 /// # Arguments
 ///
@@ -279,10 +277,11 @@ fn push_value(builder: &mut CircomBuilder<Fr>, path: &str, value: &InputValue) {
 
 /// Proves and verifies a Circom circuit, generating keys on each call
 ///
-/// Convenience function that generates Groth16 keys and then proves and verifies
-/// the circuit. This is simpler to use but less efficient for repeated proofs
-/// since key generation is expensive. For multiple proofs with the same circuit,
-/// use `generate_keys` once and then call `prove_and_verify_with_keys` repeatedly.
+/// Convenience function that generates Groth16 keys and then proves and
+/// verifies the circuit. This is simpler to use but less efficient for repeated
+/// proofs since key generation is expensive. For multiple proofs with the same
+/// circuit, use `generate_keys` once and then call `prove_and_verify_with_keys`
+/// repeatedly.
 ///
 /// # Arguments
 ///
@@ -292,8 +291,9 @@ fn push_value(builder: &mut CircomBuilder<Fr>, path: &str, value: &InputValue) {
 ///
 /// # Returns
 ///
-/// Returns `Ok(CircomResult)` containing the verification result, proof, public inputs,
-/// and verifying key, or an error if key generation, proving, or verification fails.
+/// Returns `Ok(CircomResult)` containing the verification result, proof, public
+/// inputs, and verifying key, or an error if key generation, proving, or
+/// verification fails.
 pub fn prove_and_verify(
     wasm_path: impl AsRef<Path>,
     r1cs_path: impl AsRef<Path>,

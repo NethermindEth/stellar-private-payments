@@ -42,7 +42,8 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     leaves[0]
 }
 
-/// Compute the Merkle path (siblings) and path index bits for a given leaf index
+/// Compute the Merkle path (siblings) and path index bits for a given leaf
+/// index
 ///
 /// Generates the Merkle proof for a leaf at the given index, including all
 /// sibling nodes along the path to the root and the path indices encoded as

@@ -1,25 +1,30 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::circom_tester::{Inputs, prove_and_verify};
-    use crate::test::utils::general::load_artifacts;
+    use crate::test::utils::{
+        circom_tester::{Inputs, prove_and_verify},
+        general::load_artifacts,
+    };
     use anyhow::{Context, Result};
     use num_bigint::BigInt;
     use std::path::PathBuf;
 
     /// Run a Poseidon2 hash test case
     ///
-    /// Tests the Poseidon2 hash circuit with two inputs and a domain separation value.
+    /// Tests the Poseidon2 hash circuit with two inputs and a domain separation
+    /// value.
     ///
     /// # Arguments
     ///
     /// * `wasm` - Path to the compiled WASM file
     /// * `r1cs` - Path to the R1CS constraint system file
-    /// * `inputs_pair` - Tuple of two u64 input values to test the hash function
+    /// * `inputs_pair` - Tuple of two u64 input values to test the hash
+    ///   function
     /// * `domain_separation` - Domain separation value
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    /// Returns `Ok(())` if the proof verifies successfully, or an error
+    /// otherwise.
     fn run_case_hash(
         wasm: &PathBuf,
         r1cs: &PathBuf,
@@ -53,11 +58,13 @@ mod tests {
     ///
     /// * `wasm` - Path to the compiled WASM file
     /// * `r1cs` - Path to the R1CS constraint system file
-    /// * `inputs_pair` - Tuple of two u64 input values to test the compression function
+    /// * `inputs_pair` - Tuple of two u64 input values to test the compression
+    ///   function
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    /// Returns `Ok(())` if the proof verifies successfully, or an error
+    /// otherwise.
     fn run_case_compress(wasm: &PathBuf, r1cs: &PathBuf, inputs_pair: (u64, u64)) -> Result<()> {
         // Prepare circuit inputs
         let mut inputs = Inputs::new();

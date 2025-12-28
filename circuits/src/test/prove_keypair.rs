@@ -1,10 +1,11 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::circom_tester::{Inputs, prove_and_verify};
-    use crate::test::utils::general::load_artifacts;
-    use crate::test::utils::keypair::{derive_public_key, sign};
-    use anyhow::Context;
-    use anyhow::Result;
+    use crate::test::utils::{
+        circom_tester::{Inputs, prove_and_verify},
+        general::load_artifacts,
+        keypair::{derive_public_key, sign},
+    };
+    use anyhow::{Context, Result};
     use std::path::PathBuf;
     use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -21,7 +22,8 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    /// Returns `Ok(())` if the proof verifies successfully, or an error
+    /// otherwise.
     fn run_keypair_case(wasm: &PathBuf, r1cs: &PathBuf, private_key: Scalar) -> Result<()> {
         // compute expected in Rust
         let expected_pk = derive_public_key(private_key);
@@ -37,8 +39,9 @@ mod tests {
 
     /// Run a signature test case
     ///
-    /// Tests the signature circuit by generating a signature from a private key,
-    /// commitment, and merkle path, then verifying the circuit produces the expected result.
+    /// Tests the signature circuit by generating a signature from a private
+    /// key, commitment, and merkle path, then verifying the circuit
+    /// produces the expected result.
     ///
     /// # Arguments
     ///
@@ -50,7 +53,8 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    /// Returns `Ok(())` if the proof verifies successfully, or an error
+    /// otherwise.
     fn run_signature_case(
         wasm: &PathBuf,
         r1cs: &PathBuf,

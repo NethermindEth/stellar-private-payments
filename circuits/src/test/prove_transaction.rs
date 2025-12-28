@@ -9,8 +9,7 @@ mod tests {
         transaction_case::{InputNote, OutputNote, TxCase, prove_transaction_case},
     };
     use anyhow::{Context, Result};
-    use zkhash::ark_ff::Zero;
-    use zkhash::fields::bn256::FpBN256 as Scalar;
+    use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
     #[test]
     #[ignore]
@@ -253,7 +252,8 @@ mod tests {
             LEVELS,
         )?;
 
-        // Compute Tx1.out0 commitment and insert it into the tree as if it was appended to the on-chain tree
+        // Compute Tx1.out0 commitment and insert it into the tree as if it was appended
+        // to the on-chain tree
         let out0_commit = commitment(tx1_out0.amount, tx1_out0.pub_key, tx1_out0.blinding);
         leaves[chain_idx] = out0_commit;
 
@@ -535,7 +535,8 @@ mod tests {
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
         let (wasm, r1cs) = load_artifacts("transaction2")?;
 
-        // Make one real note and reuse it for BOTH inputs -> identical commitments, signatures, and nullifiers
+        // Make one real note and reuse it for BOTH inputs -> identical commitments,
+        // signatures, and nullifiers
         let privk = Scalar::from(7777u64);
         let blind = Scalar::from(4242u64);
         let amount = Scalar::from(33u64);

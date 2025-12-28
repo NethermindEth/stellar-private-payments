@@ -12,7 +12,8 @@
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
 //! The script also generates Groth16 proving and verification
-//! keys for the main test circuit (compliant_test) and outputs them to `scripts/testdata/`.
+//! keys for the main test circuit (compliant_test) and outputs them to
+//! `scripts/testdata/`.
 //!
 //! The output directory is exposed as en environment variable
 //! `std::env::var("CIRCUIT_OUT_DIR")`
@@ -119,11 +120,13 @@ fn main() -> Result<()> {
         Report::print_reports(&report_warns, &program_archive.file_library);
 
         // === CHECK DEPENDENCIES ===
-        // We now extract all included files from the parsed circuit and check if rebuild is needed
-        // This prevents situations where a circuit is not updated, but its dependencies are
+        // We now extract all included files from the parsed circuit and check if
+        // rebuild is needed This prevents situations where a circuit is not
+        // updated, but its dependencies are
         let dependencies = extract_circom_dependencies(&circom_file, &crate_dir)?;
         for dep_path in &dependencies {
-            // Register each dependency file with cargo so it knows to rebuild when they change
+            // Register each dependency file with cargo so it knows to rebuild when they
+            // change
             println!("cargo:rerun-if-changed={}", dep_path.display());
         }
 
@@ -219,7 +222,8 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-/// Recursively extract all .circom file dependencies by parsing all include statements
+/// Recursively extract all .circom file dependencies by parsing all include
+/// statements
 ///
 /// # Arguments
 ///
@@ -282,8 +286,8 @@ fn extract_circom_dependencies(main_file: &Path, base_dir: &Path) -> Result<Vec<
 ///
 /// # Returns
 ///
-/// Returns `Ok(Some(PathBuf))` if the path is found and resolved, `Ok(None)` if not found,
-/// or an error if file system operations fail.
+/// Returns `Ok(Some(PathBuf))` if the path is found and resolved, `Ok(None)` if
+/// not found, or an error if file system operations fail.
 fn resolve_include_path(
     include_path: &str,
     current_dir: &Path,
@@ -560,8 +564,8 @@ fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
 /// Compile WASM using Rust through Circom library
 ///
 /// Compiles a Circom circuit to WebAssembly format for witness generation.
-/// The process involves running the compiler, generating WAT (WebAssembly Text),
-/// and converting it to WASM binary format.
+/// The process involves running the compiler, generating WAT (WebAssembly
+/// Text), and converting it to WASM binary format.
 ///
 /// # Arguments
 ///
@@ -635,7 +639,8 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
 ///
 /// # Returns
 ///
-/// Returns `Ok(())` on success, or an error if parsing, encoding, or writing fails.
+/// Returns `Ok(())` on success, or an error if parsing, encoding, or writing
+/// fails.
 fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
     use std::{
         fs::File,
@@ -701,8 +706,9 @@ fn generate_groth16_keys(
 
 /// Generate Groth16 keys if they don't exist or are older than the R1CS file.
 ///
-/// This function checks if the proving and verification keys exist and are up-to-date.
-/// If not, it generates new keys and writes them to the `scripts/testdata/` directory.
+/// This function checks if the proving and verification keys exist and are
+/// up-to-date. If not, it generates new keys and writes them to the
+/// `scripts/testdata/` directory.
 ///
 /// # Arguments
 ///
