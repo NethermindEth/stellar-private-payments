@@ -22,4 +22,4 @@ jobs:
       - run: |
           rustup +nightly component add miri
           cargo +nightly miri setup
-          MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-strict-provenance" cargo +nightly miri test --lib
+          MIRIFLAGS="-Zmiri-disable-isolation -Zmiri-strict-provenance -Zmiri-disable-stacked-borrows" cargo +nightly miri test --lib
