@@ -13,6 +13,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Install nightly rustfmt
+        run: rustup component add rustfmt --toolchain nightly
       - name: Run Fmt
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
 
