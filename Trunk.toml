@@ -1,0 +1,26 @@
+[build]
+target = "app/index.html"
+public-url = "/"
+dist = "dist"
+filehash = false
+
+[watch]
+watch = ["app", "circuits"]
+ignore = ["app/node_modules"]
+
+[serve]
+addresses = ["0.0.0.0"]
+port = 8000
+
+[tools]
+tailwindcss = "4.1.18"
+
+[[hooks]]
+stage = "build"
+command = "sh"
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
+
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./app.js --bundle --outfile=dist/.stage/js/worker.js --format=esm"]
