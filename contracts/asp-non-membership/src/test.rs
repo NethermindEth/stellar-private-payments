@@ -129,7 +129,8 @@ fn test_root_consistency_with_circuits_insert_1_42() {
 
     let root = client.get_root();
 
-    // Expected root from circuits/src/test/utils/sparse_merkle_tree.rs test_new_tree
+    // Expected root from circuits/src/test/utils/sparse_merkle_tree.rs
+    // test_new_tree
     let expected_root_bytes = [
         36, 47, 214, 99, 44, 86, 82, 102, 2, 180, 27, 116, 85, 152, 220, 251, 240, 186, 68, 254,
         31, 87, 13, 109, 107, 75, 208, 28, 34, 234, 154, 162,
@@ -139,7 +140,8 @@ fn test_root_consistency_with_circuits_insert_1_42() {
     assert_eq!(root, expected_root, "Root should match the circuits test");
 }
 
-/// Test that matches the circuits test: insert key=1, value=42, then update to value=100
+/// Test that matches the circuits test: insert key=1, value=42, then update to
+/// value=100
 #[test]
 fn test_root_consistency_with_circuits_update_1_100() {
     let env = Env::default();
@@ -160,7 +162,8 @@ fn test_root_consistency_with_circuits_update_1_100() {
 
     let root = client.get_root();
 
-    // Expected root from circuits test: 12569474685065514766800302626776627658362290519786081498087070427717152263146
+    // Expected root from circuits test:
+    // 12569474685065514766800302626776627658362290519786081498087070427717152263146
     // Hex: 0x1bca121020a7041a503dabbb08f8ed11fd45bf8c2c0851e9db040ea7ae6fcbea
     let expected_root_bytes = [
         27, 202, 18, 16, 32, 167, 4, 26, 80, 61, 171, 187, 8, 248, 237, 17, 253, 69, 191, 140, 44,
@@ -174,7 +177,8 @@ fn test_root_consistency_with_circuits_update_1_100() {
     );
 }
 
-/// Test that matches the circuits test: insert key=1, value=42, then insert key=2, value=324
+/// Test that matches the circuits test: insert key=1, value=42, then insert
+/// key=2, value=324
 #[test]
 fn test_root_consistency_with_circuits_insert_2_324() {
     let env = Env::default();
@@ -196,7 +200,8 @@ fn test_root_consistency_with_circuits_insert_2_324() {
 
     let root = client.get_root();
 
-    // Expected root from circuits test: 5609325791308905881148228299085922973290228927442613473721605762655624624574
+    // Expected root from circuits test:
+    // 5609325791308905881148228299085922973290228927442613473721605762655624624574
     // Hex: 0x0c66c411436951f3846f7b784b3da933cb56d973afdcec1b1d56af709df7f9be
     let expected_root_bytes = [
         12, 102, 196, 17, 67, 105, 81, 243, 132, 111, 123, 120, 75, 61, 169, 51, 203, 86, 217, 115,
@@ -479,7 +484,8 @@ fn test_verify_non_membership_empty_tree() {
     assert!(result, "Non-membership should be verified in empty tree");
 }
 
-/// Test verify_non_membership with single leaf (collision case, is_old0 = false)
+/// Test verify_non_membership with single leaf (collision case, is_old0 =
+/// false)
 #[test]
 fn test_verify_non_membership_single_leaf_collision() {
     let env = Env::default();

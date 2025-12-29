@@ -1,6 +1,5 @@
 use ark_bn254::{G1Affine as ArkG1Affine, G2Affine as ArkG2Affine};
-use ark_ff::BigInteger;
-use ark_ff::fields::PrimeField;
+use ark_ff::{BigInteger, fields::PrimeField};
 use contract_types::VerificationKeyBytes;
 use soroban_sdk::{Address, BytesN, Env, IntoVal, TryFromVal, Val, Vec, contract, contractimpl};
 
@@ -37,9 +36,13 @@ impl MockToken {
     pub fn balance(_env: Env, _id: Address) -> i128 {
         0
     }
+
     pub fn transfer(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+
     pub fn transfer_from(_env: Env, _from: Address, _to: Address, _amount: i128) {}
+
     pub fn approve(_env: Env, _from: Address, _spender: Address, _amount: i128) {}
+
     pub fn allowance(_env: Env, _from: Address, _spender: Address) -> i128 {
         0
     }
@@ -77,7 +80,8 @@ pub fn g2_bytes_from_ark(p: ArkG2Affine) -> [u8; 128] {
 /// * `vk` - The ark-groth16 VerifyingKey<Bn254>
 ///
 /// # Returns
-/// A VerificationKeyBytes struct suitable for use with the CircomGroth16Verifier contract
+/// A VerificationKeyBytes struct suitable for use with the
+/// CircomGroth16Verifier contract
 pub fn vk_bytes_from_ark(
     env: &Env,
     vk: &ark_groth16::VerifyingKey<ark_bn254::Bn254>,

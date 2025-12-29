@@ -1,27 +1,24 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::circom_tester::{Inputs, SignalKey, prove_and_verify};
-    use crate::test::utils::general::load_artifacts;
-    use crate::test::utils::general::{poseidon2_hash2, scalar_to_bigint};
-    use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
-    use crate::test::utils::sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides};
-    use crate::test::utils::transaction::prepopulated_leaves;
-    use crate::test::utils::transaction_case::{
-        TxCase, build_base_inputs, prepare_transaction_witness,
-    };
     use crate::test::utils::{
+        circom_tester::{Inputs, SignalKey, prove_and_verify},
+        general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         keypair::derive_public_key,
-        transaction::commitment,
-        transaction_case::{InputNote, OutputNote},
+        merkle_tree::{merkle_proof, merkle_root},
+        sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
+        transaction::{commitment, prepopulated_leaves},
+        transaction_case::{
+            InputNote, OutputNote, TxCase, build_base_inputs, prepare_transaction_witness,
+        },
     };
-    use anyhow::Context;
-    use anyhow::{Result, ensure};
+    use anyhow::{Context, Result, ensure};
     use num_bigint::BigInt;
-    use std::convert::TryInto;
-    use std::panic::{self, AssertUnwindSafe};
-    use std::path::PathBuf;
-    use zkhash::ark_ff::Zero;
-    use zkhash::fields::bn256::FpBN256 as Scalar;
+    use std::{
+        convert::TryInto,
+        panic::{self, AssertUnwindSafe},
+        path::PathBuf,
+    };
+    use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
     const LEVELS: usize = 5;
     const N_MEM_PROOFS: usize = 1;
@@ -1288,7 +1285,8 @@ mod tests {
         let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
         let keys = vec![
             NonMembership {
-                key_non_inclusion: BigInt::from(100001u64), // This will make the proof of non-membership fail
+                key_non_inclusion: BigInt::from(100001u64), /* This will make the proof of
+                                                             * non-membership fail */
             },
             NonMembership {
                 key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),

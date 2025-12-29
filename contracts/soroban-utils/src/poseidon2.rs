@@ -47,7 +47,8 @@ pub fn poseidon2_compress(env: &Env, left: U256, right: U256) -> U256 {
     if compressed_0 >= bn256_mod {
         compressed_0 = compressed_0.rem_euclid(&bn256_mod);
     }
-    // Note we do not consider the second element of the output vector as we truncate to the first element
+    // Note we do not consider the second element of the output vector as we
+    // truncate to the first element
     compressed_0
 }
 
@@ -102,9 +103,10 @@ pub fn poseidon2_hash2(env: &Env, a: U256, b: U256, sep: Option<U256>) -> U256 {
 
 /// Get the zero hash values for each level of a Merkle tree
 ///
-/// Hash of 0 at the leaf level is defined as Poseidon2 hash of "XLM" encoded as ASCII.
-/// More specifically, t=4, r=3, domain_sep=0. poseidon2(88, 76,77) = poseidon2("XLM").
-/// From there, we use the poseidon2 compression function to get the zero hash for each level.
+/// Hash of 0 at the leaf level is defined as Poseidon2 hash of "XLM" encoded as
+/// ASCII. More specifically, t=4, r=3, domain_sep=0. poseidon2(88, 76,77) =
+/// poseidon2("XLM"). From there, we use the poseidon2 compression function to
+/// get the zero hash for each level.
 pub fn get_zeroes(env: &Env) -> Vec<U256> {
     vec![
         env,

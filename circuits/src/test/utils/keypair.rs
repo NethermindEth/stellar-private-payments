@@ -1,12 +1,12 @@
-use zkhash::ark_ff::Zero;
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
 use super::general::{poseidon2_hash2, poseidon2_hash3};
 
 /// Derive a public key from a private key using Poseidon2 hash
 ///
-/// Computes `publicKey = Poseidon2(privateKey, 0)` with domain separation value 3.
-/// Please note the 0 is used as padding as Poseidon2 hash does not support T=1 inputs (over BN256).
+/// Computes `publicKey = Poseidon2(privateKey, 0)` with domain separation value
+/// 3. Please note the 0 is used as padding as Poseidon2 hash does not support
+/// T=1 inputs (over BN256).
 ///
 /// # Arguments
 ///

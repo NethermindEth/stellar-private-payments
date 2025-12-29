@@ -56,13 +56,14 @@ impl MerkleTreeWithHistory {
     /// Initialize the Merkle tree with history
     ///
     /// Creates a new Merkle tree with the specified number of levels. The tree
-    /// is initialized with precomputed zero hashes at each level, and the initial
-    /// root is set to the zero hash at the top level.
+    /// is initialized with precomputed zero hashes at each level, and the
+    /// initial root is set to the zero hash at the top level.
     ///
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `levels` - Number of levels in the Merkle tree (must be in range [1..32])
+    /// * `levels` - Number of levels in the Merkle tree (must be in range
+    ///   [1..32])
     pub fn init(env: &Env, levels: u32) -> Result<(), Error> {
         if levels == 0 || levels > 32 {
             return Err(Error::WrongLevels);
@@ -98,13 +99,15 @@ impl MerkleTreeWithHistory {
 
     /// Insert two leaves into the Merkle tree as siblings
     ///
-    /// Adds 2 new leaves to the Merkle tree and updates the root. The leaves are
-    /// inserted at the next available index, and the tree is updated efficiently
-    /// by only recomputing the hashes along the path to the root.
+    /// Adds 2 new leaves to the Merkle tree and updates the root. The leaves
+    /// are inserted at the next available index, and the tree is updated
+    /// efficiently by only recomputing the hashes along the path to the
+    /// root.
     ///
     /// When the tree is modified, a new root is automatically created in
     /// the next history slot. The previous root remains valid for proof
-    /// verification until it is overwritten after `ROOT_HISTORY_SIZE` rotations.
+    /// verification until it is overwritten after `ROOT_HISTORY_SIZE`
+    /// rotations.
     ///
     /// # Arguments
     ///
@@ -141,7 +144,8 @@ impl MerkleTreeWithHistory {
         // Hash the two leaves to form their parent node at level 1
         let mut current_hash = poseidon2_compress(env, leaf_1, leaf_2);
 
-        // Calculate the parent index at level 1 (since we already hashed the two leaves)
+        // Calculate the parent index at level 1 (since we already hashed the two
+        // leaves)
         let mut current_index = next_index >> 1;
 
         // Update the tree by recomputing hashes along the path to root
@@ -180,9 +184,10 @@ impl MerkleTreeWithHistory {
 
     /// Check if a root exists in the recent history
     ///
-    /// Searches the root history ring buffer to verify if a given root is valid.
-    /// This allows proofs generated against recent tree states to be verified,
-    /// providing some tolerance for latency between proof generation and submission.
+    /// Searches the root history ring buffer to verify if a given root is
+    /// valid. This allows proofs generated against recent tree states to be
+    /// verified, providing some tolerance for latency between proof
+    /// generation and submission.
     ///
     /// # Arguments
     ///
@@ -191,8 +196,8 @@ impl MerkleTreeWithHistory {
     ///
     /// # Returns
     ///
-    /// Returns `true` if the root exists in the history buffer, `false` otherwise.
-    /// Zero root always returns `false`.
+    /// Returns `true` if the root exists in the history buffer, `false`
+    /// otherwise. Zero root always returns `false`.
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
         // Zero root is never valid as define zero in a different way
         if *root == U256::from_u32(env, 0u32) {

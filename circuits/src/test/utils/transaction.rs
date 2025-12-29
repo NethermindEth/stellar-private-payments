@@ -47,6 +47,7 @@ impl Rng64 {
     fn new(seed: u64) -> Self {
         Self(seed)
     }
+
     fn next(&mut self) -> u64 {
         let mut x = self.0;
         x ^= x << 13;
@@ -80,15 +81,17 @@ fn rand_commitment(rng: &mut Rng64) -> Scalar {
 /// Build a pre-populated leaves vector of length 2^levels
 ///
 /// Creates a vector of leaves for a Merkle tree, pre-populating some positions
-/// with random commitments while excluding specified indices. The excluded indices
-/// are reserved for overwriting with test case inputs.
+/// with random commitments while excluding specified indices. The excluded
+/// indices are reserved for overwriting with test case inputs.
 ///
 /// # Arguments
 ///
 /// * `levels` - Number of tree levels
 /// * `seed` - Seed value for the random number generator
-/// * `exclude_indices` - Indices to leave empty (will be overwritten with test inputs)
-/// * `fill_count` - Number of random commitments to place in the tree for testing cases
+/// * `exclude_indices` - Indices to leave empty (will be overwritten with test
+///   inputs)
+/// * `fill_count` - Number of random commitments to place in the tree for
+///   testing cases
 ///
 /// # Returns
 ///

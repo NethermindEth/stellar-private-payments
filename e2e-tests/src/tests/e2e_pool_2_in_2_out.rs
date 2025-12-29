@@ -13,25 +13,26 @@ use super::utils::{
 use anyhow::Result;
 use asp_membership::ASPMembershipClient;
 use asp_non_membership::ASPNonMembershipClient;
-use circuits::test::utils::general::poseidon2_hash2;
-use circuits::test::utils::general::scalar_to_bigint;
-use circuits::test::utils::keypair::derive_public_key;
-use circuits::test::utils::transaction::{commitment, prepopulated_leaves};
-use circuits::test::utils::transaction_case::{
-    InputNote, OutputNote, TxCase, prepare_transaction_witness,
+use circuits::test::utils::{
+    general::{poseidon2_hash2, scalar_to_bigint},
+    keypair::derive_public_key,
+    transaction::{commitment, prepopulated_leaves},
+    transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec};
+use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-/// Full E2E test: Generate a real proof, deploy contracts, and call transact which verifies the zk-proof
+/// Full E2E test: Generate a real proof, deploy contracts, and call transact
+/// which verifies the zk-proof
 ///
 /// This test demonstrates a complete integration:
 /// 1. Creates a transaction case (2 inputs, 2 outputs)
 /// 2. Generates a real Groth16 proof using the compliance circuit
-/// 3. Deploys all contracts (Pool, ASP Membership, ASP Non-Membership, Verifier) and syncs the state
-/// 4. Initializes the verifier with the real verification key from proof generation
+/// 3. Deploys all contracts (Pool, ASP Membership, ASP Non-Membership,
+///    Verifier) and syncs the state
+/// 4. Initializes the verifier with the real verification key from proof
+///    generation
 /// 5. Calls the `transact` function on the pool contract
 #[test]
 fn test_e2e_transact_with_real_proof() -> Result<()> {
@@ -89,7 +90,8 @@ fn test_e2e_transact_with_real_proof() -> Result<()> {
         24,
     );
     // Leave the last 2 position empty (zero value in Merkle tree)
-    // Otherwise when the verification succeeds, the pool will revert the transaction because the Merkle tree would be full.
+    // Otherwise when the verification succeeds, the pool will revert the
+    // transaction because the Merkle tree would be full.
     let zero = U256::from_be_bytes(
         &env,
         &Bytes::from_array(
@@ -135,9 +137,10 @@ fn test_e2e_transact_with_real_proof() -> Result<()> {
     println!("Contracts deployed!");
 
     // Sync on-chain state with off-chain proof data
-    // Since contracts were just deployed, their merkle trees are basically empty. We need to insert leaves into them to have an state
-    // equivalent to what we used to generate the proof off-chain.
-    // Insert membership leaves into ASP Membership contract
+    // Since contracts were just deployed, their merkle trees are basically empty.
+    // We need to insert leaves into them to have an state equivalent to what we
+    // used to generate the proof off-chain. Insert membership leaves into ASP
+    // Membership contract
     let asp_membership_client = ASPMembershipClient::new(&env, &contracts.asp_membership);
     let asp_non_membership_client =
         ASPNonMembershipClient::new(&env, &contracts.asp_non_membership);

@@ -1,9 +1,9 @@
 //! ASP Membership Contract
 //!
-//! This contract implements a Merkle tree-based membership system using Poseidon2
-//! hash function for Anonymous Service Provider (ASP) membership tracking.
-//! The contract maintains a Merkle tree where each leaf represents a member,
-//! and the root serves as a commitment to the entire membership set.
+//! This contract implements a Merkle tree-based membership system using
+//! Poseidon2 hash function for Anonymous Service Provider (ASP) membership
+//! tracking. The contract maintains a Merkle tree where each leaf represents a
+//! member, and the root serves as a commitment to the entire membership set.
 #![no_std]
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
@@ -63,12 +63,14 @@ impl ASPMembership {
     /// Constructor: initialize the ASP Membership contract
     ///
     /// Creates a new Merkle tree with the specified number of levels and sets
-    /// the admin address. The tree is initialized with zero hashes at each level.
+    /// the admin address. The tree is initialized with zero hashes at each
+    /// level.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `admin` - Address of the contract administrator
-    /// * `levels` - Number of levels in the Merkle tree (must be in range [1..32])
+    /// * `levels` - Number of levels in the Merkle tree (must be in range
+    ///   [1..32])
     ///
     /// # Returns
     /// Returns `Ok(())` on success, or an error if already initialized
@@ -157,15 +159,16 @@ impl ASPMembership {
     ///
     /// Adds a new member to the Merkle tree and updates the root. The leaf is
     /// inserted at the next available index and the tree is updated efficiently
-    /// by only recomputing the hashes along the path to the root. Only the admin
-    /// can insert leaves.
+    /// by only recomputing the hashes along the path to the root. Only the
+    /// admin can insert leaves.
     ///
     /// # Arguments
     /// * `env` - The Soroban environment
     /// * `leaf` - The leaf value to insert (typically a commitment or hash)
     ///
     /// # Returns
-    /// Returns `Ok(())` on success, or `MerkleTreeFull` if the tree is at capacity
+    /// Returns `Ok(())` on success, or `MerkleTreeFull` if the tree is at
+    /// capacity
     pub fn insert_leaf(env: Env, leaf: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
         let admin: Address = store.get(&DataKey::Admin).unwrap();

@@ -17,10 +17,11 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 #[derive(Clone, Debug)]
 /// Description of a note spent by the tested transaction.
 pub struct InputNote {
-    pub leaf_index: usize, // We need to place the note in the tree, and hold the index to know where it is
-    pub priv_key: Scalar,  // Used to derive its public key and to sign nullifiers for spends.
-    pub blinding: Scalar,  // Keeps the commitment hiding so tests match the production circuit.
-    pub amount: Scalar,    // Amount being spent; required for balance and commitment inputs.
+    pub leaf_index: usize, /* We need to place the note in the tree, and hold the index to know
+                            * where it is */
+    pub priv_key: Scalar, // Used to derive its public key and to sign nullifiers for spends.
+    pub blinding: Scalar, // Keeps the commitment hiding so tests match the production circuit.
+    pub amount: Scalar,   // Amount being spent; required for balance and commitment inputs.
 }
 
 #[derive(Clone, Debug)]
@@ -33,7 +34,8 @@ pub struct OutputNote {
 
 #[derive(Clone, Debug)]
 /// Convenience container holding a single test transaction scenario.
-/// We use `Vec` because we usually have more than one input and output. The test defines how many
+/// We use `Vec` because we usually have more than one input and output. The
+/// test defines how many
 pub struct TxCase {
     pub inputs: Vec<InputNote>,
     pub outputs: Vec<OutputNote>,
@@ -55,8 +57,8 @@ pub struct TransactionWitness {
 
 /// Builds the witnesses needed to exercise a `TxCase`
 ///
-/// Populates commitment leaves in the Merkle tree, derives Merkle proofs for each
-/// input note, and computes nullifiers. This prepares all the witness data
+/// Populates commitment leaves in the Merkle tree, derives Merkle proofs for
+/// each input note, and computes nullifiers. This prepares all the witness data
 /// required for proving a transaction.
 ///
 /// # Arguments
@@ -67,9 +69,9 @@ pub struct TransactionWitness {
 ///
 /// # Returns
 ///
-/// Returns `Ok(TransactionWitness)` containing the root, public keys, nullifiers,
-/// path indices, and flattened path elements, or an error if the tree depth
-/// doesn't match expectations.
+/// Returns `Ok(TransactionWitness)` containing the root, public keys,
+/// nullifiers, path indices, and flattened path elements, or an error if the
+/// tree depth doesn't match expectations.
 pub fn prepare_transaction_witness(
     case: &TxCase,
     mut leaves: Vec<Scalar>,

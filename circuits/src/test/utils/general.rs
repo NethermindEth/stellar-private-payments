@@ -1,13 +1,16 @@
 use num_bigint::{BigInt, BigUint};
-use std::ops::AddAssign;
-use std::path::PathBuf;
-use zkhash::poseidon2::poseidon2::Poseidon2;
-use zkhash::poseidon2::poseidon2_instance_bn256::{
-    POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
+use std::{ops::AddAssign, path::PathBuf};
+use zkhash::poseidon2::{
+    poseidon2::Poseidon2,
+    poseidon2_instance_bn256::{
+        POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
+    },
 };
 
-use zkhash::ark_ff::{BigInteger, PrimeField};
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use zkhash::{
+    ark_ff::{BigInteger, PrimeField},
+    fields::bn256::FpBN256 as Scalar,
+};
 
 /// Poseidon2 hash of two field elements using optimized compression mode
 ///

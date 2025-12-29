@@ -1,8 +1,10 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::general::scalar_to_bigint;
-    use crate::test::utils::merkle_tree::{merkle_proof, merkle_root};
-    use crate::test::utils::{circom_tester::generate_keys, general::load_artifacts};
+    use crate::test::utils::{
+        circom_tester::generate_keys,
+        general::{load_artifacts, scalar_to_bigint},
+        merkle_tree::{merkle_proof, merkle_root},
+    };
 
     use crate::test::utils::circom_tester::{CircuitKeys, Inputs, prove_and_verify_with_keys};
     use anyhow::{Context, Result};
@@ -12,9 +14,9 @@ mod tests {
 
     /// Run a Merkle proof test case
     ///
-    /// Tests the Merkle proof circuit by computing a Merkle root and proof in Rust,
-    /// then verifying the circuit produces matching results. Uses precomputed keys
-    /// for efficiency when running multiple test cases.
+    /// Tests the Merkle proof circuit by computing a Merkle root and proof in
+    /// Rust, then verifying the circuit produces matching results. Uses
+    /// precomputed keys for efficiency when running multiple test cases.
     ///
     /// # Arguments
     ///
@@ -27,8 +29,9 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies and the computed root matches the circuit output,
-    /// or an error if verification fails or roots don't match.
+    /// Returns `Ok(())` if the proof verifies and the computed root matches the
+    /// circuit output, or an error if verification fails or roots don't
+    /// match.
     fn run_case(
         wasm: &PathBuf,
         r1cs: &PathBuf,
