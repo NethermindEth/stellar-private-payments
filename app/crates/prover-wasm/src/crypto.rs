@@ -48,8 +48,10 @@ pub(crate) fn poseidon2_hash3_internal(a: Scalar, b: Scalar, c: Scalar, domain: 
 /// Used for internal nodes in merkle trees.
 pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
-    let perm = poseidon2.permutation(&[left, right]);
-    perm[0]
+    let input = [left, right];
+    let perm = poseidon2.permutation(&input);
+    // Feed-forward: add inputs back to permutation output
+    perm[0] + input[0]
 }
 
 /// Poseidon2 hash with 2 inputs and domain separation
@@ -158,6 +160,7 @@ pub fn compute_nullifier(
 }
 
 /// Internal public key derivation
+/// Uses domain separation 0x03 (matching Keypair template in circom)
 pub(crate) fn derive_public_key_internal(private_key: Scalar) -> Scalar {
-    poseidon2_hash2_internal(private_key, Scalar::from(0u64), None)
+    poseidon2_hash2_internal(private_key, Scalar::from(0u64), Some(Scalar::from(3u64)))
 }

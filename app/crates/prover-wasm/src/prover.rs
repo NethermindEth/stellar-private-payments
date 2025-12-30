@@ -239,6 +239,15 @@ impl Prover {
         }
 
         let num_witness_elements = witness_bytes.len() / FIELD_SIZE;
+        let num_public = self.r1cs.num_public as usize;
+
+        web_sys::console::log_1(
+            &format!(
+                "[Rust prove] witness={} elements, circuit needs {} wires, {} public inputs",
+                num_witness_elements, self.r1cs.num_wires, num_public
+            )
+            .into(),
+        );
 
         // Validate witness has enough elements
         if num_witness_elements < self.r1cs.num_wires as usize {
@@ -256,6 +265,16 @@ impl Prover {
             witness.push(bytes_to_fr(chunk)?);
         }
 
+        // Log first few public inputs for debugging
+        for i in 1..=num_public.min(3) {
+            if i < witness.len() {
+                web_sys::console::log_1(
+                    &format!("[Rust prove] witness[{}] (public input {}) = {}", i, i - 1, witness[i])
+                        .into(),
+                );
+            }
+        }
+
         // Create circuit with R1CS and witness
         let circuit = R1CSCircuit {
             r1cs: self.r1cs.clone(),
@@ -263,9 +282,12 @@ impl Prover {
         };
 
         // Generate proof
+        web_sys::console::log_1(&"[Rust prove] Generating proof...".into());
         let mut rng = OsRng;
         let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
             .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {}", e)))?;
+
+        web_sys::console::log_1(&"[Rust prove] Proof generated successfully".into());
 
         // Serialize proof points
         let mut a_bytes = Vec::new();
@@ -331,9 +353,20 @@ impl Prover {
     /// Verify a proof (for testing purposes)
     #[wasm_bindgen]
     pub fn verify(&self, proof_bytes: &[u8], public_inputs_bytes: &[u8]) -> Result<bool, JsValue> {
+        web_sys::console::log_1(
+            &format!(
+                "[Rust verify] proof_bytes={} bytes, public_inputs_bytes={} bytes",
+                proof_bytes.len(),
+                public_inputs_bytes.len()
+            )
+            .into(),
+        );
+
         // Deserialize proof
         let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+
+        web_sys::console::log_1(&"[Rust verify] Proof deserialized OK".into());
 
         // Parse public inputs
         if public_inputs_bytes.len() % FIELD_SIZE != 0 {
@@ -341,10 +374,36 @@ impl Prover {
         }
 
         let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
+        let expected_inputs = self.pk.vk.gamma_abc_g1.len() - 1;
+
+        web_sys::console::log_1(
+            &format!(
+                "[Rust verify] Parsed {} public inputs, VK expects {}",
+                num_inputs, expected_inputs
+            )
+            .into(),
+        );
+
+        if num_inputs != expected_inputs {
+            web_sys::console::log_1(
+                &format!(
+                    "[Rust verify] WARNING: Public input count mismatch! Got {}, expected {}",
+                    num_inputs, expected_inputs
+                )
+                .into(),
+            );
+        }
+
         let mut public_inputs = Vec::with_capacity(num_inputs);
         for i in 0..num_inputs {
             let chunk = &public_inputs_bytes[i * FIELD_SIZE..(i + 1) * FIELD_SIZE];
-            public_inputs.push(bytes_to_fr(chunk)?);
+            let fr = bytes_to_fr(chunk)?;
+            if i < 3 {
+                web_sys::console::log_1(
+                    &format!("[Rust verify] public_input[{}] = {}", i, fr).into(),
+                );
+            }
+            public_inputs.push(fr);
         }
 
         // Verify
@@ -354,6 +413,8 @@ impl Prover {
             &proof,
         )
         .map_err(|e| JsValue::from_str(&format!("Verification error: {}", e)))?;
+
+        web_sys::console::log_1(&format!("[Rust verify] Result: {}", result).into());
 
         Ok(result)
     }

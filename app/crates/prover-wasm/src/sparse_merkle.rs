@@ -10,15 +10,13 @@ use wasm_bindgen::prelude::*;
 use zkhash::ark_ff::PrimeField;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-use crate::crypto::{poseidon2_compression, poseidon2_hash3_internal};
+use crate::crypto::{poseidon2_compression, poseidon2_hash2_internal};
 use crate::serialization::{bytes_to_scalar, scalar_to_bytes};
 
 // Hash functions
-/// Poseidon2 hash for leaf nodes: hash(key, value, 1)
-///
-/// Uses domain separation value of 1 to distinguish leaves from internal nodes.
+/// Poseidon2 hash for leaf nodes: Poseidon2(key, value, domain=1)
 fn poseidon2_hash_leaf(key: Scalar, value: Scalar) -> Scalar {
-    poseidon2_hash3_internal(key, value, Scalar::from(1u64), None)
+    poseidon2_hash2_internal(key, value, Some(Scalar::from(1u64)))
 }
 
 // =============================================================================
