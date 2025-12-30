@@ -3,7 +3,7 @@
  * to avoid blocking the main UI thread.
  * Communication happens via messages
  */
-import initWasmModule, {init, Prover} from '../../dist/js/prover.js';;
+import initWasmModule, {init, Prover} from './app.js';
 
 (async () => {
     console.log('Worker script initializing...');
