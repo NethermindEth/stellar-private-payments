@@ -49,6 +49,15 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
 
         let num_public = self.r1cs.num_public as usize;
         let num_wires = self.r1cs.num_wires as usize;
+        let num_constraints = self.r1cs.constraints.len();
+
+        web_sys::console::log_1(
+            &format!(
+                "[R1CS] generate_constraints: num_public={}, num_wires={}, num_constraints={}, witness_len={}",
+                num_public, num_wires, num_constraints, self.witness.len()
+            )
+            .into(),
+        );
 
         // Allocate all variables and store them for constraint generation
         let mut variables: Vec<Variable> = Vec::with_capacity(num_wires);
@@ -78,8 +87,42 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
             variables.push(var);
         }
 
+        web_sys::console::log_1(
+            &format!(
+                "[R1CS] Allocated {} variables (1 constant + {} public + {} private)",
+                variables.len(),
+                num_public,
+                num_wires - num_public - 1
+            )
+            .into(),
+        );
+
+        // Log first 3 constraints for debugging
+        for (idx, constraint) in self.r1cs.constraints.iter().enumerate().take(3) {
+            web_sys::console::log_1(
+                &format!(
+                    "[R1CS] Constraint {}: A has {} terms, B has {} terms, C has {} terms",
+                    idx,
+                    constraint.a.terms.len(),
+                    constraint.b.terms.len(),
+                    constraint.c.terms.len()
+                )
+                .into(),
+            );
+            if let Some(term) = constraint.a.terms.first() {
+                web_sys::console::log_1(
+                    &format!(
+                        "[R1CS]   First A term: wire_id={}, coeff={}",
+                        term.wire_id, term.coefficient
+                    )
+                    .into(),
+                );
+            }
+        }
+
         // Now generate all constraints from R1CS
         // Each R1CS constraint is: A * B = C
+        let mut constraints_enforced = 0usize;
         for constraint in &self.r1cs.constraints {
             // We need to capture the constraint data for the closures
             let a_terms: Vec<_> = constraint
@@ -148,6 +191,21 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
                     lc_c
                 },
             )?;
+            constraints_enforced += 1;
+        }
+
+        web_sys::console::log_1(
+            &format!("[R1CS] Enforced {} constraints", constraints_enforced).into(),
+        );
+
+        // Check if constraint system is satisfied
+        let is_satisfied = cs.is_satisfied().unwrap_or(false);
+        web_sys::console::log_1(
+            &format!("[R1CS] Constraint system satisfied: {}", is_satisfied).into(),
+        );
+
+        if !is_satisfied {
+            web_sys::console::log_1(&"[R1CS] WARNING: Constraints not satisfied!".into());
         }
 
         Ok(())
