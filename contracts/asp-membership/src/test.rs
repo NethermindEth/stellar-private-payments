@@ -7,8 +7,7 @@ use soroban_sdk::{Address, Bytes, Env, U256, Vec, testutils::Address as _, vec};
 use zkhash::{
     ark_ff::{BigInteger, Fp256, PrimeField},
     fields::bn256::FpBN256 as Scalar,
-    poseidon2::poseidon2::Poseidon2,
-    poseidon2::poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2,
+    poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
 };
 
 #[test]
@@ -259,7 +258,8 @@ fn test_multiple_insertions() {
     );
 }
 
-/// Poseidon2 compression function (same as in circuits/src/test/utils/general.rs)
+/// Poseidon2 compression function (same as in
+/// circuits/src/test/utils/general.rs)
 fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
     let mut perm = h.permutation(&[left, right]);

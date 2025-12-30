@@ -1,62 +1,12 @@
-APP_DIR = ./app
-DIST_DIR = ./dist
-INPUT_CSS = $(APP_DIR)/css/src.css
-OUTPUT_CSS = $(DIST_DIR)/css/app.css
-SERVED_OUTPUT_CSS = $(APP_DIR)/css/app.css
-CONFIG = $(APP_DIR)/tailwind.config.js
-ESBUILD = ./app/node_modules/.bin/esbuild
-
-.PHONY: all
-all: dist
-
-# Build the app distribution for static hosting
-.PHONY: dist
-dist: createdist bundle
-
-# install required frontend deps
-.PHONY: bundle
-bundle: html css js assets wasm circuits-artifacts witness-module proving-keys
-
-.PHONY: css
-css:
-	@echo "Packing CSS"
-	npx --prefix $(APP_DIR) tailwindcss -i $(INPUT_CSS) -o $(OUTPUT_CSS) --minify
-
-.PHONY: js
-js:	wasm witness-module
-	@echo "Packing JS"
-	mkdir -p $(DIST_DIR)/js
-	# Bundle main app (excludes witness module and prover for separate loading)
-	$(ESBUILD) $(APP_DIR)/js/app.js --bundle --outfile=$(DIST_DIR)/js/app.js --format=esm \
-		--external:./witness/* --external:../../dist/js/prover/*
-	# Copy bridge and worker (they import witness/prover dynamically)
-	cp $(APP_DIR)/js/bridge.js $(DIST_DIR)/js/
-	cp $(APP_DIR)/js/worker.js $(DIST_DIR)/js/
-
-.PHONY: assets
-assets:
-	cp -r app/assets $(DIST_DIR)/assets
-
-.PHONY: html
-html:
-	@echo "Packing HTML"
-	cp -r app/*.html $(DIST_DIR)/
-
-.PHONY: createdist
-createdist:
-	rm -rf $(DIST_DIR)
-	mkdir -p $(DIST_DIR)
-
 .PHONY: serve
 serve: $(DIST_DIR)
-	@echo "Starting static server"
-	python3 $(APP_DIR)/devserver.py
+	trunk serve
 
 .PHONY: install
 install:
 	@echo "Installing frontend dependencies..."
 	npm install --prefix app
-	cargo install wasm-pack
+	cargo install trunk --locked
 
 .PHONY: wasm
 wasm:

@@ -1,7 +1,7 @@
 //! Privacy Pool Contract
 //!
-//! This contract implements a privacy-preserving transaction pool with embedded compliance.
-//! It enables users to deposit, transfer, and withdraw
+//! This contract implements a privacy-preserving transaction pool with embedded
+//! compliance. It enables users to deposit, transfer, and withdraw
 //! tokens while maintaining transaction privacy through zero-knowledge proofs.
 //!
 //! # Architecture
@@ -14,12 +14,9 @@
 #![allow(clippy::too_many_arguments)]
 use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use contract_types::{Groth16Error, Groth16Proof};
-use soroban_sdk::contractclient;
-use soroban_sdk::token::TokenClient;
-use soroban_sdk::xdr::ToXdr;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contracterror, contractevent,
-    contractimpl, contracttype, crypto::bn254::Fr,
+    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractclient, contracterror,
+    contractevent, contractimpl, contracttype, crypto::bn254::Fr, token::TokenClient, xdr::ToXdr,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -137,8 +134,8 @@ pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
 ///
 /// Used for registering a user's public key to enable encrypted communication
 /// for receiving transfers.
-/// Not required to interact with the pool. But facilitates in-pool transfers via events.
-/// As parties can learn about each other public key.
+/// Not required to interact with the pool. But facilitates in-pool transfers
+/// via events. As parties can learn about each other public key.
 #[contracttype]
 pub struct Account {
     /// Owner address of the account
@@ -322,7 +319,8 @@ impl PoolContract {
     /// # Arguments
     ///
     /// * `env` - The Soroban environment
-    /// * `ext_amount` - External amount (positive for deposit, negative for withdrawal)
+    /// * `ext_amount` - External amount (positive for deposit, negative for
+    ///   withdrawal)
     ///
     /// # Returns
     ///
@@ -397,8 +395,10 @@ impl PoolContract {
         let client = CircomGroth16VerifierClient::new(env, &verifier);
 
         // Public inputs expected by the Circom Transaction circuit:
-        // Order is important. Order is defined by the order in which the signals were declared in the circuit.
-        // The current order is [root, public_amount, ext_data_hash, asp_membership_root, asp_non_membership_root, input nullifiers, output_commitment0, output_commitment1]
+        // Order is important. Order is defined by the order in which the signals were
+        // declared in the circuit. The current order is [root, public_amount,
+        // ext_data_hash, asp_membership_root, asp_non_membership_root, input
+        // nullifiers, output_commitment0, output_commitment1]
         let mut public_inputs: Vec<Fr> = Vec::new(env);
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
@@ -480,7 +480,8 @@ impl PoolContract {
     /// * `env` - The Soroban environment
     /// * `proof` - Zero-knowledge proof and public inputs
     /// * `ext_data` - External transaction data
-    /// * `sender` - Address of the transaction sender (must authorize funding transaction)
+    /// * `sender` - Address of the transaction sender (must authorize funding
+    ///   transaction)
     ///
     /// # Returns
     ///
@@ -694,8 +695,8 @@ impl PoolContract {
 
     /// Update the contract administrator
     ///
-    /// Transfers administrative control to a new address. Requires authorization
-    /// from the current admin.
+    /// Transfers administrative control to a new address. Requires
+    /// authorization from the current admin.
     ///
     /// # Arguments
     ///
@@ -729,7 +730,8 @@ impl PoolContract {
 
     /// Update the ASP Membership contract address
     ///
-    /// Changes the ASP Membership contract address. Requires admin authorization.
+    /// Changes the ASP Membership contract address. Requires admin
+    /// authorization.
     ///
     /// # Arguments
     ///
@@ -746,7 +748,8 @@ impl PoolContract {
 
     /// Update the ASP Non-Membership contract address
     ///
-    /// Changes the ASP Non-Membership contract address. Requires admin authorization.
+    /// Changes the ASP Non-Membership contract address. Requires admin
+    /// authorization.
     ///
     /// # Arguments
     ///

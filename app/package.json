@@ -9,7 +9,6 @@
   "author": "",
   "license": "Apache-2.0",
   "devDependencies": {
-    "@tailwindcss/cli": "^4.1.18",
     "esbuild": "^0.27.2",
     "tailwindcss": "^4.1.18"
   },

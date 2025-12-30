@@ -23,12 +23,15 @@
     <title>PoolStellar - Compliant Private System</title>
     
     <!-- Tailwind CSS -->
-    <link href="css/app.css" rel="stylesheet">
+    <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
     
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+
+    <link data-trunk rel="rust" data-target-path="js" data-wasm-opt="z" />
+    <link data-trunk rel="copy-dir" href="assets/" />
 </head>
 <body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
     <!-- Skip to main content for accessibility -->
@@ -685,6 +688,6 @@
         </div>
     </template>
 
-    <script src="js/app.js" type="module"></script>
+    <script data-trunk data-target-path="js" data-integrity="none" src="js/ui.js" type="module"></script>
 </body>
 </html>

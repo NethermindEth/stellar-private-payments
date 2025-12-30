@@ -6,26 +6,29 @@ use ark_groth16::VerifyingKey;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
-use circuits::test::utils::circom_tester::{
-    CircomResult, SignalKey, load_keys, prove_and_verify_with_keys,
+use circuits::test::utils::{
+    circom_tester::{CircomResult, SignalKey, load_keys, prove_and_verify_with_keys},
+    general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
+    merkle_tree::{merkle_proof, merkle_root},
+    sparse_merkle_tree::prepare_smt_proof_with_overrides,
+    transaction::prepopulated_leaves,
+    transaction_case::{TxCase, build_base_inputs, prepare_transaction_witness},
 };
-use circuits::test::utils::general::{load_artifacts, poseidon2_hash2, scalar_to_bigint};
-use circuits::test::utils::merkle_tree::{merkle_proof, merkle_root};
-use circuits::test::utils::sparse_merkle_tree::prepare_smt_proof_with_overrides;
-use circuits::test::utils::transaction::prepopulated_leaves;
-use circuits::test::utils::transaction_case::{
-    TxCase, build_base_inputs, prepare_transaction_witness,
-};
-use num_bigint::BigInt;
-use num_bigint::BigUint;
+use num_bigint::{BigInt, BigUint};
 use pool::PoolContract;
-use soroban_sdk::crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine};
-use soroban_sdk::testutils::Address as _;
-use soroban_sdk::{Address, Bytes, BytesN, Env, U256};
-use soroban_utils::utils::{MockToken, vk_bytes_from_ark};
-use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark};
-use zkhash::ark_ff::{BigInteger, PrimeField, Zero};
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use soroban_sdk::{
+    Address, Bytes, BytesN, Env, U256,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    testutils::Address as _,
+};
+use soroban_utils::{
+    g1_bytes_from_ark, g2_bytes_from_ark,
+    utils::{MockToken, vk_bytes_from_ark},
+};
+use zkhash::{
+    ark_ff::{BigInteger, PrimeField, Zero},
+    fields::bn256::FpBN256 as Scalar,
+};
 
 /// Number of levels in the pool's commitment Merkle tree
 pub const LEVELS: usize = 5;
@@ -42,8 +45,8 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 5;
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
 
-/// Returns the path to the pre-generated proving key for the compliant_test circuit.
-/// Uses CARGO_MANIFEST_DIR to find the workspace root.
+/// Returns the path to the pre-generated proving key for the compliant_test
+/// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
 fn proving_key_path() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
@@ -65,8 +68,9 @@ pub struct DeployedContracts {
 
 /// Deploy all contracts required for E2E testing
 ///
-/// Deploys and runs constructors for the Pool, ASP Membership, ASP Non-Membership,
-/// and Groth16 Verifier contracts with the provided verification key.
+/// Deploys and runs constructors for the Pool, ASP Membership, ASP
+/// Non-Membership, and Groth16 Verifier contracts with the provided
+/// verification key.
 ///
 /// # Arguments
 ///
@@ -191,7 +195,8 @@ pub struct NonMembership {
 ///
 /// # Returns
 ///
-/// A vector of membership trees proof information, one per input per membership proof
+/// A vector of membership trees proof information, one per input per membership
+/// proof
 pub fn build_membership_trees<F>(case: &TxCase, seed_fn: F) -> Vec<MembershipTreeProof>
 where
     F: Fn(usize) -> u64,

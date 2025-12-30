@@ -1,16 +1,19 @@
 #[cfg(test)]
 mod tests {
-    use crate::test::utils::circom_tester::prove_and_verify;
-    use crate::test::utils::general::load_artifacts;
-    use crate::test::utils::{circom_tester::Inputs, sparse_merkle_tree::prepare_smt_proof};
+    use crate::test::utils::{
+        circom_tester::{Inputs, prove_and_verify},
+        general::load_artifacts,
+        sparse_merkle_tree::prepare_smt_proof,
+    };
     use anyhow::{Context, Result};
     use num_bigint::BigInt;
     use std::path::PathBuf;
 
     /// Run a sparse Merkle tree test case
     ///
-    /// Tests the sparse Merkle tree circuit by preparing an SMT proof (either inclusion
-    /// or non-inclusion) and verifying the circuit correctly validates the proof.
+    /// Tests the sparse Merkle tree circuit by preparing an SMT proof (either
+    /// inclusion or non-inclusion) and verifying the circuit correctly
+    /// validates the proof.
     ///
     /// # Arguments
     ///
@@ -21,7 +24,8 @@ mod tests {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` if the proof verifies successfully, or an error otherwise.
+    /// Returns `Ok(())` if the proof verifies successfully, or an error
+    /// otherwise.
     fn run_case(
         wasm: &PathBuf,
         r1cs: &PathBuf,
@@ -41,7 +45,8 @@ mod tests {
             BigInt::from(1u32)
         };
 
-        // Compute (oldKey, oldValue, isOld0, key, value) according to what smtverifier.circom expects
+        // Compute (oldKey, oldValue, isOld0, key, value) according to what
+        // smtverifier.circom expects
         let (old_key, old_value, is_old0, key_for_circuit, value_for_circuit) = if smt_proof.found {
             // Inclusion proof
             (

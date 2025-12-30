@@ -47,7 +47,8 @@ impl Groth16Proof {
     }
 }
 
-// Layout: a.x | a.y | b.x_0 | b.x_1 | b.y_0 | b.y_1 | c.x | c.y (all 32-byte big-endian)
+// Layout: a.x | a.y | b.x_0 | b.x_1 | b.y_0 | b.y_1 | c.x | c.y (all 32-byte
+// big-endian)
 pub const FIELD_ELEMENT_SIZE: u32 = 32;
 pub const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
 pub const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
