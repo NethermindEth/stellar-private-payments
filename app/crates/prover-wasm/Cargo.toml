@@ -1,0 +1,43 @@
+[package]
+name = "prover-wasm"
+version = "0.1.0"
+license = "Apache-2.0"
+edition = "2024"
+description = "Browser WASM module for ZK proof generation using Groth16"
+repository = "https://github.com/NethermindEth/stellar-private-transactions"
+publish = false
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# WASM bindings
+wasm-bindgen = { version = "0.2", default-features = false }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+console_error_panic_hook = { version = "0.1", default-features = false }
+js-sys = { version = "0.3", default-features = false }
+getrandom = { version = "0.2", features = ["js"] }
+
+# Serialization
+serde = { version = "1", features = ["derive"], default-features = false }
+serde-wasm-bindgen = { version = "0.6", default-features = false }
+
+# Arkworks - ZK proving
+ark-groth16 = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-ec = { workspace = true }
+ark-relations = { workspace = true }
+ark-serialize = { workspace = true }
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
+
+# Poseidon2 hash
+zkhash = { path = "../../../poseidon2" }
+
+# Error handling
+anyhow = { workspace = true }
+
+[lints]
+workspace = true
+

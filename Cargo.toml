@@ -1,5 +1,5 @@
 [workspace]
-members = ["app", "circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
+members = ["app", "app/crates/prover-wasm", "circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
 resolver = "3"
 
 [workspace.package]
