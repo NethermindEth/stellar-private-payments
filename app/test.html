@@ -79,9 +79,6 @@
     <script type="module">
         // Import from the bridge (same as worker uses)
         import {
-            configure,
-            initModules,
-            initWitnessModule,
             initProver,
             isInitialized,
             derivePublicKey,
@@ -132,7 +129,7 @@
         async function testCrypto() {
             log('=== Testing Crypto Operations ===', 'info');
             
-            // Test 1: Derive public key
+            // Test.  Derive public key
             // Use bigintToField for BigInt values, numberToField for small safe integers
             const privateKey = bigintToField(12345n);
             const publicKey = derivePublicKey(privateKey);
@@ -140,13 +137,13 @@
             log(`Private key: 12345`, 'info');
             log(`Public key: ${publicKeyHex}`, 'success');
             
-            // Test 2: Compute commitment
+            // Test. Compute commitment
             const amount = bigintToField(100n);
             const blinding = bigintToField(999n);
             const commitment = computeCommitment(amount, publicKey, blinding);
             log(`Commitment: ${fieldToHex(commitment)}`, 'success');
             
-            // Test 3: Poseidon hash
+            // Test. Poseidon hash
             const hash2Result = poseidon2_hash2(privateKey, amount, 0);
             log(`Poseidon2(sk, amount, domain=0): ${bytesToHex(hash2Result)}`, 'success');
             

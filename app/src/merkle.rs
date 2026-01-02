@@ -5,7 +5,6 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use circuits::core::merkle::poseidon2_compression;
 use wasm_bindgen::prelude::*;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -16,7 +15,7 @@ use crate::{
 
 // Re-export core merkle functions from circuits
 pub use circuits::core::merkle::{
-    merkle_parent, merkle_proof as merkle_proof_internal, merkle_root,
+    merkle_proof as merkle_proof_internal, merkle_root, poseidon2_compression,
 };
 
 /// Merkle proof data returned to JavaScript
@@ -62,13 +61,15 @@ impl MerkleProof {
 /// Simple Merkle tree for proof generation
 #[wasm_bindgen]
 pub struct MerkleTree {
-    /// Tree levels (level 0 for leaves)
+    /// Tree levels
     levels_data: Vec<Vec<Scalar>>,
     /// Number of levels
     depth: usize,
     /// Next leaf index to insert
     next_index: u64,
 }
+
+// TODO: For now we implement a full merkle tree for quick prototyping. We should implement a partial merkle tree next to minimize storage on user side
 
 #[wasm_bindgen]
 impl MerkleTree {
@@ -88,7 +89,7 @@ impl MerkleTree {
             .ok_or_else(|| JsValue::from_str("Depth overflow"))?;
         let mut levels_data = Vec::with_capacity(capacity);
 
-        // Level 0 = leaves (all zeros initially)
+        // Leaves at level 0
         levels_data.push(vec![zero; num_leaves]);
 
         // Build empty tree (all zeros hash to zero with Poseidon)
@@ -97,7 +98,7 @@ impl MerkleTree {
 
         for _ in 0..depth {
             current_level_size /= 2;
-            prev_hash = hash_pair(prev_hash, prev_hash);
+            prev_hash = poseidon2_compression(prev_hash, prev_hash);
             levels_data.push(vec![prev_hash; current_level_size]);
         }
 
@@ -122,7 +123,7 @@ impl MerkleTree {
         let index_usize =
             usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
 
-        // Insert leaf at level 0
+        // Insert leaf
         self.levels_data[0][index_usize] = leaf;
 
         // Update path to root
@@ -140,7 +141,7 @@ impl MerkleTree {
                 (sibling, current_hash)
             };
 
-            current_hash = hash_pair(left, right);
+            current_hash = poseidon2_compression(left, right);
             current_index /= 2;
 
             // Update parent level
@@ -192,7 +193,7 @@ impl MerkleTree {
             path_elements.extend_from_slice(&scalar_to_bytes(&sibling));
 
             // Record direction (0 = left, 1 = right)
-            if current_index % 2 == 1 {
+            if !current_index.is_multiple_of(2) {
                 path_indices_bits |= 1u64 << level;
             }
 
@@ -258,15 +259,10 @@ pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>,
     for _ in 0..depth {
         let mut next_level = Vec::with_capacity(current_level.len() / 2);
         for pair in current_level.chunks(2) {
-            next_level.push(hash_pair(pair[0], pair[1]));
+            next_level.push(poseidon2_compression(pair[0], pair[1]));
         }
         current_level = next_level;
     }
 
     Ok(scalar_to_bytes(&current_level[0]))
-}
-
-/// Hash two field elements using Poseidon2 compression
-fn hash_pair(left: Scalar, right: Scalar) -> Scalar {
-    poseidon2_compression(left, right)
 }

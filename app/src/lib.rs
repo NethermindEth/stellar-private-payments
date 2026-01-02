@@ -2,7 +2,7 @@
 //!
 //! This module provides browser-compatible ZK proof generation using Groth16.
 //! It handles:
-//! - Input preparation (crypto operations, merkle trees)
+//! - Input preparation (cryptographic operations, merkle trees)
 //! - Proof generation from witness data
 //!
 //! # License

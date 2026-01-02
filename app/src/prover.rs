@@ -2,10 +2,10 @@
 //!
 //! Handles loading proving keys and generating ZK proofs from witness data.
 //!
-//! Note: This module cannot use ark_circom directly because it depends on
+//! We cannot use ark_circom directly because it depends on
 //! wasmer which doesn't work in browser WASM. Instead, we:
 //! 1. Load the proving key
-//! 2. Parse the R1CS file to get constraint matrices
+//! 2. Parse the R1CS file to get constraint matrices (see r1cs.rs)
 //! 3. Accept pre-computed witness bytes from the JS witness calculator
 //! 4. Replay constraints and generate proofs using ark-groth16
 
@@ -69,9 +69,9 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
         }
 
         // Allocate private witnesses (wires num_public+1..)
-        for i in (num_public
+        for i in num_public
             .checked_add(1)
-            .expect("Error on addition of public inputs"))..num_wires
+            .ok_or(SynthesisError::Unsatisfiable)?..num_wires
         {
             let value = if i < self.witness.len() {
                 self.witness[i]

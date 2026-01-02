@@ -1,0 +1,92 @@
+# Privacy Pool Browser Application
+
+Browser-based zero-knowledge proof generation for private Stellar transactions.
+
+## License Architecture
+
+This application contains code under two different licenses that are kept strictly separate:
+
+| Component | License | Location |
+|-----------|---------|----------|
+| Prover Module (Rust/WASM) | Apache-2.0 | `src/` |
+| Witness Calculator (JavaScript) | GPL-3.0 | `js/witness/` |
+
+### Why Two Licenses?
+The original idea was to use 2 Rust modules.
+But the ark-circom dependency relies on Wasmer, and wasmer cannot be compiled into WASM because it uses a just-in-time compiler to run the witness generation.
+Since this will not work in the browser, we went a with a different 2 module approach:
+
+- The witness calculator (`js/witness/`) module is derived from [circom/snarkjs](https://github.com/iden3/circom) which is licensed under GPL-3.0.
+This module is GPL3 licensed, as it consumes Circom artifacts and uses directly the `witness_calculator.js` file.
+- The prover module (`src/`) is a Rust module that is compiled into WASM. This code is licensed under Apache-2.0, a more permissive license that allows commercial use.
+
+### License Isolation
+
+To prevent GPL-3.0 from propagating into our Apache-2.0 codebase, the two modules communicate exclusively through **data-only exchange**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        Browser Runtime                              │
+│                                                                     │
+│  ┌──────────────────────┐         ┌──────────────────────────────┐  │
+│  │   Witness Module     │         │      Prover Module           │  │
+│  │     (GPL-3.0)        │         │      (Apache-2.0)            │  │
+│  │                      │         │                              │  │
+│  │  witness_calculator  │         │  Groth16 proof generation    │  │
+│  │  from circom         │         │  Merkle tree operations      │  │
+│  │                      │         │  Poseidon2 hashing           │  │
+│  └──────────┬───────────┘         └──────────────┬───────────────┘  │
+│             │                                    │                  │
+│             │         Uint8Array                 │                  │
+│             └──────────────────────>─────────────┘                  │
+│                    (data only, no code linking)                     │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+The bridge module (`js/bridge.js`) orchestrates this data exchange without creating a derivative work of either module.
+
+
+## Directory Structure
+
+```
+app/
+├── src/                   # Rust prover module (Apache-2.0)
+│   ├── lib.rs             # WASM entry point
+│   ├── prover.rs          # Groth16 proof generation
+│   ├── crypto.rs          # Poseidon2 hashing
+│   ├── merkle.rs          # Merkle tree operations
+│   ├── sparse_merkle.rs   # Sparse Merkle tree (SMT) with no_std support
+│   ├── r1cs.rs            # R1CS constraint parser
+│   ├── serialization.rs   # Field element serialization
+│   └── types.rs           # Common types
+│
+├── js/
+│   ├── bridge.js          # Coordinates communication between witness + prover modules
+│   ├── witness/           # Circom witness calculator (GPL-3.0)
+│   │   ├── LICENSE        # GPL-3.0 license text
+│   │   ├── index.js       # Witness module wrapper
+│   │   └── witness_calculator.js  # Witness calculator from Circom
+│   ├── prover/            # Compiled WASM output
+│   └── ui.js              # UI interactions
+│
+├── css/                   # Stylesheets
+├── assets/                # Static assets
+├── index.html             # Main application
+└── Cargo.toml             # Rust dependencies
+```
+
+## Building
+
+### Prerequisites
+
+- Rust toolchain with `wasm32-unknown-unknown` target
+- [Trunk](https://trunkrs.dev/) for WASM bundling
+- Node.js (for witness calculator)
+
+### Build Commands
+
+```bash
+# Build WASM module and serve automatically
+make serve
+```

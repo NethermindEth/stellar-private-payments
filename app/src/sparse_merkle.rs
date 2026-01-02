@@ -1,8 +1,11 @@
 //! Sparse Merkle Tree utilities for WASM (no_std compatible)
 //!
 //! Provides sparse merkle tree functionality using BTreeMap for no_std
-//! compatibility. This is a simplified implementation matching the circomlibjs
-//! SMT interface.
+//! compatibility.
+//!
+//! Equivalent functionality to `circuits::test::utils::sparse_merkle_tree` in
+//! the circuit crate. But without std dependencies: Bigint and Hashmap
+//! dependencies mostly. SMT interface.
 
 use alloc::{collections::BTreeMap, vec::Vec};
 

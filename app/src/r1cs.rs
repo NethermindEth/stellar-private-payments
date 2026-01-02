@@ -295,7 +295,7 @@ mod tests {
 
     #[test]
     fn test_cursor_reads() {
-        let data = [0x72, 0x31, 0x63, 0x73, 0x01, 0x00, 0x00, 0x00]; // "r1cs" + version 1
+        let data = [0x72, 0x31, 0x63, 0x73, 0x01, 0x00, 0x00, 0x00]; // "r1cs" + version 1 + 0 padding
         let mut cursor = Cursor::new(&data);
 
         let magic = cursor.read_bytes(4).expect("should read magic bytes");

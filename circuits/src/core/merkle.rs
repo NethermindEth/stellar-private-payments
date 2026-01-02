@@ -22,14 +22,6 @@ pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     perm[0].add(input[0])
 }
 
-/// Compute the Merkle parent from ordered children (left, right)
-///
-/// Uses Poseidon2 compression to combine two child nodes into a parent node.
-#[inline]
-pub fn merkle_parent(left: Scalar, right: Scalar) -> Scalar {
-    poseidon2_compression(left, right)
-}
-
 /// Build a Merkle root from a full list of leaves
 ///
 /// Computes the Merkle root by repeatedly hashing pairs of nodes until
@@ -50,7 +42,7 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     leaves[0]
 }
 
-/// Compute the Merkle path (siblings) and path index bits for a given leaf
+/// Compute the Merkle path and path index bits for a given leaf
 /// index
 ///
 /// Generates the Merkle proof for a leaf at the given index, including all
@@ -63,10 +55,6 @@ pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
 /// - `path_elements`: Vector of sibling scalar values along the path
 /// - `path_indices`: Path indices encoded as a u64 bit pattern
 /// - `levels`: Number of levels in the tree
-///
-/// # Panics
-///
-/// Panics if `leaves` is empty or not a power of two.
 pub fn merkle_proof(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, usize) {
     assert!(!leaves.is_empty() && leaves.len().is_power_of_two());
     let mut level_nodes = leaves.to_vec();
@@ -87,7 +75,7 @@ pub fn merkle_proof(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, u
 
         let mut next = Vec::with_capacity(leaves.len() / 2);
         for pair in level_nodes.chunks_exact(2) {
-            next.push(merkle_parent(pair[0], pair[1]));
+            next.push(poseidon2_compression(pair[0], pair[1]));
         }
         level_nodes = next;
         index /= 2;
@@ -116,7 +104,7 @@ mod tests {
     fn test_merkle_root_two_leaves() {
         let leaves = alloc::vec![Scalar::from(1u64), Scalar::from(2u64)];
         let root = merkle_root(leaves.clone());
-        let expected = merkle_parent(leaves[0], leaves[1]);
+        let expected = poseidon2_compression(leaves[0], leaves[1]);
         assert_eq!(root, expected);
     }
 
@@ -142,9 +130,9 @@ mod tests {
             for (level, elem) in path.iter().enumerate().take(levels) {
                 let is_right = (indices >> level) & 1 == 1;
                 current = if is_right {
-                    merkle_parent(*elem, current)
+                    poseidon2_compression(*elem, current)
                 } else {
-                    merkle_parent(current, *elem)
+                    poseidon2_compression(current, *elem)
                 };
             }
 
