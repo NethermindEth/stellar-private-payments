@@ -698,9 +698,10 @@ fn generate_groth16_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    // IMPORTANT: Use default LibsnarkReduction (NOT CircomReduction) for WASM prover compatibility.
-    // CircomReduction uses snarkjs-compatible QAP which differs from standard arkworks.
-    // Our WASM prover uses standard ark-groth16 without the CircomReduction type parameter.
+    // IMPORTANT: Use default LibsnarkReduction (NOT CircomReduction) for WASM
+    // prover compatibility. CircomReduction uses snarkjs-compatible QAP which
+    // differs from standard arkworks. Our WASM prover uses standard ark-groth16
+    // without the CircomReduction type parameter.
     let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 

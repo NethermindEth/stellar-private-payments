@@ -1,46 +1,38 @@
 //! Sparse Merkle Tree utilities for WASM (no_std compatible)
 //!
-//! Provides sparse merkle tree functionality using BTreeMap for no_std compatibility.
-//! This is a simplified implementation matching the circomlibjs SMT interface.
+//! Provides sparse merkle tree functionality using BTreeMap for no_std
+//! compatibility. This is a simplified implementation matching the circomlibjs
+//! SMT interface.
 
-use alloc::collections::BTreeMap;
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, vec::Vec};
 
 use wasm_bindgen::prelude::*;
-use zkhash::ark_ff::PrimeField;
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use zkhash::{ark_ff::PrimeField, fields::bn256::FpBN256 as Scalar};
 
-use crate::crypto::{poseidon2_compression, poseidon2_hash2_internal};
-use crate::serialization::{bytes_to_scalar, scalar_to_bytes};
+use crate::{
+    crypto::{poseidon2_compression, poseidon2_hash2_internal},
+    serialization::{bytes_to_scalar, scalar_to_bytes},
+};
 
-// Hash functions
 /// Poseidon2 hash for leaf nodes: Poseidon2(key, value, domain=1)
 fn poseidon2_hash_leaf(key: Scalar, value: Scalar) -> Scalar {
     poseidon2_hash2_internal(key, value, Some(Scalar::from(1u64)))
 }
 
-// =============================================================================
-// Helper functions for scalar <-> bits conversion
-// =============================================================================
-
 /// Split a scalar into 256 bits (LSB first)
 fn scalar_to_bits(scalar: &Scalar) -> Vec<bool> {
     let bigint = scalar.into_bigint();
     let mut bits = Vec::with_capacity(256);
-    
+
     for limb in bigint.0.iter() {
         for i in 0..64 {
             bits.push((limb >> i) & 1 == 1);
         }
     }
-    
+
     bits.truncate(256);
     bits
 }
-
-// =============================================================================
-// Node representation
-// =============================================================================
 
 /// Node type in the sparse merkle tree
 #[derive(Clone, Debug)]
@@ -52,10 +44,6 @@ enum Node {
     /// Internal node containing (left_child_hash, right_child_hash)
     Internal { left: Scalar, right: Scalar },
 }
-
-// =============================================================================
-// Sparse Merkle Tree Implementation
-// =============================================================================
 
 /// Result of SMT find operation
 #[derive(Clone, Debug)]
@@ -171,7 +159,10 @@ impl SparseMerkleTree {
         }
 
         match self.get_node(current_hash) {
-            Some(Node::Leaf { key: leaf_key, value: leaf_value }) => {
+            Some(Node::Leaf {
+                key: leaf_key,
+                value: leaf_value,
+            }) => {
                 if leaf_key == key {
                     Ok(FindResult {
                         found: true,
@@ -199,7 +190,10 @@ impl SparseMerkleTree {
                     (left, right)
                 };
 
-                let mut result = self.find_internal(key, key_bits, child, level + 1)?;
+                let next_level = level
+                    .checked_add(1)
+                    .ok_or("Level overflow in find_internal")?;
+                let mut result = self.find_internal(key, key_bits, child, next_level)?;
                 result.siblings.insert(0, *sibling);
                 Ok(result)
             }
@@ -218,7 +212,7 @@ impl SparseMerkleTree {
     /// Insert a key-value pair
     pub fn insert(&mut self, key: &Scalar, value: &Scalar) -> Result<SMTResult, &'static str> {
         let find_result = self.find(key)?;
-        
+
         if find_result.found {
             return Err("Key already exists");
         }
@@ -228,25 +222,33 @@ impl SparseMerkleTree {
 
         // Create the new leaf
         let new_leaf_hash = poseidon2_hash_leaf(*key, *value);
-        self.put_node(new_leaf_hash, Node::Leaf { key: *key, value: *value });
+        self.put_node(
+            new_leaf_hash,
+            Node::Leaf {
+                key: *key,
+                value: *value,
+            },
+        );
 
         // Build the path from leaf to root
         let mut current_hash = new_leaf_hash;
         let mut siblings = find_result.siblings.clone();
 
-        // If there's a collision (not_found_key != 0 and is_old0 == false), we need to extend the path
+        // If there's a collision (not_found_key != 0 and is_old0 == false), we need to
+        // extend the path
         if !find_result.is_old0 {
             let old_key_bits = scalar_to_bits(&find_result.not_found_key);
-            
+
             // Find where the paths diverge
             let mut diverge_level = siblings.len();
             while diverge_level < 256 && old_key_bits[diverge_level] == key_bits[diverge_level] {
                 siblings.push(Scalar::from(0u64));
-                diverge_level += 1;
+                diverge_level = diverge_level.saturating_add(1);
             }
-            
+
             // Add the old leaf as a sibling at the divergence point
-            let old_leaf_hash = poseidon2_hash_leaf(find_result.not_found_key, find_result.not_found_value);
+            let old_leaf_hash =
+                poseidon2_hash_leaf(find_result.not_found_key, find_result.not_found_value);
             siblings.push(old_leaf_hash);
         }
 
@@ -289,7 +291,7 @@ impl SparseMerkleTree {
     /// Update a key's value
     pub fn update(&mut self, key: &Scalar, new_value: &Scalar) -> Result<SMTResult, &'static str> {
         let find_result = self.find(key)?;
-        
+
         if !find_result.found {
             return Err("Key does not exist");
         }
@@ -300,7 +302,13 @@ impl SparseMerkleTree {
 
         // Create the new leaf
         let new_leaf_hash = poseidon2_hash_leaf(*key, *new_value);
-        self.put_node(new_leaf_hash, Node::Leaf { key: *key, value: *new_value });
+        self.put_node(
+            new_leaf_hash,
+            Node::Leaf {
+                key: *key,
+                value: *new_value,
+            },
+        );
 
         // Build path from bottom to top
         let mut current_hash = new_leaf_hash;
@@ -330,10 +338,6 @@ impl SparseMerkleTree {
     }
 }
 
-// =============================================================================
-// WASM Bindings
-// =============================================================================
-
 /// WASM-friendly Sparse Merkle Tree wrapper
 #[wasm_bindgen]
 pub struct WasmSparseMerkleTree {
@@ -362,24 +366,33 @@ impl WasmSparseMerkleTree {
     /// * `key_bytes` - Key as 32 bytes (Little-Endian)
     /// * `value_bytes` - Value as 32 bytes (Little-Endian)
     #[wasm_bindgen]
-    pub fn insert(&mut self, key_bytes: &[u8], value_bytes: &[u8]) -> Result<WasmSMTResult, JsValue> {
+    pub fn insert(
+        &mut self,
+        key_bytes: &[u8],
+        value_bytes: &[u8],
+    ) -> Result<WasmSMTResult, JsValue> {
         let key = bytes_to_scalar(key_bytes)?;
         let value = bytes_to_scalar(value_bytes)?;
 
-        let result = self.inner.insert(&key, &value)
-            .map_err(|e| JsValue::from_str(e))?;
+        let result = self.inner.insert(&key, &value).map_err(JsValue::from_str)?;
 
         Ok(WasmSMTResult::from_result(&result))
     }
 
     /// Update a key's value in the tree
     #[wasm_bindgen]
-    pub fn update(&mut self, key_bytes: &[u8], new_value_bytes: &[u8]) -> Result<WasmSMTResult, JsValue> {
+    pub fn update(
+        &mut self,
+        key_bytes: &[u8],
+        new_value_bytes: &[u8],
+    ) -> Result<WasmSMTResult, JsValue> {
         let key = bytes_to_scalar(key_bytes)?;
         let new_value = bytes_to_scalar(new_value_bytes)?;
 
-        let result = self.inner.update(&key, &new_value)
-            .map_err(|e| JsValue::from_str(e))?;
+        let result = self
+            .inner
+            .update(&key, &new_value)
+            .map_err(JsValue::from_str)?;
 
         Ok(WasmSMTResult::from_result(&result))
     }
@@ -389,8 +402,7 @@ impl WasmSparseMerkleTree {
     pub fn find(&self, key_bytes: &[u8]) -> Result<WasmFindResult, JsValue> {
         let key = bytes_to_scalar(key_bytes)?;
 
-        let result = self.inner.find(&key)
-            .map_err(|e| JsValue::from_str(e))?;
+        let result = self.inner.find(&key).map_err(JsValue::from_str)?;
 
         Ok(WasmFindResult::from_result(&result, &self.inner.root()))
     }
@@ -400,8 +412,7 @@ impl WasmSparseMerkleTree {
     pub fn get_proof(&self, key_bytes: &[u8], max_levels: usize) -> Result<WasmSMTProof, JsValue> {
         let key = bytes_to_scalar(key_bytes)?;
 
-        let find_result = self.inner.find(&key)
-            .map_err(|e| JsValue::from_str(e))?;
+        let find_result = self.inner.find(&key).map_err(JsValue::from_str)?;
 
         // Pad siblings to max_levels
         let mut siblings = find_result.siblings.clone();
@@ -446,39 +457,57 @@ pub struct WasmSMTResult {
 impl WasmSMTResult {
     /// Get the old root before the operation
     #[wasm_bindgen(getter)]
-    pub fn old_root(&self) -> Vec<u8> { self.old_root.clone() }
+    pub fn old_root(&self) -> Vec<u8> {
+        self.old_root.clone()
+    }
 
     /// Get the new root after the operation
     #[wasm_bindgen(getter)]
-    pub fn new_root(&self) -> Vec<u8> { self.new_root.clone() }
+    pub fn new_root(&self) -> Vec<u8> {
+        self.new_root.clone()
+    }
 
     /// Get siblings as flat bytes
     #[wasm_bindgen(getter)]
-    pub fn siblings(&self) -> Vec<u8> { self.siblings.clone() }
+    pub fn siblings(&self) -> Vec<u8> {
+        self.siblings.clone()
+    }
 
     /// Get number of siblings
     #[wasm_bindgen(getter)]
-    pub fn num_siblings(&self) -> usize { self.num_siblings }
+    pub fn num_siblings(&self) -> usize {
+        self.num_siblings
+    }
 
     /// Get the old key
     #[wasm_bindgen(getter)]
-    pub fn old_key(&self) -> Vec<u8> { self.old_key.clone() }
+    pub fn old_key(&self) -> Vec<u8> {
+        self.old_key.clone()
+    }
 
     /// Get the old value
     #[wasm_bindgen(getter)]
-    pub fn old_value(&self) -> Vec<u8> { self.old_value.clone() }
+    pub fn old_value(&self) -> Vec<u8> {
+        self.old_value.clone()
+    }
 
     /// Get the new key
     #[wasm_bindgen(getter)]
-    pub fn new_key(&self) -> Vec<u8> { self.new_key.clone() }
+    pub fn new_key(&self) -> Vec<u8> {
+        self.new_key.clone()
+    }
 
     /// Get the new value
     #[wasm_bindgen(getter)]
-    pub fn new_value(&self) -> Vec<u8> { self.new_value.clone() }
+    pub fn new_value(&self) -> Vec<u8> {
+        self.new_value.clone()
+    }
 
     /// Whether old value was zero
     #[wasm_bindgen(getter)]
-    pub fn is_old0(&self) -> bool { self.is_old0 }
+    pub fn is_old0(&self) -> bool {
+        self.is_old0
+    }
 }
 
 impl WasmSMTResult {
@@ -514,35 +543,51 @@ pub struct WasmFindResult {
 impl WasmFindResult {
     /// Whether the key was found
     #[wasm_bindgen(getter)]
-    pub fn found(&self) -> bool { self.found }
+    pub fn found(&self) -> bool {
+        self.found
+    }
 
     /// Get siblings as flat bytes
     #[wasm_bindgen(getter)]
-    pub fn siblings(&self) -> Vec<u8> { self.siblings.clone() }
+    pub fn siblings(&self) -> Vec<u8> {
+        self.siblings.clone()
+    }
 
     /// Get number of siblings
     #[wasm_bindgen(getter)]
-    pub fn num_siblings(&self) -> usize { self.num_siblings }
+    pub fn num_siblings(&self) -> usize {
+        self.num_siblings
+    }
 
     /// Get found value (if found)
     #[wasm_bindgen(getter)]
-    pub fn found_value(&self) -> Vec<u8> { self.found_value.clone() }
+    pub fn found_value(&self) -> Vec<u8> {
+        self.found_value.clone()
+    }
 
     /// Get the key that was found at collision (if not found)
     #[wasm_bindgen(getter)]
-    pub fn not_found_key(&self) -> Vec<u8> { self.not_found_key.clone() }
+    pub fn not_found_key(&self) -> Vec<u8> {
+        self.not_found_key.clone()
+    }
 
     /// Get the value at collision (if not found)
     #[wasm_bindgen(getter)]
-    pub fn not_found_value(&self) -> Vec<u8> { self.not_found_value.clone() }
+    pub fn not_found_value(&self) -> Vec<u8> {
+        self.not_found_value.clone()
+    }
 
     /// Whether the path ended at zero
     #[wasm_bindgen(getter)]
-    pub fn is_old0(&self) -> bool { self.is_old0 }
+    pub fn is_old0(&self) -> bool {
+        self.is_old0
+    }
 
     /// Get the current root
     #[wasm_bindgen(getter)]
-    pub fn root(&self) -> Vec<u8> { self.root.clone() }
+    pub fn root(&self) -> Vec<u8> {
+        self.root.clone()
+    }
 }
 
 impl WasmFindResult {
@@ -577,40 +622,52 @@ pub struct WasmSMTProof {
 impl WasmSMTProof {
     /// Whether the key was found
     #[wasm_bindgen(getter)]
-    pub fn found(&self) -> bool { self.found }
+    pub fn found(&self) -> bool {
+        self.found
+    }
 
     /// Get siblings as flat bytes (padded to max_levels)
     #[wasm_bindgen(getter)]
-    pub fn siblings(&self) -> Vec<u8> { self.siblings.clone() }
+    pub fn siblings(&self) -> Vec<u8> {
+        self.siblings.clone()
+    }
 
     /// Get number of siblings
     #[wasm_bindgen(getter)]
-    pub fn num_siblings(&self) -> usize { self.num_siblings }
+    pub fn num_siblings(&self) -> usize {
+        self.num_siblings
+    }
 
     /// Get found value
     #[wasm_bindgen(getter)]
-    pub fn found_value(&self) -> Vec<u8> { self.found_value.clone() }
+    pub fn found_value(&self) -> Vec<u8> {
+        self.found_value.clone()
+    }
 
     /// Get not found key
     #[wasm_bindgen(getter)]
-    pub fn not_found_key(&self) -> Vec<u8> { self.not_found_key.clone() }
+    pub fn not_found_key(&self) -> Vec<u8> {
+        self.not_found_key.clone()
+    }
 
     /// Get not found value
     #[wasm_bindgen(getter)]
-    pub fn not_found_value(&self) -> Vec<u8> { self.not_found_value.clone() }
+    pub fn not_found_value(&self) -> Vec<u8> {
+        self.not_found_value.clone()
+    }
 
     /// Whether old value was zero
     #[wasm_bindgen(getter)]
-    pub fn is_old0(&self) -> bool { self.is_old0 }
+    pub fn is_old0(&self) -> bool {
+        self.is_old0
+    }
 
     /// Get root
     #[wasm_bindgen(getter)]
-    pub fn root(&self) -> Vec<u8> { self.root.clone() }
+    pub fn root(&self) -> Vec<u8> {
+        self.root.clone()
+    }
 }
-
-// =============================================================================
-// Standalone WASM functions
-// =============================================================================
 
 /// Compute Poseidon2 compression hash of two field elements
 #[wasm_bindgen]

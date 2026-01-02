@@ -3,18 +3,34 @@ name = "app"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-license.workspace = true
+license = "Apache-2.0"
 publish.workspace = true
+description = "Browser WASM module for ZK proof generation using Groth16"
 
 [lib]
 crate-type = ["cdylib"]
 
 [dependencies]
-anyhow = { workspace = true }
-console_error_panic_hook = { version = "0.1.7", default-features = false }
-serde-wasm-bindgen = { version = "0.6", default-features = false }
-wasm-bindgen = { version = "0.2.100", default-features = false }
-wasm-bindgen-futures = { version = "0.4", default-features = false }
+# Arkworks ZK proving
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
+ark-relations = { workspace = true }
+ark-serialize = { workspace = true }
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
+
+# Circuit utilities (core module only, no_std compatible)
+circuits = { path = "../circuits", default-features = false }
+
+# WASM bindings
+console_error_panic_hook = { workspace = true }
+getrandom = { workspace = true }
+serde = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+# Poseidon2 hash
+zkhash = { workspace = true }
 
 [lints]
 workspace = true

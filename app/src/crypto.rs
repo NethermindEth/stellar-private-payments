@@ -3,18 +3,19 @@
 //! Provides Poseidon2 hashing and key derivation functions matching
 //! the Circom circuit implementations.
 
-use alloc::string::String;
-use alloc::vec;
-use alloc::vec::Vec;
-
-use wasm_bindgen::prelude::*;
-use zkhash::fields::bn256::FpBN256 as Scalar;
-use zkhash::poseidon2::{
-    poseidon2::Poseidon2,
-    poseidon2_instance_bn256::{POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3},
-};
-use zkhash::poseidon2::poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_4;
 use crate::serialization::{bytes_to_scalar, scalar_to_bytes, scalar_to_hex};
+use alloc::{string::String, vec, vec::Vec};
+use core::ops::Add;
+use wasm_bindgen::prelude::*;
+use zkhash::{
+    fields::bn256::FpBN256 as Scalar,
+    poseidon2::{
+        poseidon2::Poseidon2,
+        poseidon2_instance_bn256::{
+            POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
+        },
+    },
+};
 
 /// Poseidon2 hash with 2 inputs and optional domain separation (t=3, r=2, c=1)
 ///
@@ -33,10 +34,15 @@ pub(crate) fn poseidon2_hash2_internal(a: Scalar, b: Scalar, domain: Option<Scal
 /// Poseidon2 hash with 3 inputs and optional domain separation
 ///
 /// Used for leaf hashing in sparse merkle trees and commitment generation.
-pub(crate) fn poseidon2_hash3_internal(a: Scalar, b: Scalar, c: Scalar, domain: Option<Scalar>) -> Scalar {
+pub(crate) fn poseidon2_hash3_internal(
+    a: Scalar,
+    b: Scalar,
+    c: Scalar,
+    domain: Option<Scalar>,
+) -> Scalar {
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
     let input = match domain {
-        Some(d) => vec![a, b, c ,d],
+        Some(d) => vec![a, b, c, d],
         None => vec![a, b, c, Scalar::from(0u64)],
     };
     let perm = poseidon2.permutation(&input);
@@ -51,7 +57,7 @@ pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let input = [left, right];
     let perm = poseidon2.permutation(&input);
     // Feed-forward: add inputs back to permutation output
-    perm[0] + input[0]
+    perm[0].add(input[0])
 }
 
 /// Poseidon2 hash with 2 inputs and domain separation
@@ -65,7 +71,7 @@ pub fn poseidon2_hash2(
 ) -> Result<Vec<u8>, JsValue> {
     let a = bytes_to_scalar(input0)?;
     let b = bytes_to_scalar(input1)?;
-    let domain = Scalar::from(domain_separation as u64);
+    let domain = Scalar::from(domain_separation);
 
     let result = poseidon2_hash2_internal(a, b, Some(domain));
     Ok(scalar_to_bytes(&result))
@@ -84,7 +90,7 @@ pub fn poseidon2_hash3(
     let a = bytes_to_scalar(input0)?;
     let b = bytes_to_scalar(input1)?;
     let c = bytes_to_scalar(input2)?;
-    let domain = Scalar::from(domain_separation as u64);
+    let domain = Scalar::from(domain_separation);
 
     let result = poseidon2_hash3_internal(a, b, c, Some(domain));
     Ok(scalar_to_bytes(&result))

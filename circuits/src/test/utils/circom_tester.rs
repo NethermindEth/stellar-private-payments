@@ -171,8 +171,7 @@ pub fn generate_keys(
     let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
-    let pvk = Groth16::<Bn254>::process_vk(&vk)
-        .map_err(|e| anyhow!("process_vk failed: {e}"))?;
+    let pvk = Groth16::<Bn254>::process_vk(&vk).map_err(|e| anyhow!("process_vk failed: {e}"))?;
 
     Ok(CircuitKeys { pk, vk, pvk })
 }
@@ -205,8 +204,7 @@ pub fn load_keys(pk_path: impl AsRef<Path>) -> Result<CircuitKeys> {
 
     // Compute prepared verification key for efficient verification
     // Use default LibsnarkReduction for WASM prover compatibility
-    let pvk = Groth16::<Bn254>::process_vk(&vk)
-        .map_err(|e| anyhow!("process_vk failed: {e}"))?;
+    let pvk = Groth16::<Bn254>::process_vk(&vk).map_err(|e| anyhow!("process_vk failed: {e}"))?;
 
     Ok(CircuitKeys { pk, vk, pvk })
 }
@@ -248,12 +246,8 @@ pub fn prove_and_verify_with_keys(
         .get_public_inputs()
         .ok_or_else(|| anyhow!("get_public_inputs returned None"))?;
 
-    let verified = Groth16::<Bn254>::verify_with_processed_vk(
-        &keys.pvk,
-        &public_inputs,
-        &proof,
-    )
-    .map_err(|e| anyhow!("verify_with_processed_vk failed: {e}"))?;
+    let verified = Groth16::<Bn254>::verify_with_processed_vk(&keys.pvk, &public_inputs, &proof)
+        .map_err(|e| anyhow!("verify_with_processed_vk failed: {e}"))?;
 
     Ok(CircomResult {
         verified,

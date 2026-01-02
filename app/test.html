@@ -59,7 +59,7 @@
     </style>
 </head>
 <body>
-    <h1>🔐 ZK Proof E2E Test</h1>
+    <h1>ZK Proof E2E Test</h1>
     
     <div id="status">Loading modules...</div>
     
@@ -128,9 +128,7 @@
             return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
         }
 
-        // =====================================================================
-        // TEST: Crypto Operations
-        // =====================================================================
+        // Test: Crypto Operations
         async function testCrypto() {
             log('=== Testing Crypto Operations ===', 'info');
             
@@ -155,9 +153,7 @@
             return true;
         }
 
-        // =====================================================================
-        // TEST: Merkle Tree
-        // =====================================================================
+        // Test: Merkle Tree
         async function testMerkleTree() {
             log('=== Testing Merkle Tree ===', 'info');
             
@@ -187,9 +183,7 @@
             return true;
         }
 
-        // =====================================================================
-        // TEST: Sparse Merkle Tree
-        // =====================================================================
+        // Test: Sparse Merkle Tree
         async function testSparseMerkleTree() {
             log('=== Testing Sparse Merkle Tree ===', 'info');
             
@@ -221,9 +215,7 @@
             return true;
         }
 
-        // =====================================================================
-        // TEST: Full Transaction (like e2e_pool_2_in_2_out.rs)
-        // =====================================================================
+        // Test: Full Transaction (mirrors e2e_pool_2_in_2_out.rs)
         async function testFullTransaction() {
             log('=== Testing Full Transaction Setup ===', 'info');
             
@@ -319,9 +311,7 @@
             return { inputs, outputs, merkleRoot, tree, LEVELS };
         }
         
-        // =====================================================================
-        // TEST: Full Transaction with Witness Generation (Compliant Circuit)
-        // =====================================================================
+        // Test: Full Transaction with Witness Generation (Compliant Circuit)
         async function testFullTransactionWithWitness() {
             log('=== Testing Full Compliant Transaction with Witness Generation ===', 'info');
 
@@ -443,10 +433,7 @@
             
             log('=== Building Compliance Proofs ===', 'info');
             
-            // =====================================================================
-            // MEMBERSHIP PROOFS (ASP Approved Senders List)
-            // For each input, prove the sender's public key is in the approved list
-            // =====================================================================
+            // Membership proofs: prove sender's public key is in the approved list
             log('Building ASP Membership Trees...', 'info');
             const membershipTrees = [];
             const membershipRoots = [];
@@ -643,9 +630,9 @@
                 
                 const isValid = verifyProofLocal(proofBytes, publicInputs);
                 if (isValid) {
-                    log('✅ Proof verified locally!', 'success');
+                    log('Proof verified locally!', 'success');
                 } else {
-                    log('❌ Proof verification failed!', 'error');
+                    log('Proof verification failed!', 'error');
                 }
                 
             } catch (e) {
@@ -657,9 +644,7 @@
             return true;
         }
 
-        // =====================================================================
         // Run basic tests (no witness module required)
-        // =====================================================================
         async function runBasicTests() {
             setStatus('Running basic tests...', 'running');
             btnRunBasic.disabled = true;
@@ -671,10 +656,10 @@
                 await testFullTransaction();  // Just setup, no witness
                 
                 log('', 'info');
-                log('🎉 Basic tests passed!', 'success');
+                log('Basic tests passed!', 'success');
                 setStatus('Basic tests passed!', 'ready');
             } catch (e) {
-                log(`❌ Test failed: ${e.message}`, 'error');
+                log(`Test failed: ${e.message}`, 'error');
                 console.error(e);
                 setStatus('Tests failed', 'error');
             }
@@ -682,9 +667,7 @@
             btnRunBasic.disabled = false;
         }
         
-        // =====================================================================
         // Run all tests (including witness and proof generation)
-        // =====================================================================
         async function runAllTests() {
             setStatus('Running full tests...', 'running');
             btnRunAll.disabled = true;
@@ -696,10 +679,10 @@
                 await testFullTransactionWithWitness();
                 
                 log('', 'info');
-                log('🎉 All tests passed!', 'success');
+                log('All tests passed!', 'success');
                 setStatus('All tests passed!', 'ready');
             } catch (e) {
-                log(`❌ Test failed: ${e.message}`, 'error');
+                log(`Test failed: ${e.message}`, 'error');
                 console.error(e);
                 setStatus('Tests failed', 'error');
             }
@@ -707,9 +690,7 @@
             btnRunAll.disabled = false;
         }
 
-        // =====================================================================
         // Initialization
-        // =====================================================================
         async function init() {
             try {
                 log('Initializing prover WASM module...', 'info');

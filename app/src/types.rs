@@ -1,8 +1,6 @@
 //! Common types used across the prover module
 
-use alloc::collections::BTreeMap;
-use alloc::string::String;
-use alloc::vec::Vec;
+use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::prelude::*;
@@ -48,7 +46,12 @@ impl Groth16Proof {
     /// Get the full proof as concatenated bytes [A || B || C]
     #[wasm_bindgen]
     pub fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes = Vec::with_capacity(self.a.len() + self.b.len() + self.c.len());
+        let capacity = self
+            .a
+            .len()
+            .saturating_add(self.b.len())
+            .saturating_add(self.c.len());
+        let mut bytes = Vec::with_capacity(capacity);
         bytes.extend_from_slice(&self.a);
         bytes.extend_from_slice(&self.b);
         bytes.extend_from_slice(&self.c);
@@ -95,5 +98,3 @@ impl CircuitInputs {
             .insert(String::from(name), InputValue::Array(values));
     }
 }
-
-

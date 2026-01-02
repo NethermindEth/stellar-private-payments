@@ -1,5 +1,12 @@
 [workspace]
-members = ["app", "app/crates/prover-wasm", "circuits", "contracts/*", "e2e-tests", "examples", "poseidon2"]
+members = [
+    "app",
+    "circuits",
+    "contracts/*",
+    "e2e-tests",
+    "examples",
+    "poseidon2",
+]
 resolver = "3"
 
 [workspace.package]
@@ -22,11 +29,15 @@ ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
+getrandom = { version = "0.2", features = ["js"] }
 num-bigint = { version = "0.4.6", default-features = false }
 num-integer = { version = "0.1.46", default-features = false }
+serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
+wasm-bindgen = { version = "0.2.100", default-features = false }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]

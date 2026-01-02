@@ -1,22 +1,28 @@
 //! Merkle tree utilities for proof generation
 //!
 //! Provides merkle tree operations matching the Circom circuit implementations.
+//! Core merkle functions are re-exported from `circuits::core::merkle`.
 
-use alloc::format;
-use alloc::vec;
-use alloc::vec::Vec;
+use alloc::{format, vec, vec::Vec};
 
+use circuits::core::merkle::poseidon2_compression;
 use wasm_bindgen::prelude::*;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-use crate::crypto::poseidon2_compression;
-use crate::serialization::{bytes_to_scalar, scalar_to_bytes};
-use crate::types::FIELD_SIZE;
+use crate::{
+    serialization::{bytes_to_scalar, scalar_to_bytes},
+    types::FIELD_SIZE,
+};
+
+// Re-export core merkle functions from circuits
+pub use circuits::core::merkle::{
+    merkle_parent, merkle_proof as merkle_proof_internal, merkle_root,
+};
 
 /// Merkle proof data returned to JavaScript
 #[wasm_bindgen]
 pub struct MerkleProof {
-    /// Path elements (siblings)
+    /// Path elements
     path_elements: Vec<u8>,
     /// Path indices as a single scalar
     path_indices: Vec<u8>,
@@ -53,22 +59,20 @@ impl MerkleProof {
     }
 }
 
-/// Simple in-memory Merkle tree for proof generation
+/// Simple Merkle tree for proof generation
 #[wasm_bindgen]
 pub struct MerkleTree {
-    /// Tree levels (level 0 = leaves)
+    /// Tree levels (level 0 for leaves)
     levels_data: Vec<Vec<Scalar>>,
-    /// Number of levels (depth)
+    /// Number of levels
     depth: usize,
     /// Next leaf index to insert
-    next_index: usize,
+    next_index: u64,
 }
 
 #[wasm_bindgen]
 impl MerkleTree {
     /// Create a new Merkle tree with given depth
-    ///
-    /// Tree will have 2^depth leaves
     #[wasm_bindgen(constructor)]
     pub fn new(depth: usize) -> Result<MerkleTree, JsValue> {
         if depth == 0 || depth > 32 {
@@ -79,7 +83,10 @@ impl MerkleTree {
         let zero = Scalar::from(0u64);
 
         // Initialize all levels with zeros
-        let mut levels_data = Vec::with_capacity(depth + 1);
+        let capacity = depth
+            .checked_add(1)
+            .ok_or_else(|| JsValue::from_str("Depth overflow"))?;
+        let mut levels_data = Vec::with_capacity(capacity);
 
         // Level 0 = leaves (all zeros initially)
         levels_data.push(vec![zero; num_leaves]);
@@ -107,16 +114,19 @@ impl MerkleTree {
         let leaf = bytes_to_scalar(leaf_bytes)?;
         let index = self.next_index;
 
-        let max_leaves = 1usize << self.depth;
+        let max_leaves = 1u64 << self.depth;
         if index >= max_leaves {
             return Err(JsValue::from_str("Merkle tree is full"));
         }
 
+        let index_usize =
+            usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
+
         // Insert leaf at level 0
-        self.levels_data[0][index] = leaf;
+        self.levels_data[0][index_usize] = leaf;
 
         // Update path to root
-        let mut current_index = index;
+        let mut current_index = index_usize;
         let mut current_hash = leaf;
 
         for level in 0..self.depth {
@@ -124,7 +134,7 @@ impl MerkleTree {
             let sibling = self.levels_data[level][sibling_index];
 
             // Compute parent hash
-            let (left, right) = if current_index % 2 == 0 {
+            let (left, right) = if current_index.is_multiple_of(2) {
                 (current_hash, sibling)
             } else {
                 (sibling, current_hash)
@@ -134,13 +144,19 @@ impl MerkleTree {
             current_index /= 2;
 
             // Update parent level
-            self.levels_data[level + 1][current_index] = current_hash;
+            let parent_level = level
+                .checked_add(1)
+                .ok_or_else(|| JsValue::from_str("Level overflow"))?;
+            self.levels_data[parent_level][current_index] = current_hash;
         }
 
-        self.next_index += 1;
+        self.next_index = self
+            .next_index
+            .checked_add(1)
+            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
 
-        // Safe cast since we checked max_leaves which fits in u32 for depth <= 32
-        Ok(index as u32)
+        // index is bounded by max_leaves (1 << depth where depth <= 32)
+        u32::try_from(index).map_err(|_| JsValue::from_str("Index too large for u32"))
     }
 
     /// Get the current root
@@ -160,7 +176,11 @@ impl MerkleTree {
             return Err(JsValue::from_str("Index out of bounds"));
         }
 
-        let mut path_elements = Vec::with_capacity(self.depth * FIELD_SIZE);
+        let capacity = self
+            .depth
+            .checked_mul(FIELD_SIZE)
+            .ok_or_else(|| JsValue::from_str("Overflow calculating path capacity"))?;
+        let mut path_elements = Vec::with_capacity(capacity);
         let mut path_indices_bits: u64 = 0;
         let mut current_index = index;
 
@@ -192,8 +212,8 @@ impl MerkleTree {
 
     /// Get the next available leaf index
     #[wasm_bindgen(getter)]
-    pub fn next_index(&self) -> u32 {
-        self.next_index as u32
+    pub fn next_index(&self) -> u64 {
+        self.next_index
     }
 
     /// Get tree depth
@@ -206,7 +226,7 @@ impl MerkleTree {
 /// Compute merkle root from leaves
 #[wasm_bindgen]
 pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>, JsValue> {
-    if leaves_bytes.len() % FIELD_SIZE != 0 {
+    if !leaves_bytes.len().is_multiple_of(FIELD_SIZE) {
         return Err(JsValue::from_str("Leaves bytes must be multiple of 32"));
     }
 
@@ -216,16 +236,21 @@ pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>,
     if num_leaves != expected_leaves {
         return Err(JsValue::from_str(&format!(
             "Expected {} leaves for depth {}, got {}",
-            expected_leaves,
-            depth,
-            num_leaves
+            expected_leaves, depth, num_leaves
         )));
     }
 
     // Parse leaves
     let mut current_level: Vec<Scalar> = Vec::with_capacity(num_leaves);
     for i in 0..num_leaves {
-        let chunk = &leaves_bytes[i * FIELD_SIZE..(i + 1) * FIELD_SIZE];
+        let start = i
+            .checked_mul(FIELD_SIZE)
+            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+        let end = i
+            .checked_add(1)
+            .and_then(|n| n.checked_mul(FIELD_SIZE))
+            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+        let chunk = &leaves_bytes[start..end];
         current_level.push(bytes_to_scalar(chunk)?);
     }
 
@@ -245,65 +270,3 @@ pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>,
 fn hash_pair(left: Scalar, right: Scalar) -> Scalar {
     poseidon2_compression(left, right)
 }
-
-/// Compute the Merkle parent from ordered children (left, right)
-///
-/// Uses Poseidon2 compression to combine two child nodes into a parent node.
-pub fn merkle_parent(left: Scalar, right: Scalar) -> Scalar {
-    hash_pair(left, right)
-}
-
-/// Build a Merkle root from a full list of leaves
-///
-/// Computes the Merkle root by repeatedly hashing pairs of nodes until
-/// a single root remains.
-pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
-    while leaves.len() > 1 {
-        let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in leaves.chunks_exact(2) {
-            next.push(hash_pair(pair[0], pair[1]));
-        }
-        leaves = next;
-    }
-    leaves[0]
-}
-
-/// Compute the Merkle path (siblings) and path index bits for a given leaf index
-///
-/// Generates the Merkle proof for a leaf at the given index, including all
-/// sibling nodes along the path to the root.
-pub fn merkle_proof_internal(leaves: &[Scalar], mut index: usize) -> (Vec<Scalar>, u64, usize) {
-    assert!(!leaves.is_empty() && leaves.len().is_power_of_two());
-    let mut level_nodes = leaves.to_vec();
-    let levels = level_nodes.len().ilog2() as usize;
-
-    let mut path_elems = Vec::with_capacity(levels);
-    let mut path_indices_bits_lsb = Vec::with_capacity(levels);
-
-    for _level in 0..levels {
-        let sib_index = if index % 2 == 0 {
-            index + 1
-        } else {
-            index - 1
-        };
-
-        path_elems.push(level_nodes[sib_index]);
-        path_indices_bits_lsb.push((index & 1) as u64);
-
-        let mut next = Vec::with_capacity(leaves.len() / 2);
-        for pair in level_nodes.chunks_exact(2) {
-            next.push(hash_pair(pair[0], pair[1]));
-        }
-        level_nodes = next;
-        index /= 2;
-    }
-
-    let mut path_indices: u64 = 0;
-    for (i, b) in path_indices_bits_lsb.iter().copied().enumerate() {
-        path_indices |= b << i;
-    }
-
-    (path_elems, path_indices, levels)
-}
-
-

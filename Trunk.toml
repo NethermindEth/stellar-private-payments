@@ -15,11 +15,11 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
-# Build prover-wasm beofre main build
+# Build Rust src before main frontend build
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-command_arguments = ["-c", "wasm-pack build app/crates/prover-wasm --out-name prover --no-opt --target web --no-pack --no-typescript --out-dir ../../../dist/.stage/js/prover && rm -rf dist/.stage/js/prover/.gitignore"]
+command_arguments = ["-c", "wasm-pack build app --out-name prover --no-opt --target web --no-pack --no-typescript --out-dir ../../../dist/.stage/js/prover && rm -rf dist/.stage/js/prover/.gitignore"]
 
 # Copy witness module to staging
 [[hooks]]
@@ -27,7 +27,7 @@ stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", "mkdir -p dist/.stage/js/witness && cp app/js/witness/index.js dist/.stage/js/witness/ && cp app/js/witness/witness_calculator.js dist/.stage/js/witness/"]
 
-# Copy circuit artifacts (Wasm and R1cs) to staging
+# Copy circuit artifacts (Wasm and R1CS) to staging
 [[hooks]]
 stage = "pre_build"
 command = "sh"
@@ -39,6 +39,7 @@ stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", "mkdir -p dist/.stage/keys && cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true && cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true"]
 
+# TODO: Remove once we have the main page working
 # Copy test.html and bridge.js to staging
 [[hooks]]
 stage = "pre_build"

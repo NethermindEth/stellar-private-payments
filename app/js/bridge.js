@@ -39,9 +39,7 @@ import {
     bytesToWitness,
 } from './witness/index.js';
 
-// =============================================================================
 // Configuration
-// =============================================================================
 
 const DEFAULT_CONFIG = {
     circuitName: 'compliant_test',
@@ -53,9 +51,7 @@ const DEFAULT_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 
-// =============================================================================
 // State
-// =============================================================================
 
 let prover = null;
 let proverModuleInitialized = false;
@@ -69,9 +65,7 @@ let cachedR1cs = null;
 // Download state
 let downloadPromise = null;
 
-// =============================================================================
 // Caching (Cache API)
-// =============================================================================
 
 /**
  * Get cached artifact from Cache API
@@ -123,9 +117,7 @@ export async function clearCache() {
     }
 }
 
-// =============================================================================
 // Download with Progress
-// =============================================================================
 
 /**
  * Download a file with progress tracking
@@ -177,9 +169,7 @@ async function downloadWithProgress(url, onProgress) {
     return result;
 }
 
-// =============================================================================
 // Lazy Loading
-// =============================================================================
 
 /**
  * Ensure proving artifacts are loaded (with caching and progress)
@@ -284,9 +274,7 @@ export async function isProvingCached() {
     return pk !== null && r1cs !== null;
 }
 
-// =============================================================================
 // Initialization
-// =============================================================================
 
 /**
  * Configure the ZK system URLs
@@ -415,9 +403,7 @@ export function isProverReady() {
     return proverInitialized;
 }
 
-// =============================================================================
 // Input Preparation (available immediately after initModules)
-// =============================================================================
 
 /**
  * Derive public key from private key
@@ -462,9 +448,7 @@ export { poseidon2_hash2 as poseidon2Hash2 };
  */
 export { poseidon2_hash3 as poseidon2Hash3 };
 
-// =============================================================================
 // Merkle Tree Operations
-// =============================================================================
 
 /**
  * Create a new Merkle tree
@@ -477,9 +461,7 @@ export function createMerkleTree(depth) {
 
 export { MerkleTree, MerkleProof };
 
-// =============================================================================
 // Serialization Utilities
-// =============================================================================
 
 /**
  * Convert a JavaScript number to field element bytes
@@ -503,9 +485,7 @@ export { decimal_to_field_bytes as decimalToField };
 export { hex_to_field_bytes as hexToField };
 export { field_bytes_to_hex as fieldToHex };
 
-// =============================================================================
 // Witness Generation
-// =============================================================================
 
 /**
  * Generate witness from circuit inputs
@@ -530,9 +510,7 @@ export async function generateWitnessArray(inputs) {
     return await computeWitnessArray(inputs);
 }
 
-// =============================================================================
 // Proof Generation
-// =============================================================================
 
 /**
  * Generate a ZK proof from witness bytes
@@ -598,9 +576,7 @@ export function getVerifyingKey() {
     return prover.get_verifying_key();
 }
 
-// =============================================================================
 // High-Level Proof Flow
-// =============================================================================
 
 /**
  * Generate a complete ZK proof from circuit inputs
@@ -651,9 +627,7 @@ export async function proveAndVerify(inputs, onProgress) {
     };
 }
 
-// =============================================================================
 // Re-exports
-// =============================================================================
 
 export { getCircuitInfo, bytesToWitness };
 export { verify_proof as verifyWithKey };

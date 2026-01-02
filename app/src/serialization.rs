@@ -3,12 +3,10 @@
 //! Handles conversion between JavaScript types and Arkworks field elements.
 //! All byte arrays use Little-Endian format (as expected by Arkworks).
 
-use alloc::format;
-use alloc::string::String;
-use alloc::vec::Vec;
-
+use alloc::{format, string::String, vec::Vec};
 use ark_bn254::Fr;
 use ark_ff::{Field, PrimeField};
+use core::ops::{Add, Mul};
 use wasm_bindgen::prelude::*;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -86,9 +84,13 @@ pub fn hex_to_scalar(hex: &str) -> Result<Scalar, JsValue> {
     // Parse hex to bytes (big-endian)
     let mut bytes = [0u8; FIELD_SIZE];
     for (i, chunk) in padded.as_bytes().chunks(2).enumerate() {
-        let byte_str = core::str::from_utf8(chunk)
-            .map_err(|_| JsValue::from_str("Invalid hex character"))?;
-        bytes[FIELD_SIZE - 1 - i] = u8::from_str_radix(byte_str, 16)
+        let byte_str =
+            core::str::from_utf8(chunk).map_err(|_| JsValue::from_str("Invalid hex character"))?;
+        let idx = FIELD_SIZE
+            .checked_sub(1)
+            .and_then(|v| v.checked_sub(i))
+            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+        bytes[idx] = u8::from_str_radix(byte_str, 16)
             .map_err(|_| JsValue::from_str("Invalid hex character"))?;
     }
 
@@ -100,7 +102,7 @@ pub fn hex_to_scalar(hex: &str) -> Result<Scalar, JsValue> {
 /// Witness bytes are Little-Endian, 32 bytes per element
 #[wasm_bindgen]
 pub fn parse_witness(witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-    if witness_bytes.len() % FIELD_SIZE != 0 {
+    if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
         return Err(JsValue::from_str(&format!(
             "Witness bytes length {} is not a multiple of {}",
             witness_bytes.len(),
@@ -116,10 +118,11 @@ pub fn parse_witness(witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
 /// Get the number of witness elements
 #[wasm_bindgen]
 pub fn witness_element_count(witness_bytes: &[u8]) -> Result<u32, JsValue> {
-    if witness_bytes.len() % FIELD_SIZE != 0 {
+    if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
         return Err(JsValue::from_str("Invalid witness bytes length"));
     }
-    Ok((witness_bytes.len() / FIELD_SIZE) as u32)
+    let count = witness_bytes.len() / FIELD_SIZE;
+    u32::try_from(count).map_err(|_| JsValue::from_str("Witness count exceeds u32"))
 }
 
 /// Convert a u64 to Little-Endian field element bytes
@@ -138,11 +141,11 @@ pub fn decimal_to_field_bytes(decimal: &str) -> Result<Vec<u8>, JsValue> {
         .parse()
         .map_err(|_| JsValue::from_str("Invalid decimal string"))?;
 
-    // Convert to field element
+    // Convert to field element using safe field arithmetic
     let low = (value & 0xFFFFFFFFFFFFFFFF) as u64;
     let high = (value >> 64) as u64;
 
-    let scalar = Scalar::from(low) + Scalar::from(high) * Scalar::from(1u64 << 32).square();
+    let scalar = Scalar::from(low).add(Scalar::from(high).mul(Scalar::from(1u64 << 32).square()));
     Ok(scalar_to_bytes(&scalar))
 }
 
@@ -159,4 +162,3 @@ pub fn hex_to_field_bytes(hex: &str) -> Result<Vec<u8>, JsValue> {
     let scalar = hex_to_scalar(hex)?;
     Ok(scalar_to_bytes(&scalar))
 }
-
