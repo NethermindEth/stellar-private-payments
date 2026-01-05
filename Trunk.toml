@@ -15,11 +15,11 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
-# Build Rust src before main frontend build
+# Build Rust prover module before main frontend build
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-command_arguments = ["-c", "wasm-pack build app --out-name prover --no-opt --target web --no-pack --no-typescript --out-dir ../../../dist/.stage/js/prover && rm -rf dist/.stage/js/prover/.gitignore"]
+command_arguments = ["-c", "wasm-pack build app --out-name prover --no-opt --target web --no-pack --no-typescript --out-dir ../dist/.stage/js/prover && rm -rf dist/.stage/js/prover/.gitignore"]
 
 # Copy witness module to staging
 [[hooks]]
