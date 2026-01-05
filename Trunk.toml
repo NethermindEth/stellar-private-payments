@@ -31,7 +31,7 @@ command_arguments = ["-c", "mkdir -p dist/.stage/js/witness && cp app/js/witness
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-command_arguments = ["-c", "mkdir -p dist/.stage/circuits && for dir in circuits/src/tmp/*_js; do if [ -d \"$dir\" ]; then name=$(basename $dir _js); cp \"$dir/$name.wasm\" dist/.stage/circuits/ 2>/dev/null || true; fi; done && cp circuits/src/tmp/*.r1cs dist/.stage/circuits/ 2>/dev/null || true"]
+command_arguments = ["-c", "mkdir -p dist/.stage/circuits && cp app/js/witness/*.wasm dist/.stage/circuits/ && cp app/js/witness/*.r1cs dist/.stage/circuits/"]
 
 # Copy proving keys to staging
 [[hooks]]
