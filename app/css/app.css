@@ -90,6 +90,25 @@
     .animate-spin-slow {
         animation: spin 1s linear infinite;
     }
+
+    .animate-spin {
+        animation: spin 0.75s linear infinite;
+    }
+
+    @keyframes slide-in {
+        from {
+            opacity: 0;
+            transform: translateX(100%);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+
+    .animate-slide-in {
+        animation: slide-in 0.3s ease-out;
+    }
 }
 
 @layer base {

@@ -2,7 +2,15 @@
  * PoolStellar Compliant Private System
  * Vanilla JS with template-based DOM manipulation
  */
-import { pingTestnet } from './stellar.js';
+import { 
+    pingTestnet,
+    setNetwork,
+    getNetwork,
+    readAllContractStates,
+    getPoolEvents,
+    formatAddress,
+    DEPLOYED_CONTRACTS,
+} from './stellar.js';
 
 
 // Application State
@@ -965,6 +973,211 @@ const Stats = {
     }
 };
 
+// Reads on-chain state from deployed Pool, ASP Membership, ASP Non-Membership contracts
+const ContractReader = {
+    isLoading: false,
+    lastUpdate: null,
+    
+    init() {
+        const refreshBtn = document.getElementById('btn-refresh-state');
+        refreshBtn.addEventListener('click', () => this.refreshAll());
+        
+        this.setAddresses();
+        document.getElementById('network-name').textContent = 'Futurenet';
+        document.getElementById('chain-network-badge').textContent = 'Futurenet';
+        
+        this.refreshAll();
+        setInterval(() => this.refreshAll(), 30000);
+    },
+    
+    setAddresses() {
+        document.getElementById('pool-address').textContent = formatAddress(DEPLOYED_CONTRACTS.pool, 4, 4);
+        document.getElementById('pool-address').title = DEPLOYED_CONTRACTS.pool;
+        
+        document.getElementById('membership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspMembership, 4, 4);
+        document.getElementById('membership-address').title = DEPLOYED_CONTRACTS.aspMembership;
+        
+        document.getElementById('nonmembership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspNonMembership, 4, 4);
+        document.getElementById('nonmembership-address').title = DEPLOYED_CONTRACTS.aspNonMembership;
+    },
+    
+    async refreshAll() {
+        if (this.isLoading) return;
+        
+        this.isLoading = true;
+        const refreshBtn = document.getElementById('btn-refresh-state');
+        const refreshIcon = refreshBtn.querySelector('.refresh-icon');
+        const errorDisplay = document.getElementById('contract-error-display');
+        
+        refreshIcon.classList.add('animate-spin');
+        errorDisplay.classList.add('hidden');
+        
+        this.setStatus('pool-status', 'loading');
+        this.setStatus('membership-status', 'loading');
+        this.setStatus('nonmembership-status', 'loading');
+        
+        try {
+            const result = await readAllContractStates();
+            
+            if (result.success) {
+                this.displayPoolState(result.pool);
+                this.displayMembershipState(result.aspMembership);
+                this.displayNonMembershipState(result.aspNonMembership);
+                
+                this.lastUpdate = new Date();
+                document.getElementById('state-last-updated').textContent = 
+                    `Last updated: ${this.lastUpdate.toLocaleTimeString()}`;
+            } else {
+                this.displayError(result.error);
+            }
+        } catch (err) {
+            console.error('[ContractReader] Error:', err);
+            this.displayError(err.message);
+        } finally {
+            this.isLoading = false;
+            refreshIcon.classList.remove('animate-spin');
+        }
+    },
+    
+    displayPoolState(state) {
+        if (!state || !state.success) {
+            this.setStatus('pool-status', 'error', state?.error || 'Failed');
+            return;
+        }
+        
+        this.setStatus('pool-status', 'success', 'Connected');
+        
+        const rootEl = document.getElementById('pool-root');
+        if (state.merkleRoot) {
+            rootEl.textContent = this.truncateHash(state.merkleRoot);
+            rootEl.title = state.merkleRoot;
+        } else {
+            rootEl.textContent = '—';
+        }
+        
+        const commitmentsEl = document.getElementById('pool-commitments');
+        if (state.totalCommitments !== undefined) {
+            commitmentsEl.textContent = state.totalCommitments.toLocaleString();
+        } else if (state.merkleNextIndex !== undefined) {
+            commitmentsEl.textContent = state.merkleNextIndex.toLocaleString();
+        } else {
+            commitmentsEl.textContent = '0';
+        }
+        
+        const levelsEl = document.getElementById('pool-levels');
+        levelsEl.textContent = state.merkleLevels !== undefined ? state.merkleLevels : '—';
+        
+        if (state.aspmembership) {
+            document.getElementById('compliance-membership-addr').textContent = formatAddress(state.aspmembership, 4, 4);
+        }
+        if (state.aspnonmembership) {
+            document.getElementById('compliance-nonmember-addr').textContent = formatAddress(state.aspnonmembership, 4, 4);
+        }
+    },
+    
+    displayMembershipState(state) {
+        if (!state || !state.success) {
+            this.setStatus('membership-status', 'error', state?.error || 'Failed');
+            return;
+        }
+        
+        this.setStatus('membership-status', 'success', 'Connected');
+        
+        const rootEl = document.getElementById('membership-root');
+        if (state.root) {
+            rootEl.textContent = this.truncateHash(state.root);
+            rootEl.title = state.root;
+            document.getElementById('compliance-membership-root').textContent = this.truncateHash(state.root);
+            document.getElementById('compliance-membership-root').title = state.root;
+        } else {
+            rootEl.textContent = '—';
+        }
+        
+        const countEl = document.getElementById('membership-count');
+        if (state.nextIndex !== undefined) {
+            countEl.textContent = `${state.nextIndex}${state.capacity ? ` / ${state.capacity.toLocaleString()}` : ''}`;
+        } else {
+            countEl.textContent = '0';
+        }
+    },
+    
+    displayNonMembershipState(state) {
+        if (!state || !state.success) {
+            this.setStatus('nonmembership-status', 'error', state?.error || 'Failed');
+            return;
+        }
+        
+        this.setStatus('nonmembership-status', 'success', 'Connected');
+        
+        const rootEl = document.getElementById('nonmembership-root');
+        if (state.root) {
+            rootEl.textContent = this.truncateHash(state.root);
+            rootEl.title = state.root;
+            document.getElementById('compliance-nonmember-root').textContent = this.truncateHash(state.root);
+            document.getElementById('compliance-nonmember-root').title = state.root;
+        } else {
+            rootEl.textContent = '0x0...0';
+        }
+        
+        const statusEl = document.getElementById('nonmembership-tree-status');
+        if (state.isEmpty) {
+            statusEl.textContent = 'Empty tree';
+            statusEl.className = 'text-dark-500';
+        } else {
+            statusEl.textContent = 'Has entries';
+            statusEl.className = 'text-emerald-400';
+        }
+    },
+    
+    displayError(message) {
+        const errorDisplay = document.getElementById('contract-error-display');
+        document.getElementById('contract-error-text').textContent = message || 'Failed to read contract state';
+        errorDisplay.classList.remove('hidden');
+    },
+    
+    /**
+     * @param {string} elementId - DOM element ID for status indicator
+     * @param {string} status - 'loading', 'success', 'error', or default
+     * @param {string} text - Optional display text
+     */
+    setStatus(elementId, status, text = '') {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        
+        switch (status) {
+            case 'loading':
+                el.textContent = 'Loading...';
+                el.className = 'text-[10px] text-dark-400 animate-pulse';
+                break;
+            case 'success':
+                el.textContent = text || 'OK';
+                el.className = 'text-[10px] text-emerald-500';
+                break;
+            case 'error':
+                el.textContent = text || 'Error';
+                el.className = 'text-[10px] text-red-500';
+                break;
+            default:
+                el.textContent = text || '—';
+                el.className = 'text-[10px] text-dark-500';
+        }
+    },
+    
+    /**
+     * @param {string} hash - Hash string to truncate
+     * @returns {string} Truncated hash for display
+     */
+    truncateHash(hash) {
+        if (!hash) return '—';
+        if (typeof hash !== 'string') hash = String(hash);
+        if (hash.length <= 16) return hash;
+        if (hash.startsWith('0x')) {
+            return hash.slice(0, 8) + '...' + hash.slice(-6);
+        }
+        return hash.slice(0, 6) + '...' + hash.slice(-6);
+    }
+};
+
 // Initialize
 document.addEventListener('DOMContentLoaded', () => {
     Templates.init();
@@ -978,6 +1191,7 @@ document.addEventListener('DOMContentLoaded', () => {
     Transact.init();
     NotesTable.init();
     Stats.init();
+    ContractReader.init();
     
     console.log('PoolStellar initialized');
 });

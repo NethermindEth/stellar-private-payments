@@ -1,20 +1,540 @@
 /**
- * https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
+ * Stellar Network Integration for PoolStellar
+ * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
+ * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, nativeToScVal, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
 
-// Initialize the server for Testnet
-const server = new Horizon.Server('https://horizon-testnet.stellar.org');
+const NETWORKS = {
+    testnet: {
+        name: 'Testnet',
+        horizonUrl: 'https://horizon-testnet.stellar.org',
+        rpcUrl: 'https://soroban-testnet.stellar.org',
+        passphrase: Networks.TESTNET,
+    },
+    futurenet: {
+        name: 'Futurenet',
+        horizonUrl: 'https://horizon-futurenet.stellar.org',
+        rpcUrl: 'https://rpc-futurenet.stellar.org',
+        passphrase: Networks.FUTURENET,
+    },
+    mainnet: {
+        name: 'Mainnet',
+        horizonUrl: 'https://horizon.stellar.org',
+        rpcUrl: 'https://soroban.stellar.org',
+        passphrase: Networks.PUBLIC,
+    }
+};
 
-export async function pingTestnet() {
-  try {
-    // Calling the root endpoint acts as a "ping"
-    const response = await server.root();
-    console.log('Successfully connected to Horizon!');
-    console.log('Network Passphrase:', response.network_passphrase);
-    console.log('Horizon Version:', response.horizon_version);
-  } catch (error) {
-    console.error('Connection failed:', error);
-  }
+// Deployed contract addresses on Futurenet
+export const DEPLOYED_CONTRACTS = {
+    network: 'futurenet',
+    admin: 'GCBTXCQFE3SUEOEF63MLUEWYBY4SO2PWR7KQUVCRPGM54P5W33DKALEW',
+    pool: 'CBYHV3VYYY6URN5OB4EEN2UOT6HT5HAQWVMCH57P5YMBGPI4CCPAREPU',
+    aspMembership: 'CCIRMA3SHQ4QLV2U7T63IM55BEUDBJOPZSP7F2TC5WEMZR5TGTHUQH2H',
+    aspNonMembership: 'CDI6755YM7QEP5YIWDLQGJDNU6BS5ONK27VEZADKIQ7SDHTNVEXI7Q2N',
+    verifier: 'CC54FE64G2MRMI6DQ2RGTZOAG5ICLUMLYODLOAIBWONBVFVZLPYCPVKC',
+};
+
+let currentNetwork = 'futurenet';
+let horizonServer = null;
+let sorobanServer = null;
+
+/**
+ * Initialize servers for the specified network.
+ * @param {string} network - One of 'testnet', 'futurenet', or 'mainnet'
+ * @returns {Object} Network configuration object
+ * @throws {Error} If network is not recognized
+ */
+export function setNetwork(network) {
+    if (!NETWORKS[network]) {
+        throw new Error(`Unknown network: ${network}. Use 'testnet', 'futurenet', or 'mainnet'`);
+    }
+    currentNetwork = network;
+    const config = NETWORKS[network];
+    horizonServer = new Horizon.Server(config.horizonUrl);
+    sorobanServer = new rpc.Server(config.rpcUrl);
+    console.log(`[Stellar] Connected to ${config.name}`);
+    return config;
 }
 
+/**
+ * @returns {Object} Current network configuration with name
+ */
+export function getNetwork() {
+    return { name: currentNetwork, ...NETWORKS[currentNetwork] };
+}
+
+/**
+ * @returns {Horizon.Server} Horizon server instance
+ */
+export function getHorizonServer() {
+    if (!horizonServer) setNetwork(currentNetwork);
+    return horizonServer;
+}
+
+/**
+ * @returns {rpc.Server} Soroban RPC server instance
+ */
+export function getSorobanServer() {
+    if (!sorobanServer) setNetwork(currentNetwork);
+    return sorobanServer;
+}
+
+/**
+ * Test network connectivity by calling Horizon root endpoint.
+ * @returns {Promise<{success: boolean, networkPassphrase?: string, error?: string}>}
+ */
+export async function pingTestnet() {
+    try {
+        const server = getHorizonServer();
+        const response = await server.root();
+        console.log('[Stellar] Connected to Horizon:', response.network_passphrase);
+        return { success: true, networkPassphrase: response.network_passphrase };
+    } catch (error) {
+        console.error('[Stellar] Connection failed:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Build a ledger key for reading contract data.
+ * @param {string} contractId - Contract address (C...)
+ * @param {xdr.ScVal} scValKey - Storage key as ScVal
+ * @param {string} durability - 'persistent' or 'temporary'
+ * @returns {xdr.LedgerKey}
+ */
+function buildContractDataKey(contractId, scValKey, durability = 'persistent') {
+    const dur = durability === 'temporary'
+        ? xdr.ContractDataDurability.temporary()
+        : xdr.ContractDataDurability.persistent();
+    
+    return xdr.LedgerKey.contractData(
+        new xdr.LedgerKeyContractData({
+            contract: new Address(contractId).toScAddress(),
+            key: scValKey,
+            durability: dur,
+        })
+    );
+}
+
+/**
+ * Create ScVal for enum-style keys matching Soroban contracttype encoding.
+ * @param {string} variant - Enum variant name (e.g., 'Admin', 'Root')
+ * @param {xdr.ScVal|null} value - Optional tuple value for variants like FilledSubtrees(u32)
+ * @returns {xdr.ScVal}
+ */
+function createEnumKey(variant, value = null) {
+    if (value === null) {
+        return xdr.ScVal.scvVec([
+            xdr.ScVal.scvSymbol(variant)
+        ]);
+    }
+    return xdr.ScVal.scvVec([
+        xdr.ScVal.scvSymbol(variant),
+        value
+    ]);
+}
+
+/**
+ * @param {number} n
+ * @returns {xdr.ScVal}
+ */
+function u32Val(n) {
+    return xdr.ScVal.scvU32(n);
+}
+
+/**
+ * Read a single ledger entry from a contract.
+ * @param {string} contractId - Contract address
+ * @param {xdr.ScVal} scValKey - Storage key
+ * @param {string} durability - 'persistent' or 'temporary'
+ * @returns {Promise<{success: boolean, value?: any, raw?: any, error?: string}>}
+ */
+async function readLedgerEntry(contractId, scValKey, durability = 'persistent') {
+    try {
+        const server = getSorobanServer();
+        const ledgerKey = buildContractDataKey(contractId, scValKey, durability);
+        const result = await server.getLedgerEntries(ledgerKey);
+        
+        if (result.entries && result.entries.length > 0) {
+            const entry = result.entries[0];
+            const contractData = entry.val.contractData();
+            return {
+                success: true,
+                value: scValToNative(contractData.val()),
+                raw: contractData.val(),
+                lastModifiedLedger: entry.lastModifiedLedgerSeq,
+                liveUntilLedger: entry.liveUntilLedgerSeq,
+            };
+        }
+        return { success: false, error: 'Entry not found' };
+    } catch (error) {
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Read ASP Membership contract state.
+ * Storage keys: Admin, FilledSubtrees(u32), Zeroes(u32), Levels, NextIndex, Root
+ * @param {string} contractId - Contract address, defaults to deployed address
+ * @returns {Promise<{success: boolean, root?: string, levels?: number, nextIndex?: number, error?: string}>}
+ */
+export async function readASPMembershipState(contractId = DEPLOYED_CONTRACTS.aspMembership) {
+    try {
+        const results = {
+            success: true,
+            contractId,
+            contractType: 'ASP Membership',
+        };
+
+        const rootResult = await readLedgerEntry(contractId, createEnumKey('Root'));
+        if (rootResult.success) {
+            results.root = formatU256(rootResult.value);
+            results.rootRaw = rootResult.value;
+        }
+
+        const levelsResult = await readLedgerEntry(contractId, createEnumKey('Levels'));
+        if (levelsResult.success) {
+            results.levels = levelsResult.value;
+        }
+
+        const nextIndexResult = await readLedgerEntry(contractId, createEnumKey('NextIndex'));
+        if (nextIndexResult.success) {
+            results.nextIndex = nextIndexResult.value;
+        }
+
+        const adminResult = await readLedgerEntry(contractId, createEnumKey('Admin'));
+        if (adminResult.success) {
+            results.admin = adminResult.value;
+        }
+
+        if (results.levels !== undefined) {
+            results.capacity = Math.pow(2, results.levels);
+            results.usedSlots = results.nextIndex || 0;
+        }
+
+        return results;
+    } catch (error) {
+        console.error('[Stellar] Failed to read ASP Membership:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Read ASP Non-Membership contract state (Sparse Merkle Tree).
+ * Storage keys: Admin, Root, Node(U256)
+ * @param {string} contractId - Contract address, defaults to deployed address
+ * @returns {Promise<{success: boolean, root?: string, isEmpty?: boolean, error?: string}>}
+ */
+export async function readASPNonMembershipState(contractId = DEPLOYED_CONTRACTS.aspNonMembership) {
+    try {
+        const results = {
+            success: true,
+            contractId,
+            contractType: 'ASP Non-Membership (Sparse Merkle Tree)',
+        };
+
+        const rootResult = await readLedgerEntry(contractId, createEnumKey('Root'));
+        if (rootResult.success) {
+            results.root = formatU256(rootResult.value);
+            results.rootRaw = rootResult.value;
+            results.isEmpty = isZeroU256(rootResult.value);
+        }
+
+        const adminResult = await readLedgerEntry(contractId, createEnumKey('Admin'));
+        if (adminResult.success) {
+            results.admin = adminResult.value;
+        }
+
+        return results;
+    } catch (error) {
+        console.error('[Stellar] Failed to read ASP Non-Membership:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Read Pool contract state including Merkle tree with history.
+ * DataKey: Admin, Token, Verifier, MaximumDepositAmount, Nullifiers, ASPMembership, ASPNonMembership
+ * MerkleDataKey: Levels, CurrentRootIndex, NextIndex, FilledSubtree(u32), Zeroes(u32), Root(u32)
+ * @param {string} contractId - Contract address, defaults to deployed address
+ * @returns {Promise<{success: boolean, merkleRoot?: string, merkleLevels?: number, error?: string}>}
+ */
+export async function readPoolState(contractId = DEPLOYED_CONTRACTS.pool) {
+    try {
+        const results = {
+            success: true,
+            contractId,
+            contractType: 'Privacy Pool',
+        };
+
+        const dataKeys = ['Admin', 'Token', 'Verifier', 'ASPMembership', 'ASPNonMembership'];
+        for (const key of dataKeys) {
+            const result = await readLedgerEntry(contractId, createEnumKey(key));
+            if (result.success) {
+                results[key.toLowerCase()] = result.value;
+            }
+        }
+
+        const maxDepositResult = await readLedgerEntry(contractId, createEnumKey('MaximumDepositAmount'));
+        if (maxDepositResult.success) {
+            results.maximumDepositAmount = maxDepositResult.value;
+        }
+
+        const merkleKeys = ['Levels', 'CurrentRootIndex', 'NextIndex'];
+        for (const key of merkleKeys) {
+            const result = await readLedgerEntry(contractId, createEnumKey(key));
+            if (result.success) {
+                results['merkle' + key] = result.value;
+            }
+        }
+
+        if (results.merkleCurrentRootIndex !== undefined) {
+            const rootResult = await readLedgerEntry(
+                contractId, 
+                createEnumKey('Root', u32Val(results.merkleCurrentRootIndex))
+            );
+            if (rootResult.success) {
+                results.merkleRoot = formatU256(rootResult.value);
+                results.merkleRootRaw = rootResult.value;
+            }
+        }
+
+        if (results.merkleLevels !== undefined) {
+            results.merkleCapacity = Math.pow(2, results.merkleLevels);
+            results.totalCommitments = results.merkleNextIndex || 0;
+        }
+
+        return results;
+    } catch (error) {
+        console.error('[Stellar] Failed to read Pool state:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+/**
+ * Read state from all deployed contracts in parallel.
+ * @returns {Promise<{success: boolean, pool: Object, aspMembership: Object, aspNonMembership: Object}>}
+ */
+export async function readAllContractStates() {
+    console.log('[Stellar] Reading all contract states...');
+    
+    const [poolState, membershipState, nonMembershipState] = await Promise.all([
+        readPoolState(),
+        readASPMembershipState(),
+        readASPNonMembershipState(),
+    ]);
+
+    return {
+        success: true,
+        network: currentNetwork,
+        timestamp: new Date().toISOString(),
+        pool: poolState,
+        aspMembership: membershipState,
+        aspNonMembership: nonMembershipState,
+    };
+}
+
+/**
+ * Get events from a contract.
+ * @param {string} contractId - Contract address
+ * @param {Object} options - Query options
+ * @param {number} options.startLedger - Starting ledger sequence
+ * @param {number} options.limit - Max events to return
+ * @param {Array} options.topics - Topic filters
+ * @returns {Promise<{success: boolean, events: Array, error?: string}>}
+ */
+export async function getContractEvents(contractId, options = {}) {
+    try {
+        const server = getSorobanServer();
+        const latestLedger = await server.getLatestLedger();
+        
+        const result = await server.getEvents({
+            startLedger: options.startLedger || latestLedger.sequence - 2000,
+            filters: [{
+                type: 'contract',
+                contractIds: [contractId],
+                topics: options.topics || [],
+            }],
+            limit: options.limit || 50,
+        });
+
+        const events = result.events.map(event => ({
+            id: event.id,
+            ledger: event.ledger,
+            type: event.type,
+            contractId: event.contractId,
+            topic: event.topic.map(t => scValToNative(t)),
+            value: scValToNative(event.value),
+        }));
+
+        return { success: true, events, latestLedger: result.latestLedger };
+    } catch (error) {
+        console.error('[Stellar] Failed to get events:', error);
+        return { success: false, error: error.message, events: [] };
+    }
+}
+
+/**
+ * Get Pool contract events (NewCommitment, NewNullifier).
+ * @param {number} limit - Max events to return
+ * @returns {Promise<{success: boolean, events: Array}>}
+ */
+export async function getPoolEvents(limit = 20) {
+    return getContractEvents(DEPLOYED_CONTRACTS.pool, { limit });
+}
+
+/**
+ * Get ASP Membership events (LeafAdded).
+ * @param {number} limit - Max events to return
+ * @returns {Promise<{success: boolean, events: Array}>}
+ */
+export async function getASPMembershipEvents(limit = 20) {
+    return getContractEvents(DEPLOYED_CONTRACTS.aspMembership, { limit });
+}
+
+/**
+ * Get ASP Non-Membership events (LeafInserted, LeafUpdated, LeafDeleted).
+ * @param {number} limit - Max events to return
+ * @returns {Promise<{success: boolean, events: Array}>}
+ */
+export async function getASPNonMembershipEvents(limit = 20) {
+    return getContractEvents(DEPLOYED_CONTRACTS.aspNonMembership, { limit });
+}
+
+/**
+ * Convert ScVal to native JavaScript types.
+ * @param {xdr.ScVal} scVal - Stellar ScVal
+ * @returns {any} Native JS value
+ */
+export function scValToNative(scVal) {
+    try {
+        return sdkScValToNative(scVal);
+    } catch {
+        const type = scVal.switch().name;
+        switch (type) {
+            case 'scvVoid': return null;
+            case 'scvBool': return scVal.b();
+            case 'scvU32': return scVal.u32();
+            case 'scvI32': return scVal.i32();
+            case 'scvU64': return scVal.u64().toString();
+            case 'scvI64': return scVal.i64().toString();
+            case 'scvU128': return formatU128(scVal.u128());
+            case 'scvI128': return scVal.i128().toString();
+            case 'scvU256': return formatU256Raw(scVal.u256());
+            case 'scvI256': return scVal.i256().toString();
+            case 'scvBytes': return scVal.bytes().toString('hex');
+            case 'scvString': return scVal.str().toString();
+            case 'scvSymbol': return scVal.sym().toString();
+            case 'scvAddress': return Address.fromScAddress(scVal.address()).toString();
+            case 'scvVec': return scVal.vec().map(v => scValToNative(v));
+            case 'scvMap': {
+                const map = {};
+                for (const entry of scVal.map()) {
+                    map[scValToNative(entry.key())] = scValToNative(entry.val());
+                }
+                return map;
+            }
+            default: return `[${type}]`;
+        }
+    }
+}
+
+/**
+ * Format U256 value to hex string.
+ * @param {any} value - U256 value (bigint, string, or object)
+ * @returns {string} Hex string representation
+ */
+function formatU256(value) {
+    if (typeof value === 'string') return value;
+    if (typeof value === 'bigint') return '0x' + value.toString(16).padStart(64, '0');
+    if (typeof value === 'object' && value !== null) {
+        try {
+            return JSON.stringify(value);
+        } catch {
+            return String(value);
+        }
+    }
+    return String(value);
+}
+
+/**
+ * Format raw U256 XDR type (4 x u64: hi_hi, hi_lo, lo_hi, lo_lo).
+ * @param {Object} u256Xdr - XDR U256 object
+ * @returns {string} Hex string
+ */
+function formatU256Raw(u256Xdr) {
+    try {
+        const hiHi = BigInt(u256Xdr.hiHi().toString());
+        const hiLo = BigInt(u256Xdr.hiLo().toString());
+        const loHi = BigInt(u256Xdr.loHi().toString());
+        const loLo = BigInt(u256Xdr.loLo().toString());
+        
+        const value = (hiHi << 192n) | (hiLo << 128n) | (loHi << 64n) | loLo;
+        return '0x' + value.toString(16).padStart(64, '0');
+    } catch {
+        return '[U256]';
+    }
+}
+
+/**
+ * Format U128 XDR type (2 x u64: hi, lo).
+ * @param {Object} u128Xdr - XDR U128 object
+ * @returns {string} Decimal string
+ */
+function formatU128(u128Xdr) {
+    try {
+        const hi = BigInt(u128Xdr.hi().toString());
+        const lo = BigInt(u128Xdr.lo().toString());
+        return ((hi << 64n) | lo).toString();
+    } catch {
+        return '[U128]';
+    }
+}
+
+/**
+ * Check if U256 value is zero.
+ * @param {any} value - U256 value
+ * @returns {boolean}
+ */
+function isZeroU256(value) {
+    if (typeof value === 'string') {
+        return value === '0' || value === '0x' + '0'.repeat(64);
+    }
+    if (typeof value === 'bigint') return value === 0n;
+    return false;
+}
+
+/**
+ * Validate a Soroban contract address.
+ * @param {string} address - Address to validate
+ * @returns {boolean} True if valid contract address (starts with C, 56 chars)
+ */
+export function isValidContractAddress(address) {
+    if (!address || typeof address !== 'string') return false;
+    if (!address.startsWith('C') || address.length !== 56) return false;
+    try {
+        new Address(address);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
+/**
+ * Truncate address for display.
+ * @param {string} address - Full address
+ * @param {number} startChars - Chars to show at start
+ * @param {number} endChars - Chars to show at end
+ * @returns {string} Truncated address
+ */
+export function formatAddress(address, startChars = 4, endChars = 4) {
+    if (!address) return '';
+    if (address.length <= startChars + endChars + 3) return address;
+    return `${address.slice(0, startChars)}...${address.slice(-endChars)}`;
+}
+
+setNetwork(currentNetwork);
+
+export { NETWORKS };
