@@ -1,10 +1,9 @@
 /**
- * Circom Witness Calculator (GPL-3.0)
+ * Circom Witness Calculator
  * 
- * This file is from the Circom project (iden3/circom) and is licensed under GPL-3.0.
+ * This file is from the Circom project (iden3/circom)
  * Modified to use ES module exports for browser compatibility.
  * 
- * @license GPL-3.0
  * @see https://github.com/iden3/circom
  */
 

@@ -1,11 +1,9 @@
 /**
- * Witness Module (GPL-3.0)
+ * Witness Module
  * 
- * This module uses Circom's witness_calculator.js which is GPL-3.0 licensed.
+ * This module uses Circom's witness_calculator.js 
  * It is isolated from the rest of the application and communicates
  * ONLY via Uint8Array data exchange.
- * 
- * @license GPL-3.0
  */
 
 import witnessBuilder from './witness_calculator.js';

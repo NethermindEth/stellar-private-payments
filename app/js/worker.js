@@ -5,8 +5,8 @@
  * Communication happens via postMessage.
  * 
  * This worker coordinates between:
- * - Module 1 (GPL-3.0): Witness generation
- * - Module 2 (Apache-2.0): Input preparation + proof generation
+ * - Module 1: Witness generation
+ * - Module 2: Input preparation + proof generation
  */
 
 import {

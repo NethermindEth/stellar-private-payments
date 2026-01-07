@@ -6,11 +6,11 @@
 //! - Proof generation from witness data
 //!
 //! # License
-//! Apache-2.0 - No GPL code is linked or included.
+//! Apache-2.0
 //!
 //! # Architecture
-//! This module receives witness data (Uint8Array) from the GPL-3.0 witness
-//! module via pure data exchange, ensuring license isolation.
+//! This module receives witness data (Uint8Array) from the witness 
+//! module via pure data exchange
 
 #![no_std]
 extern crate alloc;

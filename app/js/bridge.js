@@ -1,9 +1,9 @@
 /**
- * ZK Proof Bridge - Apache-2.0 License
+ * ZK Proof Bridge
  * 
  * Coordinates between:
- * - Module 1 (GPL-3.0): Witness generation (witness_calculator.js)
- * - Module 2 (Apache-2.0): Proof generation (prover-wasm)
+ * - Module 1: Witness generation (witness_calculator.js)
+ * - Module 2: Proof generation (prover-wasm)
  * 
  * Data-only exchange between modules via Uint8Array.
  */
@@ -29,7 +29,7 @@ import initProverModule, {
     version as proverVersion,
 } from './prover/prover.js';
 
-// Witness Generation Module (GPL-3.0)
+// Witness Generation Module
 // Path is relative to dist/js/ where this file runs
 import {
     initWitness,
@@ -627,6 +627,4 @@ export async function proveAndVerify(inputs, onProgress) {
 }
 
 // Re-exports
-
 export { getCircuitInfo, bytesToWitness };
-export { verify_proof as verifyWithKey };
