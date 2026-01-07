@@ -974,6 +974,169 @@ const Stats = {
 };
 
 // Reads on-chain state from deployed Pool, ASP Membership, ASP Non-Membership contracts
+/**
+ * Handles fetching and displaying recent pool events.
+ */
+const PoolEventsFetcher = {
+    isLoading: false,
+    events: [],
+    maxEvents: 3,
+    
+    /**
+     * Initialize event fetching with auto-refresh.
+     */
+    init() {
+        this.refresh();
+        setInterval(() => this.refresh(), 30000);
+    },
+    
+    /**
+     * Fetch recent pool events from the contract.
+     */
+    async refresh() {
+        if (this.isLoading) return;
+        
+        this.isLoading = true;
+        this.showLoading();
+        
+        try {
+            const result = await getPoolEvents(this.maxEvents);
+            
+            if (result.success && result.events.length > 0) {
+                this.events = result.events.slice(0, this.maxEvents);
+                this.displayEvents();
+                this.setStatus('success');
+            } else if (result.success) {
+                this.events = [];
+                this.showEmpty();
+                this.setStatus('success', 'No events');
+            } else {
+                this.setStatus('error', result.error || 'Failed');
+                this.showEmpty();
+            }
+        } catch (err) {
+            console.error('[PoolEventsFetcher] Error:', err);
+            this.setStatus('error', 'Error');
+            this.showEmpty();
+        } finally {
+            this.isLoading = false;
+        }
+    },
+    
+    /**
+     * Render the events list in the UI.
+     */
+    displayEvents() {
+        const container = document.getElementById('recent-tx');
+        const emptyEl = document.getElementById('recent-tx-empty');
+        const loadingEl = document.getElementById('recent-tx-loading');
+        const template = document.getElementById('tpl-tx-item');
+        
+        loadingEl.classList.add('hidden');
+        
+        if (!this.events.length) {
+            this.showEmpty();
+            return;
+        }
+        
+        emptyEl.classList.add('hidden');
+        container.innerHTML = '';
+        
+        for (const event of this.events) {
+            const clone = template.content.cloneNode(true);
+            const li = clone.querySelector('li');
+            
+            const hash = this.formatEventHash(event);
+            const time = this.formatEventTime(event);
+            
+            li.querySelector('.tx-hash').textContent = hash;
+            li.querySelector('.tx-hash').title = event.id || '';
+            li.querySelector('.tx-time').textContent = time;
+            
+            container.appendChild(clone);
+        }
+    },
+    
+    /**
+     * Show the empty state message.
+     * For when there are no recent transactions
+     */
+    showEmpty() {
+        const container = document.getElementById('recent-tx');
+        const emptyEl = document.getElementById('recent-tx-empty');
+        const loadingEl = document.getElementById('recent-tx-loading');
+        
+        container.innerHTML = '';
+        loadingEl.classList.add('hidden');
+        emptyEl.classList.remove('hidden');
+    },
+    
+    /**
+     * Show loading indicator.
+     */
+    showLoading() {
+        const container = document.getElementById('recent-tx');
+        const emptyEl = document.getElementById('recent-tx-empty');
+        const loadingEl = document.getElementById('recent-tx-loading');
+        
+        container.innerHTML = '';
+        emptyEl.classList.add('hidden');
+        loadingEl.classList.remove('hidden');
+    },
+    
+    /**
+     * @param {string} status - 'success', 'error', or default
+     * @param {string} text - Optional display text
+     */
+    setStatus(status, text = '') {
+        const el = document.getElementById('recent-tx-status');
+        if (!el) return;
+        
+        switch (status) {
+            case 'success':
+                el.textContent = text || 'Updated';
+                el.className = 'text-[10px] text-emerald-500';
+                break;
+            case 'error':
+                el.textContent = text || 'Error';
+                el.className = 'text-[10px] text-red-500';
+                break;
+            default:
+                el.textContent = '—';
+                el.className = 'text-[10px] text-dark-500';
+        }
+    },
+    
+    /**
+     * Format event ID or topic for display.
+     * @param {Object} event - Pool event object
+     * @returns {string} Formatted hash display
+     */
+    formatEventHash(event) {
+        const topic = event.topic?.[0] || '';
+        const prefix = typeof topic === 'string' ? topic.slice(0, 10) : 'Event';
+        
+        if (event.id) {
+            const parts = event.id.split('-');
+            const shortId = parts.length > 1 ? parts[1].slice(0, 6) : event.id.slice(0, 8);
+            return `${prefix}...${shortId}`;
+        }
+        return `${prefix}...`;
+    },
+    
+    /**
+     * Format event timestamp for display.
+     * @param {Object} event - Pool event object
+     * @returns {string} Relative time string
+     */
+    formatEventTime(event) {
+        if (event.ledger) {
+            return `L${event.ledger}`;
+        }
+        return '—';
+    }
+};
+
 const ContractReader = {
     isLoading: false,
     lastUpdate: null,
@@ -1067,11 +1230,10 @@ const ContractReader = {
         const levelsEl = document.getElementById('pool-levels');
         levelsEl.textContent = state.merkleLevels !== undefined ? state.merkleLevels : '—';
         
-        if (state.aspmembership) {
-            document.getElementById('compliance-membership-addr').textContent = formatAddress(state.aspmembership, 4, 4);
-        }
-        if (state.aspnonmembership) {
-            document.getElementById('compliance-nonmember-addr').textContent = formatAddress(state.aspnonmembership, 4, 4);
+        // Update total commitments in stats panel
+        const totalEl = document.getElementById('pool-total-value');
+        if (totalEl) {
+            totalEl.textContent = (state.totalCommitments || state.merkleNextIndex || 0).toLocaleString();
         }
     },
     
@@ -1087,8 +1249,6 @@ const ContractReader = {
         if (state.root) {
             rootEl.textContent = this.truncateHash(state.root);
             rootEl.title = state.root;
-            document.getElementById('compliance-membership-root').textContent = this.truncateHash(state.root);
-            document.getElementById('compliance-membership-root').title = state.root;
         } else {
             rootEl.textContent = '—';
         }
@@ -1113,8 +1273,6 @@ const ContractReader = {
         if (state.root) {
             rootEl.textContent = this.truncateHash(state.root);
             rootEl.title = state.root;
-            document.getElementById('compliance-nonmember-root').textContent = this.truncateHash(state.root);
-            document.getElementById('compliance-nonmember-root').title = state.root;
         } else {
             rootEl.textContent = '0x0...0';
         }
@@ -1144,22 +1302,38 @@ const ContractReader = {
         const el = document.getElementById(elementId);
         if (!el) return;
         
+        // Also update the corresponding bullet indicator
+        const indicatorId = elementId.replace('-status', '-indicator');
+        const indicator = document.getElementById(indicatorId);
+        
         switch (status) {
             case 'loading':
                 el.textContent = 'Loading...';
                 el.className = 'text-[10px] text-dark-400 animate-pulse';
+                if (indicator) {
+                    indicator.className = 'w-2 h-2 rounded-full bg-dark-400 animate-pulse';
+                }
                 break;
             case 'success':
                 el.textContent = text || 'OK';
                 el.className = 'text-[10px] text-emerald-500';
+                if (indicator) {
+                    indicator.className = 'w-2 h-2 rounded-full bg-emerald-500';
+                }
                 break;
             case 'error':
                 el.textContent = text || 'Error';
                 el.className = 'text-[10px] text-red-500';
+                if (indicator) {
+                    indicator.className = 'w-2 h-2 rounded-full bg-red-500';
+                }
                 break;
             default:
                 el.textContent = text || '—';
                 el.className = 'text-[10px] text-dark-500';
+                if (indicator) {
+                    indicator.className = 'w-2 h-2 rounded-full bg-dark-500';
+                }
         }
     },
     
@@ -1192,6 +1366,7 @@ document.addEventListener('DOMContentLoaded', () => {
     NotesTable.init();
     Stats.init();
     ContractReader.init();
+    PoolEventsFetcher.init();
     
     console.log('PoolStellar initialized');
 });

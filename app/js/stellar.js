@@ -3,7 +3,7 @@
  * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
  * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon, rpc, Networks, Address, xdr, nativeToScVal, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
 
 const NETWORKS = {
     testnet: {
@@ -504,22 +504,6 @@ function isZeroU256(value) {
     }
     if (typeof value === 'bigint') return value === 0n;
     return false;
-}
-
-/**
- * Validate a Soroban contract address.
- * @param {string} address - Address to validate
- * @returns {boolean} True if valid contract address (starts with C, 56 chars)
- */
-export function isValidContractAddress(address) {
-    if (!address || typeof address !== 'string') return false;
-    if (!address.startsWith('C') || address.length !== 56) return false;
-    try {
-        new Address(address);
-        return true;
-    } catch {
-        return false;
-    }
 }
 
 /**
