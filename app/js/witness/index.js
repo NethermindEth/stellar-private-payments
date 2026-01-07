@@ -87,7 +87,7 @@ export async function computeWitnessWTNS(inputs) {
 }
 
 /**
- * Get information about the loaded circuit
+ * Get information about the loaded circuit using BN254 curve.
  * 
  * @returns {Object} - Circuit info: { witnessSize, circomVersion, prime }
  */
@@ -130,26 +130,4 @@ export function bytesToWitness(bytes) {
     }
     
     return witness;
-}
-
-/**
- * Convert BigInt array to Little-Endian bytes (for testing)
- * 
- * @param {BigInt[]} witness - Array of field elements
- * @returns {Uint8Array} - Little-Endian bytes
- */
-export function witnessToBytes(witness) {
-    const FIELD_SIZE = 32;
-    const buf = new Uint8Array(witness.length * FIELD_SIZE);
-    
-    for (let i = 0; i < witness.length; i++) {
-        let value = witness[i];
-        // Little-Endian: LSB first
-        for (let j = 0; j < FIELD_SIZE; j++) {
-            buf[i * FIELD_SIZE + j] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    }
-    
-    return buf;
 }

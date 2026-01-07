@@ -12,13 +12,10 @@
 import {
     // Initialization
     configure,
-    initModules,
+    initProverWasm,
     initWitnessModule,
     initProver,
     init,
-    isInitialized,
-    isWitnessReady,
-    isProverReady,
     isProvingCached,
     clearCache,
     
@@ -34,12 +31,6 @@ import {
     derivePublicKey,
     derivePublicKeyHex,
     computeCommitment,
-    computeNullifier,
-    createMerkleTree,
-    bigintToField,
-    numberToField,
-    hexToField,
-    fieldToHex,
 } from './bridge.js';
 
 // State
@@ -64,9 +55,9 @@ function sendProgress(messageId, loaded, total, message) {
 /**
  * Initialize WASM modules only (fast, no downloads)
  */
-async function handleInitModules(data) {
+async function handleInitModules() {
     try {
-        await initModules();
+        await initProverWasm();
         modulesReady = true;
         return { success: true, modulesReady: true };
     } catch (error) {
@@ -77,7 +68,7 @@ async function handleInitModules(data) {
 /**
  * Initialize witness calculator (downloads circuit.wasm if needed)
  */
-async function handleInitWitness(data, messageId) {
+async function handleInitWitness(data) {
     const { circuitWasmUrl } = data || {};
     
     try {
@@ -116,9 +107,8 @@ async function handleInitProver(data, messageId) {
  * Full initialization with explicit bytes (backwards compatible)
  */
 async function handleInit(data) {
-    const { circuitWasmUrl, provingKeyBytes, r1csBytes } = data;
-    
     try {
+        const { circuitWasmUrl, provingKeyBytes, r1csBytes } = data;
         const info = await init(
             circuitWasmUrl,
             new Uint8Array(provingKeyBytes),
@@ -173,9 +163,8 @@ async function handleClearCache() {
  * Generate a ZK proof from circuit inputs
  */
 async function handleProve(data, messageId) {
-    const { inputs } = data;
-    
     try {
+        const { inputs } = data;
         // Lazy init prover if needed
         if (!proverReady) {
             const onProgress = (loaded, total, message) => {
@@ -185,12 +174,13 @@ async function handleProve(data, messageId) {
             proverReady = true;
         }
         
-        const startTime = performance.now();
-        
         // Step 1: Generate witness
+        // We measure witness generation and prof generation separately
+        // Total time is the sum of these two processes (it's accumulated over witness time after prints.
         const witnessTime = performance.now();
         const witnessBytes = await generateWitness(inputs);
-        console.log(`[Worker] Witness generation: ${(performance.now() - witnessTime).toFixed(0)}ms`);
+        const witnessOnlyTime = performance.now() - witnessTime;
+        console.log(`[Worker] Witness generation: ${(witnessOnlyTime).toFixed(0)}ms`);
         
         // Step 2: Generate proof
         const proveTime = performance.now();
@@ -200,16 +190,15 @@ async function handleProve(data, messageId) {
         // Step 3: Extract public inputs
         const publicInputsBytes = extractPublicInputs(witnessBytes);
         
-        console.log(`[Worker] Total prove time: ${(performance.now() - startTime).toFixed(0)}ms`);
         
         return {
             success: true,
             proof: Array.from(proofBytes),
             publicInputs: Array.from(publicInputsBytes),
             timings: {
-                witness: performance.now() - witnessTime,
+                witness: witnessOnlyTime,
                 prove: performance.now() - proveTime,
-                total: performance.now() - startTime,
+                total: performance.now() - witnessTime,
             },
         };
     } catch (error) {
@@ -225,9 +214,8 @@ function handleVerify(data) {
         return { success: false, error: 'Prover not initialized' };
     }
     
-    const { proofBytes, publicInputsBytes } = data;
-    
     try {
+        const { proofBytes, publicInputsBytes } = data;
         const verified = verifyProofLocal(
             new Uint8Array(proofBytes),
             new Uint8Array(publicInputsBytes)
@@ -242,14 +230,13 @@ function handleVerify(data) {
  * Derive public key from private key
  */
 function handleDerivePublicKey(data) {
-    const { privateKey, asHex } = data;
-    
     try {
-        const pkBytes = new Uint8Array(privateKey);
+        const { privateKey, asHex } = data;
+        const skBytes = new Uint8Array(privateKey);
         if (asHex) {
-            return { success: true, publicKey: derivePublicKeyHex(pkBytes) };
+            return { success: true, publicKey: derivePublicKeyHex(skBytes) };
         } else {
-            return { success: true, publicKey: Array.from(derivePublicKey(pkBytes)) };
+            return { success: true, publicKey: Array.from(derivePublicKey(skBytes)) };
         }
     } catch (error) {
         return { success: false, error: error.message };
@@ -260,9 +247,8 @@ function handleDerivePublicKey(data) {
  * Compute commitment
  */
 function handleComputeCommitment(data) {
-    const { amount, publicKey, blinding } = data;
-    
     try {
+        const { amount, publicKey, blinding } = data;
         const commitment = computeCommitment(
             new Uint8Array(amount),
             new Uint8Array(publicKey),
@@ -327,11 +313,11 @@ self.onmessage = async function(event) {
     switch (type) {
         // Initialization
         case 'INIT_MODULES':
-            result = await handleInitModules(data);
+            result = await handleInitModules();
             break;
             
         case 'INIT_WITNESS':
-            result = await handleInitWitness(data, messageId);
+            result = await handleInitWitness(data);
             break;
             
         case 'INIT_PROVER':
@@ -402,4 +388,4 @@ self.onmessage = async function(event) {
 };
 
 // Signal that worker script has loaded
-self.postMessage({ type: 'LOADED' });
+self.postMessage({ type: 'READY' });

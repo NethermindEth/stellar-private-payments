@@ -291,12 +291,11 @@ export function configure(options) {
 }
 
 /**
- * Initialize only the WASM modules (fast, no large downloads)
- * Call this early to prepare for crypto operations
+ * Initializes the prover WASM module
  * 
  * @returns {Promise<void>}
  */
-export async function initModules() {
+export async function initProverWasm() {
     if (!proverModuleInitialized) {
         await initProverModule();
         proverModuleInitialized = true;
@@ -305,13 +304,13 @@ export async function initModules() {
 }
 
 /**
- * Initialize witness generation (needed for input preparation)
+ * Initialize witness generation (downloads the circuit WASM file)
  * 
  * @param {string} circuitWasmUrl - Optional, uses config if not provided
  * @returns {Promise<Object>} Circuit info
  */
 export async function initWitnessModule(circuitWasmUrl) {
-    await initModules();
+    await initProverWasm();
     
     if (!witnessInitialized) {
         const url = circuitWasmUrl || config.circuitWasmUrl;
@@ -372,7 +371,7 @@ export async function initProver(onProgress) {
  * @returns {Promise<Object>}
  */
 export async function init(circuitWasmUrl, provingKeyBytes, r1csBytes) {
-    await initModules();
+    await initProverWasm();
     await initWitness(circuitWasmUrl);
     witnessInitialized = true;
     

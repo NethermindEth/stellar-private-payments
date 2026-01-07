@@ -9,9 +9,6 @@
  */
 
 export default async function builder(code, options) {
-
-    options = options || {};
-
     let wasmModule;
     try {
         wasmModule = await WebAssembly.compile(code);
@@ -73,17 +70,7 @@ export default async function builder(code, options) {
         }
     });
 
-    const sanityCheck =
-        options
-//        options &&
-//        (
-//            options.sanityCheck ||
-//            options.logGetSignal ||
-//            options.logSetSignal ||
-//            options.logStartComponent ||
-//            options.logFinishComponent
-//        );
-
+    const sanityCheck = options?.sanityCheck || false;
 
     wc = new WitnessCalculator(instance, sanityCheck);
     return wc;

@@ -98,7 +98,7 @@ pub fn poseidon2_hash3(
 
 /// Derive public key from private key
 ///
-/// publicKey = Poseidon2(privateKey, 0, domain=0)
+/// publicKey = Poseidon2(privateKey, 0, domain=0x03)
 #[wasm_bindgen]
 pub fn derive_public_key(private_key: &[u8]) -> Result<Vec<u8>, JsValue> {
     let sk = bytes_to_scalar(private_key)?;

@@ -17,7 +17,7 @@ But the ark-circom dependency relies on Wasmer, and wasmer cannot be compiled in
 Since this will not work in the browser, we went a with a different 2 module approach:
 
 - The witness calculator (`js/witness/`) module is derived from [circom/snarkjs](https://github.com/iden3/circom) which is licensed under GPL-3.0.
-This module is GPL3 licensed, as it consumes Circom artifacts and uses directly the `witness_calculator.js` file.
+This module is GPL-3.0 licensed, as it consumes Circom artifacts and uses directly the `witness_calculator.js` file.
 - The prover module (`src/`) is a Rust module that is compiled into WASM. This code is licensed under Apache-2.0, a more permissive license that allows commercial use.
 
 ### License Isolation
@@ -45,7 +45,8 @@ To prevent GPL-3.0 from propagating into our Apache-2.0 codebase, the two module
 ```
 
 The bridge module (`js/bridge.js`) orchestrates this data exchange without creating a derivative work of either module.
-
+The bridge module does not import, modify, or bundle GPL-3.0 licensed code.
+It operates on serialized inputs and outputs and can be replaced without modifying either module.
 
 ## Directory Structure
 
