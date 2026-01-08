@@ -1,5 +1,4 @@
 import {
-    getAddress,
     getNetworkDetails,
     isAllowed,
     isConnected,
@@ -12,25 +11,68 @@ import {
 /**
  * Request wallet access and return the active public key.
  *
+ * Throws when the extension is missing or unavailable.
+ *
+ * @returns {Promise<void>}
+ */
+async function assertFreighterInstalled() {
+    const conn = await isConnected();
+    if (conn?.error) {
+        throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
+    }
+    if (!conn?.isConnected) {
+        throw new Error("Freighter not detected");
+    }
+}
+
+/**
+ * Ensure Freighter is installed, connected, and allowed for this site.
+ *
+ * Optionally requests wallet access and returns the active public key.
+ *
+ * @param {Object} [opts] - Optional configuration.
+ * @param {boolean} [opts.requestAddress=false] - Whether to request and return the active address.
+ * @returns {Promise<string|void>} - Connected Stellar public key when requested.
+ */
+async function ensureFreighterReady(opts = {}) {
+    const { requestAddress = false } = opts;
+
+    await assertFreighterInstalled();
+
+    const allowed = await isAllowed();
+    if (allowed?.error) {
+        throw normalizeWalletError(allowed.error, "Failed to check Freighter allow-list");
+    }
+
+    if (!allowed?.isAllowed) {
+        const set = await setAllowed();
+        if (set?.error) {
+            throw normalizeWalletError(set.error, "Freighter access rejected");
+        }
+    }
+
+    if (requestAddress) {
+        const access = await requestAccess();
+        if (access?.error) {
+            throw normalizeWalletError(access.error, "Freighter access request failed");
+        }
+        if (!access?.address) {
+            throw new Error("No public key returned");
+        }
+        return access.address;
+    }
+}
+
+/**
+ * Request wallet access and return the active public key.
+ *
  * Validates Freighter availability, prompts for access if needed,
  * and returns the connected Stellar address.
  *
  * @returns {Promise<string>} - Connected Stellar public key (G...).
  */
 export async function connectWallet() {
-    const connection = await isConnected();
-
-    if (connection.error) throw normalizeWalletError(connection.error, "Failed to check Freighter");
-
-    if (!connection.isConnected) {
-        throw new Error('Freighter not detected');
-    }
-
-    const access = await requestAccess();
-    if (access.error) throw normalizeWalletError(access.error);
-    if (!access.address) throw new Error("No public key returned");
-
-    return access.address;
+    return await ensureFreighterReady({requestAddress: true});
 }
 
 /**
@@ -42,7 +84,9 @@ export async function connectWallet() {
  */
 export async function getWalletNetwork() {
     const details = await getNetworkDetails();
-    if (details.error) throw normalizeWalletError(details.error);
+    if (details?.error) {
+        throw normalizeWalletError(details.error, "Failed to get Freighter network details");
+    }
 
     const { network, networkUrl, networkPassphrase, sorobanRpcUrl } = details;
     return { network, networkUrl, networkPassphrase, sorobanRpcUrl };
@@ -57,34 +101,13 @@ export async function getWalletNetwork() {
  * @param {string} fallbackMessage - Default message when none provided.
  * @returns {Error} - Error with `code` set to USER_REJECTED or WALLET_ERROR.
  */
-function normalizeWalletError(error, fallbackMessage) {
+function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     const message = error?.message || fallbackMessage;
     const lower = String(message).toLowerCase();
     const err = new Error(message);
     err.code = /reject|declin|denied|cancel/.test(lower) ? 'USER_REJECTED' : 'WALLET_ERROR';
     err.cause = error;
     return err;
-}
-
-/**
- * Ensure Freighter is installed, connected, and allowed for this site.
- *
- * Calls the allow-list handshake when needed to avoid sign requests failing.
- *
- * @returns {Promise<void>}
- */
-async function ensureFreighterReady() {
-    const conn = await isConnected();
-    if (conn.error) throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
-    if (!conn.isConnected) throw new Error("Freighter not detected");
-
-    const allowed = await isAllowed();
-    if (allowed.error) throw normalizeWalletError(allowed.error, "Failed to check Freighter allow-list");
-
-    if (!allowed.isAllowed) {
-        const set = await setAllowed();
-        if (set.error) throw normalizeWalletError(set.error, "Freighter access rejected");
-    }
 }
 
 /**

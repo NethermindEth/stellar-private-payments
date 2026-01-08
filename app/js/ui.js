@@ -361,20 +361,27 @@ const Wallet = {
             
             btn.classList.add('border-emerald-500', 'bg-emerald-500/10');
             text.textContent = Utils.truncateHex(App.state.wallet.address, 7, 6);
-
-            if (network) {
-                const details = await getWalletNetwork();
-                network.textContent = details.network || 'Unknown';
-            }
-
-            Toast.show('Wallet connected!', 'success');
         } catch (e) {
             console.error('Wallet connection error:', e);
             const message = e?.code === 'USER_REJECTED'
                 ? 'Wallet connection cancelled'
                 : (e?.message || 'Failed to connect wallet');
             Toast.show(message, 'error');
+            return;
         }
+
+        if (network) {
+            try {
+                const details = await getWalletNetwork();
+                network.textContent = details.network || 'Unknown';
+            } catch (e) {
+                console.error('Wallet network error:', e);
+                network.textContent = 'Unknown';
+                Toast.show(e?.message || 'Failed to fetch wallet network', 'error');
+            }
+        }
+
+        Toast.show('Wallet connected!', 'success');
     },
     
     disconnect() {
