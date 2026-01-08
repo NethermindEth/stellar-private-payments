@@ -22,11 +22,20 @@ stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", "mkdir -p dist/.stage/js/witness && cp app/js/witness/index.js dist/.stage/js/witness/ && cp app/js/witness/witness_calculator.js dist/.stage/js/witness/"]
 
-# Copy circuit artifacts (Wasm and R1CS) to staging
+# Copy circuit artifacts (Wasm and R1CS) from cargo build output to dist
 [[hooks]]
 stage = "pre_build"
 command = "sh"
-command_arguments = ["-c", "mkdir -p dist/.stage/circuits && cp app/js/witness/*.wasm dist/.stage/circuits/ && cp app/js/witness/*.r1cs dist/.stage/circuits/"]
+command_arguments = ["-c", """
+mkdir -p dist/.stage/circuits
+CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
+if [ -n "$CIRCUIT_OUT" ]; then
+    cp "$CIRCUIT_OUT"/*.r1cs dist/.stage/circuits/ 2>/dev/null || true
+    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm dist/.stage/circuits/ 2>/dev/null || true
+else
+    echo "Warning: No circuit build output found. Run 'BUILD_TESTS=1 cargo build -p circuits' first."
+fi
+"""]
 
 # Copy proving keys to staging
 [[hooks]]
