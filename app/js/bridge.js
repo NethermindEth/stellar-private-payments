@@ -189,74 +189,79 @@ export async function ensureProvingArtifacts(onProgress) {
     }
     
     downloadPromise = (async () => {
-        // Try cache first
-        let pk = cachedProvingKey || await getCached(config.provingKeyUrl);
-        let r1cs = cachedR1cs || await getCached(config.r1csUrl);
-        
-        const needsPk = !pk;
-        const needsR1cs = !r1cs;
-        
-        if (needsPk || needsR1cs) {
-            // Estimate sizes for progress calculation
-            const pkSize = needsPk ? 5000000 : 0;   // ~5MB
-            const r1csSize = needsR1cs ? 3500000 : 0; // ~3.5MB
-            const totalSize = pkSize + r1csSize;
-            let pkLoaded = 0;
-            let r1csLoaded = 0;
+        try {
+            // Try cache first
+            let pk = cachedProvingKey || await getCached(config.provingKeyUrl);
+            let r1cs = cachedR1cs || await getCached(config.r1csUrl);
             
-            const reportProgress = () => {
-                if (onProgress) {
-                    const loaded = pkLoaded + r1csLoaded;
-                    const message = needsPk && pkLoaded < pkSize 
-                        ? 'Downloading proving key...'
-                        : 'Downloading circuit constraints...';
-                    onProgress(loaded, totalSize, message);
+            const needsPk = !pk;
+            const needsR1cs = !r1cs;
+            
+            if (needsPk || needsR1cs) {
+                // Estimate sizes for progress calculation
+                const pkSize = needsPk ? 5000000 : 0;   // ~5MB
+                const r1csSize = needsR1cs ? 3500000 : 0; // ~3.5MB
+                const totalSize = pkSize + r1csSize;
+                let pkLoaded = 0;
+                let r1csLoaded = 0;
+                
+                const reportProgress = () => {
+                    if (onProgress) {
+                        const loaded = pkLoaded + r1csLoaded;
+                        const message = needsPk && pkLoaded < pkSize 
+                            ? 'Downloading proving key...'
+                            : 'Downloading circuit constraints...';
+                        onProgress(loaded, totalSize, message);
+                    }
+                };
+                
+                // Download in parallel
+                const downloads = [];
+                
+                if (needsPk) {
+                    downloads.push(
+                        downloadWithProgress(config.provingKeyUrl, (loaded, total, url) => {
+                            pkLoaded = loaded;
+                            reportProgress();
+                        }).then(async (bytes) => {
+                            pk = bytes;
+                            await setCache(config.provingKeyUrl, bytes);
+                            console.log(`[ZK] Proving key downloaded: ${(bytes.length / 1024 / 1024).toFixed(2)} MB`);
+                        })
+                    );
                 }
-            };
-            
-            // Download in parallel
-            const downloads = [];
-            
-            if (needsPk) {
-                downloads.push(
-                    downloadWithProgress(config.provingKeyUrl, (loaded, total, url) => {
-                        pkLoaded = loaded;
-                        reportProgress();
-                    }).then(async (bytes) => {
-                        pk = bytes;
-                        await setCache(config.provingKeyUrl, bytes);
-                        console.log(`[ZK] Proving key downloaded: ${(bytes.length / 1024 / 1024).toFixed(2)} MB`);
-                    })
-                );
+                
+                if (needsR1cs) {
+                    downloads.push(
+                        downloadWithProgress(config.r1csUrl, (loaded, total, url) => {
+                            r1csLoaded = loaded;
+                            reportProgress();
+                        }).then(async (bytes) => {
+                            r1cs = bytes;
+                            await setCache(config.r1csUrl, bytes);
+                            console.log(`[ZK] R1CS downloaded: ${(bytes.length / 1024 / 1024).toFixed(2)} MB`);
+                        })
+                    );
+                }
+                
+                await Promise.all(downloads);
+                
+                if (onProgress) {
+                    onProgress(totalSize, totalSize, 'Download complete');
+                }
+            } else {
+                console.log('[ZK] Proving artifacts loaded from cache');
             }
             
-            if (needsR1cs) {
-                downloads.push(
-                    downloadWithProgress(config.r1csUrl, (loaded, total, url) => {
-                        r1csLoaded = loaded;
-                        reportProgress();
-                    }).then(async (bytes) => {
-                        r1cs = bytes;
-                        await setCache(config.r1csUrl, bytes);
-                        console.log(`[ZK] R1CS downloaded: ${(bytes.length / 1024 / 1024).toFixed(2)} MB`);
-                    })
-                );
-            }
+            // Store in memory
+            cachedProvingKey = pk;
+            cachedR1cs = r1cs;
             
-            await Promise.all(downloads);
-            
-            if (onProgress) {
-                onProgress(totalSize, totalSize, 'Download complete');
-            }
-        } else {
-            console.log('[ZK] Proving artifacts loaded from cache');
+            return { provingKey: pk, r1cs: r1cs };
+        } finally {
+            // Reset so failed downloads can be retried
+            downloadPromise = null;
         }
-        
-        // Store in memory
-        cachedProvingKey = pk;
-        cachedR1cs = r1cs;
-        
-        return { provingKey: pk, r1cs: r1cs };
     })();
     
     return downloadPromise;

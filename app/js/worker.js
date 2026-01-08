@@ -175,8 +175,8 @@ async function handleProve(data, messageId) {
         }
         
         // Step 1: Generate witness
-        // We measure witness generation and prof generation separately
-        // Total time is the sum of these two processes (it's accumulated over witness time after prints.
+        // We measure witness generation and proof generation separately
+        // Total time is the sum of these two processes (it's accumulated over witness time after prints).
         const witnessTime = performance.now();
         const witnessBytes = await generateWitness(inputs);
         const witnessOnlyTime = performance.now() - witnessTime;
