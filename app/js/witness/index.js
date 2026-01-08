@@ -72,21 +72,6 @@ export async function computeWitnessArray(inputs) {
 }
 
 /**
- * Compute witness in WTNS binary format (for snarkjs compatibility)
- * 
- * @param {Object} inputs - Circuit inputs
- * @returns {Promise<Uint8Array>} - Witness in WTNS binary format
- */
-export async function computeWitnessWTNS(inputs) {
-    if (!wc) {
-        throw new Error('Witness calculator not initialized. Call initWitness() first.');
-    }
-    
-    const wtns = await wc.calculateWTNSBin(inputs, true);
-    return wtns;
-}
-
-/**
  * Get information about the loaded circuit
  * 
  * @returns {Object} - Circuit info: { witnessSize, circomVersion, prime }

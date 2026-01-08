@@ -170,7 +170,8 @@ async function readLedgerEntry(contractId, scValKey, durability = 'persistent') 
         }
         return { success: false, error: 'Entry not found' };
     } catch (error) {
-        return { success: false, error: error.message };
+        console.error('[Stellar] readLedgerEntry error:', error);
+        return { success: false, error: error.message || String(error) };
     }
 }
 
@@ -390,6 +391,7 @@ export async function getPoolEvents(limit = 20) {
  * @param {number} limit - Max events to return
  * @returns {Promise<{success: boolean, events: Array}>}
  */
+// TODO: Unused for now. Will be used when everything is integrated.
 export async function getASPMembershipEvents(limit = 20) {
     return getContractEvents(DEPLOYED_CONTRACTS.aspMembership, { limit });
 }
@@ -399,6 +401,7 @@ export async function getASPMembershipEvents(limit = 20) {
  * @param {number} limit - Max events to return
  * @returns {Promise<{success: boolean, events: Array}>}
  */
+// TODO: Unused for now. Will be used when everything is integrated.
 export async function getASPNonMembershipEvents(limit = 20) {
     return getContractEvents(DEPLOYED_CONTRACTS.aspNonMembership, { limit });
 }
