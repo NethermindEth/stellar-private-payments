@@ -3,6 +3,7 @@ target = "app/index.html"
 public-url = "/"
 dist = "dist"
 filehash = false
+release = true
 
 [watch]
 watch = ["app", "circuits"]
@@ -15,12 +16,48 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
+# Copy witness module to staging
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "mkdir -p dist/.stage/js/witness && cp app/js/witness/index.js dist/.stage/js/witness/ && cp app/js/witness/witness_calculator.js dist/.stage/js/witness/"]
+
+# Copy circuit artifacts (Wasm and R1CS) from cargo build output to dist
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", """
+mkdir -p dist/.stage/circuits
+CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
+if [ -n "$CIRCUIT_OUT" ]; then
+    cp "$CIRCUIT_OUT"/*.r1cs dist/.stage/circuits/ 2>/dev/null || true
+    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm dist/.stage/circuits/ 2>/dev/null || true
+else
+    echo "Warning: No circuit build output found. Run 'BUILD_TESTS=1 cargo build -p circuits' first."
+fi
+"""]
+
+# Copy proving keys to staging
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "mkdir -p dist/.stage/keys && cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true && cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true"]
+
+# TODO: Remove once we have the main page working
+# Copy test.html and bridge.js to staging
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "cp app/test.html dist/.stage/test.html 2>/dev/null || true && mkdir -p dist/.stage/js && cp app/js/bridge.js dist/.stage/js/bridge.js"]
+
+# Bundle ui.js
 [[hooks]]
 stage = "build"
 command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
 
+# Bundle worker.js
 [[hooks]]
-stage = "post_build"
+stage = "build"
 command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./app.js --bundle --outfile=dist/.stage/js/worker.js --format=esm"]
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm"]

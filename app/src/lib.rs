@@ -1,22 +1,36 @@
-//! App logic
+//! Prover WASM Module
+//!
+//! This module provides browser-compatible ZK proof generation using Groth16.
+//! It handles:
+//! - Input preparation (cryptographic operations, merkle trees)
+//! - Proof generation from witness data
+//!
+//! # Architecture
+//! This module receives witness data (Uint8Array) from the witness
+//! module via pure data exchange
 
 #![no_std]
 extern crate alloc;
 
-/// An example module to wrap the prover
+pub mod crypto;
+pub mod merkle;
 pub mod prover;
+pub mod r1cs;
+pub mod serialization;
+pub mod sparse_merkle;
+pub mod types;
 
-use crate::prover::Prover;
-use alloc::vec::Vec;
-use anyhow::Result;
-use wasm_bindgen::{JsValue, prelude::*};
+use wasm_bindgen::prelude::*;
 
-/// An initialization function
-/// - to print panics in the console
-/// - to initialize the prover
-#[wasm_bindgen(js_name = init)]
-pub async fn init(circuit: Vec<u8>) -> Result<Prover, JsValue> {
+/// Initialize the WASM module
+/// Sets up panic hook for better error messages in browser console
+#[wasm_bindgen(start)]
+pub fn init() {
     console_error_panic_hook::set_once();
-    let prover = Prover::new(circuit);
-    Ok(prover)
+}
+
+/// Get the module version
+#[wasm_bindgen]
+pub fn version() -> alloc::string::String {
+    alloc::string::String::from(env!("CARGO_PKG_VERSION"))
 }

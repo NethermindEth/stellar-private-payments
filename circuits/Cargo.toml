@@ -7,20 +7,34 @@ license.workspace = true
 publish.workspace = true
 
 [features]
-circom-tests = ["ark-circom", "ark-serialize"]
+default = ["std"]
+std = []
+circom-tests = [
+    "std",
+    "ark-circom",
+    "ark-serialize",
+    "anyhow",
+    "ark-groth16",
+    "ark-snark",
+    "num-bigint",
+    "num-integer",
+]
 
 [dependencies]
-anyhow = { workspace = true }
+
+# Optional dependencies (only needed for circom-tests)
+anyhow = { workspace = true, optional = true }
 ark-bn254 = { workspace = true }
 ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false, optional = true }
 ark-ff = { workspace = true }
-ark-groth16 = { workspace = true }
+ark-groth16 = { workspace = true, optional = true }
 ark-serialize = { workspace = true, optional = true }
-ark-snark = { workspace = true }
+ark-snark = { workspace = true, optional = true }
+# Core dependencies (always available, no_std compatible)
 ark-std = { workspace = true }
-num-bigint = { workspace = true }
-num-integer = { workspace = true }
-zkhash = { path = "../poseidon2" }
+num-bigint = { workspace = true, optional = true }
+num-integer = { workspace = true, optional = true }
+zkhash = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }

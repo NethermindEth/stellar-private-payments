@@ -1,7 +1,7 @@
 use super::general::scalar_to_bigint;
 use anyhow::{Context, Result, anyhow};
 use ark_bn254::{Bn254, Fr};
-use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
+use ark_circom::{CircomBuilder, CircomConfig};
 use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
@@ -167,11 +167,11 @@ pub fn generate_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
+    // Use default LibsnarkReduction for WASM prover compatibility
+    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
-    let pvk = Groth16::<Bn254, CircomReduction>::process_vk(&vk)
-        .map_err(|e| anyhow!("process_vk failed: {e}"))?;
+    let pvk = Groth16::<Bn254>::process_vk(&vk).map_err(|e| anyhow!("process_vk failed: {e}"))?;
 
     Ok(CircuitKeys { pk, vk, pvk })
 }
@@ -203,8 +203,8 @@ pub fn load_keys(pk_path: impl AsRef<Path>) -> Result<CircuitKeys> {
     let vk = pk.vk.clone();
 
     // Compute prepared verification key for efficient verification
-    let pvk = Groth16::<Bn254, CircomReduction>::process_vk(&vk)
-        .map_err(|e| anyhow!("process_vk failed: {e}"))?;
+    // Use default LibsnarkReduction for WASM prover compatibility
+    let pvk = Groth16::<Bn254>::process_vk(&vk).map_err(|e| anyhow!("process_vk failed: {e}"))?;
 
     Ok(CircuitKeys { pk, vk, pvk })
 }
@@ -238,19 +238,16 @@ pub fn prove_and_verify_with_keys(
 
     let mut rng = thread_rng();
 
-    let proof = Groth16::<Bn254, CircomReduction>::prove(&keys.pk, circuit.clone(), &mut rng)
+    // Use default LibsnarkReduction for WASM prover compatibility
+    let proof = Groth16::<Bn254>::prove(&keys.pk, circuit.clone(), &mut rng)
         .map_err(|e| anyhow!("prove failed: {e}"))?;
 
     let public_inputs = circuit
         .get_public_inputs()
         .ok_or_else(|| anyhow!("get_public_inputs returned None"))?;
 
-    let verified = Groth16::<Bn254, CircomReduction>::verify_with_processed_vk(
-        &keys.pvk,
-        &public_inputs,
-        &proof,
-    )
-    .map_err(|e| anyhow!("verify_with_processed_vk failed: {e}"))?;
+    let verified = Groth16::<Bn254>::verify_with_processed_vk(&keys.pvk, &public_inputs, &proof)
+        .map_err(|e| anyhow!("verify_with_processed_vk failed: {e}"))?;
 
     Ok(CircomResult {
         verified,

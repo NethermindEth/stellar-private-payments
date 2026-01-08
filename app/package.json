@@ -7,7 +7,6 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "",
-  "license": "Apache-2.0",
   "devDependencies": {
     "esbuild": "^0.27.2",
     "tailwindcss": "^4.1.18"

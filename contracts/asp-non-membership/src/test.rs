@@ -224,7 +224,7 @@ fn test_find_key_public_method() {
 
     env.mock_all_auths();
 
-    // Test 1: Find in empty tree
+    // Test. Find in empty tree
     let key1 = U256::from_u32(&env, 42);
     let result = client.find_key(&key1);
     assert!(!result.found, "Key should not be found in empty tree");
@@ -249,7 +249,7 @@ fn test_find_key_public_method() {
     let value1 = U256::from_u32(&env, 100);
     client.insert_leaf(&key1, &value1);
 
-    // Test 2: Find existing key
+    // Test. Find existing key
     let result = client.find_key(&key1);
     assert!(result.found, "Key should be found");
     assert_eq!(result.siblings.len(), 0, "No siblings for single leaf");
@@ -269,7 +269,7 @@ fn test_find_key_public_method() {
     );
     assert!(!result.is_old0, "old0 should be false when key exists");
 
-    // Test 3: Find a non-existent key whose path collides with an existing key
+    // Test. Find a non-existent key whose path collides with an existing key
     let key2 = U256::from_u32(&env, 43);
     client.insert_leaf(&key2, &U256::from_u32(&env, 200));
     let key3 = U256::from_u32(&env, 99); // Will collide with key2

@@ -5,9 +5,8 @@
 import { pingTestnet } from './stellar.js';
 import { connectWallet, getWalletNetwork } from './wallet.js';
 
-// ============================================
+
 // Application State
-// ============================================
 const App = {
     state: {
         wallet: { connected: false, address: null },
@@ -22,9 +21,8 @@ const App = {
     els: {}
 };
 
-// ============================================
+
 // Utilities
-// ============================================
 const Utils = {
     generateHex(length = 64) {
         const chars = '0123456789abcdef';
@@ -73,9 +71,7 @@ const Utils = {
     }
 };
 
-// ============================================
 // Storage
-// ============================================
 const Storage = {
     KEY: 'poolstellar_notes',
     
@@ -98,9 +94,7 @@ const Storage = {
     }
 };
 
-// ============================================
 // Toast Notifications
-// ============================================
 const Toast = {
     show(message, type = 'success', duration = 4000) {
         const container = document.getElementById('toast-container');
@@ -136,9 +130,7 @@ const Toast = {
     }
 };
 
-// ============================================
 // Template Manager
-// ============================================
 const Templates = {
     init() {
         App.templates = {
@@ -299,9 +291,7 @@ const Templates = {
     }
 };
 
-// ============================================
 // Tabs
-// ============================================
 const Tabs = {
     init() {
         document.querySelectorAll('.tab-btn').forEach(btn => {
@@ -334,9 +324,7 @@ const Tabs = {
     }
 };
 
-// ============================================
 // Wallet
-// ============================================
 const Wallet = {
     init() {
         document.getElementById('wallet-btn').addEventListener('click', () => this.toggle());
@@ -399,9 +387,7 @@ const Wallet = {
     }
 };
 
-// ============================================
 // Deposit Module
-// ============================================
 const Deposit = {
     init() {
         const slider = document.getElementById('deposit-slider');
@@ -541,9 +527,7 @@ const Deposit = {
     }
 };
 
-// ============================================
 // Withdraw Module
-// ============================================
 const Withdraw = {
     init() {
         const inputs = document.getElementById('withdraw-inputs');
@@ -625,9 +609,7 @@ const Withdraw = {
     }
 };
 
-// ============================================
 // Transact Module
-// ============================================
 const Transact = {
     init() {
         const slider = document.getElementById('transact-slider');
@@ -788,9 +770,7 @@ const Transact = {
     }
 };
 
-// ============================================
 // Notes Table
-// ============================================
 const NotesTable = {
     filter: 'all',
     
@@ -842,9 +822,7 @@ const NotesTable = {
     }
 };
 
-// ============================================
 // Transfer Module
-// ============================================
 const Transfer = {
     init() {
         const inputs = document.getElementById('transfer-inputs');
@@ -987,9 +965,7 @@ const Transfer = {
     }
 };
 
-// ============================================
 // Stats
-// ============================================
 const Stats = {
     init() {
         const txList = document.getElementById('recent-tx');
@@ -1005,9 +981,7 @@ const Stats = {
     }
 };
 
-// ============================================
 // Initialize
-// ============================================
 document.addEventListener('DOMContentLoaded', () => {
     Templates.init();
     Storage.load();
