@@ -9,7 +9,7 @@
 //! Apache-2.0
 //!
 //! # Architecture
-//! This module receives witness data (Uint8Array) from the witness 
+//! This module receives witness data (Uint8Array) from the witness
 //! module via pure data exchange
 
 #![no_std]

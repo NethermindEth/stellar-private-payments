@@ -8,21 +8,13 @@
  */
 
 export default async function builder(code, options) {
-    let wasmModule;
-    try {
-        wasmModule = await WebAssembly.compile(code);
-    }  catch (err) {
-        console.log(err);
-        console.log("\nTry to run circom --c in order to generate c++ code instead\n");
-        throw new Error(err);
-    }
-
     let wc;
 
     let errStr = "";
     let msgStr = "";
-
-    const instance = await WebAssembly.instantiate(wasmModule, {
+    
+    // Imports for instantiation
+    const imports = {
         runtime: {
             exceptionHandler : function(code) {
                 let err;
@@ -49,7 +41,6 @@ export default async function builder(code, options) {
             },
             writeBufferMessage : function() {
                 const msg = getMessage();
-                // Any calls to `log()` will always end with a `\n`, so that's when we print and reset
                 if (msg === "\n") {
                     console.log(msgStr);
                     msgStr = "";
@@ -65,9 +56,12 @@ export default async function builder(code, options) {
             showSharedRWMemory : function() {
                 printSharedRWMemory ();
             }
-
         }
-    });
+    };
+
+    // Extract the instance from instantiate call
+    const result = await WebAssembly.instantiate(code, imports);
+    const instance = result.instance;
 
     const sanityCheck = options?.sanityCheck || false;
 

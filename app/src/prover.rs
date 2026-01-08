@@ -159,13 +159,16 @@ pub struct Prover {
 impl Prover {
     /// Create a new Prover instance from serialized keys and R1CS
     ///
+    /// Uses unchecked deserialization since the proving key is trusted.
+    /// Skips curve point validation for faster initialization.
+    ///
     /// # Arguments
     /// * `pk_bytes` - Serialized proving key (compressed)
     /// * `r1cs_bytes` - R1CS binary file contents
     #[wasm_bindgen(constructor)]
     pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover, JsValue> {
-        // Deserialize proving key
-        let pk = ProvingKey::<Bn254>::deserialize_compressed(pk_bytes)
+        // Deserialize proving key. Unchecked, proving key is trusted
+        let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to load proving key: {}", e)))?;
 
         // Extract verifying key from proving key

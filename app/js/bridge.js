@@ -323,7 +323,9 @@ export async function initWitnessModule(circuitWasmUrl) {
 }
 
 /**
- * Initialize the full prover (lazy loads proving artifacts)
+ * Initialize the full prover
+ * 
+ * Runs witness module init and artifact download in parallel for faster startup.
  * 
  * @param {function} onProgress - Optional progress callback
  * @returns {Promise<Object>} Prover info
@@ -338,11 +340,11 @@ export async function initProver(onProgress) {
         };
     }
     
-    // Ensure modules are ready
-    await initWitnessModule();
-    
-    // Load proving artifacts (lazy, cached)
-    const { provingKey, r1cs } = await ensureProvingArtifacts(onProgress);
+    // Run witness module init and artifact download in parallel
+    const [, { provingKey, r1cs }] = await Promise.all([
+        initWitnessModule(),
+        ensureProvingArtifacts(onProgress),
+    ]);
     
     // Create prover
     prover = new Prover(provingKey, r1cs);
@@ -363,7 +365,7 @@ export async function initProver(onProgress) {
 }
 
 /**
- * Full initialization (backwards compatible)
+ * Full init with explicit bytes
  * 
  * @param {string} circuitWasmUrl - URL to circuit.wasm
  * @param {Uint8Array} provingKeyBytes - Proving key bytes (if already loaded)
@@ -627,4 +629,5 @@ export async function proveAndVerify(inputs, onProgress) {
 }
 
 // Re-exports
+
 export { getCircuitInfo, bytesToWitness };
