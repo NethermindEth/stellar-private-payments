@@ -3,6 +3,7 @@ target = "app/index.html"
 public-url = "/"
 dist = "dist"
 filehash = false
+release = true
 
 [watch]
 watch = ["app", "circuits"]
@@ -14,12 +15,6 @@ port = 8000
 
 [tools]
 tailwindcss = "4.1.18"
-
-# Build Rust prover module before main frontend build
-[[hooks]]
-stage = "pre_build"
-command = "sh"
-command_arguments = ["-c", "wasm-pack build app --out-name prover --no-opt --target web --no-pack --no-typescript --out-dir ../dist/.stage/js/prover && rm -rf dist/.stage/js/prover/.gitignore"]
 
 # Copy witness module to staging
 [[hooks]]
@@ -50,10 +45,10 @@ command_arguments = ["-c", "cp app/test.html dist/.stage/test.html 2>/dev/null |
 [[hooks]]
 stage = "build"
 command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
 
-# Bundle worker.js - uses external imports for prover/witness (resolved at runtime)
+# Bundle worker.js
 [[hooks]]
 stage = "build"
 command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./app.js --external:./prover/* --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm"]
+command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm"]

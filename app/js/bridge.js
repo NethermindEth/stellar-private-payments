@@ -8,7 +8,7 @@
  * Data-only exchange between modules via Uint8Array.
  */
 
-// Prover Module: Input Preparation (Apache-2.0)
+// Prover Module: Input Preparation
 // Path is relative to dist/js/ where this file runs
 import initProverModule, {
     Prover,
@@ -27,7 +27,7 @@ import initProverModule, {
     field_bytes_to_hex,
     verify_proof,
     version as proverVersion,
-} from './prover/prover.js';
+} from './prover.js';
 
 // Witness Generation Module
 // Path is relative to dist/js/ where this file runs

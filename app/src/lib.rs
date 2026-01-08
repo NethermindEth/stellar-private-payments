@@ -1,12 +1,9 @@
-//! Prover WASM Module (Apache-2.0)
+//! Prover WASM Module
 //!
 //! This module provides browser-compatible ZK proof generation using Groth16.
 //! It handles:
 //! - Input preparation (cryptographic operations, merkle trees)
 //! - Proof generation from witness data
-//!
-//! # License
-//! Apache-2.0
 //!
 //! # Architecture
 //! This module receives witness data (Uint8Array) from the witness

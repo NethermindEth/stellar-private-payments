@@ -33,7 +33,7 @@ The bridge module operates on serialized inputs and outputs and can be replaced 
 
 ```
 app/
-├── src/                   # Rust prover module (Apache-2.0)
+├── src/                   # Rust prover module
 │   ├── lib.rs             # WASM entry point
 │   ├── prover.rs          # Groth16 proof generation
 │   ├── crypto.rs          # Poseidon2 hashing

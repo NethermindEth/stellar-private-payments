@@ -1,9 +1,9 @@
 [package]
-name = "app"
+name = "prover"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
-license = "Apache-2.0"
+license.workspace = true
 publish.workspace = true
 description = "Browser WASM module for ZK proof generation using Groth16"
 

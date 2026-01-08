@@ -1,5 +1,5 @@
 /**
- * ZK Proof Worker - Apache-2.0 License
+ * ZK Proof Worker 
  * 
  * Runs heavy proving operations in a Web Worker to avoid blocking the main UI thread.
  * Communication happens via postMessage.
