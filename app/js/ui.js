@@ -2,6 +2,7 @@
  * PoolStellar Compliant Private System
  * Vanilla JS with template-based DOM manipulation
  */
+import { connectWallet, getWalletNetwork } from './wallet.js';
 import { 
     pingTestnet,
     setNetwork,
@@ -348,33 +349,48 @@ const Wallet = {
     async connect() {
         const btn = document.getElementById('wallet-btn');
         const text = document.getElementById('wallet-text');
+        const network = document.getElementById('network-name');
         
         try {
-            // Try Freighter
-            if (typeof window.freighterApi !== 'undefined') {
-                const publicKey = await window.freighterApi.getPublicKey();
-                App.state.wallet = { connected: true, address: publicKey };
-            } else {
-                // Mock for demo
-                const mockAddr = 'GBXYZ' + Utils.generateHex(48).slice(2);
-                App.state.wallet = { connected: true, address: mockAddr };
-            }
+            const publicKey = await connectWallet();
+            App.state.wallet = { connected: true, address: publicKey };
             
             btn.classList.add('border-emerald-500', 'bg-emerald-500/10');
-            text.textContent = Utils.truncateHex(App.state.wallet.address, 4, 4);
-            Toast.show('Wallet connected!', 'success');
+            text.textContent = Utils.truncateHex(App.state.wallet.address, 7, 6);
         } catch (e) {
-            Toast.show('Failed to connect wallet', 'error');
+            console.error('Wallet connection error:', e);
+            const message = e?.code === 'USER_REJECTED'
+                ? 'Wallet connection cancelled'
+                : (e?.message || 'Failed to connect wallet');
+            Toast.show(message, 'error');
+            return;
         }
+
+        if (network) {
+            try {
+                const details = await getWalletNetwork();
+                network.textContent = details.network || 'Unknown';
+            } catch (e) {
+                console.error('Wallet network error:', e);
+                network.textContent = 'Unknown';
+                Toast.show(e?.message || 'Failed to fetch wallet network', 'error');
+            }
+        }
+
+        Toast.show('Wallet connected!', 'success');
     },
     
     disconnect() {
         const btn = document.getElementById('wallet-btn');
         const text = document.getElementById('wallet-text');
+        const network = document.getElementById('network-name');
         
         App.state.wallet = { connected: false, address: null };
         btn.classList.remove('border-emerald-500', 'bg-emerald-500/10');
         text.textContent = 'Connect Freighter';
+        if (network) {
+            network.textContent = 'Network';
+        }
         Toast.show('Wallet disconnected', 'success');
     }
 };

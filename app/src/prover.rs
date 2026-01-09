@@ -9,9 +9,14 @@
 //! 3. Accept pre-computed witness bytes from the JS witness calculator
 //! 4. Replay constraints and generate proofs using ark-groth16
 
+use crate::{
+    r1cs::R1CS,
+    serialization::bytes_to_fr,
+    types::{FIELD_SIZE, Groth16Proof},
+};
 use alloc::{format, vec::Vec};
 use ark_bn254::{Bn254, Fr};
-use ark_ff::AdditiveGroup;
+use ark_ff::{AdditiveGroup, Field};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
@@ -22,12 +27,6 @@ use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
 use wasm_bindgen::prelude::*;
-
-use crate::{
-    r1cs::R1CS,
-    serialization::bytes_to_fr,
-    types::{FIELD_SIZE, Groth16Proof},
-};
 
 /// A circuit that replays R1CS constraints with pre-computed witness
 ///
@@ -47,7 +46,18 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
         // [0]: constant "1" (wire 0)
         // [1..=num_public]: public inputs (outputs first, then inputs)
         // [num_public+1..]: private witness values
-
+        if self.witness.first() != Some(&Fr::ONE) {
+            return Err(SynthesisError::Unsatisfiable);
+        }
+        if self
+            .r1cs
+            .num_public
+            .checked_add(1)
+            .expect("R1CS num of public inputs addition failed")
+            > self.r1cs.num_wires
+        {
+            return Err(SynthesisError::Unsatisfiable);
+        }
         let num_public = self.r1cs.num_public as usize;
         let num_wires = self.r1cs.num_wires as usize;
 
@@ -58,11 +68,14 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
         variables.push(Variable::One);
 
         // Allocate public inputs (wires 1..=num_public)
+        if self.witness.len() < num_wires {
+            return Err(SynthesisError::Unsatisfiable);
+        }
         for i in 1..=num_public {
             let value = if i < self.witness.len() {
                 self.witness[i]
             } else {
-                Fr::ZERO
+                return Err(SynthesisError::Unsatisfiable);
             };
             let var = cs.new_input_variable(|| Ok(value))?;
             variables.push(var);
@@ -84,71 +97,43 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
 
         // Generate all constraints from R1CS
         // Each R1CS constraint is: A * B = C
+        let max_wire = self.r1cs.num_wires as usize;
+
+        // Validate wire IDs once
         for constraint in &self.r1cs.constraints {
-            // We need to capture the constraint data for the closures
-            let a_terms: Vec<_> = constraint
+            for t in constraint
                 .a
                 .terms
                 .iter()
-                .filter_map(|t| {
-                    let idx = t.wire_id as usize;
-                    if idx < variables.len() {
-                        Some((t.coefficient, variables[idx]))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let b_terms: Vec<_> = constraint
-                .b
-                .terms
-                .iter()
-                .filter_map(|t| {
-                    let idx = t.wire_id as usize;
-                    if idx < variables.len() {
-                        Some((t.coefficient, variables[idx]))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            let c_terms: Vec<_> = constraint
-                .c
-                .terms
-                .iter()
-                .filter_map(|t| {
-                    let idx = t.wire_id as usize;
-                    if idx < variables.len() {
-                        Some((t.coefficient, variables[idx]))
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-
-            // Enforce A * B = C using closures
-            // LinearCombination uses modular field arithmetic (cannot overflow)
+                .chain(&constraint.b.terms)
+                .chain(&constraint.c.terms)
+            {
+                if (t.wire_id as usize) >= max_wire {
+                    return Err(SynthesisError::Unsatisfiable);
+                }
+            }
+        }
+        // Enforce constraints without per-constraint allocations
+        for constraint in &self.r1cs.constraints {
             cs.enforce_r1cs_constraint(
                 || {
                     let mut lc_a = lc!();
-                    for (coeff, var) in &a_terms {
-                        lc_a.add_assign((*coeff, *var));
+                    for t in &constraint.a.terms {
+                        lc_a.add_assign((t.coefficient, variables[t.wire_id as usize]));
                     }
                     lc_a
                 },
                 || {
                     let mut lc_b = lc!();
-                    for (coeff, var) in &b_terms {
-                        lc_b.add_assign((*coeff, *var));
+                    for t in &constraint.b.terms {
+                        lc_b.add_assign((t.coefficient, variables[t.wire_id as usize]));
                     }
                     lc_b
                 },
                 || {
                     let mut lc_c = lc!();
-                    for (coeff, var) in &c_terms {
-                        lc_c.add_assign((*coeff, *var));
+                    for t in &constraint.c.terms {
+                        lc_c.add_assign((t.coefficient, variables[t.wire_id as usize]));
                     }
                     lc_c
                 },
@@ -174,24 +159,34 @@ pub struct Prover {
 impl Prover {
     /// Create a new Prover instance from serialized keys and R1CS
     ///
+    /// Uses unchecked deserialization since the proving key is trusted.
+    /// Skips curve point validation for faster initialization.
+    ///
     /// # Arguments
     /// * `pk_bytes` - Serialized proving key (compressed)
     /// * `r1cs_bytes` - R1CS binary file contents
     #[wasm_bindgen(constructor)]
     pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover, JsValue> {
-        // Deserialize proving key
-        let pk = ProvingKey::<Bn254>::deserialize_compressed(pk_bytes)
+        // Deserialize proving key. Unchecked, proving key is trusted
+        let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
             .map_err(|e| JsValue::from_str(&format!("Failed to load proving key: {}", e)))?;
 
         // Extract verifying key from proving key
         let vk = pk.vk.clone();
 
+        // Parse R1CS
+        let r1cs = R1CS::parse(r1cs_bytes)?;
+
+        // Check correctness of the extracted verifying key
+        if vk.gamma_abc_g1.len().saturating_sub(1) != r1cs.num_public as usize {
+            return Err(JsValue::from_str(
+                "VK public input count doesn't match R1CS",
+            ));
+        }
+
         // Process verifying key for faster verification
         let pvk = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::process_vk(&vk)
             .map_err(|e| JsValue::from_str(&format!("Failed to process VK: {}", e)))?;
-
-        // Parse R1CS
-        let r1cs = R1CS::parse(r1cs_bytes)?;
 
         Ok(Prover { pk, pvk, r1cs })
     }

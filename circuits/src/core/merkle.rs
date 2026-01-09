@@ -32,6 +32,10 @@ pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 /// Panics if `leaves` is empty.
 pub fn merkle_root(mut leaves: Vec<Scalar>) -> Scalar {
     assert!(!leaves.is_empty(), "leaves cannot be empty");
+    assert!(
+        leaves.len().is_power_of_two(),
+        "leaves length must be a power of 2"
+    );
     while leaves.len() > 1 {
         let mut next = Vec::with_capacity(leaves.len() / 2);
         for pair in leaves.chunks_exact(2) {

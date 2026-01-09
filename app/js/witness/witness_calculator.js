@@ -1,32 +1,20 @@
 /**
- * Circom Witness Calculator (GPL-3.0)
+ * Circom Witness Calculator
  * 
- * This file is from the Circom project (iden3/circom) and is licensed under GPL-3.0.
+ * This file is from the Circom project (iden3/circom)
  * Modified to use ES module exports for browser compatibility.
  * 
- * @license GPL-3.0
  * @see https://github.com/iden3/circom
  */
 
 export default async function builder(code, options) {
-
-    options = options || {};
-
-    let wasmModule;
-    try {
-        wasmModule = await WebAssembly.compile(code);
-    }  catch (err) {
-        console.log(err);
-        console.log("\nTry to run circom --c in order to generate c++ code instead\n");
-        throw new Error(err);
-    }
-
     let wc;
 
     let errStr = "";
     let msgStr = "";
-
-    const instance = await WebAssembly.instantiate(wasmModule, {
+    
+    // Imports for instantiation
+    const imports = {
         runtime: {
             exceptionHandler : function(code) {
                 let err;
@@ -53,7 +41,6 @@ export default async function builder(code, options) {
             },
             writeBufferMessage : function() {
                 const msg = getMessage();
-                // Any calls to `log()` will always end with a `\n`, so that's when we print and reset
                 if (msg === "\n") {
                     console.log(msgStr);
                     msgStr = "";
@@ -69,21 +56,14 @@ export default async function builder(code, options) {
             showSharedRWMemory : function() {
                 printSharedRWMemory ();
             }
-
         }
-    });
+    };
 
-    const sanityCheck =
-        options
-//        options &&
-//        (
-//            options.sanityCheck ||
-//            options.logGetSignal ||
-//            options.logSetSignal ||
-//            options.logStartComponent ||
-//            options.logFinishComponent
-//        );
+    // Extract the instance from instantiate call
+    const result = await WebAssembly.instantiate(code, imports);
+    const instance = result.instance;
 
+    const sanityCheck = options?.sanityCheck || false;
 
     wc = new WitnessCalculator(instance, sanityCheck);
     return wc;

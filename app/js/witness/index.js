@@ -1,11 +1,9 @@
 /**
- * Witness Module (GPL-3.0)
+ * Witness Module
  * 
- * This module uses Circom's witness_calculator.js which is GPL-3.0 licensed.
+ * This module uses Circom's witness_calculator.js 
  * It is isolated from the rest of the application and communicates
  * ONLY via Uint8Array data exchange.
- * 
- * @license GPL-3.0
  */
 
 import witnessBuilder from './witness_calculator.js';
@@ -72,7 +70,22 @@ export async function computeWitnessArray(inputs) {
 }
 
 /**
- * Get information about the loaded circuit
+ * Compute witness in WTNS binary format (for snarkjs compatibility)
+ * 
+ * @param {Object} inputs - Circuit inputs
+ * @returns {Promise<Uint8Array>} - Witness in WTNS binary format
+ */
+export async function computeWitnessWTNS(inputs) {
+    if (!wc) {
+        throw new Error('Witness calculator not initialized. Call initWitness() first.');
+    }
+    
+    const wtns = await wc.calculateWTNSBin(inputs, true);
+    return wtns;
+}
+
+/**
+ * Get information about the loaded circuit using BN254 curve.
  * 
  * @returns {Object} - Circuit info: { witnessSize, circomVersion, prime }
  */
@@ -115,26 +128,4 @@ export function bytesToWitness(bytes) {
     }
     
     return witness;
-}
-
-/**
- * Convert BigInt array to Little-Endian bytes (for testing)
- * 
- * @param {BigInt[]} witness - Array of field elements
- * @returns {Uint8Array} - Little-Endian bytes
- */
-export function witnessToBytes(witness) {
-    const FIELD_SIZE = 32;
-    const buf = new Uint8Array(witness.length * FIELD_SIZE);
-    
-    for (let i = 0; i < witness.length; i++) {
-        let value = witness[i];
-        // Little-Endian: LSB first
-        for (let j = 0; j < FIELD_SIZE; j++) {
-            buf[i * FIELD_SIZE + j] = Number(value & 0xffn);
-            value >>= 8n;
-        }
-    }
-    
-    return buf;
 }

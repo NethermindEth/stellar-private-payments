@@ -140,7 +140,9 @@ impl SparseMerkleTree {
     /// Find a key in the tree
     pub fn find(&self, key: &Scalar) -> Result<FindResult, &'static str> {
         let key_bits = scalar_to_bits(key);
-        self.find_internal(key, &key_bits, &self.root, 0)
+        let mut result = self.find_internal(key, &key_bits, &self.root, 0)?;
+        result.siblings.reverse();
+        Ok(result)
     }
 
     fn find_internal(
@@ -150,6 +152,10 @@ impl SparseMerkleTree {
         current_hash: &Scalar,
         level: usize,
     ) -> Result<FindResult, &'static str> {
+        if level >= 256 {
+            return Err("Maximum tree depth exceeded");
+        }
+
         if *current_hash == Scalar::from(0u64) {
             return Ok(FindResult {
                 found: false,
@@ -197,7 +203,7 @@ impl SparseMerkleTree {
                     .checked_add(1)
                     .ok_or("Level overflow in find_internal")?;
                 let mut result = self.find_internal(key, key_bits, child, next_level)?;
-                result.siblings.insert(0, *sibling);
+                result.siblings.push(*sibling);
                 Ok(result)
             }
             Some(Node::Empty) => Ok(FindResult {
