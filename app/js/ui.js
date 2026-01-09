@@ -1146,8 +1146,8 @@ const ContractReader = {
         refreshBtn.addEventListener('click', () => this.refreshAll());
         
         this.setAddresses();
-        document.getElementById('network-name').textContent = 'Futurenet';
-        document.getElementById('chain-network-badge').textContent = 'Futurenet';
+        document.getElementById('network-name').textContent = 'Testnet';
+        document.getElementById('chain-network-badge').textContent = 'Testnet';
         
         this.refreshAll();
         setInterval(() => this.refreshAll(), 30000);
