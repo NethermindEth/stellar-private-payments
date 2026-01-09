@@ -189,32 +189,27 @@ export async function readASPMembershipState(contractId = DEPLOYED_CONTRACTS.asp
             contractType: 'ASP Membership',
         };
 
-        const rootResult = await readLedgerEntry(contractId, createEnumKey('Root'));
+        // Fetch keys in parallel
+        const [rootResult, levelsResult, nextIndexResult, adminResult] = await Promise.all([
+            readLedgerEntry(contractId, createEnumKey('Root')),
+            readLedgerEntry(contractId, createEnumKey('Levels')),
+            readLedgerEntry(contractId, createEnumKey('NextIndex')),
+            readLedgerEntry(contractId, createEnumKey('Admin')),
+        ]);
+
         if (rootResult.success) {
             results.root = formatU256(rootResult.value);
             results.rootRaw = rootResult.value;
         }
-
-        const levelsResult = await readLedgerEntry(contractId, createEnumKey('Levels'));
-        if (levelsResult.success) {
-            results.levels = levelsResult.value;
-        }
-
-        const nextIndexResult = await readLedgerEntry(contractId, createEnumKey('NextIndex'));
-        if (nextIndexResult.success) {
-            results.nextIndex = nextIndexResult.value;
-        }
-
-        const adminResult = await readLedgerEntry(contractId, createEnumKey('Admin'));
-        if (adminResult.success) {
-            results.admin = adminResult.value;
-        }
+        if (levelsResult.success) results.levels = levelsResult.value;
+        if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;
+        if (adminResult.success) results.admin = adminResult.value;
 
         if (results.levels !== undefined) {
             results.capacity = Math.pow(2, results.levels);
             results.usedSlots = results.nextIndex || 0;
         }
-
+        results.success = rootResult.success && levelsResult.success && nextIndexResult.success && adminResult.success;
         return results;
     } catch (error) {
         console.error('[Stellar] Failed to read ASP Membership:', error);
@@ -247,7 +242,7 @@ export async function readASPNonMembershipState(contractId = DEPLOYED_CONTRACTS.
         if (adminResult.success) {
             results.admin = adminResult.value;
         }
-
+        results.success = rootResult.success && adminResult.success;
         return results;
     } catch (error) {
         console.error('[Stellar] Failed to read ASP Non-Membership:', error);
@@ -263,37 +258,53 @@ export async function readASPNonMembershipState(contractId = DEPLOYED_CONTRACTS.
  * @returns {Promise<{success: boolean, merkleRoot?: string, merkleLevels?: number, error?: string}>}
  */
 export async function readPoolState(contractId = DEPLOYED_CONTRACTS.pool) {
+    const results = {
+        success: true,
+        contractId,
+        contractType: 'Privacy Pool',
+    };
     try {
-        const results = {
-            success: true,
-            contractId,
-            contractType: 'Privacy Pool',
-        };
-
+        // Fetch all independent keys in parallel
         const dataKeys = ['Admin', 'Token', 'Verifier', 'ASPMembership', 'ASPNonMembership'];
-        for (const key of dataKeys) {
-            const result = await readLedgerEntry(contractId, createEnumKey(key));
+        const merkleKeys = ['Levels', 'CurrentRootIndex', 'NextIndex'];
+
+        const [dataResults, merkleResults, maxDepositResult] = await Promise.all([
+            // All data keys in parallel
+            Promise.all(dataKeys.map(key =>
+                readLedgerEntry(contractId, createEnumKey(key))
+                    .then(result => ({ key, result }))
+            )),
+            // All merkle keys in parallel
+            Promise.all(merkleKeys.map(key =>
+                readLedgerEntry(contractId, createEnumKey(key))
+                    .then(result => ({ key, result }))
+            )),
+            // MaximumDepositAmount
+            readLedgerEntry(contractId, createEnumKey('MaximumDepositAmount')),
+        ]);
+
+        // Process data keys results
+        for (const { key, result } of dataResults) {
             if (result.success) {
                 results[key.toLowerCase()] = result.value;
             }
         }
 
-        const maxDepositResult = await readLedgerEntry(contractId, createEnumKey('MaximumDepositAmount'));
-        if (maxDepositResult.success) {
-            results.maximumDepositAmount = maxDepositResult.value;
-        }
-
-        const merkleKeys = ['Levels', 'CurrentRootIndex', 'NextIndex'];
-        for (const key of merkleKeys) {
-            const result = await readLedgerEntry(contractId, createEnumKey(key));
+        // Process merkle keys results
+        for (const { key, result } of merkleResults) {
             if (result.success) {
                 results['merkle' + key] = result.value;
             }
         }
 
+        if (maxDepositResult.success) {
+            results.maximumDepositAmount = maxDepositResult.value;
+        }
+
+        // Fetch root current root index
         if (results.merkleCurrentRootIndex !== undefined) {
             const rootResult = await readLedgerEntry(
-                contractId, 
+                contractId,
                 createEnumKey('Root', u32Val(results.merkleCurrentRootIndex))
             );
             if (rootResult.success) {
@@ -306,7 +317,9 @@ export async function readPoolState(contractId = DEPLOYED_CONTRACTS.pool) {
             results.merkleCapacity = Math.pow(2, results.merkleLevels);
             results.totalCommitments = results.merkleNextIndex || 0;
         }
-
+        
+        results.success = dataResults.every(r => r.result.success) && merkleResults.every(r => r.result.success);
+        
         return results;
     } catch (error) {
         console.error('[Stellar] Failed to read Pool state:', error);
@@ -328,7 +341,7 @@ export async function readAllContractStates() {
     ]);
 
     return {
-        success: true,
+        success: poolState.success && membershipState.success && nonMembershipState.success,
         network: currentNetwork,
         timestamp: new Date().toISOString(),
         pool: poolState,
@@ -352,7 +365,7 @@ export async function getContractEvents(contractId, options = {}) {
         const latestLedger = await server.getLatestLedger();
         
         const result = await server.getEvents({
-            startLedger: options.startLedger || latestLedger.sequence - 2000,
+            startLedger: options.startLedger || Math.max(1, latestLedger.sequence - 2000),
             filters: [{
                 type: 'contract',
                 contractIds: [contractId],
@@ -412,6 +425,9 @@ export async function getASPNonMembershipEvents(limit = 20) {
  * @returns {any} Native JS value
  */
 export function scValToNative(scVal) {
+    if (!scVal || typeof scVal.switch !== 'function') {
+        throw new Error('Invalid ScVal');
+    }
     try {
         return sdkScValToNative(scVal);
     } catch {
@@ -506,6 +522,7 @@ function isZeroU256(value) {
         return value === '0' || value === '0x' + '0'.repeat(64);
     }
     if (typeof value === 'bigint') return value === 0n;
+    if (typeof value === 'number') return value === 0;
     return false;
 }
 

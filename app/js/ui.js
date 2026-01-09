@@ -5,8 +5,6 @@
 import { connectWallet, getWalletNetwork } from './wallet.js';
 import { 
     pingTestnet,
-    setNetwork,
-    getNetwork,
     readAllContractStates,
     getPoolEvents,
     formatAddress,
@@ -973,22 +971,6 @@ const Transfer = {
     }
 };
 
-// Stats
-const Stats = {
-    init() {
-        const txList = document.getElementById('recent-tx');
-        const transactions = [
-            { hash: '0x3f2a...8b1c', time: '2m ago' },
-            { hash: '0x7d9e...4a2f', time: '15m ago' },
-            { hash: '0xc4b8...9e3d', time: '1h ago' }
-        ];
-        
-        transactions.forEach(tx => {
-            txList.appendChild(Templates.createTxItem(tx.hash, tx.time));
-        });
-    }
-};
-
 // Reads on-chain state from deployed Pool, ASP Membership, ASP Non-Membership contracts
 /**
  * Handles fetching and displaying recent pool events.
@@ -1149,24 +1131,35 @@ const PoolEventsFetcher = {
         if (event.ledger) {
             return `L${event.ledger}`;
         }
-        return '—';
+        return '--';
     }
 };
 
 const ContractReader = {
     isLoading: false,
     lastUpdate: null,
-    
+    refreshIntervalId: null,
+
     init() {
         const refreshBtn = document.getElementById('btn-refresh-state');
         refreshBtn.addEventListener('click', () => this.refreshAll());
-        
+
         this.setAddresses();
         document.getElementById('network-name').textContent = 'Testnet';
         document.getElementById('chain-network-badge').textContent = 'Testnet';
-        
+
         this.refreshAll();
-        setInterval(() => this.refreshAll(), 30000);
+        this.refreshIntervalId = setInterval(() => this.refreshAll(), 30000);
+    },
+
+    /**
+     * Stop auto-refresh. Call when component is unmounted or on critical errors.
+     */
+    destroy() {
+        if (this.refreshIntervalId) {
+            clearInterval(this.refreshIntervalId);
+            this.refreshIntervalId = null;
+        }
     },
     
     setAddresses() {
@@ -1212,6 +1205,13 @@ const ContractReader = {
         } catch (err) {
             console.error('[ContractReader] Error:', err);
             this.displayError(err.message);
+
+            // Stop polling after 5 consecutive failures
+            this.errorCount = (this.errorCount || 0) + 1;
+            if (this.errorCount >= 5) {
+                console.warn('[ContractReader] Too many failures, stopping auto-refresh');
+                this.destroy();
+            }
         } finally {
             this.isLoading = false;
             refreshIcon.classList.remove('animate-spin');
@@ -1380,7 +1380,6 @@ document.addEventListener('DOMContentLoaded', () => {
     Transfer.init();
     Transact.init();
     NotesTable.init();
-    Stats.init();
     ContractReader.init();
     PoolEventsFetcher.init();
     
