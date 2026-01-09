@@ -37,3 +37,6 @@ e2e-tests/test_snapshots/*
 # App
 app/node_modules
 dist/
+
+# Scripts
+scripts/testdata/*
