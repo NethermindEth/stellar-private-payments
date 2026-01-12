@@ -68,6 +68,11 @@ unused-allowed-license = "allow"
 ignore = false
 registries = []
 
+# Specific license exception
+[[licenses.exceptions]]
+name = "xxhash-rust"
+allow = ["BSL-1.0"]
+
 [bans]
 wildcards = "deny"
 allow-wildcard-paths = true
@@ -90,6 +95,7 @@ allow-git = [
     "https://github.com/arkworks-rs/algebra",
     "https://github.com/arkworks-rs/groth16",
     "https://github.com/arkworks-rs/crypto-primitives",
+    "https://github.com/arkworks-rs/circom-compat",
 ]
 
 [sources.allow-org]

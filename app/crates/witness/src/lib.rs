@@ -3,15 +3,11 @@
 //! Uses ark-circom to compute witnesses for Circom circuits in the browser.
 //! Outputs witness bytes compatible with the prover module.
 
-extern crate alloc;
-
-use alloc::{format, string::String, vec::Vec};
 use ark_bn254::Fr;
-use ark_circom::circom::R1CSFile;
-use ark_circom::WitnessCalculator as ArkWitnessCalculator;
+use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
 use num_bigint::BigInt;
-use std::collections::HashMap;
-use std::io::Cursor;
+// These are part of the reduced STD that is browser compatible
+use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
 use wasm_bindgen::prelude::*;
 use wasmer::{Module, Store};
 
@@ -54,8 +50,8 @@ impl WitnessCalculator {
         let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor)
             .map_err(|e| JsValue::from_str(&format!("Failed to parse R1CS: {}", e)))?;
 
-        let witness_size = r1cs_file.header.n_wires as u32;
-        let num_public = r1cs_file.header.n_pub_in as u32;
+        let witness_size = r1cs_file.header.n_wires;
+        let num_public = r1cs_file.header.n_pub_in;
 
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
@@ -123,8 +119,9 @@ impl WitnessCalculator {
     }
 }
 
-/// Check, recursively, if a JSON value is an array that contains only primitives.
-/// This determines if the array should be flattened to a single key to match Circom convention.
+/// Check, recursively, if a JSON value is an array that contains only
+/// primitives. This determines if the array should be flattened to a single key
+/// to match Circom convention.
 fn is_pure_array(value: &serde_json::Value) -> bool {
     use serde_json::Value;
     match value {
@@ -135,9 +132,10 @@ fn is_pure_array(value: &serde_json::Value) -> bool {
 }
 
 /// Flatten a JSON value into the inputs hashmap
-/// 
+///
 /// For Circom circuits:
-/// - Multi-dimensional arrays of primitives are flattened to a single key in row-major order
+/// - Multi-dimensional arrays of primitives are flattened to a single key in
+///   row-major order
 /// - Arrays containing objects use indexed keys with dot notation for fields
 fn flatten_input(
     key: &str,
@@ -164,13 +162,14 @@ fn flatten_input(
             } else {
                 BigInt::parse_bytes(s.as_bytes(), 10)
             };
-            let bi = bi
-                .ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
+            let bi =
+                bi.ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
             inputs.entry(key.to_string()).or_default().push(bi);
         }
         Value::Array(arr) => {
             // Check if this is a "pure" array (only primitives, possibly nested)
-            // Pure arrays get flattened to a single key (Circom convention for multi-dim arrays)
+            // Pure arrays get flattened to a single key (Circom convention for multi-dim
+            // arrays)
             if is_pure_array(value) {
                 // Flatten all values to the same key in row-major order
                 flatten_pure_array(key, value, inputs)?;
@@ -229,8 +228,8 @@ fn flatten_pure_array(
             } else {
                 BigInt::parse_bytes(s.as_bytes(), 10)
             };
-            let bi = bi
-                .ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
+            let bi =
+                bi.ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
             inputs.entry(key.to_string()).or_default().push(bi);
         }
         Value::Array(arr) => {
@@ -262,7 +261,12 @@ fn flatten_pure_array(
 
 /// Convert witness to Little-Endian bytes (32 bytes per element)
 fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(witness.len() * 32);
+    let mut bytes = Vec::with_capacity(
+        witness
+            .len()
+            .checked_mul(32)
+            .expect("Overflow in witness size"),
+    );
 
     for bi in witness {
         // Convert BigInt to 32 LE bytes

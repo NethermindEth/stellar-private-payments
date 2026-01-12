@@ -16,48 +16,39 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
-# Copy circuit artifacts, proving keys, witness module, and static JS
+# Copy all static assets to staging
 [[hooks]]
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
 mkdir -p dist/.stage/circuits dist/.stage/keys dist/.stage/js/witness
 
-# Circuit artifacts from build output
+# Circuit artifacts from Cargo build output
 CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
 if [ -n "$CIRCUIT_OUT" ]; then
     cp "$CIRCUIT_OUT"/*.r1cs dist/.stage/circuits/ 2>/dev/null || true
     cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm dist/.stage/circuits/ 2>/dev/null || true
 fi
 
-# Proving keys and verification keys
+# Proving keys
 cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true
 cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true
 
-# Witness WASM module (built by wasm-pack)
-if [ -d "target/wasm-witness" ]; then
-    cp target/wasm-witness/witness.js dist/.stage/js/witness/ 2>/dev/null || true
-    cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || true
-fi
+# Witness WASM module
+cp target/wasm-witness/witness.js dist/.stage/js/witness/ 2>/dev/null || true
+cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || true
 
-# Static files (bridge.js is external to esbuild bundles, test.html for dev)
+# Static files
 cp app/js/bridge.js dist/.stage/js/
 cp app/test.html dist/.stage/ 2>/dev/null || true
+cp scripts/deployments.json dist/.stage/ 2>/dev/null || true
 """]
 
-# Bundle JS files with npm dependencies
+# Bundle JS with esbuild
 [[hooks]]
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-cd app && ./node_modules/.bin/esbuild \
-    js/worker.js \
-    js/wallet.js \
-    js/stellar.js \
-    --bundle \
-    --format=esm \
-    --outdir=../dist/.stage/js \
-    --external:./prover.js \
-    --external:./witness/* \
-    --external:./bridge.js
+./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm
+./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm
 """]

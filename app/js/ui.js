@@ -8,7 +8,9 @@ import {
     readAllContractStates,
     getPoolEvents,
     formatAddress,
-    DEPLOYED_CONTRACTS,
+    loadDeployedContracts,
+    getDeployedContracts,
+    validateWalletNetwork,
 } from './stellar.js';
 
 
@@ -74,17 +76,6 @@ const Utils = {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    },
-    
-    /**
-     * Toggle button loading state
-     * @param {HTMLButtonElement} btn - Button element with .btn-text and .btn-loading children
-     * @param {boolean} loading - Whether to show loading state
-     */
-    setButtonLoading(btn, loading) {
-        btn.disabled = loading;
-        btn.querySelector('.btn-text').classList.toggle('hidden', loading);
-        btn.querySelector('.btn-loading').classList.toggle('hidden', !loading);
     }
 };
 
@@ -375,14 +366,18 @@ const Wallet = {
             return;
         }
 
+        // Validate wallet is on the correct network
         if (network) {
             try {
                 const details = await getWalletNetwork();
+                validateWalletNetwork(details.network);
                 network.textContent = details.network || 'Unknown';
             } catch (e) {
                 console.error('Wallet network error:', e);
                 network.textContent = 'Unknown';
                 Toast.show(e?.message || 'Failed to fetch wallet network', 'error');
+                this.disconnect();
+                return;
             }
         }
 
@@ -497,7 +492,9 @@ const Deposit = {
         const totalAmount = parseFloat(document.getElementById('deposit-amount').value);
         const btn = document.getElementById('btn-deposit');
         
-        Utils.setButtonLoading(btn, true);
+        btn.disabled = true;
+        btn.querySelector('.btn-text').classList.add('hidden');
+        btn.querySelector('.btn-loading').classList.remove('hidden');
         
         try {
             await new Promise(r => setTimeout(r, 2000));
@@ -535,7 +532,9 @@ const Deposit = {
         } catch (e) {
             Toast.show('Deposit failed: ' + e.message, 'error');
         } finally {
-            Utils.setButtonLoading(btn, false);
+            btn.disabled = false;
+            btn.querySelector('.btn-text').classList.remove('hidden');
+            btn.querySelector('.btn-loading').classList.add('hidden');
         }
     }
 };
@@ -586,7 +585,9 @@ const Withdraw = {
         }
         
         const btn = document.getElementById('btn-withdraw');
-        Utils.setButtonLoading(btn, true);
+        btn.disabled = true;
+        btn.querySelector('.btn-text').classList.add('hidden');
+        btn.querySelector('.btn-loading').classList.remove('hidden');
         
         try {
             await new Promise(r => setTimeout(r, 2500));
@@ -613,7 +614,9 @@ const Withdraw = {
         } catch (e) {
             Toast.show('Withdrawal failed: ' + e.message, 'error');
         } finally {
-            Utils.setButtonLoading(btn, false);
+            btn.disabled = false;
+            btn.querySelector('.btn-text').classList.remove('hidden');
+            btn.querySelector('.btn-loading').classList.add('hidden');
         }
     }
 };
@@ -713,7 +716,9 @@ const Transact = {
         }
         
         const btn = document.getElementById('btn-transact');
-        Utils.setButtonLoading(btn, true);
+        btn.disabled = true;
+        btn.querySelector('.btn-text').classList.add('hidden');
+        btn.querySelector('.btn-loading').classList.remove('hidden');
         
         try {
             await new Promise(r => setTimeout(r, 3000));
@@ -770,7 +775,9 @@ const Transact = {
         } catch (e) {
             Toast.show('Transaction failed: ' + e.message, 'error');
         } finally {
-            Utils.setButtonLoading(btn, false);
+            btn.disabled = false;
+            btn.querySelector('.btn-text').classList.remove('hidden');
+            btn.querySelector('.btn-loading').classList.add('hidden');
         }
     }
 };
@@ -914,7 +921,9 @@ const Transfer = {
         }
         
         const btn = document.getElementById('btn-transfer');
-        Utils.setButtonLoading(btn, true);
+        btn.disabled = true;
+        btn.querySelector('.btn-text').classList.add('hidden');
+        btn.querySelector('.btn-loading').classList.remove('hidden');
         
         try {
             await new Promise(r => setTimeout(r, 3000));
@@ -961,7 +970,9 @@ const Transfer = {
         } catch (e) {
             Toast.show('Transfer failed: ' + e.message, 'error');
         } finally {
-            Utils.setButtonLoading(btn, false);
+            btn.disabled = false;
+            btn.querySelector('.btn-text').classList.remove('hidden');
+            btn.querySelector('.btn-loading').classList.add('hidden');
         }
     }
 };
@@ -974,7 +985,6 @@ const PoolEventsFetcher = {
     isLoading: false,
     events: [],
     maxEvents: 3,
-    refreshIntervalId: null,
     
     /**
      * Initialize event fetching with auto-refresh.
@@ -984,16 +994,12 @@ const PoolEventsFetcher = {
         this.refreshIntervalId = setInterval(() => this.refresh(), 30000);
     },
 
-    /**
-     * Stop auto-refresh. Call when component is unmounted or on critical errors.
-     */
     destroy() {
         if (this.refreshIntervalId) {
             clearInterval(this.refreshIntervalId);
             this.refreshIntervalId = null;
         }
     },
-    
     /**
      * Fetch recent pool events from the contract.
      */
@@ -1169,14 +1175,20 @@ const ContractReader = {
     },
     
     setAddresses() {
-        document.getElementById('pool-address').textContent = formatAddress(DEPLOYED_CONTRACTS.pool, 4, 4);
-        document.getElementById('pool-address').title = DEPLOYED_CONTRACTS.pool;
+        const contracts = getDeployedContracts();
+        if (!contracts) {
+            console.warn('[ContractReader] Deployed contracts not loaded yet');
+            return;
+        }
         
-        document.getElementById('membership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspMembership, 4, 4);
-        document.getElementById('membership-address').title = DEPLOYED_CONTRACTS.aspMembership;
+        document.getElementById('pool-address').textContent = formatAddress(contracts.pool, 4, 4);
+        document.getElementById('pool-address').title = contracts.pool;
         
-        document.getElementById('nonmembership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspNonMembership, 4, 4);
-        document.getElementById('nonmembership-address').title = DEPLOYED_CONTRACTS.aspNonMembership;
+        document.getElementById('membership-address').textContent = formatAddress(contracts.aspMembership, 4, 4);
+        document.getElementById('membership-address').title = contracts.aspMembership;
+        
+        document.getElementById('nonmembership-address').textContent = formatAddress(contracts.aspNonMembership, 4, 4);
+        document.getElementById('nonmembership-address').title = contracts.aspNonMembership;
     },
     
     async refreshAll() {
@@ -1375,7 +1387,7 @@ const ContractReader = {
 };
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
     Storage.load();
     
@@ -1386,11 +1398,22 @@ document.addEventListener('DOMContentLoaded', () => {
     Transfer.init();
     Transact.init();
     NotesTable.init();
-    ContractReader.init();
-    PoolEventsFetcher.init();
     
-    // Verify Stellar network connectivity
-    pingTestnet();
+    // Load deployment config before initializing contract readers
+    try {
+        await loadDeployedContracts();
+        ContractReader.init();
+        PoolEventsFetcher.init();
+    } catch (err) {
+        console.error('[Init] Failed to load deployment config:', err);
+        // Display error
+        const errorText = document.getElementById('contract-error-text');
+        const errorDisplay = document.getElementById('contract-error-display');
+        if (errorText && errorDisplay) {
+            errorText.textContent = `Failed to load contract config: ${err.message}`;
+            errorDisplay.classList.remove('hidden');
+        }
+    }
     
     console.log('PoolStellar initialized');
 });
