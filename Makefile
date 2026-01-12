@@ -18,7 +18,6 @@ wasm-witness:
 		--out-name witness \
 		--out-dir ../../../target/wasm-witness \
 		--release
-	@# Clean up unnecessary files from wasm-pack
 	@rm -f target/wasm-witness/.gitignore target/wasm-witness/package.json 2>/dev/null || true
 
 .PHONY: circuits-build

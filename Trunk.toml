@@ -34,7 +34,7 @@ fi
 cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true
 cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true
 
-# Witness WASM module
+# Witness WASM module (built by wasm-pack)
 if [ -d "target/wasm-witness" ]; then
     cp target/wasm-witness/witness.js dist/.stage/js/witness/ 2>/dev/null || true
     cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || true
