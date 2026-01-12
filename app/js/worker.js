@@ -301,10 +301,7 @@ function handleGetState() {
     };
 }
 
-// =============================================================================
 // Message Handler
-// =============================================================================
-
 self.onmessage = async function(event) {
     const { type, messageId, data } = event.data;
     

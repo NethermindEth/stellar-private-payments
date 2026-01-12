@@ -7,7 +7,7 @@ release = true
 
 [watch]
 watch = ["app", "circuits"]
-ignore = ["app/node_modules"]
+ignore = ["app/node_modules", "dist"]
 
 [serve]
 addresses = ["0.0.0.0"]
@@ -61,3 +61,9 @@ command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --exter
 stage = "build"
 command = "sh"
 command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm"]
+
+# Copy deployments.json to staging
+[[hooks]]
+stage = "pre_build"
+command = "sh"
+command_arguments = ["-c", "cp scripts/deployments.json dist/.stage/deployments.json 2>/dev/null || echo '{\"error\": \"deployments.json not found\"}' > dist/.stage/deployments.json"]
