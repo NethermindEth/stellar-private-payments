@@ -8,7 +8,9 @@ import {
     readAllContractStates,
     getPoolEvents,
     formatAddress,
-    DEPLOYED_CONTRACTS,
+    loadDeployedContracts,
+    getDeployedContracts,
+    validateWalletNetwork,
 } from './stellar.js';
 
 
@@ -364,14 +366,18 @@ const Wallet = {
             return;
         }
 
+        // Validate wallet is on the correct network
         if (network) {
             try {
                 const details = await getWalletNetwork();
+                validateWalletNetwork(details.network);
                 network.textContent = details.network || 'Unknown';
             } catch (e) {
                 console.error('Wallet network error:', e);
                 network.textContent = 'Unknown';
                 Toast.show(e?.message || 'Failed to fetch wallet network', 'error');
+                this.disconnect();
+                return;
             }
         }
 
@@ -1163,14 +1169,20 @@ const ContractReader = {
     },
     
     setAddresses() {
-        document.getElementById('pool-address').textContent = formatAddress(DEPLOYED_CONTRACTS.pool, 4, 4);
-        document.getElementById('pool-address').title = DEPLOYED_CONTRACTS.pool;
+        const contracts = getDeployedContracts();
+        if (!contracts) {
+            console.warn('[ContractReader] Deployed contracts not loaded yet');
+            return;
+        }
         
-        document.getElementById('membership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspMembership, 4, 4);
-        document.getElementById('membership-address').title = DEPLOYED_CONTRACTS.aspMembership;
+        document.getElementById('pool-address').textContent = formatAddress(contracts.pool, 4, 4);
+        document.getElementById('pool-address').title = contracts.pool;
         
-        document.getElementById('nonmembership-address').textContent = formatAddress(DEPLOYED_CONTRACTS.aspNonMembership, 4, 4);
-        document.getElementById('nonmembership-address').title = DEPLOYED_CONTRACTS.aspNonMembership;
+        document.getElementById('membership-address').textContent = formatAddress(contracts.aspMembership, 4, 4);
+        document.getElementById('membership-address').title = contracts.aspMembership;
+        
+        document.getElementById('nonmembership-address').textContent = formatAddress(contracts.aspNonMembership, 4, 4);
+        document.getElementById('nonmembership-address').title = contracts.aspNonMembership;
     },
     
     async refreshAll() {
@@ -1369,7 +1381,7 @@ const ContractReader = {
 };
 
 // Initialize
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
     Storage.load();
     
@@ -1380,8 +1392,21 @@ document.addEventListener('DOMContentLoaded', () => {
     Transfer.init();
     Transact.init();
     NotesTable.init();
-    ContractReader.init();
-    PoolEventsFetcher.init();
+    
+    // Load deployment config before initializing contract readers
+    try {
+        await loadDeployedContracts();
+        ContractReader.init();
+        PoolEventsFetcher.init();
+    } catch (err) {
+        console.error('[Init] Failed to load deployment config:', err);
+        // Display error
+        const errorDisplay = document.getElementById('contract-error-display');
+        if (errorDisplay) {
+            errorDisplay.textContent = `Failed to load contract config: ${err.message}`;
+            errorDisplay.classList.remove('hidden');
+        }
+    }
     
     console.log('PoolStellar initialized');
 });

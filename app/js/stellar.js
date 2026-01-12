@@ -5,6 +5,8 @@
  */
 import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
 
+const SUPPORTED_NETWORK = 'testnet';
+
 const NETWORKS = {
     testnet: {
         name: 'Testnet',
@@ -26,36 +28,82 @@ const NETWORKS = {
     }
 };
 
-// Deployed contract addresses on Testnet
-export const DEPLOYED_CONTRACTS = {
-    network: 'testnet',
-    admin: 'GCBTXCQFE3SUEOEF63MLUEWYBY4SO2PWR7KQUVCRPGM54P5W33DKALEW',
-    pool: 'CDDVKNJ5MFUQYHPEXPEJNP5M6FVERY3ETA52A7NAZHWESVNUPRVI6H7N',
-    aspMembership: 'CAQQ57D2JOYAQQKMB2ZFGJELUZL43KU3LBZA66KRP7XPIIDMZ3V7L3Y5',
-    aspNonMembership: 'CBPEI57XCJOWCOS4YPGY5EGPI6EOIUHK3XZTSWFLU54K5AKUUQDQPCHX',
-    verifier: 'CB62VSKSHELPIUEJFEFWY52M6IA3D6UEORV44265LA7VP3NYYPOQKU7A',
-};
+let deployedContracts = null;
 
-let currentNetwork = 'testnet';
+/**
+ * Load deployed contract addresses from deployments.json.
+ * Must be called before using contract addresses.
+ * @returns {Promise<Object>} Deployed contract configuration
+ * @throws {Error} If deployments.json cannot be loaded
+ */
+export async function loadDeployedContracts() {
+    if (deployedContracts) {
+        return deployedContracts;
+    }
+    
+    const response = await fetch('/deployments.json');
+    if (!response.ok) {
+        throw new Error(`Failed to load deployments.json: ${response.status}`);
+    }
+    
+    const data = await response.json();
+    deployedContracts = {
+        network: data.network,
+        admin: data.admin,
+        pool: data.pool,
+        aspMembership: data.asp_membership,
+        aspNonMembership: data.asp_non_membership,
+        verifier: data.verifier,
+    };
+    
+    if (deployedContracts.network !== SUPPORTED_NETWORK) {
+        throw new Error(
+            `Deployment network mismatch: expected '${SUPPORTED_NETWORK}', got '${deployedContracts.network}'`
+        );
+    }
+    
+    console.log('[Stellar] Loaded contract addresses from deployments.json');
+    return deployedContracts;
+}
+
+/**
+ * Get deployed contract addresses. Returns cached value if already loaded.
+ * @returns {Object|null} Deployed contracts or null if not yet loaded
+ */
+export function getDeployedContracts() {
+    return deployedContracts;
+}
+
+let currentNetwork = SUPPORTED_NETWORK;
 let horizonServer = null;
 let sorobanServer = null;
 
 /**
- * Initialize servers for the specified network.
- * @param {string} network - One of 'testnet', 'futurenet', or 'mainnet'
+ * Initialize servers for the current network.
+ * Network switching is not supported - only testnet is allowed.
  * @returns {Object} Network configuration object
- * @throws {Error} If network is not recognized
  */
-export function setNetwork(network) {
-    if (!NETWORKS[network]) {
-        throw new Error(`Unknown network: ${network}. Use 'testnet', 'futurenet', or 'mainnet'`);
-    }
-    currentNetwork = network;
-    const config = NETWORKS[network];
+function initializeNetwork() {
+    const config = NETWORKS[currentNetwork];
     horizonServer = new Horizon.Server(config.horizonUrl);
     sorobanServer = new rpc.Server(config.rpcUrl);
     console.log(`[Stellar] Connected to ${config.name}`);
     return config;
+}
+
+/**
+ * Validate that a wallet network matches the supported network.
+ * @param {string} walletNetwork - Network name from wallet (e.g., 'TESTNET')
+ * @throws {Error} If wallet network doesn't match supported network
+ */
+export function validateWalletNetwork(walletNetwork) {
+    const normalized = walletNetwork?.toLowerCase();
+    if (normalized !== SUPPORTED_NETWORK) {
+        throw new Error(
+            `Network mismatch: app requires '${SUPPORTED_NETWORK}' but wallet is on '${walletNetwork}'. ` +
+            `Please switch your wallet to ${SUPPORTED_NETWORK.toUpperCase()}.`
+        );
+    }
 }
 
 /**
@@ -69,7 +117,7 @@ export function getNetwork() {
  * @returns {Horizon.Server} Horizon server instance
  */
 export function getHorizonServer() {
-    if (!horizonServer) setNetwork(currentNetwork);
+    if (!horizonServer) initializeNetwork();
     return horizonServer;
 }
 
@@ -77,7 +125,7 @@ export function getHorizonServer() {
  * @returns {rpc.Server} Soroban RPC server instance
  */
 export function getSorobanServer() {
-    if (!sorobanServer) setNetwork(currentNetwork);
+    if (!sorobanServer) initializeNetwork();
     return sorobanServer;
 }
 
@@ -178,10 +226,15 @@ async function readLedgerEntry(contractId, scValKey, durability = 'persistent') 
 /**
  * Read ASP Membership contract state.
  * Storage keys: Admin, FilledSubtrees(u32), Zeroes(u32), Levels, NextIndex, Root
- * @param {string} contractId - Contract address, defaults to deployed address
+ * @param {string} [contractId] - Contract address, defaults to deployed address
  * @returns {Promise<{success: boolean, root?: string, levels?: number, nextIndex?: number, error?: string}>}
  */
-export async function readASPMembershipState(contractId = DEPLOYED_CONTRACTS.aspMembership) {
+export async function readASPMembershipState(contractId) {
+    const contracts = getDeployedContracts();
+    contractId = contractId ?? contracts?.aspMembership;
+    if (!contractId) {
+        return { success: false, error: 'Contract address not provided and deployments not loaded' };
+    }
     try {
         const results = {
             success: true,
@@ -220,10 +273,15 @@ export async function readASPMembershipState(contractId = DEPLOYED_CONTRACTS.asp
 /**
  * Read ASP Non-Membership contract state (Sparse Merkle Tree).
  * Storage keys: Admin, Root, Node(U256)
- * @param {string} contractId - Contract address, defaults to deployed address
+ * @param {string} [contractId] - Contract address, defaults to deployed address
  * @returns {Promise<{success: boolean, root?: string, isEmpty?: boolean, error?: string}>}
  */
-export async function readASPNonMembershipState(contractId = DEPLOYED_CONTRACTS.aspNonMembership) {
+export async function readASPNonMembershipState(contractId) {
+    const contracts = getDeployedContracts();
+    contractId = contractId ?? contracts?.aspNonMembership;
+    if (!contractId) {
+        return { success: false, error: 'Contract address not provided and deployments not loaded' };
+    }
     try {
         const results = {
             success: true,
@@ -254,10 +312,15 @@ export async function readASPNonMembershipState(contractId = DEPLOYED_CONTRACTS.
  * Read Pool contract state including Merkle tree with history.
  * DataKey: Admin, Token, Verifier, MaximumDepositAmount, Nullifiers, ASPMembership, ASPNonMembership
  * MerkleDataKey: Levels, CurrentRootIndex, NextIndex, FilledSubtree(u32), Zeroes(u32), Root(u32)
- * @param {string} contractId - Contract address, defaults to deployed address
+ * @param {string} [contractId] - Contract address, defaults to deployed address
  * @returns {Promise<{success: boolean, merkleRoot?: string, merkleLevels?: number, error?: string}>}
  */
-export async function readPoolState(contractId = DEPLOYED_CONTRACTS.pool) {
+export async function readPoolState(contractId) {
+    const contracts = getDeployedContracts();
+    contractId = contractId ?? contracts?.pool;
+    if (!contractId) {
+        return { success: false, error: 'Contract address not provided and deployments not loaded' };
+    }
     const results = {
         success: true,
         contractId,
@@ -329,9 +392,20 @@ export async function readPoolState(contractId = DEPLOYED_CONTRACTS.pool) {
 
 /**
  * Read state from all deployed contracts in parallel.
+ * Requires loadDeployedContracts() to be called first.
  * @returns {Promise<{success: boolean, pool: Object, aspMembership: Object, aspNonMembership: Object}>}
  */
 export async function readAllContractStates() {
+    const contracts = getDeployedContracts();
+    if (!contracts) {
+        return {
+            success: false,
+            error: 'Deployments not loaded. Call loadDeployedContracts() first.',
+            network: currentNetwork,
+            timestamp: new Date().toISOString(),
+        };
+    }
+    
     console.log('[Stellar] Reading all contract states...');
     
     const [poolState, membershipState, nonMembershipState] = await Promise.all([
@@ -393,36 +467,53 @@ export async function getContractEvents(contractId, options = {}) {
 /**
  * Get Pool contract events (NewCommitment, NewNullifier).
  * @param {number} limit - Max events to return
- * @returns {Promise<{success: boolean, events: Array}>}
+ * @returns {Promise<{success: boolean, events: Array, error?: string}>}
  */
 export async function getPoolEvents(limit = 20) {
-    return getContractEvents(DEPLOYED_CONTRACTS.pool, { limit });
+    const contracts = getDeployedContracts();
+    if (!contracts?.pool) {
+        return { success: false, events: [], error: 'Deployments not loaded' };
+    }
+    return getContractEvents(contracts.pool, { limit });
 }
 
 /**
  * Get ASP Membership events (LeafAdded).
  * @param {number} limit - Max events to return
- * @returns {Promise<{success: boolean, events: Array}>}
+ * @returns {Promise<{success: boolean, events: Array, error?: string}>}
  */
 // TODO: Unused for now. Will be used when everything is integrated.
 export async function getASPMembershipEvents(limit = 20) {
-    return getContractEvents(DEPLOYED_CONTRACTS.aspMembership, { limit });
+    const contracts = getDeployedContracts();
+    if (!contracts?.aspMembership) {
+        return { success: false, events: [], error: 'Deployments not loaded' };
+    }
+    return getContractEvents(contracts.aspMembership, { limit });
 }
 
 /**
  * Get ASP Non-Membership events (LeafInserted, LeafUpdated, LeafDeleted).
  * @param {number} limit - Max events to return
- * @returns {Promise<{success: boolean, events: Array}>}
+ * @returns {Promise<{success: boolean, events: Array, error?: string}>}
  */
 // TODO: Unused for now. Will be used when everything is integrated.
 export async function getASPNonMembershipEvents(limit = 20) {
-    return getContractEvents(DEPLOYED_CONTRACTS.aspNonMembership, { limit });
+    const contracts = getDeployedContracts();
+    if (!contracts?.aspNonMembership) {
+        return { success: false, events: [], error: 'Deployments not loaded' };
+    }
+    return getContractEvents(contracts.aspNonMembership, { limit });
 }
 
 /**
  * Convert ScVal to native JavaScript types.
+ * 
+ * Return types vary based on the ScVal type and match the SDK for compatibility.
+ *
+ * 
  * @param {xdr.ScVal} scVal - Stellar ScVal
- * @returns {any} Native JS value
+ * @returns {null|boolean|number|string|Array|Object} Native JS value
+ * @throws {Error} If scVal is invalid
  */
 export function scValToNative(scVal) {
     if (!scVal || typeof scVal.switch !== 'function') {
@@ -431,6 +522,7 @@ export function scValToNative(scVal) {
     try {
         return sdkScValToNative(scVal);
     } catch {
+        // Fallback for types the SDK cannot handle directly
         const type = scVal.switch().name;
         switch (type) {
             case 'scvVoid': return null;
@@ -539,6 +631,6 @@ export function formatAddress(address, startChars = 4, endChars = 4) {
     return `${address.slice(0, startChars)}...${address.slice(-endChars)}`;
 }
 
-setNetwork(currentNetwork);
+initializeNetwork();
 
-export { NETWORKS };
+export { NETWORKS, SUPPORTED_NETWORK };
