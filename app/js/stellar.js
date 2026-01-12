@@ -430,7 +430,8 @@ export function scValToNative(scVal) {
     }
     try {
         return sdkScValToNative(scVal);
-    } catch {
+    } catch (e) {
+        console.debug('[Stellar] SDK conversion failed, using fallback:', e);
         const type = scVal.switch().name;
         switch (type) {
             case 'scvVoid': return null;
@@ -516,7 +517,7 @@ function formatU128(u128Xdr) {
  * Check if U256 value is zero.
  * @param {any} value - U256 value
  * @returns {boolean}
- */
+ */ 
 function isZeroU256(value) {
     if (typeof value === 'string') {
         return value === '0' || value === '0x' + '0'.repeat(64);

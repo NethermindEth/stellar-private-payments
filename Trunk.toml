@@ -7,7 +7,7 @@ release = true
 
 [watch]
 watch = ["app", "circuits"]
-ignore = ["app/node_modules"]
+ignore = ["app/node_modules", "dist"]
 
 [serve]
 addresses = ["0.0.0.0"]
@@ -16,48 +16,48 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
-# Copy witness module to staging
-[[hooks]]
-stage = "pre_build"
-command = "sh"
-command_arguments = ["-c", "mkdir -p dist/.stage/js/witness && cp app/js/witness/index.js dist/.stage/js/witness/ && cp app/js/witness/witness_calculator.js dist/.stage/js/witness/"]
-
-# Copy circuit artifacts (Wasm and R1CS) from cargo build output to dist
+# Copy circuit artifacts, proving keys, witness module, and static JS
 [[hooks]]
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p dist/.stage/circuits
+mkdir -p dist/.stage/circuits dist/.stage/keys dist/.stage/js/witness
+
+# Circuit artifacts from build output
 CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
 if [ -n "$CIRCUIT_OUT" ]; then
     cp "$CIRCUIT_OUT"/*.r1cs dist/.stage/circuits/ 2>/dev/null || true
     cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm dist/.stage/circuits/ 2>/dev/null || true
-else
-    echo "Warning: No circuit build output found. Run 'BUILD_TESTS=1 cargo build -p circuits' first."
 fi
+
+# Proving keys and verification keys
+cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true
+cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true
+
+# Witness WASM module
+if [ -d "target/wasm-witness" ]; then
+    cp target/wasm-witness/witness.js dist/.stage/js/witness/ 2>/dev/null || true
+    cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || true
+fi
+
+# Static files (bridge.js is external to esbuild bundles, test.html for dev)
+cp app/js/bridge.js dist/.stage/js/
+cp app/test.html dist/.stage/ 2>/dev/null || true
 """]
 
-# Copy proving keys to staging
-[[hooks]]
-stage = "pre_build"
-command = "sh"
-command_arguments = ["-c", "mkdir -p dist/.stage/keys && cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true && cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true"]
-
-# TODO: Remove once we have the main page working
-# Copy test.html and bridge.js to staging
-[[hooks]]
-stage = "pre_build"
-command = "sh"
-command_arguments = ["-c", "cp app/test.html dist/.stage/test.html 2>/dev/null || true && mkdir -p dist/.stage/js && cp app/js/bridge.js dist/.stage/js/bridge.js"]
-
-# Bundle ui.js
+# Bundle JS files with npm dependencies
 [[hooks]]
 stage = "build"
 command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm"]
-
-# Bundle worker.js
-[[hooks]]
-stage = "build"
-command = "sh"
-command_arguments = ["-c", "./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm"]
+command_arguments = ["-c", """
+cd app && ./node_modules/.bin/esbuild \
+    js/worker.js \
+    js/wallet.js \
+    js/stellar.js \
+    --bundle \
+    --format=esm \
+    --outdir=../dist/.stage/js \
+    --external:./prover.js \
+    --external:./witness/* \
+    --external:./bridge.js
+"""]

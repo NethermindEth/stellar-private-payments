@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "app",
+    "app/crates/prover",
+    "app/crates/witness",
     "circuits",
     "contracts/*",
     "e2e-tests",

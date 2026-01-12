@@ -33,28 +33,32 @@ The bridge module operates on serialized inputs and outputs and can be replaced 
 
 ```
 app/
-├── src/                   # Rust prover module
-│   ├── lib.rs             # WASM entry point
-│   ├── prover.rs          # Groth16 proof generation
-│   ├── crypto.rs          # Poseidon2 hashing
-│   ├── merkle.rs          # Merkle tree operations
-│   ├── sparse_merkle.rs   # Sparse Merkle tree (SMT) with no_std support
-│   ├── r1cs.rs            # R1CS constraint parser
-│   ├── serialization.rs   # Field element serialization
-│   └── types.rs           # Common types
+├── crates/
+│   ├── prover/                    # Rust prover module
+│   │   ├── src/
+│   │   │   ├── lib.rs             # WASM entry point
+│   │   │   ├── prover.rs          # Groth16 proof generation
+│   │   │   ├── crypto.rs          # Poseidon2 hashing
+│   │   │   ├── merkle.rs          # Merkle tree operations
+│   │   │   ├── sparse_merkle.rs   # Sparse Merkle tree (SMT) with no_std support
+│   │   │   ├── r1cs.rs            # R1CS constraint parser
+│   │   │   ├── serialization.rs   # Field element serialization
+│   │   │   └── types.rs           # Common types
+│   │   └── Cargo.toml
+│   │
+│   └── witness/           # Rust witness module (using ark-circom)
+│       ├── src/lib.rs     # Witness calculator WASM bindings
+│       └── Cargo.toml
 │
 ├── js/
 │   ├── bridge.js          # Coordinates communication between witness + prover modules
-│   ├── witness/           # Circom witness calculator
-│   │   ├── index.js       # Witness module wrapper
-│   │   └── witness_calculator.js  # Witness calculator from Circom
-│   ├── prover/            # Compiled WASM output
+│   ├── witness/           # Compiled witness WASM output
+│   ├── prover/            # Compiled prover WASM output
 │   └── ui.js              # UI interactions
 │
 ├── css/                   # Stylesheets
 ├── assets/                # Static assets
-├── index.html             # Main application
-└── Cargo.toml             # Rust dependencies
+└── index.html             # Main application
 ```
 
 ## Building

@@ -74,6 +74,17 @@ const Utils = {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
+    },
+    
+    /**
+     * Toggle button loading state
+     * @param {HTMLButtonElement} btn - Button element with .btn-text and .btn-loading children
+     * @param {boolean} loading - Whether to show loading state
+     */
+    setButtonLoading(btn, loading) {
+        btn.disabled = loading;
+        btn.querySelector('.btn-text').classList.toggle('hidden', loading);
+        btn.querySelector('.btn-loading').classList.toggle('hidden', !loading);
     }
 };
 
@@ -486,9 +497,7 @@ const Deposit = {
         const totalAmount = parseFloat(document.getElementById('deposit-amount').value);
         const btn = document.getElementById('btn-deposit');
         
-        btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        Utils.setButtonLoading(btn, true);
         
         try {
             await new Promise(r => setTimeout(r, 2000));
@@ -526,9 +535,7 @@ const Deposit = {
         } catch (e) {
             Toast.show('Deposit failed: ' + e.message, 'error');
         } finally {
-            btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            Utils.setButtonLoading(btn, false);
         }
     }
 };
@@ -579,9 +586,7 @@ const Withdraw = {
         }
         
         const btn = document.getElementById('btn-withdraw');
-        btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        Utils.setButtonLoading(btn, true);
         
         try {
             await new Promise(r => setTimeout(r, 2500));
@@ -608,9 +613,7 @@ const Withdraw = {
         } catch (e) {
             Toast.show('Withdrawal failed: ' + e.message, 'error');
         } finally {
-            btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            Utils.setButtonLoading(btn, false);
         }
     }
 };
@@ -710,9 +713,7 @@ const Transact = {
         }
         
         const btn = document.getElementById('btn-transact');
-        btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        Utils.setButtonLoading(btn, true);
         
         try {
             await new Promise(r => setTimeout(r, 3000));
@@ -769,9 +770,7 @@ const Transact = {
         } catch (e) {
             Toast.show('Transaction failed: ' + e.message, 'error');
         } finally {
-            btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            Utils.setButtonLoading(btn, false);
         }
     }
 };
@@ -915,9 +914,7 @@ const Transfer = {
         }
         
         const btn = document.getElementById('btn-transfer');
-        btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        Utils.setButtonLoading(btn, true);
         
         try {
             await new Promise(r => setTimeout(r, 3000));
@@ -964,9 +961,7 @@ const Transfer = {
         } catch (e) {
             Toast.show('Transfer failed: ' + e.message, 'error');
         } finally {
-            btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            Utils.setButtonLoading(btn, false);
         }
     }
 };
@@ -979,13 +974,24 @@ const PoolEventsFetcher = {
     isLoading: false,
     events: [],
     maxEvents: 3,
+    refreshIntervalId: null,
     
     /**
      * Initialize event fetching with auto-refresh.
      */
     init() {
         this.refresh();
-        setInterval(() => this.refresh(), 30000);
+        this.refreshIntervalId = setInterval(() => this.refresh(), 30000);
+    },
+
+    /**
+     * Stop auto-refresh. Call when component is unmounted or on critical errors.
+     */
+    destroy() {
+        if (this.refreshIntervalId) {
+            clearInterval(this.refreshIntervalId);
+            this.refreshIntervalId = null;
+        }
     },
     
     /**
@@ -1383,54 +1389,8 @@ document.addEventListener('DOMContentLoaded', () => {
     ContractReader.init();
     PoolEventsFetcher.init();
     
+    // Verify Stellar network connectivity
+    pingTestnet();
+    
     console.log('PoolStellar initialized');
 });
-
-async function initializeWorker() {
-    return new Promise((resolve, reject) => {
-        const worker = new Worker('js/worker.js', { type: 'module' });
-
-        worker.onmessage = (event) => {
-            const { type, error } = event.data;
-
-            if (type === 'READY') {
-                console.log("Worker is ready.");
-                resolve(worker);
-            } else if (type === 'ERROR') {
-                reject(new Error(error));
-            }
-        };
-
-        worker.onerror = (err) => reject(err);
-    });
-}
-
-async function main() {
-    // Initialize worker with a prover
-    let worker = null;
-    try {
-        worker = await initializeWorker();
-        console.log("Initialization complete!");
-    } catch (err) {
-        console.error("Critical Failure:", err);
-    }
-
-    worker.onmessage = (event) => {
-        const { type, result, error } = event.data;
-        if (type === 'PROVE') {
-            const decoder = new TextDecoder();
-            const str = decoder.decode(event.data.payload);
-            console.log(`Proof ${str}`);
-        }
-        
-    };
-
-    worker.postMessage({ 
-        type: 'PROVE' 
-    });
-    console.log("Ping Stellar");
-    // Test Stellar network
-    pingTestnet();
-}
-
-main();
