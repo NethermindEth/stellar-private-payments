@@ -35,6 +35,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSD-2-Clause-Patent",
+    "BSL-1.0",
     "CC-BY-1.0",
     "CC-BY-2.0",
     "CC-BY-3.0",
@@ -67,11 +68,6 @@ unused-allowed-license = "allow"
 [licenses.private]
 ignore = false
 registries = []
-
-# Specific license exception
-[[licenses.exceptions]]
-name = "xxhash-rust"
-allow = ["BSL-1.0"]
 
 [bans]
 wildcards = "deny"
