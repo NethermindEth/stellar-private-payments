@@ -33,7 +33,7 @@ pub struct WitnessCalculator {
     /// Number of variables in the witness
     witness_size: u32,
     /// Number of public inputs
-    num_public: u32,
+    num_public_inputs: u32,
 }
 
 #[wasm_bindgen]
@@ -51,7 +51,7 @@ impl WitnessCalculator {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse R1CS: {}", e)))?;
 
         let witness_size = r1cs_file.header.n_wires;
-        let num_public = r1cs_file.header.n_pub_in;
+        let num_public_inputs = r1cs_file.header.n_pub_in;
 
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
@@ -66,7 +66,7 @@ impl WitnessCalculator {
             store,
             calculator,
             witness_size,
-            num_public,
+            num_public_inputs,
         })
     }
 
@@ -99,7 +99,7 @@ impl WitnessCalculator {
         // Calculate witness
         let witness = self
             .calculator
-            .calculate_witness(&mut self.store, inputs_hashmap, true)
+            .calculate_witness(&mut self.store, inputs_hashmap, false)
             .map_err(|e| JsValue::from_str(&format!("Witness calculation failed: {}", e)))?;
 
         // Convert to Little-Endian bytes
@@ -115,7 +115,7 @@ impl WitnessCalculator {
     /// Get the number of public inputs
     #[wasm_bindgen(getter)]
     pub fn num_public_inputs(&self) -> u32 {
-        self.num_public
+        self.num_public_inputs
     }
 }
 
@@ -271,6 +271,12 @@ fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
     for bi in witness {
         // Convert BigInt to 32 LE bytes
         let (sign, mut be_bytes) = bi.to_bytes_be();
+
+        // Check it fits in 32 bytes
+        assert!(
+            be_bytes.len() <= 32,
+            "Field element exceeds 32 bytes in witness"
+        );
 
         // Handle negative numbers (should not happen in valid circuits)
         if sign == num_bigint::Sign::Minus {
