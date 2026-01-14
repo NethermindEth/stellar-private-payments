@@ -5,8 +5,8 @@
  * @module state/asp-non-membership-fetcher
  */
 
-import { getSorobanServer, getDeployedContracts, scValToNative } from '../stellar.js';
-import { xdr, Address } from '@stellar/stellar-sdk';
+import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
+import { xdr, Address, TransactionBuilder, Account } from '@stellar/stellar-sdk';
 import { bytesToHex } from './utils.js';
 
 /**
@@ -63,7 +63,7 @@ export async function fetchRoot() {
  * Fetches a non-membership proof for a key by calling the contract's find_key function.
  * Uses simulateTransaction to call the view function without submitting.
  * @param {Uint8Array|string} key - Key to prove non-membership for
- * @returns {Promise<{success: boolean, proof?: SMTNonMembershipProof, error?: string}>}
+ * @returns {Promise<{success: boolean, proof?: SMTNonMembershipProof, error?: string, keyExists?: boolean}>}
  */
 export async function fetchNonMembershipProof(key) {
     const contracts = getDeployedContracts();
@@ -82,7 +82,7 @@ export async function fetchNonMembershipProof(key) {
         // Build the function invocation using simulateTransaction
         // We need to call find_key(key) on the contract
         // TODO: Update with real addresses once we integrate with the UI
-        const account = 'GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF'; // Dummy
+        const account = 'GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC'; // Dummy
         
         const invokeArgs = new xdr.InvokeContractArgs({
             contractAddress: new Address(contractId).toScAddress(),
@@ -101,11 +101,11 @@ export async function fetchNonMembershipProof(key) {
         );
 
         // Build a minimal transaction for simulation
-        const txBuilder = new (await import('@stellar/stellar-sdk')).TransactionBuilder(
-            new (await import('@stellar/stellar-sdk')).Account(account, '0'),
+        const txBuilder = new TransactionBuilder(
+            new Account(account, '0'),
             {
                 fee: '100',
-                networkPassphrase: (await import('../stellar.js')).getNetwork().passphrase,
+                networkPassphrase: getNetwork().passphrase,
             }
         );
         

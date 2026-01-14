@@ -9,9 +9,9 @@ import { toHex, normalizeHex } from './utils.js';
 
 /**
  * @typedef {Object} UserNote
- * @property {string} id - Note ID (commitment hex)
- * @property {string} privateKey - Private key (hex)
- * @property {string} blinding - Blinding factor (hex)
+ * @property {string} id - Commitment hash 
+ * @property {string} privateKey - Private key 
+ * @property {string} blinding - Blinding factor
  * @property {string} amount - Amount as string (bigint)
  * @property {number} leafIndex - Index in the pool merkle tree
  * @property {string} createdAt - ISO timestamp
@@ -23,7 +23,7 @@ import { toHex, normalizeHex } from './utils.js';
 /**
  * Saves a new note to the store.
  * @param {Object} params - Note parameters
- * @param {string} params.commitment - Commitment hash (hex)
+ * @param {string} params.commitment - Commitment hash
  * @param {Uint8Array|string} params.privateKey - Private key
  * @param {Uint8Array|string} params.blinding - Blinding factor
  * @param {bigint|string|number} params.amount - Note amount
@@ -50,7 +50,7 @@ export async function saveNote(params) {
 
 /**
  * Marks a note as spent.
- * @param {string} commitment - Note commitment (hex)
+ * @param {string} commitment - Note commitment
  * @param {number} ledger - Ledger when spent
  * @returns {Promise<boolean>} True if note was found and marked
  */
@@ -88,7 +88,7 @@ export async function getNotes(options = {}) {
 
 /**
  * Gets a note by commitment.
- * @param {string} commitment - Note commitment (hex)
+ * @param {string} commitment - Note commitment
  * @returns {Promise<UserNote|null>}
  */
 export async function getNoteByCommitment(commitment) {
@@ -114,105 +114,28 @@ export async function getBalance() {
 }
 
 /**
- * Exports notes to an encrypted JSON blob.
- * Uses Web Crypto API for encryption with a password-derived key.
- * @param {string} password - Encryption password
+ * Exports notes to a plain JSON blob.
  * @returns {Promise<Blob>}
  */
-export async function exportNotes(password) {
+export async function exportNotes() {
     const notes = await db.getAll('user_notes');
     const data = JSON.stringify({
         version: 1,
         exportedAt: new Date().toISOString(),
         notes,
-    });
+    }, null, 2);
     
-    // Derive key from password
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        enc.encode(password),
-        'PBKDF2',
-        false,
-        ['deriveBits', 'deriveKey']
-    );
-    
-    const salt = crypto.getRandomValues(new Uint8Array(16));
-    const key = await crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt,
-            iterations: 100000,
-            hash: 'SHA-256',
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['encrypt']
-    );
-    
-    const iv = crypto.getRandomValues(new Uint8Array(12));
-    const encrypted = await crypto.subtle.encrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        enc.encode(data)
-    );
-    
-    // Combine salt + iv + ciphertext
-    const result = new Uint8Array(salt.length + iv.length + encrypted.byteLength);
-    result.set(salt, 0);
-    result.set(iv, salt.length);
-    result.set(new Uint8Array(encrypted), salt.length + iv.length);
-    
-    return new Blob([result], { type: 'application/octet-stream' });
+    return new Blob([data], { type: 'application/json' });
 }
 
 /**
- * Imports notes from an encrypted blob.
- * @param {File|Blob} file - Encrypted notes file
- * @param {string} password - Decryption password
+ * Imports notes from a JSON file.
+ * @param {File|Blob} file - Notes JSON file
  * @returns {Promise<number>} Number of notes imported
  */
-export async function importNotes(file, password) {
-    const arrayBuffer = await file.arrayBuffer();
-    const data = new Uint8Array(arrayBuffer);
-    
-    // Extract salt, iv, ciphertext
-    const salt = data.slice(0, 16);
-    const iv = data.slice(16, 28);
-    const ciphertext = data.slice(28);
-    
-    // Derive key from password
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-        'raw',
-        enc.encode(password),
-        'PBKDF2',
-        false,
-        ['deriveBits', 'deriveKey']
-    );
-    
-    const key = await crypto.subtle.deriveKey(
-        {
-            name: 'PBKDF2',
-            salt,
-            iterations: 100000,
-            hash: 'SHA-256',
-        },
-        keyMaterial,
-        { name: 'AES-GCM', length: 256 },
-        false,
-        ['decrypt']
-    );
-    
-    const decrypted = await crypto.subtle.decrypt(
-        { name: 'AES-GCM', iv },
-        key,
-        ciphertext
-    );
-    
-    const dec = new TextDecoder();
-    const json = JSON.parse(dec.decode(decrypted));
+export async function importNotes(file) {
+    const text = await file.text();
+    const json = JSON.parse(text);
     
     if (json.version !== 1) {
         throw new Error(`Unsupported export version: ${json.version}`);
@@ -230,7 +153,6 @@ export async function importNotes(file, password) {
             existing.spentAtLedger = note.spentAtLedger;
             await db.put('user_notes', existing);
         }
-        // If existing.spent && !note.spent: keep existing spent status (no action)
     }
     
     console.log(`[NotesStore] Imported ${imported} notes`);
@@ -239,7 +161,7 @@ export async function importNotes(file, password) {
 
 /**
  * Deletes a note from the store.
- * @param {string} commitment - Note commitment (hex)
+ * @param {string} commitment - Note commitment
  * @returns {Promise<void>}
  */
 export async function deleteNote(commitment) {

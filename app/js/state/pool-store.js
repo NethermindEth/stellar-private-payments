@@ -10,7 +10,7 @@
 
 import * as db from './db.js';
 import { createMerkleTree } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeU256ToHex } from './utils.js';
+import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex } from './utils.js';
 
 const POOL_TREE_DEPTH = 20;
 
@@ -19,21 +19,21 @@ let merkleTree = null;
 /**
  * @typedef {Object} PoolLeaf
  * @property {number} index - Leaf index in merkle tree
- * @property {string} commitment - Commitment hash (hex)
+ * @property {string} commitment - Commitment hash
  * @property {number} ledger - Ledger when added
  */
 
 /**
  * @typedef {Object} PoolNullifier
- * @property {string} nullifier - Nullifier hash (hex)
+ * @property {string} nullifier - Nullifier hash
  * @property {number} ledger - Ledger when spent
  */
 
 /**
  * @typedef {Object} PoolEncryptedOutput
- * @property {string} commitment - Commitment hash (hex)
+ * @property {string} commitment - Commitment hash
  * @property {number} index - Leaf index
- * @property {string} encryptedOutput - Encrypted output data (hex)
+ * @property {string} encryptedOutput - Encrypted output data
  * @property {number} ledger - Ledger when created
  */
 
@@ -179,22 +179,24 @@ export function getMerkleProof(leafIndex) {
  * @returns {Promise<boolean>}
  */
 export async function isNullifierSpent(nullifier) {
-    const hex = typeof nullifier === 'string' ? nullifier : bytesToHex(nullifier);
+    const hex = typeof nullifier === 'string' ? normalizeHex(nullifier) : bytesToHex(nullifier);
     const result = await db.get('pool_nullifiers', hex);
     return result !== undefined;
 }
 
 /**
  * Gets all encrypted outputs for potential note detection.
- * @param {number} [fromLedger] - Optional: only get outputs from this ledger onwards
+ * @param {number} [fromLedger] - Only get outputs from this ledger onwards
  * @returns {Promise<PoolEncryptedOutput[]>}
  */
 export async function getEncryptedOutputs(fromLedger) {
     const outputs = await db.getAll('pool_encrypted_outputs');
-    if (fromLedger !== undefined) {
-        return outputs.filter(o => o.ledger >= fromLedger);
+    
+    if (fromLedger === undefined) {
+        return outputs;
     }
-    return outputs;
+    
+    return outputs.filter(o => o.ledger >= fromLedger);
 }
 
 /**

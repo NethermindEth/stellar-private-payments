@@ -15,6 +15,7 @@ import { getRetentionConfig, detectRetentionWindow, ledgersToDuration } from './
 let initialized = false;
 let retentionConfig = null;
 let eventListeners = [];
+let forwardedSyncListeners = [];
 
 /**
  * StateManager provides a unified API for all client-side state operations.
@@ -45,10 +46,20 @@ export const StateManager = {
         await poolStore.init();
         await aspMembershipStore.init();
 
-        // Forward sync events
-        syncController.on('syncProgress', data => emit('syncProgress', data));
-        syncController.on('syncComplete', data => emit('syncComplete', data));
-        syncController.on('syncBroken', data => emit('syncBroken', data));
+        // Forward sync events (store references for cleanup)
+        const progressHandler = data => emit('syncProgress', data);
+        const completeHandler = data => emit('syncComplete', data);
+        const brokenHandler = data => emit('syncBroken', data);
+        
+        syncController.on('syncProgress', progressHandler);
+        syncController.on('syncComplete', completeHandler);
+        syncController.on('syncBroken', brokenHandler);
+        
+        forwardedSyncListeners = [
+            ['syncProgress', progressHandler],
+            ['syncComplete', completeHandler],
+            ['syncBroken', brokenHandler],
+        ];
 
         initialized = true;
         console.log('[StateManager] Initialized');
@@ -244,22 +255,20 @@ export const StateManager = {
     },
 
     /**
-     * Exports notes to an encrypted file.
-     * @param {string} password - Encryption password
+     * Exports notes to a JSON file.
      * @returns {Promise<Blob>}
      */
-    async exportNotes(password) {
-        return notesStore.exportNotes(password);
+    async exportNotes() {
+        return notesStore.exportNotes();
     },
 
     /**
-     * Imports notes from an encrypted file.
-     * @param {File|Blob} file - Encrypted notes file
-     * @param {string} password - Decryption password
+     * Imports notes from a JSON file.
+     * @param {File|Blob} file - Notes JSON file
      * @returns {Promise<number>} Number of notes imported
      */
-    async importNotes(file, password) {
-        return notesStore.importNotes(file, password);
+    async importNotes(file) {
+        return notesStore.importNotes(file);
     },
 
     // Events
@@ -299,9 +308,13 @@ export const StateManager = {
     },
 
     /**
-     * Closes the database connection.
+     * Closes the database connection and cleans up listeners.
      */
     close() {
+        for (const [event, handler] of forwardedSyncListeners) {
+            syncController.off(event, handler);
+        }
+        forwardedSyncListeners = [];
         db.close();
         initialized = false;
     },

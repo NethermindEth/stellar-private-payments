@@ -19,8 +19,8 @@ let merkleTree = null;
 /**
  * @typedef {Object} ASPMembershipLeaf
  * @property {number} index - Leaf index in merkle tree
- * @property {string} leaf - Leaf hash (hex)
- * @property {string} root - Root after insertion (hex)
+ * @property {string} leaf - Leaf hash 
+ * @property {string} root - Root after insertion 
  * @property {number} ledger - Ledger when added
  */
 
@@ -153,8 +153,8 @@ export function getNextIndex() {
  */
 export async function findLeafByHash(leafHash) {
     const hex = typeof leafHash === 'string' ? leafHash : bytesToHex(leafHash);
-    const leaves = await db.getAll('asp_membership_leaves');
-    return leaves.find(l => l.leaf === hex) || null;
+    const result = await db.getByIndex('asp_membership_leaves', 'by_leaf', hex);
+    return result || null;
 }
 
 /**

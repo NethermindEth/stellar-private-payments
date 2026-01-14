@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'poolstellar';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 /**
  * Store configuration for IndexedDB schema.
@@ -23,7 +23,10 @@ const STORES = {
         keyPath: 'commitment',
         indexes: [{ name: 'by_ledger', keyPath: 'ledger' }]
     },
-    asp_membership_leaves: { keyPath: 'index' },
+    asp_membership_leaves: {
+        keyPath: 'index',
+        indexes: [{ name: 'by_leaf', keyPath: 'leaf', unique: true }]
+    },
     user_notes: {
         keyPath: 'id',
         indexes: [{ name: 'by_spent', keyPath: 'spent' }]
@@ -61,17 +64,26 @@ function openDatabase() {
 
         request.onupgradeneeded = (event) => {
             const db = event.target.result;
+            const tx = event.target.transaction;
             console.log(`[DB] Upgrading database to version ${DB_VERSION}`);
 
             for (const [storeName, config] of Object.entries(STORES)) {
+                let store;
                 if (!db.objectStoreNames.contains(storeName)) {
-                    const store = db.createObjectStore(storeName, { keyPath: config.keyPath });
-                    if (config.indexes) {
-                        for (const idx of config.indexes) {
+                    store = db.createObjectStore(storeName, { keyPath: config.keyPath });
+                    console.log(`[DB] Created store: ${storeName}`);
+                } else {
+                    store = tx.objectStore(storeName);
+                }
+                
+                // Create any missing indexes
+                if (config.indexes) {
+                    for (const idx of config.indexes) {
+                        if (!store.indexNames.contains(idx.name)) {
                             store.createIndex(idx.name, idx.keyPath, { unique: idx.unique || false });
+                            console.log(`[DB] Created index: ${storeName}.${idx.name}`);
                         }
                     }
-                    console.log(`[DB] Created store: ${storeName}`);
                 }
             }
         };
@@ -152,6 +164,20 @@ export async function getAllByIndex(storeName, indexName, value) {
     const store = tx.objectStore(storeName);
     const index = store.index(indexName);
     return promisifyRequest(index.getAll(value));
+}
+
+/**
+ * Gets a single record by index value.
+ * @param {string} storeName - Object store name
+ * @param {string} indexName - Index name
+ * @param {any} value - Index value to match
+ * @returns {Promise<any|undefined>}
+ */
+export async function getByIndex(storeName, indexName, value) {
+    const tx = await getTransaction(storeName, 'readonly');
+    const store = tx.objectStore(storeName);
+    const index = store.index(indexName);
+    return promisifyRequest(index.get(value));
 }
 
 /**
