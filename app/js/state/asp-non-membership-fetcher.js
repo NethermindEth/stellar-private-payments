@@ -176,14 +176,3 @@ function hexToU256ScVal(hex) {
         })
     );
 }
-
-/**
- * Normalizes hex string for comparison (strips leading zeros).
- * @param {string} hex
- * @returns {string}
- */
-function normalizeHexForCompare(hex) {
-    if (!hex) return '';
-    const clean = hex.startsWith('0x') ? hex.slice(2) : hex;
-    return clean.toLowerCase().replace(/^0+/, '') || '0';
-}
