@@ -35,6 +35,7 @@ allow = [
     "BSD-2-Clause",
     "BSD-3-Clause",
     "BSD-2-Clause-Patent",
+    "BSL-1.0",
     "CC-BY-1.0",
     "CC-BY-2.0",
     "CC-BY-3.0",
@@ -90,6 +91,7 @@ allow-git = [
     "https://github.com/arkworks-rs/algebra",
     "https://github.com/arkworks-rs/groth16",
     "https://github.com/arkworks-rs/crypto-primitives",
+    "https://github.com/arkworks-rs/circom-compat",
 ]
 
 [sources.allow-org]

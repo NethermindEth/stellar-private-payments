@@ -1,6 +1,7 @@
 [workspace]
 members = [
-    "app",
+    "app/crates/prover",
+    "app/crates/witness",
     "circuits",
     "contracts/*",
     "e2e-tests",
@@ -38,6 +39,7 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 wasm-bindgen = { version = "0.2.100", default-features = false }
+wasmer = { version = "6.1", default-features = false }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]

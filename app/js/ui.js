@@ -991,9 +991,15 @@ const PoolEventsFetcher = {
      */
     init() {
         this.refresh();
-        setInterval(() => this.refresh(), 30000);
+        this.refreshIntervalId = setInterval(() => this.refresh(), 30000);
     },
-    
+
+    destroy() {
+        if (this.refreshIntervalId) {
+            clearInterval(this.refreshIntervalId);
+            this.refreshIntervalId = null;
+        }
+    },
     /**
      * Fetch recent pool events from the contract.
      */
@@ -1401,61 +1407,13 @@ document.addEventListener('DOMContentLoaded', async () => {
     } catch (err) {
         console.error('[Init] Failed to load deployment config:', err);
         // Display error
+        const errorText = document.getElementById('contract-error-text');
         const errorDisplay = document.getElementById('contract-error-display');
-        if (errorDisplay) {
-            errorDisplay.textContent = `Failed to load contract config: ${err.message}`;
+        if (errorText && errorDisplay) {
+            errorText.textContent = `Failed to load contract config: ${err.message}`;
             errorDisplay.classList.remove('hidden');
         }
     }
     
     console.log('PoolStellar initialized');
 });
-
-async function initializeWorker() {
-    return new Promise((resolve, reject) => {
-        const worker = new Worker('js/worker.js', { type: 'module' });
-
-        worker.onmessage = (event) => {
-            const { type, error } = event.data;
-
-            if (type === 'READY') {
-                console.log("Worker is ready.");
-                resolve(worker);
-            } else if (type === 'ERROR') {
-                reject(new Error(error));
-            }
-        };
-
-        worker.onerror = (err) => reject(err);
-    });
-}
-
-async function main() {
-    // Initialize worker with a prover
-    let worker = null;
-    try {
-        worker = await initializeWorker();
-        console.log("Initialization complete!");
-    } catch (err) {
-        console.error("Critical Failure:", err);
-    }
-
-    worker.onmessage = (event) => {
-        const { type, result, error } = event.data;
-        if (type === 'PROVE') {
-            const decoder = new TextDecoder();
-            const str = decoder.decode(event.data.payload);
-            console.log(`Proof ${str}`);
-        }
-        
-    };
-
-    worker.postMessage({ 
-        type: 'PROVE' 
-    });
-    console.log("Ping Stellar");
-    // Test Stellar network
-    pingTestnet();
-}
-
-main();

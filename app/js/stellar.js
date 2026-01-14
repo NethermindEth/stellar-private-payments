@@ -521,7 +521,8 @@ export function scValToNative(scVal) {
     }
     try {
         return sdkScValToNative(scVal);
-    } catch {
+    } catch (sdkError) {
+        console.warn('[Stellar] SDK scValToNative failed, using fallback:', sdkError);
         // Fallback for types the SDK cannot handle directly
         const type = scVal.switch().name;
         switch (type) {
@@ -563,7 +564,8 @@ function formatU256(value) {
     if (typeof value === 'object' && value !== null) {
         try {
             return JSON.stringify(value);
-        } catch {
+        } catch (error) {
+            console.warn('[Stellar] Failed to stringify U256 object:', error);
             return String(value);
         }
     }
@@ -584,7 +586,8 @@ function formatU256Raw(u256Xdr) {
         
         const value = (hiHi << 192n) | (hiLo << 128n) | (loHi << 64n) | loLo;
         return '0x' + value.toString(16).padStart(64, '0');
-    } catch {
+    } catch (error) {
+        console.warn('[Stellar] Failed to stringify U256 raw object:', error);
         return '[U256]';
     }
 }
@@ -599,7 +602,8 @@ function formatU128(u128Xdr) {
         const hi = BigInt(u128Xdr.hi().toString());
         const lo = BigInt(u128Xdr.lo().toString());
         return ((hi << 64n) | lo).toString();
-    } catch {
+    } catch (error) {
+        console.warn('[Stellar] Failed to stringify U128 object:', error);
         return '[U128]';
     }
 }
@@ -608,7 +612,7 @@ function formatU128(u128Xdr) {
  * Check if U256 value is zero.
  * @param {any} value - U256 value
  * @returns {boolean}
- */
+ */ 
 function isZeroU256(value) {
     if (typeof value === 'string') {
         return value === '0' || value === '0x' + '0'.repeat(64);

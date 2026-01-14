@@ -2,14 +2,13 @@
  * ZK Proof Bridge
  * 
  * Coordinates between:
- * - Module 1: Witness generation (witness_calculator.js)
- * - Module 2: Proof generation (prover-wasm)
+ * - Module 1: Witness generation (witness-wasm using ark-circom)
+ * - Module 2: Proof generation (prover-wasm using ark-groth16)
  * 
- * Data-only exchange between modules via Uint8Array.
+ * Data exchange via Uint8Array.
  */
 
-// Prover Module: Input Preparation
-// Path is relative to dist/js/ where this file runs
+// Prover Module
 import initProverModule, {
     Prover,
     MerkleTree,
@@ -29,38 +28,35 @@ import initProverModule, {
     version as proverVersion,
 } from './prover.js';
 
-// Witness Generation Module
-// Path is relative to dist/js/ where this file runs
-import {
-    initWitness,
-    computeWitness,
-    computeWitnessArray,
-    getCircuitInfo,
-    bytesToWitness,
-} from './witness/index.js';
+// Witness Module (ark-circom WASM)
+import initWitnessWasm, {
+    WitnessCalculator,
+    version as witnessVersion,
+} from './witness/witness.js';
 
 // Configuration
-
 const DEFAULT_CONFIG = {
     circuitName: 'compliant_test',
     circuitWasmUrl: '/circuits/compliant_test.wasm',
     provingKeyUrl: '/keys/compliant_test_proving_key.bin',
     r1csUrl: '/circuits/compliant_test.r1cs',
-    cacheName: 'zk-proving-artifacts-v1',
+    cacheName: 'zk-proving-artifacts',
 };
 
 let config = { ...DEFAULT_CONFIG };
 
 // State
-
 let prover = null;
+let witnessCalc = null;
 let proverModuleInitialized = false;
-let witnessInitialized = false;
+let witnessModuleInitialized = false;
 let proverInitialized = false;
+let witnessInitialized = false;
 
-// Cached artifacts (in-memory after first load)
+// Cached artifacts
 let cachedProvingKey = null;
 let cachedR1cs = null;
+let cachedCircuitWasm = null;
 
 // Download state
 let downloadPromise = null;
@@ -110,6 +106,7 @@ export async function clearCache() {
         await caches.delete(config.cacheName);
         cachedProvingKey = null;
         cachedR1cs = null;
+        cachedCircuitWasm = null;
         downloadPromise = null;
         console.log('[ZK] Cache cleared');
     } catch (e) {
@@ -127,11 +124,10 @@ export async function clearCache() {
  */
 async function downloadWithProgress(url, onProgress) {
     const response = await fetch(url);
-    
     if (!response.ok) {
         throw new Error(`Failed to fetch ${url}: ${response.status}`);
     }
-    
+
     const contentLength = response.headers.get('Content-Length');
     const total = contentLength ? parseInt(contentLength, 10) : 0;
     
@@ -141,31 +137,26 @@ async function downloadWithProgress(url, onProgress) {
         if (onProgress) onProgress(bytes.length, bytes.length, url);
         return bytes;
     }
-    
+
     const reader = response.body.getReader();
     const chunks = [];
     let loaded = 0;
-    
+
     while (true) {
         const { done, value } = await reader.read();
         if (done) break;
-        
         chunks.push(value);
         loaded += value.length;
-        
-        if (onProgress) {
-            onProgress(loaded, total, url);
-        }
+        if (onProgress) onProgress(loaded, total, url);
     }
-    
-    // Combine chunks into single Uint8Array
+
     const result = new Uint8Array(loaded);
     let offset = 0;
     for (const chunk of chunks) {
         result.set(chunk, offset);
         offset += chunk.length;
     }
-    
+
     return result;
 }
 
@@ -178,33 +169,28 @@ async function downloadWithProgress(url, onProgress) {
  * @returns {Promise<{provingKey: Uint8Array, r1cs: Uint8Array}>}
  */
 export async function ensureProvingArtifacts(onProgress) {
-    // Already in memory
     if (cachedProvingKey && cachedR1cs) {
         return { provingKey: cachedProvingKey, r1cs: cachedR1cs };
     }
-    
-    // Download already in progress
+
     if (downloadPromise) {
         return downloadPromise;
     }
-    
+
     downloadPromise = (async () => {
         try {
-            // Try cache first
             let pk = cachedProvingKey || await getCached(config.provingKeyUrl);
             let r1cs = cachedR1cs || await getCached(config.r1csUrl);
-            
+
             const needsPk = !pk;
             const needsR1cs = !r1cs;
-            
+
             if (needsPk || needsR1cs) {
-                // Estimate sizes for progress calculation
-                const pkSize = needsPk ? 5000000 : 0;   // ~5MB
-                const r1csSize = needsR1cs ? 3500000 : 0; // ~3.5MB
+                const pkSize = needsPk ? 5000000 : 0;
+                const r1csSize = needsR1cs ? 3500000 : 0;
                 const totalSize = pkSize + r1csSize;
-                let pkLoaded = 0;
-                let r1csLoaded = 0;
-                
+                let pkLoaded = 0, r1csLoaded = 0;
+
                 const reportProgress = () => {
                     if (onProgress) {
                         const loaded = pkLoaded + r1csLoaded;
@@ -214,13 +200,12 @@ export async function ensureProvingArtifacts(onProgress) {
                         onProgress(loaded, totalSize, message);
                     }
                 };
-                
-                // Download in parallel
+
                 const downloads = [];
-                
+
                 if (needsPk) {
                     downloads.push(
-                        downloadWithProgress(config.provingKeyUrl, (loaded, total, url) => {
+                        downloadWithProgress(config.provingKeyUrl, (loaded) => {
                             pkLoaded = loaded;
                             reportProgress();
                         }).then(async (bytes) => {
@@ -230,10 +215,10 @@ export async function ensureProvingArtifacts(onProgress) {
                         })
                     );
                 }
-                
+
                 if (needsR1cs) {
                     downloads.push(
-                        downloadWithProgress(config.r1csUrl, (loaded, total, url) => {
+                        downloadWithProgress(config.r1csUrl, (loaded) => {
                             r1csLoaded = loaded;
                             reportProgress();
                         }).then(async (bytes) => {
@@ -243,9 +228,9 @@ export async function ensureProvingArtifacts(onProgress) {
                         })
                     );
                 }
-                
+
                 await Promise.all(downloads);
-                
+
                 if (onProgress) {
                     onProgress(totalSize, totalSize, 'Download complete');
                 }
@@ -256,14 +241,13 @@ export async function ensureProvingArtifacts(onProgress) {
             // Store in memory
             cachedProvingKey = pk;
             cachedR1cs = r1cs;
-            
-            return { provingKey: pk, r1cs: r1cs };
+            return { provingKey: pk, r1cs };
         } finally {
             // Reset so failed downloads can be retried
             downloadPromise = null;
         }
     })();
-    
+
     return downloadPromise;
 }
 
@@ -273,7 +257,6 @@ export async function ensureProvingArtifacts(onProgress) {
  */
 export async function isProvingCached() {
     if (cachedProvingKey && cachedR1cs) return true;
-    
     const pk = await getCached(config.provingKeyUrl);
     const r1cs = await getCached(config.r1csUrl);
     return pk !== null && r1cs !== null;
@@ -309,21 +292,63 @@ export async function initProverWasm() {
 }
 
 /**
- * Initialize witness generation (downloads the circuit WASM file)
+ * Initialize the witness WASM module (ark-circom)
+ */
+export async function initWitnessModuleWasm() {
+    if (!witnessModuleInitialized) {
+        await initWitnessWasm();
+        witnessModuleInitialized = true;
+        console.log(`[ZK] Witness WASM module initialized (v${witnessVersion()})`);
+    }
+}
+
+/**
+ * Initialize witness calculator with circuit files
  * 
- * @param {string} circuitWasmUrl - Optional, uses config if not provided
+ * @param {string} circuitWasmUrl - Optional URL to circuit.wasm
+ * @param {string} r1csUrl - Optional URL to circuit.r1cs
  * @returns {Promise<Object>} Circuit info
  */
-export async function initWitnessModule(circuitWasmUrl) {
-    await initProverWasm();
-    
-    if (!witnessInitialized) {
-        const url = circuitWasmUrl || config.circuitWasmUrl;
-        await initWitness(url);
-        witnessInitialized = true;
-        console.log('[ZK] Witness calculator initialized');
+export async function initWitnessModule(circuitWasmUrl, r1csUrl) {
+    await initWitnessModuleWasm();
+
+    if (witnessInitialized && witnessCalc) {
+        return getCircuitInfo();
     }
-    
+
+    const wasmUrl = circuitWasmUrl || config.circuitWasmUrl;
+    const r1cs = r1csUrl || config.r1csUrl;
+
+    // Load circuit WASM
+    let circuitWasm = cachedCircuitWasm || await getCached(wasmUrl);
+    if (!circuitWasm) {
+        const response = await fetch(wasmUrl);
+        if (!response.ok) throw new Error(`Failed to fetch circuit WASM: ${response.status}`);
+        circuitWasm = new Uint8Array(await response.arrayBuffer());
+        await setCache(wasmUrl, circuitWasm);
+        cachedCircuitWasm = circuitWasm;
+        console.log(`[ZK] Circuit WASM downloaded: ${(circuitWasm.length / 1024).toFixed(2)} KB`);
+    }
+
+    // Load R1CS
+    let r1csBytes = cachedR1cs || await getCached(r1cs);
+    if (!r1csBytes) {
+        const response = await fetch(r1cs);
+        if (!response.ok) throw new Error(`Failed to fetch R1CS: ${response.status}`);
+        r1csBytes = new Uint8Array(await response.arrayBuffer());
+        await setCache(r1cs, r1csBytes);
+        cachedR1cs = r1csBytes;
+        console.log(`[ZK] R1CS downloaded: ${(r1csBytes.length / 1024 / 1024).toFixed(2)} MB`);
+    }
+
+    // Create witness calculator
+    witnessCalc = new WitnessCalculator(circuitWasm, r1csBytes);
+    witnessInitialized = true;
+
+    console.log('[ZK] Witness calculator initialized (ark-circom)');
+    console.log(`[ZK]   - Witness size: ${witnessCalc.witness_size} elements`);
+    console.log(`[ZK]   - Public inputs: ${witnessCalc.num_public_inputs}`);
+
     return getCircuitInfo();
 }
 
@@ -344,22 +369,24 @@ export async function initProver(onProgress) {
             numWires: prover.num_wires,
         };
     }
-    
-    // Run witness module init and artifact download in parallel
+
+    // Initialize both modules and download artifacts in parallel
     const [, { provingKey, r1cs }] = await Promise.all([
         initWitnessModule(),
         ensureProvingArtifacts(onProgress),
     ]);
-    
+
+    await initProverWasm();
+
     // Create prover
     prover = new Prover(provingKey, r1cs);
     proverInitialized = true;
-    
+
     console.log('[ZK] Prover initialized');
     console.log(`[ZK]   - ${prover.num_constraints} constraints`);
     console.log(`[ZK]   - ${prover.num_wires} wires`);
     console.log(`[ZK]   - ${prover.num_public_inputs} public inputs`);
-    
+
     return {
         version: proverVersion(),
         circuitInfo: getCircuitInfo(),
@@ -378,13 +405,22 @@ export async function initProver(onProgress) {
  * @returns {Promise<Object>}
  */
 export async function init(circuitWasmUrl, provingKeyBytes, r1csBytes) {
+    await initWitnessModuleWasm();
     await initProverWasm();
-    await initWitness(circuitWasmUrl);
+
+    // Load circuit WASM for witness calculator
+    const response = await fetch(circuitWasmUrl);
+    if (!response.ok) {
+        throw new Error(`Failed to fetch circuit WASM: ${response.status}`);
+    }
+    const circuitWasm = new Uint8Array(await response.arrayBuffer());
+
+    witnessCalc = new WitnessCalculator(circuitWasm, r1csBytes);
     witnessInitialized = true;
-    
+
     prover = new Prover(provingKeyBytes, r1csBytes);
     proverInitialized = true;
-    
+
     return {
         version: proverVersion(),
         circuitInfo: getCircuitInfo(),
@@ -409,7 +445,22 @@ export function isProverReady() {
     return proverInitialized;
 }
 
-// Input Preparation (available immediately after initModules)
+// Circuit Info
+
+/**
+ * Get circuit info
+ */
+export function getCircuitInfo() {
+    if (!witnessCalc) {
+        throw new Error('Witness calculator not initialized.');
+    }
+    return {
+        witnessSize: witnessCalc.witness_size,
+        numPublicInputs: witnessCalc.num_public_inputs,
+    };
+}
+
+// Input Preparation
 
 /**
  * Derive public key from private key
@@ -500,20 +551,37 @@ export { field_bytes_to_hex as fieldToHex };
  * @returns {Promise<Uint8Array>} Witness bytes (Little-Endian, 32 bytes per element)
  */
 export async function generateWitness(inputs) {
-    if (!witnessInitialized) {
+    if (!witnessInitialized || !witnessCalc) {
         throw new Error('Witness module not initialized. Call initWitnessModule() first.');
     }
-    return await computeWitness(inputs);
+
+    const inputsJson = JSON.stringify(inputs);
+    const witnessBytes = witnessCalc.compute_witness(inputsJson);
+
+    return new Uint8Array(witnessBytes);
 }
 
 /**
- * Generate witness and return as BigInt array (for debugging)
+ * Convert bytes to BigInt array (for debugging)
  */
-export async function generateWitnessArray(inputs) {
-    if (!witnessInitialized) {
-        throw new Error('Witness module not initialized. Call initWitnessModule() first.');
+export function bytesToWitness(bytes) {
+    const FIELD_SIZE = 32;
+    if (bytes.length % FIELD_SIZE !== 0) {
+        throw new Error(`Witness bytes length ${bytes.length} is not a multiple of ${FIELD_SIZE}`);
     }
-    return await computeWitnessArray(inputs);
+
+    const numElements = bytes.length / FIELD_SIZE;
+    const witness = new Array(numElements);
+
+    for (let i = 0; i < numElements; i++) {
+        let value = 0n;
+        for (let j = FIELD_SIZE - 1; j >= 0; j--) {
+            value = (value << 8n) | BigInt(bytes[i * FIELD_SIZE + j]);
+        }
+        witness[i] = value;
+    }
+
+    return witness;
 }
 
 // Proof Generation
@@ -582,33 +650,24 @@ export function getVerifyingKey() {
     return prover.get_verifying_key();
 }
 
-// High-Level Proof Flow
+// High-Level API
 
 /**
  * Generate a complete ZK proof from circuit inputs
- * 
- * This function:
- * 1. Ensures prover is initialized (lazy loads if needed)
- * 2. Generates witness
- * 3. Generates proof
  * 
  * @param {Object} inputs - Circuit inputs
  * @param {function} onProgress - Optional progress callback for artifact download
  * @returns {Promise<{proof: Uint8Array, publicInputs: Uint8Array}>}
  */
 export async function prove(inputs, onProgress) {
-    // Lazy initialize prover if needed
     if (!proverInitialized) {
         await initProver(onProgress);
     }
-    
-    // Generate witness
+
     const witnessBytes = await generateWitness(inputs);
-    
-    // Generate proof
     const proofBytes = generateProofBytes(witnessBytes);
     const publicInputsBytes = extractPublicInputs(witnessBytes);
-    
+
     return {
         proof: proofBytes,
         publicInputs: publicInputsBytes,
@@ -625,14 +684,6 @@ export async function prove(inputs, onProgress) {
 export async function proveAndVerify(inputs, onProgress) {
     const { proof, publicInputs } = await prove(inputs, onProgress);
     const verified = verifyProofLocal(proof, publicInputs);
-    
-    return {
-        proof,
-        publicInputs,
-        verified,
-    };
+
+    return { proof, publicInputs, verified };
 }
-
-// Re-exports
-
-export { getCircuitInfo, bytesToWitness };
