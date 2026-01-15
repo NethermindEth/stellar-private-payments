@@ -99,7 +99,7 @@ impl WitnessCalculator {
         // Calculate witness
         let witness = self
             .calculator
-            .calculate_witness(&mut self.store, inputs_hashmap, true)
+            .calculate_witness(&mut self.store, inputs_hashmap, false)
             .map_err(|e| JsValue::from_str(&format!("Witness calculation failed: {}", e)))?;
 
         // Convert to Little-Endian bytes

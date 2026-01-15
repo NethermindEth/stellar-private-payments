@@ -112,13 +112,12 @@ export const StateManager = {
 
     /**
      * Starts synchronization of Pool and ASP Membership events.
-     * Optionally performs note scanning if a private key is provided.
+     * If user has authenticated keypairs, also scans for new notes and checks spent status.
      * 
      * @param {Object} [options]
      * @param {function} [options.onProgress] - Progress callback
-     * @param {Uint8Array} [options.privateKey] - User's private key for note scanning
-     * @param {boolean} [options.scanNotes=true] - Scan for new notes (if privateKey provided)
-     * @param {boolean} [options.checkSpent=true] - Check spent status (if privateKey provided)
+     * @param {boolean} [options.scanNotes=true] - Scan for new notes (if keys authenticated)
+     * @param {boolean} [options.checkSpent=true] - Check spent status (if keys authenticated)
      * @returns {Promise<Object>} Sync status including notesFound and notesMarkedSpent
      */
     async startSync(options) {
@@ -291,52 +290,59 @@ export const StateManager = {
         return notesStore.importNotes(file);
     },
 
-    // Note Scanning
+    // Note Scanning / User Authentication
 
     /**
-     * Sets the user's private key for automatic note scanning during syncs.
-     * When set, syncs will automatically scan for incoming notes and check spent status.
-     * @param {Uint8Array|null} privateKey - Private key or null to disable auto-scanning
+     * Checks if the user has authenticated their keypairs for note scanning.
+     * Keys are derived from Freighter signatures and cached in memory.
+     * @returns {boolean}
      */
-    setUserPrivateKey(privateKey) {
-        syncController.setUserPrivateKey(privateKey);
+    hasAuthenticatedKeys() {
+        return syncController.hasAuthenticatedKeys();
     },
 
     /**
-     * Checks if a private key is set for automatic scanning.
-     * @returns {boolean}
+     * Initialize user's keypairs by prompting for Freighter signatures.
+     * Call this when the user "logs in" to enable note scanning.
+     * @returns {Promise<boolean>} True if keypairs were successfully derived
      */
-    hasUserPrivateKey() {
-        return syncController.hasUserPrivateKey();
+    async initializeUserKeys() {
+        return syncController.initializeUserKeys();
+    },
+
+    /**
+     * Clear cached keypairs.
+     */
+    clearUserKeys() {
+        syncController.clearUserKeys();
     },
 
     /**
      * Scans encrypted outputs to find notes belonging to the user.
-     * This is useful for discovering notes received from others.
+     * Requires user to have authenticated keypairs first
      * 
-     * @param {Uint8Array} privateKey - User's private key
      * @param {Object} [options] - Scan options
      * @param {boolean} [options.fullRescan=false] - Rescan all outputs, not just new ones
      * @param {function} [options.onProgress] - Progress callback (scanned, total)
      * @returns {Promise<{scanned: number, found: number, notes: Array, alreadyKnown: number}>}
      */
-    async scanForNotes(privateKey, options) {
+    async scanForNotes(options) {
         if (!initialized) {
             throw new Error('StateManager not initialized');
         }
-        return noteScanner.scanForNotes(privateKey, options);
+        return noteScanner.scanForNotes(options);
     },
 
     /**
      * Checks if any user notes have been spent and updates their status.
-     * @param {Uint8Array} privateKey - User's private key
+     * Requires user to have authenticated keypairs first
      * @returns {Promise<{checked: number, markedSpent: number}>}
      */
-    async checkSpentNotes(privateKey) {
+    async checkSpentNotes() {
         if (!initialized) {
             throw new Error('StateManager not initialized');
         }
-        return noteScanner.checkSpentNotes(privateKey);
+        return noteScanner.checkSpentNotes();
     },
 
     /**
@@ -404,7 +410,7 @@ export const StateManager = {
             source.off(event, handler);
         }
         forwardedSyncListeners = [];
-        syncController.setUserPrivateKey(null);
+        syncController.clearUserKeys();
         db.close();
         initialized = false;
     },

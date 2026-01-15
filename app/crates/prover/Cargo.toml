@@ -19,16 +19,17 @@ ark-relations = { workspace = true }
 ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
-
 # Circuit utilities (core module only, no_std compatible)
 circuits = { path = "../../../circuits", default-features = false }
-
 # WASM bindings
 console_error_panic_hook = { workspace = true }
-getrandom = { workspace = true }
+getrandom = { workspace = true, features = ["js"] }
 serde = { workspace = true }
+sha2 = "0.10"
 wasm-bindgen = { workspace = true }
-
+# Note encryption using X25519-XSalsa20-Poly1305
+x25519-dalek = { version = "2.0", features = ["static_secrets"] }
+xsalsa20poly1305 = "0.9"
 # Poseidon2 hash
 zkhash = { workspace = true }
 

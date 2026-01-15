@@ -1,6 +1,15 @@
 /**
  * Sync Controller - orchestrates event synchronization for Pool and ASP Membership.
- * Handles incremental sync, gap detection, progress reporting, and note discovery.
+ * 
+ * Handles:
+ * - Incremental sync of contract events
+ * - Gap detection
+ * - Progress reporting
+ * - Note discovery
+ * 
+ * Note scanning uses the user's keypairs derived from Freighter signatures.
+ * No private keys need to be passed or stored - they're derived on-demand.
+ * 
  * @module state/sync-controller
  */
 
@@ -8,6 +17,7 @@ import * as db from './db.js';
 import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
 import * as noteScanner from './note-scanner.js';
+import * as notesStore from './notes-store.js';
 import { getRetentionConfig, ledgersToDuration } from './retention-verifier.js';
 import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNetwork } from '../stellar.js';
 
@@ -39,7 +49,6 @@ import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNe
 
 let isSyncing = false;
 let syncListeners = [];
-let userPrivateKey = null; // Stored for automatic note scanning
 
 /**
  * Gets the current sync metadata from IndexedDB.
@@ -132,13 +141,16 @@ export async function checkSyncGap() {
 
 /**
  * Starts a full synchronization of Pool and ASP Membership events.
- * Optionally scans for user notes and checks spent status if privateKey is provided.
+ * Optionally scans for user notes and checks spent status.
+ * 
+ * Note scanning uses the user's deterministic keypairs derived from Freighter.
+ * If the user hasn't authenticated (signed the required messages), note scanning
+ * will be skipped.
  * 
  * @param {Object} [options]
  * @param {function} [options.onProgress] - Progress callback: (progress) => void
- * @param {Uint8Array} [options.privateKey] - User's private key for note scanning
- * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes (if privateKey provided)
- * @param {boolean} [options.checkSpent=true] - Whether to check spent status (if privateKey provided)
+ * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes
+ * @param {boolean} [options.checkSpent=true] - Whether to check spent status
  * @returns {Promise<SyncStatus>}
  */
 export async function startSync(options = {}) {
@@ -147,12 +159,7 @@ export async function startSync(options = {}) {
     }
     
     isSyncing = true;
-    const { onProgress, privateKey, scanNotes = true, checkSpent = true } = options;
-    
-    // Store private key for future syncs if provided
-    if (privateKey) {
-        userPrivateKey = privateKey;
-    }
+    const { onProgress, scanNotes = true, checkSpent = true } = options;
     
     try {
         let metadata = await getSyncMetadata() || createDefaultMetadata();
@@ -235,41 +242,39 @@ export async function startSync(options = {}) {
         metadata.lastSuccessfulSync = new Date().toISOString();
         await saveSyncMetadata(metadata);
         
-        // Note scanning (if private key is available)
+        // Note scanning (only if user has authenticated with Freighter)
         let scanResult = null;
         let spentResult = null;
-        const keyToUse = privateKey || userPrivateKey;
+        const hasKeys = notesStore.hasAuthenticatedKeys();
         
-        if (keyToUse) {
+        if (hasKeys && scanNotes) {
             emit('syncProgress', { phase: 'note_scanning', progress: 75 });
             
-            if (scanNotes) {
-                scanResult = await noteScanner.scanForNotes(keyToUse, {
-                    onProgress: (scanned, total) => {
-                        if (onProgress) {
-                            onProgress({ phase: 'note_scanning', scanned, total });
-                        }
-                    },
-                });
-                
-                if (scanResult.found > 0) {
-                    emit('notesDiscovered', {
-                        found: scanResult.found,
-                        notes: scanResult.notes,
-                    });
-                }
-            }
+            scanResult = await noteScanner.scanForNotes({
+                onProgress: (scanned, total) => {
+                    if (onProgress) {
+                        onProgress({ phase: 'note_scanning', scanned, total });
+                    }
+                },
+            });
             
+            if (scanResult.found > 0) {
+                emit('notesDiscovered', {
+                    found: scanResult.found,
+                    notes: scanResult.notes,
+                });
+            }
+        }
+        
+        if (hasKeys && checkSpent) {
             emit('syncProgress', { phase: 'checking_spent', progress: 90 });
             
-            if (checkSpent) {
-                spentResult = await noteScanner.checkSpentNotes(keyToUse);
-                
-                if (spentResult.markedSpent > 0) {
-                    emit('notesMarkedSpent', {
-                        count: spentResult.markedSpent,
-                    });
-                }
+            spentResult = await noteScanner.checkSpentNotes();
+            
+            if (spentResult.markedSpent > 0) {
+                emit('notesMarkedSpent', {
+                    count: spentResult.markedSpent,
+                });
             }
         }
         
@@ -307,19 +312,28 @@ export async function startSync(options = {}) {
 }
 
 /**
- * Sets the user's private key for automatic note scanning during syncs.
- * @param {Uint8Array|null} privateKey - Private key or null to clear
+ * Checks if the user has authenticated their keys for note scanning.
+ * Keys are derived from Freighter signatures and cached in memory.
+ * @returns {boolean}
  */
-export function setUserPrivateKey(privateKey) {
-    userPrivateKey = privateKey;
+export function hasAuthenticatedKeys() {
+    return notesStore.hasAuthenticatedKeys();
 }
 
 /**
- * Checks if a user private key is set for automatic scanning.
- * @returns {boolean}
+ * Initialize user's keypairs by prompting for Freighter signatures.
+ * Call this when the user "logs in" to enable note scanning.
+ * @returns {Promise<boolean>} True if keypairs were successfully derived
  */
-export function hasUserPrivateKey() {
-    return userPrivateKey !== null;
+export async function initializeUserKeys() {
+    return notesStore.initializeKeypairs();
+}
+
+/**
+ * Clear cached keypairs (call on logout).
+ */
+export function clearUserKeys() {
+    notesStore.clearKeypairCaches();
 }
 
 /**

@@ -17,3 +17,9 @@ install:
 	@echo "Installing frontend dependencies..."
 	npm install --prefix app
 	cargo install trunk --locked
+
+.PHONY: clean
+clean:
+	@echo "Cleaning build artifacts..."
+	cargo clean
+	rm -rf dist

@@ -25,6 +25,11 @@ import initProverModule, {
     hex_to_field_bytes,
     field_bytes_to_hex,
     verify_proof,
+    derive_keypair_from_signature,
+    derive_note_private_key,
+    generate_random_blinding,
+    encrypt_note_data,
+    decrypt_note_data,
     version as proverVersion,
 } from './prover.js';
 
@@ -650,59 +655,141 @@ export function getVerifyingKey() {
     return prover.get_verifying_key();
 }
 
-// Note Encryption (for private transfers)
-// TODO: These functions need WASM implementation for note scanning
+// Key derivation from Freighter signatures. All keys are deterministically derived for recovery.
 
 /**
- * Derives a shared secret using ECDH.
- * Used for encrypting/decrypting note data.
+ * Derive X25519 encryption keypair from Freighter signature.
+ * Used for encrypting/decrypting note data (amount, blinding).
  * 
- * IMPORTANT: This is a placeholder. The actual implementation needs to be
- * added to the prover WASM module using the same curve as the circuit.
+ * Derivation: signature (64 bytes) → SHA-256 → X25519 keypair
+ * Message: "Sign to access Privacy Pool [v1]"
  * 
- * @param {Uint8Array} privateKey - Our private key (32 bytes)
- * @param {Uint8Array} publicKey - Their public key (32 bytes)
- * @returns {Uint8Array|null} Shared secret (32 bytes) or null if not implemented
+ * @param {Uint8Array} signature - Stellar Ed25519 signature (64 bytes)
+ * @returns {{publicKey: Uint8Array, privateKey: Uint8Array}} X25519 keypair
  */
-export function deriveSharedSecret(privateKey, publicKey) {
-    // TODO: Implement in WASM using scalar multiplication on the curve
-    // This would typically be: sharedSecret = hash(privateKey * publicKey)
-    console.warn('[ZK] deriveSharedSecret not yet implemented in WASM');
-    return null;
+export function deriveEncryptionKeypairFromSignature(signature) {
+    if (signature.length !== 64) {
+        throw new Error('Signature must be 64 bytes (Ed25519)');
+    }
+    
+    const result = derive_keypair_from_signature(signature);
+    return {
+        publicKey: new Uint8Array(result.slice(0, 32)),
+        privateKey: new Uint8Array(result.slice(32, 64)),
+    };
 }
 
 /**
- * Encrypts note data for a recipient.
+ * Derive note private key (BN254 scalar) from Freighter signature.
+ * Used inside ZK circuits to prove ownership of notes.
  * 
- * Format: [ephemeralPubKey (32)] [nonce (12)] [ciphertext] [tag (16)]
+ * Derivation: signature (64 bytes) → SHA-256 → BN254 scalar
+ * Message: "Privacy Pool Spending Key [v1]"
  * 
- * @param {Uint8Array} recipientPubKey - Recipient's public key
- * @param {Object} noteData - { amount: bigint, blinding: Uint8Array }
- * @returns {Uint8Array|null} Encrypted data or null if not implemented
+ * The corresponding public key is derived via: Poseidon2(privateKey, 0, domain=0x03)
+ * 
+ * @param {Uint8Array} signature - Stellar Ed25519 signature (64 bytes)
+ * @returns {Uint8Array} Note private key (32 bytes, BN254 scalar)
+ */
+export function deriveNotePrivateKeyFromSignature(signature) {
+    if (signature.length !== 64) {
+        throw new Error('Signature must be 64 bytes (Ed25519)');
+    }
+    
+    return new Uint8Array(derive_note_private_key(signature));
+}
+
+/**
+ * Generate a cryptographically random blinding factor for a note.
+ * Each note needs a unique blinding to ensure commitment uniqueness.
+ * 
+ * Unlike private keys, blindings are NOT derived from signatures.
+ * They are random per-note and stored encrypted on-chain.
+ * 
+ * @returns {Uint8Array} Random blinding (32 bytes, BN254 scalar)
+ * @throws {Error} If secure random number generation is unavailable (e.g., non-HTTPS context)
+ */
+export function generateBlinding() {
+    // generate_random_blinding() returns Result and throws on RNG failure
+    return new Uint8Array(generate_random_blinding());
+}
+
+/**
+ * Encrypt note data for a recipient (X25519-XSalsa20-Poly1305).
+ * 
+ * Output format: [ephemeralPubKey (32)] [nonce (24)] [ciphertext+tag (56)]
+ * Total: 112 bytes
+ * 
+ * @param {Uint8Array} recipientPubKey - Recipient's X25519 encryption public key (32 bytes)
+ * @param {Object} noteData - { amount: bigint, blinding: Uint8Array (32 bytes) }
+ * @returns {Uint8Array} Encrypted data (112 bytes)
  */
 export function encryptNoteData(recipientPubKey, noteData) {
-    // TODO: Implement when deriveSharedSecret is available
-    // 1. Generate ephemeral keypair
-    // 2. Derive shared secret with recipient's public key
-    // 3. Encrypt { amount, blinding } with AES-GCM
-    console.warn('[ZK] encryptNoteData not yet implemented');
-    return null;
+    if (recipientPubKey.length !== 32) {
+        throw new Error('Recipient public key must be 32 bytes');
+    }
+    
+    // Prepare plaintext: amount (8 bytes LE) + blinding (32 bytes) = 40 bytes
+    const plaintext = new Uint8Array(40);
+    const amountBytes = bigintToLittleEndian(noteData.amount, 8);
+    plaintext.set(amountBytes, 0);
+    plaintext.set(noteData.blinding, 8);
+    
+    return new Uint8Array(encrypt_note_data(recipientPubKey, plaintext));
 }
 
 /**
- * Decrypts note data using our private key.
+ * Decrypt note data using our X25519 private key.
  * 
- * @param {Uint8Array} privateKey - Our private key
- * @param {Uint8Array} encryptedData - Encrypted note data
- * @returns {Object|null} { amount: bigint, blinding: Uint8Array } or null if decryption fails
+ * If decryption succeeds, the note was addressed to us.
+ * If it fails, the note was for someone else.
+ * 
+ * @param {Uint8Array} privateKey - Our X25519 encryption private key (32 bytes)
+ * @param {Uint8Array} encryptedData - Encrypted data from on-chain event
+ * @returns {Object|null} { amount: bigint, blinding: Uint8Array } or null if not for us
  */
 export function decryptNoteData(privateKey, encryptedData) {
-    // TODO: Implement when deriveSharedSecret is available
-    // 1. Extract ephemeral public key from encrypted data
-    // 2. Derive shared secret
-    // 3. Decrypt with AES-GCM
-    console.warn('[ZK] decryptNoteData not yet implemented');
-    return null;
+    if (privateKey.length !== 32) {
+        return null;
+    }
+    
+    try {
+        const plaintext = decrypt_note_data(privateKey, encryptedData);
+        
+        // Empty result means decryption failed (not addressed to us)
+        if (plaintext.length !== 40) {
+            return null;
+        }
+        
+        const amountBytes = plaintext.slice(0, 8);
+        const blinding = new Uint8Array(plaintext.slice(8, 40));
+        
+        // Convert amount from little-endian
+        let amount = 0n;
+        for (let i = 7; i >= 0; i--) {
+            amount = (amount << 8n) | BigInt(amountBytes[i]);
+        }
+        
+        return { amount, blinding };
+    } catch (e) {
+        return null;
+    }
+}
+
+/**
+ * Convert bigint to little-endian byte array.
+ * @param {bigint} value - Value to convert
+ * @param {number} length - Output byte length
+ * @returns {Uint8Array}
+ */
+export function bigintToLittleEndian(value, length) {
+    const bytes = new Uint8Array(length);
+    let v = value;
+    for (let i = 0; i < length; i++) {
+        bytes[i] = Number(v & 0xFFn);
+        v = v >> 8n;
+    }
+    return bytes;
 }
 
 // High-Level API

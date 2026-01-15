@@ -12,7 +12,10 @@ import * as db from './db.js';
 import { createMerkleTree } from '../bridge.js';
 import { hexToBytes, bytesToHex, normalizeU256ToHex } from './utils.js';
 
-const ASP_MEMBERSHIP_TREE_DEPTH = 32;
+// Note: This should match the actual contract depth
+// For now using 20 (1M leaves) to avoid memory issues
+// TODO: Read actual depth from contract state
+const ASP_MEMBERSHIP_TREE_DEPTH = 20; // Depth 20 = 2^20 = 1,048,576 leaves (reasonable for WASM)
 
 let merkleTree = null;
 

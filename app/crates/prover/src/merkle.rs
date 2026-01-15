@@ -81,7 +81,11 @@ impl MerkleTree {
             return Err(JsValue::from_str("Depth must be between 1 and 32"));
         }
 
-        let num_leaves = 1usize << depth;
+        // Use checked shift to avoid overflow
+        let depth_u32 = depth as u32;
+        let num_leaves = 1usize.checked_shl(depth_u32).ok_or_else(|| {
+            JsValue::from_str("Depth too large for this platform, would overflow")
+        })?;
         let zero = Scalar::from(0u64);
 
         // Initialize all levels with zeros
