@@ -650,6 +650,61 @@ export function getVerifyingKey() {
     return prover.get_verifying_key();
 }
 
+// Note Encryption (for private transfers)
+// TODO: These functions need WASM implementation for note scanning
+
+/**
+ * Derives a shared secret using ECDH.
+ * Used for encrypting/decrypting note data.
+ * 
+ * IMPORTANT: This is a placeholder. The actual implementation needs to be
+ * added to the prover WASM module using the same curve as the circuit.
+ * 
+ * @param {Uint8Array} privateKey - Our private key (32 bytes)
+ * @param {Uint8Array} publicKey - Their public key (32 bytes)
+ * @returns {Uint8Array|null} Shared secret (32 bytes) or null if not implemented
+ */
+export function deriveSharedSecret(privateKey, publicKey) {
+    // TODO: Implement in WASM using scalar multiplication on the curve
+    // This would typically be: sharedSecret = hash(privateKey * publicKey)
+    console.warn('[ZK] deriveSharedSecret not yet implemented in WASM');
+    return null;
+}
+
+/**
+ * Encrypts note data for a recipient.
+ * 
+ * Format: [ephemeralPubKey (32)] [nonce (12)] [ciphertext] [tag (16)]
+ * 
+ * @param {Uint8Array} recipientPubKey - Recipient's public key
+ * @param {Object} noteData - { amount: bigint, blinding: Uint8Array }
+ * @returns {Uint8Array|null} Encrypted data or null if not implemented
+ */
+export function encryptNoteData(recipientPubKey, noteData) {
+    // TODO: Implement when deriveSharedSecret is available
+    // 1. Generate ephemeral keypair
+    // 2. Derive shared secret with recipient's public key
+    // 3. Encrypt { amount, blinding } with AES-GCM
+    console.warn('[ZK] encryptNoteData not yet implemented');
+    return null;
+}
+
+/**
+ * Decrypts note data using our private key.
+ * 
+ * @param {Uint8Array} privateKey - Our private key
+ * @param {Uint8Array} encryptedData - Encrypted note data
+ * @returns {Object|null} { amount: bigint, blinding: Uint8Array } or null if decryption fails
+ */
+export function decryptNoteData(privateKey, encryptedData) {
+    // TODO: Implement when deriveSharedSecret is available
+    // 1. Extract ephemeral public key from encrypted data
+    // 2. Derive shared secret
+    // 3. Decrypt with AES-GCM
+    console.warn('[ZK] decryptNoteData not yet implemented');
+    return null;
+}
+
 // High-Level API
 
 /**

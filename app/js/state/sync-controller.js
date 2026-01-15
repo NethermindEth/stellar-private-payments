@@ -1,12 +1,13 @@
 /**
  * Sync Controller - orchestrates event synchronization for Pool and ASP Membership.
- * Handles incremental sync, gap detection, and progress reporting.
+ * Handles incremental sync, gap detection, progress reporting, and note discovery.
  * @module state/sync-controller
  */
 
 import * as db from './db.js';
 import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
+import * as noteScanner from './note-scanner.js';
 import { getRetentionConfig, ledgersToDuration } from './retention-verifier.js';
 import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNetwork } from '../stellar.js';
 
@@ -38,6 +39,7 @@ import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNe
 
 let isSyncing = false;
 let syncListeners = [];
+let userPrivateKey = null; // Stored for automatic note scanning
 
 /**
  * Gets the current sync metadata from IndexedDB.
@@ -130,8 +132,13 @@ export async function checkSyncGap() {
 
 /**
  * Starts a full synchronization of Pool and ASP Membership events.
+ * Optionally scans for user notes and checks spent status if privateKey is provided.
+ * 
  * @param {Object} [options]
  * @param {function} [options.onProgress] - Progress callback: (progress) => void
+ * @param {Uint8Array} [options.privateKey] - User's private key for note scanning
+ * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes (if privateKey provided)
+ * @param {boolean} [options.checkSpent=true] - Whether to check spent status (if privateKey provided)
  * @returns {Promise<SyncStatus>}
  */
 export async function startSync(options = {}) {
@@ -140,7 +147,12 @@ export async function startSync(options = {}) {
     }
     
     isSyncing = true;
-    const { onProgress } = options;
+    const { onProgress, privateKey, scanNotes = true, checkSpent = true } = options;
+    
+    // Store private key for future syncs if provided
+    if (privateKey) {
+        userPrivateKey = privateKey;
+    }
     
     try {
         let metadata = await getSyncMetadata() || createDefaultMetadata();
@@ -192,7 +204,6 @@ export async function startSync(options = {}) {
         });
         
         if (poolResult.success) {
-            // Events already processed via onPage - just update metadata
             metadata.poolSync.lastLedger = poolResult.latestLedger;
             metadata.poolSync.lastCursor = poolResult.cursor;
             metadata.poolSync.syncBroken = false;
@@ -215,7 +226,6 @@ export async function startSync(options = {}) {
         });
         
         if (aspResult.success) {
-            // Events already processed via onPage - just update metadata
             metadata.aspMembershipSync.lastLedger = aspResult.latestLedger;
             metadata.aspMembershipSync.lastCursor = aspResult.cursor;
             metadata.aspMembershipSync.syncBroken = false;
@@ -224,6 +234,44 @@ export async function startSync(options = {}) {
         // Update metadata
         metadata.lastSuccessfulSync = new Date().toISOString();
         await saveSyncMetadata(metadata);
+        
+        // Note scanning (if private key is available)
+        let scanResult = null;
+        let spentResult = null;
+        const keyToUse = privateKey || userPrivateKey;
+        
+        if (keyToUse) {
+            emit('syncProgress', { phase: 'note_scanning', progress: 75 });
+            
+            if (scanNotes) {
+                scanResult = await noteScanner.scanForNotes(keyToUse, {
+                    onProgress: (scanned, total) => {
+                        if (onProgress) {
+                            onProgress({ phase: 'note_scanning', scanned, total });
+                        }
+                    },
+                });
+                
+                if (scanResult.found > 0) {
+                    emit('notesDiscovered', {
+                        found: scanResult.found,
+                        notes: scanResult.notes,
+                    });
+                }
+            }
+            
+            emit('syncProgress', { phase: 'checking_spent', progress: 90 });
+            
+            if (checkSpent) {
+                spentResult = await noteScanner.checkSpentNotes(keyToUse);
+                
+                if (spentResult.markedSpent > 0) {
+                    emit('notesMarkedSpent', {
+                        count: spentResult.markedSpent,
+                    });
+                }
+            }
+        }
         
         const status = {
             status: 'complete',
@@ -237,6 +285,9 @@ export async function startSync(options = {}) {
             latestLedger,
             gap: 0,
             syncBroken: false,
+            // Note scanning results (if performed)
+            notesFound: scanResult?.found || 0,
+            notesMarkedSpent: spentResult?.markedSpent || 0,
         };
         
         emit('syncComplete', status);
@@ -253,6 +304,22 @@ export async function startSync(options = {}) {
     } finally {
         isSyncing = false;
     }
+}
+
+/**
+ * Sets the user's private key for automatic note scanning during syncs.
+ * @param {Uint8Array|null} privateKey - Private key or null to clear
+ */
+export function setUserPrivateKey(privateKey) {
+    userPrivateKey = privateKey;
+}
+
+/**
+ * Checks if a user private key is set for automatic scanning.
+ * @returns {boolean}
+ */
+export function hasUserPrivateKey() {
+    return userPrivateKey !== null;
 }
 
 /**

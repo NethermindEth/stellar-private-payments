@@ -10,6 +10,7 @@ import * as aspMembershipStore from './asp-membership-store.js';
 import * as aspNonMembershipFetcher from './asp-non-membership-fetcher.js';
 import * as notesStore from './notes-store.js';
 import * as syncController from './sync-controller.js';
+import * as noteScanner from './note-scanner.js';
 import { getRetentionConfig, detectRetentionWindow, ledgersToDuration } from './retention-verifier.js';
 
 let initialized = false;
@@ -50,15 +51,29 @@ export const StateManager = {
         const progressHandler = data => emit('syncProgress', data);
         const completeHandler = data => emit('syncComplete', data);
         const brokenHandler = data => emit('syncBroken', data);
+        const notesDiscoveredHandler = data => emit('notesDiscovered', data);
+        const notesMarkedSpentHandler = data => emit('notesMarkedSpent', data);
         
         syncController.on('syncProgress', progressHandler);
         syncController.on('syncComplete', completeHandler);
         syncController.on('syncBroken', brokenHandler);
+        syncController.on('notesDiscovered', notesDiscoveredHandler);
+        syncController.on('notesMarkedSpent', notesMarkedSpentHandler);
+        
+        // Forward note scanner events
+        const noteDiscoveredHandler = data => emit('noteDiscovered', data);
+        const noteSpentHandler = data => emit('noteSpent', data);
+        noteScanner.on('noteDiscovered', noteDiscoveredHandler);
+        noteScanner.on('noteSpent', noteSpentHandler);
         
         forwardedSyncListeners = [
-            ['syncProgress', progressHandler],
-            ['syncComplete', completeHandler],
-            ['syncBroken', brokenHandler],
+            ['syncProgress', progressHandler, syncController],
+            ['syncComplete', completeHandler, syncController],
+            ['syncBroken', brokenHandler, syncController],
+            ['notesDiscovered', notesDiscoveredHandler, syncController],
+            ['notesMarkedSpent', notesMarkedSpentHandler, syncController],
+            ['noteDiscovered', noteDiscoveredHandler, noteScanner],
+            ['noteSpent', noteSpentHandler, noteScanner],
         ];
 
         initialized = true;
@@ -97,9 +112,14 @@ export const StateManager = {
 
     /**
      * Starts synchronization of Pool and ASP Membership events.
+     * Optionally performs note scanning if a private key is provided.
+     * 
      * @param {Object} [options]
      * @param {function} [options.onProgress] - Progress callback
-     * @returns {Promise<Object>} Sync status
+     * @param {Uint8Array} [options.privateKey] - User's private key for note scanning
+     * @param {boolean} [options.scanNotes=true] - Scan for new notes (if privateKey provided)
+     * @param {boolean} [options.checkSpent=true] - Check spent status (if privateKey provided)
+     * @returns {Promise<Object>} Sync status including notesFound and notesMarkedSpent
      */
     async startSync(options) {
         if (!initialized) {
@@ -271,11 +291,80 @@ export const StateManager = {
         return notesStore.importNotes(file);
     },
 
+    // Note Scanning
+
+    /**
+     * Sets the user's private key for automatic note scanning during syncs.
+     * When set, syncs will automatically scan for incoming notes and check spent status.
+     * @param {Uint8Array|null} privateKey - Private key or null to disable auto-scanning
+     */
+    setUserPrivateKey(privateKey) {
+        syncController.setUserPrivateKey(privateKey);
+    },
+
+    /**
+     * Checks if a private key is set for automatic scanning.
+     * @returns {boolean}
+     */
+    hasUserPrivateKey() {
+        return syncController.hasUserPrivateKey();
+    },
+
+    /**
+     * Scans encrypted outputs to find notes belonging to the user.
+     * This is useful for discovering notes received from others.
+     * 
+     * @param {Uint8Array} privateKey - User's private key
+     * @param {Object} [options] - Scan options
+     * @param {boolean} [options.fullRescan=false] - Rescan all outputs, not just new ones
+     * @param {function} [options.onProgress] - Progress callback (scanned, total)
+     * @returns {Promise<{scanned: number, found: number, notes: Array, alreadyKnown: number}>}
+     */
+    async scanForNotes(privateKey, options) {
+        if (!initialized) {
+            throw new Error('StateManager not initialized');
+        }
+        return noteScanner.scanForNotes(privateKey, options);
+    },
+
+    /**
+     * Checks if any user notes have been spent and updates their status.
+     * @param {Uint8Array} privateKey - User's private key
+     * @returns {Promise<{checked: number, markedSpent: number}>}
+     */
+    async checkSpentNotes(privateKey) {
+        if (!initialized) {
+            throw new Error('StateManager not initialized');
+        }
+        return noteScanner.checkSpentNotes(privateKey);
+    },
+
+    /**
+     * Derives the nullifier for a note (for verification purposes).
+     * @param {Uint8Array} privateKey - Note's private key
+     * @param {Uint8Array} commitment - Note commitment
+     * @param {number} leafIndex - Leaf index in merkle tree
+     * @returns {Uint8Array} Nullifier hash
+     */
+    deriveNullifier(privateKey, commitment, leafIndex) {
+        return noteScanner.deriveNullifierForNote(privateKey, commitment, leafIndex);
+    },
+
     // Events
 
     /**
      * Adds an event listener.
-     * Events: syncProgress, syncComplete, syncBroken, retentionDetected
+     * 
+     * Events:
+     * - syncProgress: { phase, progress, ... } - Sync progress updates
+     * - syncComplete: { status, poolLeavesCount, ... } - Sync completed
+     * - syncBroken: { message, gap } - Sync gap exceeds retention
+     * - retentionDetected: { window, description, ... } - RPC retention detected
+     * - notesDiscovered: { found, notes } - New notes found during sync
+     * - notesMarkedSpent: { count } - Notes marked spent during sync
+     * - noteDiscovered: { note } - Individual note discovered
+     * - noteSpent: { commitment, ledger } - Individual note marked spent
+     * 
      * @param {string} event - Event name
      * @param {function} handler - Event handler
      */
@@ -311,10 +400,11 @@ export const StateManager = {
      * Closes the database connection and cleans up listeners.
      */
     close() {
-        for (const [event, handler] of forwardedSyncListeners) {
-            syncController.off(event, handler);
+        for (const [event, handler, source] of forwardedSyncListeners) {
+            source.off(event, handler);
         }
         forwardedSyncListeners = [];
+        syncController.setUserPrivateKey(null);
         db.close();
         initialized = false;
     },
@@ -347,4 +437,4 @@ function emit(event, data) {
 export default StateManager;
 
 // Re-export sub-modules for direct access if needed
-export { db, poolStore, aspMembershipStore, aspNonMembershipFetcher, notesStore, syncController };
+export { db, poolStore, aspMembershipStore, aspNonMembershipFetcher, notesStore, syncController, noteScanner };

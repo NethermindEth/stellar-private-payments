@@ -12,7 +12,7 @@ import * as db from './db.js';
 import { createMerkleTree } from '../bridge.js';
 import { hexToBytes, bytesToHex, normalizeU256ToHex } from './utils.js';
 
-const ASP_MEMBERSHIP_TREE_DEPTH = 20;
+const ASP_MEMBERSHIP_TREE_DEPTH = 32;
 
 let merkleTree = null;
 
