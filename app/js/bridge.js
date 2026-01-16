@@ -613,6 +613,22 @@ export function generateProofBytes(witnessBytes) {
 }
 
 /**
+ * Convert compressed proof bytes into uncompressed bytes for on-chain usage.
+ * 
+ * @param {Uint8Array} proofBytes - Compressed proof bytes [A || B || C]
+ * @returns {Uint8Array} Uncompressed proof bytes [A || B || C]
+ */
+export function proofBytesToUncompressed(proofBytes) {
+    if (!proverInitialized || !prover) {
+        throw new Error('Prover not initialized. Call initProver() first.');
+    }
+    if (!prover.proof_bytes_to_uncompressed) {
+        throw new Error('Prover does not support uncompressed proof conversion');
+    }
+    return prover.proof_bytes_to_uncompressed(proofBytes);
+}
+
+/**
  * Extract public inputs from witness
  * 
  * @param {Uint8Array} witnessBytes - Full witness bytes

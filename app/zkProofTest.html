@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Pool ZK Proof Test</title>
+  <style>
+    :root {
+      color-scheme: light;
+    }
+    body {
+      margin: 0;
+      font-family: "Courier New", Courier, monospace;
+      background: #0f172a;
+      color: #e2e8f0;
+    }
+    main {
+      max-width: 980px;
+      margin: 0 auto;
+      padding: 32px 24px 48px;
+    }
+    h1 {
+      font-size: 24px;
+      margin: 0 0 12px;
+      color: #38bdf8;
+    }
+    .status {
+      padding: 10px 12px;
+      border-radius: 8px;
+      background: #1e293b;
+      margin-bottom: 16px;
+      border: 1px solid #334155;
+    }
+    .controls {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-bottom: 16px;
+    }
+    button {
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      padding: 10px 16px;
+      font-weight: 700;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background: #475569;
+      color: #cbd5f5;
+      cursor: not-allowed;
+    }
+    .panel {
+      background: #0b1224;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 16px;
+    }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      font-size: 13px;
+      line-height: 1.4;
+    }
+    .muted {
+      color: #94a3b8;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Pool ZK Proof Test</h1>
+    <div id="status" class="status">Idle</div>
+    <div class="controls">
+      <button id="btnConnect">Connect Freighter</button>
+      <button id="btnSend" disabled>Generate Proof + Send Deposit</button>
+    </div>
+    <div class="panel">
+      <pre id="log" class="muted"></pre>
+    </div>
+  </main>
+
+  <script src="vendor/freighter-api.min.js"></script>
+  <script src="vendor/stellar-sdk.min.js"></script>
+  <script type="module">
+    import initProverModule, { WasmSparseMerkleTree, poseidon2_hash2 } from './js/prover.js';
+    import {
+      initProver,
+      isInitialized,
+      derivePublicKey,
+      computeCommitment,
+      computeSignature,
+      computeNullifier,
+      createMerkleTree,
+      bigintToField,
+      hexToField,
+      fieldToHex,
+      generateWitness,
+      generateProofBytes,
+      proofBytesToUncompressed,
+      verifyProofLocal,
+      extractPublicInputs,
+    } from './js/bridge.js';
+
+    const PRIVATE_KEY_HEX = '0x3625edaf29a00f40abaf4eb6b423c103287e4bc06f46a41472f5b186e277ea51';
+    const EXPECTED_MEMBERSHIP_LEAF = '0x1e844e1b3284abb5bdad20ba0707f4c4053b6740814eb888658eb177d18ca2b2';
+    const LEVELS = 5;
+    const SMT_LEVELS = 5;
+    const DEPOSIT_AMOUNT = 5n;
+    const BN256_MOD = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
+    const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
+    const EXPECTED_MEMBERSHIP_ROOT_EMPTY = BigInt('0x19926faa23b0737d467f9476f0f84b2968ff6666e16a23e4d44898f884504764');
+    const EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF = BigInt('0x111e35f8c229c85e124f5e5653f4501a93bb8fcf0a724a0d15d985772dffda9d');
+
+    const statusEl = document.getElementById('status');
+    const logEl = document.getElementById('log');
+    const btnConnect = document.getElementById('btnConnect');
+    const btnSend = document.getElementById('btnSend');
+
+    const state = {
+      address: null,
+      networkPassphrase: null,
+      rpcUrl: null,
+      contracts: null,
+      poolClient: null,
+    };
+
+    function setStatus(text) {
+      statusEl.textContent = text;
+    }
+
+    function log(msg) {
+      const time = new Date().toISOString().slice(11, 23);
+      logEl.textContent += `[${time}] ${msg}\n`;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    function bytesToHex(bytes) {
+      return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function bytesToBigIntLE(bytes) {
+      let result = 0n;
+      for (let i = bytes.length - 1; i >= 0; i--) {
+        result = (result << 8n) | BigInt(bytes[i]);
+      }
+      return result;
+    }
+
+    function bytesToBigIntBE(bytes) {
+      let result = 0n;
+      for (let i = 0; i < bytes.length; i++) {
+        result = (result << 8n) | BigInt(bytes[i]);
+      }
+      return result;
+    }
+
+    function bigIntToBytesBE(value, length = 32) {
+      let hex = value.toString(16);
+      if (hex.length > length * 2) {
+        throw new Error('Value exceeds byte length');
+      }
+      hex = hex.padStart(length * 2, '0');
+      const out = new Uint8Array(length);
+      for (let i = 0; i < length; i++) {
+        out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);
+      }
+      return out;
+    }
+
+    function bytesToBigIntStringLE(bytes) {
+      return bytesToBigIntLE(bytes).toString();
+    }
+
+    function asBigInt(value) {
+      if (typeof value === 'bigint') return value;
+      if (typeof value === 'number') return BigInt(value);
+      if (typeof value === 'string') return BigInt(value);
+      throw new Error('Expected numeric value');
+    }
+
+    function toHex32(value) {
+      const v = asBigInt(value);
+      return '0x' + v.toString(16).padStart(64, '0');
+    }
+
+    function unwrapResult(result, label) {
+      if (result && typeof result.isOk === 'function' && typeof result.isErr === 'function') {
+        if (result.isOk()) return result.unwrap();
+        const err = result.unwrapErr();
+        const msg = err?.message ? err.message : String(err);
+        throw new Error(label ? `${label} failed: ${msg}` : msg);
+      }
+      return result;
+    }
+
+    const MASK_64 = (1n << 64n) - 1n;
+    const KECCAK_ROTC = [
+      1, 3, 6, 10, 15, 21, 28, 36, 45, 55, 2, 14, 27, 41, 56, 8, 25, 43, 62, 18, 39, 61, 20, 44,
+    ];
+    const KECCAK_PILN = [
+      10, 7, 11, 17, 18, 3, 5, 16, 8, 21, 24, 4, 15, 23, 19, 13, 12, 2, 20, 14, 22, 9, 6, 1,
+    ];
+    const KECCAK_RNDC = [
+      0x0000000000000001n, 0x0000000000008082n, 0x800000000000808an, 0x8000000080008000n,
+      0x000000000000808bn, 0x0000000080000001n, 0x8000000080008081n, 0x8000000000008009n,
+      0x000000000000008an, 0x0000000000000088n, 0x0000000080008009n, 0x000000008000000an,
+      0x000000008000808bn, 0x800000000000008bn, 0x8000000000008089n, 0x8000000000008003n,
+      0x8000000000008002n, 0x8000000000000080n, 0x000000000000800an, 0x800000008000000an,
+      0x8000000080008081n, 0x8000000000008080n, 0x0000000080000001n, 0x8000000080008008n,
+    ];
+
+    function rotl64(x, n) {
+      const nn = BigInt(n);
+      return ((x << nn) | (x >> (64n - nn))) & MASK_64;
+    }
+
+    function keccakf(state) {
+      const bc = new Array(5).fill(0n);
+      for (let round = 0; round < 24; round++) {
+        for (let i = 0; i < 5; i++) {
+          bc[i] = state[i] ^ state[i + 5] ^ state[i + 10] ^ state[i + 15] ^ state[i + 20];
+        }
+        for (let i = 0; i < 5; i++) {
+          const t = bc[(i + 4) % 5] ^ rotl64(bc[(i + 1) % 5], 1);
+          for (let j = 0; j < 25; j += 5) {
+            state[j + i] = (state[j + i] ^ t) & MASK_64;
+          }
+        }
+        let t = state[1];
+        for (let i = 0; i < 24; i++) {
+          const j = KECCAK_PILN[i];
+          const temp = state[j];
+          state[j] = rotl64(t, KECCAK_ROTC[i]);
+          t = temp;
+        }
+        for (let j = 0; j < 25; j += 5) {
+          for (let i = 0; i < 5; i++) {
+            bc[i] = state[j + i];
+          }
+          for (let i = 0; i < 5; i++) {
+            const not = (~bc[(i + 1) % 5]) & MASK_64;
+            state[j + i] = (state[j + i] ^ (not & bc[(i + 2) % 5])) & MASK_64;
+          }
+        }
+        state[0] = (state[0] ^ KECCAK_RNDC[round]) & MASK_64;
+      }
+    }
+
+    function keccak256(bytes) {
+      const rate = 136;
+      const msg = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+      const total = Math.ceil((msg.length + 1) / rate) * rate;
+      const padded = new Uint8Array(total);
+      padded.set(msg);
+      padded[msg.length] = 0x01;
+      padded[padded.length - 1] |= 0x80;
+
+      const state = new Array(25).fill(0n);
+      for (let offset = 0; offset < padded.length; offset += rate) {
+        for (let i = 0; i < rate / 8; i++) {
+          let word = 0n;
+          const base = offset + i * 8;
+          for (let b = 0; b < 8; b++) {
+            word |= BigInt(padded[base + b]) << (8n * BigInt(b));
+          }
+          state[i] = (state[i] ^ word) & MASK_64;
+        }
+        keccakf(state);
+      }
+
+      const out = new Uint8Array(32);
+      let outPos = 0;
+      for (let i = 0; i < rate / 8 && outPos < out.length; i++) {
+        let word = state[i];
+        for (let b = 0; b < 8 && outPos < out.length; b++) {
+          out[outPos++] = Number((word >> (8n * BigInt(b))) & 0xffn);
+        }
+      }
+      return out;
+    }
+
+    function hashExtData(extData) {
+      const { xdr, Address, XdrLargeInt } = window.StellarSdk;
+      const entries = [
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('recipient'),
+          val: Address.fromString(extData.recipient).toScVal(),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('ext_amount'),
+          val: new XdrLargeInt('i256', extData.ext_amount.toString()).toScVal(),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('encrypted_output0'),
+          val: xdr.ScVal.scvBytes(extData.encrypted_output0),
+        }),
+        new xdr.ScMapEntry({
+          key: xdr.ScVal.scvSymbol('encrypted_output1'),
+          val: xdr.ScVal.scvBytes(extData.encrypted_output1),
+        }),
+      ];
+      const scVal = xdr.ScVal.scvMap(entries);
+      const xdrRaw = scVal.toXDR();
+      const xdrBytes = xdrRaw instanceof Uint8Array ? xdrRaw : new Uint8Array(xdrRaw);
+      const digest = keccak256(xdrBytes);
+      const digestBig = bytesToBigIntBE(digest);
+      const reduced = digestBig % BN256_MOD;
+      return {
+        bigInt: reduced,
+        bytes: bigIntToBytesBE(reduced, 32),
+      };
+    }
+
+    function sliceFieldElements(bytes, count) {
+      const out = [];
+      for (let i = 0; i < count; i++) {
+        const start = i * 32;
+        const chunk = bytes.slice(start, start + 32);
+        out.push(bytesToBigIntStringLE(chunk));
+      }
+      return out;
+    }
+
+    async function connectWallet() {
+      if (!window.freighterApi) {
+        throw new Error('Freighter API not available');
+      }
+      const conn = await window.freighterApi.isConnected();
+      if (conn?.error) {
+        throw new Error(conn.error.message || 'Failed to check Freighter connection');
+      }
+      if (!conn?.isConnected) {
+        throw new Error('Freighter not detected');
+      }
+      const allowed = await window.freighterApi.isAllowed();
+      if (allowed?.error) {
+        throw new Error(allowed.error.message || 'Failed to check Freighter allow-list');
+      }
+      if (!allowed?.isAllowed) {
+        const set = await window.freighterApi.setAllowed();
+        if (set?.error) {
+          throw new Error(set.error.message || 'Freighter access rejected');
+        }
+      }
+      const access = await window.freighterApi.requestAccess();
+      if (access?.error) {
+        throw new Error(access.error.message || 'Freighter access request failed');
+      }
+      if (!access?.address) {
+        throw new Error('No public key returned');
+      }
+      const net = await window.freighterApi.getNetworkDetails();
+      if (net?.error) {
+        throw new Error(net.error.message || 'Failed to fetch network details');
+      }
+      state.address = access.address;
+      state.networkPassphrase = net.networkPassphrase;
+      state.rpcUrl = net.sorobanRpcUrl || 'https://soroban-testnet.stellar.org';
+      return access.address;
+    }
+
+    async function loadDeployments() {
+      if (state.contracts) return state.contracts;
+      const response = await fetch('./deployments.json');
+      if (!response.ok) {
+        throw new Error(`Failed to load deployments.json: ${response.status}`);
+      }
+      state.contracts = await response.json();
+      return state.contracts;
+    }
+
+    async function loadPoolClient(clientOpts, contractId) {
+      if (state.poolClient) return state.poolClient;
+      const response = await fetch('./pool.wasm');
+      if (!response.ok) {
+        throw new Error(`Failed to load pool.wasm: ${response.status}`);
+      }
+      const wasmBytes = new Uint8Array(await response.arrayBuffer());
+      const { Client } = window.StellarSdk.contract;
+      state.poolClient = await Client.fromWasm(wasmBytes, {
+        ...clientOpts,
+        contractId,
+      });
+      return state.poolClient;
+    }
+
+    function buildSigner() {
+      return {
+        signTransaction: async (transactionXdr, opts = {}) => {
+          const { signedTxXdr, error } = await window.freighterApi.signTransaction(transactionXdr, {
+            networkPassphrase: state.networkPassphrase,
+            address: state.address,
+            ...opts,
+          });
+          if (error) {
+            throw new Error(error.message || 'Transaction signature failed');
+          }
+          return { signedTxXdr, signerAddress: state.address };
+        },
+        signAuthEntry: async (entryXdr, opts = {}) => {
+          const { signedAuthEntry, error } = await window.freighterApi.signAuthEntry(entryXdr, {
+            networkPassphrase: state.networkPassphrase,
+            address: state.address,
+            ...opts,
+          });
+          if (error) {
+            throw new Error(error.message || 'Auth entry signature failed');
+          }
+          return { signedAuthEntry, signerAddress: state.address };
+        },
+      };
+    }
+
+    async function generateAndSend() {
+      if (!state.address) {
+        throw new Error('Connect wallet first');
+      }
+
+      const contracts = await loadDeployments();
+      const { Client } = window.StellarSdk.contract;
+      const signer = buildSigner();
+      const clientOpts = {
+        rpcUrl: state.rpcUrl,
+        networkPassphrase: state.networkPassphrase,
+        publicKey: state.address,
+        signTransaction: signer.signTransaction,
+        signAuthEntry: signer.signAuthEntry,
+      };
+
+      setStatus('Loading contract clients...');
+      const [poolClient, membershipClient, nonMembershipClient] = await Promise.all([
+        loadPoolClient(clientOpts, contracts.pool),
+        Client.from({ ...clientOpts, contractId: contracts.asp_membership }),
+        Client.from({ ...clientOpts, contractId: contracts.asp_non_membership }),
+      ]);
+
+      setStatus('Reading on-chain roots...');
+      const poolRootRaw = (await poolClient.get_root()).result;
+      const membershipRootRaw = (await membershipClient.get_root()).result;
+      const nonMembershipRootRaw = (await nonMembershipClient.get_root()).result;
+      const poolRoot = asBigInt(unwrapResult(poolRootRaw, 'pool.get_root'));
+      const aspMembershipRoot = asBigInt(unwrapResult(membershipRootRaw, 'asp_membership.get_root'));
+      const aspNonMembershipRoot = asBigInt(unwrapResult(nonMembershipRootRaw, 'asp_non_membership.get_root'));
+      log(`Pool root (on-chain): ${toHex32(poolRoot)}`);
+      log(`ASP membership root (on-chain): ${toHex32(aspMembershipRoot)}`);
+      log(`ASP non-membership root (on-chain): ${toHex32(aspNonMembershipRoot)}`);
+      if (aspMembershipRoot === EXPECTED_MEMBERSHIP_ROOT_EMPTY) {
+        log('ASP membership root matches expected empty tree root');
+      }
+      if (aspMembershipRoot === EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF) {
+        log('ASP membership root matches expected single-leaf root');
+      }
+
+      setStatus('Initializing prover...');
+      if (!isInitialized()) {
+        await initProver((loaded, total) => {
+          if (total > 0) {
+            const pct = ((loaded / total) * 100).toFixed(1);
+            setStatus(`Downloading proving artifacts: ${pct}%`);
+          }
+        });
+      }
+
+      const privKey = BigInt(PRIVATE_KEY_HEX);
+      const privKeyBytes = bigintToField(privKey);
+      const pubKeyBytes = derivePublicKey(privKeyBytes);
+      log(`Derived public key: ${fieldToHex(pubKeyBytes)}`);
+
+      const membershipBlindingBytes = bigintToField(0n);
+      const membershipLeaf = poseidon2_hash2(pubKeyBytes, membershipBlindingBytes, 1);
+      const membershipLeafHex = fieldToHex(membershipLeaf);
+      log(`Membership leaf: ${membershipLeafHex}`);
+      if (membershipLeafHex !== EXPECTED_MEMBERSHIP_LEAF) {
+        log('Warning: membership leaf does not match expected value');
+      }
+
+      const membershipTree = createMerkleTree(LEVELS);
+      const zeroLeaf = hexToField(ZERO_LEAF_HEX);
+      const totalLeaves = 1 << LEVELS;
+      for (let i = 0; i < totalLeaves; i++) {
+        membershipTree.insert(i === 0 ? membershipLeaf : zeroLeaf);
+      }
+      const membershipProof = membershipTree.get_proof(0);
+      const membershipRootBytes = membershipTree.root();
+      const membershipRoot = bytesToBigIntLE(membershipRootBytes);
+      log(`Membership root (computed): ${toHex32(membershipRoot)}`);
+      log(`Expected membership root (empty): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_EMPTY)}`);
+      log(`Expected membership root (with leaf): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF)}`);
+      if (membershipRoot !== aspMembershipRoot) {
+        throw new Error('Membership root mismatch with on-chain ASP contract (ensure the leaf is inserted)');
+      }
+
+      const smt = new WasmSparseMerkleTree(SMT_LEVELS);
+      const nonMembershipProof = smt.get_proof(pubKeyBytes, SMT_LEVELS);
+      const nonMembershipRootBytes = smt.root();
+      const nonMembershipRoot = bytesToBigIntLE(nonMembershipRootBytes);
+      log(`Non-membership root (computed): ${toHex32(nonMembershipRoot)}`);
+      if (nonMembershipRoot !== aspNonMembershipRoot) {
+        throw new Error('Non-membership root mismatch with on-chain ASP contract (expected empty tree root)');
+      }
+
+      const inputs = [
+        { amount: 0n, blinding: 101n },
+        { amount: 0n, blinding: 202n },
+      ];
+
+      const pathIndicesBytes = bigintToField(0n);
+      const pathIndicesStr = bytesToBigIntStringLE(pathIndicesBytes);
+
+      for (const input of inputs) {
+        const amountBytes = bigintToField(input.amount);
+        const blindingBytes = bigintToField(input.blinding);
+        const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+        const signature = computeSignature(privKeyBytes, commitment, pathIndicesBytes);
+        const nullifier = computeNullifier(commitment, pathIndicesBytes, signature);
+        input.commitmentBytes = commitment;
+        input.nullifierBytes = nullifier;
+        input.nullifierBig = bytesToBigIntLE(nullifier);
+      }
+
+      const outputs = [
+        { amount: DEPOSIT_AMOUNT, blinding: 303n },
+        { amount: 0n, blinding: 404n },
+      ];
+
+      for (const output of outputs) {
+        const amountBytes = bigintToField(output.amount);
+        const blindingBytes = bigintToField(output.blinding);
+        const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+        output.commitmentBytes = commitment;
+        output.commitmentBig = bytesToBigIntLE(commitment);
+      }
+
+      const extData = {
+        recipient: contracts.pool,
+        ext_amount: DEPOSIT_AMOUNT,
+        encrypted_output0: new Uint8Array(),
+        encrypted_output1: new Uint8Array(),
+      };
+
+      const extDataHash = hashExtData(extData);
+      log(`ext_data_hash: ${bytesToHex(extDataHash.bytes)}`);
+
+      const membershipPathElements = sliceFieldElements(membershipProof.path_elements, LEVELS);
+      const membershipPathIndices = bytesToBigIntStringLE(membershipProof.path_indices);
+      const nonMembershipSiblings = sliceFieldElements(nonMembershipProof.siblings, SMT_LEVELS);
+
+      const circuitInputs = {
+        root: poolRoot.toString(),
+        publicAmount: DEPOSIT_AMOUNT.toString(),
+        extDataHash: extDataHash.bigInt.toString(),
+        inputNullifier: inputs.map(input => input.nullifierBig.toString()),
+        outputCommitment: outputs.map(output => output.commitmentBig.toString()),
+        inAmount: inputs.map(input => input.amount.toString()),
+        inPrivateKey: inputs.map(() => privKey.toString()),
+        inBlinding: inputs.map(input => input.blinding.toString()),
+        inPathIndices: inputs.map(() => pathIndicesStr),
+        inPathElements: inputs.map(() => Array(LEVELS).fill('0')),
+        outAmount: outputs.map(output => output.amount.toString()),
+        outPubkey: outputs.map(() => bytesToBigIntStringLE(pubKeyBytes)),
+        outBlinding: outputs.map(output => output.blinding.toString()),
+        membershipRoots: inputs.map(() => [membershipRoot.toString()]),
+        nonMembershipRoots: inputs.map(() => [nonMembershipRoot.toString()]),
+        membershipProofs: inputs.map(() => [
+          {
+            leaf: bytesToBigIntStringLE(membershipLeaf),
+            blinding: '0',
+            pathIndices: membershipPathIndices,
+            pathElements: membershipPathElements,
+          },
+        ]),
+        nonMembershipProofs: inputs.map(() => [
+          {
+            key: bytesToBigIntStringLE(pubKeyBytes),
+            oldKey: bytesToBigIntStringLE(nonMembershipProof.not_found_key),
+            oldValue: bytesToBigIntStringLE(nonMembershipProof.not_found_value),
+            isOld0: nonMembershipProof.is_old0 ? '1' : '0',
+            siblings: nonMembershipSiblings,
+          },
+        ]),
+      };
+
+      setStatus('Generating witness and proof...');
+      const witnessBytes = await generateWitness(circuitInputs);
+      const proofBytes = generateProofBytes(witnessBytes);
+      log(`Proof bytes (compressed): ${proofBytes.length} bytes`);
+      const proofBytesUncompressed = proofBytesToUncompressed(proofBytes);
+      log(`Proof bytes (uncompressed): ${proofBytesUncompressed.length} bytes`);
+      if (proofBytesUncompressed.length !== 256) {
+        throw new Error(`Unexpected uncompressed proof length: ${proofBytesUncompressed.length}`);
+      }
+
+      const publicInputs = extractPublicInputs(witnessBytes);
+      const verified = verifyProofLocal(proofBytes, publicInputs);
+      log(`Local proof verification: ${verified ? 'OK' : 'FAILED'}`);
+      if (!verified) {
+        throw new Error('Local proof verification failed');
+      }
+
+      const proof = {
+        proof: {
+          a: proofBytesUncompressed.slice(0, 64),
+          b: proofBytesUncompressed.slice(64, 64 + 128),
+          c: proofBytesUncompressed.slice(64 + 128),
+        },
+        root: poolRoot,
+        input_nullifiers: inputs.map(input => input.nullifierBig),
+        output_commitment0: outputs[0].commitmentBig,
+        output_commitment1: outputs[1].commitmentBig,
+        public_amount: DEPOSIT_AMOUNT,
+        ext_data_hash: extDataHash.bytes,
+        asp_membership_root: membershipRoot,
+        asp_non_membership_root: nonMembershipRoot,
+      };
+
+      setStatus('Sending transaction...');
+      const tx = await poolClient.transact({
+        proof,
+        ext_data: extData,
+        sender: state.address,
+      });
+
+      const sent = await tx.signAndSend();
+      log(`Sent transaction: ${sent.sendTransactionResponse.hash}`);
+      setStatus('Transaction submitted');
+    }
+
+    async function init() {
+      setStatus('Loading prover module...');
+      await initProverModule();
+      const keccakEmpty = bytesToHex(keccak256(new Uint8Array()));
+      if (keccakEmpty !== '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') {
+        throw new Error('Keccak self-check failed');
+      }
+      setStatus('Ready');
+    }
+
+    btnConnect.addEventListener('click', async () => {
+      try {
+        setStatus('Connecting wallet...');
+        const address = await connectWallet();
+        log(`Wallet connected: ${address}`);
+        btnSend.disabled = false;
+        setStatus('Wallet connected');
+      } catch (err) {
+        setStatus('Wallet connection failed');
+        log(`Error: ${err.message}`);
+      }
+    });
+
+    btnSend.addEventListener('click', async () => {
+      btnSend.disabled = true;
+      try {
+        await generateAndSend();
+      } catch (err) {
+        setStatus('Transaction failed');
+        log(`Error: ${err.message}`);
+      } finally {
+        btnSend.disabled = false;
+      }
+    });
+
+    init().catch(err => {
+      setStatus('Initialization failed');
+      log(`Error: ${err.message}`);
+    });
+  </script>
+</body>
+</html>

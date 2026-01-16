@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     Bytes, BytesN, Vec, contracterror, contracttype,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    crypto::bn254::{Bn254G1Affine, Bn254G2Affine},
 };
 
 /// Errors that can occur during Groth16 proof verification.
@@ -35,9 +35,9 @@ pub struct VerificationKeyBytes {
 #[derive(Clone)]
 #[contracttype]
 pub struct Groth16Proof {
-    pub a: G1Affine,
-    pub b: G2Affine,
-    pub c: G1Affine,
+    pub a: Bn254G1Affine,
+    pub b: Bn254G2Affine,
+    pub c: Bn254G1Affine,
 }
 
 impl Groth16Proof {
@@ -62,19 +62,19 @@ impl TryFrom<Bytes> for Groth16Proof {
             return Err(Groth16Error::MalformedProof);
         }
 
-        let a = G1Affine::from_bytes(
+        let a = Bn254G1Affine::from_bytes(
             value
                 .slice(0..G1_SIZE)
                 .try_into()
                 .map_err(|_| Groth16Error::MalformedProof)?,
         );
-        let b = G2Affine::from_bytes(
+        let b = Bn254G2Affine::from_bytes(
             value
                 .slice(G1_SIZE..G1_SIZE + G2_SIZE)
                 .try_into()
                 .map_err(|_| Groth16Error::MalformedProof)?,
         );
-        let c = G1Affine::from_bytes(
+        let c = Bn254G1Affine::from_bytes(
             value
                 .slice(G1_SIZE + G2_SIZE..)
                 .try_into()

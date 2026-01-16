@@ -15,8 +15,8 @@ use crate::{
     types::{FIELD_SIZE, Groth16Proof},
 };
 use alloc::{format, vec::Vec};
-use ark_bn254::{Bn254, Fr};
-use ark_ff::{AdditiveGroup, Field};
+use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
+use ark_ff::{AdditiveGroup, BigInteger, Field};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
@@ -38,6 +38,38 @@ struct R1CSCircuit {
     r1cs: R1CS,
     /// Full witness including the "one" element at index 0
     witness: Vec<Fr>,
+}
+
+fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    let x_bytes: [u8; 32] = p.x.into_bigint().to_bytes_be().try_into().unwrap();
+    let y_bytes: [u8; 32] = p.y.into_bigint().to_bytes_be().try_into().unwrap();
+    out[..32].copy_from_slice(&x_bytes);
+    out[32..].copy_from_slice(&y_bytes);
+    out
+}
+
+fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    let x0: [u8; 32] = p.x.c0.into_bigint().to_bytes_be().try_into().unwrap();
+    let x1: [u8; 32] = p.x.c1.into_bigint().to_bytes_be().try_into().unwrap();
+    let y0: [u8; 32] = p.y.c0.into_bigint().to_bytes_be().try_into().unwrap();
+    let y1: [u8; 32] = p.y.c1.into_bigint().to_bytes_be().try_into().unwrap();
+
+    // Match Soroban's BN254 G2 affine encoding: c1 || c0 for each coordinate.
+    out[..32].copy_from_slice(&x1);
+    out[32..64].copy_from_slice(&x0);
+    out[64..96].copy_from_slice(&y1);
+    out[96..].copy_from_slice(&y0);
+    out
+}
+
+fn proof_to_uncompressed_bytes(proof: &Proof<Bn254>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(256);
+    out.extend_from_slice(&g1_bytes_uncompressed(&proof.a));
+    out.extend_from_slice(&g2_bytes_uncompressed(&proof.b));
+    out.extend_from_slice(&g1_bytes_uncompressed(&proof.c));
+    out
 }
 
 impl ConstraintSynthesizer<Fr> for R1CSCircuit {
@@ -299,6 +331,16 @@ impl Prover {
     pub fn prove_bytes(&self, witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
         let proof = self.prove(witness_bytes)?;
         Ok(proof.to_bytes())
+    }
+
+    /// Convert a compressed proof into uncompressed bytes for Soroban contracts.
+    ///
+    /// Format: [A (G1) || B (G2) || C (G1)] where each point is uncompressed.
+    #[wasm_bindgen]
+    pub fn proof_bytes_to_uncompressed(&self, proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+        Ok(proof_to_uncompressed_bytes(&proof))
     }
 
     /// Get public inputs from witness
