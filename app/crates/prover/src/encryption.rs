@@ -36,7 +36,6 @@
 
 use alloc::{format, string::String, vec::Vec};
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
-
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};

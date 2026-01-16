@@ -69,11 +69,6 @@ unused-allowed-license = "allow"
 ignore = false
 registries = []
 
-# Specific license exception
-[[licenses.exceptions]]
-name = "xxhash-rust"
-allow = ["BSL-1.0"]
-
 [bans]
 wildcards = "deny"
 allow-wildcard-paths = true
