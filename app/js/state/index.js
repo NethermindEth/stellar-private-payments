@@ -112,12 +112,13 @@ export const StateManager = {
 
     /**
      * Starts synchronization of Pool and ASP Membership events.
-     * If user has authenticated keypairs, also scans for new notes and checks spent status.
+     * Optionally performs note scanning if a private key is provided.
      * 
      * @param {Object} [options]
      * @param {function} [options.onProgress] - Progress callback
-     * @param {boolean} [options.scanNotes=true] - Scan for new notes (if keys authenticated)
-     * @param {boolean} [options.checkSpent=true] - Check spent status (if keys authenticated)
+     * @param {Uint8Array} [options.privateKey] - User's private key for note scanning
+     * @param {boolean} [options.scanNotes=true] - Scan for new notes (if privateKey provided)
+     * @param {boolean} [options.checkSpent=true] - Check spent status (if privateKey provided)
      * @returns {Promise<Object>} Sync status including notesFound and notesMarkedSpent
      */
     async startSync(options) {
@@ -319,30 +320,31 @@ export const StateManager = {
 
     /**
      * Scans encrypted outputs to find notes belonging to the user.
-     * Requires user to have authenticated keypairs first
+     * This is useful for discovering notes received from others.
      * 
+     * @param {Uint8Array} privateKey - User's private key
      * @param {Object} [options] - Scan options
      * @param {boolean} [options.fullRescan=false] - Rescan all outputs, not just new ones
      * @param {function} [options.onProgress] - Progress callback (scanned, total)
      * @returns {Promise<{scanned: number, found: number, notes: Array, alreadyKnown: number}>}
      */
-    async scanForNotes(options) {
+    async scanForNotes(privateKey, options) {
         if (!initialized) {
             throw new Error('StateManager not initialized');
         }
-        return noteScanner.scanForNotes(options);
+        return noteScanner.scanForNotes(privateKey, options);
     },
 
     /**
      * Checks if any user notes have been spent and updates their status.
-     * Requires user to have authenticated keypairs first
+     * @param {Uint8Array} privateKey - User's private key
      * @returns {Promise<{checked: number, markedSpent: number}>}
      */
-    async checkSpentNotes() {
+    async checkSpentNotes(privateKey) {
         if (!initialized) {
             throw new Error('StateManager not initialized');
         }
-        return noteScanner.checkSpentNotes();
+        return noteScanner.checkSpentNotes(privateKey);
     },
 
     /**

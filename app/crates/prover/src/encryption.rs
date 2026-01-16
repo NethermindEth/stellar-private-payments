@@ -6,13 +6,17 @@
 //!    off-chain. Derived from Freighter signature using SHA-256.
 //!
 //! 2. **Note Identity Keys (BN254)**: For proving ownership in ZK circuits.
-//!    Also derived from Freighter signature using SHA-256 with a different
-//!    domain separation.
+//!    Also derived from Freighter signature using SHA-256 with domain
+//!    separation.
 //!
 //! Both key types are deterministically derived from wallet signatures,
 //! ensuring users can recover all keys using only their wallet seed phrase.
-//! Signature results are not directly used as keys, we apply a hash function
-//! over them to break any potential underlying math structure.   
+//!
+//! We use SHA-256 as the hash function for both key derivation and encryption.
+//! We use sha instead of Poseidon2 because:
+//! - It won't be used in the circuit context
+//! - SHA is well-established and its security has been more researched than
+//!   Poseidon2
 //!
 //! # Key Architecture
 //!
@@ -21,17 +25,18 @@
 //!        │
 //!        ├── signMessage("Sign to access Privacy Pool [v1]")
 //!        │          │
-//!        │          └── SHA-256 → X25519 Encryption Keypair. Used for encrypting/decrypting note data.
+//!        │          └── SHA-256 → X25519 Encryption Keypair
 //!        │
-//!        └── signMessage("Spending Key [v1]")
+//!        └── signMessage("Privacy Pool Spending Key [v1]")
 //!                   │
-//!                   └── SHA-256 → BN254 Note Private Key. Used for note ownership proofs in ZK circuits.
+//!                   └── SHA-256 → BN254 Note Private Key
 //!                                      │
 //!                                      └── Poseidon2 → Note Public Key
 //! ```
 
 use alloc::{format, string::String, vec::Vec};
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
+
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -97,7 +102,8 @@ fn derive_keypair_from_signature_internal(signature: &[u8]) -> Result<Vec<u8>, S
 /// ```
 ///
 /// # Arguments
-/// * `signature` - Stellar Ed25519 signature from signing "Spending Key [v1]"
+/// * `signature` - Stellar Ed25519 signature from signing "Privacy Pool
+///   Spending Key [v1]"
 ///
 /// # Returns
 /// 32 bytes: Note private key (BN254 scalar, little-endian)
@@ -116,7 +122,6 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
     Ok(key.to_vec())
 }
 
-/// Blinding factor generation. Used for note commitment uniqueness
 /// Generate a cryptographically random blinding factor for a note.
 ///
 /// Each note requires a unique blinding factor to ensure commitments are unique
@@ -124,10 +129,6 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
 ///
 /// # Returns
 /// 32 bytes: Random BN254 scalar (little-endian)
-///
-/// # Errors
-/// Returns an error if the platform's secure random number generator is
-/// unavailable. This can happen in HTTP contexts instead of HTTPS.
 ///
 /// # Note
 /// Unlike the private keys above, blinding factors are NOT derived
@@ -141,7 +142,7 @@ pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
     Ok(blinding.to_vec())
 }
 
-/// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl library standard)
+/// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
 ///
 /// When sending a note to someone, we encrypt the sensitive data (amount and
 /// blinding) with their X25519 public key. Only they can decrypt it.
@@ -233,7 +234,7 @@ fn encrypt_note_data_internal(
 ///
 /// # Returns
 /// - Success: `[amount (8 bytes LE)] [blinding (32 bytes)]` = 40 bytes
-/// - Failure: Empty vec
+/// - Failure: Empty vec (note was not addressed to us)
 #[wasm_bindgen]
 pub fn decrypt_note_data(
     private_key_bytes: &[u8],

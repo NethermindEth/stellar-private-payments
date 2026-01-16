@@ -654,8 +654,6 @@ export function getVerifyingKey() {
     return prover.get_verifying_key();
 }
 
-// Key derivation from Freighter signatures. All keys are deterministically derived for recovery.
-
 /**
  * Derive X25519 encryption keypair from Freighter signature.
  * Used for encrypting/decrypting note data (amount, blinding).
@@ -706,10 +704,8 @@ export function deriveNotePrivateKeyFromSignature(signature) {
  * They are random per-note and stored encrypted on-chain.
  * 
  * @returns {Uint8Array} Random blinding (32 bytes, BN254 scalar)
- * @throws {Error} If secure random number generation is unavailable (e.g., non-HTTPS context)
  */
 export function generateBlinding() {
-    // generate_random_blinding() returns Result and throws on RNG failure
     return new Uint8Array(generate_random_blinding());
 }
 
@@ -771,6 +767,7 @@ export function decryptNoteData(privateKey, encryptedData) {
         
         return { amount, blinding };
     } catch (e) {
+        console.warn('[bridge] decryptNoteData error:', e);
         return null;
     }
 }

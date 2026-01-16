@@ -18,14 +18,13 @@
 import * as db from './db.js';
 import * as notesStore from './notes-store.js';
 import * as poolStore from './pool-store.js';
-import {
-    computeCommitment,
-    computeNullifier,
+import { 
+    computeCommitment, 
+    computeNullifier, 
     computeSignature,
     decryptNoteData,
-    bigintToLittleEndian,
 } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeHex, reverseBytes } from './utils.js';
+import { hexToBytes, bytesToHex, normalizeHex } from './utils.js';
 
 /**
  * @typedef {Object} ScanResult
@@ -54,33 +53,34 @@ let scanListeners = [];
  * The encryption private key is derived deterministically from a Freighter signature,
  * so this will work on any device where the user has their wallet.
  * 
- * Encryption scheme: X25519-XSalsa20-Poly1305. Format: [ephemeralPubKey (32)] [nonce (24)] [ciphertext (40) + tag (16)]
+ * Encryption scheme: X25519-XSalsa20-Poly1305
+ * Format: [ephemeralPubKey (32)] [nonce (24)] [ciphertext (40) + tag (16)]
  * 
  * @param {string|Uint8Array} encryptedOutput - Encrypted output data from on-chain event
  * @returns {Promise<DecryptedNote|null>} Decrypted note data or null if not addressed to us
  */
 export async function tryDecryptNote(encryptedOutput) {
     try {
-        const encrypted = typeof encryptedOutput === 'string'
-            ? hexToBytes(encryptedOutput)
+        const encrypted = typeof encryptedOutput === 'string' 
+            ? hexToBytes(encryptedOutput) 
             : encryptedOutput;
-
+        
         // Minimum size: ephemeral_pubkey (32) + nonce (24) + ciphertext (40) + tag (16) = 112
         if (encrypted.length < 112) {
             return null;
         }
-
-        // Get user's encryption keypair
+        
+        // Get user's encryption keypair (derived from Freighter signature)
         const encKeypair = await notesStore.getUserEncryptionKeypair();
         if (!encKeypair) {
             console.warn('[NoteScanner] No encryption keypair available - user must sign message');
             return null;
         }
-
+        
         // Attempt decryption
         const decrypted = decryptNoteData(encKeypair.privateKey, encrypted);
-
-        return decrypted; // { amount, blinding }
+        
+        return decrypted; // { amount, blinding } or null if not for us
     } catch (e) {
         // Decryption failed - this output is not addressed to us
         return null;
@@ -92,7 +92,8 @@ export async function tryDecryptNote(encryptedOutput) {
  * 
  * The commitment is: Poseidon2(amount, notePublicKey, blinding, domain=0x01)
  * 
- * We use our note public key to verify that this commitment was indeed addressed to us.
+ * We use our note public key (derived from Freighter signature via Poseidon2)
+ * to verify that this commitment was indeed addressed to us.
  * 
  * @param {DecryptedNote} decrypted - Decrypted note data { amount, blinding }
  * @param {Uint8Array} notePublicKey - User's note public key
@@ -102,12 +103,10 @@ export async function tryDecryptNote(encryptedOutput) {
 export function verifyNoteCommitment(decrypted, notePublicKey, expectedCommitment) {
     try {
         // Compute commitment: Poseidon2(amount, publicKey, blinding, domain=0x01)
-        const amountBytes = bigintToLittleEndian(decrypted.amount, 8);
+        const amountBytes = bigintToBytes(decrypted.amount, 8);
         const computed = computeCommitment(amountBytes, notePublicKey, decrypted.blinding);
-
-        // Reverse bytes: computed is LE (Arkworks), expected is BE Hex (Soroban)
-        const computedHex = bytesToHex(reverseBytes(computed));
-
+        const computedHex = bytesToHex(computed);
+        
         return normalizeHex(computedHex) === normalizeHex(expectedCommitment);
     } catch (e) {
         console.error('[NoteScanner] Commitment verification failed:', e);
@@ -118,7 +117,7 @@ export function verifyNoteCommitment(decrypted, notePublicKey, expectedCommitmen
 /**
  * Scans encrypted outputs to find notes belonging to the user.
  * 
- * This function uses the user's deterministic keypairs:
+ * This function uses the user's deterministic keypairs (derived from Freighter signatures):
  * 1. Encryption keypair: To decrypt note data
  * 2. Note identity keypair: To verify commitments and store the note
  * 
@@ -130,56 +129,57 @@ export function verifyNoteCommitment(decrypted, notePublicKey, expectedCommitmen
  */
 export async function scanForNotes(options = {}) {
     const { fromLedger, fullRescan = false, onProgress } = options;
-
-    // Get user's note identity keypair
+    
+    // Get user's note identity keypair (required for verification and storage)
     const noteKeypair = await notesStore.getUserNoteKeypair();
     if (!noteKeypair) {
         console.error('[NoteScanner] Cannot scan without note keypair');
         return { scanned: 0, found: 0, notes: [], alreadyKnown: 0 };
     }
-
+    
     // Determine start ledger
     const startLedger = fullRescan ? 0 : (fromLedger ?? lastScannedLedger);
-
+    
     // Get encrypted outputs from pool
     const outputs = await poolStore.getEncryptedOutputs(startLedger > 0 ? startLedger : undefined);
-
+    
     const result = {
         scanned: 0,
         found: 0,
         notes: [],
         alreadyKnown: 0,
     };
-
+    
     for (let i = 0; i < outputs.length; i++) {
         const output = outputs[i];
         result.scanned++;
-
+        
         if (onProgress && i % 100 === 0) {
             onProgress(i, outputs.length);
         }
-
+        
         // Skip if we already have this note
         const existing = await notesStore.getNoteByCommitment(output.commitment);
         if (existing) {
             result.alreadyKnown++;
             continue;
         }
-
+        
         // Try to decrypt using our encryption private key
         const decrypted = await tryDecryptNote(output.encryptedOutput);
         if (!decrypted) {
             continue; // Not addressed to us
         }
-
+        
         // Verify the commitment matches using our note public key
         if (!verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment)) {
             console.warn('[NoteScanner] Decryption succeeded but commitment mismatch - ignoring');
             continue;
         }
-
+        
         // Save the discovered note with our note private key
         // The private key is deterministic, so we store it for convenience
+        // (it can always be re-derived from Freighter)
         const note = await notesStore.saveNote({
             commitment: output.commitment,
             privateKey: noteKeypair.privateKey,
@@ -188,24 +188,24 @@ export async function scanForNotes(options = {}) {
             leafIndex: output.index,
             ledger: output.ledger,
         });
-
+        
         result.notes.push(note);
         result.found++;
-
+        
         emit('noteDiscovered', note);
     }
-
+    
     // Update last scanned ledger
     if (outputs.length > 0) {
         lastScannedLedger = Math.max(lastScannedLedger, ...outputs.map(o => o.ledger));
     }
-
+    
     if (onProgress) {
         onProgress(outputs.length, outputs.length);
     }
-
+    
     console.log(`[NoteScanner] Scanned ${result.scanned} outputs, found ${result.found} new notes`);
-
+    
     return result;
 }
 
@@ -220,9 +220,9 @@ export async function scanForNotes(options = {}) {
  */
 export async function checkSpentNotes() {
     const unspentNotes = await notesStore.getUnspentNotes();
-
+    
     let markedSpent = 0;
-
+    
     for (const note of unspentNotes) {
         try {
             // Derive nullifier for this note using its stored private key
@@ -231,29 +231,29 @@ export async function checkSpentNotes() {
                 hexToBytes(note.id), // commitment
                 note.leafIndex
             );
-
+            
             const nullifierHex = bytesToHex(nullifier);
-
+            
             // Check if this nullifier exists on-chain
             const isSpent = await poolStore.isNullifierSpent(nullifierHex);
-
+            
             if (isSpent) {
                 // Get the ledger when it was spent
                 const nullifierRecord = await db.get('pool_nullifiers', normalizeHex(nullifierHex));
                 const spentLedger = nullifierRecord?.ledger || 0;
-
+                
                 await notesStore.markNoteSpent(note.id, spentLedger);
                 markedSpent++;
-
+                
                 emit('noteSpent', { commitment: note.id, ledger: spentLedger });
             }
         } catch (e) {
             console.error('[NoteScanner] Error checking note spent status:', e);
         }
     }
-
+    
     console.log(`[NoteScanner] Checked ${unspentNotes.length} notes, marked ${markedSpent} as spent`);
-
+    
     return { checked: unspentNotes.length, markedSpent };
 }
 
@@ -276,10 +276,10 @@ export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
         pathIndices.push(idx & 1);
         idx = idx >> 1;
     }
-
+    
     // Compute signature = hash(privateKey, commitment, pathIndices[0])
     const signature = computeSignature(privateKey, commitment, pathIndices[0]);
-
+    
     // Convert pathIndices to field elements for nullifier computation
     // pathIndices is encoded as a single number: sum(pathIndices[i] * 2^i)
     let pathIndicesValue = 0n;
@@ -288,11 +288,27 @@ export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
             pathIndicesValue |= (1n << BigInt(i));
         }
     }
-
-    const pathIndicesBytes = bigintToLittleEndian(pathIndicesValue, 32);
-
+    
+    const pathIndicesBytes = bigintToBytes(pathIndicesValue, 32);
+    
     // Nullifier = hash(commitment, pathIndices, signature)
     return computeNullifier(commitment, pathIndicesBytes, signature);
+}
+
+/**
+ * Converts a bigint to little-endian bytes.
+ * @param {bigint} value 
+ * @param {number} length - Byte length
+ * @returns {Uint8Array}
+ */
+function bigintToBytes(value, length) {
+    const bytes = new Uint8Array(length);
+    let v = value;
+    for (let i = 0; i < length; i++) {
+        bytes[i] = Number(v & 0xFFn);
+        v = v >> 8n;
+    }
+    return bytes;
 }
 
 /**

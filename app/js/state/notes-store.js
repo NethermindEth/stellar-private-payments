@@ -112,7 +112,7 @@ export async function getNotes(options = {}) {
  */
 export async function getNoteByCommitment(commitment) {
     const id = normalizeHex(commitment);
-    return db.get('user_notes', id);
+    return await db.get('user_notes', id) || null;
 }
 
 /**
@@ -206,12 +206,13 @@ const ENCRYPTION_MESSAGE = "Sign to access Privacy Pool [v1]";
 // Message signed to derive the BN254 note identity keypair
 const SPENDING_KEY_MESSAGE = "Privacy Pool Spending Key [v1]";
 
-// In-memory key caches to avoid repeated Freighter signature prompts.
+// In-memory key caches to avoid repeated Freighter usage
 let cachedEncryptionKeypair = null;
 let cachedNoteKeypair = null;
 
+
 /**
- * Get user's X25519 encryption keypair, deriving from Freighter signature if needed.
+ * Get user X25519 encryption keypair, deriving from Freighter signature if needed.
  * 
  * This keypair is used with XSalsa20-Poly1305 to encrypt note data so that
  * only the recipient can see the amount and blinding factor.
@@ -248,7 +249,7 @@ export async function getEncryptionPublicKeyHex() {
 }
 
 /**
- * Get user's note identity keypair, deriving from Freighter signature if needed.
+ * Get user note identity keypair, deriving from Freighter signature if needed.
  * 
  * This keypair is used inside ZK circuits:
  * - privateKey: Proves you own the note (used in nullifier derivation)
@@ -307,7 +308,6 @@ export async function getNotePrivateKey() {
 }
 
 // Cache management
-
 /**
  * Clear all cached keypairs (call on logout or wallet disconnect).
  */
@@ -344,7 +344,6 @@ export async function initializeKeypairs() {
     return true;
 }
 
-// Internal helpers
 /**
  * Request a signature from Freighter and decode it.
  * @param {string} message - Message to sign
@@ -381,6 +380,3 @@ async function requestSignature(message, purpose) {
         return null;
     }
 }
-
-// Legacy alias for backwards compatibility
-export const clearEncryptionKeypairCache = clearKeypairCaches;
