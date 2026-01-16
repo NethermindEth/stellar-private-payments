@@ -32,8 +32,9 @@ pub struct WitnessCalculator {
     calculator: ArkWitnessCalculator,
     /// Number of variables in the witness
     witness_size: u32,
-    /// Number of public inputs
-    num_public: u32,
+    /// Number of public inputs (does not include public outputs or the constant
+    /// signal 1)
+    num_public_inputs: u32,
 }
 
 #[wasm_bindgen]
@@ -51,7 +52,7 @@ impl WitnessCalculator {
             .map_err(|e| JsValue::from_str(&format!("Failed to parse R1CS: {}", e)))?;
 
         let witness_size = r1cs_file.header.n_wires;
-        let num_public = r1cs_file.header.n_pub_in;
+        let num_public_inputs = r1cs_file.header.n_pub_in;
 
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
@@ -66,7 +67,7 @@ impl WitnessCalculator {
             store,
             calculator,
             witness_size,
-            num_public,
+            num_public_inputs,
         })
     }
 
@@ -115,23 +116,31 @@ impl WitnessCalculator {
     /// Get the number of public inputs
     #[wasm_bindgen(getter)]
     pub fn num_public_inputs(&self) -> u32 {
-        self.num_public
+        self.num_public_inputs
     }
 }
 
-/// Check, recursively, if a JSON value is an array that contains only
-/// primitives. This determines if the array should be flattened to a single key
-/// to match Circom convention.
+/// Check if a JSON value is an array containing only primitives.
 fn is_pure_array(value: &serde_json::Value) -> bool {
     use serde_json::Value;
-    match value {
-        Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Null => true,
-        Value::Array(arr) => arr.iter().all(is_pure_array),
-        Value::Object(_) => false,
+
+    let mut stack: Vec<&Value> = vec![value];
+
+    while let Some(current) = stack.pop() {
+        match current {
+            Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Null => {}
+            Value::Array(arr) => {
+                for item in arr {
+                    stack.push(item);
+                }
+            }
+            Value::Object(_) => return false,
+        }
     }
+    true
 }
 
-/// Flatten a JSON value into the inputs hashmap
+/// Flatten a JSON value into the inputs hashmap.
 ///
 /// For Circom circuits:
 /// - Multi-dimensional arrays of primitives are flattened to a single key in
@@ -144,66 +153,68 @@ fn flatten_input(
 ) -> Result<(), JsValue> {
     use serde_json::Value;
 
-    match value {
-        Value::Number(n) => {
-            let bi = if let Some(i) = n.as_u64() {
-                BigInt::from(i)
-            } else if let Some(i) = n.as_i64() {
-                BigInt::from(i)
-            } else {
-                return Err(JsValue::from_str(&format!("Invalid number for {}", key)));
-            };
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::String(s) => {
-            // Handle decimal or hex strings
-            let bi = if let Some(hex) = s.strip_prefix("0x") {
-                BigInt::parse_bytes(hex.as_bytes(), 16)
-            } else {
-                BigInt::parse_bytes(s.as_bytes(), 10)
-            };
-            let bi =
-                bi.ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::Array(arr) => {
-            // Check if this is a "pure" array (only primitives, possibly nested)
-            // Pure arrays get flattened to a single key (Circom convention for multi-dim
-            // arrays)
-            if is_pure_array(value) {
-                // Flatten all values to the same key in row-major order
-                flatten_pure_array(key, value, inputs)?;
-            } else {
-                // Array contains objects - use indexed keys with field access
-                for (idx, item) in arr.iter().enumerate() {
-                    let indexed_key = format!("{}[{}]", key, idx);
-                    flatten_input(&indexed_key, item, inputs)?;
+    // (key, value) pairs to iterate over.
+    let mut stack: Vec<(String, &Value)> = vec![(key.to_string(), value)];
+
+    while let Some((current_key, current_value)) = stack.pop() {
+        match current_value {
+            Value::Number(n) => {
+                let bi = if let Some(i) = n.as_u64() {
+                    BigInt::from(i)
+                } else if let Some(i) = n.as_i64() {
+                    BigInt::from(i)
+                } else {
+                    return Err(JsValue::from_str(&format!(
+                        "Invalid number for {}",
+                        current_key
+                    )));
+                };
+                inputs.entry(current_key).or_default().push(bi);
+            }
+            Value::String(s) => {
+                let bi = if let Some(hex) = s.strip_prefix("0x") {
+                    BigInt::parse_bytes(hex.as_bytes(), 16)
+                } else {
+                    BigInt::parse_bytes(s.as_bytes(), 10)
+                };
+                let bi = bi.ok_or_else(|| {
+                    JsValue::from_str(&format!("Invalid bigint for {}: {}", current_key, s))
+                })?;
+                inputs.entry(current_key).or_default().push(bi);
+            }
+            Value::Array(arr) => {
+                // Pure arrays get flattened to a single key as in
+                if is_pure_array(current_value) {
+                    flatten_pure_array(&current_key, current_value, inputs)?;
+                } else {
+                    //  If the array contains objects, we push indexed items in reverse order
+                    // to maintain the original order when popping
+                    for (idx, item) in arr.iter().enumerate().rev() {
+                        let indexed_key = format!("{}[{}]", current_key, idx);
+                        stack.push((indexed_key, item));
+                    }
                 }
             }
-        }
-        Value::Object(obj) => {
-            // Flatten object fields with dot notation
-            for (field, val) in obj {
-                let nested_key = format!("{}.{}", key, field);
-                flatten_input(&nested_key, val, inputs)?;
+            Value::Object(obj) => {
+                // Push object fields
+                for (field, val) in obj {
+                    let nested_key = format!("{}.{}", current_key, field);
+                    stack.push((nested_key, val));
+                }
             }
-        }
-        Value::Bool(b) => {
-            let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::Null => {
-            // Treat null as 0
-            inputs
-                .entry(key.to_string())
-                .or_default()
-                .push(BigInt::from(0));
+            Value::Bool(b) => {
+                let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
+                inputs.entry(current_key).or_default().push(bi);
+            }
+            Value::Null => {
+                inputs.entry(current_key).or_default().push(BigInt::from(0));
+            }
         }
     }
     Ok(())
 }
 
-/// Recursively flatten a pure array to a single key
+/// Flatten a pure array to a single key in row-major order.
 fn flatten_pure_array(
     key: &str,
     value: &serde_json::Value,
@@ -211,49 +222,71 @@ fn flatten_pure_array(
 ) -> Result<(), JsValue> {
     use serde_json::Value;
 
-    match value {
-        Value::Number(n) => {
-            let bi = if let Some(i) = n.as_u64() {
-                BigInt::from(i)
-            } else if let Some(i) = n.as_i64() {
-                BigInt::from(i)
-            } else {
-                return Err(JsValue::from_str(&format!("Invalid number for {}", key)));
-            };
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::String(s) => {
-            let bi = if let Some(hex) = s.strip_prefix("0x") {
-                BigInt::parse_bytes(hex.as_bytes(), 16)
-            } else {
-                BigInt::parse_bytes(s.as_bytes(), 10)
-            };
-            let bi =
-                bi.ok_or_else(|| JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s)))?;
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::Array(arr) => {
-            // Recursively flatten in row-major order
-            for item in arr {
-                flatten_pure_array(key, item, inputs)?;
+    // We use indices to maintain row-major order:
+    // each item is (array_ref, next_index_to_process).
+    // For non-array values, we process them immediately.
+    enum WorkItem<'a> {
+        Value(&'a Value),
+        ArrayIter { arr: &'a [Value], idx: usize },
+    }
+
+    let mut stack: Vec<WorkItem<'_>> = vec![WorkItem::Value(value)];
+
+    while let Some(item) = stack.pop() {
+        match item {
+            WorkItem::Value(v) => match v {
+                Value::Number(n) => {
+                    let bi = if let Some(i) = n.as_u64() {
+                        BigInt::from(i)
+                    } else if let Some(i) = n.as_i64() {
+                        BigInt::from(i)
+                    } else {
+                        return Err(JsValue::from_str(&format!("Invalid number for {}", key)));
+                    };
+                    inputs.entry(key.to_string()).or_default().push(bi);
+                }
+                Value::String(s) => {
+                    let bi = if let Some(hex) = s.strip_prefix("0x") {
+                        BigInt::parse_bytes(hex.as_bytes(), 16)
+                    } else {
+                        BigInt::parse_bytes(s.as_bytes(), 10)
+                    };
+                    let bi = bi.ok_or_else(|| {
+                        JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s))
+                    })?;
+                    inputs.entry(key.to_string()).or_default().push(bi);
+                }
+                Value::Array(arr) => {
+                    if !arr.is_empty() {
+                        stack.push(WorkItem::ArrayIter { arr, idx: 0 });
+                    }
+                }
+                Value::Bool(b) => {
+                    let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
+                    inputs.entry(key.to_string()).or_default().push(bi);
+                }
+                Value::Null => {
+                    inputs
+                        .entry(key.to_string())
+                        .or_default()
+                        .push(BigInt::from(0));
+                }
+                Value::Object(_) => {
+                    return Err(JsValue::from_str(&format!(
+                        "Unexpected object in pure array: {}",
+                        key
+                    )));
+                }
+            },
+            WorkItem::ArrayIter { arr, idx } => {
+                // Push continuation for remaining elements first
+                let next_idx = idx.saturating_add(1);
+                if next_idx < arr.len() {
+                    stack.push(WorkItem::ArrayIter { arr, idx: next_idx });
+                }
+                // Then push current element
+                stack.push(WorkItem::Value(&arr[idx]));
             }
-        }
-        Value::Bool(b) => {
-            let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
-            inputs.entry(key.to_string()).or_default().push(bi);
-        }
-        Value::Null => {
-            inputs
-                .entry(key.to_string())
-                .or_default()
-                .push(BigInt::from(0));
-        }
-        Value::Object(_) => {
-            // Should not happen for pure arrays
-            return Err(JsValue::from_str(&format!(
-                "Unexpected object in pure array: {}",
-                key
-            )));
         }
     }
     Ok(())
@@ -271,6 +304,12 @@ fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
     for bi in witness {
         // Convert BigInt to 32 LE bytes
         let (sign, mut be_bytes) = bi.to_bytes_be();
+
+        // Check it fits in 32 bytes
+        assert!(
+            be_bytes.len() <= 32,
+            "Field element exceeds 32 bytes in witness"
+        );
 
         // Handle negative numbers (should not happen in valid circuits)
         if sign == num_bigint::Sign::Minus {

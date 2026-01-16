@@ -24,7 +24,6 @@ import initProverModule, {
     decimal_to_field_bytes,
     hex_to_field_bytes,
     field_bytes_to_hex,
-    verify_proof,
     derive_keypair_from_signature,
     derive_note_private_key,
     generate_random_blinding,
