@@ -1,0 +1,34 @@
+This directory is licensed under the Apache License, Version 2.0.
+
+See the root `LICENSE-APACHE` file for the full license text.
+
+## Clarification
+
+The source code contained within this directory (`app/`) is licensed under the 
+*Apache 2.0*.
+
+This frontend application is designed to interact with compiled 
+circuit artifacts (specifically WASM modules) at runtime.
+
+### 1. Separation of Concerns
+
+The circuit artifacts are NOT present in this source directory. They are 
+generated during the build process and placed into the final distribution 
+directory (`dist/`).
+
+### 2. Dynamic Linking of *LGPLv3* Components
+
+The loaded WASM artifacts are compiled from circuit templates that may link 
+against `circomlib`, which is licensed under *LGPLv3*.
+
+The interaction between this frontend application and the WASM artifacts is 
+strictly *Dynamic Linking*:
+* The application loads the artifacts as external modules via standard 
+    WebAssembly interfaces.
+* The application does not statically include, inline, or derive source code 
+    from the *LGPLv3* circuit templates.
+
+Therefore, under the terms of the *LGPLv3*, this frontend application is 
+considered a "work that uses the library." The frontend source code remains 
+under *Apache 2.0*, while the dynamically loaded WASM artifacts remain under 
+*LGPLv3*.
