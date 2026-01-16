@@ -82,7 +82,7 @@ impl MerkleTree {
         }
 
         // Use checked shift to avoid overflow
-        let depth_u32 = depth as u32;
+        let depth_u32 = u32::try_from(depth).expect("Depth didn't fit in u32");
         let num_leaves = 1usize.checked_shl(depth_u32).ok_or_else(|| {
             JsValue::from_str("Depth too large for this platform, would overflow")
         })?;

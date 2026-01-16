@@ -6,12 +6,13 @@
 //!    off-chain. Derived from Freighter signature using SHA-256.
 //!
 //! 2. **Note Identity Keys (BN254)**: For proving ownership in ZK circuits.
-//!    Also derived from Freighter signature using SHA-256 with a different domain separation.
+//!    Also derived from Freighter signature using SHA-256 with a different
+//!    domain separation.
 //!
 //! Both key types are deterministically derived from wallet signatures,
 //! ensuring users can recover all keys using only their wallet seed phrase.
-//! Signature results are not directly used as keys, we apply a hash function over them to break
-//! any potential underlying math structure.   
+//! Signature results are not directly used as keys, we apply a hash function
+//! over them to break any potential underlying math structure.   
 //!
 //! # Key Architecture
 //!
@@ -30,14 +31,14 @@
 //! ```
 
 use alloc::{format, string::String, vec::Vec};
+use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
-use xsalsa20poly1305::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 
-/// Encryption key derivation (X25519). Used for off-chain note encryption/decryption
-/// Derive X25519 encryption keypair deterministically from a Freighter
-/// signature.
+/// Encryption key derivation (X25519). Used for off-chain note
+/// encryption/decryption Derive X25519 encryption keypair deterministically
+/// from a Freighter signature.
 ///
 /// This keypair is used for encrypting note data (amount, blinding) so that
 /// only the recipient can decrypt it. The encryption scheme is
@@ -49,7 +50,8 @@ use xsalsa20poly1305::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 /// ```
 ///
 /// # Arguments
-/// * `signature` - Stellar Ed25519 signature from signing "Sign to access Privacy Pool [v1]"
+/// * `signature` - Stellar Ed25519 signature from signing "Sign to access
+///   Privacy Pool [v1]"
 ///
 /// # Returns
 /// 64 bytes: `[public_key (32), private_key (32)]`
@@ -129,7 +131,8 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
 ///
 /// # Note
 /// Unlike the private keys above, blinding factors are NOT derived
-/// deterministically. They are random per-note and must be stored for later use.
+/// deterministically. They are random per-note and must be stored for later
+/// use.
 #[wasm_bindgen]
 pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
     let mut blinding = [0u8; 32];
@@ -207,7 +210,10 @@ fn encrypt_note_data_internal(
 
     // Pack: [ephemeral_pubkey (32)] [nonce (24)] [ciphertext + tag]
     // 32 (pubkey) + 24 (nonce) = 56 bytes overhead
-    let capacity = ciphertext.len().checked_add(56).expect("Integer overflow on encrytion output size");
+    let capacity = ciphertext
+        .len()
+        .checked_add(56)
+        .expect("Integer overflow on encryption output size");
     let mut result = Vec::with_capacity(capacity);
     result.extend_from_slice(ephemeral_public.as_bytes());
     result.extend_from_slice(&nonce_bytes);
@@ -244,7 +250,8 @@ fn decrypt_note_data_internal(
         return Err("Private key must be 32 bytes".into());
     }
 
-    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (40) + tag (16) = 112
+    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (40) + tag
+    // (16) = 112
     if encrypted_data.len() < 112 {
         return Err("Encrypted data too short".into());
     }
@@ -256,14 +263,12 @@ fn decrypt_note_data_internal(
 
     // Setup our private key
     let our_secret = StaticSecret::from(
-        *<&[u8; 32]>::try_from(private_key_bytes)
-            .map_err(|_| "Invalid private key")?,
+        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| "Invalid private key")?,
     );
 
     // ECDH: derive shared secret
     let ephemeral_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(ephemeral_pubkey)
-            .map_err(|_| "Invalid ephemeral public key")?,
+        *<&[u8; 32]>::try_from(ephemeral_pubkey).map_err(|_| "Invalid ephemeral public key")?,
     );
     let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
 
@@ -288,7 +293,7 @@ fn decrypt_note_data_internal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_derive_keypair_determinism() {
         let signature = [1u8; 64];
@@ -301,7 +306,8 @@ mod tests {
     #[test]
     fn test_encryption_roundtrip() {
         let recipient_sig = [2u8; 64];
-        let recip_keys = derive_keypair_from_signature_internal(&recipient_sig).expect("Derivation failed");
+        let recip_keys =
+            derive_keypair_from_signature_internal(&recipient_sig).expect("Derivation failed");
         let pub_key = &recip_keys[0..32];
         let priv_key = &recip_keys[32..64];
 
@@ -315,7 +321,8 @@ mod tests {
         let encrypted = encrypt_note_data_internal(pub_key, &plaintext).expect("Encryption failed");
         assert!(encrypted.len() >= 112);
 
-        let decrypted = decrypt_note_data_internal(priv_key, &encrypted).expect("Decryption failed");
+        let decrypted =
+            decrypt_note_data_internal(priv_key, &encrypted).expect("Decryption failed");
         assert_eq!(decrypted, plaintext);
     }
 
@@ -323,19 +330,22 @@ mod tests {
     fn test_decrypt_failure_wrong_key() {
         let alice_sig = [3u8; 64];
         let bob_sig = [4u8; 64];
-        
-        let alice_keys = derive_keypair_from_signature_internal(&alice_sig).expect("Derivation failed");
+
+        let alice_keys =
+            derive_keypair_from_signature_internal(&alice_sig).expect("Derivation failed");
         let bob_keys = derive_keypair_from_signature_internal(&bob_sig).expect("Derivation failed");
-        
+
         // Encrypt for Alice
         let alice_pub = &alice_keys[0..32];
         let plaintext = [0u8; 40];
-        let encrypted = encrypt_note_data_internal(alice_pub, &plaintext).expect("Encryption failed");
+        let encrypted =
+            encrypt_note_data_internal(alice_pub, &plaintext).expect("Encryption failed");
 
         // Bob tries to decrypt
         let bob_priv = &bob_keys[32..64];
-        let decrypted = decrypt_note_data_internal(bob_priv, &encrypted).expect("Decryption should handle failure gracefully");
-        
+        let decrypted = decrypt_note_data_internal(bob_priv, &encrypted)
+            .expect("Decryption should handle failure gracefully");
+
         // Should return empty vec on failure as per implementation
         assert!(decrypted.is_empty());
     }
@@ -343,7 +353,8 @@ mod tests {
     #[test]
     fn test_invalid_input_lengths() {
         let sig = [5u8; 64];
-        let keys = derive_keypair_from_signature_internal(&sig).unwrap();
+        let keys = derive_keypair_from_signature_internal(&sig)
+            .expect("Derivation failed in test_invalid_input_lengths");
         let pub_key = &keys[0..32];
 
         // Invalid plaintext length

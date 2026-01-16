@@ -24,19 +24,18 @@ circuits = { path = "../../../circuits", default-features = false }
 
 # WASM bindings
 console_error_panic_hook = { workspace = true }
+crypto_secretbox = "0.1.1"
 serde = { workspace = true }
-sha2 = "0.10"
+sha2 = { workspace = true }
 wasm-bindgen = { workspace = true }
 # Note encryption using X25519-XSalsa20-Poly1305
 x25519-dalek = { version = "2.0", features = ["static_secrets"] }
-xsalsa20poly1305 = "0.9"
 # Poseidon2 hash
 zkhash = { workspace = true }
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { workspace = true, features = ["js"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { workspace = true }
-
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
 
 [lints]
 workspace = true
