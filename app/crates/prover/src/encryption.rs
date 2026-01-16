@@ -29,7 +29,7 @@
 //!                                      └── Poseidon2 → Note Public Key
 //! ```
 
-use alloc::{format, vec::Vec};
+use alloc::{format, string::String, vec::Vec};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
@@ -55,8 +55,12 @@ use xsalsa20poly1305::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 /// 64 bytes: `[public_key (32), private_key (32)]`
 #[wasm_bindgen]
 pub fn derive_keypair_from_signature(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
+    derive_keypair_from_signature_internal(signature).map_err(|e| JsValue::from_str(&e))
+}
+
+fn derive_keypair_from_signature_internal(signature: &[u8]) -> Result<Vec<u8>, String> {
     if signature.len() != 64 {
-        return Err(JsValue::from_str("Signature must be 64 bytes (Ed25519)"));
+        return Err("Signature must be 64 bytes (Ed25519)".into());
     }
 
     // Hash signature to get a 32-byte seed
@@ -158,19 +162,24 @@ pub fn encrypt_note_data(
     recipient_pubkey_bytes: &[u8],
     plaintext: &[u8],
 ) -> Result<Vec<u8>, JsValue> {
+    encrypt_note_data_internal(recipient_pubkey_bytes, plaintext).map_err(|e| JsValue::from_str(&e))
+}
+
+fn encrypt_note_data_internal(
+    recipient_pubkey_bytes: &[u8],
+    plaintext: &[u8],
+) -> Result<Vec<u8>, String> {
     if recipient_pubkey_bytes.len() != 32 {
-        return Err(JsValue::from_str("Recipient public key must be 32 bytes"));
+        return Err("Recipient public key must be 32 bytes".into());
     }
     if plaintext.len() != 40 {
-        return Err(JsValue::from_str(
-            "Plaintext must be 40 bytes (8 amount + 32 blinding)",
-        ));
+        return Err("Plaintext must be 40 bytes (8 amount + 32 blinding)".into());
     }
 
     // Generate ephemeral secret key using getrandom directly
     let mut ephemeral_bytes = [0u8; 32];
     getrandom::getrandom(&mut ephemeral_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to generate ephemeral key: {}", e)))?;
+        .map_err(|e| format!("Failed to generate ephemeral key: {}", e))?;
 
     let ephemeral_secret = StaticSecret::from(ephemeral_bytes);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
@@ -178,7 +187,7 @@ pub fn encrypt_note_data(
     // ECDH: derive shared secret
     let recipient_public = PublicKey::from(
         *<&[u8; 32]>::try_from(recipient_pubkey_bytes)
-            .map_err(|_| JsValue::from_str("Invalid recipient public key"))?,
+            .map_err(|_| "Invalid recipient public key")?,
     );
     let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
 
@@ -188,17 +197,17 @@ pub fn encrypt_note_data(
     // Generate random nonce (24 bytes for XSalsa20) using getrandom
     let mut nonce_bytes = [0u8; 24];
     getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to generate nonce: {}", e)))?;
+        .map_err(|e| format!("Failed to generate nonce: {}", e))?;
     let nonce = Nonce::from(nonce_bytes);
 
     // Encrypt plaintext
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
-        .map_err(|e| JsValue::from_str(&format!("Encryption failed: {:?}", e)))?;
+        .map_err(|e| format!("Encryption failed: {:?}", e))?;
 
     // Pack: [ephemeral_pubkey (32)] [nonce (24)] [ciphertext + tag]
     // 32 (pubkey) + 24 (nonce) = 56 bytes overhead
-    let capacity = ciphertext.len().checked_add(56)?;
+    let capacity = ciphertext.len().checked_add(56).expect("Integer overflow on encrytion output size");
     let mut result = Vec::with_capacity(capacity);
     result.extend_from_slice(ephemeral_public.as_bytes());
     result.extend_from_slice(&nonce_bytes);
@@ -224,13 +233,20 @@ pub fn decrypt_note_data(
     private_key_bytes: &[u8],
     encrypted_data: &[u8],
 ) -> Result<Vec<u8>, JsValue> {
+    decrypt_note_data_internal(private_key_bytes, encrypted_data).map_err(|e| JsValue::from_str(&e))
+}
+
+fn decrypt_note_data_internal(
+    private_key_bytes: &[u8],
+    encrypted_data: &[u8],
+) -> Result<Vec<u8>, String> {
     if private_key_bytes.len() != 32 {
-        return Err(JsValue::from_str("Private key must be 32 bytes"));
+        return Err("Private key must be 32 bytes".into());
     }
 
     // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (40) + tag (16) = 112
     if encrypted_data.len() < 112 {
-        return Err(JsValue::from_str("Encrypted data too short"));
+        return Err("Encrypted data too short".into());
     }
 
     // Extract components
@@ -241,13 +257,13 @@ pub fn decrypt_note_data(
     // Setup our private key
     let our_secret = StaticSecret::from(
         *<&[u8; 32]>::try_from(private_key_bytes)
-            .map_err(|_| JsValue::from_str("Invalid private key"))?,
+            .map_err(|_| "Invalid private key")?,
     );
 
     // ECDH: derive shared secret
     let ephemeral_public = PublicKey::from(
         *<&[u8; 32]>::try_from(ephemeral_pubkey)
-            .map_err(|_| JsValue::from_str("Invalid ephemeral public key"))?,
+            .map_err(|_| "Invalid ephemeral public key")?,
     );
     let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
 
@@ -266,5 +282,76 @@ pub fn decrypt_note_data(
             // Decryption failed - this note output is not for us
             Ok(Vec::new()) // Return empty vec
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    
+    #[test]
+    fn test_derive_keypair_determinism() {
+        let signature = [1u8; 64];
+        let keys1 = derive_keypair_from_signature_internal(&signature).expect("Derivation failed");
+        let keys2 = derive_keypair_from_signature_internal(&signature).expect("Derivation failed");
+        assert_eq!(keys1, keys2);
+        assert_eq!(keys1.len(), 64);
+    }
+
+    #[test]
+    fn test_encryption_roundtrip() {
+        let recipient_sig = [2u8; 64];
+        let recip_keys = derive_keypair_from_signature_internal(&recipient_sig).expect("Derivation failed");
+        let pub_key = &recip_keys[0..32];
+        let priv_key = &recip_keys[32..64];
+
+        // 8 bytes amount + 32 bytes blinding = 40 bytes
+        let amount = [10u8; 8];
+        let blinding = [20u8; 32];
+        let mut plaintext = Vec::with_capacity(40);
+        plaintext.extend_from_slice(&amount);
+        plaintext.extend_from_slice(&blinding);
+
+        let encrypted = encrypt_note_data_internal(pub_key, &plaintext).expect("Encryption failed");
+        assert!(encrypted.len() >= 112);
+
+        let decrypted = decrypt_note_data_internal(priv_key, &encrypted).expect("Decryption failed");
+        assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_decrypt_failure_wrong_key() {
+        let alice_sig = [3u8; 64];
+        let bob_sig = [4u8; 64];
+        
+        let alice_keys = derive_keypair_from_signature_internal(&alice_sig).expect("Derivation failed");
+        let bob_keys = derive_keypair_from_signature_internal(&bob_sig).expect("Derivation failed");
+        
+        // Encrypt for Alice
+        let alice_pub = &alice_keys[0..32];
+        let plaintext = [0u8; 40];
+        let encrypted = encrypt_note_data_internal(alice_pub, &plaintext).expect("Encryption failed");
+
+        // Bob tries to decrypt
+        let bob_priv = &bob_keys[32..64];
+        let decrypted = decrypt_note_data_internal(bob_priv, &encrypted).expect("Decryption should handle failure gracefully");
+        
+        // Should return empty vec on failure as per implementation
+        assert!(decrypted.is_empty());
+    }
+
+    #[test]
+    fn test_invalid_input_lengths() {
+        let sig = [5u8; 64];
+        let keys = derive_keypair_from_signature_internal(&sig).unwrap();
+        let pub_key = &keys[0..32];
+
+        // Invalid plaintext length
+        let res = encrypt_note_data_internal(pub_key, &[0u8; 39]);
+        assert!(res.is_err());
+
+        // Invalid pubkey length
+        let res = encrypt_note_data_internal(&[0u8; 31], &[0u8; 40]);
+        assert!(res.is_err());
     }
 }

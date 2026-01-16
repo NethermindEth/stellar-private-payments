@@ -10,7 +10,7 @@
 
 import * as db from './db.js';
 import { createMerkleTree } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex } from './utils.js';
+import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex, reverseBytes } from './utils.js';
 
 const POOL_TREE_DEPTH = 20;
 
@@ -44,23 +44,24 @@ let merkleTree = null;
  */
 export async function init() {
     merkleTree = createMerkleTree(POOL_TREE_DEPTH);
-    
+
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
     let expectedIndex = 0;
-    
+
     await db.iterate('pool_leaves', (leaf) => {
         // Verify sequential ordering (merkle tree requires ordered insertion)
         if (leaf.index !== expectedIndex) {
             console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
         }
-        
+
         const commitmentBytes = hexToBytes(leaf.commitment);
-        merkleTree.insert(commitmentBytes);
+        // Reverse bytes: DB has BE hex (from Soroban), but Merkle Tree (Arkworks) needs LE bytes
+        merkleTree.insert(reverseBytes(commitmentBytes));
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
-    
+
     console.log(`[PoolStore] Initialized with ${leafCount} leaves`);
 }
 
@@ -77,28 +78,29 @@ export async function processNewCommitment(event, ledger) {
     const commitment = normalizeU256ToHex(event.commitment);
     const index = event.index;
     const encryptedOutput = event.encryptedOutput;
-    
+
     // Store leaf
     await db.put('pool_leaves', {
         index,
         commitment,
         ledger,
     });
-    
+
     // Store encrypted output for note detection
     await db.put('pool_encrypted_outputs', {
         commitment,
         index,
-        encryptedOutput: typeof encryptedOutput === 'string' 
-            ? encryptedOutput 
+        encryptedOutput: typeof encryptedOutput === 'string'
+            ? encryptedOutput
             : bytesToHex(encryptedOutput),
         ledger,
     });
-    
+
     // Update merkle tree
     if (merkleTree) {
         const commitmentBytes = hexToBytes(commitment);
-        merkleTree.insert(commitmentBytes);
+        // Reverse bytes: Event sends BE hex, Merkle Tree needs LE bytes
+        merkleTree.insert(reverseBytes(commitmentBytes));
     }
 }
 
@@ -111,7 +113,7 @@ export async function processNewCommitment(event, ledger) {
  */
 export async function processNewNullifier(event, ledger) {
     const nullifier = normalizeU256ToHex(event.nullifier);
-    
+
     await db.put('pool_nullifiers', {
         nullifier,
         ledger,
@@ -127,10 +129,10 @@ export async function processNewNullifier(event, ledger) {
 export async function processEvents(events, ledger) {
     let commitments = 0;
     let nullifiers = 0;
-    
+
     for (const event of events) {
         const eventType = event.topic?.[0];
-        
+
         if (eventType === 'NewCommitmentEvent' || eventType === 'new_commitment') {
             await processNewCommitment({
                 commitment: event.value?.commitment || event.topic?.[1],
@@ -145,7 +147,7 @@ export async function processEvents(events, ledger) {
             nullifiers++;
         }
     }
-    
+
     return { commitments, nullifiers };
 }
 
@@ -191,11 +193,11 @@ export async function isNullifierSpent(nullifier) {
  */
 export async function getEncryptedOutputs(fromLedger) {
     const outputs = await db.getAll('pool_encrypted_outputs');
-    
+
     if (fromLedger === undefined) {
         return outputs;
     }
-    
+
     return outputs.filter(o => o.ledger >= fromLedger);
 }
 

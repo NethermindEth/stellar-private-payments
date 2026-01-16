@@ -92,3 +92,12 @@ export function normalizeU256ToHex(value) {
     }
     return String(value);
 }
+
+/**
+ * Reverses a Uint8Array in place and returns it.
+ * @param {Uint8Array} bytes
+ * @returns {Uint8Array}
+ */
+export function reverseBytes(bytes) {
+    return bytes.reverse();
+}
