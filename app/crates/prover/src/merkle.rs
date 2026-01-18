@@ -171,7 +171,7 @@ impl MerkleTree {
     /// Get merkle proof for a leaf at given index
     #[wasm_bindgen]
     pub fn get_proof(&self, index: u32) -> Result<MerkleProof, JsValue> {
-        let index = index as usize;
+        let index = usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
         let max_leaves = 1usize << self.depth;
 
         if index >= max_leaves {
