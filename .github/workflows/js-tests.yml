@@ -20,6 +20,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
         working-directory: app
+      - name: Debug witness files
+        run: |
+          ls -la js || true
+          ls -la js/witness || true
+          find . -maxdepth 4 -type f -iname "*witness*" -print
+        working-directory: app
+
       - name: Run tests
         run: npm test
         working-directory: app
