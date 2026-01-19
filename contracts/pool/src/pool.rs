@@ -406,6 +406,20 @@ impl PoolContract {
             &proof.public_amount,
         )));
         public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
+
+        for nullifier in proof.input_nullifiers.iter() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+        }
+
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment0,
+        )));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment1,
+        )));
+
         // Add compliance roots. Order is important.
         for _ in 0..proof.input_nullifiers.len() {
             public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
@@ -419,19 +433,13 @@ impl PoolContract {
                 &proof.asp_non_membership_root,
             )));
         }
-        for nullifier in proof.input_nullifiers.iter() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
-        }
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment0,
-        )));
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment1,
-        )));
 
-        let is_valid = client.verify(&proof.proof, &public_inputs);
+        let res = client.try_verify(&proof.proof, &public_inputs);
+
+        let is_valid = match res {
+            Ok(Ok(v)) => v,   // verifier returned Ok(true/false)
+            _ => false,       // verifier errored/trapped => treat as invalid
+        };
 
         Ok(is_valid)
     }

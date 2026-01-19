@@ -57,6 +57,13 @@
       border-radius: 12px;
       padding: 16px;
     }
+    .panel-title {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: #94a3b8;
+      margin: 0 0 8px;
+    }
     pre {
       margin: 0;
       white-space: pre-wrap;
@@ -75,6 +82,10 @@
     <div class="controls">
       <button id="btnConnect">Connect Freighter</button>
       <button id="btnSend" disabled>Generate Proof + Send Deposit</button>
+    </div>
+    <div class="panel">
+      <div class="panel-title">Deployed Contracts</div>
+      <pre id="contracts" class="muted">Loading deployments...</pre>
     </div>
     <div class="panel">
       <pre id="log" class="muted"></pre>
@@ -115,6 +126,7 @@
 
     const statusEl = document.getElementById('status');
     const logEl = document.getElementById('log');
+    const contractsEl = document.getElementById('contracts');
     const btnConnect = document.getElementById('btnConnect');
     const btnSend = document.getElementById('btnSend');
 
@@ -136,8 +148,90 @@
       logEl.scrollTop = logEl.scrollHeight;
     }
 
+    function toLogValue(value) {
+      if (value instanceof Uint8Array) {
+        return bytesToHex(value);
+      }
+      if (typeof value === 'bigint') {
+        return value.toString();
+      }
+      if (Array.isArray(value)) {
+        return value.map(item => toLogValue(item));
+      }
+      if (value && typeof value === 'object') {
+        const out = {};
+        for (const [key, val] of Object.entries(value)) {
+          out[key] = toLogValue(val);
+        }
+        return out;
+      }
+      return value;
+    }
+
+    function logObject(label, value) {
+      const logged = toLogValue(value);
+      log(`${label}: ${JSON.stringify(logged)}`);
+      console.log(label, logged);
+    }
+
+    function logError(context, err) {
+      const details = err?.message || err;
+      const message = context ? `${context}: ${details}` : `${details}`;
+      log(`Error: ${message}`);
+      if (err) {
+        console.error(message, err);
+      } else {
+        console.error(message);
+      }
+    }
+
+    function renderDeployments(contracts) {
+      if (!contractsEl) return;
+      if (!contracts) {
+        contractsEl.textContent = 'No deployments loaded.';
+        return;
+      }
+      const lines = [
+        `network: ${contracts.network || 'unknown'}`,
+        `admin: ${contracts.admin || 'unknown'}`,
+        `pool: ${contracts.pool || 'unknown'}`,
+        `asp_membership: ${contracts.asp_membership || 'unknown'}`,
+        `asp_non_membership: ${contracts.asp_non_membership || 'unknown'}`,
+        `verifier: ${contracts.verifier || 'unknown'}`,
+      ];
+      contractsEl.textContent = lines.join('\n');
+    }
+
     function bytesToHex(bytes) {
       return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+    }
+
+    function isSymbolSmall(value) {
+      if (value.length > 9) return false;
+      for (let i = 0; i < value.length; i++) {
+        const code = value.charCodeAt(i);
+        const isUnderscore = code === 95;
+        const isDigit = code >= 48 && code <= 57;
+        const isUpper = code >= 65 && code <= 90;
+        const isLower = code >= 97 && code <= 122;
+        if (!isUnderscore && !isDigit && !isUpper && !isLower) {
+          return false;
+        }
+      }
+      return true;
+    }
+
+    function compareSymbolKeys(a, b) {
+      if (a === b) return 0;
+      return a < b ? -1 : 1;
+    }
+
+    function isWasmMagic(bytes) {
+      return bytes.length >= 4 &&
+        bytes[0] === 0x00 &&
+        bytes[1] === 0x61 &&
+        bytes[2] === 0x73 &&
+        bytes[3] === 0x6d;
     }
 
     function bytesToBigIntLE(bytes) {
@@ -284,26 +378,33 @@
     function hashExtData(extData) {
       const { xdr, Address, XdrLargeInt } = window.StellarSdk;
       const entries = [
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('recipient'),
+        {
+          key: 'recipient',
           val: Address.fromString(extData.recipient).toScVal(),
-        }),
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('ext_amount'),
+        },
+        {
+          key: 'ext_amount',
           val: new XdrLargeInt('i256', extData.ext_amount.toString()).toScVal(),
-        }),
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('encrypted_output0'),
+        },
+        {
+          key: 'encrypted_output0',
           val: xdr.ScVal.scvBytes(extData.encrypted_output0),
-        }),
-        new xdr.ScMapEntry({
-          key: xdr.ScVal.scvSymbol('encrypted_output1'),
+        },
+        {
+          key: 'encrypted_output1',
           val: xdr.ScVal.scvBytes(extData.encrypted_output1),
-        }),
+        },
       ];
-      const scVal = xdr.ScVal.scvMap(entries);
+      entries.sort((a, b) => compareSymbolKeys(a.key, b.key));
+      log(`ExtData field order: ${entries.map(entry => entry.key).join(', ')}`);
+      const scEntries = entries.map(entry => new xdr.ScMapEntry({
+        key: xdr.ScVal.scvSymbol(entry.key),
+        val: entry.val,
+      }));
+      const scVal = xdr.ScVal.scvMap(scEntries);
       const xdrRaw = scVal.toXDR();
       const xdrBytes = xdrRaw instanceof Uint8Array ? xdrRaw : new Uint8Array(xdrRaw);
+      log(`ExtData XDR bytes: ${xdrBytes.length}`);
       const digest = keccak256(xdrBytes);
       const digestBig = bytesToBigIntBE(digest);
       const reduced = digestBig % BN256_MOD;
@@ -368,21 +469,39 @@
         throw new Error(`Failed to load deployments.json: ${response.status}`);
       }
       state.contracts = await response.json();
+      renderDeployments(state.contracts);
       return state.contracts;
     }
 
     async function loadPoolClient(clientOpts, contractId) {
       if (state.poolClient) return state.poolClient;
+      log('Loading pool.wasm from ./pool.wasm...');
       const response = await fetch('./pool.wasm');
       if (!response.ok) {
         throw new Error(`Failed to load pool.wasm: ${response.status}`);
       }
+      const contentType = response.headers.get('content-type') || 'unknown';
+      log(`pool.wasm response: ${response.status} ${response.statusText} (content-type: ${contentType})`);
       const wasmBytes = new Uint8Array(await response.arrayBuffer());
+      log(`pool.wasm size: ${wasmBytes.length} bytes`);
+      const header = wasmBytes.slice(0, 8);
+      log(`pool.wasm header: ${bytesToHex(header)}`);
+      if (!isWasmMagic(wasmBytes)) {
+        if (header[0] === 0x3c) {
+          log('pool.wasm starts with "<" which often means HTML was returned (404 or index page)');
+        }
+        throw new Error('pool.wasm does not start with WASM magic bytes');
+      }
       const { Client } = window.StellarSdk.contract;
-      state.poolClient = await Client.fromWasm(wasmBytes, {
-        ...clientOpts,
-        contractId,
-      });
+      try {
+        state.poolClient = await Client.fromWasm(wasmBytes, {
+          ...clientOpts,
+          contractId,
+        });
+      } catch (err) {
+        log(`Client.fromWasm failed: ${err.message}`);
+        throw err;
+      }
       return state.poolClient;
     }
 
@@ -583,6 +702,7 @@
       };
 
       setStatus('Generating witness and proof...');
+      console.log("CIRCUIT_INPUTS_JSON=", JSON.stringify(circuitInputs, null, 2));
       const witnessBytes = await generateWitness(circuitInputs);
       const proofBytes = generateProofBytes(witnessBytes);
       log(`Proof bytes (compressed): ${proofBytes.length} bytes`);
@@ -615,6 +735,10 @@
         asp_non_membership_root: nonMembershipRoot,
       };
 
+      logObject('Transact proof', proof);
+      logObject('Transact ext_data', extData);
+      logObject('Transact sender', state.address);
+
       setStatus('Sending transaction...');
       const tx = await poolClient.transact({
         proof,
@@ -634,6 +758,14 @@
       if (keccakEmpty !== '0xc5d2460186f7233c927e7db2dcc703c0e500b653ca82273b7bfad8045d85a470') {
         throw new Error('Keccak self-check failed');
       }
+      try {
+        await loadDeployments();
+      } catch (err) {
+        if (contractsEl) {
+          contractsEl.textContent = `Failed to load deployments.json: ${err.message}`;
+        }
+        logError('Failed to load deployments.json', err);
+      }
       setStatus('Ready');
     }
 
@@ -646,7 +778,7 @@
         setStatus('Wallet connected');
       } catch (err) {
         setStatus('Wallet connection failed');
-        log(`Error: ${err.message}`);
+        logError('Wallet connection failed', err);
       }
     });
 
@@ -656,7 +788,7 @@
         await generateAndSend();
       } catch (err) {
         setStatus('Transaction failed');
-        log(`Error: ${err.message}`);
+        logError('Transaction failed', err);
       } finally {
         btnSend.disabled = false;
       }
@@ -664,7 +796,7 @@
 
     init().catch(err => {
       setStatus('Initialization failed');
-      log(`Error: ${err.message}`);
+      logError('Initialization failed', err);
     });
   </script>
 </body>

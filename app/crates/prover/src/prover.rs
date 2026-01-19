@@ -27,6 +27,7 @@ use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
 use wasm_bindgen::prelude::*;
+use ark_ff::PrimeField;
 
 /// A circuit that replays R1CS constraints with pre-computed witness
 ///
