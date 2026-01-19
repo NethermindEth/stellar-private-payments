@@ -52,7 +52,8 @@ export async function init() {
     await db.iterate('pool_leaves', (leaf) => {
         // Verify sequential ordering (merkle tree requires ordered insertion)
         if (leaf.index !== expectedIndex) {
-            console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+            console.error(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+            throw new Error('[PoolStore] Gap in leaf indices, aborting init');
         }
 
         const commitmentBytes = hexToBytes(leaf.commitment);
@@ -98,9 +99,15 @@ export async function processNewCommitment(event, ledger) {
 
     // Update merkle tree
     if (merkleTree) {
+        // Enforce ordering
+        if (index !== merkleTree.next_index()) {
+            throw new Error(`Out-of-order insertion: expected ${merkleTree.next_index()}, got ${index}`);
+        }
+
         const commitmentBytes = hexToBytes(commitment);
         // Reverse bytes: Event sends BE hex, Merkle Tree needs LE bytes
-        merkleTree.insert(reverseBytes(commitmentBytes));
+        merkleTree.insert(reverseBytes(commitmentBytes));       
+        
     }
 }
 

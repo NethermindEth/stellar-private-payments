@@ -172,6 +172,10 @@ export async function signWalletMessage(message, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
     }
+    // If SignMessage returns null
+    if (!signedMessage) {
+        throw new Error('No signature returned. Probably the used rejected');
+    }   
 
     return { signedMessage, signerAddress };
 }

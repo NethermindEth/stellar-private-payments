@@ -412,6 +412,10 @@ export const StateManager = {
             source.off(event, handler);
         }
         forwardedSyncListeners = [];
+
+        // Force clean of StateManager's own listeners
+        eventListeners = [];
+        
         syncController.clearUserKeys();
         db.close();
         initialized = false;

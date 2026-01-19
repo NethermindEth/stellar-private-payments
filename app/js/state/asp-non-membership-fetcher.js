@@ -7,7 +7,7 @@
 
 import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
 import { xdr, Address, TransactionBuilder, Account } from '@stellar/stellar-sdk';
-import { bytesToHex } from './utils.js';
+import {bytesToHex, hexToBytes} from './utils.js';
 
 /**
  * @typedef {Object} SMTNonMembershipProof
@@ -34,7 +34,7 @@ export async function fetchRoot() {
         const contractId = contracts.aspNonMembership;
         
         // Build the ledger key for Root
-        const rootKey = xdr.ScVal.scvVec([xdr.ScVal.scvSymbol('Root')]);
+        const rootKey = xdr.ScVal.scvSymbol('Root');
         const ledgerKey = xdr.LedgerKey.contractData(
             new xdr.LedgerKeyContractData({
                 contract: new Address(contractId).toScAddress(),
@@ -134,9 +134,11 @@ export async function fetchNonMembershipProof(key) {
             
             // Build non-membership proof
             const proof = {
-                root: await fetchRoot().then(r => r.root),
-                key: keyHex,
-                siblings: findResult.siblings || [],
+                root: hexToBytes(await fetchRoot().then(r => r.root)),
+                key: hexToBytes(keyHex),
+                siblings: (findResult.siblings || []).map(s =>
+                    typeof s === 'string' ? hexToBytes(s) : s
+                ),
                 notFoundKey: findResult.not_found_key || findResult.notFoundKey,
                 notFoundValue: findResult.not_found_value || findResult.notFoundValue,
                 isOld0: findResult.is_old0 || findResult.isOld0,

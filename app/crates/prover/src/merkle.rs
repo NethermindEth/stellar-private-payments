@@ -71,7 +71,6 @@ pub struct MerkleTree {
 
 // TODO: For now we implement a full merkle tree for quick prototyping. We
 // should implement a partial merkle tree next to minimize storage on user side
-
 #[wasm_bindgen]
 impl MerkleTree {
     /// Create a new Merkle tree with given depth

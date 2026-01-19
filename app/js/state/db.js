@@ -276,7 +276,7 @@ export async function iterate(storeName, callback, options = {}) {
     const store = tx.objectStore(storeName);
     const request = store.openCursor(options.query, options.direction);
 
-    return new Promise((resolve, reject) => {
+    let result = new Promise((resolve, reject) => {
         request.onsuccess = () => {
             const cursor = request.result;
             if (cursor) {
@@ -292,6 +292,9 @@ export async function iterate(storeName, callback, options = {}) {
         };
         request.onerror = () => reject(request.error);
     });
+
+    await promisifyTransaction(tx);
+    return result;
 }
 
 /**

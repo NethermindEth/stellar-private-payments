@@ -41,7 +41,8 @@ export async function init() {
     
     await db.iterate('asp_membership_leaves', (leaf) => {
         if (leaf.index !== expectedIndex) {
-            console.warn(`[ASPMembershipStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+            console.error(`[ASPMembershipStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+            throw new Error('[ASPMembershipStore] Gap in leaf indices, aborting init');
         }
         
         const leafBytes = hexToBytes(leaf.leaf);
@@ -77,8 +78,21 @@ export async function processLeafAdded(event, ledger) {
     
     // Update merkle tree
     if (merkleTree) {
+        // Enforce ordering
+        if (index !== merkleTree.next_index()) {
+            throw new Error(`Out-of-order insertion: expected ${merkleTree.next_index()}, got ${index}`);
+        }
+        
         const leafBytes = hexToBytes(leaf);
         merkleTree.insert(leafBytes);
+        // Check we get the same root after insertion
+        const computedRoot = bytesToHex(merkleTree.root());
+        if (computedRoot !== root) {
+            console.error(`[ASPMembershipStore] Root mismatch after insert at index ${index}`);
+            console.error(`  Expected: ${root}`);
+            console.error(`  Computed: ${computedRoot}`);
+            throw new Error('[ASPMembershipStore] Root mismatch after insert. Corrupted state. Aborting');
+        }
     }
 }
 

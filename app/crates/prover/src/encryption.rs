@@ -35,6 +35,9 @@
 //! ```
 
 use alloc::{format, string::String, vec::Vec};
+use ark_bn254::Fr;
+use ark_ff::PrimeField;
+use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use sha2::{Digest, Sha256};
 use wasm_bindgen::prelude::*;
@@ -113,12 +116,21 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
     }
 
     // Hash signature to get 32-byte key
-    // SHA-256 output is always < BN254 field modulus, so no reduction needed
+    // As SHA-256 might be larger than BN254 field, we apply module reduction.
     let mut hasher = Sha256::new();
     hasher.update(signature);
     let key = hasher.finalize();
 
-    Ok(key.to_vec())
+    // Reduce to BN254 module
+    let field = Fr::from_le_bytes_mod_order(&key);
+
+    // Serialize into bytes
+    let mut result: Vec<u8> = Vec::with_capacity(32);
+    field
+        .serialize_compressed(&mut result)
+        .expect("Serialization failed");
+
+    Ok(result)
 }
 
 /// Generate a cryptographically random blinding factor for a note.
