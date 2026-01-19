@@ -1,3 +1,7 @@
+// Mock WASM modules that bridge.js imports
+jest.mock('../prover.js', () => require('../__mocks__/prover.js'), { virtual: true });
+jest.mock('../witness/witness.js', () => require('../__mocks__/witness.js'), { virtual: true });
+
 jest.mock('../wallet.js', () => ({
   __esModule: true,
   connectWallet: jest.fn(),
