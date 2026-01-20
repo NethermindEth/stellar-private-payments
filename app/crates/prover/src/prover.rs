@@ -16,6 +16,7 @@ use crate::{
 };
 use alloc::{format, vec::Vec};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
+use ark_ff::PrimeField;
 use ark_ff::{AdditiveGroup, BigInteger, Field};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
@@ -27,7 +28,6 @@ use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
 use wasm_bindgen::prelude::*;
-use ark_ff::PrimeField;
 
 /// A circuit that replays R1CS constraints with pre-computed witness
 ///

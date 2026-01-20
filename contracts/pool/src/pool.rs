@@ -603,14 +603,14 @@ impl PoolContract {
             index: idx_0,
             encrypted_output: ext_data.encrypted_output0.clone(),
         }
-            .publish(env);
+        .publish(env);
 
         NewCommitmentEvent {
             commitment: proof.output_commitment1,
             index: idx_1,
             encrypted_output: ext_data.encrypted_output1.clone(),
         }
-            .publish(env);
+        .publish(env);
 
         Ok(())
     }
@@ -631,7 +631,7 @@ impl PoolContract {
             owner: account.owner,
             key: account.public_key,
         }
-            .publish(&env);
+        .publish(&env);
     }
 
     // ========== Storage Getters and Setters ==========
