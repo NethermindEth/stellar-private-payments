@@ -406,20 +406,6 @@ impl PoolContract {
             &proof.public_amount,
         )));
         public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
-
-        for nullifier in proof.input_nullifiers.iter() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
-        }
-
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment0,
-        )));
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment1,
-        )));
-
         // Add compliance roots. Order is important.
         for _ in 0..proof.input_nullifiers.len() {
             public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
@@ -433,13 +419,19 @@ impl PoolContract {
                 &proof.asp_non_membership_root,
             )));
         }
+        for nullifier in proof.input_nullifiers.iter() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+        }
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment0,
+        )));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment1,
+        )));
 
-        let res = client.try_verify(&proof.proof, &public_inputs);
-
-        let is_valid = match res {
-            Ok(Ok(v)) => v,   // verifier returned Ok(true/false)
-            _ => false,       // verifier errored/trapped => treat as invalid
-        };
+        let is_valid = client.verify(&proof.proof, &public_inputs);
 
         Ok(is_valid)
     }
@@ -611,14 +603,14 @@ impl PoolContract {
             index: idx_0,
             encrypted_output: ext_data.encrypted_output0.clone(),
         }
-        .publish(env);
+            .publish(env);
 
         NewCommitmentEvent {
             commitment: proof.output_commitment1,
             index: idx_1,
             encrypted_output: ext_data.encrypted_output1.clone(),
         }
-        .publish(env);
+            .publish(env);
 
         Ok(())
     }
@@ -639,7 +631,7 @@ impl PoolContract {
             owner: account.owner,
             key: account.public_key,
         }
-        .publish(&env);
+            .publish(&env);
     }
 
     // ========== Storage Getters and Setters ==========
