@@ -226,14 +226,6 @@
       return a < b ? -1 : 1;
     }
 
-    function isWasmMagic(bytes) {
-      return bytes.length >= 4 &&
-        bytes[0] === 0x00 &&
-        bytes[1] === 0x61 &&
-        bytes[2] === 0x73 &&
-        bytes[3] === 0x6d;
-    }
-
     function bytesToBigIntLE(bytes) {
       let result = 0n;
       for (let i = bytes.length - 1; i >= 0; i--) {
@@ -475,31 +467,12 @@
 
     async function loadPoolClient(clientOpts, contractId) {
       if (state.poolClient) return state.poolClient;
-      log('Loading pool.wasm from ./pool.wasm...');
-      const response = await fetch('./pool.wasm');
-      if (!response.ok) {
-        throw new Error(`Failed to load pool.wasm: ${response.status}`);
-      }
-      const contentType = response.headers.get('content-type') || 'unknown';
-      log(`pool.wasm response: ${response.status} ${response.statusText} (content-type: ${contentType})`);
-      const wasmBytes = new Uint8Array(await response.arrayBuffer());
-      log(`pool.wasm size: ${wasmBytes.length} bytes`);
-      const header = wasmBytes.slice(0, 8);
-      log(`pool.wasm header: ${bytesToHex(header)}`);
-      if (!isWasmMagic(wasmBytes)) {
-        if (header[0] === 0x3c) {
-          log('pool.wasm starts with "<" which often means HTML was returned (404 or index page)');
-        }
-        throw new Error('pool.wasm does not start with WASM magic bytes');
-      }
       const { Client } = window.StellarSdk.contract;
       try {
-        state.poolClient = await Client.fromWasm(wasmBytes, {
-          ...clientOpts,
-          contractId,
-        });
+        log('Loading pool contract spec from RPC...');
+        state.poolClient = await Client.from({ ...clientOpts, contractId });
       } catch (err) {
-        log(`Client.fromWasm failed: ${err.message}`);
+        log(`Client.from failed: ${err.message}`);
         throw err;
       }
       return state.poolClient;

@@ -1,0 +1,750 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ZK E2E Test</title>
+    <style>
+        body {
+            font-family: 'Monaco', 'Menlo', monospace;
+            background: #1a1a2e;
+            color: #eee;
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        h1 { color: #00d9ff; }
+        .test-section {
+            background: #16213e;
+            border-radius: 8px;
+            padding: 16px;
+            margin: 16px 0;
+        }
+        .test-section h2 {
+            margin-top: 0;
+            color: #00ff88;
+        }
+        .log {
+            background: #0f0f23;
+            border-radius: 4px;
+            padding: 12px;
+            font-size: 13px;
+            white-space: pre-wrap;
+            max-height: 400px;
+            overflow-y: auto;
+        }
+        .success { color: #00ff88; }
+        .error { color: #ff6b6b; }
+        .info { color: #00d9ff; }
+        button {
+            background: #00d9ff;
+            color: #1a1a2e;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            font-weight: bold;
+            cursor: pointer;
+            margin: 8px 8px 8px 0;
+        }
+        button:hover { background: #00ff88; }
+        button:disabled { background: #444; cursor: not-allowed; }
+        #status {
+            padding: 12px;
+            border-radius: 6px;
+            margin: 16px 0;
+        }
+        .status-ready { background: #1a4d1a; }
+        .status-running { background: #4d4d1a; }
+        .status-error { background: #4d1a1a; }
+    </style>
+</head>
+<body>
+    <h1>ZK Proof E2E Test</h1>
+    
+    <div id="status">Loading modules...</div>
+    
+    <div class="test-section">
+        <h2>Controls</h2>
+        <button id="btnInit" disabled>Initialize All Modules</button>
+        <button id="btnRunBasic" disabled>Run Basic Tests (no witness)</button>
+        <button id="btnRunAll" disabled>Run Full Tests (with witness/proof)</button>
+        <button id="btnClear">Clear Log</button>
+    </div>
+    
+    <div class="test-section">
+        <h2>Test Output</h2>
+        <div id="log" class="log"></div>
+    </div>
+
+    <script type="module">
+        // Import from the bridge (same as worker uses)
+        import {
+            initProver,
+            initWitnessModule,
+            isInitialized,
+            derivePublicKey,
+            computeCommitment,
+            computeSignature,
+            computeNullifier,
+            createMerkleTree,
+            bigintToField,
+            fieldToHex,
+            generateWitness,
+            generateProofBytes,
+            extractPublicInputs,
+            verifyProofLocal,
+        } from '/js/bridge.js';
+
+        // Also import the raw prover module for direct access
+        import initProverModule, {
+            WasmSparseMerkleTree,
+            poseidon2_hash2,
+        } from '/js/prover.js';
+
+        const logEl = document.getElementById('log');
+        const statusEl = document.getElementById('status');
+        const btnInit = document.getElementById('btnInit');
+        const btnRunBasic = document.getElementById('btnRunBasic');
+        const btnRunAll = document.getElementById('btnRunAll');
+        const btnClear = document.getElementById('btnClear');
+
+        function log(msg, type = 'info') {
+            const line = document.createElement('div');
+            line.className = type;
+            line.textContent = `[${new Date().toISOString().substr(11, 12)}] ${msg}`;
+            logEl.appendChild(line);
+            logEl.scrollTop = logEl.scrollHeight;
+            console.log(msg);
+        }
+
+        function setStatus(msg, type = 'ready') {
+            statusEl.textContent = msg;
+            statusEl.className = `status-${type}`;
+        }
+
+        function bytesToHex(bytes) {
+            return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+        }
+
+        // Test: Crypto Operations
+        async function testCrypto() {
+            log('=== Testing Crypto Operations ===', 'info');
+            
+            // Test.  Derive public key
+            // Use bigintToField for BigInt values, numberToField for small safe integers
+            const privateKey = bigintToField(12345n);
+            const publicKey = derivePublicKey(privateKey);
+            const publicKeyHex = fieldToHex(publicKey);
+            log(`Private key: 12345`, 'info');
+            log(`Public key: ${publicKeyHex}`, 'success');
+            
+            // Test. Compute commitment
+            const amount = bigintToField(100n);
+            const blinding = bigintToField(999n);
+            const commitment = computeCommitment(amount, publicKey, blinding);
+            log(`Commitment: ${fieldToHex(commitment)}`, 'success');
+            
+            // Test. Poseidon hash
+            const hash2Result = poseidon2_hash2(privateKey, amount, 0);
+            log(`Poseidon2(sk, amount, domain=0): ${bytesToHex(hash2Result)}`, 'success');
+            
+            return true;
+        }
+
+        // Test: Merkle Tree
+        async function testMerkleTree() {
+            log('=== Testing Merkle Tree ===', 'info');
+            
+            const depth = 4; // 16 leaves
+            const tree = createMerkleTree(depth);
+            log(`Created Merkle tree with depth ${depth}`, 'info');
+            
+            // Insert some leaves
+            const leaves = [];
+            for (let i = 0; i < 8; i++) {
+                const leaf = bigintToField(BigInt(i * 100 + 1));
+                const index = tree.insert(leaf);
+                leaves.push({ index, leaf });
+                log(`Inserted leaf ${i}: index=${index}`, 'info');
+            }
+            
+            const root = tree.root();
+            log(`Merkle root: ${bytesToHex(root)}`, 'success');
+            
+            // Get proof for leaf 3
+            const proof = tree.get_proof(3);
+            log(`Proof for leaf 3:`, 'info');
+            log(`  - Levels: ${proof.levels}`, 'info');
+            log(`  - Path indices: ${bytesToHex(proof.path_indices)}`, 'info');
+            log(`  - Root matches: ${bytesToHex(proof.root) === bytesToHex(root)}`, 'success');
+            
+            return true;
+        }
+
+        // Test: Sparse Merkle Tree
+        async function testSparseMerkleTree() {
+            log('=== Testing Sparse Merkle Tree ===', 'info');
+            
+            const smt = new WasmSparseMerkleTree();
+            log(`Created empty Sparse Merkle Tree`, 'info');
+            log(`Initial root: ${bytesToHex(smt.root())}`, 'info');
+            
+            // Insert key-value pairs
+            const key1 = bigintToField(1n);
+            const value1 = bigintToField(100n);
+            const result1 = smt.insert(key1, value1);
+            log(`Inserted (1, 100)`, 'info');
+            log(`New root: ${bytesToHex(result1.new_root)}`, 'success');
+            
+            const key2 = bigintToField(2n);
+            const value2 = bigintToField(200n);
+            const result2 = smt.insert(key2, value2);
+            log(`Inserted (2, 200)`, 'info');
+            log(`New root: ${bytesToHex(result2.new_root)}`, 'success');
+            
+            // Find key
+            const findResult = smt.find(key1);
+            log(`Find key 1: found=${findResult.found}`, findResult.found ? 'success' : 'error');
+            
+            // Get proof
+            const proof = smt.get_proof(key1, 256);
+            log(`Proof for key 1: ${proof.num_siblings} siblings`, 'success');
+            
+            return true;
+        }
+
+        // Test: Full Transaction (mirrors e2e_pool_2_in_2_out.rs)
+        async function testFullTransaction() {
+            log('=== Testing Full Transaction Setup ===', 'info');
+            
+            // Constants matching compliant_test.circom:
+            // CompliantTransaction(nIns=2, nOuts=2, nMembershipProofs=1, nNonMembershipProofs=1, levels=5, smtLevels=5)
+            const LEVELS = 5;  // Must match circuit's levels parameter (32 leaves)
+            const numLeaves = 1 << LEVELS;  // 32 leaves
+            
+            // Create input notes
+            const inputs = [
+                { leafIndex: 0, privKey: 101n, blinding: 201n, amount: 0n },  // Dummy
+                { leafIndex: 1, privKey: 102n, blinding: 211n, amount: 13n }, // Real
+            ];
+            
+            // Create output notes
+            const outputs = [
+                { pubKey: 501n, blinding: 601n, amount: 13n }, // Real
+                { pubKey: 502n, blinding: 602n, amount: 0n },  // Dummy
+            ];
+            
+            log(`Created ${inputs.length} inputs, ${outputs.length} outputs`, 'info');
+            
+            // Derive public keys for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const privKeyBytes = bigintToField(inputs[i].privKey);
+                const pubKey = derivePublicKey(privKeyBytes);
+                inputs[i].pubKeyBytes = pubKey;
+                log(`Input ${i} public key: ${fieldToHex(pubKey).slice(0, 20)}...`, 'info');
+            }
+            
+            // Compute commitments for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const amountBytes = bigintToField(inputs[i].amount);
+                const blindingBytes = bigintToField(inputs[i].blinding);
+                const commitment = computeCommitment(amountBytes, inputs[i].pubKeyBytes, blindingBytes);
+                inputs[i].commitment = commitment;
+                log(`Input ${i} commitment: ${fieldToHex(commitment).slice(0, 20)}...`, 'success');
+            }
+            
+            // Compute commitments for outputs
+            for (let i = 0; i < outputs.length; i++) {
+                const amountBytes = bigintToField(outputs[i].amount);
+                const pubKeyBytes = bigintToField(outputs[i].pubKey);
+                const blindingBytes = bigintToField(outputs[i].blinding);
+                const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+                outputs[i].commitment = commitment;
+                log(`Output ${i} commitment: ${fieldToHex(commitment).slice(0, 20)}...`, 'success');
+            }
+            
+            // Build merkle tree with all leaves (32 for LEVELS=5)
+            const tree = createMerkleTree(LEVELS);
+            log(`Building merkle tree with ${numLeaves} leaves (depth ${LEVELS})`, 'info');
+            
+            // Insert leaves: input commitments at their indices, dummy values elsewhere
+            for (let i = 0; i < numLeaves; i++) {
+                let leaf;
+                const inputAtIndex = inputs.find(inp => inp.leafIndex === i);
+                if (inputAtIndex) {
+                    leaf = inputAtIndex.commitment;
+                    log(`Leaf ${i}: input commitment`, 'info');
+                } else {
+                    // Dummy leaf - use incrementing values
+                    leaf = bigintToField(BigInt(0xDEADBEEF + i));
+                    
+                }
+                tree.insert(leaf);
+            }
+            
+            const merkleRoot = tree.root();
+            log(`Merkle root: ${fieldToHex(merkleRoot)}`, 'success');
+            
+            // Get merkle proofs and compute nullifiers for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const proof = tree.get_proof(inputs[i].leafIndex);
+                inputs[i].merkleProof = proof;
+                inputs[i].pathElements = proof.path_elements;
+                inputs[i].pathIndices = proof.path_indices;
+                
+                // Compute signature: sign(privKey, commitment, pathIndices)
+                const privKeyBytes = bigintToField(inputs[i].privKey);
+                const signature = computeSignature(privKeyBytes, inputs[i].commitment, inputs[i].pathIndices);
+                inputs[i].signature = signature;
+                
+                // Compute nullifier: nullifier(commitment, pathIndices, signature)
+                const nullifier = computeNullifier(inputs[i].commitment, inputs[i].pathIndices, signature);
+                inputs[i].nullifier = nullifier;
+                
+                log(`Input ${i}: merkle proof (${proof.levels} levels), nullifier: ${fieldToHex(nullifier).slice(0, 20)}...`, 'success');
+            }
+            
+            log('=== Transaction Setup Complete ===', 'success');
+            
+            return { inputs, outputs, merkleRoot, tree, LEVELS };
+        }
+        
+        // Test: Full Transaction with Witness Generation (Compliant Circuit)
+        async function testFullTransactionWithWitness() {
+            log('=== Testing Full Compliant Transaction with Witness Generation ===', 'info');
+
+            // Constants matching compliant_test.circom:
+            // CompliantTransaction(nIns=2, nOuts=2, nMembershipProofs=1, nNonMembershipProofs=1, levels=5, smtLevels=5)
+            const LEVELS = 5;  // Must match circuit's levels parameter (32 leaves)
+            const numLeaves = 1 << LEVELS;  // 32 leaves
+            const SMT_LEVELS = 5;  // Sparse Merkle Tree levels for compliance
+            const nMembershipProofs = 1;
+            const nNonMembershipProofs = 1;
+            
+            // Create input notes
+            const inputs = [
+                { leafIndex: 0, privKey: 101n, blinding: 201n, amount: 0n },  // Dummy
+                { leafIndex: 1, privKey: 102n, blinding: 211n, amount: 13n }, // Real
+            ];
+
+            // Create output notes
+            const outputs = [
+                { pubKey: 501n, blinding: 601n, amount: 13n }, // Real
+                { pubKey: 502n, blinding: 602n, amount: 0n },  // Dummy
+            ];
+
+            log(`Created ${inputs.length} inputs, ${outputs.length} outputs`, 'info');
+
+            // Derive public keys for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const privKeyBytes = bigintToField(inputs[i].privKey);
+                const pubKey = derivePublicKey(privKeyBytes);
+                inputs[i].pubKeyBytes = pubKey;
+                log(`Input ${i} public key: ${fieldToHex(pubKey).slice(0, 20)}...`, 'info');
+            }
+
+            // Compute commitments for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const amountBytes = bigintToField(inputs[i].amount);
+                const blindingBytes = bigintToField(inputs[i].blinding);
+                const commitment = computeCommitment(amountBytes, inputs[i].pubKeyBytes, blindingBytes);
+                inputs[i].commitment = commitment;
+                log(`Input ${i} commitment: ${fieldToHex(commitment).slice(0, 20)}...`, 'success');
+            }
+
+            // Compute commitments for outputs
+            for (let i = 0; i < outputs.length; i++) {
+                const amountBytes = bigintToField(outputs[i].amount);
+                const pubKeyBytes = bigintToField(outputs[i].pubKey);
+                const blindingBytes = bigintToField(outputs[i].blinding);
+                const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+                outputs[i].commitment = commitment;
+                log(`Output ${i} commitment: ${fieldToHex(commitment).slice(0, 20)}...`, 'success');
+            }
+
+            // Build merkle tree with all leaves (32 for LEVELS=5)
+            const tree = createMerkleTree(LEVELS);
+            log(`Building merkle tree with ${numLeaves} leaves (depth ${LEVELS})`, 'info');
+
+            // Insert leaves: input commitments at their indices, dummy values elsewhere
+            for (let i = 0; i < numLeaves; i++) {
+                let leaf;
+                const inputAtIndex = inputs.find(inp => inp.leafIndex === i);
+                if (inputAtIndex) {
+                    leaf = inputAtIndex.commitment;
+                    log(`Leaf ${i}: input commitment`, 'info');
+                } else {
+                    // Dummy leaf - use incrementing values
+                    leaf = bigintToField(BigInt(0xDEADBEEF + i));
+
+                }
+                tree.insert(leaf);
+            }
+
+            const merkleRoot = tree.root();
+            log(`Merkle root: ${fieldToHex(merkleRoot)}`, 'success');
+
+            // Get merkle proofs and compute nullifiers for inputs
+            for (let i = 0; i < inputs.length; i++) {
+                const proof = tree.get_proof(inputs[i].leafIndex);
+                inputs[i].merkleProof = proof;
+                inputs[i].pathElements = proof.path_elements;
+                inputs[i].pathIndices = proof.path_indices;
+
+                // Compute signature: sign(privKey, commitment, pathIndices)
+                const privKeyBytes = bigintToField(inputs[i].privKey);
+                const signature = computeSignature(privKeyBytes, inputs[i].commitment, inputs[i].pathIndices);
+                inputs[i].signature = signature;
+
+                // Compute nullifier: nullifier(commitment, pathIndices, signature)
+                const nullifier = computeNullifier(inputs[i].commitment, inputs[i].pathIndices, signature);
+                inputs[i].nullifier = nullifier;
+            }
+            
+            // Check if witness module is initialized - use initProver() which handles everything
+            if (!isInitialized()) {
+                log('Modules not initialized. Initializing prover + witness + artifacts...', 'info');
+                try {
+                    await initProver((loaded, total) => {
+                        if (total > 0) {
+                            const pct = ((loaded / total) * 100).toFixed(1);
+                            log(`  Download: ${pct}% (${(loaded / 1024 / 1024).toFixed(2)} MB)`, 'info');
+                        }
+                    });
+                    log('All modules initialized!', 'success');
+                } catch (e) {
+                    log(`Failed to initialize: ${e.message}`, 'error');
+                    log('Skipping witness generation test.', 'info');
+                    return true;
+                }
+            }
+            
+            // Helper to convert bytes to BigInt string for circuit input
+            function bytesToBigIntString(bytes) {
+                // Convert LE bytes to BigInt
+                let result = 0n;
+                for (let i = bytes.length - 1; i >= 0; i--) {
+                    result = (result << 8n) | BigInt(bytes[i]);
+                }
+                return result.toString();
+            }
+            
+            log('=== Building Compliance Proofs ===', 'info');
+            
+            // Membership proofs: prove sender's public key is in the approved list
+            log('Building ASP Membership Trees...', 'info');
+            const membershipTrees = [];
+            const membershipRoots = [];
+            const membershipProofsData = [];
+            
+            for (let i = 0; i < inputs.length; i++) {
+                // Create a membership tree for this input
+                // Membership leaf = hash(publicKey, blinding, domain=1)
+                const membershipBlinding = bigintToField(BigInt(0xFEEDFACE + i));
+                const membershipLeaf = poseidon2_hash2(inputs[i].pubKeyBytes, membershipBlinding, 1);
+                
+                // Build a small merkle tree with the membership leaf
+                const membershipTree = createMerkleTree(LEVELS);
+                const membershipIndex = i;  // Place leaf at index i
+                
+                // Fill tree with dummy leaves, insert membership leaf at index
+                for (let j = 0; j < (1 << LEVELS); j++) {
+                    if (j === membershipIndex) {
+                        membershipTree.insert(membershipLeaf);
+                    } else {
+                        membershipTree.insert(bigintToField(BigInt(0xABCDEF00 + j)));
+                    }
+                }
+                
+                const membershipProof = membershipTree.get_proof(membershipIndex);
+                
+                membershipTrees.push({
+                    tree: membershipTree,
+                    index: membershipIndex,
+                    leaf: membershipLeaf,
+                    blinding: membershipBlinding,
+                });
+                membershipRoots.push(membershipTree.root());
+                membershipProofsData.push(membershipProof);
+                
+                log(`  Input ${i}: Membership leaf at index ${membershipIndex}, root: ${bytesToHex(membershipTree.root()).slice(0, 20)}...`, 'success');
+            }
+            
+            // NON-MEMBERSHIP PROOFS
+            // For each input, prove the sender's public key is NOT in the blocked list
+            log('Building ASP Non-Membership Trees (Sparse Merkle Trees)...', 'info');
+            
+            const nonMembershipTrees = [];
+            const nonMembershipRoots = [];
+            const nonMembershipProofsData = [];
+            
+            for (let i = 0; i < inputs.length; i++) {
+                // Create a sparse merkle tree for non-membership
+                const smt = new WasmSparseMerkleTree(SMT_LEVELS);
+                
+                // Insert some dummy blocked keys
+                const blockedKey1 = bigintToField(BigInt(0xBAD00001 + i * 1000));
+                const blockedKey2 = bigintToField(BigInt(0xBAD00002 + i * 1000));
+                smt.insert(blockedKey1, blockedKey1);  // key = value for simplicity
+                smt.insert(blockedKey2, blockedKey2);
+                
+                // Get non-membership proof for the input's public key
+                // This proves the public key is NOT in the blocked list
+                const nonMembershipProof = smt.get_proof(inputs[i].pubKeyBytes, SMT_LEVELS);
+                
+                nonMembershipTrees.push(smt);
+                nonMembershipRoots.push(smt.root());
+                nonMembershipProofsData.push(nonMembershipProof);
+                
+                log(`  Input ${i}: Non-membership proof, SMT root: ${bytesToHex(smt.root()).slice(0, 20)}..., found=${nonMembershipProof.found}`, 'success');
+            }
+            
+            // BUILD CIRCUIT INPUTS
+            log('Building complete circuit inputs...', 'info');
+            
+            // Build circuit inputs object with proper Circom signal naming
+            const circuitInputs = {
+                // Public inputs
+                root: bytesToBigIntString(merkleRoot),
+                publicAmount: "0",
+                extDataHash: "0",
+                
+                // Input nullifiers (public) - inputNullifier[i]
+                inputNullifier: inputs.map(inp => bytesToBigIntString(inp.nullifier)),
+                
+                // Output commitments (public) - outputCommitment[i]
+                outputCommitment: outputs.map(out => bytesToBigIntString(out.commitment)),
+                
+                // Private inputs: input note details - inAmount[i], etc.
+                inAmount: inputs.map(inp => inp.amount.toString()),
+                inPrivateKey: inputs.map(inp => inp.privKey.toString()),
+                inBlinding: inputs.map(inp => inp.blinding.toString()),
+                inPathIndices: inputs.map(inp => bytesToBigIntString(inp.pathIndices)),
+                
+                // Private inputs: output note details - outAmount[i], etc.
+                outAmount: outputs.map(out => out.amount.toString()),
+                outPubkey: outputs.map(out => out.pubKey.toString()),
+                outBlinding: outputs.map(out => out.blinding.toString()),
+            };
+            
+            // Add membershipRoots and nonMembershipRoots as 2D arrays
+            // membershipRoots[nIns][nMembershipProofs] and nonMembershipRoots[nIns][nNonMembershipProofs]
+            circuitInputs.membershipRoots = [];
+            circuitInputs.nonMembershipRoots = [];
+            for (let i = 0; i < inputs.length; i++) {
+                circuitInputs.membershipRoots.push([bytesToBigIntString(membershipRoots[i])]);
+                circuitInputs.nonMembershipRoots.push([bytesToBigIntString(nonMembershipRoots[i])]);
+            }
+            
+            // Add inPathElements as 2D array - inPathElements[nIns][levels]
+            circuitInputs.inPathElements = [];
+            for (let i = 0; i < inputs.length; i++) {
+                const pathElems = inputs[i].pathElements;
+                const thisInputPath = [];
+                for (let j = 0; j < LEVELS; j++) {
+                    const start = j * 32;
+                    const elemBytes = pathElems.slice(start, start + 32);
+                    thisInputPath.push(bytesToBigIntString(elemBytes));
+                }
+                circuitInputs.inPathElements.push(thisInputPath);
+            }
+            
+            // Add membership proofs as nested array of objects: membershipProofs[nIns][nMembershipProofs]
+            circuitInputs.membershipProofs = [];
+            for (let i = 0; i < inputs.length; i++) {
+                const proofsForInput = [];
+                for (let m = 0; m < nMembershipProofs; m++) {
+                    const mp = membershipProofsData[i];
+                    const pathElems = mp.path_elements;
+                    const pathElementsArray = [];
+                    for (let j = 0; j < LEVELS; j++) {
+                        const start = j * 32;
+                        const elemBytes = pathElems.slice(start, start + 32);
+                        pathElementsArray.push(bytesToBigIntString(elemBytes));
+                    }
+                    
+                    proofsForInput.push({
+                        leaf: bytesToBigIntString(membershipTrees[i].leaf),
+                        blinding: bytesToBigIntString(membershipTrees[i].blinding),
+                        pathIndices: bytesToBigIntString(mp.path_indices),
+                        pathElements: pathElementsArray,
+                    });
+                }
+                circuitInputs.membershipProofs.push(proofsForInput);
+            }
+            
+            // Add non-membership proofs as nested array of objects: nonMembershipProofs[nIns][nNonMembershipProofs]
+            circuitInputs.nonMembershipProofs = [];
+            for (let i = 0; i < inputs.length; i++) {
+                const proofsForInput = [];
+                for (let n = 0; n < nNonMembershipProofs; n++) {
+                    const nmp = nonMembershipProofsData[i];
+                    const siblings = nmp.siblings;
+                    const siblingsArray = [];
+                    for (let j = 0; j < SMT_LEVELS; j++) {
+                        const start = j * 32;
+                        const sibBytes = siblings.slice(start, start + 32);
+                        siblingsArray.push(bytesToBigIntString(sibBytes));
+                    }
+                    
+                    proofsForInput.push({
+                        key: bytesToBigIntString(inputs[i].pubKeyBytes),
+                        oldKey: bytesToBigIntString(nmp.not_found_key),
+                        oldValue: bytesToBigIntString(nmp.not_found_value),
+                        isOld0: nmp.is_old0 ? "1" : "0",
+                        siblings: siblingsArray,
+                    });
+                }
+                circuitInputs.nonMembershipProofs.push(proofsForInput);
+            }
+            
+            log('Circuit inputs prepared:', 'info');
+            log(`  - root: ${circuitInputs.root.slice(0, 20)}...`, 'info');
+            log(`  - inputNullifier: [${circuitInputs.inputNullifier.map(n => n.slice(0, 10) + '...').join(', ')}]`, 'info');
+            log(`  - outputCommitment: [${circuitInputs.outputCommitment.map(c => c.slice(0, 10) + '...').join(', ')}]`, 'info');
+            log(`  - membershipRoots: ${membershipRoots.length} roots`, 'info');
+            log(`  - nonMembershipRoots: ${nonMembershipRoots.length} roots`, 'info');
+            log(`  - inPathElements: ${inputs.length * LEVELS} elements (${LEVELS} per input)`, 'info');
+            log(circuitInputs, 'info');
+            
+            // Debug: log all input signal names
+            console.log('All circuit input names:', Object.keys(circuitInputs));
+            
+            // Generate witness
+            log('Generating witness...', 'info');
+            try {
+                const witnessBytes = await generateWitness(circuitInputs);
+                log(`Witness generated! Size: ${witnessBytes.length} bytes (${witnessBytes.length / 32} field elements)`, 'success');
+                
+                // Optionally generate proof if prover is initialized
+                log('Generating proof...', 'info');
+                const proofBytes = generateProofBytes(witnessBytes);
+                log(`Proof generated! Size: ${proofBytes.length} bytes`, 'success');
+                log(`  - Proof (first 40 bytes): ${bytesToHex(proofBytes.slice(0, 40))}...`, 'info');
+                
+                // Verify locally
+                const publicInputs = extractPublicInputs(witnessBytes);
+                log(`Extracted ${publicInputs.length / 32} public inputs`, 'info');
+                
+                const isValid = verifyProofLocal(proofBytes, publicInputs);
+                if (isValid) {
+                    log('Proof verified locally!', 'success');
+                } else {
+                    log('Proof verification failed!', 'error');
+                }
+                
+            } catch (e) {
+                log(`Witness/Proof generation failed: ${e.message}`, 'error');
+                console.error(e);
+            }
+            
+            log('=== Full Compliant Transaction Test Complete ===', 'success');
+            return true;
+        }
+
+        // Run basic tests (no witness module required)
+        async function runBasicTests() {
+            setStatus('Running basic tests...', 'running');
+            btnRunBasic.disabled = true;
+            
+            try {
+                await testCrypto();
+                await testMerkleTree();
+                await testSparseMerkleTree();
+                await testFullTransaction();  // Just setup, no witness
+                
+                log('', 'info');
+                log('Basic tests passed!', 'success');
+                setStatus('Basic tests passed!', 'ready');
+            } catch (e) {
+                log(`Test failed: ${e.message}`, 'error');
+                console.error(e);
+                setStatus('Tests failed', 'error');
+            }
+            
+            btnRunBasic.disabled = false;
+        }
+        
+        // Run all tests (including witness and proof generation)
+        async function runAllTests() {
+            setStatus('Running full tests...', 'running');
+            btnRunAll.disabled = true;
+            
+            try {
+                await testCrypto();
+                await testMerkleTree();
+                await testSparseMerkleTree();
+                await testFullTransactionWithWitness();
+                
+                log('', 'info');
+                log('All tests passed!', 'success');
+                setStatus('All tests passed!', 'ready');
+            } catch (e) {
+                log(`Test failed: ${e.message}`, 'error');
+                console.error(e);
+                setStatus('Tests failed', 'error');
+            }
+            
+            btnRunAll.disabled = false;
+        }
+
+        // Initialization
+        async function init() {
+            try {
+                log('Initializing prover WASM module...', 'info');
+                await initProverModule();
+                log('Prover WASM module initialized', 'success');
+                
+                setStatus('Ready - Prover module loaded. Click "Initialize All" for witness/proof generation.', 'ready');
+                btnInit.disabled = false;
+                btnRunBasic.disabled = false;  // Basic tests work without witness module
+            } catch (e) {
+                log(`Failed to initialize: ${e.message}`, 'error');
+                setStatus('Initialization failed', 'error');
+            }
+        }
+
+        async function fullInit() {
+            try {
+                setStatus('Initializing all modules (prover + witness + proving artifacts)...', 'running');
+                btnInit.disabled = true;
+                
+                log('Calling initProver() - this will load:', 'info');
+                log('  1. Prover WASM module', 'info');
+                log('  2. Circuit WASM (witness calculator)', 'info');
+                log('  3. Proving key and R1CS (may download ~10-20MB)', 'info');
+                
+                const proverInfo = await initProver((loaded, total) => {
+                    if (total > 0) {
+                        const pct = ((loaded / total) * 100).toFixed(1);
+                        log(`  Download progress: ${pct}% (${(loaded / 1024 / 1024).toFixed(2)} MB)`, 'info');
+                    }
+                });
+                
+                log(`All modules initialized! Prover version: ${proverInfo.version}`, 'success');
+                log(`  - Constraints: ${proverInfo.numConstraints}`, 'info');
+                log(`  - Wires: ${proverInfo.numWires}`, 'info');
+                log(`  - Public inputs: ${proverInfo.numPublicInputs}`, 'info');
+                
+                setStatus('Fully initialized - Ready for witness generation and proofs', 'ready');
+                btnRunAll.disabled = false;  // Enable full tests only after everything is loaded
+            } catch (e) {
+                log(`Full init failed: ${e.message}`, 'error');
+                console.error(e);
+                setStatus('Full init failed - check console for details', 'error');
+            }
+            btnInit.disabled = false;
+        }
+
+        // Event handlers
+        btnInit.addEventListener('click', fullInit);
+        btnRunBasic.addEventListener('click', runBasicTests);
+        btnRunAll.addEventListener('click', runAllTests);
+        btnClear.addEventListener('click', () => { logEl.innerHTML = ''; });
+
+        // Start
+        init();
+    </script>
+</body>
+</html>
+

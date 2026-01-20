@@ -21,7 +21,7 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p dist/.stage/circuits dist/.stage/keys dist/.stage/js/witness dist/.stage/vendor
+mkdir -p dist/.stage/circuits dist/.stage/keys dist/.stage/js/witness
 
 # Circuit artifacts from Cargo build output
 CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
@@ -41,8 +41,8 @@ cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || tr
 # Static files
 cp app/js/bridge.js dist/.stage/js/
 cp app/test.html dist/.stage/ 2>/dev/null || true
-cp app/zkProofTest.html dist/.stage/ 2>/dev/null || true
-cp target/stellar/pool.wasm dist/.stage/pool.wasm 2>/dev/null || true
+cp app/proofTest.html dist/.stage/ 2>/dev/null || true
+cp app/depositTest.html dist/.stage/ 2>/dev/null || true
 cp scripts/deployments.json dist/.stage/ 2>/dev/null || true
 cp app/node_modules/@stellar/freighter-api/build/index.min.js dist/.stage/vendor/freighter-api.min.js 2>/dev/null || true
 cp app/node_modules/@stellar/stellar-sdk/dist/stellar-sdk.min.js dist/.stage/vendor/stellar-sdk.min.js 2>/dev/null || true

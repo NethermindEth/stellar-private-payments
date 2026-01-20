@@ -5,7 +5,7 @@
  * Inputs (in build dir):
  *  - proof.json
  *  - public.json
- *  - verification_key.json
+ *  - compliant_test_vk.json
  *
  * Outputs (in build dir):
  *  - calldata.txt                 (snarkjs zkesc output)
@@ -22,6 +22,10 @@ const { execSync } = require("child_process");
 function die(msg) {
   console.error("soroban_pack:", msg);
   process.exit(1);
+}
+
+function warn(msg) {
+  console.warn("soroban_pack:", msg);
 }
 
 function padHexToBytes(hex, bytes) {
@@ -81,81 +85,121 @@ function main() {
   const buildDir = process.argv[2] || "build";
   const proofPath = path.join(buildDir, "proof.json");
   const publicPath = path.join(buildDir, "public.json");
-  const vkPath = path.join(buildDir, "verification_key.json");
+  const vkPath = path.join(buildDir, "compliant_test_vk.json");
 
-  if (!fs.existsSync(proofPath)) die(`missing ${proofPath}`);
-  if (!fs.existsSync(publicPath)) die(`missing ${publicPath}`);
-  if (!fs.existsSync(vkPath)) die(`missing ${vkPath}`);
+  const hasProof = fs.existsSync(proofPath);
+  const hasPublic = fs.existsSync(publicPath);
+  const hasVk = fs.existsSync(vkPath);
+  const wrote = [];
+
+  if (!hasProof) warn(`missing ${proofPath}`);
+  if (!hasPublic) warn(`missing ${publicPath}`);
+  if (!hasVk) warn(`missing ${vkPath}`);
 
   // 1) Produce canonical calldata using snarkjs 0.7.x command
   // help says: snarkjs zkesc [public.json] [proof.json]
-  let calldata;
-  try {
-    calldata = execSync(`snarkjs zkesc ${publicPath} ${proofPath}`, { encoding: "utf8" });
-  } catch (e) {
-    die("failed running `snarkjs zkesc build/public.json build/proof.json` (is snarkjs installed?)");
-  }
-  fs.writeFileSync(path.join(buildDir, "calldata.txt"), calldata);
+  let pubHex = null;
+  let pubDec = null;
+  if (hasProof && hasPublic) {
+    let calldata;
+    try {
+      calldata = execSync(`snarkjs zkesc ${publicPath} ${proofPath}`, { encoding: "utf8" });
+    } catch (e) {
+      die("failed running `snarkjs zkesc build/public.json build/proof.json` (is snarkjs installed?)");
+    }
+    fs.writeFileSync(path.join(buildDir, "calldata.txt"), calldata);
+    wrote.push(`${buildDir}/calldata.txt`);
 
-  // 2) Parse calldata tokens:
-  // a0,a1, b00,b01,b10,b11, c0,c1, then public inputs...
-  const toks = extract0xTokens(calldata).map((h) => padHexToBytes(h, 32)); // each 32 bytes
-  if (toks.length < 8) die(`calldata has too few tokens: ${toks.length}`);
+    // 2) Parse calldata tokens:
+    // a0,a1, b00,b01,b10,b11, c0,c1, then public inputs...
+    const toks = extract0xTokens(calldata).map((h) => padHexToBytes(h, 32)); // each 32 bytes
+    if (toks.length < 8) die(`calldata has too few tokens: ${toks.length}`);
 
-  const ax = toks[0], ay = toks[1];
-  const b00 = toks[2], b01 = toks[3], b10 = toks[4], b11 = toks[5];
-  const cx = toks[6], cy = toks[7];
+    const ax = toks[0], ay = toks[1];
+    const b00 = toks[2], b01 = toks[3], b10 = toks[4], b11 = toks[5];
+    const cx = toks[6], cy = toks[7];
 
-  // proof packing
-  const proofSoroban = {
-    a: ax + ay,                          // 64 bytes => 128 hex chars
-    b: b00 + b01 + b10 + b11,            // 128 bytes => 256 hex chars
-    c: cx + cy                           // 64 bytes => 128 hex chars
-  };
+    // proof packing
+    const proofSoroban = {
+      a: ax + ay,                          // 64 bytes => 128 hex chars
+      b: b00 + b01 + b10 + b11,            // 128 bytes => 256 hex chars
+      c: cx + cy                           // 64 bytes => 128 hex chars
+    };
 
-  fs.writeFileSync(
-    path.join(buildDir, "proof_soroban.json"),
-    JSON.stringify(proofSoroban, null, 2)
-  );
-
-  // public inputs (hex + decimal)
-  const pubHex = toks.slice(8); // 32-byte hex strings
-  const pubDec = pubHex.map(hexToDecString);
-
-  fs.writeFileSync(path.join(buildDir, "public_inputs_hex.json"), JSON.stringify(pubHex, null, 2));
-  fs.writeFileSync(path.join(buildDir, "public_inputs_decimal.json"), JSON.stringify(pubDec, null, 2));
-
-  // 3) Build Soroban VK from snarkjs verification_key.json
-  const vk = JSON.parse(fs.readFileSync(vkPath, "utf8"));
-  const vkSoroban = {
-    alpha: g1_from_snarkjs(vk.vk_alpha_1),
-    beta: g2_from_snarkjs(vk.vk_beta_2),
-    gamma: g2_from_snarkjs(vk.vk_gamma_2),
-    delta: g2_from_snarkjs(vk.vk_delta_2),
-    ic: vk.IC.map(g1_from_snarkjs),
-  };
-
-  // sanity: ic length should be public_inputs + 1
-  if (vkSoroban.ic.length !== pubDec.length + 1) {
-    die(
-      `IC length mismatch: ic=${vkSoroban.ic.length} but public_inputs=${pubDec.length}; expected ic = public_inputs + 1`
+    fs.writeFileSync(
+      path.join(buildDir, "proof_soroban.json"),
+      JSON.stringify(proofSoroban, null, 2)
     );
+    wrote.push(`${buildDir}/proof_soroban.json`);
+
+    // public inputs (hex + decimal)
+    pubHex = toks.slice(8); // 32-byte hex strings
+    pubDec = pubHex.map(hexToDecString);
+
+    fs.writeFileSync(path.join(buildDir, "public_inputs_hex.json"), JSON.stringify(pubHex, null, 2));
+    fs.writeFileSync(path.join(buildDir, "public_inputs_decimal.json"), JSON.stringify(pubDec, null, 2));
+    wrote.push(`${buildDir}/public_inputs_hex.json`);
+    wrote.push(`${buildDir}/public_inputs_decimal.json`);
+  } else if (hasPublic) {
+    const publicInputs = JSON.parse(fs.readFileSync(publicPath, "utf8"));
+    if (!Array.isArray(publicInputs)) {
+      die(`public.json must be an array, got ${typeof publicInputs}`);
+    }
+    pubDec = publicInputs.map((val) => BigInt(val).toString(10));
+    pubHex = pubDec.map(toHex32FromDecString);
+    fs.writeFileSync(path.join(buildDir, "public_inputs_hex.json"), JSON.stringify(pubHex, null, 2));
+    fs.writeFileSync(path.join(buildDir, "public_inputs_decimal.json"), JSON.stringify(pubDec, null, 2));
+    wrote.push(`${buildDir}/public_inputs_hex.json`);
+    wrote.push(`${buildDir}/public_inputs_decimal.json`);
+    warn("skipped calldata/proof output because proof.json is missing");
+  } else if (hasProof) {
+    warn("skipped calldata/proof output because public.json is missing");
   }
 
-  fs.writeFileSync(
-    path.join(buildDir, "vk_soroban_fixed.json"),
-    JSON.stringify(vkSoroban, null, 2)
-  );
+  // 3) Build Soroban VK from snarkjs compliant_test_vk.json
+  let vkSoroban = null;
+  if (hasVk) {
+    const vk = JSON.parse(fs.readFileSync(vkPath, "utf8"));
+    vkSoroban = {
+      alpha: g1_from_snarkjs(vk.vk_alpha_1),
+      beta: g2_from_snarkjs(vk.vk_beta_2),
+      gamma: g2_from_snarkjs(vk.vk_gamma_2),
+      delta: g2_from_snarkjs(vk.vk_delta_2),
+      ic: vk.IC.map(g1_from_snarkjs),
+    };
+
+    // sanity: ic length should be public_inputs + 1
+    if (pubDec) {
+      if (vkSoroban.ic.length !== pubDec.length + 1) {
+        die(
+          `IC length mismatch: ic=${vkSoroban.ic.length} but public_inputs=${pubDec.length}; expected ic = public_inputs + 1`
+        );
+      }
+    } else {
+      warn("skipped IC length check because public inputs are unavailable");
+    }
+
+    fs.writeFileSync(
+      path.join(buildDir, "vk_soroban_fixed.json"),
+      JSON.stringify(vkSoroban, null, 2)
+    );
+    wrote.push(`${buildDir}/vk_soroban_fixed.json`);
+  }
+
+  if (wrote.length === 0) {
+    console.log("No outputs written (missing inputs).");
+    return;
+  }
 
   console.log("✅ Wrote:");
-  console.log(` - ${buildDir}/calldata.txt`);
-  console.log(` - ${buildDir}/proof_soroban.json`);
-  console.log(` - ${buildDir}/public_inputs_decimal.json`);
-  console.log(` - ${buildDir}/vk_soroban_fixed.json`);
-  console.log("");
-  console.log(`Public inputs: ${pubDec.length}`);
-  console.log(`IC points:      ${vkSoroban.ic.length}`);
-  console.log(`Proof sizes:    a=${proofSoroban.a.length} hex, b=${proofSoroban.b.length} hex, c=${proofSoroban.c.length} hex`);
+  wrote.forEach((entry) => console.log(` - ${entry}`));
+  if (pubDec) {
+    console.log("");
+    console.log(`Public inputs: ${pubDec.length}`);
+  }
+  if (vkSoroban) {
+    console.log(`IC points:      ${vkSoroban.ic.length}`);
+  }
 }
 
 main();
