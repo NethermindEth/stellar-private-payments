@@ -16,8 +16,7 @@ use crate::{
 };
 use alloc::{format, vec::Vec};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
-use ark_ff::PrimeField;
-use ark_ff::{AdditiveGroup, BigInteger, Field};
+use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
@@ -43,8 +42,8 @@ struct R1CSCircuit {
 
 fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
-    let x_bytes: [u8; 32] = p.x.into_bigint().to_bytes_be().try_into().unwrap();
-    let y_bytes: [u8; 32] = p.y.into_bigint().to_bytes_be().try_into().unwrap();
+    let x_bytes = bigint_to_be_32(p.x.into_bigint());
+    let y_bytes = bigint_to_be_32(p.y.into_bigint());
     out[..32].copy_from_slice(&x_bytes);
     out[32..].copy_from_slice(&y_bytes);
     out
@@ -52,16 +51,30 @@ fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
 
 fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
-    let x0: [u8; 32] = p.x.c0.into_bigint().to_bytes_be().try_into().unwrap();
-    let x1: [u8; 32] = p.x.c1.into_bigint().to_bytes_be().try_into().unwrap();
-    let y0: [u8; 32] = p.y.c0.into_bigint().to_bytes_be().try_into().unwrap();
-    let y1: [u8; 32] = p.y.c1.into_bigint().to_bytes_be().try_into().unwrap();
+    let x0 = bigint_to_be_32(p.x.c0.into_bigint());
+    let x1 = bigint_to_be_32(p.x.c1.into_bigint());
+    let y0 = bigint_to_be_32(p.y.c0.into_bigint());
+    let y1 = bigint_to_be_32(p.y.c1.into_bigint());
 
     // Match Soroban's BN254 G2 affine encoding: c1 || c0 for each coordinate.
     out[..32].copy_from_slice(&x1);
     out[32..64].copy_from_slice(&x0);
     out[64..96].copy_from_slice(&y1);
     out[96..].copy_from_slice(&y0);
+    out
+}
+
+fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
+    let bytes = value.to_bytes_be();
+    if bytes.len() > 32 {
+        panic!("bigint exceeds 32 bytes");
+    }
+    let mut out = [0u8; 32];
+    let start = match 32usize.checked_sub(bytes.len()) {
+        Some(start) => start,
+        None => panic!("bigint exceeds 32 bytes"),
+    };
+    out[start..].copy_from_slice(&bytes);
     out
 }
 
@@ -334,7 +347,8 @@ impl Prover {
         Ok(proof.to_bytes())
     }
 
-    /// Convert a compressed proof into uncompressed bytes for Soroban contracts.
+    /// Convert a compressed proof into uncompressed bytes for Soroban
+    /// contracts.
     ///
     /// Format: [A (G1) || B (G2) || C (G1)] where each point is uncompressed.
     #[wasm_bindgen]
