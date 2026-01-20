@@ -36,6 +36,7 @@ getrandom = { version = "0.2", features = ["js"] }
 num-bigint = { version = "0.4.6", default-features = false }
 num-integer = { version = "0.1.46", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { git = "https://github.com/stellar/rs-soroban-sdk", branch = "release/v25-preview", features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 wasm-bindgen = { version = "0.2.100", default-features = false }

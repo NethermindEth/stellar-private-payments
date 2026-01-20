@@ -71,7 +71,6 @@ pub struct MerkleTree {
 
 // TODO: For now we implement a full merkle tree for quick prototyping. We
 // should implement a partial merkle tree next to minimize storage on user side
-
 #[wasm_bindgen]
 impl MerkleTree {
     /// Create a new Merkle tree with given depth
@@ -81,7 +80,11 @@ impl MerkleTree {
             return Err(JsValue::from_str("Depth must be between 1 and 32"));
         }
 
-        let num_leaves = 1usize << depth;
+        // Use checked shift to avoid overflow
+        let depth_u32 = u32::try_from(depth).expect("Depth didn't fit in u32");
+        let num_leaves = 1usize.checked_shl(depth_u32).ok_or_else(|| {
+            JsValue::from_str("Depth too large for this platform, would overflow")
+        })?;
         let zero = Scalar::from(0u64);
 
         // Initialize all levels with zeros

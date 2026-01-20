@@ -506,6 +506,139 @@ export async function getASPNonMembershipEvents(limit = 20) {
 }
 
 /**
+ * Get the latest ledger sequence number.
+ * @returns {Promise<number>}
+ */
+export async function getLatestLedger() {
+    const server = getSorobanServer();
+    const result = await server.getLatestLedger();
+    return result.sequence;
+}
+
+/**
+ * Fetch all events from a contract with pagination.
+ * Handles cursor-based pagination to retrieve events beyond a single page.
+ * 
+ * Memory behavior:
+ * - If `onPage` callback is provided, events are NOT accumulated in memory.
+ *   Use this for large datasets where memory is a concern.
+ * - If `onPage` is NOT provided, all events are returned in the `events` array.
+ * 
+ * @param {string} contractId - Contract address
+ * @param {Object} options - Query options
+ * @param {number} options.startLedger - Starting ledger sequence
+ * @param {string} [options.cursor] - Pagination cursor (for resuming)
+ * @param {number} [options.pageSize=100] - Events per page
+ * @param {function} [options.onPage] - Callback for each page: (events, cursor) => void
+ * @returns {Promise<{success: boolean, events: Array, cursor?: string, latestLedger: number, count: number, error?: string}>}
+ */
+export async function fetchAllContractEvents(contractId, options = {}) {
+    const { startLedger, cursor: initialCursor, pageSize = 100, onPage } = options;
+
+    if (!startLedger && !initialCursor) {
+        return { success: false, events: [], error: 'startLedger or cursor required' };
+    }
+
+    try {
+        const server = getSorobanServer();
+        // Only accumulate events if no callback is provided (for backward compat)
+        const allEvents = onPage ? null : [];
+        let cursor = initialCursor;
+        let latestLedger = 0;
+        let totalCount = 0;
+
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+            const requestParams = {
+                filters: [{
+                    type: 'contract',
+                    contractIds: [contractId],
+                }],
+                limit: pageSize,
+            };
+
+            if (cursor) {
+                requestParams.cursor = cursor;
+            } else {
+                requestParams.startLedger = startLedger;
+            }
+
+            const result = await server.getEvents(requestParams);
+            latestLedger = result.latestLedger;
+
+            const pageEvents = result.events.map(event => ({
+                id: event.id,
+                ledger: event.ledger,
+                type: event.type,
+                contractId: event.contractId,
+                topic: event.topic.map(t => scValToNative(t)),
+                value: scValToNative(event.value),
+            }));
+
+            if (pageEvents.length > 0) {
+                totalCount += pageEvents.length;
+                cursor = pageEvents[pageEvents.length - 1].id;
+                
+                if (onPage) {
+                    // Stream mode: process and discard
+                    onPage(pageEvents, cursor);
+                } else {
+                    // Batch mode: accumulate for return
+                    allEvents.push(...pageEvents);
+                }
+            }
+
+            if (result.events.length < pageSize) {
+                break;
+            }
+        }
+
+        return { 
+            success: true, 
+            events: allEvents || [], 
+            cursor, 
+            latestLedger,
+            count: totalCount,
+        };
+    } catch (error) {
+        console.error('[Stellar] Failed to fetch all events:', error);
+        return { success: false, error: error.message, events: [], count: 0 };
+    }
+}
+
+/**
+ * Fetch Pool events with pagination.
+ * @param {Object} options - Query options
+ * @param {number} options.startLedger - Starting ledger sequence
+ * @param {string} [options.cursor] - Pagination cursor
+ * @param {function} [options.onPage] - Callback for each page
+ * @returns {Promise<{success: boolean, events: Array, cursor?: string, latestLedger: number, error?: string}>}
+ */
+export async function fetchAllPoolEvents(options = {}) {
+    const contracts = getDeployedContracts();
+    if (!contracts?.pool) {
+        return { success: false, events: [], error: 'Deployments not loaded' };
+    }
+    return fetchAllContractEvents(contracts.pool, options);
+}
+
+/**
+ * Fetch ASP Membership events with pagination.
+ * @param {Object} options - Query options
+ * @param {number} options.startLedger - Starting ledger sequence
+ * @param {string} [options.cursor] - Pagination cursor
+ * @param {function} [options.onPage] - Callback for each page
+ * @returns {Promise<{success: boolean, events: Array, cursor?: string, latestLedger: number, error?: string}>}
+ */
+export async function fetchAllASPMembershipEvents(options = {}) {
+    const contracts = getDeployedContracts();
+    if (!contracts?.aspMembership) {
+        return { success: false, events: [], error: 'Deployments not loaded' };
+    }
+    return fetchAllContractEvents(contracts.aspMembership, options);
+}
+
+/**
  * Convert ScVal to native JavaScript types.
  * 
  * Return types vary based on the ScVal type and match the SDK for compatibility.

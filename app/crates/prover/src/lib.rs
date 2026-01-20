@@ -13,6 +13,7 @@
 extern crate alloc;
 
 pub mod crypto;
+pub mod encryption;
 pub mod merkle;
 pub mod prover;
 pub mod r1cs;

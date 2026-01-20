@@ -5,7 +5,8 @@ import {
     requestAccess,
     setAllowed,
     signAuthEntry,
-    signTransaction
+    signTransaction,
+    signMessage
 } from '@stellar/freighter-api';
 
 /**
@@ -152,4 +153,29 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
     }
 
     return { signedAuthEntry, signerAddress };
+}
+
+/**
+ * Request the user to sign an arbitrary message via Freighter.
+ *
+ * Used for deriving encryption keys deterministically.
+ *
+ * @param {string} message - Message to sign.
+ * @param {Object} [opts] - Optional signing context.
+ * @param {string} [opts.address] - Specific account to sign with.
+ * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
+ */
+export async function signWalletMessage(message, opts = {}) {
+    await ensureFreighterReady();
+
+    const { signedMessage, signerAddress, error } = await signMessage(message, opts);
+    if (error) {
+        throw normalizeWalletError(error, 'Message signature failed');
+    }
+    // If SignMessage returns null
+    if (!signedMessage) {
+        throw new Error('No signature returned. Probably the used rejected');
+    }   
+
+    return { signedMessage, signerAddress };
 }

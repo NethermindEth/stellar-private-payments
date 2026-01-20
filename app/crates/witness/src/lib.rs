@@ -224,7 +224,7 @@ fn flatten_pure_array(
 
     // We use indices to maintain row-major order:
     // each item is (array_ref, next_index_to_process).
-    // For non-array values, we process them iUpdatmmediately.
+    // For non-array values, we process them immediately.
     enum WorkItem<'a> {
         Value(&'a Value),
         ArrayIter { arr: &'a [Value], idx: usize },
