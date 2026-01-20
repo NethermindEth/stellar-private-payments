@@ -27,6 +27,7 @@ circuits/**/witness_calculator.js
 circuits/**/generate_witness.js
 circuits/**/*.dat
 circuits/**/Makefile
+circuits/src/build/
 
 # Contracts
 contracts/**/test_snapshots
