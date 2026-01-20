@@ -63,6 +63,11 @@ function log(msg) {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+function logConsole(msg) {
+  const time = new Date().toISOString().slice(11, 23);
+  console.log(`[${time}] ${msg}`);
+}
+
 function toLogValue(value) {
   if (value instanceof Uint8Array) {
     return bytesToHex(value);
@@ -89,10 +94,15 @@ function logObject(label, value) {
   console.log(label, logged);
 }
 
+function logObjectConsole(label, value) {
+  const logged = toLogValue(value);
+  console.log(label, logged);
+}
+
 function logError(context, err) {
   const details = err?.message || err;
   const message = context ? `${context}: ${details}` : `${details}`;
-  log(`Error: ${message}`);
+  log('Proof failed. Check console.');
   if (err) {
     console.error(message, err);
   } else {
@@ -206,7 +216,7 @@ function hashExtData(extData) {
     },
   ];
   entries.sort((a, b) => compareSymbolKeys(a.key, b.key));
-  log(`ExtData field order: ${entries.map(entry => entry.key).join(', ')}`);
+  logConsole(`ExtData field order: ${entries.map(entry => entry.key).join(', ')}`);
   const scEntries = entries.map(entry => new xdr.ScMapEntry({
     key: xdr.ScVal.scvSymbol(entry.key),
     val: entry.val,
@@ -214,7 +224,7 @@ function hashExtData(extData) {
   const scVal = xdr.ScVal.scvMap(scEntries);
   const xdrRaw = scVal.toXDR();
   const xdrBytes = xdrRaw instanceof Uint8Array ? xdrRaw : new Uint8Array(xdrRaw);
-  log(`ExtData XDR bytes: ${xdrBytes.length}`);
+  logConsole(`ExtData XDR bytes: ${xdrBytes.length}`);
   const digest = keccak256(xdrBytes);
   const digestBig = bytesToBigIntBE(digest);
   const reduced = digestBig % BN256_MOD;
@@ -314,14 +324,14 @@ async function generateAndSend() {
   const poolRoot = asBigInt(unwrapResult(poolRootRaw, 'pool.get_root'));
   const aspMembershipRoot = asBigInt(unwrapResult(membershipRootRaw, 'asp_membership.get_root'));
   const aspNonMembershipRoot = asBigInt(unwrapResult(nonMembershipRootRaw, 'asp_non_membership.get_root'));
-  log(`Pool root (on-chain): ${toHex32(poolRoot)}`);
-  log(`ASP membership root (on-chain): ${toHex32(aspMembershipRoot)}`);
-  log(`ASP non-membership root (on-chain): ${toHex32(aspNonMembershipRoot)}`);
+  logConsole(`Pool root (on-chain): ${toHex32(poolRoot)}`);
+  logConsole(`ASP membership root (on-chain): ${toHex32(aspMembershipRoot)}`);
+  logConsole(`ASP non-membership root (on-chain): ${toHex32(aspNonMembershipRoot)}`);
   if (aspMembershipRoot === EXPECTED_MEMBERSHIP_ROOT_EMPTY) {
-    log('ASP membership root matches expected empty tree root');
+    logConsole('ASP membership root matches expected empty tree root');
   }
   if (aspMembershipRoot === EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF) {
-    log('ASP membership root matches expected single-leaf root');
+    logConsole('ASP membership root matches expected single-leaf root');
   }
 
   setStatus('Initializing prover...');
@@ -337,12 +347,12 @@ async function generateAndSend() {
   const privKey = BigInt(PRIVATE_KEY_HEX);
   const privKeyBytes = bigintToField(privKey);
   const pubKeyBytes = derivePublicKey(privKeyBytes);
-  log(`Derived public key: ${fieldToHex(pubKeyBytes)}`);
+  logConsole(`Derived public key: ${fieldToHex(pubKeyBytes)}`);
 
   const membershipBlindingBytes = bigintToField(0n);
   const membershipLeaf = poseidon2Hash2(pubKeyBytes, membershipBlindingBytes, 1);
   const membershipLeafHex = fieldToHex(membershipLeaf);
-  log(`Membership leaf: ${membershipLeafHex}`);
+  logConsole(`Membership leaf: ${membershipLeafHex}`);
   if (membershipLeafHex !== EXPECTED_MEMBERSHIP_LEAF) {
     log('Warning: membership leaf does not match expected value');
   }
@@ -356,9 +366,9 @@ async function generateAndSend() {
   const membershipProof = membershipTree.get_proof(0);
   const membershipRootBytes = membershipTree.root();
   const membershipRoot = bytesToBigIntLE(membershipRootBytes);
-  log(`Membership root (computed): ${toHex32(membershipRoot)}`);
-  log(`Expected membership root (empty): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_EMPTY)}`);
-  log(`Expected membership root (with leaf): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF)}`);
+  logConsole(`Membership root (computed): ${toHex32(membershipRoot)}`);
+  logConsole(`Expected membership root (empty): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_EMPTY)}`);
+  logConsole(`Expected membership root (with leaf): ${toHex32(EXPECTED_MEMBERSHIP_ROOT_WITH_LEAF)}`);
   if (membershipRoot !== aspMembershipRoot) {
     throw new Error('Membership root mismatch with on-chain ASP contract (ensure the leaf is inserted)');
   }
@@ -367,7 +377,7 @@ async function generateAndSend() {
   const nonMembershipProof = smt.get_proof(pubKeyBytes, SMT_LEVELS);
   const nonMembershipRootBytes = smt.root();
   const nonMembershipRoot = bytesToBigIntLE(nonMembershipRootBytes);
-  log(`Non-membership root (computed): ${toHex32(nonMembershipRoot)}`);
+  logConsole(`Non-membership root (computed): ${toHex32(nonMembershipRoot)}`);
   if (nonMembershipRoot !== aspNonMembershipRoot) {
     throw new Error('Non-membership root mismatch with on-chain ASP contract (expected empty tree root)');
   }
@@ -412,7 +422,7 @@ async function generateAndSend() {
   };
 
   const extDataHash = hashExtData(extData);
-  log(`ext_data_hash: ${bytesToHex(extDataHash.bytes)}`);
+  logConsole(`ext_data_hash: ${bytesToHex(extDataHash.bytes)}`);
 
   const membershipPathElements = sliceFieldElements(membershipProof.path_elements, LEVELS);
   const membershipPathIndices = bytesToBigIntStringLE(membershipProof.path_indices);
@@ -457,16 +467,16 @@ async function generateAndSend() {
   console.log('CIRCUIT_INPUTS_JSON=', JSON.stringify(circuitInputs, null, 2));
   const witnessBytes = await generateWitness(circuitInputs);
   const proofBytes = generateProofBytes(witnessBytes);
-  log(`Proof bytes (compressed): ${proofBytes.length} bytes`);
+  logConsole(`Proof bytes (compressed): ${proofBytes.length} bytes`);
   const proofBytesUncompressed = proofBytesToUncompressed(proofBytes);
-  log(`Proof bytes (uncompressed): ${proofBytesUncompressed.length} bytes`);
+  logConsole(`Proof bytes (uncompressed): ${proofBytesUncompressed.length} bytes`);
   if (proofBytesUncompressed.length !== 256) {
     throw new Error(`Unexpected uncompressed proof length: ${proofBytesUncompressed.length}`);
   }
 
   const publicInputs = extractPublicInputs(witnessBytes);
   const verified = verifyProofLocal(proofBytes, publicInputs);
-  log(`Local proof verification: ${verified ? 'OK' : 'FAILED'}`);
+  logConsole(`Local proof verification: ${verified ? 'OK' : 'FAILED'}`);
   if (!verified) {
     throw new Error('Local proof verification failed');
   }
@@ -487,8 +497,8 @@ async function generateAndSend() {
     asp_non_membership_root: nonMembershipRoot,
   };
 
-  logObject('Transact proof', proof);
-  logObject('Transact ext_data', extData);
+  logObjectConsole('Transact proof', proof);
+  logObjectConsole('Transact ext_data', extData);
   logObject('Transact sender', state.address);
 
   setStatus('Sending transaction...');
