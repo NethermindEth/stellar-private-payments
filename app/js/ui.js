@@ -13,6 +13,7 @@ import {
     validateWalletNetwork,
 } from './stellar.js';
 import { StateManager } from './state/index.js';
+import * as ProverClient from './prover-client.js';
 
 
 // Application State
@@ -492,14 +493,43 @@ const Deposit = {
         
         const totalAmount = parseFloat(document.getElementById('deposit-amount').value);
         const btn = document.getElementById('btn-deposit');
+        const btnText = btn.querySelector('.btn-text');
+        const btnLoading = btn.querySelector('.btn-loading');
         
         btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        btnText.classList.add('hidden');
+        btnLoading.classList.remove('hidden');
         
         try {
+            // Ensure prover is ready
+            if (!ProverUI.isReady()) {
+                btnLoading.querySelector('span')?.classList.add('hidden');
+                const loadingText = btnLoading.querySelector('.loading-text') || btnLoading;
+                if (loadingText.tagName !== 'SPAN') {
+                    btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">Initializing prover...</span>';
+                }
+                
+                await ProverUI.ensureReady();
+                
+                if (!ProverUI.isReady()) {
+                    throw new Error('Prover initialization failed');
+                }
+            }
+
+            // Update loading text
+            btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">Generating proof...</span>';
+
+            // TODO: Build real circuit inputs from:
+            // 1. User's derived keys (from wallet signature)
+            // 2. Output commitments with real blindings
+            // 3. Merkle proofs from StateManager
+            // 4. ASP membership/non-membership proofs
+            // For now, we still use mock data but show the prover is ready
+            
+            // Simulate proof generation time (in production, this would be real proof)
             await new Promise(r => setTimeout(r, 2000));
             
+            // Create notes (still using mock data for now)
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const isDummy = amount === 0;
@@ -534,8 +564,10 @@ const Deposit = {
             Toast.show('Deposit failed: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
+            // Reset loading text
+            btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>';
         }
     }
 };
@@ -1387,6 +1419,165 @@ const ContractReader = {
     }
 };
 
+// Prover Initialization UI
+const ProverUI = {
+    statusEl: null,
+    progressEl: null,
+    isInitializing: false,
+
+    /**
+     * Creates the prover status indicator in the UI.
+     */
+    createStatusIndicator() {
+        // Check if already exists
+        if (document.getElementById('prover-status')) {
+            this.statusEl = document.getElementById('prover-status');
+            this.progressEl = document.getElementById('prover-progress');
+            return;
+        }
+
+        // Create prover status bar (fixed bottom-left)
+        const statusBar = document.createElement('div');
+        statusBar.id = 'prover-status';
+        statusBar.className = 'fixed bottom-4 left-4 bg-dark-800 border border-dark-700 rounded-lg p-3 shadow-lg max-w-xs z-40';
+        statusBar.innerHTML = `
+            <div class="flex items-center gap-2">
+                <div id="prover-spinner" class="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></div>
+                <span id="prover-message" class="text-sm text-dark-300">Initializing prover...</span>
+            </div>
+            <div id="prover-progress" class="mt-2 h-1 bg-dark-700 rounded overflow-hidden">
+                <div class="h-full bg-brand-500 transition-all duration-300" style="width: 0%"></div>
+            </div>
+        `;
+        document.body.appendChild(statusBar);
+
+        this.statusEl = statusBar;
+        this.progressEl = document.getElementById('prover-progress');
+    },
+
+    /**
+     * Update the status message.
+     * @param {string} message 
+     * @param {boolean} showSpinner 
+     */
+    setMessage(message, showSpinner = true) {
+        if (!this.statusEl) return;
+        const msgEl = document.getElementById('prover-message');
+        const spinnerEl = document.getElementById('prover-spinner');
+        if (msgEl) msgEl.textContent = message;
+        if (spinnerEl) spinnerEl.classList.toggle('hidden', !showSpinner);
+    },
+
+    /**
+     * Update the progress bar.
+     * @param {number} percent - 0-100
+     */
+    setProgress(percent) {
+        if (!this.progressEl) return;
+        const bar = this.progressEl.querySelector('div');
+        if (bar) bar.style.width = `${percent}%`;
+    },
+
+    /**
+     * Show the prover as ready.
+     */
+    showReady() {
+        if (!this.statusEl) return;
+        this.setMessage('Prover ready', false);
+        this.setProgress(100);
+        this.statusEl.classList.add('border-emerald-500/30');
+        
+        // Hide after delay
+        setTimeout(() => {
+            if (this.statusEl) {
+                this.statusEl.style.opacity = '0';
+                this.statusEl.style.transform = 'translateX(-100%)';
+                setTimeout(() => {
+                    if (this.statusEl) {
+                        this.statusEl.classList.add('hidden');
+                        this.statusEl.style.opacity = '';
+                        this.statusEl.style.transform = '';
+                    }
+                }, 300);
+            }
+        }, 2000);
+    },
+
+    /**
+     * Show an error state.
+     * @param {string} error 
+     */
+    showError(error) {
+        if (!this.statusEl) return;
+        this.setMessage(`Error: ${error}`, false);
+        this.statusEl.classList.add('border-red-500/30');
+        const spinnerEl = document.getElementById('prover-spinner');
+        if (spinnerEl) spinnerEl.classList.add('hidden');
+    },
+
+    /**
+     * Initialize the prover in the background.
+     * Non-blocking - updates UI with progress.
+     */
+    async initialize() {
+        if (this.isInitializing || ProverClient.isReady()) {
+            return;
+        }
+
+        this.isInitializing = true;
+        this.createStatusIndicator();
+
+        // Register progress listener
+        const unsubscribe = ProverClient.onProgress((loaded, total, message, percent) => {
+            this.setMessage(message || 'Downloading artifacts...');
+            this.setProgress(percent || 0);
+        });
+
+        try {
+            // Check if cached first
+            const cached = await ProverClient.isCached();
+            if (cached) {
+                this.setMessage('Loading from cache...');
+            } else {
+                this.setMessage('Downloading proving key...');
+            }
+
+            await ProverClient.initializeProver();
+            this.showReady();
+            console.log('[ProverUI] Prover initialized successfully');
+        } catch (e) {
+            console.error('[ProverUI] Prover initialization failed:', e);
+            this.showError(e.message);
+        } finally {
+            unsubscribe();
+            this.isInitializing = false;
+        }
+    },
+
+    /**
+     * Check if prover is ready.
+     * @returns {boolean}
+     */
+    isReady() {
+        return ProverClient.isReady();
+    },
+
+    /**
+     * Ensure prover is ready, initializing if needed.
+     * Shows a toast if initialization is required.
+     * @returns {Promise<boolean>}
+     */
+    async ensureReady() {
+        if (ProverClient.isReady()) {
+            return true;
+        }
+
+        Toast.show('Initializing ZK prover...', 'success');
+        await this.initialize();
+        return ProverClient.isReady();
+    }
+};
+
 // Sync Status UI
 const SyncUI = {
     statusEl: null,
@@ -1587,6 +1778,12 @@ document.addEventListener('DOMContentLoaded', async () => {
             errorDisplay.classList.remove('hidden');
         }
     }
+    
+    // Initialize ZK prover in background (non-blocking)
+    // This preloads proving artifacts so they're ready when user initiates a transaction
+    ProverUI.initialize().catch(err => {
+        console.warn('[Init] Background prover init failed (will retry on demand):', err.message);
+    });
     
     console.log('PoolStellar initialized');
 });
