@@ -32,7 +32,8 @@ const PRIVATE_KEY_HEX = '0x3625edaf29a00f40abaf4eb6b423c103287e4bc06f46a41472f5b
 const EXPECTED_MEMBERSHIP_LEAF = '0x1e844e1b3284abb5bdad20ba0707f4c4053b6740814eb888658eb177d18ca2b2';
 const LEVELS = 5;
 const SMT_LEVELS = 5;
-const DEPOSIT_AMOUNT = 500000n;
+const DEPOSIT_AMOUNT = 50000000n;
+const WITHDRAW_AMOUNT = DEPOSIT_AMOUNT;
 const BN256_MOD = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
 const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
 // Just used to check if the leaf deployed is the expected
@@ -44,6 +45,7 @@ const logEl = document.getElementById('log');
 const contractsEl = document.getElementById('contracts');
 const btnConnect = document.getElementById('btnConnect');
 const btnSend = document.getElementById('btnSend');
+const btnWithdraw = document.getElementById('btnWithdraw');
 
 const state = {
   address: null,
@@ -51,6 +53,10 @@ const state = {
   rpcUrl: null,
   contracts: null,
   poolClient: null,
+  poolLeaves: [],
+  lastDepositOutputs: null,
+  lastPoolRoot: null,
+  lastWithdrawn: false,
 };
 
 function setStatus(text) {
@@ -244,6 +250,58 @@ function sliceFieldElements(bytes, count) {
   return out;
 }
 
+function calculatePublicAmount(extAmount) {
+  const v = asBigInt(extAmount);
+  if (v >= 0n) return v;
+  return BN256_MOD - (-v);
+}
+
+function buildPoolTree(leaves, levels, zeroLeaf) {
+  // Fill all leaves explicitly so roots match the on-chain zero leaf (XLM hash).
+  const tree = createMerkleTree(levels);
+  const totalLeaves = 1 << levels;
+  for (let i = 0; i < totalLeaves; i++) {
+    tree.insert(leaves[i] || zeroLeaf);
+  }
+  return tree;
+}
+
+async function waitForPoolRoot(poolClient, expectedRoot, maxAttempts = 10, delayMs = 1500) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const rootRaw = (await poolClient.get_root()).result;
+    const root = asBigInt(unwrapResult(rootRaw, 'pool.get_root'));
+    if (root === expectedRoot) {
+      return root;
+    }
+    await new Promise(resolve => setTimeout(resolve, delayMs));
+  }
+  throw new Error('Timed out waiting for pool root to update');
+}
+
+function prepareInputs(inputs, pubKeyBytes, privKeyBytes) {
+  for (const input of inputs) {
+    const amountBytes = bigintToField(input.amount);
+    const blindingBytes = bigintToField(input.blinding);
+    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+    const signature = computeSignature(privKeyBytes, commitment, input.pathIndicesBytes);
+    const nullifier = computeNullifier(commitment, input.pathIndicesBytes, signature);
+    input.commitmentBytes = commitment;
+    input.commitmentBig = bytesToBigIntLE(commitment);
+    input.nullifierBytes = nullifier;
+    input.nullifierBig = bytesToBigIntLE(nullifier);
+  }
+}
+
+function prepareOutputs(outputs, pubKeyBytes) {
+  for (const output of outputs) {
+    const amountBytes = bigintToField(output.amount);
+    const blindingBytes = bigintToField(output.blinding);
+    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+    output.commitmentBytes = commitment;
+    output.commitmentBig = bytesToBigIntLE(commitment);
+  }
+}
+
 async function connectWallet() {
   const address = await connectFreighter();
   const net = await getWalletNetwork();
@@ -295,7 +353,7 @@ function buildSigner() {
   };
 }
 
-async function generateAndSend() {
+async function loadContext() {
   if (!state.address) {
     throw new Error('Connect wallet first');
   }
@@ -382,89 +440,66 @@ async function generateAndSend() {
     throw new Error('Non-membership root mismatch with on-chain ASP contract (expected empty tree root)');
   }
 
-  const inputs = [
-    { amount: 0n, blinding: 101n },
-    { amount: 0n, blinding: 202n },
-  ];
-
-  const pathIndicesBytes = bigintToField(0n);
-  const pathIndicesStr = bytesToBigIntStringLE(pathIndicesBytes);
-
-  for (const input of inputs) {
-    const amountBytes = bigintToField(input.amount);
-    const blindingBytes = bigintToField(input.blinding);
-    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
-    const signature = computeSignature(privKeyBytes, commitment, pathIndicesBytes);
-    const nullifier = computeNullifier(commitment, pathIndicesBytes, signature);
-    input.commitmentBytes = commitment;
-    input.nullifierBytes = nullifier;
-    input.nullifierBig = bytesToBigIntLE(nullifier);
-  }
-
-  const outputs = [
-    { amount: DEPOSIT_AMOUNT, blinding: 303n },
-    { amount: 0n, blinding: 404n },
-  ];
-
-  for (const output of outputs) {
-    const amountBytes = bigintToField(output.amount);
-    const blindingBytes = bigintToField(output.blinding);
-    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
-    output.commitmentBytes = commitment;
-    output.commitmentBig = bytesToBigIntLE(commitment);
-  }
-
-  const extData = {
-    recipient: contracts.pool,
-    ext_amount: DEPOSIT_AMOUNT,
-    encrypted_output0: new Uint8Array(),
-    encrypted_output1: new Uint8Array(),
-  };
-
-  const extDataHash = hashExtData(extData);
-  logConsole(`ext_data_hash: ${bytesToHex(extDataHash.bytes)}`);
-
   const membershipPathElements = sliceFieldElements(membershipProof.path_elements, LEVELS);
   const membershipPathIndices = bytesToBigIntStringLE(membershipProof.path_indices);
   const nonMembershipSiblings = sliceFieldElements(nonMembershipProof.siblings, SMT_LEVELS);
 
+  const membershipProofPayload = {
+    leaf: bytesToBigIntStringLE(membershipLeaf),
+    blinding: '0',
+    pathIndices: membershipPathIndices,
+    pathElements: membershipPathElements,
+  };
+  const nonMembershipProofPayload = {
+    key: bytesToBigIntStringLE(pubKeyBytes),
+    oldKey: bytesToBigIntStringLE(nonMembershipProof.not_found_key),
+    oldValue: bytesToBigIntStringLE(nonMembershipProof.not_found_value),
+    isOld0: nonMembershipProof.is_old0 ? '1' : '0',
+    siblings: nonMembershipSiblings,
+  };
+
+  return {
+    contracts,
+    poolClient,
+    poolRoot,
+    membershipRoot,
+    nonMembershipRoot,
+    privKey,
+    privKeyBytes,
+    pubKeyBytes,
+    zeroLeaf,
+    membershipProofPayload,
+    nonMembershipProofPayload,
+  };
+}
+
+async function buildProofBundle(label, rootValue, inputs, outputs, extData, context) {
+  const publicAmount = calculatePublicAmount(extData.ext_amount);
+  const extDataHash = hashExtData(extData);
+  logConsole(`${label} ext_data_hash: ${bytesToHex(extDataHash.bytes)}`);
+
   const circuitInputs = {
-    root: poolRoot.toString(),
-    publicAmount: DEPOSIT_AMOUNT.toString(),
+    root: rootValue.toString(),
+    publicAmount: publicAmount.toString(),
     extDataHash: extDataHash.bigInt.toString(),
     inputNullifier: inputs.map(input => input.nullifierBig.toString()),
     outputCommitment: outputs.map(output => output.commitmentBig.toString()),
     inAmount: inputs.map(input => input.amount.toString()),
-    inPrivateKey: inputs.map(() => privKey.toString()),
+    inPrivateKey: inputs.map(() => context.privKey.toString()),
     inBlinding: inputs.map(input => input.blinding.toString()),
-    inPathIndices: inputs.map(() => pathIndicesStr),
-    inPathElements: inputs.map(() => Array(LEVELS).fill('0')),
+    inPathIndices: inputs.map(input => input.pathIndicesStr),
+    inPathElements: inputs.map(input => input.pathElements),
     outAmount: outputs.map(output => output.amount.toString()),
-    outPubkey: outputs.map(() => bytesToBigIntStringLE(pubKeyBytes)),
+    outPubkey: outputs.map(() => bytesToBigIntStringLE(context.pubKeyBytes)),
     outBlinding: outputs.map(output => output.blinding.toString()),
-    membershipRoots: inputs.map(() => [membershipRoot.toString()]),
-    nonMembershipRoots: inputs.map(() => [nonMembershipRoot.toString()]),
-    membershipProofs: inputs.map(() => [
-      {
-        leaf: bytesToBigIntStringLE(membershipLeaf),
-        blinding: '0',
-        pathIndices: membershipPathIndices,
-        pathElements: membershipPathElements,
-      },
-    ]),
-    nonMembershipProofs: inputs.map(() => [
-      {
-        key: bytesToBigIntStringLE(pubKeyBytes),
-        oldKey: bytesToBigIntStringLE(nonMembershipProof.not_found_key),
-        oldValue: bytesToBigIntStringLE(nonMembershipProof.not_found_value),
-        isOld0: nonMembershipProof.is_old0 ? '1' : '0',
-        siblings: nonMembershipSiblings,
-      },
-    ]),
+    membershipRoots: inputs.map(() => [context.membershipRoot.toString()]),
+    nonMembershipRoots: inputs.map(() => [context.nonMembershipRoot.toString()]),
+    membershipProofs: inputs.map(() => [context.membershipProofPayload]),
+    nonMembershipProofs: inputs.map(() => [context.nonMembershipProofPayload]),
   };
 
-  setStatus('Generating witness and proof...');
-  console.log('CIRCUIT_INPUTS_JSON=', JSON.stringify(circuitInputs, null, 2));
+  setStatus(`Generating ${label.toLowerCase()} witness and proof...`);
+  console.log(`${label.toUpperCase()}_CIRCUIT_INPUTS_JSON=`, JSON.stringify(circuitInputs, null, 2));
   const witnessBytes = await generateWitness(circuitInputs);
   const proofBytes = generateProofBytes(witnessBytes);
   logConsole(`Proof bytes (compressed): ${proofBytes.length} bytes`);
@@ -487,30 +522,182 @@ async function generateAndSend() {
       b: proofBytesUncompressed.slice(64, 64 + 128),
       c: proofBytesUncompressed.slice(64 + 128),
     },
-    root: poolRoot,
+    root: rootValue,
     input_nullifiers: inputs.map(input => input.nullifierBig),
     output_commitment0: outputs[0].commitmentBig,
     output_commitment1: outputs[1].commitmentBig,
-    public_amount: DEPOSIT_AMOUNT,
+    public_amount: publicAmount,
     ext_data_hash: extDataHash.bytes,
-    asp_membership_root: membershipRoot,
-    asp_non_membership_root: nonMembershipRoot,
+    asp_membership_root: context.membershipRoot,
+    asp_non_membership_root: context.nonMembershipRoot,
   };
 
-  logObjectConsole('Transact proof', proof);
-  logObjectConsole('Transact ext_data', extData);
-  logObject('Transact sender', state.address);
+  logObjectConsole(`${label} proof`, proof);
+  logObjectConsole(`${label} ext_data`, extData);
+  logObject(`${label} sender`, state.address);
 
-  setStatus('Sending transaction...');
-  const tx = await poolClient.transact({
-    proof,
-    ext_data: extData,
+  return { proof, extData };
+}
+
+async function generateDeposit() {
+  const context = await loadContext();
+  const emptyPoolTree = buildPoolTree([], LEVELS, context.zeroLeaf);
+  const emptyPoolRoot = bytesToBigIntLE(emptyPoolTree.root());
+  if (context.poolRoot !== emptyPoolRoot) {
+    throw new Error('Pool root is not empty. Reset pool state to run deposit test.');
+  }
+
+  const emptyPathIndicesBytes = bigintToField(0n);
+  const emptyPathIndicesStr = bytesToBigIntStringLE(emptyPathIndicesBytes);
+  const emptyPathElements = Array(LEVELS).fill('0');
+
+  const depositInputs = [
+    {
+      amount: 0n,
+      blinding: 101n,
+      pathIndicesBytes: emptyPathIndicesBytes,
+      pathIndicesStr: emptyPathIndicesStr,
+      pathElements: emptyPathElements,
+    },
+    {
+      amount: 0n,
+      blinding: 202n,
+      pathIndicesBytes: emptyPathIndicesBytes,
+      pathIndicesStr: emptyPathIndicesStr,
+      pathElements: emptyPathElements,
+    },
+  ];
+  prepareInputs(depositInputs, context.pubKeyBytes, context.privKeyBytes);
+
+  const depositOutputs = [
+    { amount: DEPOSIT_AMOUNT, blinding: 303n },
+    { amount: 0n, blinding: 404n },
+  ];
+  prepareOutputs(depositOutputs, context.pubKeyBytes);
+
+  const depositExtData = {
+    recipient: context.contracts.pool,
+    ext_amount: DEPOSIT_AMOUNT,
+    encrypted_output0: new Uint8Array(),
+    encrypted_output1: new Uint8Array(),
+  };
+
+  const depositBundle = await buildProofBundle(
+    'Deposit',
+    context.poolRoot,
+    depositInputs,
+    depositOutputs,
+    depositExtData,
+    context,
+  );
+
+  setStatus('Sending deposit transaction...');
+  const depositTx = await context.poolClient.transact({
+    proof: depositBundle.proof,
+    ext_data: depositBundle.extData,
     sender: state.address,
   });
+  const depositSent = await depositTx.signAndSend();
+  log(`Sent deposit transaction: ${depositSent.sendTransactionResponse.hash}`);
 
-  const sent = await tx.signAndSend();
-  log(`Sent transaction: ${sent.sendTransactionResponse.hash}`);
-  setStatus('Transaction submitted');
+  state.poolLeaves = [depositOutputs[0].commitmentBytes, depositOutputs[1].commitmentBytes];
+  state.lastDepositOutputs = depositOutputs.map(output => ({
+    amount: output.amount,
+    blinding: output.blinding,
+  }));
+  state.lastWithdrawn = false;
+
+  const poolTreeAfterDeposit = buildPoolTree(state.poolLeaves, LEVELS, context.zeroLeaf);
+  const poolRootAfterDeposit = bytesToBigIntLE(poolTreeAfterDeposit.root());
+  logConsole(`Pool root (computed after deposit): ${toHex32(poolRootAfterDeposit)}`);
+  await waitForPoolRoot(context.poolClient, poolRootAfterDeposit);
+  state.lastPoolRoot = poolRootAfterDeposit;
+
+  if (btnWithdraw) {
+    btnWithdraw.disabled = false;
+  }
+  setStatus('Deposit submitted');
+}
+
+async function generateWithdraw() {
+  if (!state.lastDepositOutputs || state.poolLeaves.length === 0) {
+    throw new Error('Run deposit first to create a spendable note.');
+  }
+  if (state.lastWithdrawn) {
+    throw new Error('Withdrawal already attempted. Run a new deposit to continue.');
+  }
+
+  const context = await loadContext();
+  const poolTree = buildPoolTree(state.poolLeaves, LEVELS, context.zeroLeaf);
+  const poolRoot = bytesToBigIntLE(poolTree.root());
+  logConsole(`Pool root (computed for withdraw): ${toHex32(poolRoot)}`);
+  if (context.poolRoot !== poolRoot) {
+    await waitForPoolRoot(context.poolClient, poolRoot);
+  }
+
+  const depositProof0 = poolTree.get_proof(0);
+  const depositProof1 = poolTree.get_proof(1);
+  const withdrawInputs = [
+    {
+      amount: state.lastDepositOutputs[0].amount,
+      blinding: state.lastDepositOutputs[0].blinding,
+      pathIndicesBytes: depositProof0.path_indices,
+      pathIndicesStr: bytesToBigIntStringLE(depositProof0.path_indices),
+      pathElements: sliceFieldElements(depositProof0.path_elements, LEVELS),
+    },
+    {
+      amount: state.lastDepositOutputs[1].amount,
+      blinding: state.lastDepositOutputs[1].blinding,
+      pathIndicesBytes: depositProof1.path_indices,
+      pathIndicesStr: bytesToBigIntStringLE(depositProof1.path_indices),
+      pathElements: sliceFieldElements(depositProof1.path_elements, LEVELS),
+    },
+  ];
+  prepareInputs(withdrawInputs, context.pubKeyBytes, context.privKeyBytes);
+
+  const withdrawOutputs = [
+    { amount: 0n, blinding: 505n },
+    { amount: 0n, blinding: 606n },
+  ];
+  prepareOutputs(withdrawOutputs, context.pubKeyBytes);
+
+  const withdrawExtData = {
+    recipient: state.address,
+    ext_amount: -WITHDRAW_AMOUNT,
+    encrypted_output0: new Uint8Array(),
+    encrypted_output1: new Uint8Array(),
+  };
+
+  const withdrawBundle = await buildProofBundle(
+    'Withdraw',
+    poolRoot,
+    withdrawInputs,
+    withdrawOutputs,
+    withdrawExtData,
+    context,
+  );
+
+  setStatus('Sending withdrawal transaction...');
+  const withdrawTx = await context.poolClient.transact({
+    proof: withdrawBundle.proof,
+    ext_data: withdrawBundle.extData,
+    sender: state.address,
+  });
+  const withdrawSent = await withdrawTx.signAndSend();
+  log(`Sent withdrawal transaction: ${withdrawSent.sendTransactionResponse.hash}`);
+
+  state.poolLeaves.push(withdrawOutputs[0].commitmentBytes, withdrawOutputs[1].commitmentBytes);
+  const poolTreeAfterWithdraw = buildPoolTree(state.poolLeaves, LEVELS, context.zeroLeaf);
+  const poolRootAfterWithdraw = bytesToBigIntLE(poolTreeAfterWithdraw.root());
+  logConsole(`Pool root (computed after withdraw): ${toHex32(poolRootAfterWithdraw)}`);
+  await waitForPoolRoot(context.poolClient, poolRootAfterWithdraw);
+  state.lastPoolRoot = poolRootAfterWithdraw;
+  state.lastWithdrawn = true;
+
+  if (btnWithdraw) {
+    btnWithdraw.disabled = true;
+  }
+  setStatus('Withdrawal submitted');
 }
 
 async function init() {
@@ -537,6 +724,9 @@ btnConnect.addEventListener('click', async () => {
     const address = await connectWallet();
     log(`Wallet connected: ${address}`);
     btnSend.disabled = false;
+    if (btnWithdraw) {
+      btnWithdraw.disabled = true;
+    }
     setStatus('Wallet connected');
   } catch (err) {
     setStatus('Wallet connection failed');
@@ -547,14 +737,27 @@ btnConnect.addEventListener('click', async () => {
 btnSend.addEventListener('click', async () => {
   btnSend.disabled = true;
   try {
-    await generateAndSend();
+    await generateDeposit();
   } catch (err) {
     setStatus('Transaction failed');
-    logError('Transaction failed', err);
+    logError('Deposit failed', err);
   } finally {
     btnSend.disabled = false;
   }
 });
+
+if (btnWithdraw) {
+  btnWithdraw.addEventListener('click', async () => {
+    btnWithdraw.disabled = true;
+    try {
+      await generateWithdraw();
+    } catch (err) {
+      setStatus('Transaction failed');
+      logError('Withdrawal failed', err);
+      btnWithdraw.disabled = false;
+    }
+  });
+}
 
 init().catch(err => {
   setStatus('Initialization failed');
