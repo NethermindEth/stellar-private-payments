@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en" class="scroll-smooth">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="ASP Admin console for membership and non-membership trees." />
+  <meta name="author" content="PoolStellar" />
+
+  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+  <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png" />
+  <link rel="apple-touch-icon" href="assets/apple-touch-icon.png" />
+
+  <title>ASP Admin Console</title>
+
+  <link rel="stylesheet" href="css/app.css" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+</head>
+
+<body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
+<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-6 min-h-screen">
+  <header class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 sm:p-6 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl" role="banner">
+    <div class="space-y-2">
+      <div class="flex items-center gap-2 text-xs uppercase tracking-[0.35em] text-brand-400">
+        <span class="w-6 h-px bg-brand-500"></span>
+        ASP Admin
+      </div>
+      <h1 class="text-xl sm:text-2xl font-semibold">Membership and Non-Membership Control</h1>
+      <p class="text-sm text-dark-400 max-w-2xl">
+        Generate compliant leaves, inspect contract roots, and insert new leaves
+        for the ASP membership and non-membership sets.
+      </p>
+    </div>
+    <div class="flex flex-wrap items-center gap-3">
+      <div class="px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-xs text-dark-300" id="networkChip">Network: --</div>
+      <div class="px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-xs text-dark-300" id="walletChip">Wallet: Disconnected</div>
+      <button class="px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="connectBtn" type="button">
+        Connect Freighter
+      </button>
+    </div>
+  </header>
+
+  <main id="main-content" class="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
+    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="state-heading">
+      <div class="flex items-center justify-between gap-2">
+        <h2 id="state-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Contracts and State</h2>
+        <div id="status" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-dark-700 bg-dark-800 text-dark-300">Idle</div>
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="membershipContract">ASP Membership Contract ID</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="membershipContract" type="text" placeholder="C..." />
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="nonMembershipContract" type="text" placeholder="C..." />
+      </div>
+      <button class="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="refreshBtn" type="button">
+        Refresh State
+      </button>
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
+          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Root</div>
+          <div class="font-mono text-xs text-dark-200 break-all" id="membershipRoot">--</div>
+        </div>
+        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
+          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Levels</div>
+          <div class="font-mono text-xs text-dark-200" id="membershipLevels">--</div>
+        </div>
+        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
+          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Next Index</div>
+          <div class="font-mono text-xs text-dark-200" id="membershipNextIndex">--</div>
+        </div>
+        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
+          <div class="text-[10px] uppercase tracking-wide text-dark-400">Non-Membership Root</div>
+          <div class="font-mono text-xs text-dark-200 break-all" id="nonMembershipRoot">--</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="membership-heading">
+      <div class="flex items-center justify-between gap-2">
+        <h2 id="membership-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Membership Leaf Builder</h2>
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="privateKey">Private Key (hex or decimal)</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="privateKey" type="text" placeholder="0x..." />
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="publicKey">Public Key Override (optional)</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="publicKey" type="text" placeholder="0x..." />
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blinding">Blinding (hex or decimal)</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blinding" type="text" placeholder="0" />
+      </div>
+      <div class="flex flex-wrap gap-3">
+        <button class="flex-1 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="computeMembershipLeafBtn" type="button">
+          Compute Leaf
+        </button>
+        <button class="flex-1 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition disabled:opacity-60" id="useMembershipLeafBtn" type="button" disabled>
+          Use Computed Leaf
+        </button>
+      </div>
+      <div class="space-y-3">
+        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Derived Public Key</div>
+        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="derivedPubKey">--</div>
+      </div>
+      <div class="space-y-3">
+        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf (hex)</div>
+        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedMembershipLeafHex">--</div>
+      </div>
+      <div class="space-y-3">
+        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf (decimal)</div>
+        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedMembershipLeafDec">--</div>
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="membershipLeafInput">Leaf to Insert</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="membershipLeafInput" type="text" placeholder="Paste leaf hex or decimal" />
+      </div>
+      <button class="w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="insertMembershipLeafBtn" type="button">
+        Insert Membership Leaf
+      </button>
+      <p class="text-xs text-dark-400">Leaf = Poseidon2(publicKey, blinding, domain=1).</p>
+    </section>
+
+    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="nonmembership-heading">
+      <div class="flex items-center justify-between gap-2">
+        <h2 id="nonmembership-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Non-Membership Insert</h2>
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blockedKey">Key (public key to block)</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blockedKey" type="text" placeholder="0x..." />
+      </div>
+      <div class="space-y-3">
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blockedValue">Value</label>
+        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blockedValue" type="text" placeholder="0x..." />
+        <label class="flex items-center gap-2 text-xs text-dark-400" for="valueSame">
+          <input class="accent-brand-500" id="valueSame" type="checkbox" checked />
+          Value equals key
+        </label>
+      </div>
+      <button class="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="computeNonMembershipLeafBtn" type="button">
+        Compute Leaf Hash
+      </button>
+      <div class="space-y-3">
+        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf Hash (hex)</div>
+        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedNonMembershipLeafHex">--</div>
+      </div>
+      <button class="w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="insertNonMembershipLeafBtn" type="button">
+        Insert Non-Membership Leaf
+      </button>
+      <p class="text-xs text-dark-400">Leaf hash uses Poseidon2(key, value, domain=1).</p>
+    </section>
+
+    <section class="xl:col-span-3 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="activity-heading">
+      <div class="flex items-center justify-between gap-2 mb-3">
+        <h2 id="activity-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Activity</h2>
+      </div>
+      <pre class="font-mono text-xs text-dark-400 whitespace-pre-wrap" id="log"></pre>
+    </section>
+  </main>
+</div>
+
+<script type="module" src="js/admin.js"></script>
+</body>
+</html>
