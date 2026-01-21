@@ -42,7 +42,7 @@ function notifyProgress(loaded, total, message, percent) {
     }
 }
 
-// Promise for worker readiness (to handle multiple concurrent calls to ensureWorker)
+// Promise for worker readiness
 let workerReadyPromise = null;
 
 /**
@@ -96,7 +96,8 @@ function ensureWorker() {
                     if (data.success !== false) {
                         pending.resolve(data);
                     } else {
-                        pending.reject(new Error(data.error || 'Unknown error'));
+                        console.error('[ProverClient] Worker returned error:', data);
+                        pending.reject(new Error(data.error || `Worker error (type: ${type})`));
                     }
                 }
             };

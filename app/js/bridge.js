@@ -13,6 +13,7 @@ import initProverModule, {
     Prover,
     MerkleTree,
     MerkleProof,
+    WasmSparseMerkleTree,
     derive_public_key,
     derive_public_key_hex,
     compute_commitment,
@@ -522,7 +523,7 @@ export function createMerkleTree(depth) {
     return new MerkleTree(depth);
 }
 
-export { MerkleTree, MerkleProof };
+export { MerkleTree, MerkleProof, WasmSparseMerkleTree };
 
 // Serialization Utilities
 

@@ -3,7 +3,7 @@
  * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
  * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, contract } from '@stellar/stellar-sdk';
 
 const SUPPORTED_NETWORK = 'testnet';
 
@@ -769,5 +769,212 @@ export function formatAddress(address, startChars = 4, endChars = 4) {
 }
 
 initializeNetwork();
+
+// Pool contract client cache
+let poolClient = null;
+
+/**
+ * Creates a signer object compatible with the Stellar SDK contract client.
+ * Uses Freighter wallet for signing transactions and auth entries.
+ *
+ * @param {string} publicKey - User's Stellar public key
+ * @param {string} networkPassphrase - Network passphrase for signing
+ * @param {function} signTransaction - Function to sign transactions (from wallet.js)
+ * @param {function} signAuthEntry - Function to sign auth entries (from wallet.js)
+ * @returns {Object} Signer object with signTransaction and signAuthEntry methods
+ */
+export function createFreighterSigner(publicKey, networkPassphrase, signTransaction, signAuthEntry) {
+    return {
+        signTransaction: async (transactionXdr, opts = {}) => {
+            const result = await signTransaction(transactionXdr, {
+                networkPassphrase,
+                address: publicKey,
+                ...opts,
+            });
+            return result.signedTxXdr;
+        },
+        signAuthEntry: async (entryXdr, opts = {}) => {
+            const result = await signAuthEntry(entryXdr, {
+                networkPassphrase,
+                address: publicKey,
+                ...opts,
+            });
+            return result.signedAuthEntry;
+        },
+    };
+}
+
+/**
+ * Get or create the Pool contract client.
+ * Uses the contract spec from on-chain to build the client dynamically.
+ *
+ * @param {Object} signerOptions - Options for creating the signer
+ * @param {string} signerOptions.publicKey - User's Stellar public key
+ * @param {function} signerOptions.signTransaction - Function to sign transactions
+ * @param {function} signerOptions.signAuthEntry - Function to sign auth entries
+ * @param {boolean} [forceRefresh=false] - Force creation of new client
+ * @returns {Promise<contract.Client>} Pool contract client
+ */
+export async function getPoolClient(signerOptions, forceRefresh = false) {
+    const contracts = getDeployedContracts();
+    if (!contracts?.pool) {
+        throw new Error('Deployments not loaded. Call loadDeployedContracts() first.');
+    }
+
+    const network = getNetwork();
+
+    // Return cached client if available and not forcing refresh
+    if (poolClient && !forceRefresh) {
+        return poolClient;
+    }
+
+    const signer = createFreighterSigner(
+        signerOptions.publicKey,
+        network.passphrase,
+        signerOptions.signTransaction,
+        signerOptions.signAuthEntry
+    );
+
+    console.log('[Stellar] Loading Pool contract client from RPC...');
+    poolClient = await contract.Client.from({
+        contractId: contracts.pool,
+        rpcUrl: network.rpcUrl,
+        networkPassphrase: network.passphrase,
+        publicKey: signerOptions.publicKey,
+        signTransaction: signer.signTransaction,
+        signAuthEntry: signer.signAuthEntry,
+    });
+
+    console.log('[Stellar] Pool contract client ready');
+    return poolClient;
+}
+
+/**
+ * Convert a BigInt to a U256 compatible object for Soroban.
+ *
+ * @param {bigint} value - BigInt value to convert
+ * @returns {bigint} Value as BigInt (SDK handles conversion)
+ */
+function toU256(value) {
+    // The SDK contract client handles BigInt -> U256 conversion
+    return value;
+}
+
+/**
+ * Convert a BigInt to an I256 compatible value for Soroban.
+ *
+ * @param {bigint} value - BigInt value (can be negative)
+ * @returns {bigint} Value as BigInt (SDK handles conversion)
+ */
+function toI256(value) {
+    return value;
+}
+
+/**
+ * Submit a transact call to the Pool contract.
+ *
+ * @param {Object} params
+ * @param {Object} params.proof - Proof data from transaction builder
+ * @param {Object} params.proof.proof - Groth16 proof { a: Uint8Array(64), b: Uint8Array(128), c: Uint8Array(64) }
+ * @param {bigint} params.proof.root - Pool merkle root
+ * @param {bigint[]} params.proof.input_nullifiers - Input nullifiers
+ * @param {bigint} params.proof.output_commitment0 - First output commitment
+ * @param {bigint} params.proof.output_commitment1 - Second output commitment
+ * @param {bigint} params.proof.public_amount - Public amount (deposit positive, withdraw negative)
+ * @param {Uint8Array} params.proof.ext_data_hash - 32-byte ext data hash
+ * @param {bigint} params.proof.asp_membership_root - ASP membership root
+ * @param {bigint} params.proof.asp_non_membership_root - ASP non-membership root
+ * @param {Object} params.extData - External data
+ * @param {string} params.extData.recipient - Recipient address
+ * @param {bigint} params.extData.ext_amount - External amount
+ * @param {bigint} [params.extData.fee=0n] - Relayer fee
+ * @param {Uint8Array} params.extData.encrypted_output0 - Encrypted output 0
+ * @param {Uint8Array} params.extData.encrypted_output1 - Encrypted output 1
+ * @param {string} params.sender - Sender address (must match signer)
+ * @param {Object} params.signerOptions - Signer options for getPoolClient
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function submitPoolTransaction(params) {
+    const { proof, extData, sender, signerOptions } = params;
+
+    try {
+        console.log('[Stellar] Preparing pool transaction...');
+
+        // Get pool client with signer
+        const client = await getPoolClient(signerOptions);
+
+        // Format proof for contract
+        const contractProof = {
+            proof: {
+                a: Buffer.from(proof.proof.a),
+                b: Buffer.from(proof.proof.b),
+                c: Buffer.from(proof.proof.c),
+            },
+            root: toU256(proof.root),
+            input_nullifiers: proof.input_nullifiers.map(n => toU256(n)),
+            output_commitment0: toU256(proof.output_commitment0),
+            output_commitment1: toU256(proof.output_commitment1),
+            public_amount: toU256(proof.public_amount),
+            ext_data_hash: Buffer.from(proof.ext_data_hash),
+            asp_membership_root: toU256(proof.asp_membership_root),
+            asp_non_membership_root: toU256(proof.asp_non_membership_root),
+        };
+
+        // Format ext_data for contract
+        const contractExtData = {
+            recipient: extData.recipient,
+            ext_amount: toI256(extData.ext_amount),
+            fee: toU256(extData.fee || 0n),
+            encrypted_output0: Buffer.from(extData.encrypted_output0),
+            encrypted_output1: Buffer.from(extData.encrypted_output1),
+        };
+
+        console.log('[Stellar] Calling transact...', {
+            proof: { root: proof.root.toString(16) },
+            ext_amount: extData.ext_amount.toString(),
+        });
+
+        // Build and send transaction
+        const tx = await client.transact({
+            proof: contractProof,
+            ext_data: contractExtData,
+            sender,
+        });
+
+        console.log('[Stellar] Signing and sending transaction...');
+        const result = await tx.signAndSend();
+
+        console.log('[Stellar] Transaction submitted:', result.sendTransactionResponse?.hash);
+
+        return {
+            success: true,
+            txHash: result.sendTransactionResponse?.hash,
+            result,
+        };
+    } catch (error) {
+        console.error('[Stellar] Transaction submission failed:', error);
+        return {
+            success: false,
+            error: error.message || String(error),
+        };
+    }
+}
+
+/**
+ * Submit a deposit transaction to the Pool contract.
+ * Convenience wrapper around submitPoolTransaction for deposits.
+ *
+ * @param {Object} proofResult - Result from generateDepositProof()
+ * @param {Object} signerOptions - Signer options (publicKey, signTransaction, signAuthEntry)
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function submitDeposit(proofResult, signerOptions) {
+    return submitPoolTransaction({
+        proof: proofResult.sorobanProof,
+        extData: proofResult.extData,
+        sender: signerOptions.publicKey,
+        signerOptions,
+    });
+}
 
 export { NETWORKS, SUPPORTED_NETWORK };

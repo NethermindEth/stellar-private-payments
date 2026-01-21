@@ -197,12 +197,19 @@ async function handleProve(data, messageId) {
         }
         
         // Step 3: Extract public inputs
+        console.log('[Worker] Extracting public inputs...');
         const publicInputsBytes = extractPublicInputs(witnessBytes);
+        console.log(`[Worker] Public inputs extracted: ${publicInputsBytes?.length || 0} bytes`);
+        
+        // Convert to arrays for serialization
+        const proofArray = Array.from(proofBytes);
+        const publicInputsArray = Array.from(publicInputsBytes);
+        console.log(`[Worker] Proof: ${proofArray.length} bytes, Public inputs: ${publicInputsArray.length} bytes`);
         
         return {
             success: true,
-            proof: Array.from(proofBytes),
-            publicInputs: Array.from(publicInputsBytes),
+            proof: proofArray,
+            publicInputs: publicInputsArray,
             sorobanFormat: !!sorobanFormat,
             timings: {
                 witness: witnessOnlyTime,
@@ -211,7 +218,8 @@ async function handleProve(data, messageId) {
             },
         };
     } catch (error) {
-        return { success: false, error: error.message };
+        console.error('[Worker] handleProve error:', error);
+        return { success: false, error: error?.message || String(error) || 'Proof generation failed' };
     }
 }
 

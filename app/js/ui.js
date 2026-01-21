@@ -2,18 +2,29 @@
  * PoolStellar Compliant Private System
  * Vanilla JS with template-based DOM manipulation
  */
-import { connectWallet, getWalletNetwork } from './wallet.js';
+import { connectWallet, getWalletNetwork, signWalletMessage, signWalletTransaction, signWalletAuthEntry } from './wallet.js';
 import { 
     pingTestnet,
     readAllContractStates,
+    readPoolState,
+    readASPMembershipState,
+    readASPNonMembershipState,
     getPoolEvents,
     formatAddress,
     loadDeployedContracts,
     getDeployedContracts,
     validateWalletNetwork,
+    submitDeposit,
 } from './stellar.js';
 import { StateManager } from './state/index.js';
 import * as ProverClient from './prover-client.js';
+import { generateDepositProof } from './transaction-builder.js';
+import { 
+    deriveNotePrivateKeyFromSignature, 
+    deriveEncryptionKeypairFromSignature,
+    generateBlinding, 
+    fieldToHex,
+} from './bridge.js';
 
 
 // Application State
@@ -496,51 +507,154 @@ const Deposit = {
         const btnText = btn.querySelector('.btn-text');
         const btnLoading = btn.querySelector('.btn-loading');
         
+        const setLoadingText = (text) => {
+            btnLoading.innerHTML = `<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">${text}</span>`;
+        };
+        
         btn.disabled = true;
         btnText.classList.add('hidden');
         btnLoading.classList.remove('hidden');
         
         try {
-            // Ensure prover is ready
-            if (!ProverUI.isReady()) {
-                btnLoading.querySelector('span')?.classList.add('hidden');
-                const loadingText = btnLoading.querySelector('.loading-text') || btnLoading;
-                if (loadingText.tagName !== 'SPAN') {
-                    btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">Initializing prover...</span>';
+            // Step 1: Sign messages to derive keys
+            // Get network info for signing
+            const network = await getWalletNetwork();
+            const signOpts = {
+                address: App.state.wallet.address,
+            };
+            
+            setLoadingText('Sign message to derive keys (1/2)...');
+            console.log('[Deposit] Requesting spending key signature...');
+            let spendingSig;
+            try {
+                const result = await signWalletMessage('Privacy Pool Spending Key [v1]', signOpts);
+                spendingSig = result.signedMessage;
+                console.log('[Deposit] Spending key signature received');
+            } catch (sigError) {
+                console.error('[Deposit] Spending key signature error:', sigError);
+                if (sigError.code === 'USER_REJECTED') {
+                    throw new Error('Please approve the message signature to derive your spending key');
                 }
-                
-                await ProverUI.ensureReady();
-                
-                if (!ProverUI.isReady()) {
-                    throw new Error('Prover initialization failed');
-                }
+                throw sigError;
             }
-
-            // Update loading text
-            btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">Generating proof...</span>';
-
-            // TODO: Build real circuit inputs from:
-            // 1. User's derived keys (from wallet signature)
-            // 2. Output commitments with real blindings
-            // 3. Merkle proofs from StateManager
-            // 4. ASP membership/non-membership proofs
-            // For now, we still use mock data but show the prover is ready
             
-            // Simulate proof generation time (in production, this would be real proof)
-            await new Promise(r => setTimeout(r, 2000));
+            // Small delay to let Freighter reset between signature requests
+            await new Promise(r => setTimeout(r, 500));
             
-            // Create notes (still using mock data for now)
+            setLoadingText('Sign message to derive keys (2/2)...');
+            console.log('[Deposit] Requesting encryption key signature...');
+            let encryptionSig;
+            try {
+                const result = await signWalletMessage('Sign to access Privacy Pool [v1]', signOpts);
+                encryptionSig = result.signedMessage;
+                console.log('[Deposit] Encryption key signature received');
+            } catch (sigError) {
+                console.error('[Deposit] Encryption key signature error:', sigError);
+                if (sigError.code === 'USER_REJECTED') {
+                    throw new Error('Please approve the message signature to derive your encryption key');
+                }
+                throw sigError;
+            }
+            
+            // Convert signatures to bytes and derive keys
+            const spendingSigBytes = new Uint8Array(atob(spendingSig).split('').map(c => c.charCodeAt(0)));
+            const encryptionSigBytes = new Uint8Array(atob(encryptionSig).split('').map(c => c.charCodeAt(0)));
+            
+            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+            const { publicKey: encryptionPubKey } = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
+            console.log('[Deposit] Derived keys from signatures');
+            
+            // Step 2: Fetch on-chain state
+            setLoadingText('Fetching on-chain state...');
+            const [poolState, membershipState, nonMembershipState] = await Promise.all([
+                readPoolState(),
+                readASPMembershipState(),
+                readASPNonMembershipState(),
+            ]);
+            
+            if (!poolState.success || !membershipState.success || !nonMembershipState.success) {
+                throw new Error('Failed to read contract state');
+            }
+            
+            // Parse roots from hex strings to BigInt
+            const poolRoot = BigInt(poolState.merkleRoot || '0x0');
+            const membershipRoot = BigInt(membershipState.root || '0x0');
+            const nonMembershipRoot = BigInt(nonMembershipState.root || '0x0');
+            
+            console.log('[Deposit] On-chain roots:', {
+                pool: poolRoot.toString(16),
+                membership: membershipRoot.toString(16),
+                nonMembership: nonMembershipRoot.toString(16),
+            });
+            
+            // Step 3: Build output notes
+            const outputs = [];
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
+                // Convert XLM amount to stroops (7 decimals for XLM)
+                const amountBigInt = BigInt(Math.floor(amount * 10000000));
+                const blindingBytes = generateBlinding();
+                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                outputs.push({ amount: amountBigInt, blinding });
+            });
+            
+            // Ensure we have exactly 2 outputs (circuit requirement)
+            while (outputs.length < 2) {
+                const blindingBytes = generateBlinding();
+                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                outputs.push({ amount: 0n, blinding });
+            }
+            
+            // Step 4: Generate proof (includes encryption of outputs)
+            const contracts = getDeployedContracts();
+            const totalAmountStroops = BigInt(Math.floor(totalAmount * 10000000));
+            
+            // Get membership blinding from UI
+            const membershipBlindingInput = document.getElementById('deposit-membership-blinding')?.value || '0';
+            const membershipBlinding = BigInt(membershipBlindingInput);
+            console.log('[Deposit] Using membership blinding:', membershipBlinding.toString());
+            
+            setLoadingText('Generating ZK proof...');
+            const proofResult = await generateDepositProof({
+                privKeyBytes,
+                encryptionPubKey,
+                poolRoot,
+                membershipRoot,
+                nonMembershipRoot,
+                amount: totalAmountStroops,
+                outputs,
+                poolAddress: contracts.pool,
+                stateManager: App.stateManager,
+                membershipLeafIndex: 0, // TODO: get from actual membership tree
+                membershipBlinding,
+            }, {
+                onProgress: (progress) => {
+                    if (progress.message) {
+                        setLoadingText(progress.message);
+                    }
+                },
+            });
+            
+            console.log('[Deposit] Proof generated:', {
+                verified: proofResult.verified,
+                timings: proofResult.timings,
+            });
+            
+            // Step 5: Update UI with generated notes
+            let outputIndex = 0;
+            document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
+                const outputNote = proofResult.outputNotes[outputIndex];
+                const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const isDummy = amount === 0;
-                const noteId = Utils.generateHex(64);
+                
+                // Generate note ID from commitment
+                const noteId = fieldToHex(outputNote.commitmentBytes);
                 
                 const note = {
                     id: noteId,
-                    commitment: Utils.generateHex(64),
-                    nullifier: Utils.generateHex(64),
+                    commitment: fieldToHex(outputNote.commitmentBytes),
                     amount,
-                    blinding: Utils.generateHex(64),
+                    blinding: outputNote.blinding.toString(),
                     spent: false,
                     isDummy,
                     createdAt: new Date().toISOString()
@@ -555,19 +669,33 @@ const Deposit = {
                 
                 row.querySelector('.copy-btn').disabled = false;
                 row.querySelector('.download-btn').disabled = false;
+                outputIndex++;
             });
+            
+            // Step 6: Submit transaction to Soroban
+            setLoadingText('Submitting transaction...');
+            const submitResult = await submitDeposit(proofResult, {
+                publicKey: App.state.wallet.address,
+                signTransaction: signWalletTransaction,
+                signAuthEntry: signWalletAuthEntry,
+            });
+            
+            if (!submitResult.success) {
+                throw new Error(`Transaction failed: ${submitResult.error}`);
+            }
+            
+            console.log('[Deposit] Transaction submitted:', submitResult.txHash);
             
             Storage.save();
             NotesTable.render();
-            Toast.show(`Successfully deposited ${totalAmount} XLM!`, 'success');
+            Toast.show(`Deposited ${totalAmount} XLM! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
         } catch (e) {
+            console.error('[Deposit] Error:', e);
             Toast.show('Deposit failed: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
             btnLoading.classList.add('hidden');
-            // Reset loading text
-            btnLoading.innerHTML = '<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>';
         }
     }
 };
