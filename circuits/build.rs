@@ -869,10 +869,12 @@ fn g1_to_snarkjs(p: &G1Affine) -> Value {
 }
 
 /// Convert a G2Affine point to snarkjs JSON format.
+/// snarkjs uses [c1, c0] ordering (imaginary first, real second) for Fq2
+/// elements.
 fn g2_to_snarkjs(p: &G2Affine) -> Value {
     json!([
-        [fq_to_decimal(&p.x.c0), fq_to_decimal(&p.x.c1)],
-        [fq_to_decimal(&p.y.c0), fq_to_decimal(&p.y.c1)],
+        [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
+        [fq_to_decimal(&p.y.c1), fq_to_decimal(&p.y.c0)],
         ["1", "0"]
     ])
 }

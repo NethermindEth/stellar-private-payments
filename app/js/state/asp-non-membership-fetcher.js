@@ -6,7 +6,7 @@
  */
 
 import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
-import { xdr, Address, TransactionBuilder, Account } from '@stellar/stellar-sdk';
+import { xdr, Address, TransactionBuilder, Account, Operation } from '@stellar/stellar-sdk';
 import {bytesToHex, hexToBytes} from './utils.js';
 
 /**
@@ -90,15 +90,10 @@ export async function fetchNonMembershipProof(key) {
             args: [keyU256],
         });
 
-        const op = xdr.Operation.fromXDR(
-            xdr.Operation.invokeHostFunction(
-                new xdr.InvokeHostFunctionOp({
-                    hostFunction: xdr.HostFunction.hostFunctionTypeInvokeContract(invokeArgs),
-                    auth: [],
-                })
-            ).toXDR(),
-            'base64'
-        );
+        const op = Operation.invokeHostFunction({
+            func: xdr.HostFunction.hostFunctionTypeInvokeContract(invokeArgs),
+            auth: [],
+        });
 
         // Build a minimal transaction for simulation
         const txBuilder = new TransactionBuilder(
@@ -132,16 +127,20 @@ export async function fetchNonMembershipProof(key) {
                 };
             }
             
+            // Fetch root
+            const rootResult = await fetchRoot();
+            if (!rootResult.success) {
+                return { success: false, error: `Failed to fetch root: ${rootResult.error}` };
+            }
+            
             // Build non-membership proof
             const proof = {
-                root: hexToBytes(await fetchRoot().then(r => r.root)),
+                root: toBytes(rootResult.root),
                 key: hexToBytes(keyHex),
-                siblings: (findResult.siblings || []).map(s =>
-                    typeof s === 'string' ? hexToBytes(s) : s
-                ),
-                notFoundKey: findResult.not_found_key || findResult.notFoundKey,
-                notFoundValue: findResult.not_found_value || findResult.notFoundValue,
-                isOld0: findResult.is_old0 || findResult.isOld0,
+                siblings: (findResult.siblings || []).map(s => toBytes(s)),
+                notFoundKey: toBytes(findResult.not_found_key || findResult.notFoundKey),
+                notFoundValue: toBytes(findResult.not_found_value || findResult.notFoundValue),
+                isOld0: findResult.is_old0 ?? findResult.isOld0 ?? false,
             };
             
             return { success: true, proof };
@@ -152,6 +151,38 @@ export async function fetchNonMembershipProof(key) {
         console.error('[ASPNonMembershipFetcher] Failed to fetch proof:', error);
         return { success: false, error: error.message };
     }
+}
+
+/**
+ * Converts various types to Uint8Array.
+ * Handles hex strings, Buffer, Uint8Array, BigInt, and null/undefined.
+ * @param {string|Buffer|Uint8Array|BigInt|null|undefined} value
+ * @returns {Uint8Array}
+ */
+function toBytes(value) {
+    if (value === null || value === undefined) {
+        return new Uint8Array(32); // Return zero bytes
+    }
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (Buffer.isBuffer(value)) {
+        return new Uint8Array(value);
+    }
+    if (typeof value === 'bigint') {
+        // Convert BigInt to 32-byte big-endian representation
+        const hex = value.toString(16).padStart(64, '0');
+        return hexToBytes(hex);
+    }
+    if (typeof value === 'string') {
+        return hexToBytes(value);
+    }
+    // Handle objects with buffer property (common in SDK)
+    if (value && typeof value === 'object' && value.buffer) {
+        return new Uint8Array(value.buffer);
+    }
+    console.warn('[ASPNonMembershipFetcher] Unknown value type:', typeof value, value);
+    return new Uint8Array(32);
 }
 
 /**

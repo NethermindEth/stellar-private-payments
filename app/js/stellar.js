@@ -3,7 +3,7 @@
  * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
  * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, contract } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, contract, TransactionBuilder, Transaction, FeeBumpTransaction } from '@stellar/stellar-sdk';
 
 const SUPPORTED_NETWORK = 'testnet';
 
@@ -786,20 +786,20 @@ let poolClient = null;
 export function createFreighterSigner(publicKey, networkPassphrase, signTransaction, signAuthEntry) {
     return {
         signTransaction: async (transactionXdr, opts = {}) => {
-            const result = await signTransaction(transactionXdr, {
+            // SDK expects { signedTxXdr, signerAddress } object, not just the XDR string
+            return signTransaction(transactionXdr, {
                 networkPassphrase,
                 address: publicKey,
                 ...opts,
             });
-            return result.signedTxXdr;
         },
         signAuthEntry: async (entryXdr, opts = {}) => {
-            const result = await signAuthEntry(entryXdr, {
+            // SDK expects { signedAuthEntry } object
+            return signAuthEntry(entryXdr, {
                 networkPassphrase,
                 address: publicKey,
                 ...opts,
             });
-            return result.signedAuthEntry;
         },
     };
 }
@@ -847,6 +847,30 @@ export async function getPoolClient(signerOptions, forceRefresh = false) {
 
     console.log('[Stellar] Pool contract client ready');
     return poolClient;
+}
+
+/**
+ * Converts various types to Uint8Array for Soroban contract calls.
+ * Handles Uint8Array, ArrayBuffer, and array-like objects.
+ *
+ * @param {Uint8Array|ArrayBuffer|Array<number>} value - Value to convert
+ * @returns {Uint8Array} Value as Uint8Array
+ */
+function toBytes(value) {
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    if (Array.isArray(value)) {
+        return new Uint8Array(value);
+    }
+    // Handle objects with buffer-like properties
+    if (value && typeof value === 'object' && 'length' in value) {
+        return new Uint8Array(Array.from(value));
+    }
+    throw new Error(`Cannot convert ${typeof value} to Uint8Array`);
 }
 
 /**
@@ -903,30 +927,29 @@ export async function submitPoolTransaction(params) {
         // Get pool client with signer
         const client = await getPoolClient(signerOptions);
 
-        // Format proof for contract
+        // Format proof for contract (ensure Uint8Array for byte fields)
         const contractProof = {
             proof: {
-                a: Buffer.from(proof.proof.a),
-                b: Buffer.from(proof.proof.b),
-                c: Buffer.from(proof.proof.c),
+                a: toBytes(proof.proof.a),
+                b: toBytes(proof.proof.b),
+                c: toBytes(proof.proof.c),
             },
             root: toU256(proof.root),
             input_nullifiers: proof.input_nullifiers.map(n => toU256(n)),
             output_commitment0: toU256(proof.output_commitment0),
             output_commitment1: toU256(proof.output_commitment1),
             public_amount: toU256(proof.public_amount),
-            ext_data_hash: Buffer.from(proof.ext_data_hash),
+            ext_data_hash: toBytes(proof.ext_data_hash),
             asp_membership_root: toU256(proof.asp_membership_root),
             asp_non_membership_root: toU256(proof.asp_non_membership_root),
         };
 
-        // Format ext_data for contract
+        // Format ext_data for contract (must match ExtData struct in pool.rs)
         const contractExtData = {
             recipient: extData.recipient,
             ext_amount: toI256(extData.ext_amount),
-            fee: toU256(extData.fee || 0n),
-            encrypted_output0: Buffer.from(extData.encrypted_output0),
-            encrypted_output1: Buffer.from(extData.encrypted_output1),
+            encrypted_output0: toBytes(extData.encrypted_output0),
+            encrypted_output1: toBytes(extData.encrypted_output1),
         };
 
         console.log('[Stellar] Calling transact...', {
@@ -934,25 +957,52 @@ export async function submitPoolTransaction(params) {
             ext_amount: extData.ext_amount.toString(),
         });
 
-        // Build and send transaction
-        const tx = await client.transact({
-            proof: contractProof,
-            ext_data: contractExtData,
-            sender,
-        });
+        // Build the transaction (this will simulate)
+        let tx;
+        try {
+            tx = await client.transact({
+                proof: contractProof,
+                ext_data: contractExtData,
+                sender,
+            });
+            console.log('[Stellar] Transaction built successfully');
+        } catch (buildError) {
+            console.error('[Stellar] Transaction build error:', buildError);
+            
+            // Check if simulation failed
+            const errorMsg = String(buildError?.message || '');
+            if (errorMsg.includes('simulation') || errorMsg.includes('Simulation')) {
+                throw new Error(`Transaction simulation failed: ${errorMsg}`);
+            }
+            throw buildError;
+        }
 
-        console.log('[Stellar] Signing and sending transaction...');
-        const result = await tx.signAndSend();
-
-        console.log('[Stellar] Transaction submitted:', result.sendTransactionResponse?.hash);
+        console.log('[Stellar] Signing and sending transaction... (v6)');
+        
+        // Use simple signAndSend like the working code
+        const sent = await tx.signAndSend();
+        const txHash = sent.sendTransactionResponse?.hash;
+        
+        console.log('[Stellar] Transaction submitted successfully:', txHash);
 
         return {
             success: true,
-            txHash: result.sendTransactionResponse?.hash,
-            result,
+            txHash,
         };
     } catch (error) {
         console.error('[Stellar] Transaction submission failed:', error);
+        
+        // Check if this is a parsing error that might have happened after submission
+        const errorMsg = String(error?.message || '');
+        if (errorMsg.includes('switch') || errorMsg.includes('Cannot read properties')) {
+            console.warn('[Stellar] SDK parsing error - transaction status uncertain');
+            return {
+                success: false,
+                error: 'SDK parsing error - check Stellar Expert for transaction status',
+                warning: errorMsg,
+            };
+        }
+        
         return {
             success: false,
             error: error.message || String(error),

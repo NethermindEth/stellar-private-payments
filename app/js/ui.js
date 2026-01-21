@@ -22,8 +22,11 @@ import { generateDepositProof } from './transaction-builder.js';
 import { 
     deriveNotePrivateKeyFromSignature, 
     deriveEncryptionKeypairFromSignature,
+    derivePublicKey,
     generateBlinding, 
     fieldToHex,
+    bigintToField,
+    poseidon2Hash2,
 } from './bridge.js';
 
 
@@ -561,8 +564,26 @@ const Deposit = {
             const encryptionSigBytes = new Uint8Array(atob(encryptionSig).split('').map(c => c.charCodeAt(0)));
             
             const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+            const pubKeyBytes = derivePublicKey(privKeyBytes);
             const { publicKey: encryptionPubKey } = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
             console.log('[Deposit] Derived keys from signatures');
+            
+            // DEBUG: Compute and print ASP membership leaf for manual contract registration
+            const membershipBlindingInput = document.getElementById('deposit-membership-blinding')?.value || '0';
+            const membershipBlinding = BigInt(membershipBlindingInput);
+            const membershipBlindingBytes = bigintToField(membershipBlinding);
+            const membershipLeaf = poseidon2Hash2(pubKeyBytes, membershipBlindingBytes, 1);
+            const membershipLeafHex = fieldToHex(membershipLeaf);
+            console.log('='.repeat(60));
+            console.log('[DEBUG] ASP Membership Leaf Info:');
+            console.log('  Public Key (hex):', fieldToHex(pubKeyBytes));
+            console.log('  Blinding:', membershipBlinding.toString());
+            console.log('  Membership Leaf = poseidon2(pubKey, blinding, domain=1)');
+            console.log('  Membership Leaf (hex):', membershipLeafHex);
+            console.log('='.repeat(60));
+            console.log('To add this leaf to ASP-membership contract via Stellar CLI:');
+            console.log(`  stellar contract invoke --id <ASP_MEMBERSHIP_CONTRACT> -- add_leaf --leaf ${membershipLeafHex}`);
+            console.log('='.repeat(60));
             
             // Step 2: Fetch on-chain state
             setLoadingText('Fetching on-chain state...');
@@ -608,11 +629,7 @@ const Deposit = {
             // Step 4: Generate proof (includes encryption of outputs)
             const contracts = getDeployedContracts();
             const totalAmountStroops = BigInt(Math.floor(totalAmount * 10000000));
-            
-            // Get membership blinding from UI
-            const membershipBlindingInput = document.getElementById('deposit-membership-blinding')?.value || '0';
-            const membershipBlinding = BigInt(membershipBlindingInput);
-            console.log('[Deposit] Using membership blinding:', membershipBlinding.toString());
+            // membershipBlinding was already read above for the debug print
             
             setLoadingText('Generating ZK proof...');
             const proofResult = await generateDepositProof({
@@ -624,7 +641,7 @@ const Deposit = {
                 amount: totalAmountStroops,
                 outputs,
                 poolAddress: contracts.pool,
-                stateManager: App.stateManager,
+                stateManager: StateManager,
                 membershipLeafIndex: 0, // TODO: get from actual membership tree
                 membershipBlinding,
             }, {
@@ -640,7 +657,8 @@ const Deposit = {
                 timings: proofResult.timings,
             });
             
-            // Step 5: Update UI with generated notes
+            // Step 5: Prepare notes (don't save yet - wait for tx success)
+            const pendingNotes = [];
             let outputIndex = 0;
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
                 const outputNote = proofResult.outputNotes[outputIndex];
@@ -660,7 +678,8 @@ const Deposit = {
                     createdAt: new Date().toISOString()
                 };
                 
-                if (!isDummy) App.state.notes.push(note);
+                // Store for later - only add to state after tx success
+                if (!isDummy) pendingNotes.push(note);
                 
                 const display = row.querySelector('.output-note-id');
                 display.value = Utils.truncateHex(noteId, 8, 8);
@@ -686,9 +705,21 @@ const Deposit = {
             
             console.log('[Deposit] Transaction submitted:', submitResult.txHash);
             
+            // Handle warning case (transaction submitted but result parsing failed)
+            if (submitResult.warning) {
+                console.warn('[Deposit] Warning:', submitResult.warning);
+            }
+            
+            // Now that transaction succeeded, save the notes
+            pendingNotes.forEach(note => App.state.notes.push(note));
             Storage.save();
             NotesTable.render();
-            Toast.show(`Deposited ${totalAmount} XLM! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
+            
+            // Show appropriate message based on whether we have a real tx hash
+            const txDisplay = submitResult.txHash?.startsWith('submitted') || submitResult.txHash?.startsWith('pending')
+                ? 'Check Stellar Expert for status'
+                : `Tx: ${submitResult.txHash?.slice(0, 8)}...`;
+            Toast.show(`Deposited ${totalAmount} XLM! ${txDisplay}`, 'success');
         } catch (e) {
             console.error('[Deposit] Error:', e);
             Toast.show('Deposit failed: ' + e.message, 'error');
@@ -1196,6 +1227,7 @@ const PoolEventsFetcher = {
     
     /**
      * Render the events list in the UI.
+     * Groups events by ledger to show one entry per transaction.
      */
     displayEvents() {
         const container = document.getElementById('recent-tx');
@@ -1213,16 +1245,39 @@ const PoolEventsFetcher = {
         emptyEl.classList.add('hidden');
         container.innerHTML = '';
         
+        // Group events by ledger to show one entry per transaction
+        const byLedger = new Map();
         for (const event of this.events) {
+            const ledger = event.ledger;
+            if (!byLedger.has(ledger)) {
+                byLedger.set(ledger, { ledger, nullifiers: 0, commitments: 0, events: [] });
+            }
+            const group = byLedger.get(ledger);
+            group.events.push(event);
+            
+            const topic = event.topic?.[0] || '';
+            if (topic.includes('nullif')) group.nullifiers++;
+            if (topic.includes('commit')) group.commitments++;
+        }
+        
+        // Display grouped transactions (max 3)
+        const groups = Array.from(byLedger.values()).slice(0, this.maxEvents);
+        
+        for (const group of groups) {
             const clone = template.content.cloneNode(true);
             const li = clone.querySelector('li');
             
-            const hash = this.formatEventHash(event);
-            const time = this.formatEventTime(event);
+            // Determine transaction type based on events
+            let txType = 'Transaction';
+            if (group.nullifiers === 2 && group.commitments === 2) {
+                txType = 'Pool Activity';
+            } else if (group.commitments > 0) {
+                txType = `+${group.commitments} notes`;
+            }
             
-            li.querySelector('.tx-hash').textContent = hash;
-            li.querySelector('.tx-hash').title = event.id || '';
-            li.querySelector('.tx-time').textContent = time;
+            li.querySelector('.tx-hash').textContent = txType;
+            li.querySelector('.tx-hash').title = `Ledger ${group.ledger}: ${group.nullifiers} nullifiers, ${group.commitments} commitments`;
+            li.querySelector('.tx-time').textContent = `L${group.ledger}`;
             
             container.appendChild(clone);
         }

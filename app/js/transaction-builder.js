@@ -145,7 +145,11 @@ function keccak256(bytes) {
  * @returns {{bigInt: bigint, bytes: Uint8Array}}
  */
 export function hashExtData(extData) {
-    // Fields must be sorted alphabetically for consistent hashing (Soroban XDR serialization)
+    // Fields must match contract's ExtData struct exactly (sorted alphabetically for XDR):
+    // - encrypted_output0: Bytes
+    // - encrypted_output1: Bytes
+    // - ext_amount: I256
+    // - recipient: Address
     const entries = [
         {
             key: 'encrypted_output0',
@@ -160,16 +164,12 @@ export function hashExtData(extData) {
             val: new XdrLargeInt('i256', extData.ext_amount.toString()).toScVal(),
         },
         {
-            key: 'fee',
-            val: new XdrLargeInt('u256', (extData.fee || 0n).toString()).toScVal(),
-        },
-        {
             key: 'recipient',
             val: Address.fromString(extData.recipient).toScVal(),
         },
     ];
 
-    // Sort alphabetically by key. Soroban maps are sorted
+    // Sort alphabetically by key (Soroban XDR serialization order)
     entries.sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
 
     const scEntries = entries.map(
@@ -183,9 +183,20 @@ export function hashExtData(extData) {
     const xdrRaw = scVal.toXDR();
     const xdrBytes = xdrRaw instanceof Uint8Array ? xdrRaw : new Uint8Array(xdrRaw);
 
+    // Debug logging
+    console.log('[hashExtData] Input:', {
+        recipient: extData.recipient,
+        ext_amount: extData.ext_amount.toString(),
+        encrypted_output0_len: extData.encrypted_output0?.length,
+        encrypted_output1_len: extData.encrypted_output1?.length,
+    });
+    console.log('[hashExtData] XDR bytes length:', xdrBytes.length);
+
     const digest = keccak256(xdrBytes);
     const digestBig = bytesToBigIntBE(digest);
     const reduced = digestBig % BN256_MOD;
+
+    console.log('[hashExtData] Hash (hex):', reduced.toString(16).padStart(64, '0'));
 
     return {
         bigInt: reduced,
@@ -296,12 +307,30 @@ function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndex = 0, me
 
 /**
  * Builds non-membership proof data from StateManager.
+ * If the non-membership tree is empty (root = 0), returns a default empty proof.
  *
  * @param {Uint8Array} pubKeyBytes - User's public key
  * @param {Object} stateManager - StateManager instance
+ * @param {bigint} nonMembershipRoot - Expected non-membership root from on-chain state
  * @returns {Promise<Object>} Non-membership proof data
  */
-async function buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager) {
+async function buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager, nonMembershipRoot) {
+    // Handle empty tree case (root = 0)
+    if (nonMembershipRoot === 0n || nonMembershipRoot === BigInt(0)) {
+        console.log('[TxBuilder] Non-membership tree is empty (root=0), using empty proof');
+        // For empty SMT, non-membership is trivially provable
+        // Return dummy proof that satisfies circuit constraints for empty tree
+        const LEVELS = 20; // SMT depth
+        return {
+            key: bytesToBigIntStringLE(pubKeyBytes),
+            oldKey: '0',
+            oldValue: '0',
+            isOld0: '1', // Empty branch
+            siblings: Array(LEVELS).fill('0'),
+            root: '0',
+        };
+    }
+
     const result = await stateManager.getASPNonMembershipProof(pubKeyBytes);
 
     if (!result.success) {
@@ -315,11 +344,13 @@ async function buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager) {
     const proof = result.proof;
     return {
         key: bytesToBigIntStringLE(pubKeyBytes),
-        oldKey: proof.notFoundKey,
-        oldValue: proof.notFoundValue,
+        oldKey: proof.notFoundKey ? bytesToBigIntStringLE(proof.notFoundKey) : '0',
+        oldValue: proof.notFoundValue ? bytesToBigIntStringLE(proof.notFoundValue) : '0',
         isOld0: proof.isOld0 ? '1' : '0',
-        siblings: proof.siblings,
-        root: proof.root.toString(), // String for JSON serialization
+        siblings: (proof.siblings || []).map(s => 
+            s instanceof Uint8Array ? bytesToBigIntStringLE(s) : s.toString()
+        ),
+        root: bytesToBigIntStringLE(proof.root),
     };
 }
 
@@ -423,7 +454,7 @@ export async function buildTransactionInputs(params) {
     // Build non-membership proof
     let nonMembershipProofData;
     if (stateManager) {
-        nonMembershipProofData = await buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager);
+        nonMembershipProofData = await buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager, nonMembershipRoot);
     } else {
         console.error('[TxBuilder] No state manager provided, skipping non-membership proof');
         throw new Error('[TxBuilder] No state manager provided. Unable to build non-membership proof.');
@@ -567,7 +598,6 @@ export async function generateDepositProof(params, options = {}) {
             extData: {
                 recipient: poolAddress,
                 ext_amount: amount,
-                fee: 0n,
             },
         },
         options
