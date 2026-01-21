@@ -30,6 +30,8 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
+    <!-- Wasm-opt=0 disables Trunk's wasm-opt. We handle that manually later in Trunk.toml  with a post_build hook with extra WASM feature flags -->
+    <!-- We need data-wasm-opt="0" because Trunk doesn't allow us to pass additional flags that we need for WASM optimization. So we pass it manually in the post_build hook. -->
     <link data-trunk rel="rust" href="crates/prover" data-target-path="js" data-wasm-opt="0" />
     <link data-trunk rel="copy-dir" href="assets/" />
 </head>
