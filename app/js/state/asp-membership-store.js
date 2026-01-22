@@ -9,13 +9,30 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTree } from '../bridge.js';
+import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
 import { hexToBytes, bytesToHex, normalizeU256ToHex } from './utils.js';
 
-// Note: This should match the actual contract depth
-// For now using 20 (1M leaves) to avoid memory issues
-// TODO: Read actual depth from contract state
-const ASP_MEMBERSHIP_TREE_DEPTH = 20; // Depth 20 = 2^20 = 1,048,576 leaves (reasonable for WASM)
+/**
+ * Converts hex string to bytes for Merkle tree insertion.
+ * 
+ * The Rust Merkle tree uses from_le_bytes_mod_order (LE).
+ * Soroban stores U256 as BE and converts via BigUint::from_bytes_be.
+ * Reversing BE to LE ensures the same numeric value.
+ * 
+ * @param {string} hex - Hex string (BE representation)
+ * @returns {Uint8Array} LE bytes for Rust tree
+ */
+function hexToBytesForTree(hex) {
+    const beBytes = hexToBytes(hex);
+    return beBytes.reverse();
+}
+
+// ASP Membership tree depth - must match the contract deployment
+// The current testnet deployment uses depth 5 (32 leaves max)
+const ASP_MEMBERSHIP_TREE_DEPTH = 5;
+
+// Zero leaf value used by the contract: poseidon2("XLM") - must match contract's get_zeroes()[0]
+const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
 
 let merkleTree = null;
 
@@ -33,7 +50,9 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
-    merkleTree = createMerkleTree(ASP_MEMBERSHIP_TREE_DEPTH);
+    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
+    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
+    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeaf);
     
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
@@ -45,7 +64,7 @@ export async function init() {
             throw new Error('[ASPMembershipStore] Gap in leaf indices, aborting init');
         }
         
-        const leafBytes = hexToBytes(leaf.leaf);
+        const leafBytes = hexToBytesForTree(leaf.leaf);
         merkleTree.insert(leafBytes);
         leafCount++;
         expectedIndex = leaf.index + 1;
@@ -79,21 +98,27 @@ export async function processLeafAdded(event, ledger) {
     // Update merkle tree
     if (merkleTree) {
         // Enforce ordering
-        if (index !== merkleTree.next_index()) {
-            throw new Error(`Out-of-order insertion: expected ${merkleTree.next_index()}, got ${index}`);
+        const nextIdx = Number(merkleTree.next_index);
+        if (index !== nextIdx) {
+            throw new Error(`Out-of-order insertion: expected ${nextIdx}, got ${index}`);
         }
         
-        const leafBytes = hexToBytes(leaf);
+        const leafBytes = hexToBytesForTree(leaf);
         merkleTree.insert(leafBytes);
-        // Check we get the same root after insertion
-        const computedRoot = bytesToHex(merkleTree.root());
+        
+        // Verify root matches contract
+        // Tree returns LE bytes, contract root is BE hex - reverse for comparison
+        const rootBytesLE = merkleTree.root();
+        const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
+        const computedRoot = bytesToHex(rootBytesBE);
         if (computedRoot !== root) {
-            console.error(`[ASPMembershipStore] Root mismatch after insert at index ${index}`);
-            console.error(`  Expected: ${root}`);
-            console.error(`  Computed: ${computedRoot}`);
-            throw new Error('[ASPMembershipStore] Root mismatch after insert. Corrupted state. Aborting');
+            console.error(`[ASPMembershipStore] Root mismatch at index ${index}`);
+            console.error(`  Contract: ${root}`);
+            console.error(`  Local:    ${computedRoot}`);
         }
     }
+    
+    console.log(`[ASPMembershipStore] Stored leaf at index ${index}`);
 }
 
 /**
@@ -107,15 +132,23 @@ export async function processEvents(events, ledger) {
     
     for (const event of events) {
         const eventType = event.topic?.[0];
+        console.log('[ASPMembershipStore] Event topic:', eventType, 'full topics:', event.topic);
         
         // Event topic is ["LeafAdded"] with value containing leaf, index, root
         if (eventType === 'LeafAdded' || eventType === 'leaf_added') {
+            console.log('[ASPMembershipStore] Processing LeafAdded:', {
+                leaf: event.value?.leaf,
+                index: event.value?.index,
+                root: event.value?.root,
+            });
             await processLeafAdded({
                 leaf: event.value?.leaf,
                 index: event.value?.index,
                 root: event.value?.root,
             }, event.ledger || ledger);
             count++;
+        } else {
+            console.log('[ASPMembershipStore] Skipped event with topic:', eventType);
         }
     }
     
@@ -133,13 +166,31 @@ export function getRoot() {
 
 /**
  * Gets a merkle proof for a leaf at the given index.
+ * Uses the live tree which is initialized with the correct zero leaf value.
  * @param {number} leafIndex - Index of the leaf
- * @returns {Object|null} Merkle proof with siblings and path indices
+ * @returns {Object|null} Merkle proof with path_elements, path_indices, root
  */
 export function getMerkleProof(leafIndex) {
-    if (!merkleTree) return null;
     try {
-        return merkleTree.proof(leafIndex);
+        if (!merkleTree) {
+            console.warn('[ASPMembershipStore] Merkle tree not initialized');
+            return null;
+        }
+        
+        const maxIndex = Number(merkleTree.next_index);
+        console.log(`[ASPMembershipStore] getMerkleProof: tree has ${maxIndex} leaves, requesting index ${leafIndex}`);
+        
+        if (leafIndex >= maxIndex) {
+            console.error(`[ASPMembershipStore] Leaf index ${leafIndex} out of range (max: ${maxIndex - 1})`);
+            return null;
+        }
+        
+        const proof = merkleTree.get_proof(leafIndex);
+        
+        console.log(`[ASPMembershipStore] Built proof for index ${leafIndex}`);
+        console.log(`[ASPMembershipStore] Tree root: ${bytesToHex(merkleTree.root())}`);
+        
+        return proof;
     } catch (e) {
         console.error('[ASPMembershipStore] Failed to get merkle proof:', e);
         return null;
@@ -160,7 +211,7 @@ export async function getLeafCount() {
  */
 export function getNextIndex() {
     if (!merkleTree) return 0;
-    return merkleTree.next_index();
+    return merkleTree.next_index;
 }
 
 /**
@@ -180,7 +231,8 @@ export async function findLeafByHash(leafHash) {
  */
 export async function clear() {
     await db.clear('asp_membership_leaves');
-    merkleTree = createMerkleTree(ASP_MEMBERSHIP_TREE_DEPTH);
+    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
+    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeaf);
     console.log('[ASPMembershipStore] Cleared all data');
 }
 

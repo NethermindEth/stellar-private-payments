@@ -264,6 +264,10 @@
                             <div id="withdraw-inputs" class="space-y-2">
                                 <!-- Input rows will be created from template -->
                             </div>
+                            <button type="button" id="withdraw-add-input" class="hidden mt-2 px-3 py-1.5 text-xs text-dark-400 hover:text-brand-400 border border-dashed border-dark-600 hover:border-brand-500 rounded-lg transition-colors flex items-center gap-1.5">
+                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+                                Add another note
+                            </button>
                             <div class="flex justify-between items-center mt-3 p-3 bg-dark-800 rounded-lg">
                                 <span class="text-sm text-dark-400">Total to withdraw:</span>
                                 <span id="withdraw-total" class="font-mono text-lg font-semibold text-brand-400">0 XLM</span>
@@ -573,19 +577,34 @@
                             </svg>
                             On-Chain State
                         </h3>
-                        <button 
-                            type="button"
-                            id="btn-refresh-state"
-                            class="p-1.5 text-dark-400 hover:text-brand-500 transition-colors"
-                            title="Refresh all states"
-                            aria-label="Refresh contract states"
-                        >
-                            <svg class="w-4 h-4 refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                                <path d="M23 4v6h-6"/>
-                                <path d="M1 20v-6h6"/>
-                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-                            </svg>
-                        </button>
+                        <div class="flex items-center gap-1">
+                            <button 
+                                type="button"
+                                id="btn-refresh-state"
+                                class="p-1.5 text-dark-400 hover:text-brand-500 transition-colors"
+                                title="Refresh all states"
+                                aria-label="Refresh contract states"
+                            >
+                                <svg class="w-4 h-4 refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M23 4v6h-6"/>
+                                    <path d="M1 20v-6h6"/>
+                                    <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                                </svg>
+                            </button>
+                            <button 
+                                type="button"
+                                id="btn-force-resync"
+                                class="p-1.5 text-dark-500 hover:text-orange-500 transition-colors"
+                                title="Force full resync (clears cache)"
+                                aria-label="Force full resync"
+                            >
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+                                    <line x1="10" y1="11" x2="10" y2="17"/>
+                                    <line x1="14" y1="11" x2="14" y2="17"/>
+                                </svg>
+                            </button>
+                        </div>
                     </header>
                     <div class="p-4 space-y-3">
                         <!-- Network Badge -->
@@ -847,9 +866,12 @@
             <td class="px-4 py-3">
                 <div class="flex gap-1">
                     <button type="button" class="use-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use in withdraw" aria-label="Use in withdraw">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 21V3M5 14l7 7 7-7"/></svg>
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
                     </button>
-                    <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy" aria-label="Copy note ID">
+                    <button type="button" class="download-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Download note file" aria-label="Download note file">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                    </button>
+                    <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy note ID" aria-label="Copy note ID">
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
                     </button>
                 </div>

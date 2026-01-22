@@ -189,6 +189,15 @@ export const StateManager = {
         return poolStore.getNextIndex();
     },
 
+    /**
+     * Rebuilds the pool merkle tree from database.
+     * Call after sync to ensure tree matches stored leaves.
+     * @returns {Promise<number>} Number of leaves in rebuilt tree
+     */
+    async rebuildPoolTree() {
+        return poolStore.rebuildTree();
+    },
+
     // ASP Membership
 
     /**
@@ -202,10 +211,27 @@ export const StateManager = {
     /**
      * Gets a merkle proof for an ASP membership leaf.
      * @param {number} leafIndex - Leaf index
-     * @returns {Object|null}
+     * @returns {Promise<Object|null>}
      */
-    getASPMembershipProof(leafIndex) {
+    async getASPMembershipProof(leafIndex) {
         return aspMembershipStore.getMerkleProof(leafIndex);
+    },
+
+    /**
+     * Finds a user's membership leaf by its hash and returns the index.
+     * @param {string|Uint8Array} leafHash - The membership leaf hash
+     * @returns {Promise<{index: number, leaf: string}|null>}
+     */
+    async findASPMembershipLeaf(leafHash) {
+        return aspMembershipStore.findLeafByHash(leafHash);
+    },
+
+    /**
+     * Gets the total count of ASP membership leaves.
+     * @returns {Promise<number>}
+     */
+    async getASPMembershipLeafCount() {
+        return aspMembershipStore.getLeafCount();
     },
 
     // ASP Non-Membership (on-demand)
@@ -402,6 +428,22 @@ export const StateManager = {
         await syncController.clearAndReset();
         await notesStore.clear();
         console.log('[StateManager] All data cleared');
+    },
+
+    /**
+     * Debug: Show all pool leaves stored in IndexedDB.
+     * @returns {Promise<void>}
+     */
+    async debugPoolLeaves() {
+        return poolStore.debugShowAllLeaves();
+    },
+
+    /**
+     * Debug: Get all pool leaf indices.
+     * @returns {Promise<number[]>}
+     */
+    async getPoolLeafIndices() {
+        return poolStore.getAllLeafIndices();
     },
 
     /**

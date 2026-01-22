@@ -523,6 +523,17 @@ export function createMerkleTree(depth) {
     return new MerkleTree(depth);
 }
 
+/**
+ * Create a new Merkle tree with a custom zero leaf value.
+ * Used for matching contract implementations that use non-zero empty leaves.
+ * @param {number} depth - Tree depth (e.g., 5 for 2^5 leaves)
+ * @param {Uint8Array} zeroLeafBytes - Custom zero leaf value as 32 bytes (Little-Endian)
+ * @returns {MerkleTree} Merkle tree instance
+ */
+export function createMerkleTreeWithZeroLeaf(depth, zeroLeafBytes) {
+    return MerkleTree.new_with_zero_leaf(depth, zeroLeafBytes);
+}
+
 export { MerkleTree, MerkleProof, WasmSparseMerkleTree };
 
 // Serialization Utilities

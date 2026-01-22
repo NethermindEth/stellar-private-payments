@@ -19,7 +19,7 @@ import {
     computeCommitment,
     computeSignature,
     computeNullifier,
-    createMerkleTree,
+    createMerkleTreeWithZeroLeaf,
     bigintToField,
     hexToField,
     fieldToHex,
@@ -27,6 +27,7 @@ import {
     encryptNoteData,
     deriveEncryptionKeypairFromSignature,
     WasmSparseMerkleTree,
+    generateBlinding,
 } from './bridge.js';
 import * as ProverClient from './prover-client.js';
 
@@ -35,6 +36,21 @@ const LEVELS = 5;
 const SMT_LEVELS = 5;
 const BN256_MOD = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
 const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
+
+/**
+ * Converts a signed amount to its field element representation (U256).
+ * For positive values, returns the value directly.
+ * For negative values, returns FIELD_SIZE - |value| (two's complement in the field).
+ * @param {bigint} amount - The signed amount
+ * @returns {bigint} The field element representation
+ */
+function toFieldElement(amount) {
+    if (amount >= 0n) {
+        return amount;
+    }
+    // Negative: field_element = BN256_MOD - |amount|
+    return BN256_MOD + amount;
+}
 
 /**
  * Converts bytes to little-endian BigInt.
@@ -205,7 +221,7 @@ export function hashExtData(extData) {
 }
 
 /**
- * Creates a dummy input note
+ * Creates a dummy input note (for deposits where no real inputs exist).
  *
  * @param {Uint8Array} privKeyBytes - User's private key
  * @param {Uint8Array} pubKeyBytes - User's public key
@@ -236,6 +252,62 @@ function createDummyInput(privKeyBytes, pubKeyBytes, blinding) {
 }
 
 /**
+ * Creates a real input note from an existing note with its merkle proof.
+ * Used for withdrawals and transfers where the user spends existing notes.
+ *
+ * @param {Uint8Array} privKeyBytes - User's private key (32 bytes)
+ * @param {Uint8Array} pubKeyBytes - User's public key (32 bytes)
+ * @param {Object} note - Note data from storage
+ * @param {bigint} note.amount - Note amount
+ * @param {bigint} note.blinding - Note blinding factor
+ * @param {number} note.leafIndex - Index in pool merkle tree
+ * @param {Object} merkleProof - Merkle proof from pool store
+ * @param {Uint8Array} merkleProof.path_elements - Sibling hashes (concatenated)
+ * @param {Uint8Array} merkleProof.path_indices - Path indices as bits
+ * @returns {Object} Input note data ready for circuit
+ */
+function createRealInput(privKeyBytes, pubKeyBytes, note, merkleProof) {
+    const amount = BigInt(note.amount);
+    const blinding = BigInt(note.blinding);
+    const leafIndex = note.leafIndex;
+    
+    const amountBytes = bigintToField(amount);
+    const blindingBytes = bigintToField(blinding);
+    
+    // Compute commitment: poseidon2(amount, pubKey, blinding)
+    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+    
+    // Path indices as BigInt for nullifier computation
+    const pathIndicesBytes = merkleProof.path_indices;
+    const pathIndicesBigInt = bytesToBigIntLE(pathIndicesBytes);
+    
+    // Compute signature: poseidon2(privKey, commitment, pathIndices, domain=0x04)
+    const signature = computeSignature(privKeyBytes, commitment, pathIndicesBytes);
+    
+    // Compute nullifier: poseidon2(commitment, pathIndices, signature, domain=0x05)
+    const nullifier = computeNullifier(commitment, pathIndicesBytes, signature);
+    
+    // Parse merkle proof elements
+    const pathElements = sliceFieldElements(merkleProof.path_elements, LEVELS);
+    const pathIndicesStr = pathIndicesBigInt.toString();
+    
+    console.log(`[TxBuilder] Created real input: amount=${amount}, leafIndex=${leafIndex}`);
+    
+    return {
+        amount,
+        blinding,
+        blindingBytes,
+        commitmentBytes: commitment,
+        nullifierBytes: nullifier,
+        nullifierBig: bytesToBigIntLE(nullifier),
+        pathIndices: pathIndicesStr,
+        pathElements,
+        leafIndex,
+        isDummy: false,
+    };
+}
+
+/**
  * Creates an output note.
  *
  * @param {bigint} amount - Note amount
@@ -260,24 +332,83 @@ function createOutput(amount, pubKeyBytes, blinding) {
 
 /**
  * Builds membership proof data for circuit inputs.
+ * 
+ * Automatically finds the user's leaf index in the synced ASP membership tree.
+ * Falls back to building a local tree for testing if not synced.
  *
  * @param {Uint8Array} pubKeyBytes - User's public key
  * @param {bigint} membershipRoot - Expected on-chain membership root
- * @param {number} leafIndex - Index where the user's leaf is in the tree
+ * @param {number} leafIndexHint - Hint for leaf index (used if auto-detection fails)
  * @param {bigint} membershipBlinding - Blinding used when the leaf was added to the tree
- * @returns {Object} Membership proof data
+ * @param {Object} [stateManager] - StateManager instance for getting real proofs
+ * @returns {Promise<Object>} Membership proof data
  */
-function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndex = 0, membershipBlinding = 0n) {
+async function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndexHint = 0, membershipBlinding = 0n, stateManager = null) {
     // Membership leaf = poseidon2(pubKey, blinding, domain=1)
     const membershipBlindingBytes = bigintToField(membershipBlinding);
     const membershipLeaf = poseidon2Hash2(pubKeyBytes, membershipBlindingBytes, 1);
+    const leafHex = fieldToHex(membershipLeaf);
 
-    // Build local membership tree
-    // In production, this should be synced from on-chain state
-    const membershipTree = createMerkleTree(LEVELS);
+    // Try to find the user's leaf in the synced membership tree
+    let leafIndex = leafIndexHint;
+    if (stateManager) {
+        try {
+            const foundLeaf = await stateManager.findASPMembershipLeaf(leafHex);
+            if (foundLeaf) {
+                leafIndex = foundLeaf.index;
+                console.log(`[TxBuilder] Found user's membership leaf at index ${leafIndex}`);
+            } else {
+                const leafCount = await stateManager.getASPMembershipLeafCount();
+                console.warn(`[TxBuilder] User's membership leaf not found in synced tree (${leafCount} leaves synced)`);
+                console.warn(`[TxBuilder] Using hint index: ${leafIndexHint}`);
+            }
+        } catch (e) {
+            console.warn('[TxBuilder] Error searching for membership leaf:', e.message);
+        }
+    }
+
+    // Try to get proof from synced StateManager
+    if (stateManager) {
+        const syncedProof = await stateManager.getASPMembershipProof(leafIndex);
+        console.log('[TxBuilder] Synced proof from StateManager:', syncedProof ? 'found' : 'null');
+        if (syncedProof) {
+            const syncedRoot = bytesToBigIntLE(syncedProof.root);
+            console.log('[TxBuilder] Membership root comparison:', {
+                syncedRoot: syncedRoot.toString(16),
+                expectedRoot: membershipRoot.toString(16),
+                match: syncedRoot === membershipRoot,
+            });
+            if (syncedRoot === membershipRoot) {
+                console.log('[TxBuilder] Using synced ASP membership proof');
+                const pathElements = sliceFieldElements(syncedProof.path_elements, LEVELS);
+                const pathIndices = bytesToBigIntStringLE(syncedProof.path_indices);
+                console.log('[TxBuilder] Membership proof details:', {
+                    leaf: bytesToBigIntStringLE(membershipLeaf),
+                    blinding: membershipBlinding.toString(),
+                    pathIndicesLength: pathIndices.length,
+                    pathElementsLength: pathElements.length,
+                });
+                return {
+                    leaf: bytesToBigIntStringLE(membershipLeaf),
+                    blinding: membershipBlinding.toString(),
+                    pathIndices,
+                    pathElements,
+                    root: syncedRoot.toString(),
+                };
+            } else {
+                console.warn('[TxBuilder] Synced membership root mismatch, will use fallback');
+            }
+        }
+    }
+
+    // Fallback: Build local membership tree (for testing or when not synced)
+    // This will only work if the on-chain tree has ONLY this user's leaf at the specified index
+    console.warn('[TxBuilder] Building local membership tree - ensure ASP membership is synced for production');
     const zeroLeaf = hexToField(ZERO_LEAF_HEX);
+    const membershipTree = createMerkleTreeWithZeroLeaf(LEVELS, zeroLeaf);
     const totalLeaves = 1 << LEVELS;
 
+    // Insert leaves in order, placing the actual leaf at the correct index
     for (let i = 0; i < totalLeaves; i++) {
         membershipTree.insert(i === leafIndex ? membershipLeaf : zeroLeaf);
     }
@@ -290,7 +421,12 @@ function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndex = 0, me
         console.warn('[TxBuilder] Membership root mismatch:', {
             computed: computedRoot.toString(16),
             expected: membershipRoot.toString(16),
+            userLeaf: leafHex,
+            leafIndex,
         });
+        console.warn('[TxBuilder] This likely means:');
+        console.warn('  1. ASP membership tree is not synced, OR');
+        console.warn('  2. Wrong blinding factor provided');
     }
 
     const pathElements = sliceFieldElements(membershipProof.path_elements, LEVELS);
@@ -298,10 +434,10 @@ function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndex = 0, me
 
     return {
         leaf: bytesToBigIntStringLE(membershipLeaf),
-        blinding: membershipBlinding.toString(), // Use provided blinding value
+        blinding: membershipBlinding.toString(),
         pathIndices,
         pathElements,
-        root: computedRoot.toString(), // String for JSON serialization
+        root: computedRoot.toString(),
     };
 }
 
@@ -320,13 +456,12 @@ async function buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager, n
         console.log('[TxBuilder] Non-membership tree is empty (root=0), using empty proof');
         // For empty SMT, non-membership is trivially provable
         // Return dummy proof that satisfies circuit constraints for empty tree
-        const LEVELS = 20; // SMT depth
         return {
             key: bytesToBigIntStringLE(pubKeyBytes),
             oldKey: '0',
             oldValue: '0',
             isOld0: '1', // Empty branch
-            siblings: Array(LEVELS).fill('0'),
+            siblings: Array(SMT_LEVELS).fill('0'),
             root: '0',
         };
     }
@@ -342,14 +477,26 @@ async function buildNonMembershipProofDataFromChain(pubKeyBytes, stateManager, n
     }
 
     const proof = result.proof;
+    
+    // Convert siblings and ensure correct length for circuit
+    let siblings = (proof.siblings || []).map(s => 
+        s instanceof Uint8Array ? bytesToBigIntStringLE(s) : s.toString()
+    );
+    
+    // Pad or trim siblings to match SMT_LEVELS
+    if (siblings.length < SMT_LEVELS) {
+        siblings = [...siblings, ...Array(SMT_LEVELS - siblings.length).fill('0')];
+    } else if (siblings.length > SMT_LEVELS) {
+        console.warn(`[TxBuilder] Non-membership proof has ${siblings.length} siblings, trimming to ${SMT_LEVELS}`);
+        siblings = siblings.slice(0, SMT_LEVELS);
+    }
+    
     return {
         key: bytesToBigIntStringLE(pubKeyBytes),
         oldKey: proof.notFoundKey ? bytesToBigIntStringLE(proof.notFoundKey) : '0',
         oldValue: proof.notFoundValue ? bytesToBigIntStringLE(proof.notFoundValue) : '0',
         isOld0: proof.isOld0 ? '1' : '0',
-        siblings: (proof.siblings || []).map(s => 
-            s instanceof Uint8Array ? bytesToBigIntStringLE(s) : s.toString()
-        ),
+        siblings,
         root: bytesToBigIntStringLE(proof.root),
     };
 }
@@ -404,7 +551,6 @@ export async function buildTransactionInputs(params) {
 
     // Derive public key
     const pubKeyBytes = derivePublicKey(privKeyBytes);
-    const pubKeyBigIntStr = bytesToBigIntStringLE(pubKeyBytes);
     const privKeyBigInt = bytesToBigIntLE(privKeyBytes);
 
     // Create input notes
@@ -412,14 +558,25 @@ export async function buildTransactionInputs(params) {
     // For withdrawals/transfers: use real inputs
     const inputNotes = [];
     if (inputs.length === 0) {
-        // Deposit: 2 dummy inputs
-        inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, 101n));
-        inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, 202n));
+        // 2 dummy inputs, each one with separate blindings
+        const blinding1 = bytesToBigIntLE(generateBlinding());
+        const blinding2 = bytesToBigIntLE(generateBlinding());
+        inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, blinding1));
+        inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, blinding2));
     } else {
-        // Withdrawal/Transfer: real inputs
+        // Withdrawal/Transfer: spending real inputs from existing notes
         for (const input of inputs) {
-            // TODO: implement real input note creation with merkle proofs
-            throw new Error('Real input notes not yet implemented');
+            if (!input.merkleProof) {
+                throw new Error(`Input note at index ${input.leafIndex} is missing merkle proof`);
+            }
+            const realInput = createRealInput(privKeyBytes, pubKeyBytes, input, input.merkleProof);
+            inputNotes.push(realInput);
+        }
+        
+        // Pad to 2 inputs if only 1 provided (circuit requires exactly 2 inputs)
+        while (inputNotes.length < 2) {
+            const dummyBlinding = BigInt(Date.now() + inputNotes.length);
+            inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, dummyBlinding));
         }
     }
 
@@ -448,8 +605,8 @@ export async function buildTransactionInputs(params) {
     // Build ext data hash
     const extDataHash = hashExtData(completeExtData);
 
-    // Build membership proof
-    const membershipProofData = buildMembershipProofData(pubKeyBytes, membershipRoot, membershipLeafIndex, membershipBlinding);
+    // Build membership proof (auto-finds user's leaf index in synced tree)
+    const membershipProofData = await buildMembershipProofData(pubKeyBytes, membershipRoot, membershipLeafIndex, membershipBlinding, stateManager);
 
     // Build non-membership proof
     let nonMembershipProofData;
@@ -461,10 +618,14 @@ export async function buildTransactionInputs(params) {
     }
 
     // Construct circuit inputs
+    // publicAmount must be the field element representation (like Tornado Nova)
+    // For negative ext_amount, this is FIELD_SIZE - |ext_amount|
+    const publicAmountField = toFieldElement(extData.ext_amount);
+    
     const circuitInputs = {
         // Public inputs
         root: poolRoot.toString(),
-        publicAmount: extData.ext_amount.toString(),
+        publicAmount: publicAmountField.toString(),
         extDataHash: extDataHash.bigInt.toString(),
         inputNullifier: inputNotes.map((n) => n.nullifierBig.toString()),
         outputCommitment: outputNotes.map((n) => n.commitmentBig.toString()),
@@ -524,15 +685,142 @@ export async function generateTransactionProof(params, options = {}) {
 
     // Generate proof in Soroban format
     onProgress?.({ phase: 'prove', message: 'Generating ZK proof...' });
+    
+    // Debug: log circuit inputs
+    console.log('[TxBuilder] Circuit inputs:', JSON.stringify(circuitInputs, (key, value) => 
+        typeof value === 'bigint' ? value.toString() : value, 2));
+    
+    // Validate all circuit inputs are within field modulus
+    const validateFieldValue = (name, value) => {
+        const bi = BigInt(value);
+        if (bi >= BN256_MOD) {
+            console.error(`[TxBuilder] FIELD OVERFLOW: ${name} = ${bi.toString()} exceeds modulus ${BN256_MOD.toString()}`);
+            return false;
+        }
+        return true;
+    };
+    
+    let allValid = true;
+    allValid = validateFieldValue('root', circuitInputs.root) && allValid;
+    allValid = validateFieldValue('publicAmount', circuitInputs.publicAmount) && allValid;
+    allValid = validateFieldValue('extDataHash', circuitInputs.extDataHash) && allValid;
+    circuitInputs.inputNullifier.forEach((n, i) => {
+        allValid = validateFieldValue(`inputNullifier[${i}]`, n) && allValid;
+    });
+    circuitInputs.outputCommitment.forEach((c, i) => {
+        allValid = validateFieldValue(`outputCommitment[${i}]`, c) && allValid;
+    });
+    circuitInputs.inAmount.forEach((a, i) => {
+        allValid = validateFieldValue(`inAmount[${i}]`, a) && allValid;
+    });
+    circuitInputs.inPrivateKey.forEach((k, i) => {
+        allValid = validateFieldValue(`inPrivateKey[${i}]`, k) && allValid;
+    });
+    circuitInputs.inBlinding.forEach((b, i) => {
+        allValid = validateFieldValue(`inBlinding[${i}]`, b) && allValid;
+    });
+    circuitInputs.inPathIndices.forEach((p, i) => {
+        allValid = validateFieldValue(`inPathIndices[${i}]`, p) && allValid;
+    });
+    circuitInputs.inPathElements.forEach((arr, i) => {
+        arr.forEach((e, j) => {
+            allValid = validateFieldValue(`inPathElements[${i}][${j}]`, e) && allValid;
+        });
+    });
+    circuitInputs.outAmount.forEach((a, i) => {
+        allValid = validateFieldValue(`outAmount[${i}]`, a) && allValid;
+    });
+    circuitInputs.outPubkey.forEach((p, i) => {
+        allValid = validateFieldValue(`outPubkey[${i}]`, p) && allValid;
+    });
+    circuitInputs.outBlinding.forEach((b, i) => {
+        allValid = validateFieldValue(`outBlinding[${i}]`, b) && allValid;
+    });
+    circuitInputs.membershipRoots.forEach((arr, i) => {
+        arr.forEach((r, j) => {
+            allValid = validateFieldValue(`membershipRoots[${i}][${j}]`, r) && allValid;
+        });
+    });
+    circuitInputs.nonMembershipRoots.forEach((arr, i) => {
+        arr.forEach((r, j) => {
+            allValid = validateFieldValue(`nonMembershipRoots[${i}][${j}]`, r) && allValid;
+        });
+    });
+    // Check membership proof fields: leaf, blinding, pathIndices, pathElements
+    circuitInputs.membershipProofs.forEach((proofArr, i) => {
+        proofArr.forEach((proof, j) => {
+            if (proof.leaf !== undefined) {
+                allValid = validateFieldValue(`membershipProofs[${i}][${j}].leaf`, proof.leaf) && allValid;
+            }
+            if (proof.blinding !== undefined) {
+                allValid = validateFieldValue(`membershipProofs[${i}][${j}].blinding`, proof.blinding) && allValid;
+            }
+            if (proof.pathIndices !== undefined) {
+                allValid = validateFieldValue(`membershipProofs[${i}][${j}].pathIndices`, proof.pathIndices) && allValid;
+            }
+            if (proof.pathElements) {
+                proof.pathElements.forEach((e, k) => {
+                    allValid = validateFieldValue(`membershipProofs[${i}][${j}].pathElements[${k}]`, e) && allValid;
+                });
+            }
+        });
+    });
+    // Check non-membership proof fields: key, oldKey, oldValue, isOld0, siblings
+    circuitInputs.nonMembershipProofs.forEach((proofArr, i) => {
+        proofArr.forEach((proof, j) => {
+            if (proof.key !== undefined) {
+                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].key`, proof.key) && allValid;
+            }
+            if (proof.oldKey !== undefined) {
+                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].oldKey`, proof.oldKey) && allValid;
+            }
+            if (proof.oldValue !== undefined) {
+                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].oldValue`, proof.oldValue) && allValid;
+            }
+            if (proof.isOld0 !== undefined) {
+                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].isOld0`, proof.isOld0) && allValid;
+            }
+            if (proof.siblings) {
+                proof.siblings.forEach((s, k) => {
+                    allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].siblings[${k}]`, s) && allValid;
+                });
+            }
+        });
+    });
+    
+    if (!allValid) {
+        throw new Error('Circuit inputs contain values exceeding field modulus');
+    }
+    
     const { proof, publicInputs, timings } = await ProverClient.prove(circuitInputs, {
         sorobanFormat: true,
     });
-
-    // Note: Local verification is skipped for Soroban format proofs because
-    // the local verifier expects compressed format while Soroban uses uncompressed.
+    
     // On-chain verification will validate the proof.
     const verified = true; // Skip local verification for Soroban format
     console.log('[TxBuilder] Proof generated, skipping local verification (Soroban format)');
+    
+    // Debug: compare circuit vs contract values
+    console.log('[TxBuilder] Public input comparison:', {
+        circuit_publicAmount: circuitInputs.publicAmount,
+        contract_public_amount: toFieldElement(params.extData.ext_amount).toString(),
+        match: circuitInputs.publicAmount === toFieldElement(params.extData.ext_amount).toString(),
+        circuit_extDataHash: circuitInputs.extDataHash,
+        contract_ext_data_hash: extDataHash.bigInt.toString(),
+        hashMatch: circuitInputs.extDataHash === extDataHash.bigInt.toString(),
+    });
+    
+    // Debug: show proof public inputs returned by prover
+    console.log('[TxBuilder] Proof public inputs (from prover):', publicInputs.length, 'bytes');
+    // Parse public inputs as field elements (each is 32 bytes)
+    const numPublicInputs = publicInputs.length / 32;
+    console.log('[TxBuilder] Number of public inputs:', numPublicInputs);
+    for (let i = 0; i < numPublicInputs; i++) {
+        const start = i * 32;
+        const bytes = publicInputs.slice(start, start + 32);
+        const value = BigInt('0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''));
+        console.log(`[TxBuilder] Public input[${i}]:`, value.toString());
+    }
 
     // Parse proof bytes into Soroban structure
     const proofStruct = {
@@ -542,17 +830,28 @@ export async function generateTransactionProof(params, options = {}) {
     };
 
     // Build Soroban-ready transaction data
+    // Values are passed as-is (same numeric values used in the circuit)
+    // Only public_amount needs special handling for negative values (field element)
+    const publicAmountField = toFieldElement(params.extData.ext_amount);
+    
     const sorobanProof = {
         proof: proofStruct,
         root: params.poolRoot,
         input_nullifiers: inputNotes.map((n) => n.nullifierBig),
         output_commitment0: outputNotes[0].commitmentBig,
         output_commitment1: outputNotes[1].commitmentBig,
-        public_amount: params.extData.ext_amount,
-        ext_data_hash: extDataHash.bytes,
+        public_amount: publicAmountField,
+        ext_data_hash: extDataHash.bytes, // BE bytes (same as contract hash computation)
         asp_membership_root: params.membershipRoot,
         asp_non_membership_root: params.nonMembershipRoot,
     };
+    
+    console.log('[TxBuilder] Soroban proof values:', {
+        root: params.poolRoot.toString(),
+        public_amount: publicAmountField.toString(),
+        asp_membership_root: params.membershipRoot.toString(),
+        asp_non_membership_root: params.nonMembershipRoot.toString(),
+    });
 
     return {
         proof: proofStruct,
@@ -604,9 +903,139 @@ export async function generateDepositProof(params, options = {}) {
     );
 }
 
+/**
+ * Convenience function for withdrawal transactions.
+ * Withdrawals spend input notes and send tokens to an external recipient.
+ *
+ * @param {Object} params
+ * @param {Uint8Array} params.privKeyBytes - User's BN254 private key
+ * @param {Uint8Array} params.encryptionPubKey - User's X25519 public key
+ * @param {bigint} params.poolRoot - Current pool root
+ * @param {bigint} params.membershipRoot - ASP membership root
+ * @param {bigint} params.nonMembershipRoot - ASP non-membership root
+ * @param {Array<Object>} params.inputNotes - Notes to spend (with merkleProof attached)
+ * @param {string} params.recipient - Address to receive withdrawn tokens
+ * @param {bigint} params.withdrawAmount - Amount to withdraw (must be <= sum of inputs)
+ * @param {Array<{amount: bigint, blinding: bigint}>} [params.changeOutputs] - Change outputs (optional)
+ * @param {Object} [params.stateManager] - StateManager instance
+ * @param {number} [params.membershipLeafIndex=0] - User's leaf index in membership tree
+ * @param {bigint} [params.membershipBlinding=0n] - Blinding used when user was added to membership tree
+ * @param {Object} options
+ * @returns {Promise<Object>} Proof result
+ */
+export async function generateWithdrawProof(params, options = {}) {
+    const { inputNotes, recipient, withdrawAmount, changeOutputs = [], ...rest } = params;
+
+    // Calculate total input amount
+    const inputTotal = inputNotes.reduce((sum, n) => sum + BigInt(n.amount), 0n);
+    const change = inputTotal - withdrawAmount;
+    
+    if (change < 0n) {
+        throw new Error(`Insufficient input amount: have ${inputTotal}, need ${withdrawAmount}`);
+    }
+
+    // Build outputs: change goes back to self (or use provided changeOutputs)
+    let outputs;
+    if (changeOutputs.length > 0) {
+        outputs = changeOutputs;
+    } else {
+        // Auto-generate change output
+        outputs = [
+            { amount: change, blinding: BigInt(Date.now()) },
+            { amount: 0n, blinding: BigInt(Date.now() + 1) }, // Dummy second output
+        ];
+    }
+
+    return generateTransactionProof(
+        {
+            ...rest,
+            inputs: inputNotes,
+            outputs,
+            extData: {
+                recipient,
+                ext_amount: -withdrawAmount, // Negative = withdrawal
+            },
+        },
+        options
+    );
+}
+
+/**
+ * Convenience function for transfer transactions.
+ * Transfers move notes from one user to another without external token movement.
+ *
+ * @param {Object} params
+ * @param {Uint8Array} params.privKeyBytes - Sender's BN254 private key
+ * @param {Uint8Array} params.encryptionPubKey - Sender's X25519 public key
+ * @param {Uint8Array} params.recipientPubKey - Recipient's BN254 public key
+ * @param {Uint8Array} params.recipientEncryptionPubKey - Recipient's X25519 public key
+ * @param {bigint} params.poolRoot - Current pool root
+ * @param {bigint} params.membershipRoot - ASP membership root
+ * @param {bigint} params.nonMembershipRoot - ASP non-membership root
+ * @param {Array<Object>} params.inputNotes - Notes to spend (with merkleProof attached)
+ * @param {Array<{amount: bigint, blinding: bigint}>} params.recipientOutputs - Outputs for recipient
+ * @param {Array<{amount: bigint, blinding: bigint}>} [params.changeOutputs] - Change outputs for sender
+ * @param {string} params.poolAddress - Pool contract address (for ext_data recipient)
+ * @param {Object} [params.stateManager] - StateManager instance
+ * @param {number} [params.membershipLeafIndex=0] - User's leaf index in membership tree
+ * @param {bigint} [params.membershipBlinding=0n] - Blinding used when user was added to membership tree
+ * @param {Object} options
+ * @returns {Promise<Object>} Proof result
+ */
+export async function generateTransferProof(params, options = {}) {
+    const { 
+        inputNotes, 
+        recipientPubKey,
+        recipientEncryptionPubKey,
+        recipientOutputs, 
+        changeOutputs = [],
+        poolAddress,
+        ...rest 
+    } = params;
+
+    // Calculate totals
+    const inputTotal = inputNotes.reduce((sum, n) => sum + BigInt(n.amount), 0n);
+    const recipientTotal = recipientOutputs.reduce((sum, o) => sum + o.amount, 0n);
+    const changeTotal = changeOutputs.reduce((sum, o) => sum + o.amount, 0n);
+    
+    if (inputTotal !== recipientTotal + changeTotal) {
+        throw new Error(`Transfer amounts don't balance: inputs=${inputTotal}, outputs=${recipientTotal + changeTotal}`);
+    }
+
+    // Build outputs with recipient public keys
+    const outputs = [
+        ...recipientOutputs.map(o => ({
+            ...o,
+            recipientPubKey,
+            recipientEncryptionPubKey,
+        })),
+        ...changeOutputs,
+    ];
+    
+    // Ensure we have exactly 2 outputs
+    while (outputs.length < 2) {
+        outputs.push({ amount: 0n, blinding: BigInt(Date.now() + outputs.length) });
+    }
+
+    return generateTransactionProof(
+        {
+            ...rest,
+            inputs: inputNotes,
+            outputs,
+            extData: {
+                recipient: poolAddress,
+                ext_amount: 0n, // Transfer: no external token movement
+            },
+        },
+        options
+    );
+}
+
 export default {
     hashExtData,
     buildTransactionInputs,
     generateTransactionProof,
     generateDepositProof,
+    generateWithdrawProof,
+    generateTransferProof,
 };

@@ -15,10 +15,11 @@ import {
     getDeployedContracts,
     validateWalletNetwork,
     submitDeposit,
+    submitPoolTransaction,
 } from './stellar.js';
-import { StateManager } from './state/index.js';
+import { StateManager, poolStore } from './state/index.js';
 import * as ProverClient from './prover-client.js';
-import { generateDepositProof } from './transaction-builder.js';
+import { generateDepositProof, generateWithdrawProof, generateTransferProof } from './transaction-builder.js';
 import { 
     deriveNotePrivateKeyFromSignature, 
     deriveEncryptionKeypairFromSignature,
@@ -230,7 +231,9 @@ const Templates = {
             const note = App.state.notes.find(n => n.id === noteId && !n.spent);
             
             if (note) {
-                valueDisplay.textContent = `${note.amount} XLM`;
+                // Convert stroops to XLM for display
+                const amountXLM = Number(note.amount) / 1e7;
+                valueDisplay.textContent = `${amountXLM} XLM`;
                 valueDisplay.classList.remove('text-dark-500');
                 valueDisplay.classList.add('text-brand-400');
             } else {
@@ -279,7 +282,9 @@ const Templates = {
         row.dataset.id = note.id;
         
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
-        row.querySelector('.note-amount').textContent = `${note.amount} XLM`;
+        // Note.amount is in stroops - convert to XLM for display
+        const amountXLM = Number(note.amount) / 1e7;
+        row.querySelector('.note-amount').textContent = `${amountXLM.toFixed(7).replace(/\.?0+$/, '')} XLM`;
         row.querySelector('.note-date').textContent = Utils.formatDate(note.createdAt);
         
         const badge = row.querySelector('.status-badge');
@@ -293,7 +298,7 @@ const Templates = {
             badge.classList.add('bg-emerald-500/20', 'text-emerald-400');
         }
         
-        // Use button
+        // Use button (switch to withdraw and populate input)
         const useBtn = row.querySelector('.use-btn');
         if (useBtn) {
             useBtn.addEventListener('click', () => {
@@ -303,6 +308,27 @@ const Templates = {
                     inputs[0].value = note.id;
                     inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
                 }
+            });
+        }
+        
+        // Download button (export note as file for later use)
+        const downloadBtn = row.querySelector('.download-btn');
+        if (downloadBtn) {
+            downloadBtn.addEventListener('click', () => {
+                const noteData = {
+                    id: note.id,
+                    commitment: note.commitment || note.id,
+                    amount: note.amount, // Stored in stroops
+                    blinding: note.blinding,
+                    leafIndex: note.leafIndex,
+                    createdAt: note.createdAt,
+                    version: 1,
+                };
+                const blob = new Blob([JSON.stringify(noteData, null, 2)], { type: 'application/json' });
+                const amountXLM = Number(note.amount) / 1e7;
+                const filename = `note_${note.id.slice(0, 8)}_${amountXLM}xlm.json`;
+                Utils.downloadFile(blob, filename);
+                Toast.show('Note file downloaded', 'success');
             });
         }
         
@@ -398,6 +424,10 @@ const Wallet = {
         }
 
         Toast.show('Wallet connected!', 'success');
+        
+        // Pre-fill withdrawal recipient fields with wallet address
+        Withdraw.prefillRecipient();
+        Transact.prefillRecipient();
     },
     
     disconnect() {
@@ -542,7 +572,7 @@ const Deposit = {
             }
             
             // Small delay to let Freighter reset between signature requests
-            await new Promise(r => setTimeout(r, 500));
+            await new Promise(r => setTimeout(r, 300));
             
             setLoadingText('Sign message to derive keys (2/2)...');
             console.log('[Deposit] Requesting encryption key signature...');
@@ -608,12 +638,13 @@ const Deposit = {
                 nonMembership: nonMembershipRoot.toString(16),
             });
             
-            // Step 3: Build output notes
+            // Step 3: Build output notes (amounts in stroops for circuit/contract)
             const outputs = [];
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
-                // Convert XLM amount to stroops (7 decimals for XLM)
-                const amountBigInt = BigInt(Math.floor(amount * 10000000));
+                // Convert XLM to stroops - required because circuit's publicAmount 
+                // must match contract's ext_amount (which transfers tokens in stroops)
+                const amountBigInt = BigInt(Math.floor(amount * 1e7));
                 const blindingBytes = generateBlinding();
                 const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
                 outputs.push({ amount: amountBigInt, blinding });
@@ -626,10 +657,9 @@ const Deposit = {
                 outputs.push({ amount: 0n, blinding });
             }
             
-            // Step 4: Generate proof (includes encryption of outputs)
+            // Step 4: Generate proof
             const contracts = getDeployedContracts();
-            const totalAmountStroops = BigInt(Math.floor(totalAmount * 10000000));
-            // membershipBlinding was already read above for the debug print
+            const totalAmountStroops = BigInt(Math.floor(totalAmount * 1_000_000_0));
             
             setLoadingText('Generating ZK proof...');
             const proofResult = await generateDepositProof({
@@ -658,21 +688,34 @@ const Deposit = {
             });
             
             // Step 5: Prepare notes (don't save yet - wait for tx success)
+            // Get the pool's next leaf index so we can track where our commitments will be
+            // Convert to Number since it may come as BigInt from contract
+            const poolNextIndex = Number(poolState.merkleNextIndex || 0);
+            
             const pendingNotes = [];
             let outputIndex = 0;
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {
                 const outputNote = proofResult.outputNotes[outputIndex];
-                const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
-                const isDummy = amount === 0;
+                const amountXLM = parseFloat(row.querySelector('.output-amount').value) || 0;
+                const isDummy = amountXLM === 0;
                 
                 // Generate note ID from commitment
                 const noteId = fieldToHex(outputNote.commitmentBytes);
                 
+                // Calculate the leaf index for this output
+                // Pool inserts commitments in order: output0 at nextIndex, output1 at nextIndex+1
+                const leafIndex = poolNextIndex + outputIndex;
+                
+                // Store the STROOPS amount (what was used in the commitment)
+                // This matches outputNote.amount which is already in stroops
+                const amountStroops = Number(outputNote.amount);
+                
                 const note = {
                     id: noteId,
                     commitment: fieldToHex(outputNote.commitmentBytes),
-                    amount,
+                    amount: amountStroops, // Store in stroops to match commitment
                     blinding: outputNote.blinding.toString(),
+                    leafIndex,
                     spent: false,
                     isDummy,
                     createdAt: new Date().toISOString()
@@ -715,6 +758,18 @@ const Deposit = {
             Storage.save();
             NotesTable.render();
             
+            // Sync pool state to update local merkle tree with new commitments
+            // This enables withdrawal of the just-deposited notes
+            try {
+                setLoadingText('Syncing pool state...');
+                await StateManager.startSync({ forceRefresh: true });
+                await StateManager.rebuildPoolTree();
+                console.log('[Deposit] Pool state synced and tree rebuilt');
+            } catch (syncError) {
+                console.warn('[Deposit] Pool sync failed:', syncError);
+                // Not fatal - user can manually sync later
+            }
+            
             // Show appropriate message based on whether we have a real tx hash
             const txDisplay = submitResult.txHash?.startsWith('submitted') || submitResult.txHash?.startsWith('pending')
                 ? 'Check Stellar Expert for status'
@@ -733,13 +788,35 @@ const Deposit = {
 
 // Withdraw Module
 const Withdraw = {
+    inputCount: 1,
+    
     init() {
         const inputs = document.getElementById('withdraw-inputs');
         const btn = document.getElementById('btn-withdraw');
+        const addBtn = document.getElementById('withdraw-add-input');
+        const recipientInput = document.getElementById('withdraw-recipient');
         
-        // Create 2 input rows
+        // Start with 1 input row (dummy will be auto-added for second slot)
         inputs.appendChild(Templates.createInputRow(0));
-        inputs.appendChild(Templates.createInputRow(1));
+        this.inputCount = 1;
+        
+        // Pre-fill recipient with wallet address if already connected
+        if (App.state.wallet.connected && App.state.wallet.address) {
+            recipientInput.value = App.state.wallet.address;
+        }
+        
+        // Show "add another note" button
+        addBtn.classList.remove('hidden');
+        
+        // Add second input when button clicked
+        addBtn.addEventListener('click', () => {
+            if (this.inputCount < 2) {
+                inputs.appendChild(Templates.createInputRow(1));
+                this.inputCount = 2;
+                addBtn.classList.add('hidden'); // Max 2 inputs
+                this.updateTotal();
+            }
+        });
         
         // Update total on input change
         inputs.addEventListener('input', () => this.updateTotal());
@@ -747,15 +824,35 @@ const Withdraw = {
         btn.addEventListener('click', () => this.submit());
     },
     
+    /**
+     * Pre-fills the recipient address with the connected wallet address.
+     * Called when the wallet connects.
+     */
+    prefillRecipient() {
+        const recipientInput = document.getElementById('withdraw-recipient');
+        if (recipientInput && !recipientInput.value && App.state.wallet.address) {
+            recipientInput.value = App.state.wallet.address;
+        }
+    },
+    
     updateTotal() {
-        let total = 0;
+        let totalStroops = 0n;
         document.querySelectorAll('#withdraw-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
             const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note) total += note.amount;
+            if (note) {
+                // Handle both old notes (XLM) and new notes (stroops)
+                // If amount < 1000, it's likely XLM and needs conversion
+                const amountStroops = note.amount < 1000 
+                    ? BigInt(Math.round(note.amount * 1e7))
+                    : BigInt(note.amount);
+                totalStroops += amountStroops;
+            }
         });
-        document.getElementById('withdraw-total').textContent = `${total} XLM`;
-        return total;
+        // Display in XLM
+        const totalXLM = Number(totalStroops) / 1e7;
+        document.getElementById('withdraw-total').textContent = `${totalXLM.toFixed(7).replace(/\.?0+$/, '')} XLM`;
+        return totalStroops; // Return stroops for calculations
     },
     
     async submit() {
@@ -764,8 +861,8 @@ const Withdraw = {
             return;
         }
         
-        const total = this.updateTotal();
-        if (total === 0) {
+        const totalStroops = this.updateTotal();
+        if (totalStroops === 0n) {
             Toast.show('Please enter at least one note with value > 0', 'error');
             return;
         }
@@ -777,24 +874,204 @@ const Withdraw = {
         }
         
         const btn = document.getElementById('btn-withdraw');
+        const btnText = btn.querySelector('.btn-text');
+        const btnLoading = btn.querySelector('.btn-loading');
         btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        btnText.classList.add('hidden');
+        btnLoading.classList.remove('hidden');
+        
+        const setLoadingText = (text) => {
+            btnLoading.querySelector('span')?.remove();
+            const span = document.createElement('span');
+            span.textContent = text;
+            btnLoading.appendChild(span);
+        };
         
         try {
-            await new Promise(r => setTimeout(r, 2500));
+            // Step 1: Get keys from wallet signatures
+            setLoadingText('Requesting spending key...');
+            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
+            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
             
-            document.querySelectorAll('#withdraw-inputs .note-input').forEach(input => {
+            setLoadingText('Requesting encryption key...');
+            await new Promise(r => setTimeout(r, 500));
+            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
+            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
+            
+            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
+            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
+            
+            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
+            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            
+            // Step 2: Sync pool state to ensure we have latest data
+            setLoadingText('Syncing pool state...');
+            try {
+                // Force refresh to bypass cached cursor and get latest events
+                await StateManager.startSync({ privateKey: privKeyBytes, forceRefresh: true });
+                // Force rebuild tree from DB to ensure it matches synced data
+                await StateManager.rebuildPoolTree();
+                console.log('[Withdraw] Pool state synced and tree rebuilt');
+            } catch (syncError) {
+                console.warn('[Withdraw] Sync warning:', syncError.message);
+                // Continue even if sync has issues - we'll validate roots later
+            }
+            
+            // Step 3: Collect input notes with merkle proofs
+            setLoadingText('Gathering input notes...');
+            const inputNotes = [];
+            let totalInputAmount = 0n;
+            
+            const noteInputs = document.querySelectorAll('#withdraw-inputs .note-input');
+            for (const input of noteInputs) {
                 const noteId = input.value.trim();
-                const note = App.state.notes.find(n => n.id === noteId);
-                if (note && note.amount > 0) note.spent = true;
+                if (!noteId) continue;
+                
+                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+                if (!note) continue;
+                
+                // Get merkle proof from pool store (async - builds tree with correct zeros)
+                const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                if (!merkleProof) {
+                    throw new Error(`Cannot find merkle proof for note at index ${note.leafIndex}. Pool state may be out of sync.`);
+                }
+                
+                // Handle both old notes (XLM) and new notes (stroops)
+                // If amount < 1000, it's likely XLM and needs conversion
+                const amountStroops = note.amount < 1000 
+                    ? BigInt(Math.round(note.amount * 1e7))
+                    : BigInt(note.amount);
+                
+                inputNotes.push({
+                    ...note,
+                    amount: amountStroops, // Override with stroops amount for circuit
+                    merkleProof,
+                });
+                totalInputAmount += amountStroops;
+            }
+            
+            if (inputNotes.length === 0) {
+                throw new Error('No valid input notes found');
+            }
+            
+            // totalStroops is already in stroops from updateTotal()
+            const withdrawAmount = totalStroops;
+            
+            // Step 4: Get ASP membership blinding
+            const membershipBlindingInput = document.getElementById('withdraw-membership-blinding');
+            const membershipBlinding = membershipBlindingInput ? BigInt(membershipBlindingInput.value || '0') : 0n;
+            console.log('[Withdraw] Using membership blinding:', membershipBlinding.toString());
+            
+            // Step 5: Get on-chain roots
+            setLoadingText('Fetching on-chain state...');
+            const states = await readAllContractStates();
+            // Pool uses merkleRoot, ASP contracts use root
+            // Values already have 0x prefix from formatU256
+            const poolRoot = BigInt(states.pool.merkleRoot || '0x0');
+            const membershipRoot = BigInt(states.aspMembership.root || '0x0');
+            const nonMembershipRoot = BigInt(states.aspNonMembership.root || '0x0');
+            
+            console.log('[Withdraw] On-chain roots:', {
+                pool: states.pool.merkleRoot,
+                membership: states.aspMembership.root,
+                nonMembership: states.aspNonMembership.root || '0',
+            });
+            
+            // Verify local pool tree is synced with on-chain state
+            const localPoolRootLE = poolStore.getRoot();
+            const localLeafCount = poolStore.getNextIndex();
+            const dbLeafCount = await poolStore.getLeafCount();
+            const onChainLeafCount = states.pool.merkleNextIndex || 0;
+            console.log('[Withdraw] Local pool state:', {
+                treeLeafCount: localLeafCount,
+                dbLeafCount: dbLeafCount,
+                onChainNextIndex: onChainLeafCount,
+            });
+            
+            if (localPoolRootLE) {
+                // Tree returns LE bytes, convert to BE BigInt for comparison with on-chain (BE)
+                // Read bytes in reverse order (LE to BE conversion)
+                let localRootBigInt = 0n;
+                for (let i = 0; i < localPoolRootLE.length; i++) {
+                    localRootBigInt = (localRootBigInt << 8n) | BigInt(localPoolRootLE[localPoolRootLE.length - 1 - i]);
+                }
+                console.log('[Withdraw] Local pool root (BE):', localRootBigInt.toString(16));
+                console.log('[Withdraw] On-chain pool root:', poolRoot.toString(16));
+                if (localRootBigInt !== poolRoot) {
+                    console.error('[Withdraw] Pool root mismatch! Local tree out of sync.');
+                    console.error('  Local:    ', localRootBigInt.toString(16));
+                    console.error('  On-chain: ', poolRoot.toString(16));
+                    console.error('  Local has', localLeafCount, 'leaves, on-chain has', onChainLeafCount);
+                    throw new Error(`Pool state out of sync. Local: ${localLeafCount} leaves, On-chain: ${onChainLeafCount} leaves. Try clearing data and refreshing.`);
+                }
+                console.log('[Withdraw] Pool roots match - local tree is synced');
+            }
+            
+            // Step 6: Generate proof
+            setLoadingText('Generating ZK proof...');
+            const proofResult = await generateWithdrawProof({
+                privKeyBytes,
+                encryptionPubKey: encryptionKeypair.publicKey,
+                poolRoot,
+                membershipRoot,
+                nonMembershipRoot,
+                inputNotes,
+                recipient,
+                withdrawAmount,
+                stateManager: StateManager,
+                membershipBlinding,
+            }, {
+                onProgress: ({ phase, message }) => {
+                    if (message) setLoadingText(message);
+                },
+            });
+            
+            console.log('[Withdraw] Proof generated');
+            
+            // Step 7: Submit transaction
+            setLoadingText('Submitting transaction...');
+            const submitResult = await submitPoolTransaction({
+                proof: proofResult.sorobanProof,
+                extData: proofResult.extData,
+                sender: App.state.wallet.address,
+                signerOptions: {
+                    publicKey: App.state.wallet.address,
+                    signTransaction: signWalletTransaction,
+                    signAuthEntry: signWalletAuthEntry,
+                },
+            });
+            
+            if (!submitResult.success) {
+                throw new Error(`Transaction failed: ${submitResult.error}`);
+            }
+            
+            console.log('[Withdraw] Transaction submitted:', submitResult.txHash);
+            
+            // Step 8: Mark input notes as spent (only after success)
+            inputNotes.forEach(inputNote => {
+                const note = App.state.notes.find(n => n.id === inputNote.id);
+                if (note) note.spent = true;
             });
             
             Storage.save();
             NotesTable.render();
-            Toast.show('Withdrawal successful!', 'success');
             
-            // Clear
+            // Sync pool state to update local merkle tree
+            try {
+                setLoadingText('Syncing pool state...');
+                await StateManager.startSync({ forceRefresh: true });
+                await StateManager.rebuildPoolTree();
+                console.log('[Withdraw] Pool state synced and tree rebuilt');
+            } catch (syncError) {
+                console.warn('[Withdraw] Pool sync failed:', syncError);
+            }
+            
+            // withdrawAmount is in stroops, convert to XLM for display
+            const withdrawXLM = Number(withdrawAmount) / 1e7;
+            Toast.show(`Withdrew ${withdrawXLM} XLM! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
+            
+            // Clear form
             document.querySelectorAll('#withdraw-inputs .note-input').forEach(i => { i.value = ''; });
             document.querySelectorAll('#withdraw-inputs .value-display').forEach(d => {
                 d.textContent = '0 XLM';
@@ -804,11 +1081,12 @@ const Withdraw = {
             document.getElementById('withdraw-recipient').value = '';
             this.updateTotal();
         } catch (e) {
+            console.error('[Withdraw] Error:', e);
             Toast.show('Withdrawal failed: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
         }
     }
 };
@@ -827,6 +1105,12 @@ const Transact = {
         inputs.appendChild(Templates.createInputRow(1));
         outputs.appendChild(Templates.createOutputRow(0, 0));
         outputs.appendChild(Templates.createOutputRow(1, 0));
+        
+        // Pre-fill withdrawal recipient with wallet address if already connected
+        if (App.state.wallet.connected && App.state.wallet.address) {
+            const recipientInput = document.getElementById('transact-recipient');
+            if (recipientInput) recipientInput.value = App.state.wallet.address;
+        }
         
         // Sync slider and input
         slider.addEventListener('input', () => {
@@ -858,13 +1142,26 @@ const Transact = {
         this.updateBalance();
     },
     
+    /**
+     * Pre-fills the withdrawal recipient address with the connected wallet address.
+     * Called when the wallet connects.
+     */
+    prefillRecipient() {
+        const recipientInput = document.getElementById('transact-recipient');
+        if (recipientInput && !recipientInput.value && App.state.wallet.address) {
+            recipientInput.value = App.state.wallet.address;
+        }
+    },
+    
     updateBalance() {
-        let inputsTotal = 0;
+        // Calculate inputs total in XLM (note.amount is in stroops)
+        let inputsTotalStroops = 0;
         document.querySelectorAll('#transact-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
             const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note) inputsTotal += note.amount;
+            if (note) inputsTotalStroops += Number(note.amount);
         });
+        const inputsTotal = inputsTotalStroops / 1e7; // Convert to XLM
         
         const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
         
@@ -874,7 +1171,7 @@ const Transact = {
         });
         
         const eq = document.getElementById('transact-balance');
-        eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${inputsTotal}`;
+        eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${inputsTotal.toFixed(7).replace(/\.?0+$/, '')}`;
         eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicAmount >= 0 ? '+' : ''}${publicAmount}`;
         eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
         
@@ -908,29 +1205,164 @@ const Transact = {
         }
         
         const btn = document.getElementById('btn-transact');
+        const btnText = btn.querySelector('.btn-text');
+        const btnLoading = btn.querySelector('.btn-loading');
         btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        btnText.classList.add('hidden');
+        btnLoading.classList.remove('hidden');
+        
+        const setLoadingText = (text) => {
+            btnLoading.querySelector('span')?.remove();
+            const span = document.createElement('span');
+            span.textContent = text;
+            btnLoading.appendChild(span);
+        };
         
         try {
-            await new Promise(r => setTimeout(r, 3000));
+            // Step 1: Get keys from wallet signatures
+            setLoadingText('Requesting spending key...');
+            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
+            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
             
-            // Get output recipient (if different from self)
-            const outputRecipient = document.getElementById('transact-outputs-recipient').value.trim();
+            setLoadingText('Requesting encryption key...');
+            await new Promise(r => setTimeout(r, 500));
+            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
+            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
+            
+            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
+            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
+            
+            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
+            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            
+            // Step 2: Collect parameters
+            const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
+            const publicAmountStroops = BigInt(Math.round(publicAmount * 1e7));
+            const outputRecipient = document.getElementById('transact-outputs-recipient')?.value.trim();
             const isForSelf = !outputRecipient || outputRecipient === App.state.wallet.address;
             
-            // Create output notes
+            // Step 3: Collect input notes with merkle proofs
+            setLoadingText('Gathering input notes...');
+            const inputNotes = [];
+            
+            const transactNoteInputs = document.querySelectorAll('#transact-inputs .note-input');
+            for (const input of transactNoteInputs) {
+                const noteId = input.value.trim();
+                if (!noteId) continue;
+                
+                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+                if (!note) continue;
+                
+                const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                if (!merkleProof) {
+                    throw new Error(`Cannot find merkle proof for note at index ${note.leafIndex}`);
+                }
+                
+                inputNotes.push({
+                    ...note,
+                    merkleProof,
+                });
+            }
+            
+            // Step 4: Collect outputs
+            const outputs = [];
             document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
-                const isDummy = amount === 0;
-                const noteId = Utils.generateHex(64);
+                const blindingBytes = generateBlinding();
+                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                outputs.push({
+                    amount: BigInt(Math.round(amount * 1e7)),
+                    blinding,
+                });
+            });
+            
+            // Step 5: Get ASP membership blinding
+            const membershipBlindingInput = document.getElementById('transact-membership-blinding');
+            const membershipBlinding = membershipBlindingInput ? BigInt(membershipBlindingInput.value || '0') : 0n;
+            console.log('[Transact] Using membership blinding:', membershipBlinding.toString());
+            
+            // Step 6: Get on-chain roots and pool address
+            setLoadingText('Fetching on-chain state...');
+            const states = await readAllContractStates();
+            const contracts = getDeployedContracts();
+            // Pool uses merkleRoot, ASP contracts use root
+            // Values already have 0x prefix from formatU256
+            const poolRoot = BigInt(states.pool.merkleRoot || '0x0');
+            const membershipRoot = BigInt(states.aspMembership.root || '0x0');
+            const nonMembershipRoot = BigInt(states.aspNonMembership.root || '0x0');
+            
+            // Determine recipient based on transaction type
+            let recipient;
+            if (publicAmountStroops > 0n) {
+                // Deposit: recipient is pool
+                recipient = contracts.pool;
+            } else if (publicAmountStroops < 0n) {
+                // Withdrawal: recipient is external address
+                const withdrawRecipient = document.getElementById('transact-recipient')?.value.trim();
+                recipient = withdrawRecipient || App.state.wallet.address;
+            } else {
+                // Transfer: recipient is pool
+                recipient = contracts.pool;
+            }
+            
+            console.log('[Transact] Transaction parameters:', {
+                publicAmount,
+                inputCount: inputNotes.length,
+                outputCount: outputs.length,
+                recipient,
+            });
+            
+            // Step 7: Generate proof using the generic transaction function
+            setLoadingText('Generating ZK proof...');
+            const { generateTransactionProof } = await import('./transaction-builder.js');
+            
+            const proofResult = await generateTransactionProof({
+                privKeyBytes,
+                encryptionPubKey: encryptionKeypair.publicKey,
+                poolRoot,
+                membershipRoot,
+                nonMembershipRoot,
+                inputs: inputNotes,
+                outputs,
+                extData: {
+                    recipient,
+                    ext_amount: publicAmountStroops,
+                },
+                stateManager: StateManager,
+                membershipBlinding,
+            }, {
+                onProgress: ({ phase, message }) => {
+                    if (message) setLoadingText(message);
+                },
+            });
+            
+            console.log('[Transact] Proof generated');
+            
+            // Step 8: Update UI with generated output notes
+            // Get the pool's next leaf index so we can track where our commitments will be
+            // Convert to Number since it may come as BigInt from contract
+            const poolNextIndex = Number(states.pool.merkleNextIndex || 0);
+            
+            const pendingNotes = [];
+            let outputIndex = 0;
+            document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
+                const outputNote = proofResult.outputNotes[outputIndex];
+                const amountXLM = parseFloat(row.querySelector('.output-amount').value) || 0;
+                const isDummy = amountXLM === 0;
+                
+                const noteId = fieldToHex(outputNote.commitmentBytes);
+                const leafIndex = poolNextIndex + outputIndex;
+                
+                // Store in stroops to match the commitment
+                const amountStroops = Number(outputNote.amount);
                 
                 const note = {
                     id: noteId,
-                    commitment: Utils.generateHex(64),
-                    nullifier: Utils.generateHex(64),
-                    amount,
-                    blinding: Utils.generateHex(64),
+                    commitment: noteId,
+                    amount: amountStroops,
+                    blinding: outputNote.blinding.toString(),
+                    leafIndex,
                     spent: false,
                     isDummy,
                     owner: outputRecipient || App.state.wallet.address,
@@ -938,7 +1370,7 @@ const Transact = {
                 };
                 
                 // Only store locally if for self
-                if (!isDummy && isForSelf) App.state.notes.push(note);
+                if (!isDummy && isForSelf) pendingNotes.push(note);
                 
                 const display = row.querySelector('.output-note-id');
                 display.value = Utils.truncateHex(noteId, 8, 8);
@@ -947,29 +1379,61 @@ const Transact = {
                 
                 row.querySelector('.copy-btn').disabled = false;
                 row.querySelector('.download-btn').disabled = false;
+                outputIndex++;
             });
             
-            // Mark inputs as spent
-            document.querySelectorAll('#transact-inputs .note-input').forEach(input => {
-                const noteId = input.value.trim();
-                const note = App.state.notes.find(n => n.id === noteId);
-                if (note && note.amount > 0) note.spent = true;
+            // Step 9: Submit transaction
+            setLoadingText('Submitting transaction...');
+            const submitResult = await submitPoolTransaction({
+                proof: proofResult.sorobanProof,
+                extData: proofResult.extData,
+                sender: App.state.wallet.address,
+                signerOptions: {
+                    publicKey: App.state.wallet.address,
+                    signTransaction: signWalletTransaction,
+                    signAuthEntry: signWalletAuthEntry,
+                },
+            });
+            
+            if (!submitResult.success) {
+                throw new Error(`Transaction failed: ${submitResult.error}`);
+            }
+            
+            console.log('[Transact] Transaction submitted:', submitResult.txHash);
+            
+            // Step 10: Save notes and mark inputs as spent (only after success)
+            pendingNotes.forEach(note => App.state.notes.push(note));
+            
+            inputNotes.forEach(inputNote => {
+                const note = App.state.notes.find(n => n.id === inputNote.id);
+                if (note) note.spent = true;
             });
             
             Storage.save();
             NotesTable.render();
             
+            // Sync pool state to update local merkle tree
+            try {
+                setLoadingText('Syncing pool state...');
+                await StateManager.startSync({ forceRefresh: true });
+                await StateManager.rebuildPoolTree();
+                console.log('[Transact] Pool state synced and tree rebuilt');
+            } catch (syncError) {
+                console.warn('[Transact] Pool sync failed:', syncError);
+            }
+            
             if (isForSelf) {
-                Toast.show('Transaction successful!', 'success');
+                Toast.show(`Transaction successful! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
             } else {
                 Toast.show('Transaction successful! Share note files with recipient.', 'success');
             }
         } catch (e) {
+            console.error('[Transact] Error:', e);
             Toast.show('Transaction failed: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
         }
     }
 };
@@ -1049,12 +1513,14 @@ const Transfer = {
     },
     
     updateBalance() {
-        let inputsTotal = 0;
+        // Calculate inputs total in XLM (note.amount is in stroops)
+        let inputsTotalStroops = 0;
         document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
             const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note) inputsTotal += note.amount;
+            if (note) inputsTotalStroops += Number(note.amount);
         });
+        const inputsTotal = inputsTotalStroops / 1e7; // Convert to XLM
         
         let outputsTotal = 0;
         document.querySelectorAll('#transfer-outputs .output-amount').forEach(input => {
@@ -1062,7 +1528,7 @@ const Transfer = {
         });
         
         const eq = document.getElementById('transfer-balance');
-        eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${inputsTotal}`;
+        eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${inputsTotal.toFixed(7).replace(/\.?0+$/, '')}`;
         eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
         
         const isBalanced = Math.abs(inputsTotal - outputsTotal) < 0.0000001;
@@ -1113,32 +1579,155 @@ const Transfer = {
         }
         
         const btn = document.getElementById('btn-transfer');
+        const btnText = btn.querySelector('.btn-text');
+        const btnLoading = btn.querySelector('.btn-loading');
         btn.disabled = true;
-        btn.querySelector('.btn-text').classList.add('hidden');
-        btn.querySelector('.btn-loading').classList.remove('hidden');
+        btnText.classList.add('hidden');
+        btnLoading.classList.remove('hidden');
+        
+        const setLoadingText = (text) => {
+            btnLoading.querySelector('span')?.remove();
+            const span = document.createElement('span');
+            span.textContent = text;
+            btnLoading.appendChild(span);
+        };
         
         try {
-            await new Promise(r => setTimeout(r, 3000));
+            // Step 1: Get keys from wallet signatures
+            setLoadingText('Requesting spending key...');
+            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
+            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
             
-            // Create output notes (owned by recipient, not stored locally)
+            setLoadingText('Requesting encryption key...');
+            await new Promise(r => setTimeout(r, 500));
+            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
+            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
+            
+            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
+            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
+            
+            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
+            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            
+            // Step 2: Parse recipient public key (hex string to bytes)
+            let recipientPubKeyBytes;
+            try {
+                const cleanHex = recipientKey.startsWith('0x') ? recipientKey.slice(2) : recipientKey;
+                recipientPubKeyBytes = new Uint8Array(cleanHex.match(/.{2}/g).map(b => parseInt(b, 16)));
+                if (recipientPubKeyBytes.length !== 32) {
+                    throw new Error('Invalid length');
+                }
+            } catch {
+                throw new Error('Invalid recipient public key format. Expected 64 hex characters.');
+            }
+            
+            // Step 3: Collect input notes with merkle proofs
+            setLoadingText('Gathering input notes...');
+            const inputNotes = [];
+            
+            const transferNoteInputs = document.querySelectorAll('#transfer-inputs .note-input');
+            for (const input of transferNoteInputs) {
+                const noteId = input.value.trim();
+                if (!noteId) continue;
+                
+                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+                if (!note) continue;
+                
+                const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                if (!merkleProof) {
+                    throw new Error(`Cannot find merkle proof for note at index ${note.leafIndex}`);
+                }
+                
+                inputNotes.push({
+                    ...note,
+                    merkleProof,
+                });
+            }
+            
+            if (inputNotes.length === 0) {
+                throw new Error('No valid input notes found');
+            }
+            
+            // Step 4: Collect output amounts
+            const recipientOutputs = [];
             document.querySelectorAll('#transfer-outputs .output-row').forEach(row => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
-                const isDummy = amount === 0;
-                const noteId = Utils.generateHex(64);
+                if (amount > 0) {
+                    const blindingBytes = generateBlinding();
+                    const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                    recipientOutputs.push({
+                        amount: BigInt(Math.round(amount * 1e7)),
+                        blinding,
+                    });
+                }
+            });
+            
+            // Step 5: Get ASP membership blinding
+            const membershipBlindingInput = document.getElementById('transfer-membership-blinding');
+            const membershipBlinding = membershipBlindingInput ? BigInt(membershipBlindingInput.value || '0') : 0n;
+            console.log('[Transfer] Using membership blinding:', membershipBlinding.toString());
+            
+            // Step 6: Get on-chain roots and pool address
+            setLoadingText('Fetching on-chain state...');
+            const states = await readAllContractStates();
+            const contracts = getDeployedContracts();
+            // Pool uses merkleRoot, ASP contracts use root
+            // Values already have 0x prefix from formatU256
+            const poolRoot = BigInt(states.pool.merkleRoot || '0x0');
+            const membershipRoot = BigInt(states.aspMembership.root || '0x0');
+            const nonMembershipRoot = BigInt(states.aspNonMembership.root || '0x0');
+            
+            console.log('[Transfer] On-chain roots:', {
+                pool: states.pool.merkleRoot,
+                membership: states.aspMembership.root,
+                nonMembership: states.aspNonMembership.root || '0',
+            });
+            
+            // Step 7: Generate proof
+            setLoadingText('Generating ZK proof...');
+            const proofResult = await generateTransferProof({
+                privKeyBytes,
+                encryptionPubKey: encryptionKeypair.publicKey,
+                recipientPubKey: recipientPubKeyBytes,
+                recipientEncryptionPubKey: recipientPubKeyBytes, // For now, use same key
+                poolRoot,
+                membershipRoot,
+                nonMembershipRoot,
+                inputNotes,
+                recipientOutputs,
+                poolAddress: contracts.pool,
+                stateManager: StateManager,
+                membershipBlinding,
+            }, {
+                onProgress: ({ phase, message }) => {
+                    if (message) setLoadingText(message);
+                },
+            });
+            
+            console.log('[Transfer] Proof generated');
+            
+            // Step 8: Update UI with generated output notes
+            let outputIndex = 0;
+            document.querySelectorAll('#transfer-outputs .output-row').forEach(row => {
+                const outputNote = proofResult.outputNotes[outputIndex];
+                const amountXLM = parseFloat(row.querySelector('.output-amount').value) || 0;
+                const isDummy = amountXLM === 0;
+                
+                const noteId = fieldToHex(outputNote.commitmentBytes);
+                // Store in stroops to match the commitment
+                const amountStroops = Number(outputNote.amount);
                 
                 const note = {
                     id: noteId,
-                    commitment: Utils.generateHex(64),
-                    nullifier: Utils.generateHex(64),
-                    amount,
-                    blinding: Utils.generateHex(64),
+                    commitment: noteId,
+                    amount: amountStroops,
+                    blinding: outputNote.blinding.toString(),
                     spent: false,
                     isDummy,
                     owner: recipientKey,
                     createdAt: new Date().toISOString()
                 };
-                
-                // Note: We don't store these locally as they belong to the recipient
                 
                 const display = row.querySelector('.output-note-id');
                 display.value = Utils.truncateHex(noteId, 8, 8);
@@ -1147,24 +1736,44 @@ const Transfer = {
                 
                 row.querySelector('.copy-btn').disabled = false;
                 row.querySelector('.download-btn').disabled = false;
+                outputIndex++;
             });
             
-            // Mark input notes as spent
-            document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
-                const noteId = input.value.trim();
-                const note = App.state.notes.find(n => n.id === noteId);
-                if (note && note.amount > 0) note.spent = true;
+            // Step 9: Submit transaction
+            setLoadingText('Submitting transaction...');
+            const submitResult = await submitPoolTransaction({
+                proof: proofResult.sorobanProof,
+                extData: proofResult.extData,
+                sender: App.state.wallet.address,
+                signerOptions: {
+                    publicKey: App.state.wallet.address,
+                    signTransaction: signWalletTransaction,
+                    signAuthEntry: signWalletAuthEntry,
+                },
+            });
+            
+            if (!submitResult.success) {
+                throw new Error(`Transaction failed: ${submitResult.error}`);
+            }
+            
+            console.log('[Transfer] Transaction submitted:', submitResult.txHash);
+            
+            // Step 10: Mark input notes as spent (only after success)
+            inputNotes.forEach(inputNote => {
+                const note = App.state.notes.find(n => n.id === inputNote.id);
+                if (note) note.spent = true;
             });
             
             Storage.save();
             NotesTable.render();
             Toast.show('Transfer successful! Share the note files with the recipient.', 'success');
         } catch (e) {
+            console.error('[Transfer] Error:', e);
             Toast.show('Transfer failed: ' + e.message, 'error');
         } finally {
             btn.disabled = false;
-            btn.querySelector('.btn-text').classList.remove('hidden');
-            btn.querySelector('.btn-loading').classList.add('hidden');
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
         }
     }
 };
@@ -1371,6 +1980,11 @@ const ContractReader = {
     init() {
         const refreshBtn = document.getElementById('btn-refresh-state');
         refreshBtn.addEventListener('click', () => this.refreshAll());
+        
+        const forceResyncBtn = document.getElementById('btn-force-resync');
+        if (forceResyncBtn) {
+            forceResyncBtn.addEventListener('click', () => SyncUI.forceResync());
+        }
 
         this.setAddresses();
         document.getElementById('network-name').textContent = 'Testnet';
@@ -1902,7 +2516,10 @@ const SyncUI = {
         try {
             const status = await StateManager.startSync({
                 onProgress: (p) => this.onProgress(p),
+                forceRefresh: true, // Always fetch fresh events
             });
+            // Rebuild tree to ensure it matches synced data
+            await StateManager.rebuildPoolTree();
             if (status.status === 'broken') {
                 this.showWarning(status.message);
             }
@@ -1919,6 +2536,40 @@ const SyncUI = {
             this.showWarning(gap.message);
         } else if (gap.status === 'broken') {
             this.showWarning(gap.message);
+        }
+    },
+
+    /**
+     * Forces a complete resync by clearing all state and re-fetching from scratch.
+     * Use when events are missing or state is corrupted.
+     */
+    async forceResync() {
+        if (!confirm('This will clear all cached state and re-sync from scratch. Continue?')) {
+            return;
+        }
+        
+        this.show('Clearing cached state...');
+        try {
+            await StateManager.clearAll();
+            console.log('[SyncUI] State cleared, starting fresh sync...');
+            this.show('Re-syncing from scratch...');
+            
+            const status = await StateManager.startSync({
+                onProgress: (p) => this.onProgress(p),
+                forceRefresh: true, // Ensure we get all events
+            });
+            // Rebuild tree after fresh sync
+            await StateManager.rebuildPoolTree();
+            
+            if (status.status === 'complete') {
+                Toast.show(`Resynced: ${status.aspMembershipLeavesCount} ASP membership leaves, ${status.poolLeavesCount} pool leaves`, 'success');
+            } else if (status.status === 'broken') {
+                this.showWarning(status.message);
+            }
+        } catch (err) {
+            console.error('[SyncUI] Force resync failed:', err);
+            Toast.show('Force resync failed: ' + err.message, 'error');
+            this.hide();
         }
     }
 };
@@ -1968,5 +2619,31 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.warn('[Init] Background prover init failed (will retry on demand):', err.message);
     });
     
+    // Expose StateManager and poolStore to window for debugging
+    window.StateManager = StateManager;
+    window.poolStore = poolStore;
+    
+    // Debug function to check RPC retention
+    window.checkRetention = async () => {
+        const { getRetentionConfig } = await import('./state/retention-verifier.js');
+        const { getLatestLedger } = await import('./stellar.js');
+        
+        const config = await getRetentionConfig(true); // force refresh
+        const latest = await getLatestLedger();
+        const oldestFetchable = latest - config.window;
+        
+        console.log('=== RPC Retention Info ===');
+        console.log('Retention window:', config.description);
+        console.log('Window size (ledgers):', config.window);
+        console.log('Latest ledger:', latest);
+        console.log('Oldest fetchable ledger:', oldestFetchable);
+        console.log('Your stored leaves are from ledgers: 603897, 605935, 606025');
+        console.log('Can fetch ledger 603897?', 603897 >= oldestFetchable ? 'YES' : 'NO (too old)');
+        console.log('==========================');
+        
+        return { config, latest, oldestFetchable };
+    };
+    
     console.log('PoolStellar initialized');
+    console.log('Debug: StateManager, poolStore, checkRetention() available on window');
 });

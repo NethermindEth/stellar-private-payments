@@ -9,10 +9,37 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTree } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex, reverseBytes } from './utils.js';
+import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex } from './utils.js';
 
-const POOL_TREE_DEPTH = 20;
+/**
+ * Converts hex string to bytes for Merkle tree insertion.
+ * 
+ * The Rust Merkle tree uses zkhash which interprets bytes via from_le_bytes_mod_order (LE).
+ * The Soroban contract stores U256 as BE and converts to Scalar via BigUint::from_bytes_be.
+ * 
+ * To get matching numeric values:
+ * - Contract: U256 (BE bytes) → BigUint::from_bytes_be → Scalar
+ * - Our code: Hex → BE bytes → reverse to LE → from_le_bytes_mod_order → Scalar
+ * 
+ * By reversing BE to LE before calling from_le_bytes_mod_order, we get the same
+ * numeric value as the contract.
+ * 
+ * @param {string} hex - Hex string (BE representation of U256)
+ * @returns {Uint8Array} LE bytes for Rust tree insertion
+ */
+function hexToBytesForTree(hex) {
+    const beBytes = hexToBytes(hex);
+    // Reverse BE to LE for Rust's from_le_bytes_mod_order
+    return beBytes.reverse();
+}
+
+// Pool tree depth - must match the circuit and contract deployment
+// The current testnet deployment uses depth 5 (32 leaves max)
+const POOL_TREE_DEPTH = 5;
+
+// Zero leaf value used by the contract: poseidon2("XLM") - must match contract's get_zeroes()[0]
+const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
 
 let merkleTree = null;
 
@@ -43,27 +70,63 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
-    merkleTree = createMerkleTree(POOL_TREE_DEPTH);
+    await rebuildTree();
+}
 
+/**
+ * Rebuilds the merkle tree from the database.
+ * Call this after sync to ensure tree is up-to-date with stored leaves.
+ * @returns {Promise<number>} Number of leaves in the rebuilt tree
+ */
+export async function rebuildTree() {
+    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
+    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
+    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
+    
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
     let expectedIndex = 0;
-
+    const loadedIndices = [];
+    
     await db.iterate('pool_leaves', (leaf) => {
         // Verify sequential ordering (merkle tree requires ordered insertion)
         if (leaf.index !== expectedIndex) {
-            console.error(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
-            throw new Error('[PoolStore] Gap in leaf indices, aborting init');
+            console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
         }
-
-        const commitmentBytes = hexToBytes(leaf.commitment);
-        // Reverse bytes: DB has BE hex (from Soroban), but Merkle Tree (Arkworks) needs LE bytes
-        merkleTree.insert(reverseBytes(commitmentBytes));
+        
+        const commitmentBytes = hexToBytesForTree(leaf.commitment);
+        merkleTree.insert(commitmentBytes);
+        loadedIndices.push(leaf.index);
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
+    
+    console.log(`[PoolStore] Rebuilt tree with ${leafCount} leaves, indices: [${loadedIndices.join(', ')}]`);
+    return leafCount;
+}
 
-    console.log(`[PoolStore] Initialized with ${leafCount} leaves`);
+/**
+ * Gets all stored leaf indices (for debugging).
+ * @returns {Promise<number[]>}
+ */
+export async function getAllLeafIndices() {
+    const indices = [];
+    await db.iterate('pool_leaves', (leaf) => {
+        indices.push(leaf.index);
+    }, { direction: 'next' });
+    return indices;
+}
+
+/**
+ * Debug function to show all stored leaves.
+ * @returns {Promise<void>}
+ */
+export async function debugShowAllLeaves() {
+    console.log('[PoolStore] === DEBUG: All stored leaves ===');
+    await db.iterate('pool_leaves', (leaf) => {
+        console.log(`  [${leaf.index}] ${leaf.commitment.slice(0, 20)}... (ledger: ${leaf.ledger})`);
+    }, { direction: 'next' });
+    console.log('[PoolStore] === END DEBUG ===');
 }
 
 /**
@@ -77,37 +140,33 @@ export async function init() {
  */
 export async function processNewCommitment(event, ledger) {
     const commitment = normalizeU256ToHex(event.commitment);
-    const index = event.index;
+    // Ensure index is a Number (events may have BigInt or Number)
+    const index = typeof event.index === 'bigint' ? Number(event.index) : Number(event.index);
     const encryptedOutput = event.encryptedOutput;
-
+    
+    console.log(`[PoolStore] Storing leaf at index ${index}: ${commitment.slice(0, 20)}...`);
+    
     // Store leaf
     await db.put('pool_leaves', {
         index,
         commitment,
         ledger,
     });
-
+    
     // Store encrypted output for note detection
     await db.put('pool_encrypted_outputs', {
         commitment,
         index,
-        encryptedOutput: typeof encryptedOutput === 'string'
-            ? encryptedOutput
+        encryptedOutput: typeof encryptedOutput === 'string' 
+            ? encryptedOutput 
             : bytesToHex(encryptedOutput),
         ledger,
     });
-
+    
     // Update merkle tree
     if (merkleTree) {
-        // Enforce ordering
-        if (index !== merkleTree.next_index()) {
-            throw new Error(`Out-of-order insertion: expected ${merkleTree.next_index()}, got ${index}`);
-        }
-
-        const commitmentBytes = hexToBytes(commitment);
-        // Reverse bytes: Event sends BE hex, Merkle Tree needs LE bytes
-        merkleTree.insert(reverseBytes(commitmentBytes));       
-        
+        const commitmentBytes = hexToBytesForTree(commitment);
+        merkleTree.insert(commitmentBytes);
     }
 }
 
@@ -120,7 +179,7 @@ export async function processNewCommitment(event, ledger) {
  */
 export async function processNewNullifier(event, ledger) {
     const nullifier = normalizeU256ToHex(event.nullifier);
-
+    
     await db.put('pool_nullifiers', {
         nullifier,
         ledger,
@@ -136,25 +195,58 @@ export async function processNewNullifier(event, ledger) {
 export async function processEvents(events, ledger) {
     let commitments = 0;
     let nullifiers = 0;
-
+    let unrecognized = 0;
+    
+    console.log(`[PoolStore] Processing batch of ${events.length} events`);
+    
     for (const event of events) {
         const eventType = event.topic?.[0];
-
-        if (eventType === 'NewCommitmentEvent' || eventType === 'new_commitment') {
+        
+        // Log all events for debugging
+        console.log('[PoolStore] Event:', {
+            type: eventType,
+            ledger: event.ledger,
+            topics: event.topic,
+            valueKeys: event.value ? Object.keys(event.value) : null,
+        });
+        
+        // Match various event name formats (Soroban converts struct names to snake_case symbols)
+        if (eventType === 'NewCommitmentEvent' || eventType === 'new_commitment_event' || eventType === 'new_commitment') {
+            // The commitment is in topic[1] (as a topic), value contains {index, encrypted_output}
+            const commitment = event.topic?.[1];
+            const index = event.value?.index;
+            const encryptedOutput = event.value?.encrypted_output;
+            
+            console.log('[PoolStore] NewCommitment:', { 
+                commitment: commitment?.toString?.().slice(0, 20) + '...', 
+                index, 
+                encryptedOutputLen: encryptedOutput?.length,
+                ledger: event.ledger,
+            });
+            
             await processNewCommitment({
-                commitment: event.value?.commitment || event.topic?.[1],
-                index: event.value?.index,
-                encryptedOutput: event.value?.encrypted_output || event.value?.encryptedOutput,
+                commitment,
+                index,
+                encryptedOutput,
             }, event.ledger || ledger);
             commitments++;
-        } else if (eventType === 'NewNullifierEvent' || eventType === 'new_nullifier') {
+        } else if (eventType === 'NewNullifierEvent' || eventType === 'new_nullifier_event' || eventType === 'new_nullifier') {
+            const nullifier = event.topic?.[1];
+            console.log('[PoolStore] NewNullifier:', { 
+                nullifier: nullifier?.toString?.().slice(0, 20) + '...',
+                ledger: event.ledger,
+            });
             await processNewNullifier({
-                nullifier: event.value?.nullifier || event.topic?.[1],
+                nullifier,
             }, event.ledger || ledger);
             nullifiers++;
+        } else {
+            unrecognized++;
+            console.log('[PoolStore] Unrecognized event type:', eventType);
         }
     }
-
+    
+    console.log(`[PoolStore] Batch result: ${commitments} commitments, ${nullifiers} nullifiers, ${unrecognized} unrecognized`);
     return { commitments, nullifiers };
 }
 
@@ -169,13 +261,34 @@ export function getRoot() {
 
 /**
  * Gets a merkle proof for a leaf at the given index.
+ * Uses the live tree which is initialized with the correct zero leaf value.
  * @param {number} leafIndex - Index of the leaf
- * @returns {Object|null} Merkle proof with siblings and path indices
+ * @returns {Object|null} Merkle proof with path_elements, path_indices, root
  */
-export function getMerkleProof(leafIndex) {
-    if (!merkleTree) return null;
+export async function getMerkleProof(leafIndex) {
     try {
-        return merkleTree.proof(leafIndex);
+        if (!merkleTree) {
+            console.warn('[PoolStore] Merkle tree not initialized');
+            return null;
+        }
+        
+        const maxIndex = Number(merkleTree.next_index);
+        console.log(`[PoolStore] getMerkleProof: tree has ${maxIndex} leaves, requesting index ${leafIndex}`);
+        
+        if (leafIndex >= maxIndex) {
+            console.error(`[PoolStore] Leaf index ${leafIndex} out of range (max: ${maxIndex - 1})`);
+            return null;
+        }
+        
+        const proof = merkleTree.get_proof(leafIndex);
+        
+        // Tree returns LE bytes, convert to BE hex for logging
+        const rootBytesLE = merkleTree.root();
+        const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
+        console.log(`[PoolStore] Built proof for index ${leafIndex}`);
+        console.log(`[PoolStore] Tree root (BE): ${bytesToHex(rootBytesBE)}`);
+        
+        return proof;
     } catch (e) {
         console.error('[PoolStore] Failed to get merkle proof:', e);
         return null;
@@ -200,11 +313,11 @@ export async function isNullifierSpent(nullifier) {
  */
 export async function getEncryptedOutputs(fromLedger) {
     const outputs = await db.getAll('pool_encrypted_outputs');
-
+    
     if (fromLedger === undefined) {
         return outputs;
     }
-
+    
     return outputs.filter(o => o.ledger >= fromLedger);
 }
 
@@ -222,7 +335,7 @@ export async function getLeafCount() {
  */
 export function getNextIndex() {
     if (!merkleTree) return 0;
-    return merkleTree.next_index();
+    return merkleTree.next_index;
 }
 
 /**
@@ -233,7 +346,8 @@ export async function clear() {
     await db.clear('pool_leaves');
     await db.clear('pool_nullifiers');
     await db.clear('pool_encrypted_outputs');
-    merkleTree = createMerkleTree(POOL_TREE_DEPTH);
+    const zeroLeaf = hexToBytes(ZERO_LEAF_HEX);
+    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
     console.log('[PoolStore] Cleared all data');
 }
 

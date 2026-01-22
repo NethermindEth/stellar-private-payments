@@ -3,7 +3,7 @@
  * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
  * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, contract, TransactionBuilder, Transaction, FeeBumpTransaction } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, nativeToScVal, contract, TransactionBuilder, Transaction, FeeBumpTransaction, ScInt } from '@stellar/stellar-sdk';
 
 const SUPPORTED_NETWORK = 'testnet';
 
@@ -11,7 +11,7 @@ const NETWORKS = {
     testnet: {
         name: 'Testnet',
         horizonUrl: 'https://horizon-testnet.stellar.org',
-        rpcUrl: 'https://soroban-testnet.stellar.org',
+        rpcUrl: 'https://stellar.liquify.com/api=41EEWAH79Y5OCGI7/testnet',
         passphrase: Networks.TESTNET,
     },
     futurenet: {
@@ -885,13 +885,14 @@ function toU256(value) {
 }
 
 /**
- * Convert a BigInt to an I256 compatible value for Soroban.
+ * Convert a BigInt to an I256 ScVal for Soroban.
+ * Uses ScInt which properly handles negative values via two's complement.
  *
- * @param {bigint} value - BigInt value (can be negative)
- * @returns {bigint} Value as BigInt (SDK handles conversion)
+ * @param {bigint} value - BigInt value (can be negative for withdrawals)
+ * @returns {xdr.ScVal} I256 ScVal
  */
 function toI256(value) {
-    return value;
+    return new ScInt(value, { type: 'i256' }).toScVal();
 }
 
 /**
@@ -927,7 +928,7 @@ export async function submitPoolTransaction(params) {
         // Get pool client with signer
         const client = await getPoolClient(signerOptions);
 
-        // Format proof for contract (ensure Uint8Array for byte fields)
+        // Format proof for contract. Ensure Uint8Array for byte fields
         const contractProof = {
             proof: {
                 a: toBytes(proof.proof.a),
@@ -945,16 +946,38 @@ export async function submitPoolTransaction(params) {
         };
 
         // Format ext_data for contract (must match ExtData struct in pool.rs)
+        // Use ScInt for I256 which handles negative values via two's complement
         const contractExtData = {
-            recipient: extData.recipient,
-            ext_amount: toI256(extData.ext_amount),
             encrypted_output0: toBytes(extData.encrypted_output0),
             encrypted_output1: toBytes(extData.encrypted_output1),
+            ext_amount: new ScInt(extData.ext_amount, { type: 'i256' }).toScVal(),
+            recipient: extData.recipient,
         };
 
         console.log('[Stellar] Calling transact...', {
             proof: { root: proof.root.toString(16) },
             ext_amount: extData.ext_amount.toString(),
+        });
+        
+        // Debug: log all fields to find undefined values
+        console.log('[Stellar] contractProof fields:', {
+            proof_a: contractProof.proof?.a?.length,
+            proof_b: contractProof.proof?.b?.length,
+            proof_c: contractProof.proof?.c?.length,
+            root: typeof contractProof.root,
+            input_nullifiers: contractProof.input_nullifiers?.length,
+            output_commitment0: typeof contractProof.output_commitment0,
+            output_commitment1: typeof contractProof.output_commitment1,
+            public_amount: typeof contractProof.public_amount,
+            ext_data_hash: contractProof.ext_data_hash?.length,
+            asp_membership_root: typeof contractProof.asp_membership_root,
+            asp_non_membership_root: typeof contractProof.asp_non_membership_root,
+        });
+        console.log('[Stellar] contractExtData fields:', {
+            encrypted_output0: contractExtData.encrypted_output0?.length,
+            encrypted_output1: contractExtData.encrypted_output1?.length,
+            ext_amount: contractExtData.ext_amount?.switch?.()?.name,
+            recipient: contractExtData.recipient,
         });
 
         // Build the transaction (this will simulate)
@@ -1028,3 +1051,157 @@ export async function submitDeposit(proofResult, signerOptions) {
 }
 
 export { NETWORKS, SUPPORTED_NETWORK };
+
+// Manual function to add an ASP membership leaf when RPC events are unavailable
+window.manuallyAddASPMembershipLeaf = async function(leafDecimal, index, rootDecimal) {
+    // Import the store
+    const aspStore = await import('./state/asp-membership-store.js');
+    
+    // Convert decimal strings to hex
+    const leafHex = '0x' + BigInt(leafDecimal).toString(16).padStart(64, '0');
+    const rootHex = '0x' + BigInt(rootDecimal).toString(16).padStart(64, '0');
+    
+    console.log('Adding ASP membership leaf manually:');
+    console.log('  Leaf:', leafHex);
+    console.log('  Index:', index);
+    console.log('  Root:', rootHex);
+    
+    try {
+        await aspStore.processLeafAdded({
+            leaf: leafHex,
+            index: index,
+            root: rootHex,
+        }, 0); // ledger 0 as placeholder
+        
+        const count = await aspStore.getLeafCount();
+        console.log('Success! ASP membership store now has', count, 'leaves');
+        
+        // Verify we can get a proof
+        const proof = aspStore.getMerkleProof(index);
+        if (proof) {
+            console.log('Merkle proof available for index', index);
+        }
+        
+        return { success: true, leafCount: count };
+    } catch (error) {
+        console.error('Failed to add leaf:', error);
+        return { success: false, error: error.message };
+    }
+};
+
+// Debug function to verify ASP membership state directly
+window.debugASPMembershipState = async function() {
+    const contracts = getDeployedContracts();
+    console.log('Reading ASP Membership state from:', contracts?.aspMembership);
+    
+    const state = await readASPMembershipState();
+    console.log('ASP Membership State:', state);
+    
+    if (state.success) {
+        console.log('  Next Index:', state.nextIndex, '(meaning', state.nextIndex, 'leaves have been inserted)');
+        console.log('  Current Root:', state.merkleRoot);
+        console.log('  Levels:', state.levels);
+    }
+    
+    return state;
+};
+
+// Debug function to check events from any starting ledger
+window.debugASPMembershipEvents = async function(startLedgerOffset = 100000) {
+    const contracts = getDeployedContracts();
+    console.log('ASP Membership Contract:', contracts?.aspMembership);
+    
+    const server = getSorobanServer();
+    const latestLedger = await server.getLatestLedger();
+    console.log('Latest ledger:', latestLedger.sequence);
+    
+    const startLedger = Math.max(1, latestLedger.sequence - startLedgerOffset);
+    console.log('Searching from ledger:', startLedger, '(offset:', startLedgerOffset, ')');
+    
+    try {
+        const result = await server.getEvents({
+            startLedger: startLedger,
+            filters: [{
+                type: 'contract',
+                contractIds: [contracts.aspMembership],
+            }],
+            limit: 100,
+        });
+        
+        console.log('Raw RPC response:', result);
+        console.log('Events found:', result.events.length);
+        
+        if (result.events.length > 0) {
+            result.events.forEach((evt, i) => {
+                console.log(`Event ${i}:`, {
+                    id: evt.id,
+                    ledger: evt.ledger,
+                    type: evt.type,
+                    topic: evt.topic?.map(t => {
+                        try { return sdkScValToNative(t); } catch { return t; }
+                    }),
+                    value: (() => {
+                        try { return sdkScValToNative(evt.value); } catch { return evt.value; }
+                    })(),
+                });
+            });
+        } else {
+            console.log('No events found. Try a larger offset: debugASPMembershipEvents(200000)');
+        }
+        
+        return result;
+    } catch (error) {
+        console.error('Error fetching events:', error);
+        return { error: error.message };
+    }
+};
+
+// Debug function to fetch pool events directly
+window.debugPoolEvents = async function(startLedgerOffset = 100000) {
+    const contracts = getDeployedContracts();
+    console.log('Pool Contract:', contracts?.pool);
+    
+    const server = getSorobanServer();
+    const latestLedger = await server.getLatestLedger();
+    console.log('Latest ledger:', latestLedger.sequence);
+    
+    const startLedger = Math.max(1, latestLedger.sequence - startLedgerOffset);
+    console.log('Searching from ledger:', startLedger, '(offset:', startLedgerOffset, ')');
+    
+    try {
+        const result = await server.getEvents({
+            startLedger: startLedger,
+            filters: [{
+                type: 'contract',
+                contractIds: [contracts.pool],
+            }],
+            limit: 100,
+        });
+        
+        console.log('Raw RPC response:', result);
+        console.log('Events found:', result.events.length);
+        
+        if (result.events.length > 0) {
+            result.events.forEach((evt, i) => {
+                console.log(`Event ${i}:`, {
+                    id: evt.id,
+                    ledger: evt.ledger,
+                    type: evt.type,
+                    topic: evt.topic?.map(t => {
+                        try { return sdkScValToNative(t); } catch { return t; }
+                    }),
+                    value: (() => {
+                        try { return sdkScValToNative(evt.value); } catch { return evt.value; }
+                    })(),
+                });
+            });
+        } else {
+            console.log('No events found. Try a larger offset: debugPoolEvents(200000)');
+        }
+        
+        return result;
+    } catch (error) {
+        console.error('Error fetching events:', error);
+        return { error: error.message };
+    }
+};

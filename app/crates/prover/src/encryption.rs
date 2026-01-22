@@ -139,7 +139,7 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
 /// even when amount and recipient are the same.
 ///
 /// # Returns
-/// 32 bytes: Random BN254 scalar (little-endian)
+/// 32 bytes: Random BN254 scalar (little-endian), reduced to field modulus
 ///
 /// # Note
 /// Unlike the private keys above, blinding factors are NOT derived
@@ -147,10 +147,19 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
 /// use.
 #[wasm_bindgen]
 pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
-    let mut blinding = [0u8; 32];
-    getrandom::getrandom(&mut blinding)
+    let mut random_bytes = [0u8; 32];
+    getrandom::getrandom(&mut random_bytes)
         .map_err(|e| JsValue::from_str(&format!("Random generation failed: {}", e)))?;
-    Ok(blinding.to_vec())
+
+    // Reduce to BN254 field to ensure valid scalar
+    let scalar = Fr::from_le_bytes_mod_order(&random_bytes);
+
+    // Serialize back to little-endian bytes
+    let mut result = Vec::with_capacity(32);
+    scalar
+        .serialize_compressed(&mut result)
+        .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))?;
+    Ok(result)
 }
 
 /// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
