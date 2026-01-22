@@ -137,7 +137,9 @@ fn to_field_element(bi: BigInt) -> BigInt {
         BigInt::parse_bytes(BN254_FIELD_MODULUS.as_bytes(), 10).expect("Invalid field modulus");
 
     if bi.sign() == Sign::Minus {
-        let abs_value = -&bi; // Get absolute value
+        let abs_value = bi
+            .checked_mul(&BigInt::from(-1))
+            .expect("Overflow in getting the abs value"); // Get absolute value
 
         // Validate: absolute value must be less than the field modulus
         assert!(
@@ -147,7 +149,9 @@ fn to_field_element(bi: BigInt) -> BigInt {
         );
 
         // For negative n: field_element = p - |n|
-        modulus - abs_value
+        modulus
+            .checked_sub(&abs_value)
+            .expect("Overflow in field element computation")
     } else {
         // Validate: positive value must be less than the field modulus
         assert!(bi < modulus, "Value {} exceeds field modulus", bi);

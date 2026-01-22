@@ -368,17 +368,14 @@ export function terminate() {
 export default {
     initializeProver,
     isReady,
-    getState,
     isCached,
     clearCache,
     prove,
-    convertProofToSoroban,
     verify,
     derivePublicKey,
     computeCommitment,
     getVerifyingKey,
     getCircuitInfo,
-    ping,
     terminate,
     onProgress,
 };

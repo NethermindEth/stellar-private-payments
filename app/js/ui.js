@@ -4,7 +4,6 @@
  */
 import { connectWallet, getWalletNetwork, signWalletMessage, signWalletTransaction, signWalletAuthEntry } from './wallet.js';
 import { 
-    pingTestnet,
     readAllContractStates,
     readPoolState,
     readASPMembershipState,
