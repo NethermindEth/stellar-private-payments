@@ -46,6 +46,66 @@ const App = {
     els: {}
 };
 
+/**
+ * Derives spending and encryption keys from Freighter wallet signatures.
+ * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
+ * 
+ * @param {Object} options
+ * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
+ * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
+ * @param {number} [options.signDelay=300] - Delay between signature requests (ms)
+ * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
+ * @throws {Error} If user rejects signature requests
+ */
+async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDelay = 300 }) {
+    onStatus?.('Sign message to derive keys (1/2)...');
+    
+    let spendingResult;
+    try {
+        spendingResult = await signWalletMessage('Privacy Pool Spending Key [v1]', signOptions);
+    } catch (e) {
+        if (e.code === 'USER_REJECTED') {
+            throw new Error('Please approve the message signature to derive your spending key');
+        }
+        throw e;
+    }
+    
+    if (!spendingResult?.signedMessage) {
+        throw new Error('Spending key signature rejected');
+    }
+    
+    if (signDelay > 0) {
+        await new Promise(r => setTimeout(r, signDelay));
+    }
+    
+    onStatus?.('Sign message to derive keys (2/2)...');
+    
+    let encryptionResult;
+    try {
+        encryptionResult = await signWalletMessage('Sign to access Privacy Pool [v1]', signOptions);
+    } catch (e) {
+        if (e.code === 'USER_REJECTED') {
+            throw new Error('Please approve the message signature to derive your encryption key');
+        }
+        throw e;
+    }
+    
+    if (!encryptionResult?.signedMessage) {
+        throw new Error('Encryption key signature rejected');
+    }
+    
+    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
+    const encryptionSigBytes = Uint8Array.from(atob(encryptionResult.signedMessage), c => c.charCodeAt(0));
+    
+    const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+    const pubKeyBytes = derivePublicKey(privKeyBytes);
+    const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
+    
+    console.log('[KeyDerivation] Derived keys from wallet signatures');
+    
+    return { privKeyBytes, pubKeyBytes, encryptionKeypair };
+}
+
 
 // Utilities
 const Utils = {
@@ -549,54 +609,13 @@ const Deposit = {
         btnLoading.classList.remove('hidden');
         
         try {
-            // Step 1: Sign messages to derive keys
-            // Get network info for signing
-            const network = await getWalletNetwork();
-            const signOpts = {
-                address: App.state.wallet.address,
-            };
-            
-            setLoadingText('Sign message to derive keys (1/2)...');
-            console.log('[Deposit] Requesting spending key signature...');
-            let spendingSig;
-            try {
-                const result = await signWalletMessage('Privacy Pool Spending Key [v1]', signOpts);
-                spendingSig = result.signedMessage;
-                console.log('[Deposit] Spending key signature received');
-            } catch (sigError) {
-                console.error('[Deposit] Spending key signature error:', sigError);
-                if (sigError.code === 'USER_REJECTED') {
-                    throw new Error('Please approve the message signature to derive your spending key');
-                }
-                throw sigError;
-            }
-            
-            // Small delay to let Freighter reset between signature requests
-            await new Promise(r => setTimeout(r, 300));
-            
-            setLoadingText('Sign message to derive keys (2/2)...');
-            console.log('[Deposit] Requesting encryption key signature...');
-            let encryptionSig;
-            try {
-                const result = await signWalletMessage('Sign to access Privacy Pool [v1]', signOpts);
-                encryptionSig = result.signedMessage;
-                console.log('[Deposit] Encryption key signature received');
-            } catch (sigError) {
-                console.error('[Deposit] Encryption key signature error:', sigError);
-                if (sigError.code === 'USER_REJECTED') {
-                    throw new Error('Please approve the message signature to derive your encryption key');
-                }
-                throw sigError;
-            }
-            
-            // Convert signatures to bytes and derive keys
-            const spendingSigBytes = new Uint8Array(atob(spendingSig).split('').map(c => c.charCodeAt(0)));
-            const encryptionSigBytes = new Uint8Array(atob(encryptionSig).split('').map(c => c.charCodeAt(0)));
-            
-            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-            const pubKeyBytes = derivePublicKey(privKeyBytes);
-            const { publicKey: encryptionPubKey } = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-            console.log('[Deposit] Derived keys from signatures');
+            // Step 1: Derive keys from wallet signatures
+            const { privKeyBytes, pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
+                onStatus: setLoadingText,
+                signOptions: { address: App.state.wallet.address },
+                signDelay: 300,
+            });
+            const encryptionPubKey = encryptionKeypair.publicKey;
             
             // DEBUG: Compute and print ASP membership leaf for manual contract registration
             const membershipBlindingInput = document.getElementById('deposit-membership-blinding')?.value || '0';
@@ -888,22 +907,11 @@ const Withdraw = {
         };
         
         try {
-            // Step 1: Get keys from wallet signatures
-            setLoadingText('Requesting spending key...');
-            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
-            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
-            
-            setLoadingText('Requesting encryption key...');
-            await new Promise(r => setTimeout(r, 500));
-            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
-            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
-            
-            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
-            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
-            
-            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            // Step 1: Derive keys from wallet signatures
+            const { privKeyBytes, pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
+                onStatus: setLoadingText,
+                signDelay: 500,
+            });
             
             // Step 2: Sync pool state to ensure we have latest data
             setLoadingText('Syncing pool state...');
@@ -1219,22 +1227,11 @@ const Transact = {
         };
         
         try {
-            // Step 1: Get keys from wallet signatures
-            setLoadingText('Requesting spending key...');
-            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
-            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
-            
-            setLoadingText('Requesting encryption key...');
-            await new Promise(r => setTimeout(r, 500));
-            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
-            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
-            
-            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
-            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
-            
-            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            // Step 1: Derive keys from wallet signatures
+            const { privKeyBytes, pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
+                onStatus: setLoadingText,
+                signDelay: 500,
+            });
             
             // Step 2: Collect parameters
             const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
@@ -1593,22 +1590,11 @@ const Transfer = {
         };
         
         try {
-            // Step 1: Get keys from wallet signatures
-            setLoadingText('Requesting spending key...');
-            const spendingSig = await signWalletMessage('Privacy Pool Spending Key [v1]');
-            if (!spendingSig.signedMessage) throw new Error('Spending key signature rejected');
-            
-            setLoadingText('Requesting encryption key...');
-            await new Promise(r => setTimeout(r, 500));
-            const encryptionSig = await signWalletMessage('Sign to access Privacy Pool [v1]');
-            if (!encryptionSig.signedMessage) throw new Error('Encryption key signature rejected');
-            
-            const spendingSigBytes = Uint8Array.from(atob(spendingSig.signedMessage), c => c.charCodeAt(0));
-            const encryptionSigBytes = Uint8Array.from(atob(encryptionSig.signedMessage), c => c.charCodeAt(0));
-            
-            const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-            const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-            const pubKeyBytes = derivePublicKey(privKeyBytes);
+            // Step 1: Derive keys from wallet signatures
+            const { privKeyBytes, pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
+                onStatus: setLoadingText,
+                signDelay: 500,
+            });
             
             // Step 2: Parse recipient public key (hex string to bytes)
             let recipientPubKeyBytes;
@@ -2619,31 +2605,5 @@ document.addEventListener('DOMContentLoaded', async () => {
         console.warn('[Init] Background prover init failed (will retry on demand):', err.message);
     });
     
-    // Expose StateManager and poolStore to window for debugging
-    window.StateManager = StateManager;
-    window.poolStore = poolStore;
-    
-    // Debug function to check RPC retention
-    window.checkRetention = async () => {
-        const { getRetentionConfig } = await import('./state/retention-verifier.js');
-        const { getLatestLedger } = await import('./stellar.js');
-        
-        const config = await getRetentionConfig(true); // force refresh
-        const latest = await getLatestLedger();
-        const oldestFetchable = latest - config.window;
-        
-        console.log('=== RPC Retention Info ===');
-        console.log('Retention window:', config.description);
-        console.log('Window size (ledgers):', config.window);
-        console.log('Latest ledger:', latest);
-        console.log('Oldest fetchable ledger:', oldestFetchable);
-        console.log('Your stored leaves are from ledgers: 603897, 605935, 606025');
-        console.log('Can fetch ledger 603897?', 603897 >= oldestFetchable ? 'YES' : 'NO (too old)');
-        console.log('==========================');
-        
-        return { config, latest, oldestFetchable };
-    };
-    
     console.log('PoolStellar initialized');
-    console.log('Debug: StateManager, poolStore, checkRetention() available on window');
 });

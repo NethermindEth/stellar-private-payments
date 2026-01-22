@@ -200,29 +200,16 @@ export async function startSync(options = {}) {
         // Sync Pool events (streaming mode - events processed in onPage callback)
         let poolEventCount = 0;
         const poolCursor = forceRefresh ? null : metadata.poolSync.lastCursor;
-        console.log('[SyncController] Fetching pool events:', {
-            startLedger: poolStartLedger,
-            cursor: poolCursor || '(none)',
-            latestLedger,
-            forceRefresh,
-        });
         const poolResult = await fetchAllPoolEvents({
             startLedger: poolStartLedger,
             cursor: poolCursor,
             onPage: async (events, cursor) => {
-                console.log(`[SyncController] Pool page: ${events.length} events, cursor: ${cursor}`);
                 await poolStore.processEvents(events);
                 poolEventCount += events.length;
                 if (onProgress) {
                     onProgress({ phase: 'pool', events: events.length, cursor });
                 }
             },
-        });
-        console.log('[SyncController] Pool sync result:', {
-            success: poolResult.success,
-            count: poolResult.count,
-            latestLedger: poolResult.latestLedger,
-            error: poolResult.error,
         });
         
         if (poolResult.success) {
@@ -231,47 +218,25 @@ export async function startSync(options = {}) {
             metadata.poolSync.syncBroken = false;
             
             // Always rebuild tree after sync to ensure consistency
-            const treeLeafCount = await poolStore.rebuildTree();
-            console.log(`[SyncController] Rebuilt pool tree with ${treeLeafCount} leaves (processed ${poolEventCount} new events)`);
+            await poolStore.rebuildTree();
         }
         
         emit('syncProgress', { phase: 'asp_membership', progress: 50 });
         
         // Sync ASP Membership events (streaming mode)
         let aspEventCount = 0;
-        const contracts = await import('../stellar.js').then(m => m.getDeployedContracts());
-        console.log('[SyncController] ASP membership contract:', contracts?.aspMembership);
         const aspCursor = forceRefresh ? null : metadata.aspMembershipSync.lastCursor;
         
         const aspResult = await fetchAllASPMembershipEvents({
             startLedger: aspStartLedger,
             cursor: aspCursor,
             onPage: async (events, cursor) => {
-                console.log('[SyncController] ASP membership page:', events.length, 'events, cursor:', cursor);
-                for (const evt of events) {
-                    console.log('[SyncController] ASP event raw:', {
-                        id: evt.id,
-                        ledger: evt.ledger,
-                        contractId: evt.contractId,
-                        topic: evt.topic,
-                        topicTypes: evt.topic?.map(t => typeof t),
-                        value: evt.value,
-                    });
-                }
-                const processed = await aspMembershipStore.processEvents(events);
-                console.log('[SyncController] Processed', processed, 'ASP membership leaves');
+                await aspMembershipStore.processEvents(events);
                 aspEventCount += events.length;
                 if (onProgress) {
                     onProgress({ phase: 'asp_membership', events: events.length, cursor });
                 }
             },
-        });
-        
-        console.log('[SyncController] ASP membership sync result:', {
-            success: aspResult.success,
-            count: aspResult.count,
-            error: aspResult.error,
-            latestLedger: aspResult.latestLedger,
         });
         
         if (aspResult.success) {

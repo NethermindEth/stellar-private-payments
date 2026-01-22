@@ -86,7 +86,6 @@ export async function rebuildTree() {
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
     let expectedIndex = 0;
-    const loadedIndices = [];
     
     await db.iterate('pool_leaves', (leaf) => {
         // Verify sequential ordering (merkle tree requires ordered insertion)
@@ -96,37 +95,11 @@ export async function rebuildTree() {
         
         const commitmentBytes = hexToBytesForTree(leaf.commitment);
         merkleTree.insert(commitmentBytes);
-        loadedIndices.push(leaf.index);
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
     
-    console.log(`[PoolStore] Rebuilt tree with ${leafCount} leaves, indices: [${loadedIndices.join(', ')}]`);
     return leafCount;
-}
-
-/**
- * Gets all stored leaf indices (for debugging).
- * @returns {Promise<number[]>}
- */
-export async function getAllLeafIndices() {
-    const indices = [];
-    await db.iterate('pool_leaves', (leaf) => {
-        indices.push(leaf.index);
-    }, { direction: 'next' });
-    return indices;
-}
-
-/**
- * Debug function to show all stored leaves.
- * @returns {Promise<void>}
- */
-export async function debugShowAllLeaves() {
-    console.log('[PoolStore] === DEBUG: All stored leaves ===');
-    await db.iterate('pool_leaves', (leaf) => {
-        console.log(`  [${leaf.index}] ${leaf.commitment.slice(0, 20)}... (ledger: ${leaf.ledger})`);
-    }, { direction: 'next' });
-    console.log('[PoolStore] === END DEBUG ===');
 }
 
 /**
@@ -143,8 +116,6 @@ export async function processNewCommitment(event, ledger) {
     // Ensure index is a Number (events may have BigInt or Number)
     const index = typeof event.index === 'bigint' ? Number(event.index) : Number(event.index);
     const encryptedOutput = event.encryptedOutput;
-    
-    console.log(`[PoolStore] Storing leaf at index ${index}: ${commitment.slice(0, 20)}...`);
     
     // Store leaf
     await db.put('pool_leaves', {
@@ -195,34 +166,15 @@ export async function processNewNullifier(event, ledger) {
 export async function processEvents(events, ledger) {
     let commitments = 0;
     let nullifiers = 0;
-    let unrecognized = 0;
-    
-    console.log(`[PoolStore] Processing batch of ${events.length} events`);
     
     for (const event of events) {
         const eventType = event.topic?.[0];
         
-        // Log all events for debugging
-        console.log('[PoolStore] Event:', {
-            type: eventType,
-            ledger: event.ledger,
-            topics: event.topic,
-            valueKeys: event.value ? Object.keys(event.value) : null,
-        });
-        
         // Match various event name formats (Soroban converts struct names to snake_case symbols)
         if (eventType === 'NewCommitmentEvent' || eventType === 'new_commitment_event' || eventType === 'new_commitment') {
-            // The commitment is in topic[1] (as a topic), value contains {index, encrypted_output}
             const commitment = event.topic?.[1];
             const index = event.value?.index;
             const encryptedOutput = event.value?.encrypted_output;
-            
-            console.log('[PoolStore] NewCommitment:', { 
-                commitment: commitment?.toString?.().slice(0, 20) + '...', 
-                index, 
-                encryptedOutputLen: encryptedOutput?.length,
-                ledger: event.ledger,
-            });
             
             await processNewCommitment({
                 commitment,
@@ -232,21 +184,13 @@ export async function processEvents(events, ledger) {
             commitments++;
         } else if (eventType === 'NewNullifierEvent' || eventType === 'new_nullifier_event' || eventType === 'new_nullifier') {
             const nullifier = event.topic?.[1];
-            console.log('[PoolStore] NewNullifier:', { 
-                nullifier: nullifier?.toString?.().slice(0, 20) + '...',
-                ledger: event.ledger,
-            });
             await processNewNullifier({
                 nullifier,
             }, event.ledger || ledger);
             nullifiers++;
-        } else {
-            unrecognized++;
-            console.log('[PoolStore] Unrecognized event type:', eventType);
         }
     }
     
-    console.log(`[PoolStore] Batch result: ${commitments} commitments, ${nullifiers} nullifiers, ${unrecognized} unrecognized`);
     return { commitments, nullifiers };
 }
 
@@ -346,7 +290,7 @@ export async function clear() {
     await db.clear('pool_leaves');
     await db.clear('pool_nullifiers');
     await db.clear('pool_encrypted_outputs');
-    const zeroLeaf = hexToBytes(ZERO_LEAF_HEX);
+    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
     merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
     console.log('[PoolStore] Cleared all data');
 }

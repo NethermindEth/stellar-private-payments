@@ -686,141 +686,12 @@ export async function generateTransactionProof(params, options = {}) {
     // Generate proof in Soroban format
     onProgress?.({ phase: 'prove', message: 'Generating ZK proof...' });
     
-    // Debug: log circuit inputs
-    console.log('[TxBuilder] Circuit inputs:', JSON.stringify(circuitInputs, (key, value) => 
-        typeof value === 'bigint' ? value.toString() : value, 2));
-    
-    // Validate all circuit inputs are within field modulus
-    const validateFieldValue = (name, value) => {
-        const bi = BigInt(value);
-        if (bi >= BN256_MOD) {
-            console.error(`[TxBuilder] FIELD OVERFLOW: ${name} = ${bi.toString()} exceeds modulus ${BN256_MOD.toString()}`);
-            return false;
-        }
-        return true;
-    };
-    
-    let allValid = true;
-    allValid = validateFieldValue('root', circuitInputs.root) && allValid;
-    allValid = validateFieldValue('publicAmount', circuitInputs.publicAmount) && allValid;
-    allValid = validateFieldValue('extDataHash', circuitInputs.extDataHash) && allValid;
-    circuitInputs.inputNullifier.forEach((n, i) => {
-        allValid = validateFieldValue(`inputNullifier[${i}]`, n) && allValid;
-    });
-    circuitInputs.outputCommitment.forEach((c, i) => {
-        allValid = validateFieldValue(`outputCommitment[${i}]`, c) && allValid;
-    });
-    circuitInputs.inAmount.forEach((a, i) => {
-        allValid = validateFieldValue(`inAmount[${i}]`, a) && allValid;
-    });
-    circuitInputs.inPrivateKey.forEach((k, i) => {
-        allValid = validateFieldValue(`inPrivateKey[${i}]`, k) && allValid;
-    });
-    circuitInputs.inBlinding.forEach((b, i) => {
-        allValid = validateFieldValue(`inBlinding[${i}]`, b) && allValid;
-    });
-    circuitInputs.inPathIndices.forEach((p, i) => {
-        allValid = validateFieldValue(`inPathIndices[${i}]`, p) && allValid;
-    });
-    circuitInputs.inPathElements.forEach((arr, i) => {
-        arr.forEach((e, j) => {
-            allValid = validateFieldValue(`inPathElements[${i}][${j}]`, e) && allValid;
-        });
-    });
-    circuitInputs.outAmount.forEach((a, i) => {
-        allValid = validateFieldValue(`outAmount[${i}]`, a) && allValid;
-    });
-    circuitInputs.outPubkey.forEach((p, i) => {
-        allValid = validateFieldValue(`outPubkey[${i}]`, p) && allValid;
-    });
-    circuitInputs.outBlinding.forEach((b, i) => {
-        allValid = validateFieldValue(`outBlinding[${i}]`, b) && allValid;
-    });
-    circuitInputs.membershipRoots.forEach((arr, i) => {
-        arr.forEach((r, j) => {
-            allValid = validateFieldValue(`membershipRoots[${i}][${j}]`, r) && allValid;
-        });
-    });
-    circuitInputs.nonMembershipRoots.forEach((arr, i) => {
-        arr.forEach((r, j) => {
-            allValid = validateFieldValue(`nonMembershipRoots[${i}][${j}]`, r) && allValid;
-        });
-    });
-    // Check membership proof fields: leaf, blinding, pathIndices, pathElements
-    circuitInputs.membershipProofs.forEach((proofArr, i) => {
-        proofArr.forEach((proof, j) => {
-            if (proof.leaf !== undefined) {
-                allValid = validateFieldValue(`membershipProofs[${i}][${j}].leaf`, proof.leaf) && allValid;
-            }
-            if (proof.blinding !== undefined) {
-                allValid = validateFieldValue(`membershipProofs[${i}][${j}].blinding`, proof.blinding) && allValid;
-            }
-            if (proof.pathIndices !== undefined) {
-                allValid = validateFieldValue(`membershipProofs[${i}][${j}].pathIndices`, proof.pathIndices) && allValid;
-            }
-            if (proof.pathElements) {
-                proof.pathElements.forEach((e, k) => {
-                    allValid = validateFieldValue(`membershipProofs[${i}][${j}].pathElements[${k}]`, e) && allValid;
-                });
-            }
-        });
-    });
-    // Check non-membership proof fields: key, oldKey, oldValue, isOld0, siblings
-    circuitInputs.nonMembershipProofs.forEach((proofArr, i) => {
-        proofArr.forEach((proof, j) => {
-            if (proof.key !== undefined) {
-                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].key`, proof.key) && allValid;
-            }
-            if (proof.oldKey !== undefined) {
-                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].oldKey`, proof.oldKey) && allValid;
-            }
-            if (proof.oldValue !== undefined) {
-                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].oldValue`, proof.oldValue) && allValid;
-            }
-            if (proof.isOld0 !== undefined) {
-                allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].isOld0`, proof.isOld0) && allValid;
-            }
-            if (proof.siblings) {
-                proof.siblings.forEach((s, k) => {
-                    allValid = validateFieldValue(`nonMembershipProofs[${i}][${j}].siblings[${k}]`, s) && allValid;
-                });
-            }
-        });
-    });
-    
-    if (!allValid) {
-        throw new Error('Circuit inputs contain values exceeding field modulus');
-    }
-    
     const { proof, publicInputs, timings } = await ProverClient.prove(circuitInputs, {
         sorobanFormat: true,
     });
-    
+
     // On-chain verification will validate the proof.
     const verified = true; // Skip local verification for Soroban format
-    console.log('[TxBuilder] Proof generated, skipping local verification (Soroban format)');
-    
-    // Debug: compare circuit vs contract values
-    console.log('[TxBuilder] Public input comparison:', {
-        circuit_publicAmount: circuitInputs.publicAmount,
-        contract_public_amount: toFieldElement(params.extData.ext_amount).toString(),
-        match: circuitInputs.publicAmount === toFieldElement(params.extData.ext_amount).toString(),
-        circuit_extDataHash: circuitInputs.extDataHash,
-        contract_ext_data_hash: extDataHash.bigInt.toString(),
-        hashMatch: circuitInputs.extDataHash === extDataHash.bigInt.toString(),
-    });
-    
-    // Debug: show proof public inputs returned by prover
-    console.log('[TxBuilder] Proof public inputs (from prover):', publicInputs.length, 'bytes');
-    // Parse public inputs as field elements (each is 32 bytes)
-    const numPublicInputs = publicInputs.length / 32;
-    console.log('[TxBuilder] Number of public inputs:', numPublicInputs);
-    for (let i = 0; i < numPublicInputs; i++) {
-        const start = i * 32;
-        const bytes = publicInputs.slice(start, start + 32);
-        const value = BigInt('0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join(''));
-        console.log(`[TxBuilder] Public input[${i}]:`, value.toString());
-    }
 
     // Parse proof bytes into Soroban structure
     const proofStruct = {
@@ -845,13 +716,6 @@ export async function generateTransactionProof(params, options = {}) {
         asp_membership_root: params.membershipRoot,
         asp_non_membership_root: params.nonMembershipRoot,
     };
-    
-    console.log('[TxBuilder] Soroban proof values:', {
-        root: params.poolRoot.toString(),
-        public_amount: publicAmountField.toString(),
-        asp_membership_root: params.membershipRoot.toString(),
-        asp_non_membership_root: params.nonMembershipRoot.toString(),
-    });
 
     return {
         proof: proofStruct,

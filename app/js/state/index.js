@@ -431,22 +431,6 @@ export const StateManager = {
     },
 
     /**
-     * Debug: Show all pool leaves stored in IndexedDB.
-     * @returns {Promise<void>}
-     */
-    async debugPoolLeaves() {
-        return poolStore.debugShowAllLeaves();
-    },
-
-    /**
-     * Debug: Get all pool leaf indices.
-     * @returns {Promise<number[]>}
-     */
-    async getPoolLeafIndices() {
-        return poolStore.getAllLeafIndices();
-    },
-
-    /**
      * Closes the database connection and cleans up listeners.
      */
     close() {
