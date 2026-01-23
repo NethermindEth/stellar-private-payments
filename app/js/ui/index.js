@@ -5,8 +5,9 @@
 
 export { App, Utils, Storage, Toast, deriveKeysFromWallet } from './core.js';
 export { Templates, setTabsRef } from './templates.js';
-export { Tabs, Wallet, onWalletConnect } from './navigation.js';
+export { Tabs, Wallet, onWalletConnect, onWalletDisconnect } from './navigation.js';
 export { NotesTable } from './notes-table.js';
+export { AddressBook, setAddressBookTabsRef } from './address-book.js';
 export { PoolEventsFetcher, ContractReader, setSyncUIRef } from './contract-reader.js';
 export { ProverUI } from './prover-ui.js';
 export { SyncUI } from './sync-ui.js';

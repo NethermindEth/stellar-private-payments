@@ -9,6 +9,7 @@ import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
 import * as aspNonMembershipFetcher from './asp-non-membership-fetcher.js';
 import * as notesStore from './notes-store.js';
+import * as publicKeyStore from './public-key-store.js';
 import * as syncController from './sync-controller.js';
 import * as noteScanner from './note-scanner.js';
 import { getRetentionConfig, detectRetentionWindow, ledgersToDuration } from './retention-verifier.js';
@@ -46,6 +47,7 @@ export const StateManager = {
         // Initialize stores
         await poolStore.init();
         await aspMembershipStore.init();
+        await publicKeyStore.init();
 
         // Forward sync events (store references for cleanup)
         const progressHandler = data => emit('syncProgress', data);
@@ -66,6 +68,10 @@ export const StateManager = {
         noteScanner.on('noteDiscovered', noteDiscoveredHandler);
         noteScanner.on('noteSpent', noteSpentHandler);
         
+        // Forward public key events
+        const publicKeyRegisteredHandler = data => emit('publicKeyRegistered', data);
+        publicKeyStore.on('publicKeyRegistered', publicKeyRegisteredHandler);
+        
         forwardedSyncListeners = [
             ['syncProgress', progressHandler, syncController],
             ['syncComplete', completeHandler, syncController],
@@ -74,6 +80,7 @@ export const StateManager = {
             ['notesMarkedSpent', notesMarkedSpentHandler, syncController],
             ['noteDiscovered', noteDiscoveredHandler, noteScanner],
             ['noteSpent', noteSpentHandler, noteScanner],
+            ['publicKeyRegistered', publicKeyRegisteredHandler, publicKeyStore],
         ];
 
         initialized = true;
@@ -253,6 +260,43 @@ export const StateManager = {
         return aspNonMembershipFetcher.fetchRoot();
     },
 
+    // Address Book (Public Keys)
+
+    /**
+     * Gets a registered public key by Stellar address.
+     * @param {string} address - Stellar address to look up
+     * @returns {Promise<Object|null>} Public key record or null
+     */
+    async getPublicKeyByAddress(address) {
+        return publicKeyStore.getByAddress(address);
+    },
+
+    /**
+     * Searches for a public key, querying on-chain if not found locally.
+     * @param {string} address - Stellar address to search
+     * @returns {Promise<{found: boolean, record?: Object, source: string}>}
+     */
+    async searchPublicKey(address) {
+        return publicKeyStore.searchByAddress(address);
+    },
+
+    /**
+     * Gets recent public key registrations for the address book.
+     * @param {number} [limit=20] - Maximum records to return
+     * @returns {Promise<Array>}
+     */
+    async getRecentPublicKeys(limit = 20) {
+        return publicKeyStore.getRecentRegistrations(limit);
+    },
+
+    /**
+     * Gets total count of registered public keys.
+     * @returns {Promise<number>}
+     */
+    async getPublicKeyCount() {
+        return publicKeyStore.getCount();
+    },
+
     // Notes
 
     /**
@@ -398,6 +442,7 @@ export const StateManager = {
      * - notesMarkedSpent: { count } - Notes marked spent during sync
      * - noteDiscovered: { note } - Individual note discovered
      * - noteSpent: { commitment, ledger } - Individual note marked spent
+     * - publicKeyRegistered: { address, publicKey, ledger } - New public key registered
      * 
      * @param {string} event - Event name
      * @param {function} handler - Event handler
@@ -428,6 +473,22 @@ export const StateManager = {
         await syncController.clearAndReset();
         await notesStore.clear();
         console.log('[StateManager] All data cleared');
+    },
+
+    /**
+     * Force resets the database by deleting and reinitializing.
+     * Use when database upgrades fail or data becomes corrupted.
+     * WARNING: This will delete ALL local data including notes.
+     * @returns {Promise<void>}
+     */
+    async forceResetDatabase() {
+        console.log('[StateManager] Force resetting database...');
+        await db.forceReset();
+        // Reinitialize stores after database reset
+        await poolStore.init();
+        await aspMembershipStore.init();
+        await publicKeyStore.init();
+        console.log('[StateManager] Database force reset complete - sync required');
     },
 
     /**
@@ -475,4 +536,4 @@ function emit(event, data) {
 export default StateManager;
 
 // Re-export sub-modules for direct access if needed
-export { db, poolStore, aspMembershipStore, aspNonMembershipFetcher, notesStore, syncController, noteScanner };
+export { db, poolStore, aspMembershipStore, aspNonMembershipFetcher, notesStore, publicKeyStore, syncController, noteScanner };

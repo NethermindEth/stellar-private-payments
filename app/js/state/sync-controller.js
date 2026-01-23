@@ -16,6 +16,7 @@
 import * as db from './db.js';
 import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
+import * as publicKeyStore from './public-key-store.js';
 import * as noteScanner from './note-scanner.js';
 import * as notesStore from './notes-store.js';
 import { getRetentionConfig, ledgersToDuration } from './retention-verifier.js';
@@ -199,12 +200,16 @@ export async function startSync(options = {}) {
         
         // Sync Pool events (streaming mode - events processed in onPage callback)
         let poolEventCount = 0;
+        let publicKeyCount = 0;
         const poolCursor = forceRefresh ? null : metadata.poolSync.lastCursor;
         const poolResult = await fetchAllPoolEvents({
             startLedger: poolStartLedger,
             cursor: poolCursor,
             onPage: async (events, cursor) => {
                 await poolStore.processEvents(events);
+                // Also process PublicKeyEvent for address book
+                const pkResult = await publicKeyStore.processEvents(events);
+                publicKeyCount += pkResult.registrations;
                 poolEventCount += events.length;
                 if (onProgress) {
                     onProgress({ phase: 'pool', events: events.length, cursor });
@@ -290,6 +295,7 @@ export async function startSync(options = {}) {
             message: `Synced ${poolEventCount} pool events, ${aspEventCount} ASP membership events`,
             poolLeavesCount: await poolStore.getLeafCount(),
             aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
+            registeredPublicKeys: publicKeyCount,
             lastSyncedLedger: Math.max(
                 metadata.poolSync.lastLedger,
                 metadata.aspMembershipSync.lastLedger
@@ -395,6 +401,7 @@ export function isSyncInProgress() {
 export async function clearAndReset() {
     await poolStore.clear();
     await aspMembershipStore.clear();
+    await publicKeyStore.clear();
     await db.del('sync_metadata', getNetwork().name);
     console.log('[SyncController] Cleared all data and reset sync state');
 }

@@ -32,8 +32,9 @@ export const Transact = {
         
         inputs.appendChild(Templates.createInputRow(0));
         inputs.appendChild(Templates.createInputRow(1));
-        outputs.appendChild(Templates.createOutputRow(0, 0));
-        outputs.appendChild(Templates.createOutputRow(1, 0));
+        // Use advanced output rows with per-output recipient selection
+        outputs.appendChild(Templates.createAdvancedOutputRow(0, 0));
+        outputs.appendChild(Templates.createAdvancedOutputRow(1, 0));
         
         if (App.state.wallet.connected && App.state.wallet.address) {
             const recipientInput = document.getElementById('transact-recipient');
@@ -75,6 +76,25 @@ export const Transact = {
         if (recipientInput && !recipientInput.value && App.state.wallet.address) {
             recipientInput.value = App.state.wallet.address;
         }
+    },
+    
+    /**
+     * Gets the recipient configuration for each output.
+     * Empty recipient key means "self". Returns array of { isSelf: boolean, publicKey: string|null }.
+     */
+    getOutputRecipients() {
+        const recipients = [];
+        document.querySelectorAll('#transact-outputs .advanced-output-row').forEach(row => {
+            const recipientKey = row.querySelector('.output-recipient-key');
+            const keyValue = recipientKey?.value.trim() || '';
+            const isSelf = keyValue === '';
+            
+            recipients.push({
+                isSelf,
+                publicKey: isSelf ? null : keyValue,
+            });
+        });
+        return recipients;
     },
     
     updateBalance() {
@@ -135,10 +155,7 @@ export const Transact = {
         btnLoading.classList.remove('hidden');
         
         const setLoadingText = (text) => {
-            btnLoading.querySelector('span')?.remove();
-            const span = document.createElement('span');
-            span.textContent = text;
-            btnLoading.appendChild(span);
+            btnLoading.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-dark-950/30 border-t-dark-950 rounded-full animate-spin"></span><span class="ml-2">${text}</span>`;
         };
         
         try {
@@ -149,8 +166,10 @@ export const Transact = {
             
             const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
             const publicAmountStroops = BigInt(Math.round(publicAmount * 1e7));
-            const outputRecipient = document.getElementById('transact-outputs-recipient')?.value.trim();
-            const isForSelf = !outputRecipient || outputRecipient === App.state.wallet.address;
+            
+            // Get per-output recipient configuration
+            const outputRecipients = this.getOutputRecipients();
+            const hasExternalRecipient = outputRecipients.some(r => !r.isSelf && r.publicKey);
             
             setLoadingText('Gathering input notes...');
             const inputNotes = [];
@@ -172,11 +191,17 @@ export const Transact = {
             }
             
             const outputs = [];
-            document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
+            document.querySelectorAll('#transact-outputs .advanced-output-row').forEach((row, idx) => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const blindingBytes = generateBlinding();
                 const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
-                outputs.push({ amount: BigInt(Math.round(amount * 1e7)), blinding });
+                const recipient = outputRecipients[idx];
+                outputs.push({ 
+                    amount: BigInt(Math.round(amount * 1e7)), 
+                    blinding,
+                    isSelf: recipient?.isSelf ?? true,
+                    recipientPublicKey: recipient?.publicKey || null,
+                });
             });
             
             const membershipBlindingInput = document.getElementById('transact-membership-blinding');
@@ -205,6 +230,7 @@ export const Transact = {
                 inputCount: inputNotes.length,
                 outputCount: outputs.length,
                 recipient,
+                hasExternalRecipient,
             });
             
             setLoadingText('Generating ZK proof...');
@@ -233,14 +259,20 @@ export const Transact = {
             
             const pendingNotes = [];
             let outputIndex = 0;
-            document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
+            document.querySelectorAll('#transact-outputs .advanced-output-row').forEach(row => {
                 const outputNote = proofResult.outputNotes[outputIndex];
                 const amountXLM = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const isDummy = amountXLM === 0;
+                const recipientInfo = outputRecipients[outputIndex];
                 
                 const noteId = fieldToHex(outputNote.commitmentBytes);
                 const leafIndex = poolNextIndex + outputIndex;
                 const amountStroops = Number(outputNote.amount);
+                
+                // Determine note owner - either self or specified recipient
+                const noteOwner = recipientInfo?.isSelf 
+                    ? App.state.wallet.address 
+                    : (recipientInfo?.publicKey || App.state.wallet.address);
                 
                 const note = {
                     id: noteId,
@@ -250,11 +282,12 @@ export const Transact = {
                     leafIndex,
                     spent: false,
                     isDummy,
-                    owner: outputRecipient || App.state.wallet.address,
+                    owner: noteOwner,
                     createdAt: new Date().toISOString()
                 };
                 
-                if (!isDummy && isForSelf) pendingNotes.push(note);
+                // Only add to pending notes if it's for ourselves and not a dummy
+                if (!isDummy && recipientInfo?.isSelf) pendingNotes.push(note);
                 
                 const display = row.querySelector('.output-note-id');
                 display.value = Utils.truncateHex(noteId, 8, 8);
@@ -303,10 +336,10 @@ export const Transact = {
                 console.warn('[Transact] Pool sync failed:', syncError);
             }
             
-            if (isForSelf) {
-                Toast.show(`Transaction successful! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
+            if (hasExternalRecipient) {
+                Toast.show('Transaction successful! Share note files with recipients.', 'success');
             } else {
-                Toast.show('Transaction successful! Share note files with recipient.', 'success');
+                Toast.show(`Transaction successful! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
             }
         } catch (e) {
             console.error('[Transact] Error:', e);

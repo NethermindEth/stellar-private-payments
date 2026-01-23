@@ -4,6 +4,7 @@
  */
 
 import { App, Utils, Toast } from './core.js';
+import { StateManager } from '../state/index.js';
 
 // Forward reference - set by navigation.js after it loads
 let TabsRef = null;
@@ -21,6 +22,7 @@ export const Templates = {
     init() {
         App.templates = {
             outputRow: document.getElementById('tpl-output-row'),
+            advancedOutputRow: document.getElementById('tpl-advanced-output-row'),
             inputRow: document.getElementById('tpl-input-row'),
             txItem: document.getElementById('tpl-tx-item'),
             noteRow: document.getElementById('tpl-note-row'),
@@ -77,6 +79,94 @@ export const Templates = {
         return row;
     },
     
+    /**
+     * Creates an advanced output row with per-output recipient selection.
+     * Used in Transact mode where each output can go to a different recipient.
+     * Empty recipient = self, filled = other recipient.
+     * @param {number} index - Row index
+     * @param {number} initialValue - Initial amount value
+     * @returns {HTMLElement}
+     */
+    createAdvancedOutputRow(index, initialValue = 0) {
+        const row = App.templates.advancedOutputRow.content.cloneNode(true).firstElementChild;
+        row.dataset.index = index;
+        
+        const amountInput = row.querySelector('.output-amount');
+        const recipientKey = row.querySelector('.output-recipient-key');
+        const lookupBtn = row.querySelector('.output-lookup-btn');
+        
+        amountInput.value = initialValue;
+        
+        // Update dummy badge on value change
+        amountInput.addEventListener('input', () => {
+            const val = parseFloat(amountInput.value) || 0;
+            row.querySelector('.dummy-badge').classList.toggle('hidden', val !== 0);
+        });
+        
+        // Mini spinner buttons
+        row.querySelector('.mini-up').addEventListener('click', () => {
+            amountInput.value = (parseFloat(amountInput.value) || 0) + 1;
+            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        
+        row.querySelector('.mini-down').addEventListener('click', () => {
+            amountInput.value = Math.max(0, (parseFloat(amountInput.value) || 0) - 1);
+            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+        
+        // Address book lookup for recipient
+        lookupBtn?.addEventListener('click', async () => {
+            const address = prompt('Enter Stellar address to look up (G...):');
+            if (!address) return;
+            
+            if (!address.startsWith('G') || address.length !== 56) {
+                Toast.show('Invalid Stellar address format', 'error');
+                return;
+            }
+            
+            Toast.show('Searching...', 'info');
+            
+            try {
+                const result = await StateManager.searchPublicKey(address);
+                
+                if (result.found) {
+                    recipientKey.value = result.record.publicKey;
+                    recipientKey.dispatchEvent(new Event('input', { bubbles: true }));
+                    Toast.show(`Found public key (${result.source})`, 'success');
+                } else {
+                    Toast.show('No registered public key found for this address', 'error');
+                }
+            } catch (e) {
+                console.error('[Templates] Address lookup failed:', e);
+                Toast.show('Lookup failed: ' + e.message, 'error');
+            }
+        });
+        
+        // Copy button
+        row.querySelector('.copy-btn').addEventListener('click', () => {
+            const noteId = row.querySelector('.output-note-id');
+            if (noteId.dataset.fullId) {
+                Utils.copyToClipboard(noteId.dataset.fullId);
+            }
+        });
+        
+        // Download button
+        row.querySelector('.download-btn').addEventListener('click', () => {
+            const noteId = row.querySelector('.output-note-id');
+            if (noteId.dataset.noteData) {
+                Utils.downloadFile(noteId.dataset.noteData, `note-${Date.now()}.json`);
+                Toast.show('Note downloaded!', 'success');
+            }
+        });
+        
+        // Initial dummy state
+        if (initialValue === 0) {
+            row.querySelector('.dummy-badge').classList.remove('hidden');
+        }
+        
+        return row;
+    },
+    
     createInputRow(index) {
         const row = App.templates.inputRow.content.cloneNode(true).firstElementChild;
         row.dataset.index = index;
@@ -104,13 +194,8 @@ export const Templates = {
             }
         });
         
-        // File upload
-        uploadBtn.addEventListener('click', () => fileInput.click());
-        
-        fileInput.addEventListener('change', async (e) => {
-            const file = e.target.files[0];
-            if (!file) return;
-            
+        // Shared file processing function
+        const processFile = async (file) => {
             try {
                 const text = await file.text();
                 try {
@@ -124,7 +209,40 @@ export const Templates = {
             } catch {
                 Toast.show('Failed to read file', 'error');
             }
+        };
+        
+        // File upload button
+        uploadBtn.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            await processFile(file);
             fileInput.value = '';
+        });
+        
+        // Drag and drop support
+        row.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            row.classList.add('border-brand-500', 'bg-brand-500/10');
+        });
+        
+        row.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            row.classList.remove('border-brand-500', 'bg-brand-500/10');
+        });
+        
+        row.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            row.classList.remove('border-brand-500', 'bg-brand-500/10');
+            
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                await processFile(files[0]);
+            }
         });
         
         return row;
@@ -159,18 +277,46 @@ export const Templates = {
             badge.classList.add('bg-emerald-500/20', 'text-emerald-400');
         }
         
-        // Use button (switch to withdraw and populate input)
+        // Use button - fills note in current tab's input (or switches to withdraw if in deposit)
         const useBtn = row.querySelector('.use-btn');
         if (useBtn) {
             useBtn.addEventListener('click', () => {
-                if (TabsRef) {
-                    TabsRef.switch('withdraw');
+                // Determine which tab to use
+                let targetTab = App.state.activeTab;
+                
+                // Deposit doesn't have input notes, redirect to withdraw
+                if (targetTab === 'deposit') {
+                    targetTab = 'withdraw';
+                    if (TabsRef) {
+                        TabsRef.switch('withdraw');
+                    }
                 }
-                const inputs = document.querySelectorAll('#withdraw-inputs .note-input');
-                if (inputs[0]) {
-                    inputs[0].value = note.id;
-                    inputs[0].dispatchEvent(new Event('input', { bubbles: true }));
+                
+                // Map tab to input container ID
+                const containerIds = {
+                    withdraw: 'withdraw-inputs',
+                    transfer: 'transfer-inputs',
+                    transact: 'transact-inputs',
+                };
+                
+                const containerId = containerIds[targetTab];
+                if (!containerId) return;
+                
+                const inputs = document.querySelectorAll(`#${containerId} .note-input`);
+                if (!inputs.length) return;
+                
+                // Find first empty input, or use first if all filled
+                let targetInput = inputs[0];
+                for (const input of inputs) {
+                    if (!input.value.trim()) {
+                        targetInput = input;
+                        break;
+                    }
                 }
+                
+                targetInput.value = note.id;
+                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
+                Toast.show('Note added to input', 'success');
             });
         }
         

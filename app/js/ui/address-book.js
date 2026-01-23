@@ -1,0 +1,397 @@
+/**
+ * Address Book UI - displays registered public keys and enables lookup for transfers.
+ * @module ui/address-book
+ */
+
+import { StateManager } from '../state/index.js';
+import { App, Utils, Toast } from './core.js';
+
+// Forward reference to Tabs for switching to transfer
+let TabsRef = null;
+
+/**
+ * Sets the Tabs reference for navigation.
+ * @param {Object} tabs - The Tabs module
+ */
+export function setAddressBookTabsRef(tabs) {
+    TabsRef = tabs;
+}
+
+export const AddressBook = {
+    isInitialized: false,
+    
+    init() {
+        // Store template reference
+        App.templates.addressBookRow = document.getElementById('tpl-addressbook-row');
+        
+        // Section tab switching
+        document.querySelectorAll('.section-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.switchSection(btn.dataset.sectionTab));
+        });
+        
+        // Search functionality
+        const searchInput = document.getElementById('addressbook-search');
+        const searchBtn = document.getElementById('addressbook-search-btn');
+        
+        searchInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.search(searchInput.value.trim());
+            }
+        });
+        
+        searchBtn?.addEventListener('click', () => {
+            this.search(searchInput?.value.trim());
+        });
+        
+        // Refresh button
+        document.getElementById('addressbook-refresh-btn')?.addEventListener('click', async () => {
+            const icon = document.getElementById('addressbook-refresh-icon');
+            if (icon) {
+                icon.classList.add('animate-spin');
+            }
+            try {
+                await this.render();
+            } finally {
+                if (icon) {
+                    icon.classList.remove('animate-spin');
+                }
+            }
+        });
+        
+        // Listen for new registrations
+        StateManager.on('publicKeyRegistered', () => {
+            this.render();
+        });
+        
+        this.isInitialized = true;
+    },
+    
+    /**
+     * Switches between notes and address book sections.
+     * @param {string} section - 'notes' or 'addressbook'
+     */
+    switchSection(section) {
+        document.querySelectorAll('.section-tab-btn').forEach(btn => {
+            const isActive = btn.dataset.sectionTab === section;
+            btn.setAttribute('aria-selected', isActive);
+            btn.classList.toggle('bg-dark-800', isActive);
+            btn.classList.toggle('text-brand-500', isActive);
+            btn.classList.toggle('border-brand-500/30', isActive);
+            btn.classList.toggle('border', isActive);
+            btn.classList.toggle('text-dark-400', !isActive);
+        });
+        
+        document.querySelectorAll('.section-panel').forEach(panel => {
+            panel.classList.add('hidden');
+        });
+        
+        const targetPanel = document.getElementById(`section-panel-${section}`);
+        if (targetPanel) {
+            targetPanel.classList.remove('hidden');
+        }
+        
+        // Render address book when switching to it
+        if (section === 'addressbook') {
+            this.render();
+        }
+    },
+    
+    /**
+     * Renders the address book table with recent registrations.
+     */
+    async render() {
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const loading = document.getElementById('addressbook-loading');
+        const searchResult = document.getElementById('addressbook-search-result');
+        
+        if (!tbody) return;
+        
+        // Show loading, hide others
+        loading?.classList.remove('hidden');
+        empty?.classList.add('hidden');
+        searchResult?.classList.add('hidden');
+        tbody.replaceChildren();
+        
+        try {
+            const registrations = await StateManager.getRecentPublicKeys(20);
+            
+            loading?.classList.add('hidden');
+            
+            if (registrations.length === 0) {
+                empty?.classList.remove('hidden');
+                empty?.classList.add('flex');
+                return;
+            }
+            
+            empty?.classList.add('hidden');
+            empty?.classList.remove('flex');
+            
+            registrations.forEach(record => {
+                tbody.appendChild(this.createRow(record));
+            });
+        } catch (error) {
+            console.error('[AddressBook] Failed to load registrations:', error);
+            loading?.classList.add('hidden');
+            
+            // Check if this is a database upgrade issue
+            if (error.name === 'NotFoundError' || error.message?.includes('object stores was not found')) {
+                this.renderDatabaseUpgradeError();
+            } else {
+                empty?.classList.remove('hidden');
+            }
+        }
+    },
+    
+    /**
+     * Renders a message when database needs upgrade (store not found).
+     */
+    renderDatabaseUpgradeError() {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        container.classList.remove('hidden');
+        container.innerHTML = `
+            <div class="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
+                <div class="flex items-center gap-2 mb-2">
+                    <svg class="w-4 h-4 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                        <line x1="12" y1="9" x2="12" y2="13"/>
+                        <line x1="12" y1="17" x2="12.01" y2="17"/>
+                    </svg>
+                    <h4 class="text-sm font-semibold text-orange-400">Database Upgrade Required</h4>
+                </div>
+                <p class="text-xs text-dark-400 mb-3">
+                    The address book feature requires a database upgrade. Please close all other tabs with this site and refresh.
+                </p>
+                <div class="flex gap-2">
+                    <button type="button" class="refresh-page-btn px-3 py-1.5 bg-orange-500 hover:bg-orange-400 text-dark-950 text-xs font-semibold rounded transition-colors">
+                        Refresh Page
+                    </button>
+                    <button type="button" class="force-reset-btn px-3 py-1.5 bg-red-500/20 hover:bg-red-500/30 text-red-400 text-xs rounded border border-red-500/30 transition-colors">
+                        Force Reset (deletes data)
+                    </button>
+                </div>
+                <p class="text-[10px] text-dark-600 mt-2">
+                    Force reset will delete all local data. You'll need to sync again.
+                </p>
+            </div>
+        `;
+        
+        container.querySelector('.refresh-page-btn')?.addEventListener('click', () => {
+            window.location.reload();
+        });
+        
+        container.querySelector('.force-reset-btn')?.addEventListener('click', async () => {
+            if (confirm('This will delete all local data including notes. You will need to sync again. Continue?')) {
+                try {
+                    await StateManager.forceResetDatabase();
+                    Toast.show('Database reset. Refreshing...', 'success');
+                    setTimeout(() => window.location.reload(), 1000);
+                } catch (e) {
+                    console.error('[AddressBook] Force reset failed:', e);
+                    Toast.show('Reset failed: ' + e.message, 'error');
+                }
+            }
+        });
+    },
+    
+    /**
+     * Searches for a public key by address.
+     * @param {string} address - Stellar address to search
+     */
+    async search(address) {
+        if (!address) {
+            Toast.show('Enter an address to search', 'error');
+            return;
+        }
+        
+        // Validate address format (basic check)
+        if (!address.startsWith('G') || address.length !== 56) {
+            Toast.show('Invalid Stellar address format', 'error');
+            return;
+        }
+        
+        const searchResult = document.getElementById('addressbook-search-result');
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const loading = document.getElementById('addressbook-loading');
+        
+        // Show loading state
+        loading?.classList.remove('hidden');
+        empty?.classList.add('hidden');
+        searchResult?.classList.add('hidden');
+        tbody?.replaceChildren();
+        
+        try {
+            const result = await StateManager.searchPublicKey(address);
+            
+            loading?.classList.add('hidden');
+            
+            if (result.found) {
+                // Show search result
+                searchResult?.classList.remove('hidden');
+                this.renderSearchResult(result.record, result.source);
+                Toast.show(`Found public key (${result.source})`, 'success');
+            } else {
+                // Show not found
+                searchResult?.classList.remove('hidden');
+                this.renderSearchNotFound(address);
+            }
+        } catch (error) {
+            console.error('[AddressBook] Search failed:', error);
+            loading?.classList.add('hidden');
+            Toast.show('Search failed: ' + error.message, 'error');
+        }
+    },
+    
+    /**
+     * Renders a search result.
+     * @param {Object} record - Public key record
+     * @param {string} source - 'local' or 'onchain'
+     */
+    renderSearchResult(record, source) {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        const sourceLabel = source === 'onchain' ? 'Found on-chain' : 'Found locally';
+        const sourceBadgeClass = source === 'onchain' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-brand-500/20 text-brand-400';
+        
+        container.innerHTML = `
+            <div class="p-4 bg-dark-800 border border-dark-700 rounded-lg">
+                <div class="flex items-center justify-between mb-3">
+                    <h4 class="text-sm font-semibold text-dark-200">Search Result</h4>
+                    <span class="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded ${sourceBadgeClass}">${sourceLabel}</span>
+                </div>
+                <dl class="space-y-2 text-xs">
+                    <div class="flex justify-between items-start">
+                        <dt class="text-dark-500">Address</dt>
+                        <dd class="font-mono text-dark-300 text-right break-all max-w-[300px]">${record.address}</dd>
+                    </div>
+                    <div class="flex justify-between items-start">
+                        <dt class="text-dark-500">Public Key</dt>
+                        <dd class="font-mono text-brand-400 text-right break-all max-w-[300px]">${Utils.truncateHex(record.publicKey, 12, 12)}</dd>
+                    </div>
+                </dl>
+                <div class="flex gap-2 mt-4">
+                    <button type="button" class="search-use-transfer flex-1 px-3 py-2 bg-brand-500 hover:bg-brand-400 text-dark-950 text-xs font-semibold rounded transition-colors">
+                        Use in Transfer
+                    </button>
+                    <button type="button" class="search-copy-pubkey px-3 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-300 text-xs rounded transition-colors">
+                        Copy Key
+                    </button>
+                    <button type="button" class="search-clear px-3 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-400 text-xs rounded transition-colors">
+                        Clear
+                    </button>
+                </div>
+            </div>
+        `;
+        
+        // Attach event listeners
+        container.querySelector('.search-use-transfer')?.addEventListener('click', () => {
+            this.useInTransfer(record.publicKey);
+        });
+        
+        container.querySelector('.search-copy-pubkey')?.addEventListener('click', () => {
+            Utils.copyToClipboard(record.publicKey);
+        });
+        
+        container.querySelector('.search-clear')?.addEventListener('click', () => {
+            container.classList.add('hidden');
+            document.getElementById('addressbook-search').value = '';
+            this.render();
+        });
+    },
+    
+    /**
+     * Renders a not-found search result.
+     * @param {string} address - The searched address
+     */
+    renderSearchNotFound(address) {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        container.innerHTML = `
+            <div class="p-4 bg-dark-800 border border-red-500/30 rounded-lg">
+                <div class="flex items-center gap-2 mb-2">
+                    <svg class="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <circle cx="12" cy="12" r="10"/>
+                        <line x1="15" y1="9" x2="9" y2="15"/>
+                        <line x1="9" y1="9" x2="15" y2="15"/>
+                    </svg>
+                    <h4 class="text-sm font-semibold text-red-400">Not Found</h4>
+                </div>
+                <p class="text-xs text-dark-400 mb-3">
+                    No registered public key found for <span class="font-mono text-dark-300">${Utils.truncateHex(address, 8, 8)}</span>
+                </p>
+                <p class="text-xs text-dark-500">
+                    The user may not have registered their public key yet. Ask them to register via the wallet menu.
+                </p>
+                <button type="button" class="search-clear mt-3 px-3 py-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-400 text-xs rounded transition-colors">
+                    Clear Search
+                </button>
+            </div>
+        `;
+        
+        container.querySelector('.search-clear')?.addEventListener('click', () => {
+            container.classList.add('hidden');
+            document.getElementById('addressbook-search').value = '';
+            this.render();
+        });
+    },
+    
+    /**
+     * Creates a table row for an address book entry.
+     * @param {Object} record - Public key record
+     * @returns {HTMLElement}
+     */
+    createRow(record) {
+        const row = App.templates.addressBookRow.content.cloneNode(true).firstElementChild;
+        row.dataset.address = record.address;
+        
+        row.querySelector('.ab-address').textContent = Utils.truncateHex(record.address, 8, 8);
+        row.querySelector('.ab-pubkey').textContent = Utils.truncateHex(record.publicKey, 10, 8);
+        row.querySelector('.ab-date').textContent = record.registeredAt 
+            ? Utils.formatDate(record.registeredAt)
+            : `Ledger ${record.ledger}`;
+        
+        // Use in transfer button
+        row.querySelector('.use-transfer-btn')?.addEventListener('click', () => {
+            this.useInTransfer(record.publicKey);
+        });
+        
+        // Copy public key button
+        row.querySelector('.copy-pubkey-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(record.publicKey);
+        });
+        
+        // Copy address button
+        row.querySelector('.copy-address-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(record.address);
+        });
+        
+        return row;
+    },
+    
+    /**
+     * Fills the transfer recipient field and switches to transfer tab.
+     * @param {string} publicKey - Public key to use
+     */
+    useInTransfer(publicKey) {
+        const recipientInput = document.getElementById('transfer-recipient-key');
+        if (recipientInput) {
+            recipientInput.value = publicKey;
+            recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        // Switch to transfer tab
+        if (TabsRef) {
+            TabsRef.switch('transfer');
+        }
+        
+        // Also switch section back to notes
+        this.switchSection('notes');
+        
+        Toast.show('Public key added to transfer', 'success');
+    }
+};

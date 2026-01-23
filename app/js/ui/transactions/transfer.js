@@ -38,7 +38,50 @@ export const Transfer = {
         
         btn.addEventListener('click', () => this.submit());
         
+        // Address book lookup button
+        document.getElementById('transfer-addressbook-btn')?.addEventListener('click', () => {
+            this.openAddressBookLookup();
+        });
+        
+        // Address lookup hint link
+        document.getElementById('transfer-lookup-hint')?.addEventListener('click', () => {
+            this.openAddressBookLookup();
+        });
+        
         this.updateBalance();
+    },
+    
+    /**
+     * Opens address book search modal/panel to look up a public key by Stellar address.
+     */
+    async openAddressBookLookup() {
+        const address = prompt('Enter Stellar address to look up (G...):');
+        if (!address) return;
+        
+        if (!address.startsWith('G') || address.length !== 56) {
+            Toast.show('Invalid Stellar address format', 'error');
+            return;
+        }
+        
+        Toast.show('Searching...', 'info');
+        
+        try {
+            const result = await StateManager.searchPublicKey(address);
+            
+            if (result.found) {
+                const recipientInput = document.getElementById('transfer-recipient-key');
+                if (recipientInput) {
+                    recipientInput.value = result.record.publicKey;
+                    recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                Toast.show(`Found public key (${result.source})`, 'success');
+            } else {
+                Toast.show('No registered public key found for this address', 'error');
+            }
+        } catch (e) {
+            console.error('[Transfer] Address lookup failed:', e);
+            Toast.show('Lookup failed: ' + e.message, 'error');
+        }
     },
     
     updateBalance() {
@@ -113,10 +156,7 @@ export const Transfer = {
         btnLoading.classList.remove('hidden');
         
         const setLoadingText = (text) => {
-            btnLoading.querySelector('span')?.remove();
-            const span = document.createElement('span');
-            span.textContent = text;
-            btnLoading.appendChild(span);
+            btnLoading.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-dark-950/30 border-t-dark-950 rounded-full animate-spin"></span><span class="ml-2">${text}</span>`;
         };
         
         try {

@@ -42,7 +42,7 @@
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col gap-4 sm:gap-6 min-h-screen">
         
         <!-- Header -->
-        <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl" role="banner">
+        <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-visible relative z-50" role="banner">
             <div class="flex items-center gap-3">
                 <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg shadow-lg shadow-brand-500/25" aria-hidden="true">
                     <svg class="w-6 h-6 text-dark-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -55,25 +55,73 @@
                     PoolStellar <span class="text-dark-400 font-normal">Compliant Private System</span>
                 </h1>
             </div>
-            <div class="flex items-center gap-3">
+            <div class="flex items-center gap-3 overflow-visible">
                 <div class="flex items-center gap-2 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-sm text-dark-300">
                     <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse-dot shadow-sm shadow-emerald-500" aria-hidden="true"></span>
                     <span id="network-name">Network</span>
                 </div>
-                <button 
-                    type="button"
-                    id="wallet-btn"
-                    class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
-                    aria-label="Connect wallet"
-                >
-                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                        <rect x="2" y="6" width="20" height="14" rx="2"/>
-                        <path d="M22 10h-4a2 2 0 0 0 0 4h4"/>
-                        <circle cx="18" cy="12" r="1" fill="currentColor"/>
-                        <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>
-                    </svg>
-                    <span id="wallet-text">Connect Freighter</span>
-                </button>
+                <div class="relative overflow-visible" id="wallet-container">
+                    <button 
+                        type="button"
+                        id="wallet-btn"
+                        class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
+                        aria-label="Connect wallet"
+                        aria-haspopup="true"
+                        aria-expanded="false"
+                    >
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <rect x="2" y="6" width="20" height="14" rx="2"/>
+                            <path d="M22 10h-4a2 2 0 0 0 0 4h4"/>
+                            <circle cx="18" cy="12" r="1" fill="currentColor"/>
+                            <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>
+                        </svg>
+                        <span id="wallet-text">Connect Freighter</span>
+                        <svg id="wallet-dropdown-icon" class="w-4 h-4 hidden" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                            <path d="M6 9l6 6 6-6"/>
+                        </svg>
+                    </button>
+                    
+                    <!-- Wallet Dropdown Menu -->
+                    <div 
+                        id="wallet-dropdown"
+                        class="absolute top-full right-0 mt-2 w-56 bg-dark-800 border border-dark-700 rounded-lg shadow-xl z-[100] hidden"
+                        role="menu"
+                        aria-orientation="vertical"
+                    >
+                        <div class="p-2 border-b border-dark-700">
+                            <p class="text-xs text-dark-500 px-2">Connected as</p>
+                            <p id="wallet-dropdown-address" class="font-mono text-xs text-dark-300 px-2 truncate"></p>
+                        </div>
+                        <div class="p-1">
+                            <button 
+                                type="button"
+                                id="wallet-register-btn"
+                                class="w-full flex items-center gap-2 px-3 py-2 text-sm text-dark-300 hover:bg-dark-700 hover:text-brand-400 rounded transition-colors"
+                                role="menuitem"
+                            >
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                                    <polyline points="10 17 15 12 10 7"/>
+                                    <line x1="15" y1="12" x2="3" y2="12"/>
+                                </svg>
+                                Register Public Key
+                            </button>
+                            <button 
+                                type="button"
+                                id="wallet-disconnect-btn"
+                                class="w-full flex items-center gap-2 px-3 py-2 text-sm text-dark-300 hover:bg-dark-700 hover:text-red-400 rounded transition-colors"
+                                role="menuitem"
+                            >
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+                                    <polyline points="16 17 21 12 16 7"/>
+                                    <line x1="21" y1="12" x2="9" y2="12"/>
+                                </svg>
+                                Disconnect
+                            </button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </header>
 
@@ -243,10 +291,11 @@
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <span class="btn-text">Deposit</span>
-                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
-                            </svg>
+                            <span class="btn-loading hidden"></span>
                         </button>
+                        <p id="wallet-disclaimer-deposit" class="wallet-disclaimer text-center text-xs text-dark-500 mt-2">
+                            Connect wallet to continue
+                        </p>
                     </article>
 
                     <!-- Withdraw Panel -->
@@ -317,10 +366,11 @@
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <span class="btn-text">Withdraw</span>
-                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
-                            </svg>
+                            <span class="btn-loading hidden"></span>
                         </button>
+                        <p id="wallet-disclaimer-withdraw" class="wallet-disclaimer text-center text-xs text-dark-500 mt-2">
+                            Connect wallet to continue
+                        </p>
                     </article>
 
                     <!-- Transfer Panel -->
@@ -335,14 +385,33 @@
                             <label for="transfer-recipient-key" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
                                 Recipient Public Key <span class="normal-case text-dark-500">(who will own the new notes)</span>
                             </label>
-                            <input 
-                                type="text"
-                                id="transfer-recipient-key"
-                                placeholder="G..."
-                                class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
-                                autocomplete="off"
-                                spellcheck="false"
-                            >
+                            <div class="flex gap-2">
+                                <input 
+                                    type="text"
+                                    id="transfer-recipient-key"
+                                    placeholder="0x... (64 hex characters)"
+                                    class="flex-1 px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <button 
+                                    type="button"
+                                    id="transfer-addressbook-btn"
+                                    class="px-3 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-dark-400 hover:text-brand-500 transition-colors"
+                                    title="Search Address Book"
+                                    aria-label="Search address book for recipient"
+                                >
+                                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                                        <circle cx="9" cy="7" r="4"/>
+                                        <circle cx="19" cy="11" r="3"/>
+                                        <path d="M21 21l-2-2"/>
+                                    </svg>
+                                </button>
+                            </div>
+                            <p class="text-xs text-dark-500 mt-1">
+                                Enter the recipient's ZK public key (not their Stellar address).
+                            </p>
                         </div>
 
                         <!-- Balance Equation -->
@@ -407,10 +476,11 @@
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <span class="btn-text">Transfer</span>
-                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
-                            </svg>
+                            <span class="btn-loading hidden"></span>
                         </button>
+                        <p id="wallet-disclaimer-transfer" class="wallet-disclaimer text-center text-xs text-dark-500 mt-2">
+                            Connect wallet to continue
+                        </p>
                     </article>
 
                     <!-- Transact Panel -->
@@ -487,24 +557,10 @@
                             <!-- Outputs Column -->
                             <fieldset>
                                 <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
-                                    Outputs <span class="normal-case text-dark-500">(new notes to create)</span>
+                                    Outputs <span class="normal-case text-dark-500">(new notes to create - each can have a different recipient)</span>
                                 </legend>
-                                <div id="transact-outputs" class="space-y-2">
-                                    <!-- Output rows will be created from template -->
-                                </div>
-                                <!-- Outputs Recipient Key -->
-                                <div class="mt-3 p-3 bg-dark-700/50 rounded-lg">
-                                    <label for="transact-outputs-recipient" class="block text-xs font-medium text-dark-400 mb-2">
-                                        Output Notes Owner <span class="normal-case text-dark-500">(leave empty for yourself)</span>
-                                    </label>
-                                    <input 
-                                        type="text"
-                                        id="transact-outputs-recipient"
-                                        placeholder="G... (your key if empty)"
-                                        class="w-full px-3 py-2 bg-dark-800 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
-                                        autocomplete="off"
-                                        spellcheck="false"
-                                    >
+                                <div id="transact-outputs" class="space-y-3">
+                                    <!-- Advanced output rows will be created from template -->
                                 </div>
                             </fieldset>
                         </div>
@@ -552,10 +608,11 @@
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
                             <span class="btn-text">Transact</span>
-                            <svg class="btn-loading hidden w-5 h-5 animate-spin-slow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
-                                <circle cx="12" cy="12" r="10" stroke-dasharray="50" stroke-dashoffset="20" stroke-linecap="round"/>
-                            </svg>
+                            <span class="btn-loading hidden"></span>
                         </button>
+                        <p id="wallet-disclaimer-transact" class="wallet-disclaimer text-center text-xs text-dark-500 mt-2">
+                            Connect wallet to continue
+                        </p>
                     </article>
                 </div>
             </section>
@@ -740,47 +797,186 @@
             </aside>
         </main>
 
-        <!-- Notes Table -->
-        <section class="flex-1 flex flex-col bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="notes-heading">
-            <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-4 py-3 bg-dark-900 border-b border-dark-800">
-                <h3 id="notes-heading" class="flex items-center gap-2 text-sm font-semibold">
-                    <svg class="w-4 h-4 text-brand-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <!-- Notes & Address Book Section -->
+        <section class="flex-1 flex flex-col bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="notes-section-heading">
+            <h2 id="notes-section-heading" class="sr-only">Notes and Address Book</h2>
+            
+            <!-- Section Tab Navigation -->
+            <nav class="flex p-1.5 gap-1 bg-dark-900 border-b border-dark-800" role="tablist" aria-label="Notes section">
+                <button 
+                    type="button"
+                    role="tab"
+                    id="section-tab-notes"
+                    aria-selected="true"
+                    aria-controls="section-panel-notes"
+                    class="section-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset bg-dark-800 text-brand-500 border border-brand-500/30"
+                    data-section-tab="notes"
+                >
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                         <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
                         <polyline points="14 2 14 8 20 8"/>
                         <line x1="16" y1="13" x2="8" y2="13"/>
                         <line x1="16" y1="17" x2="8" y2="17"/>
                     </svg>
                     Your Notes
-                </h3>
-                <div class="flex gap-1 p-0.5 bg-dark-800 rounded-lg" role="tablist" aria-label="Filter notes">
-                    <button type="button" role="tab" aria-selected="true" class="filter-btn px-3 py-1 text-xs font-medium rounded bg-dark-700 text-dark-50" data-filter="all">All</button>
-                    <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="unspent">Unspent</button>
-                    <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="spent">Spent</button>
-                </div>
-            </header>
-            <div class="flex-1 overflow-auto min-h-[200px]">
-                <table class="w-full min-w-[600px]" aria-describedby="notes-heading">
-                    <thead class="bg-dark-800 sticky top-0">
-                        <tr>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Note ID</th>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Amount</th>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Created</th>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Status</th>
-                            <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="notes-tbody" class="divide-y divide-dark-800">
-                        <!-- Rows created from template -->
-                    </tbody>
-                </table>
-                <div id="empty-notes" class="hidden flex-1 flex-col items-center justify-center py-12 text-dark-500">
-                    <svg class="w-12 h-12 mb-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-                        <polyline points="14 2 14 8 20 8"/>
+                </button>
+                <button 
+                    type="button"
+                    role="tab"
+                    id="section-tab-addressbook"
+                    aria-selected="false"
+                    aria-controls="section-panel-addressbook"
+                    class="section-tab-btn flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-inset text-dark-400 hover:text-dark-200 hover:bg-dark-800"
+                    data-section-tab="addressbook"
+                >
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
                     </svg>
-                    <p class="text-sm">No notes yet. Make a deposit to create your first note.</p>
+                    Address Book
+                </button>
+            </nav>
+
+            <!-- Notes Panel -->
+            <article 
+                role="tabpanel"
+                id="section-panel-notes"
+                aria-labelledby="section-tab-notes"
+                class="section-panel flex-1 flex flex-col"
+            >
+                <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-4 py-3 border-b border-dark-800">
+                    <h3 class="flex items-center gap-2 text-sm font-semibold text-dark-300">
+                        Manage your private notes
+                    </h3>
+                    <div class="flex gap-1 p-0.5 bg-dark-800 rounded-lg" role="tablist" aria-label="Filter notes">
+                        <button type="button" role="tab" aria-selected="true" class="filter-btn px-3 py-1 text-xs font-medium rounded bg-dark-700 text-dark-50" data-filter="all">All</button>
+                        <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="unspent">Unspent</button>
+                        <button type="button" role="tab" aria-selected="false" class="filter-btn px-3 py-1 text-xs font-medium rounded text-dark-400 hover:text-dark-200" data-filter="spent">Spent</button>
+                    </div>
+                </header>
+                <div class="flex-1 overflow-auto min-h-[200px]">
+                    <table class="w-full min-w-[600px]" aria-describedby="section-tab-notes">
+                        <thead class="bg-dark-800 sticky top-0">
+                            <tr>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Note ID</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Amount</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Created</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Status</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="notes-tbody" class="divide-y divide-dark-800">
+                            <!-- Rows created from template -->
+                        </tbody>
+                    </table>
+                    <div id="empty-notes" class="hidden flex-1 flex-col items-center justify-center py-12 text-dark-500">
+                        <svg class="w-12 h-12 mb-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                            <polyline points="14 2 14 8 20 8"/>
+                        </svg>
+                        <p class="text-sm">No notes yet. Make a deposit to create your first note.</p>
+                    </div>
                 </div>
-            </div>
+            </article>
+
+            <!-- Address Book Panel -->
+            <article 
+                role="tabpanel"
+                id="section-panel-addressbook"
+                aria-labelledby="section-tab-addressbook"
+                class="section-panel hidden flex-1 flex flex-col"
+            >
+                <header class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 px-4 py-3 border-b border-dark-800">
+                    <h3 class="flex items-center gap-2 text-sm font-semibold text-dark-300">
+                        Registered public keys for transfers
+                    </h3>
+                    <div class="flex items-center gap-2">
+                        <div class="relative">
+                            <input 
+                                type="text"
+                                id="addressbook-search"
+                                placeholder="Search by address (G...)"
+                                class="w-64 px-3 py-1.5 pr-8 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:font-sans placeholder:text-dark-500"
+                                autocomplete="off"
+                                spellcheck="false"
+                            >
+                            <button 
+                                type="button" 
+                                id="addressbook-search-btn"
+                                class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-dark-500 hover:text-brand-500 transition-colors"
+                                title="Search"
+                                aria-label="Search address"
+                            >
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <path d="M21 21l-4.35-4.35"/>
+                                </svg>
+                            </button>
+                        </div>
+                        <button 
+                            type="button" 
+                            id="addressbook-refresh-btn"
+                            class="p-1.5 text-dark-400 hover:text-brand-500 transition-colors"
+                            title="Refresh"
+                            aria-label="Refresh address book"
+                        >
+                            <svg class="w-4 h-4 refresh-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M23 4v6h-6"/>
+                                <path d="M1 20v-6h6"/>
+                                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                            </svg>
+                            
+                        </button>
+                    </div>
+                </header>
+                
+                <!-- Registration hint -->
+                <div class="px-4 py-2 bg-dark-800/50 border-b border-dark-800">
+                    <p class="text-xs text-dark-400">
+                        <svg class="w-3.5 h-3.5 inline-block mr-1 -mt-0.5 text-brand-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <circle cx="12" cy="12" r="10"/>
+                            <path d="M12 16v-4"/>
+                            <path d="M12 8h.01"/>
+                        </svg>
+                        Want others to find your public key? <span class="text-brand-400">Register your key</span> from the wallet menu to appear in address books.
+                    </p>
+                </div>
+                
+                <div class="flex-1 overflow-auto min-h-[200px]">
+                    <table class="w-full min-w-[600px]" aria-describedby="section-tab-addressbook">
+                        <thead class="bg-dark-800 sticky top-0">
+                            <tr>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Stellar Address</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Public Key</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Registered</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="addressbook-tbody" class="divide-y divide-dark-800">
+                            <!-- Rows created from template -->
+                        </tbody>
+                    </table>
+                    <div id="empty-addressbook" class="hidden flex-1 flex-col items-center justify-center py-12 text-dark-500">
+                        <svg class="w-12 h-12 mb-3 opacity-50" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                            <circle cx="9" cy="7" r="4"/>
+                            <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                            <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                        </svg>
+                        <p class="text-sm">No registered public keys yet.</p>
+                        <p class="text-xs text-dark-600 mt-1">Public keys appear here when users register them.</p>
+                    </div>
+                    <div id="addressbook-loading" class="hidden flex-1 flex-col items-center justify-center py-12">
+                        <div class="w-6 h-6 border-2 border-dark-600 border-t-brand-500 rounded-full animate-spin"></div>
+                        <p class="text-sm text-dark-400 mt-3">Loading address book...</p>
+                    </div>
+                    <div id="addressbook-search-result" class="hidden p-4">
+                        <!-- Search result will be rendered here -->
+                    </div>
+                </div>
+            </article>
         </section>
 
         <!-- Toast Container -->
@@ -821,7 +1017,9 @@
             <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" title="Copy" aria-label="Copy note ID" disabled>
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
             </button>
-            <button type="button" class="download-btn px-2 py-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-xs text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" aria-label="Download note" disabled>Download</button>
+            <button type="button" class="download-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" title="Download note" aria-label="Download note" disabled>
+                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+            </button>
         </div>
     </template>
 
@@ -865,7 +1063,7 @@
             </td>
             <td class="px-4 py-3">
                 <div class="flex gap-1">
-                    <button type="button" class="use-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use in withdraw" aria-label="Use in withdraw">
+                    <button type="button" class="use-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use note" aria-label="Use note">
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 1l4 4-4 4"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><path d="M7 23l-4-4 4-4"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
                     </button>
                     <button type="button" class="download-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Download note file" aria-label="Download note file">
@@ -888,6 +1086,108 @@
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
             </button>
         </div>
+    </template>
+
+    <!-- Address Book Row Template -->
+    <template id="tpl-addressbook-row">
+        <tr class="border-t border-dark-800 hover:bg-dark-800/50 transition-colors">
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                    <span class="ab-address font-mono text-sm"></span>
+                    <button type="button" class="copy-address-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Copy address" aria-label="Copy address">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    </button>
+                </div>
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                    <span class="ab-pubkey font-mono text-sm text-brand-400"></span>
+                    <button type="button" class="copy-pubkey-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Copy public key" aria-label="Copy public key">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    </button>
+                </div>
+            </td>
+            <td class="px-4 py-3 text-dark-400 text-sm ab-date"></td>
+            <td class="px-4 py-3">
+                <button type="button" class="use-transfer-btn px-2 py-1 text-xs bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded transition-colors">
+                    Use in Transfer
+                </button>
+            </td>
+        </tr>
+    </template>
+
+    <!-- Advanced Output Row Template (with per-output recipient) -->
+    <template id="tpl-advanced-output-row">
+        <div class="advanced-output-row space-y-2 p-3 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
+            <div class="flex flex-wrap items-center gap-2">
+                <div class="relative flex-shrink-0">
+                    <input 
+                        type="number"
+                        class="output-amount w-20 px-2 py-1.5 pr-6 bg-dark-700 border border-dark-600 rounded text-right font-mono text-sm focus:outline-none focus:border-brand-500"
+                        value="0"
+                        min="0"
+                        placeholder="XLM"
+                        aria-label="Output amount"
+                    >
+                    <div class="absolute right-0.5 top-1/2 -translate-y-1/2 flex flex-col">
+                        <button type="button" class="mini-up p-0.5 text-dark-500 hover:text-brand-500" aria-label="Increase">
+                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
+                        </button>
+                        <button type="button" class="mini-down p-0.5 text-dark-500 hover:text-brand-500" aria-label="Decrease">
+                            <svg class="w-2.5 h-2.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
+                        </button>
+                    </div>
+                </div>
+                <span class="dummy-badge hidden text-[10px] font-semibold px-2 py-1 bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded uppercase tracking-wide">Dummy</span>
+                <input 
+                    type="text"
+                    class="output-note-id flex-1 min-w-[100px] px-2 py-1.5 bg-dark-900 border border-dark-700 rounded font-mono text-xs text-brand-400 focus:outline-none"
+                    placeholder="Note ID..."
+                    readonly
+                    aria-label="Generated note ID"
+                >
+                <button type="button" class="copy-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" title="Copy" aria-label="Copy note ID" disabled>
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                </button>
+                <button type="button" class="download-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors disabled:opacity-50" title="Download note" aria-label="Download note" disabled>
+                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                </button>
+            </div>
+            <div class="flex items-center gap-2">
+                <label class="text-xs text-dark-500 flex-shrink-0">To:</label>
+                <input 
+                    type="text"
+                    class="output-recipient-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
+                    placeholder="Yourself (leave empty) or enter recipient key"
+                    autocomplete="off"
+                    spellcheck="false"
+                >
+                <button type="button" class="output-lookup-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Look up by address" aria-label="Look up public key">
+                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                </button>
+            </div>
+        </div>
+    </template>
+
+    <!-- Address Book Row Template -->
+        <tr class="addressbook-row hover:bg-dark-800/50 transition-colors" data-address="">
+            <td class="px-4 py-3 font-mono text-xs text-dark-300 ab-address"></td>
+            <td class="px-4 py-3 font-mono text-xs text-brand-400 ab-pubkey"></td>
+            <td class="px-4 py-3 text-sm text-dark-400 ab-date"></td>
+            <td class="px-4 py-3">
+                <div class="flex gap-1">
+                    <button type="button" class="use-transfer-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use in Transfer" aria-label="Use in transfer">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 7l-10 10M7 7h10v10"/></svg>
+                    </button>
+                    <button type="button" class="copy-pubkey-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy public key" aria-label="Copy public key">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    </button>
+                    <button type="button" class="copy-address-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy address" aria-label="Copy address">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
+                    </button>
+                </div>
+            </td>
+        </tr>
     </template>
 
     <script data-trunk data-target-path="js" data-integrity="none" src="js/ui.js" type="module"></script>

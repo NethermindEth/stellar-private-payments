@@ -128,7 +128,7 @@ export const Deposit = {
         const btnLoading = btn.querySelector('.btn-loading');
         
         const setLoadingText = (text) => {
-            btnLoading.innerHTML = `<svg class="animate-spin h-4 w-4" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg><span class="loading-text ml-2">${text}</span>`;
+            btnLoading.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-dark-950/30 border-t-dark-950 rounded-full animate-spin"></span><span class="ml-2">${text}</span>`;
         };
         
         btn.disabled = true;

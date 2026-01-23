@@ -73,7 +73,6 @@ export const PoolEventsFetcher = {
         const container = document.getElementById('recent-tx');
         const emptyEl = document.getElementById('recent-tx-empty');
         const loadingEl = document.getElementById('recent-tx-loading');
-        const template = document.getElementById('tpl-tx-item');
         
         loadingEl.classList.add('hidden');
         
@@ -90,7 +89,7 @@ export const PoolEventsFetcher = {
         for (const event of this.events) {
             const ledger = event.ledger;
             if (!byLedger.has(ledger)) {
-                byLedger.set(ledger, { ledger, nullifiers: 0, commitments: 0, events: [] });
+                byLedger.set(ledger, { ledger, nullifiers: 0, commitments: 0, events: [], txHash: event.txHash });
             }
             const group = byLedger.get(ledger);
             group.events.push(event);
@@ -103,21 +102,55 @@ export const PoolEventsFetcher = {
         const groups = Array.from(byLedger.values()).slice(0, this.maxEvents);
         
         for (const group of groups) {
-            const clone = template.content.cloneNode(true);
-            const li = clone.querySelector('li');
+            // Determine transaction type based on event patterns
+            let txType = 'Pool Activity';
+            let txIcon = '';
             
-            let txType = 'Transaction';
-            if (group.nullifiers === 2 && group.commitments === 2) {
-                txType = 'Pool Activity';
-            } else if (group.commitments > 0) {
-                txType = `+${group.commitments} notes`;
+            if (group.nullifiers === 0 && group.commitments > 0) {
+                txType = 'Deposit';
+                txIcon = '<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m0 0l-4-4m4 4l4-4"/></svg>';
+            } else if (group.nullifiers > 0 && group.commitments === 0) {
+                txType = 'Withdraw';
+                txIcon = '<svg class="w-3.5 h-3.5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20V4m0 0l-4 4m4-4l4 4"/></svg>';
+            } else if (group.nullifiers > 0 && group.commitments > 0) {
+                txType = 'Transfer';
+                txIcon = '<svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m-12 6h12m-12 6h12M4 7h.01M4 13h.01M4 19h.01"/></svg>';
             }
             
-            li.querySelector('.tx-hash').textContent = txType;
-            li.querySelector('.tx-hash').title = `Ledger ${group.ledger}: ${group.nullifiers} nullifiers, ${group.commitments} commitments`;
-            li.querySelector('.tx-time').textContent = `L${group.ledger}`;
+            // Create list item with link to Stellar Expert
+            const li = document.createElement('li');
+            li.className = 'flex justify-between items-center p-2 bg-dark-800 rounded text-xs hover:bg-dark-700 transition-colors';
             
-            container.appendChild(clone);
+            const leftDiv = document.createElement('div');
+            leftDiv.className = 'flex items-center gap-2';
+            leftDiv.innerHTML = txIcon;
+            
+            const txInfo = document.createElement('div');
+            txInfo.className = 'flex flex-col';
+            
+            const txTypeSpan = document.createElement('span');
+            txTypeSpan.className = 'text-dark-200 font-medium';
+            txTypeSpan.textContent = txType;
+            
+            const txDetails = document.createElement('span');
+            txDetails.className = 'text-[10px] text-dark-500';
+            txDetails.textContent = `${group.commitments} commit${group.commitments !== 1 ? 's' : ''}, ${group.nullifiers} nullifier${group.nullifiers !== 1 ? 's' : ''}`;
+            
+            txInfo.appendChild(txTypeSpan);
+            txInfo.appendChild(txDetails);
+            leftDiv.appendChild(txInfo);
+            
+            const ledgerLink = document.createElement('a');
+            ledgerLink.href = `https://stellar.expert/explorer/testnet/ledger/${group.ledger}`;
+            ledgerLink.target = '_blank';
+            ledgerLink.rel = 'noopener noreferrer';
+            ledgerLink.className = 'text-dark-400 hover:text-brand-400 transition-colors flex items-center gap-1';
+            ledgerLink.innerHTML = `L${group.ledger} <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>`;
+            ledgerLink.title = `View ledger ${group.ledger} on Stellar Expert`;
+            
+            li.appendChild(leftDiv);
+            li.appendChild(ledgerLink);
+            container.appendChild(li);
         }
     },
     
@@ -217,14 +250,29 @@ export const ContractReader = {
             return;
         }
         
-        document.getElementById('pool-address').textContent = formatAddress(contracts.pool, 4, 4);
-        document.getElementById('pool-address').title = contracts.pool;
+        // Helper to create Stellar Expert link
+        const createExplorerLink = (contractId, displayText) => {
+            const link = document.createElement('a');
+            link.href = `https://stellar.expert/explorer/testnet/contract/${contractId}`;
+            link.target = '_blank';
+            link.rel = 'noopener noreferrer';
+            link.textContent = displayText;
+            link.title = `View ${contractId} on Stellar Expert`;
+            link.className = 'hover:text-brand-400 transition-colors';
+            return link;
+        };
         
-        document.getElementById('membership-address').textContent = formatAddress(contracts.aspMembership, 4, 4);
-        document.getElementById('membership-address').title = contracts.aspMembership;
+        const poolEl = document.getElementById('pool-address');
+        poolEl.textContent = '';
+        poolEl.appendChild(createExplorerLink(contracts.pool, formatAddress(contracts.pool, 4, 4)));
         
-        document.getElementById('nonmembership-address').textContent = formatAddress(contracts.aspNonMembership, 4, 4);
-        document.getElementById('nonmembership-address').title = contracts.aspNonMembership;
+        const membershipEl = document.getElementById('membership-address');
+        membershipEl.textContent = '';
+        membershipEl.appendChild(createExplorerLink(contracts.aspMembership, formatAddress(contracts.aspMembership, 4, 4)));
+        
+        const nonMembershipEl = document.getElementById('nonmembership-address');
+        nonMembershipEl.textContent = '';
+        nonMembershipEl.appendChild(createExplorerLink(contracts.aspNonMembership, formatAddress(contracts.aspNonMembership, 4, 4)));
     },
     
     async refreshAll() {

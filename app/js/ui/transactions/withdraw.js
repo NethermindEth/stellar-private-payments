@@ -106,10 +106,7 @@ export const Withdraw = {
         btnLoading.classList.remove('hidden');
         
         const setLoadingText = (text) => {
-            btnLoading.querySelector('span')?.remove();
-            const span = document.createElement('span');
-            span.textContent = text;
-            btnLoading.appendChild(span);
+            btnLoading.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-dark-950/30 border-t-dark-950 rounded-full animate-spin"></span><span class="ml-2">${text}</span>`;
         };
         
         try {

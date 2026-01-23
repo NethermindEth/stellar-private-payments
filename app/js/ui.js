@@ -15,6 +15,7 @@ import {
     Tabs,
     Wallet,
     NotesTable,
+    AddressBook,
     Deposit,
     Withdraw,
     Transfer,
@@ -24,6 +25,7 @@ import {
     ProverUI,
     SyncUI,
     setSyncUIRef,
+    setAddressBookTabsRef,
     setDepositNotesTableRef,
     setWithdrawNotesTableRef,
     setTransactNotesTableRef,
@@ -32,6 +34,7 @@ import {
 
 // Wire up cross-module references
 setSyncUIRef(SyncUI);
+setAddressBookTabsRef(Tabs);
 setDepositNotesTableRef(NotesTable);
 setWithdrawNotesTableRef(NotesTable);
 setTransactNotesTableRef(NotesTable);
@@ -53,6 +56,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     Transfer.init();
     Transact.init();
     NotesTable.init();
+    AddressBook.init();
     
     // Load deployment config before initializing contract readers
     try {
@@ -94,6 +98,7 @@ export {
     Tabs,
     Wallet,
     NotesTable,
+    AddressBook,
     Deposit,
     Withdraw,
     Transfer,

@@ -1050,4 +1050,53 @@ export async function submitDeposit(proofResult, signerOptions) {
     });
 }
 
+/**
+ * Register a public key on the Pool contract for address book discovery.
+ * This allows other users to find your public key for sending you transfers.
+ *
+ * @param {Object} params
+ * @param {string} params.owner - Owner's Stellar address
+ * @param {Uint8Array} params.publicKey - Public key bytes (32 bytes)
+ * @param {Object} params.signerOptions - Signer options for getPoolClient
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function registerPublicKey(params) {
+    const { owner, publicKey, signerOptions } = params;
+
+    try {
+        console.log('[Stellar] Registering public key...');
+
+        const client = await getPoolClient(signerOptions);
+
+        // Format account data for contract
+        const account = {
+            owner,
+            public_key: toBytes(publicKey),
+        };
+
+        console.log('[Stellar] Calling register...', {
+            owner: owner.slice(0, 8) + '...',
+            publicKeyLength: publicKey.length,
+        });
+
+        // Build and send the transaction
+        const tx = await client.register({ account });
+        const sent = await tx.signAndSend();
+        const txHash = sent.sendTransactionResponse?.hash;
+
+        console.log('[Stellar] Registration submitted:', txHash);
+
+        return {
+            success: true,
+            txHash,
+        };
+    } catch (error) {
+        console.error('[Stellar] Registration failed:', error);
+        return {
+            success: false,
+            error: error.message || String(error),
+        };
+    }
+}
+
 export { NETWORKS, SUPPORTED_NETWORK };

@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'poolstellar';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 /**
  * Store configuration for IndexedDB schema.
@@ -30,6 +30,10 @@ const STORES = {
     user_notes: {
         keyPath: 'id',
         indexes: [{ name: 'by_spent', keyPath: 'spent' }]
+    },
+    registered_public_keys: {
+        keyPath: 'address',
+        indexes: [{ name: 'by_ledger', keyPath: 'ledger' }]
     }
 };
 
@@ -343,9 +347,23 @@ export async function deleteDatabase() {
         };
         request.onerror = () => reject(request.error);
         request.onblocked = () => {
-            console.warn('[DB] Database deletion blocked');
+            console.warn('[DB] Database deletion blocked - close all other tabs and try again');
+            // Still resolve after a delay to allow the operation to proceed
+            setTimeout(resolve, 1000);
         };
     });
+}
+
+/**
+ * Force resets the database by deleting and reinitializing.
+ * Use this when database upgrades fail.
+ * @returns {Promise<void>}
+ */
+export async function forceReset() {
+    console.log('[DB] Force resetting database...');
+    await deleteDatabase();
+    await init();
+    console.log('[DB] Database force reset complete');
 }
 
 /**
