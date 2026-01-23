@@ -105,6 +105,28 @@ async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDelay = 30
     return { privKeyBytes, pubKeyBytes, encryptionKeypair };
 }
 
+function getErrorMessage(error) {
+    if (!error) return '';
+    return error.message || String(error);
+}
+
+function isProofVerificationError(message) {
+    const msg = (message || '').toLowerCase();
+    if (!msg) return false;
+
+    // Pool contract InvalidProof is #7; verifier InvalidProof is #0.
+    if (msg.includes('contract') && msg.includes('#7')) return true;
+    if (msg.includes('contract') && msg.includes('#0') && msg.includes('verify')) return true;
+
+    return false;
+}
+
+function getProofFailureToastMessage(error) {
+    const message = getErrorMessage(error);
+    if (!message) return '';
+    return isProofVerificationError(message) ? 'Tx failed. Proof did not verify.' : '';
+}
+
 
 // Utilities
 const Utils = {
@@ -819,7 +841,8 @@ const Deposit = {
             Toast.show(`Deposited ${totalAmount} XLM! ${txDisplay}`, 'success');
         } catch (e) {
             console.error('[Deposit] Error:', e);
-            Toast.show('Deposit failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Deposit failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1113,7 +1136,8 @@ const Withdraw = {
             this.updateTotal();
         } catch (e) {
             console.error('[Withdraw] Error:', e);
-            Toast.show('Withdrawal failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Withdrawal failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1447,7 +1471,8 @@ const Transact = {
             }
         } catch (e) {
             console.error('[Transact] Error:', e);
-            Toast.show('Transaction failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Transaction failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1776,7 +1801,8 @@ const Transfer = {
             Toast.show('Transfer successful! Share the note files with the recipient.', 'success');
         } catch (e) {
             console.error('[Transfer] Error:', e);
-            Toast.show('Transfer failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Transfer failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
