@@ -105,6 +105,28 @@ async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDelay = 30
     return { privKeyBytes, pubKeyBytes, encryptionKeypair };
 }
 
+function getErrorMessage(error) {
+    if (!error) return '';
+    return error.message || String(error);
+}
+
+function isProofVerificationError(message) {
+    const msg = (message || '').toLowerCase();
+    if (!msg) return false;
+
+    // Pool contract InvalidProof is #7; verifier InvalidProof is #0.
+    if (msg.includes('contract') && msg.includes('#7')) return true;
+    if (msg.includes('contract') && msg.includes('#0') && msg.includes('verify')) return true;
+
+    return false;
+}
+
+function getProofFailureToastMessage(error) {
+    const message = getErrorMessage(error);
+    if (!message) return '';
+    return isProofVerificationError(message) ? 'Tx failed. Proof did not verify.' : '';
+}
+
 
 // Utilities
 const Utils = {
@@ -157,24 +179,42 @@ const Utils = {
 
 // Storage
 const Storage = {
-    KEY: 'poolstellar_notes',
-    
-    save() {
+    // Prefix for per-wallet note storage keys.
+    KEY_PREFIX: 'poolstellar_notes',
+
+    getKey(address) {
+        if (!address) return null;
+        return `${this.KEY_PREFIX}:${address}`;
+    },
+
+    save(address = App.state.wallet.address) {
+        if (!address) return;
         try {
-            localStorage.setItem(this.KEY, JSON.stringify(App.state.notes));
+            const key = this.getKey(address);
+            localStorage.setItem(key, JSON.stringify(App.state.notes));
         } catch (e) {
             console.error('Storage save failed:', e);
         }
     },
-    
-    load() {
+
+    load(address = App.state.wallet.address) {
+        if (!address) {
+            App.state.notes = [];
+            return;
+        }
+
         try {
-            const data = localStorage.getItem(this.KEY);
-            if (data) App.state.notes = JSON.parse(data);
+            const key = this.getKey(address);
+            const data = localStorage.getItem(key);
+            App.state.notes = data ? JSON.parse(data) : [];
         } catch (e) {
             console.error('Storage load failed:', e);
             App.state.notes = [];
         }
+    },
+
+    clearInMemory() {
+        App.state.notes = [];
     }
 };
 
@@ -482,6 +522,10 @@ const Wallet = {
             }
         }
 
+        // Load notes scoped to this wallet address
+        Storage.load(App.state.wallet.address);
+        NotesTable.render();
+
         Toast.show('Wallet connected!', 'success');
         
         // Pre-fill withdrawal recipient fields with wallet address
@@ -495,6 +539,8 @@ const Wallet = {
         const network = document.getElementById('network-name');
         
         App.state.wallet = { connected: false, address: null };
+        Storage.clearInMemory();
+        NotesTable.render();
         btn.classList.remove('border-emerald-500', 'bg-emerald-500/10');
         text.textContent = 'Connect Freighter';
         if (network) {
@@ -795,7 +841,8 @@ const Deposit = {
             Toast.show(`Deposited ${totalAmount} XLM! ${txDisplay}`, 'success');
         } catch (e) {
             console.error('[Deposit] Error:', e);
-            Toast.show('Deposit failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Deposit failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1089,7 +1136,8 @@ const Withdraw = {
             this.updateTotal();
         } catch (e) {
             console.error('[Withdraw] Error:', e);
-            Toast.show('Withdrawal failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Withdrawal failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1423,7 +1471,8 @@ const Transact = {
             }
         } catch (e) {
             console.error('[Transact] Error:', e);
-            Toast.show('Transaction failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Transaction failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
@@ -1752,7 +1801,8 @@ const Transfer = {
             Toast.show('Transfer successful! Share the note files with the recipient.', 'success');
         } catch (e) {
             console.error('[Transfer] Error:', e);
-            Toast.show('Transfer failed: ' + e.message, 'error');
+            const proofFailureMessage = getProofFailureToastMessage(e);
+            Toast.show(proofFailureMessage || ('Transfer failed: ' + getErrorMessage(e)), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
