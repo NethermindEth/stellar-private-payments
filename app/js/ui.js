@@ -157,24 +157,42 @@ const Utils = {
 
 // Storage
 const Storage = {
-    KEY: 'poolstellar_notes',
-    
-    save() {
+    // Prefix for per-wallet note storage keys.
+    KEY_PREFIX: 'poolstellar_notes',
+
+    getKey(address) {
+        if (!address) return null;
+        return `${this.KEY_PREFIX}:${address}`;
+    },
+
+    save(address = App.state.wallet.address) {
+        if (!address) return;
         try {
-            localStorage.setItem(this.KEY, JSON.stringify(App.state.notes));
+            const key = this.getKey(address);
+            localStorage.setItem(key, JSON.stringify(App.state.notes));
         } catch (e) {
             console.error('Storage save failed:', e);
         }
     },
-    
-    load() {
+
+    load(address = App.state.wallet.address) {
+        if (!address) {
+            App.state.notes = [];
+            return;
+        }
+
         try {
-            const data = localStorage.getItem(this.KEY);
-            if (data) App.state.notes = JSON.parse(data);
+            const key = this.getKey(address);
+            const data = localStorage.getItem(key);
+            App.state.notes = data ? JSON.parse(data) : [];
         } catch (e) {
             console.error('Storage load failed:', e);
             App.state.notes = [];
         }
+    },
+
+    clearInMemory() {
+        App.state.notes = [];
     }
 };
 
@@ -482,6 +500,10 @@ const Wallet = {
             }
         }
 
+        // Load notes scoped to this wallet address
+        Storage.load(App.state.wallet.address);
+        NotesTable.render();
+
         Toast.show('Wallet connected!', 'success');
         
         // Pre-fill withdrawal recipient fields with wallet address
@@ -495,6 +517,8 @@ const Wallet = {
         const network = document.getElementById('network-name');
         
         App.state.wallet = { connected: false, address: null };
+        Storage.clearInMemory();
+        NotesTable.render();
         btn.classList.remove('border-emerald-500', 'bg-emerald-500/10');
         text.textContent = 'Connect Freighter';
         if (network) {

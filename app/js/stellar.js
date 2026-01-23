@@ -772,6 +772,7 @@ initializeNetwork();
 
 // Pool contract client cache
 let poolClient = null;
+let poolClientPublicKey = null;
 
 /**
  * Creates a signer object compatible with the Stellar SDK contract client.
@@ -823,7 +824,18 @@ export async function getPoolClient(signerOptions, forceRefresh = false) {
 
     const network = getNetwork();
 
-    // Return cached client if available and not forcing refresh
+// If signer changed, force refresh to avoid auth signature mismatch
+    const signerChanged =
+        poolClient &&
+        poolClientPublicKey &&
+        poolClientPublicKey !== signerOptions.publicKey;
+
+    if (signerChanged) {
+        console.log('[Stellar] Pool client signer changed - refreshing client');
+        forceRefresh = true;
+    }
+
+// Return cached client if available and not forcing refresh
     if (poolClient && !forceRefresh) {
         return poolClient;
     }
@@ -844,6 +856,8 @@ export async function getPoolClient(signerOptions, forceRefresh = false) {
         signTransaction: signer.signTransaction,
         signAuthEntry: signer.signAuthEntry,
     });
+    poolClientPublicKey = signerOptions.publicKey;
+
 
     console.log('[Stellar] Pool contract client ready');
     return poolClient;
