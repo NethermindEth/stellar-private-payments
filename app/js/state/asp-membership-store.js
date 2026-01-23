@@ -10,29 +10,16 @@
 
 import * as db from './db.js';
 import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeU256ToHex } from './utils.js';
+import { 
+    bytesToHex, 
+    normalizeU256ToHex, 
+    hexToBytesForTree,
+    ZERO_LEAF_HEX,
+    TREE_DEPTH,
+} from './utils.js';
 
-/**
- * Converts hex string to bytes for Merkle tree insertion.
- * 
- * The Rust Merkle tree uses from_le_bytes_mod_order (LE).
- * Soroban stores U256 as BE and converts via BigUint::from_bytes_be.
- * Reversing BE to LE ensures the same numeric value.
- * 
- * @param {string} hex - Hex string (BE representation)
- * @returns {Uint8Array} LE bytes for Rust tree
- */
-function hexToBytesForTree(hex) {
-    const beBytes = hexToBytes(hex);
-    return beBytes.reverse();
-}
-
-// ASP Membership tree depth - must match the contract deployment
-// The current testnet deployment uses depth 5 (32 leaves max)
-const ASP_MEMBERSHIP_TREE_DEPTH = 5;
-
-// Zero leaf value used by the contract: poseidon2("XLM"). Must match contract's get_zeroes()[0]
-const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
+// Alias for backwards compatibility
+const ASP_MEMBERSHIP_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
 

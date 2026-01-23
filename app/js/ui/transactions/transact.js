@@ -1,0 +1,320 @@
+/**
+ * Transact Module - handles generic pool transactions (deposit/withdraw/transfer).
+ * @module ui/transactions/transact
+ */
+
+import { signWalletTransaction, signWalletAuthEntry } from '../../wallet.js';
+import { readAllContractStates, getDeployedContracts, submitPoolTransaction } from '../../stellar.js';
+import { StateManager, poolStore } from '../../state/index.js';
+import { generateBlinding, fieldToHex } from '../../bridge.js';
+import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
+import { Templates } from '../templates.js';
+import { onWalletConnect } from '../navigation.js';
+
+// Forward reference - set by main init
+let NotesTableRef = null;
+
+/**
+ * Sets the NotesTable reference for post-transaction rendering.
+ * @param {Object} notesTable
+ */
+export function setNotesTableRef(notesTable) {
+    NotesTableRef = notesTable;
+}
+
+export const Transact = {
+    init() {
+        const slider = document.getElementById('transact-slider');
+        const amount = document.getElementById('transact-amount');
+        const inputs = document.getElementById('transact-inputs');
+        const outputs = document.getElementById('transact-outputs');
+        const btn = document.getElementById('btn-transact');
+        
+        inputs.appendChild(Templates.createInputRow(0));
+        inputs.appendChild(Templates.createInputRow(1));
+        outputs.appendChild(Templates.createOutputRow(0, 0));
+        outputs.appendChild(Templates.createOutputRow(1, 0));
+        
+        if (App.state.wallet.connected && App.state.wallet.address) {
+            const recipientInput = document.getElementById('transact-recipient');
+            if (recipientInput) recipientInput.value = App.state.wallet.address;
+        }
+        
+        slider.addEventListener('input', () => {
+            amount.value = slider.value;
+            this.updateBalance();
+        });
+        
+        amount.addEventListener('input', () => {
+            slider.value = Math.min(Math.max(-500, amount.value), 500);
+            this.updateBalance();
+        });
+        
+        inputs.addEventListener('input', () => this.updateBalance());
+        outputs.addEventListener('input', () => this.updateBalance());
+        
+        document.querySelectorAll('[data-target="transact-amount"]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const input = document.getElementById('transact-amount');
+                const val = parseFloat(input.value) || 0;
+                input.value = btn.classList.contains('spinner-up') ? val + 1 : val - 1;
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        });
+        
+        btn.addEventListener('click', () => this.submit());
+        
+        // Register for wallet connect events
+        onWalletConnect(() => this.prefillRecipient());
+        
+        this.updateBalance();
+    },
+    
+    prefillRecipient() {
+        const recipientInput = document.getElementById('transact-recipient');
+        if (recipientInput && !recipientInput.value && App.state.wallet.address) {
+            recipientInput.value = App.state.wallet.address;
+        }
+    },
+    
+    updateBalance() {
+        let inputsTotalStroops = 0;
+        document.querySelectorAll('#transact-inputs .note-input').forEach(input => {
+            const noteId = input.value.trim();
+            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+            if (note) inputsTotalStroops += Number(note.amount);
+        });
+        const inputsTotal = inputsTotalStroops / 1e7;
+        
+        const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
+        
+        let outputsTotal = 0;
+        document.querySelectorAll('#transact-outputs .output-amount').forEach(input => {
+            outputsTotal += parseFloat(input.value) || 0;
+        });
+        
+        const eq = document.getElementById('transact-balance');
+        eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${inputsTotal.toFixed(7).replace(/\.?0+$/, '')}`;
+        eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicAmount >= 0 ? '+' : ''}${publicAmount}`;
+        eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
+        
+        const leftSide = inputsTotal + publicAmount;
+        const isBalanced = Math.abs(leftSide - outputsTotal) < 0.0000001;
+        const hasValues = inputsTotal > 0 || publicAmount !== 0 || outputsTotal > 0;
+        
+        const validIcon = eq.querySelector('[data-icon="valid"]');
+        const invalidIcon = eq.querySelector('[data-icon="invalid"]');
+        
+        validIcon.classList.toggle('hidden', !hasValues || !isBalanced);
+        invalidIcon.classList.toggle('hidden', !hasValues || isBalanced);
+        
+        eq.classList.toggle('border-emerald-500/50', hasValues && isBalanced);
+        eq.classList.toggle('bg-emerald-500/5', hasValues && isBalanced);
+        eq.classList.toggle('border-red-500/50', hasValues && !isBalanced);
+        eq.classList.toggle('bg-red-500/5', hasValues && !isBalanced);
+        
+        return isBalanced;
+    },
+    
+    async submit() {
+        if (!App.state.wallet.connected) {
+            Toast.show('Please connect your wallet first', 'error');
+            return;
+        }
+        
+        if (!this.updateBalance()) {
+            Toast.show('Equation must balance: Inputs + Public = Outputs', 'error');
+            return;
+        }
+        
+        const btn = document.getElementById('btn-transact');
+        const btnText = btn.querySelector('.btn-text');
+        const btnLoading = btn.querySelector('.btn-loading');
+        btn.disabled = true;
+        btnText.classList.add('hidden');
+        btnLoading.classList.remove('hidden');
+        
+        const setLoadingText = (text) => {
+            btnLoading.querySelector('span')?.remove();
+            const span = document.createElement('span');
+            span.textContent = text;
+            btnLoading.appendChild(span);
+        };
+        
+        try {
+            const { privKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
+                onStatus: setLoadingText,
+                signDelay: 500,
+            });
+            
+            const publicAmount = parseFloat(document.getElementById('transact-amount').value) || 0;
+            const publicAmountStroops = BigInt(Math.round(publicAmount * 1e7));
+            const outputRecipient = document.getElementById('transact-outputs-recipient')?.value.trim();
+            const isForSelf = !outputRecipient || outputRecipient === App.state.wallet.address;
+            
+            setLoadingText('Gathering input notes...');
+            const inputNotes = [];
+            
+            const transactNoteInputs = document.querySelectorAll('#transact-inputs .note-input');
+            for (const input of transactNoteInputs) {
+                const noteId = input.value.trim();
+                if (!noteId) continue;
+                
+                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+                if (!note) continue;
+                
+                const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                if (!merkleProof) {
+                    throw new Error(`Cannot find merkle proof for note at index ${note.leafIndex}`);
+                }
+                
+                inputNotes.push({ ...note, merkleProof });
+            }
+            
+            const outputs = [];
+            document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
+                const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
+                const blindingBytes = generateBlinding();
+                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                outputs.push({ amount: BigInt(Math.round(amount * 1e7)), blinding });
+            });
+            
+            const membershipBlindingInput = document.getElementById('transact-membership-blinding');
+            const membershipBlinding = membershipBlindingInput ? BigInt(membershipBlindingInput.value || '0') : 0n;
+            console.log('[Transact] Using membership blinding:', membershipBlinding.toString());
+            
+            setLoadingText('Fetching on-chain state...');
+            const states = await readAllContractStates();
+            const contracts = getDeployedContracts();
+            const poolRoot = BigInt(states.pool.merkleRoot || '0x0');
+            const membershipRoot = BigInt(states.aspMembership.root || '0x0');
+            const nonMembershipRoot = BigInt(states.aspNonMembership.root || '0x0');
+            
+            let recipient;
+            if (publicAmountStroops > 0n) {
+                recipient = contracts.pool;
+            } else if (publicAmountStroops < 0n) {
+                const withdrawRecipient = document.getElementById('transact-recipient')?.value.trim();
+                recipient = withdrawRecipient || App.state.wallet.address;
+            } else {
+                recipient = contracts.pool;
+            }
+            
+            console.log('[Transact] Transaction parameters:', {
+                publicAmount,
+                inputCount: inputNotes.length,
+                outputCount: outputs.length,
+                recipient,
+            });
+            
+            setLoadingText('Generating ZK proof...');
+            const { generateTransactionProof } = await import('../../transaction-builder.js');
+            
+            const proofResult = await generateTransactionProof({
+                privKeyBytes,
+                encryptionPubKey: encryptionKeypair.publicKey,
+                poolRoot,
+                membershipRoot,
+                nonMembershipRoot,
+                inputs: inputNotes,
+                outputs,
+                extData: { recipient, ext_amount: publicAmountStroops },
+                stateManager: StateManager,
+                membershipBlinding,
+            }, {
+                onProgress: ({ message }) => {
+                    if (message) setLoadingText(message);
+                },
+            });
+            
+            console.log('[Transact] Proof generated');
+            
+            const poolNextIndex = Number(states.pool.merkleNextIndex || 0);
+            
+            const pendingNotes = [];
+            let outputIndex = 0;
+            document.querySelectorAll('#transact-outputs .output-row').forEach(row => {
+                const outputNote = proofResult.outputNotes[outputIndex];
+                const amountXLM = parseFloat(row.querySelector('.output-amount').value) || 0;
+                const isDummy = amountXLM === 0;
+                
+                const noteId = fieldToHex(outputNote.commitmentBytes);
+                const leafIndex = poolNextIndex + outputIndex;
+                const amountStroops = Number(outputNote.amount);
+                
+                const note = {
+                    id: noteId,
+                    commitment: noteId,
+                    amount: amountStroops,
+                    blinding: outputNote.blinding.toString(),
+                    leafIndex,
+                    spent: false,
+                    isDummy,
+                    owner: outputRecipient || App.state.wallet.address,
+                    createdAt: new Date().toISOString()
+                };
+                
+                if (!isDummy && isForSelf) pendingNotes.push(note);
+                
+                const display = row.querySelector('.output-note-id');
+                display.value = Utils.truncateHex(noteId, 8, 8);
+                display.dataset.fullId = noteId;
+                display.dataset.noteData = JSON.stringify(note, null, 2);
+                
+                row.querySelector('.copy-btn').disabled = false;
+                row.querySelector('.download-btn').disabled = false;
+                outputIndex++;
+            });
+            
+            setLoadingText('Submitting transaction...');
+            const submitResult = await submitPoolTransaction({
+                proof: proofResult.sorobanProof,
+                extData: proofResult.extData,
+                sender: App.state.wallet.address,
+                signerOptions: {
+                    publicKey: App.state.wallet.address,
+                    signTransaction: signWalletTransaction,
+                    signAuthEntry: signWalletAuthEntry,
+                },
+            });
+            
+            if (!submitResult.success) {
+                throw new Error(`Transaction failed: ${submitResult.error}`);
+            }
+            
+            console.log('[Transact] Transaction submitted:', submitResult.txHash);
+            
+            pendingNotes.forEach(note => App.state.notes.push(note));
+            
+            inputNotes.forEach(inputNote => {
+                const note = App.state.notes.find(n => n.id === inputNote.id);
+                if (note) note.spent = true;
+            });
+            
+            Storage.save();
+            if (NotesTableRef) NotesTableRef.render();
+            
+            try {
+                setLoadingText('Syncing pool state...');
+                await StateManager.startSync({ forceRefresh: true });
+                await StateManager.rebuildPoolTree();
+                console.log('[Transact] Pool state synced and tree rebuilt');
+            } catch (syncError) {
+                console.warn('[Transact] Pool sync failed:', syncError);
+            }
+            
+            if (isForSelf) {
+                Toast.show(`Transaction successful! Tx: ${submitResult.txHash?.slice(0, 8)}...`, 'success');
+            } else {
+                Toast.show('Transaction successful! Share note files with recipient.', 'success');
+            }
+        } catch (e) {
+            console.error('[Transact] Error:', e);
+            Toast.show('Transaction failed: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btnText.classList.remove('hidden');
+            btnLoading.classList.add('hidden');
+        }
+    }
+};

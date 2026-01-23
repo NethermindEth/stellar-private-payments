@@ -1000,7 +1000,7 @@ export async function submitPoolTransaction(params) {
             throw buildError;
         }
 
-        console.log('[Stellar] Signing and sending transaction... (v6)');
+        console.log('[Stellar] Signing and sending transaction...');
         
         // Use simple signAndSend like the working code
         const sent = await tx.signAndSend();

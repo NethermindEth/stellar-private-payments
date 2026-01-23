@@ -9,33 +9,17 @@
 
 import * as db from './db.js';
 import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
-import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex } from './utils.js';
+import { 
+    bytesToHex, 
+    normalizeU256ToHex, 
+    normalizeHex, 
+    hexToBytesForTree,
+    ZERO_LEAF_HEX,
+    TREE_DEPTH,
+} from './utils.js';
 
-/**
- * Converts hex string to bytes for Merkle tree insertion.
- * 
- * The Rust Merkle tree uses LE.
- * The Soroban contract stores U256 as BE and converts to Scalar via BigUint::from_bytes_be.
- * 
- * To get matching numeric values, we need to handle the reverse conversion:
- * - Contract: U256 (BE bytes) → BigUint::from_bytes_be → Scalar
- * - Our code: Hex → BE bytes → reverse to LE → from_le_bytes_mod_order → Scalar
- * 
- * @param {string} hex - Hex string (BE representation of U256)
- * @returns {Uint8Array} LE bytes for Rust tree insertion
- */
-function hexToBytesForTree(hex) {
-    const beBytes = hexToBytes(hex);
-    // Reverse BE to LE for Rust's from_le_bytes_mod_order
-    return beBytes.reverse();
-}
-
-// Pool tree depth - must match the circuit and contract deployment
-// The current testnet deployment uses depth 5 (32 leaves max)
-const POOL_TREE_DEPTH = 5;
-
-// Zero leaf value used by the contract: poseidon2("XLM") - must match contract's get_zeroes()[0]
-const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
+// Alias for backwards compatibility
+const POOL_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
 

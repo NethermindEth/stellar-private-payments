@@ -30,12 +30,17 @@ import {
     generateBlinding,
 } from './bridge.js';
 import * as ProverClient from './prover-client.js';
+import { 
+    BN254_MODULUS, 
+    ZERO_LEAF_HEX, 
+    TREE_DEPTH, 
+    SMT_DEPTH,
+} from './state/utils.js';
 
-// Circuit constants to match compliant_test.circom parameters
-const LEVELS = 5;
-const SMT_LEVELS = 5;
-const BN256_MOD = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
-const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
+// Circuit constants - aliased from centralized utils for local readability
+const LEVELS = TREE_DEPTH;
+const SMT_LEVELS = SMT_DEPTH;
+const BN256_MOD = BN254_MODULUS;
 
 /**
  * Converts a signed amount to its field element representation (U256).
