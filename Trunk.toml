@@ -41,6 +41,7 @@ cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || tr
 # Static files
 cp app/js/bridge.js dist/.stage/js/
 cp app/test.html dist/.stage/ 2>/dev/null || true
+cp app/admin.html dist/.stage/ 2>/dev/null || true
 cp scripts/deployments.json dist/.stage/ 2>/dev/null || true
 """]
 
@@ -51,4 +52,5 @@ command = "sh"
 command_arguments = ["-c", """
 ./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --external:./bridge.js --bundle --outfile=dist/.stage/js/admin.js --format=esm
 """]
