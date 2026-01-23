@@ -354,7 +354,8 @@ impl Prover {
         Ok(proof.to_bytes())
     }
 
-    /// Generate proof and return as uncompressed bytes compatiblew with Soroban.
+    /// Generate proof and return as uncompressed bytes compatiblew with
+    /// Soroban.
     ///
     /// Format: [A (64 bytes) || B (128 bytes) || C (64 bytes)] = 256 bytes
     /// G2 points use Soroban-compatible c1||c0 (imaginary||real) ordering.
@@ -510,7 +511,8 @@ pub fn convert_vk_to_soroban(vk_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
 
     let ic_count = vk.gamma_abc_g1.len();
 
-    // VK format: alpha(64) + beta(128) + gamma(128) + delta(128) + ic_count(4) + ic(64*n)
+    // VK format: alpha(64) + beta(128) + gamma(128) + delta(128) + ic_count(4) +
+    // ic(64*n)
     const HEADER_SIZE: usize = 452; // Fixed size 
     let ic_bytes = ic_count
         .checked_mul(64)

@@ -690,7 +690,7 @@ const Deposit = {
                 outputs,
                 poolAddress: contracts.pool,
                 stateManager: StateManager,
-                membershipLeafIndex: 0, // TODO: get from actual membership tree
+                membershipLeafIndex: 0, // Fallback. Auto-detected via stateManager.findASPMembershipLeaf()
                 membershipBlinding,
             }, {
                 onProgress: (progress) => {
