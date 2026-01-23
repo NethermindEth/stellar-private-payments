@@ -52,10 +52,10 @@ impl Groth16Proof {
 /// Size of a single BN254 field element in bytes.
 pub const FIELD_ELEMENT_SIZE: u32 = 32;
 
-/// Size of a G1 point (x || y, each 32 bytes).
+/// Size of a G1 point
 pub const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
 
-/// Size of a G2 point (x.c0 || x.c1 || y.c0 || y.c1, each 32 bytes).
+/// Size of a G2 point
 pub const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
 
 /// Total proof size: A (G1) || B (G2) || C (G1) = 64 + 128 + 64 = 256 bytes.

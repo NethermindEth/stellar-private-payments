@@ -670,10 +670,7 @@ export function getVerifyingKey() {
 
 /**
  * Convert compressed proof bytes to Soroban-compatible uncompressed format.
- * 
- * Output: [A (64 bytes) || B (128 bytes) || C (64 bytes)] = 256 bytes total
- * G2 point B uses Soroban's c1||c0 (imaginary||real) ordering.
- * 
+ *
  * @param {Uint8Array} proofBytes - Compressed proof bytes from generateProofBytes()
  * @returns {Uint8Array} Uncompressed proof bytes ready for Soroban contracts
  */
@@ -696,14 +693,6 @@ export function generateProofBytesSoroban(witnessBytes) {
 
 /**
  * Convert compressed verifying key to Soroban-compatible format.
- * 
- * Output structure:
- * - alpha (64 bytes): G1 point
- * - beta (128 bytes): G2 point (c1||c0 ordering)
- * - gamma (128 bytes): G2 point (c1||c0 ordering)
- * - delta (128 bytes): G2 point (c1||c0 ordering)
- * - ic_count (4 bytes): u32 little-endian
- * - ic[0..n] (64 bytes each): G1 points
  * 
  * @param {Uint8Array} vkBytes - Compressed verifying key bytes
  * @returns {Uint8Array} Soroban-compatible VK bytes

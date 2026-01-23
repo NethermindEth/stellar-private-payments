@@ -69,8 +69,8 @@ pub struct MerkleTree {
     next_index: u64,
 }
 
-// TODO: For now we implement a full merkle tree for quick prototyping. We
-// should implement a partial merkle tree next to minimize storage on user side
+// TODO: For now we implement a full merkle tree. We should study if a partial merkle tree is enough.
+// To minimize storage on user side
 #[wasm_bindgen]
 impl MerkleTree {
     /// Create a new Merkle tree with given depth and default zero leaf (0)

@@ -126,12 +126,8 @@ impl WitnessCalculator {
 
 /// Convert a BigInt to its field element representation.
 /// Negative numbers are converted to p - |value| where p is the field modulus.
-/// This is required because Circom circuits operate in a prime field where
-/// negative numbers don't exist - they must be represented as p - |n|.
-///
-/// Note: This only affects the ZK proof computation. The actual on-chain
-/// token transfer uses a signed integer (I256) passed separately to the
-/// contract.
+/// Relevant for ZK proof computation. For on-chain token transfer
+/// we use a I256 passed to the contract.
 fn to_field_element(bi: BigInt) -> BigInt {
     let modulus =
         BigInt::parse_bytes(BN254_FIELD_MODULUS.as_bytes(), 10).expect("Invalid field modulus");
@@ -141,7 +137,7 @@ fn to_field_element(bi: BigInt) -> BigInt {
             .checked_mul(&BigInt::from(-1))
             .expect("Overflow in getting the abs value"); // Get absolute value
 
-        // Validate: absolute value must be less than the field modulus
+        // Check absolute value must be less than the field modulus
         assert!(
             abs_value < modulus,
             "Negative value {} exceeds field modulus",

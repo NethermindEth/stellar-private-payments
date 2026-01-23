@@ -50,7 +50,7 @@ let workerReadyPromise = null;
  * @returns {Promise<Worker>} The worker instance
  */
 function ensureWorker() {
-    // If worker is already created and ready, return it
+    // Resolve if we already have a worker
     if (worker && workerReadyPromise === null) {
         return Promise.resolve(worker);
     }
@@ -366,9 +366,6 @@ export function terminate() {
 }
 
 export default {
-    initializeProver,
-    isReady,
-    isCached,
     clearCache,
     prove,
     verify,

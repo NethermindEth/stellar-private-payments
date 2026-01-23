@@ -177,7 +177,7 @@ function toBytes(value) {
     if (typeof value === 'string') {
         return hexToBytes(value);
     }
-    // Handle objects with buffer property (common in SDK)
+    // Handle objects with buffer property
     if (value && typeof value === 'object' && value.buffer) {
         return new Uint8Array(value.buffer);
     }

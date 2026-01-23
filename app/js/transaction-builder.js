@@ -7,7 +7,7 @@
  *
  * - Deposit: ext_amount > 0
  * - Withdraw: ext_amount < 0 recipient receives tokens
- * - Transfer: ext_amount = 0 outputs go to recipient
+ * - Transfer: ext_amount = 0. Notes go to recipient
  *
  * @module transaction-builder
  */
@@ -40,7 +40,7 @@ const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36
 /**
  * Converts a signed amount to its field element representation (U256).
  * For positive values, returns the value directly.
- * For negative values, returns FIELD_SIZE - |value| (two's complement in the field).
+ * For negative values, returns FIELD_SIZE - |value|
  * @param {bigint} amount - The signed amount
  * @returns {bigint} The field element representation
  */
@@ -48,7 +48,7 @@ function toFieldElement(amount) {
     if (amount >= 0n) {
         return amount;
     }
-    // Negative: field_element = BN256_MOD - |amount|
+    // Negative = BN256_MOD - |amount|
     return BN256_MOD + amount;
 }
 
@@ -154,14 +154,14 @@ function keccak256(bytes) {
  *
  * @param {Object} extData
  * @param {string} extData.recipient - Stellar address
- * @param {bigint} extData.ext_amount - Public amount (positive=deposit, negative=withdraw)
+ * @param {bigint} extData.ext_amount - Public amount
  * @param {bigint} [extData.fee=0n] - Relayer fee
  * @param {Uint8Array} extData.encrypted_output0 - Encrypted note data for output 0
  * @param {Uint8Array} extData.encrypted_output1 - Encrypted note data for output 1
  * @returns {{bigInt: bigint, bytes: Uint8Array}}
  */
 export function hashExtData(extData) {
-    // Fields must match contract's ExtData struct exactly (sorted alphabetically for XDR):
+    // Fields must match contract's ExtData struct exactly:
     // - encrypted_output0: Bytes
     // - encrypted_output1: Bytes
     // - ext_amount: I256
@@ -221,7 +221,7 @@ export function hashExtData(extData) {
 }
 
 /**
- * Creates a dummy input note (for deposits where no real inputs exist).
+ * Creates a dummy input note
  *
  * @param {Uint8Array} privKeyBytes - User's private key
  * @param {Uint8Array} pubKeyBytes - User's public key
@@ -554,8 +554,6 @@ export async function buildTransactionInputs(params) {
     const privKeyBigInt = bytesToBigIntLE(privKeyBytes);
 
     // Create input notes
-    // For deposits: use dummy inputs (amount=0)
-    // For withdrawals/transfers: use real inputs
     const inputNotes = [];
     if (inputs.length === 0) {
         // 2 dummy inputs, each one with separate blindings
@@ -573,7 +571,7 @@ export async function buildTransactionInputs(params) {
             inputNotes.push(realInput);
         }
         
-        // Pad to 2 inputs if only 1 provided (circuit requires exactly 2 inputs)
+        // Pad to 2 inputs if only 1 provided. As circuit requires exactly 2 inputs
         while (inputNotes.length < 2) {
             const dummyBlinding = BigInt(Date.now() + inputNotes.length);
             inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, dummyBlinding));
@@ -605,7 +603,7 @@ export async function buildTransactionInputs(params) {
     // Build ext data hash
     const extDataHash = hashExtData(completeExtData);
 
-    // Build membership proof (auto-finds user's leaf index in synced tree)
+    // Build membership proof
     const membershipProofData = await buildMembershipProofData(pubKeyBytes, membershipRoot, membershipLeafIndex, membershipBlinding, stateManager);
 
     // Build non-membership proof
@@ -618,7 +616,7 @@ export async function buildTransactionInputs(params) {
     }
 
     // Construct circuit inputs
-    // publicAmount must be the field element representation (like Tornado Nova)
+    // publicAmount must be the field element representation
     // For negative ext_amount, this is FIELD_SIZE - |ext_amount|
     const publicAmountField = toFieldElement(extData.ext_amount);
     
@@ -689,9 +687,7 @@ export async function generateTransactionProof(params, options = {}) {
     const { proof, publicInputs, timings } = await ProverClient.prove(circuitInputs, {
         sorobanFormat: true,
     });
-
-    // On-chain verification will validate the proof.
-    const verified = true; // Skip local verification for Soroban format
+    
 
     // Parse proof bytes into Soroban structure
     const proofStruct = {
@@ -701,8 +697,7 @@ export async function generateTransactionProof(params, options = {}) {
     };
 
     // Build Soroban-ready transaction data
-    // Values are passed as-is (same numeric values used in the circuit)
-    // Only public_amount needs special handling for negative values (field element)
+    // Public_amount needs special handling for negative values
     const publicAmountField = toFieldElement(params.extData.ext_amount);
     
     const sorobanProof = {
@@ -728,7 +723,6 @@ export async function generateTransactionProof(params, options = {}) {
         extData,
         extDataHash,
         timings,
-        verified,
     };
 }
 

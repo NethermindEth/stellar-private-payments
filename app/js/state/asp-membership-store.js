@@ -31,7 +31,7 @@ function hexToBytesForTree(hex) {
 // The current testnet deployment uses depth 5 (32 leaves max)
 const ASP_MEMBERSHIP_TREE_DEPTH = 5;
 
-// Zero leaf value used by the contract: poseidon2("XLM") - must match contract's get_zeroes()[0]
+// Zero leaf value used by the contract: poseidon2("XLM"). Must match contract's get_zeroes()[0]
 const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
 
 let merkleTree = null;
@@ -107,7 +107,7 @@ export async function processLeafAdded(event, ledger) {
         merkleTree.insert(leafBytes);
         
         // Verify root matches contract
-        // Tree returns LE bytes, contract root is BE hex - reverse for comparison
+        // Tree returns LE bytes, contract root is BE hex. We reverse for comparison
         const rootBytesLE = merkleTree.root();
         const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
         const computedRoot = bytesToHex(rootBytesBE);

@@ -3,7 +3,6 @@
  * Syncs from Pool contract events (NewCommitment, NewNullifier).
  * 
  * Init uses cursor iteration to avoid memory issues with large datasets.
- * TODO: Move this to web worker later.
  * 
  * @module state/pool-store
  */
@@ -15,15 +14,12 @@ import { hexToBytes, bytesToHex, normalizeU256ToHex, normalizeHex } from './util
 /**
  * Converts hex string to bytes for Merkle tree insertion.
  * 
- * The Rust Merkle tree uses zkhash which interprets bytes via from_le_bytes_mod_order (LE).
+ * The Rust Merkle tree uses LE.
  * The Soroban contract stores U256 as BE and converts to Scalar via BigUint::from_bytes_be.
  * 
- * To get matching numeric values:
+ * To get matching numeric values, we need to handle the reverse conversion:
  * - Contract: U256 (BE bytes) → BigUint::from_bytes_be → Scalar
  * - Our code: Hex → BE bytes → reverse to LE → from_le_bytes_mod_order → Scalar
- * 
- * By reversing BE to LE before calling from_le_bytes_mod_order, we get the same
- * numeric value as the contract.
  * 
  * @param {string} hex - Hex string (BE representation of U256)
  * @returns {Uint8Array} LE bytes for Rust tree insertion

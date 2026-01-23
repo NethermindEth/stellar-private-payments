@@ -151,7 +151,7 @@ pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
     getrandom::getrandom(&mut random_bytes)
         .map_err(|e| JsValue::from_str(&format!("Random generation failed: {}", e)))?;
 
-    // Reduce to BN254 field to ensure valid scalar
+    // Reduce to BN254 field
     let scalar = Fr::from_le_bytes_mod_order(&random_bytes);
 
     // Serialize back to little-endian bytes

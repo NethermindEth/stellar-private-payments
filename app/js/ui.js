@@ -1282,8 +1282,6 @@ const Transact = {
             setLoadingText('Fetching on-chain state...');
             const states = await readAllContractStates();
             const contracts = getDeployedContracts();
-            // Pool uses merkleRoot, ASP contracts use root
-            // Values already have 0x prefix from formatU256
             const poolRoot = BigInt(states.pool.merkleRoot || '0x0');
             const membershipRoot = BigInt(states.aspMembership.root || '0x0');
             const nonMembershipRoot = BigInt(states.aspNonMembership.root || '0x0');
@@ -2585,7 +2583,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         // Check sync gap and show warning if needed
         await SyncUI.checkGap();
         
-        // Start background sync (non-blocking)
+        // Start background sync
         SyncUI.startSync();
     } catch (err) {
         console.error('[Init] Failed to load deployment config:', err);
@@ -2598,7 +2596,7 @@ document.addEventListener('DOMContentLoaded', async () => {
         }
     }
     
-    // Initialize ZK prover in background (non-blocking)
+    // Initialize ZK prover in background
     // This preloads proving artifacts so they're ready when user initiates a transaction
     ProverUI.initialize().catch(err => {
         console.warn('[Init] Background prover init failed (will retry on demand):', err.message);
