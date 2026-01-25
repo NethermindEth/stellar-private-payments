@@ -191,10 +191,10 @@ export async function startSync(options = {}) {
         }
         
         // Determine start ledger for each contract
-        const poolStartLedger = metadata.poolSync.lastLedger || 
-            Math.max(1, latestLedger - retentionConfig.window);
-        const aspStartLedger = metadata.aspMembershipSync.lastLedger || 
-            Math.max(1, latestLedger - retentionConfig.window);
+        // Always calculate from retention window - cursor takes precedence if available
+        const retentionStartLedger = Math.max(1, latestLedger - retentionConfig.window);
+        const poolStartLedger = retentionStartLedger;
+        const aspStartLedger = retentionStartLedger;
         
         emit('syncProgress', { phase: 'pool', progress: 0 });
         
@@ -230,24 +230,58 @@ export async function startSync(options = {}) {
         
         // Sync ASP Membership events (streaming mode)
         let aspEventCount = 0;
+        let aspLeafAddedCount = 0;
         const aspCursor = forceRefresh ? null : metadata.aspMembershipSync.lastCursor;
+        
+        console.log('[SyncController] Starting ASP Membership sync:', {
+            startLedger: aspStartLedger,
+            latestLedger,
+            hasCursor: !!aspCursor,
+            cursor: aspCursor ? aspCursor.slice(0, 20) + '...' : null,
+            retentionWindow: retentionConfig.window,
+        });
         
         const aspResult = await fetchAllASPMembershipEvents({
             startLedger: aspStartLedger,
             cursor: aspCursor,
             onPage: async (events, cursor) => {
-                await aspMembershipStore.processEvents(events);
+                const leafEvents = await aspMembershipStore.processEvents(events);
                 aspEventCount += events.length;
+                aspLeafAddedCount += leafEvents;
                 if (onProgress) {
                     onProgress({ phase: 'asp_membership', events: events.length, cursor });
                 }
             },
         });
         
+        console.log('[SyncController] ASP Membership sync complete:', {
+            totalEvents: aspEventCount,
+            leafAddedEvents: aspLeafAddedCount,
+            success: aspResult.success,
+        });
+        
         if (aspResult.success) {
             metadata.aspMembershipSync.lastLedger = aspResult.latestLedger;
             metadata.aspMembershipSync.lastCursor = aspResult.cursor;
             metadata.aspMembershipSync.syncBroken = false;
+            
+            // Check if local tree matches on-chain state
+            const localLeafCount = await aspMembershipStore.getLeafCount();
+            const { readASPMembershipState } = await import('../stellar.js');
+            const onChainState = await readASPMembershipState();
+            
+            if (onChainState.success) {
+                const onChainLeafCount = onChainState.nextIndex || 0;
+                if (localLeafCount < onChainLeafCount) {
+                    console.warn('[SyncController] ASP Membership sync incomplete:');
+                    console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
+                    console.warn('  Some events may be outside RPC retention window (24h-7d)');
+                    console.warn('  Admin may need to re-add missing membership leaves');
+                    metadata.aspMembershipSync.syncBroken = true;
+                } else {
+                    console.log(`[SyncController] ASP Membership in sync: ${localLeafCount}/${onChainLeafCount} leaves`);
+                }
+            }
         }
         
         // Update metadata

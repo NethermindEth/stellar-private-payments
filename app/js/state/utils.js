@@ -10,8 +10,8 @@ export const BN254_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d2833e8487
 export const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
 
 // Tree depths - must match circuit and contract deployments
-export const TREE_DEPTH = 5;
-export const SMT_DEPTH = 5;
+export const TREE_DEPTH = 10;
+export const SMT_DEPTH = 10;
 
 /**
  * Converts hex string to Uint8Array.

@@ -20,6 +20,16 @@ import {bytesToHex, hexToBytes} from './utils.js';
  */
 
 /**
+ * Creates an enum-style key for Soroban contract storage.
+ * Soroban enum DataKey variants serialize as scvVec([scvSymbol(variant), ...values]).
+ * @param {string} variant - Enum variant name (e.g., 'Root', 'Admin')
+ * @returns {xdr.ScVal}
+ */
+function createEnumKey(variant) {
+    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
+}
+
+/**
  * Fetches the current root of the ASP Non-Membership SMT.
  * @returns {Promise<{success: boolean, root?: string, error?: string}>}
  */
@@ -33,8 +43,9 @@ export async function fetchRoot() {
         const server = getSorobanServer();
         const contractId = contracts.aspNonMembership;
         
-        // Build the ledger key for Root
-        const rootKey = xdr.ScVal.scvSymbol('Root');
+        // Build the ledger key for Root using enum-style key format
+        // DataKey::Root serializes as scvVec([scvSymbol("Root")])
+        const rootKey = createEnumKey('Root');
         const ledgerKey = xdr.LedgerKey.contractData(
             new xdr.LedgerKeyContractData({
                 contract: new Address(contractId).toScAddress(),

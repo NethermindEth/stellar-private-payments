@@ -11,7 +11,8 @@
 import * as db from './db.js';
 import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
 import { 
-    bytesToHex, 
+    bytesToHex,
+    hexToBytes,
     normalizeU256ToHex, 
     hexToBytesForTree,
     ZERO_LEAF_HEX,
@@ -38,8 +39,10 @@ let merkleTree = null;
  */
 export async function init() {
     // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
-    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
-    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeaf);
+    console.log(`[ASPMembershipStore] Initializing with ZERO_LEAF_HEX: ${ZERO_LEAF_HEX}`);
+    const zeroLeafLE = hexToBytesForTree(ZERO_LEAF_HEX);
+    
+    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
     
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
@@ -74,6 +77,14 @@ export async function processLeafAdded(event, ledger) {
     const index = Number(event.index);
     const root = normalizeU256ToHex(event.root);
     
+    // Debug: log the raw event values
+    console.log(`[ASPMembershipStore] processLeafAdded raw:`, {
+        leafBigint: typeof event.leaf === 'bigint' ? event.leaf.toString(16) : event.leaf,
+        rootBigint: typeof event.root === 'bigint' ? event.root.toString(16) : event.root,
+        leafNormalized: leaf,
+        rootNormalized: root,
+    });
+    
     // Store leaf
     await db.put('asp_membership_leaves', {
         index,
@@ -91,17 +102,31 @@ export async function processLeafAdded(event, ledger) {
         }
         
         const leafBytes = hexToBytesForTree(leaf);
+        console.log(`[ASPMembershipStore] Inserting leaf bytes (LE for tree):`, bytesToHex(leafBytes));
+        
         merkleTree.insert(leafBytes);
         
         // Verify root matches contract
-        // Tree returns LE bytes, contract root is BE hex. We reverse for comparison
+        // Tree returns LE bytes, contract root is BE hex
         const rootBytesLE = merkleTree.root();
+        console.log(`[ASPMembershipStore] Tree root bytes (LE):`, bytesToHex(rootBytesLE));
+        
+        // Try both BE and LE comparison
         const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
-        const computedRoot = bytesToHex(rootBytesBE);
-        if (computedRoot !== root) {
-            console.error(`[ASPMembershipStore] Root mismatch at index ${index}`);
-            console.error(`  Contract: ${root}`);
-            console.error(`  Local:    ${computedRoot}`);
+        const computedRootBE = bytesToHex(rootBytesBE);
+        const computedRootLE = bytesToHex(rootBytesLE);
+        
+        console.log(`[ASPMembershipStore] Root comparison at index ${index}:`);
+        console.log(`  Contract (expected): ${root}`);
+        console.log(`  Local (as BE):       ${computedRootBE}`);
+        console.log(`  Local (as LE):       ${computedRootLE}`);
+        
+        if (computedRootBE !== root && computedRootLE !== root) {
+            console.error(`[ASPMembershipStore] Root mismatch! Neither endianness matches.`);
+        } else if (computedRootLE === root) {
+            console.log(`[ASPMembershipStore] Root matches with LE interpretation`);
+        } else {
+            console.log(`[ASPMembershipStore] Root matches with BE interpretation`);
         }
     }
     
@@ -117,26 +142,53 @@ export async function processLeafAdded(event, ledger) {
 export async function processEvents(events, ledger) {
     let count = 0;
     
-    for (const event of events) {
-        const eventType = event.topic?.[0];
-        console.log('[ASPMembershipStore] Event topic:', eventType, 'full topics:', event.topic);
-        
-        // Event topic is ["LeafAdded"] with value containing leaf, index, root
-        if (eventType === 'LeafAdded' || eventType === 'leaf_added') {
-            console.log('[ASPMembershipStore] Processing LeafAdded:', {
-                leaf: event.value?.leaf,
-                index: event.value?.index,
-                root: event.value?.root,
-            });
-            await processLeafAdded({
-                leaf: event.value?.leaf,
-                index: event.value?.index,
-                root: event.value?.root,
-            }, event.ledger || ledger);
-            count++;
-        } else {
-            console.log('[ASPMembershipStore] Skipped event with topic:', eventType);
+    if (events.length === 0) {
+        console.log('[ASPMembershipStore] No events to process');
+        return count;
+    }
+    
+    console.log(`[ASPMembershipStore] Processing ${events.length} events...`);
+    
+    // Debug: log all event topics to see what we're getting
+    console.log('[ASPMembershipStore] Event topics received:', 
+        events.map(e => ({ topic: e.topic, topicType: typeof e.topic?.[0], value: e.value })));
+    
+    // Filter and sort LeafAdded events by index
+    // Topic might be 'LeafAdded', 'leaf_added', or contain it as a substring
+    const leafEvents = events
+        .filter(e => {
+            const topic = e.topic?.[0];
+            return topic === 'LeafAdded' || 
+                   topic === 'leaf_added' || 
+                   (typeof topic === 'string' && topic.includes('LeafAdded'));
+        })
+        .map(e => ({
+            leaf: e.value?.leaf,
+            index: Number(e.value?.index),
+            root: e.value?.root,
+            ledger: e.ledger || ledger,
+        }))
+        .sort((a, b) => a.index - b.index);
+    
+    if (leafEvents.length === 0 && events.length > 0) {
+        console.log('[ASPMembershipStore] No LeafAdded events found in batch. Event types seen:', 
+            [...new Set(events.map(e => JSON.stringify(e.topic)))].join(', '));
+        return count;
+    }
+    
+    // Get current tree state to skip already-processed events
+    const nextIdx = merkleTree ? Number(merkleTree.next_index) : 0;
+    
+    for (const event of leafEvents) {
+        // Skip events we've already processed
+        if (event.index < nextIdx) {
+            console.log(`[ASPMembershipStore] Skipping already-processed leaf at index ${event.index}`);
+            continue;
         }
+        
+        console.log('[ASPMembershipStore] Processing LeafAdded:', event);
+        await processLeafAdded(event, event.ledger);
+        count++;
     }
     
     return count;

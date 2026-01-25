@@ -7,4 +7,4 @@ include "./compliantTransaction.circom";
 //   nMembershipProofs, nNonMembershipProofs,
 //   levels, smtLevels
 // )
-component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = CompliantTransaction(2, 2, 1, 1, 5, 5);
+component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = CompliantTransaction(2, 2, 1, 1, 10, 10);

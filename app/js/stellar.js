@@ -11,7 +11,7 @@ const NETWORKS = {
     testnet: {
         name: 'Testnet',
         horizonUrl: 'https://horizon-testnet.stellar.org',
-        rpcUrl: 'https://stellar.liquify.com/api=41EEWAH79Y5OCGI7/testnet',
+        rpcUrl: 'https://soroban-testnet.stellar.org',
         passphrase: Networks.TESTNET,
     },
     futurenet: {
@@ -443,9 +443,12 @@ export async function getContractEvents(contractId, options = {}) {
             filters: [{
                 type: 'contract',
                 contractIds: [contractId],
-                topics: options.topics || [],
+                // Use ** to match zero or more topic segments
+                topics: options.topics || [['**']],
             }],
-            limit: options.limit || 50,
+            pagination: {
+                limit: options.limit || 50,
+            },
         });
 
         const events = result.events.map(event => ({
@@ -539,59 +542,102 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         return { success: false, events: [], error: 'startLedger or cursor required' };
     }
 
+    const network = getNetwork();
+    const rpcUrl = network.rpcUrl;
+    
+    // RPC has a search limit - it won't scan many ledgers at once.
+    // We need to search in chunks to cover the full range.
+    const CHUNK_SIZE = 5000; // Search 5000 ledgers at a time
+
     try {
-        const server = getSorobanServer();
-        // Only accumulate events if no callback is provided (for backward compat)
         const allEvents = onPage ? null : [];
         let cursor = initialCursor;
         let latestLedger = 0;
         let totalCount = 0;
+        let currentStartLedger = startLedger;
 
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const requestParams = {
+        // First, get the latest ledger to know when to stop
+        const infoResponse = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'getLatestLedger',
+            }),
+        });
+        const infoJson = await infoResponse.json();
+        latestLedger = infoJson.result?.sequence || 0;
+        
+        console.log('[Stellar] Fetching events in chunks:', {
+            contractId,
+            startLedger,
+            latestLedger,
+            chunkSize: CHUNK_SIZE,
+            totalRange: latestLedger - startLedger,
+        });
+
+        // Search in chunks from startLedger to latestLedger
+        while (currentStartLedger < latestLedger) {
+            const params = {
+                startLedger: currentStartLedger,
                 filters: [{
-                    type: 'contract',
                     contractIds: [contractId],
                 }],
-                limit: pageSize,
+                pagination: {
+                    limit: pageSize,
+                },
             };
 
-            if (cursor) {
-                requestParams.cursor = cursor;
-            } else {
-                requestParams.startLedger = startLedger;
+            const requestBody = {
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'getEvents',
+                params,
+            };
+
+            const response = await fetch(rpcUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+            });
+
+            const json = await response.json();
+            
+            if (json.error) {
+                throw new Error(json.error.message || JSON.stringify(json.error));
             }
 
-            const result = await server.getEvents(requestParams);
-            latestLedger = result.latestLedger;
+            const result = json.result;
 
-            const pageEvents = result.events.map(event => ({
+            // Parse events - raw API returns base64 XDR, need to decode
+            const pageEvents = (result.events || []).map(event => ({
                 id: event.id,
                 ledger: event.ledger,
                 type: event.type,
                 contractId: event.contractId,
-                topic: event.topic.map(t => scValToNative(t)),
-                value: scValToNative(event.value),
+                topic: event.topic.map(t => scValToNative(xdr.ScVal.fromXDR(t, 'base64'))),
+                value: scValToNative(xdr.ScVal.fromXDR(event.value, 'base64')),
             }));
 
             if (pageEvents.length > 0) {
                 totalCount += pageEvents.length;
-                cursor = pageEvents[pageEvents.length - 1].id;
+                cursor = result.cursor || pageEvents[pageEvents.length - 1].id;
                 
                 if (onPage) {
-                    // Stream mode: process and discard
                     onPage(pageEvents, cursor);
                 } else {
-                    // Batch mode: accumulate for return
                     allEvents.push(...pageEvents);
                 }
+                
+                console.log(`[Stellar] Found ${pageEvents.length} events in chunk starting at ledger ${currentStartLedger}`);
             }
 
-            if (result.events.length < pageSize) {
-                break;
-            }
+            // Move to next chunk
+            currentStartLedger += CHUNK_SIZE;
         }
+
+        console.log(`[Stellar] Search complete: ${totalCount} total events found`);
 
         return { 
             success: true, 
@@ -602,7 +648,7 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         };
     } catch (error) {
         console.error('[Stellar] Failed to fetch all events:', error);
-        return { success: false, error: error.message, events: [], count: 0 };
+        return { success: false, error: error.message, events: [], count: 0, cursor: initialCursor };
     }
 }
 

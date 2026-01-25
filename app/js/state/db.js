@@ -38,13 +38,15 @@ const STORES = {
 };
 
 let dbInstance = null;
+let dbClosing = false;
 
 /**
  * Opens the IndexedDB database, creating stores if needed.
  * @returns {Promise<IDBDatabase>}
  */
 function openDatabase() {
-    if (dbInstance) {
+    // Return cached instance only if it's valid and not closing
+    if (dbInstance && !dbClosing) {
         return Promise.resolve(dbInstance);
     }
 
@@ -58,11 +60,21 @@ function openDatabase() {
 
         request.onsuccess = () => {
             dbInstance = request.result;
+            dbClosing = false;
+            
             dbInstance.onversionchange = () => {
+                dbClosing = true;
                 dbInstance.close();
                 dbInstance = null;
                 console.warn('[DB] Database version changed, connection closed');
             };
+            
+            dbInstance.onclose = () => {
+                dbClosing = false;
+                dbInstance = null;
+                console.warn('[DB] Database connection closed');
+            };
+            
             resolve(dbInstance);
         };
 
@@ -101,9 +113,24 @@ function openDatabase() {
  * @returns {Promise<IDBTransaction>}
  */
 async function getTransaction(storeNames, mode = 'readonly') {
-    const db = await openDatabase();
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
-    return db.transaction(names, mode);
+    
+    // Retry once if connection was closed
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const db = await openDatabase();
+            return db.transaction(names, mode);
+        } catch (error) {
+            if (attempt === 0 && error.name === 'InvalidStateError') {
+                // Connection might be closing, reset and retry
+                dbInstance = null;
+                dbClosing = false;
+                console.warn('[DB] Connection invalid, retrying...');
+                continue;
+            }
+            throw error;
+        }
+    }
 }
 
 /**

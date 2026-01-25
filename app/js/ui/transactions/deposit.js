@@ -174,6 +174,21 @@ export const Deposit = {
                 nonMembership: nonMembershipRoot.toString(16),
             });
             
+            // Check if ASP membership is properly synced
+            const localMembershipLeafCount = await StateManager.getASPMembershipLeafCount();
+            const onChainMembershipLeafCount = membershipState.nextIndex || 0;
+            
+            console.log('[Deposit] ASP Membership sync status:', {
+                localLeaves: localMembershipLeafCount,
+                onChainLeaves: onChainMembershipLeafCount,
+            });
+            
+            if (onChainMembershipLeafCount > 0 && localMembershipLeafCount === 0) {
+                console.warn('[Deposit] ASP Membership tree not synced. On-chain has', onChainMembershipLeafCount, 'leaves but local has 0.');
+                console.warn('[Deposit] This usually means the LeafAdded events are outside the RPC retention window (24h-7d).');
+                console.warn('[Deposit] The deposit may fail if your membership cannot be proven.');
+            }
+            
             // Step 3: Build output notes
             const outputs = [];
             document.querySelectorAll('#deposit-outputs .output-row').forEach(row => {

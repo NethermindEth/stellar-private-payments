@@ -423,15 +423,18 @@ async function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndexHi
     const computedRoot = bytesToBigIntLE(membershipRootBytes);
 
     if (computedRoot !== membershipRoot) {
-        console.warn('[TxBuilder] Membership root mismatch:', {
+        console.error('[TxBuilder] Membership root mismatch:', {
             computed: computedRoot.toString(16),
             expected: membershipRoot.toString(16),
             userLeaf: leafHex,
             leafIndex,
         });
-        console.warn('[TxBuilder] This likely means:');
-        console.warn('  1. ASP membership tree is not synced, OR');
-        console.warn('  2. Wrong blinding factor provided');
+        console.error('[TxBuilder] This likely means:');
+        console.error('  1. ASP membership tree is not synced (events may be outside RPC retention window), OR');
+        console.error('  2. Wrong blinding factor provided, OR');
+        console.error('  3. Your membership was added before you started syncing');
+        console.error('[TxBuilder] To fix: ensure your membership leaf was added within the RPC retention window (typically 24h-7d)');
+        console.error('[TxBuilder] Or contact the admin to re-add your membership leaf');
     }
 
     const pathElements = sliceFieldElements(membershipProof.path_elements, LEVELS);
