@@ -251,8 +251,16 @@ export async function readASPMembershipState(contractId) {
         ]);
 
         if (rootResult.success) {
-            results.root = formatU256(rootResult.value);
-            results.rootRaw = rootResult.value;
+            const rawValue = rootResult.value;
+            const formattedRoot = formatU256(rawValue);
+            console.log('[Stellar] ASP Membership root formatting:', {
+                rawType: typeof rawValue,
+                rawValue: typeof rawValue === 'bigint' ? '0x' + rawValue.toString(16) : String(rawValue).slice(0, 70),
+                formatted: formattedRoot,
+                formattedLength: formattedRoot.length,
+            });
+            results.root = formattedRoot;
+            results.rootRaw = rawValue;
         }
         if (levelsResult.success) results.levels = levelsResult.value;
         if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;
@@ -733,12 +741,17 @@ export function scValToNative(scVal) {
 }
 
 /**
- * Format U256 value to hex string.
+ * Format U256 value to hex string with proper 64-char padding.
+ * Ensures consistent representation for BigInt conversion.
  * @param {any} value - U256 value (bigint, string, or object)
- * @returns {string} Hex string representation
+ * @returns {string} Hex string representation (0x + 64 hex chars)
  */
 function formatU256(value) {
-    if (typeof value === 'string') return value;
+    if (typeof value === 'string') {
+        // Ensure proper 64-char padding for hex strings
+        const hex = value.startsWith('0x') ? value.slice(2) : value;
+        return '0x' + hex.padStart(64, '0');
+    }
     if (typeof value === 'bigint') return '0x' + value.toString(16).padStart(64, '0');
     if (typeof value === 'object' && value !== null) {
         try {

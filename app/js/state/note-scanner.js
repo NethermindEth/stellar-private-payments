@@ -268,8 +268,7 @@ export async function checkSpentNotes() {
  */
 export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
     // Path indices are the binary representation of leafIndex
-    // Notes are in the pool tree, which has depth 20
-    const treeDepth = 20; // Match POOL_TREE_DEPTH
+    const treeDepth = 10;
     const pathIndices = [];
     let idx = leafIndex;
     for (let i = 0; i < treeDepth; i++) {

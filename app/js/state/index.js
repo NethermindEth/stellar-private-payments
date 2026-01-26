@@ -225,6 +225,17 @@ export const StateManager = {
     },
 
     /**
+     * Verifies a membership proof locally before sending to the contract.
+     * @param {Uint8Array} leafBytes - The leaf value (LE bytes)
+     * @param {Object} proof - Merkle proof from getASPMembershipProof
+     * @param {bigint} expectedRoot - Expected on-chain root as bigint
+     * @returns {{valid: boolean, computedRoot: bigint, details: Object}}
+     */
+    verifyASPMembershipProofLocally(leafBytes, proof, expectedRoot) {
+        return aspMembershipStore.verifyMerkleProofLocally(leafBytes, proof, expectedRoot);
+    },
+
+    /**
      * Finds a user's membership leaf by its hash and returns the index.
      * @param {string|Uint8Array} leafHash - The membership leaf hash
      * @returns {Promise<{index: number, leaf: string}|null>}

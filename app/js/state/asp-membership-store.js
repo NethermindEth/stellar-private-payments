@@ -9,7 +9,7 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import { createMerkleTreeWithZeroLeaf, poseidon2_compression_wasm } from '../bridge.js';
 import { 
     bytesToHex,
     hexToBytes,
@@ -77,14 +77,6 @@ export async function processLeafAdded(event, ledger) {
     const index = Number(event.index);
     const root = normalizeU256ToHex(event.root);
     
-    // Debug: log the raw event values
-    console.log(`[ASPMembershipStore] processLeafAdded raw:`, {
-        leafBigint: typeof event.leaf === 'bigint' ? event.leaf.toString(16) : event.leaf,
-        rootBigint: typeof event.root === 'bigint' ? event.root.toString(16) : event.root,
-        leafNormalized: leaf,
-        rootNormalized: root,
-    });
-    
     // Store leaf
     await db.put('asp_membership_leaves', {
         index,
@@ -109,24 +101,12 @@ export async function processLeafAdded(event, ledger) {
         // Verify root matches contract
         // Tree returns LE bytes, contract root is BE hex
         const rootBytesLE = merkleTree.root();
-        console.log(`[ASPMembershipStore] Tree root bytes (LE):`, bytesToHex(rootBytesLE));
-        
-        // Try both BE and LE comparison
         const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
-        const computedRootBE = bytesToHex(rootBytesBE);
-        const computedRootLE = bytesToHex(rootBytesLE);
-        
-        console.log(`[ASPMembershipStore] Root comparison at index ${index}:`);
-        console.log(`  Contract (expected): ${root}`);
-        console.log(`  Local (as BE):       ${computedRootBE}`);
-        console.log(`  Local (as LE):       ${computedRootLE}`);
-        
-        if (computedRootBE !== root && computedRootLE !== root) {
-            console.error(`[ASPMembershipStore] Root mismatch! Neither endianness matches.`);
-        } else if (computedRootLE === root) {
-            console.log(`[ASPMembershipStore] Root matches with LE interpretation`);
-        } else {
-            console.log(`[ASPMembershipStore] Root matches with BE interpretation`);
+        const computedRoot = bytesToHex(rootBytesBE);
+        if (computedRoot !== root) {
+            console.error(`[ASPMembershipStore] Root mismatch at index ${index}`);
+            console.error(`  Contract: ${root}`);
+            console.error(`  Local:    ${computedRoot}`);
         }
     }
     
@@ -204,6 +184,102 @@ export function getRoot() {
 }
 
 /**
+ * Converts LE bytes to BigInt.
+ * @param {Uint8Array} bytes
+ * @returns {bigint}
+ */
+function bytesToBigIntLE(bytes) {
+    let result = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) {
+        result = (result << 8n) | BigInt(bytes[i]);
+    }
+    return result;
+}
+
+/**
+ * Verifies a merkle proof locally by recomputing the root.
+ * This is useful for debugging proof issues before sending to the contract.
+ * 
+ * @param {Uint8Array} leafBytes - The leaf value (LE bytes)
+ * @param {Object} proof - Merkle proof with path_elements, path_indices
+ * @param {bigint} expectedRoot - Expected root as bigint
+ * @returns {{valid: boolean, computedRoot: bigint, details: Object}}
+ */
+export function verifyMerkleProofLocally(leafBytes, proof, expectedRoot) {
+    const pathIndicesNum = bytesToBigIntLE(proof.path_indices);
+    const numLevels = ASP_MEMBERSHIP_TREE_DEPTH;
+    
+    // Extract path indices as bits (0 = left, 1 = right)
+    const pathIndices = [];
+    let idx = pathIndicesNum;
+    for (let i = 0; i < numLevels; i++) {
+        pathIndices.push(Number(idx & 1n));
+        idx = idx >> 1n;
+    }
+    
+    // Extract path elements (siblings at each level)
+    const pathElements = [];
+    for (let i = 0; i < numLevels; i++) {
+        const start = i * 32;
+        const sibling = proof.path_elements.slice(start, start + 32);
+        pathElements.push(sibling);
+    }
+    
+    // Compute root by hashing up the tree
+    let currentHash = leafBytes;
+    const intermediateHashes = [{ level: 'leaf', hash: bytesToHex(currentHash) }];
+    
+    for (let i = 0; i < numLevels; i++) {
+        const sibling = pathElements[i];
+        const isRight = pathIndices[i];
+        
+        // domain = 0 for merkle tree hashing
+        let newHash;
+        if (isRight === 0) {
+            // Current node is on the left, sibling is on the right
+            newHash = poseidon2_compression_wasm(currentHash, sibling);
+        } else {
+            // Current node is on the right, sibling is on the left
+            newHash = poseidon2_compression_wasm(sibling, currentHash);
+        }
+        
+        intermediateHashes.push({
+            level: i,
+            sibling: bytesToHex(sibling),
+            isRight,
+            result: bytesToHex(newHash),
+        });
+        
+        currentHash = newHash;
+    }
+    
+    // Convert computed root to bigint (LE bytes)
+    const computedRoot = bytesToBigIntLE(currentHash);
+    const valid = computedRoot === expectedRoot;
+    
+    console.log(`[ASPMembershipStore] Local proof verification:`, {
+        valid,
+        computedRoot: '0x' + computedRoot.toString(16).padStart(64, '0'),
+        expectedRoot: '0x' + expectedRoot.toString(16).padStart(64, '0'),
+        pathIndices: pathIndices.join(''),
+    });
+    
+    if (!valid) {
+        console.log(`[ASPMembershipStore] Intermediate hashes:`, intermediateHashes);
+    }
+    
+    return {
+        valid,
+        computedRoot,
+        expectedRoot,
+        details: {
+            pathIndices,
+            intermediateHashes,
+        },
+    };
+}
+
+/**
  * Gets a merkle proof for a leaf at the given index.
  * Uses the live tree which is initialized with the correct zero leaf value.
  * @param {number} leafIndex - Index of the leaf
@@ -226,14 +302,47 @@ export function getMerkleProof(leafIndex) {
         
         const proof = merkleTree.get_proof(leafIndex);
         
+        // Tree returns LE bytes; convert to BE for display to match on-chain format
+        const rootBytesLE = merkleTree.root();
+        const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
+        
         console.log(`[ASPMembershipStore] Built proof for index ${leafIndex}`);
-        console.log(`[ASPMembershipStore] Tree root: ${bytesToHex(merkleTree.root())}`);
+        console.log(`[ASPMembershipStore] Tree root (BE): ${bytesToHex(rootBytesBE)}`);
         
         return proof;
     } catch (e) {
         console.error('[ASPMembershipStore] Failed to get merkle proof:', e);
         return null;
     }
+}
+
+/**
+ * Gets a merkle proof and verifies it locally against an expected root.
+ * Useful for debugging proof issues before submitting to the contract.
+ * 
+ * @param {number} leafIndex - Index of the leaf
+ * @param {Uint8Array} leafBytes - The leaf value (LE bytes)
+ * @param {bigint} expectedRoot - Expected on-chain root as bigint
+ * @returns {{proof: Object|null, verification: Object|null}}
+ */
+export function getMerkleProofWithVerification(leafIndex, leafBytes, expectedRoot) {
+    const proof = getMerkleProof(leafIndex);
+    if (!proof) {
+        return { proof: null, verification: null };
+    }
+    
+    const verification = verifyMerkleProofLocally(leafBytes, proof, expectedRoot);
+    
+    if (!verification.valid) {
+        console.error('[ASPMembershipStore] PROOF VERIFICATION FAILED!');
+        console.error('[ASPMembershipStore] This means the local proof does not match the expected on-chain root.');
+        console.error('[ASPMembershipStore] Possible causes:');
+        console.error('  1. Leaf value is incorrect');
+        console.error('  2. Tree sync is out of date');
+        console.error('  3. Different hash function parameters');
+    }
+    
+    return { proof, verification };
 }
 
 /**

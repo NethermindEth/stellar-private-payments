@@ -21,6 +21,7 @@ import initProverModule, {
     compute_nullifier,
     poseidon2_hash2,
     poseidon2_hash3,
+    poseidon2_compression_wasm,
     u64_to_field_bytes,
     decimal_to_field_bytes,
     hex_to_field_bytes,
@@ -511,6 +512,12 @@ export { poseidon2_hash2 as poseidon2Hash2 };
  * Poseidon2 hash with 3 inputs
  */
 export { poseidon2_hash3 as poseidon2Hash3 };
+
+
+/**
+ * Poseidon2 compression
+ */
+export { poseidon2_compression_wasm as poseidon2_compression_wasm };
 
 // Merkle Tree Operations
 

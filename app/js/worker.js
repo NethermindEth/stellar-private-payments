@@ -186,6 +186,19 @@ async function handleProve(data, messageId) {
         // Step 2: Generate proof
         const proveTime = performance.now();
         let proofBytes;
+        // DEBUG: Generate compressed proof and verify locally
+        const compressedProof = generateProofBytes(witnessBytes);
+        const debugPublicInputs = extractPublicInputs(witnessBytes);
+        try {
+            const localVerified = verifyProofLocal(compressedProof, debugPublicInputs);
+            console.log(`[Worker] DEBUG: Local arkworks verification: ${localVerified ? 'PASSED' : 'FAILED'}`);
+            if (!localVerified) {
+                console.error('[Worker] DEBUG: Proof failed local verification with embedded VK');
+            }
+        } catch (verifyErr) {
+            console.error('[Worker] DEBUG: Local verification error:', verifyErr?.message || verifyErr);
+        }
+        
         if (sorobanFormat) {
             // Generate directly in Soroban uncompressed format (256 bytes)
             proofBytes = generateProofBytesSoroban(witnessBytes);
@@ -246,13 +259,28 @@ function handleVerify(data) {
     
     try {
         const { proofBytes, publicInputsBytes } = data;
-        const verified = verifyProofLocal(
-            new Uint8Array(proofBytes),
-            new Uint8Array(publicInputsBytes)
-        );
+        
+        // Log sizes for debugging
+        const proofArr = new Uint8Array(proofBytes);
+        const pubInputsArr = new Uint8Array(publicInputsBytes);
+        console.log(`[Worker] Verifying proof: ${proofArr.length} bytes, public inputs: ${pubInputsArr.length} bytes`);
+        
+        // Expected sizes for Groth16 BN254:
+        // - Proof: 256 bytes (Soroban format) or 192 bytes (compressed)
+        // - Public inputs: 32 bytes per element
+        const numPublicInputs = pubInputsArr.length / 32;
+        console.log(`[Worker] Number of public inputs: ${numPublicInputs}`);
+        
+        const verified = verifyProofLocal(proofArr, pubInputsArr);
+        console.log(`[Worker] Verification result: ${verified}`);
         return { success: true, verified };
     } catch (error) {
-        return { success: false, error: error.message };
+        // Capture as much error info as possible
+        const errorMsg = error?.message || error?.toString() || String(error) || 'Unknown verification error';
+        console.error('[Worker] Verification error:', error);
+        console.error('[Worker] Error message:', errorMsg);
+        console.error('[Worker] Error stack:', error?.stack);
+        return { success: false, error: errorMsg };
     }
 }
 
