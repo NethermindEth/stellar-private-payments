@@ -5,14 +5,20 @@
 
 import { connectWallet, getWalletNetwork, signWalletTransaction, signWalletAuthEntry } from '../wallet.js';
 import { validateWalletNetwork, registerPublicKey, getLatestLedger } from '../stellar.js';
-import { App, Utils, Toast, deriveKeysFromWallet } from './core.js';
+import { App, Utils, Toast, deriveKeysFromWallet, Storage } from './core.js';
 import { setTabsRef } from './templates.js';
 import { fieldToHex } from '../bridge.js';
-import { publicKeyStore } from '../state/index.js';
+import { publicKeyStore, notesStore } from '../state/index.js';
+import { NotesTable } from './notes-table.js';
 
 // Callbacks for wallet connection events (set by transaction modules)
 const walletConnectCallbacks = [];
 const walletDisconnectCallbacks = [];
+const accountChangeCallbacks = [];
+
+// Polling interval for account change detection
+let accountCheckInterval = null;
+const ACCOUNT_CHECK_INTERVAL_MS = 3000;
 
 /**
  * Registers a callback to be called when wallet connects.
@@ -29,6 +35,14 @@ export function onWalletConnect(callback) {
  */
 export function onWalletDisconnect(callback) {
     walletDisconnectCallbacks.push(callback);
+}
+
+/**
+ * Registers a callback to be called when account changes (different address same wallet).
+ * @param {function(string)} callback - Receives the new address
+ */
+export function onAccountChange(callback) {
+    accountChangeCallbacks.push(callback);
 }
 
 /**
@@ -87,6 +101,7 @@ export const Tabs = {
 
 export const Wallet = {
     dropdownOpen: false,
+    checkingAccount: false,
     
     init() {
         const btn = document.getElementById('wallet-btn');
@@ -120,8 +135,81 @@ export const Wallet = {
             }
         });
         
+        // Check for account changes when window gains focus
+        window.addEventListener('focus', () => {
+            if (App.state.wallet.connected) {
+                this.checkAccountChange();
+            }
+        });
+        
+        // Also check periodically while connected
+        this.startAccountCheck();
+        
         // Initially disable submit buttons until wallet is connected
         updateSubmitButtons(false);
+    },
+    
+    startAccountCheck() {
+        if (accountCheckInterval) return;
+        accountCheckInterval = setInterval(() => {
+            if (App.state.wallet.connected && document.visibilityState === 'visible') {
+                this.checkAccountChange();
+            }
+        }, ACCOUNT_CHECK_INTERVAL_MS);
+    },
+    
+    stopAccountCheck() {
+        if (accountCheckInterval) {
+            clearInterval(accountCheckInterval);
+            accountCheckInterval = null;
+        }
+    },
+    
+    async checkAccountChange() {
+        if (this.checkingAccount || !App.state.wallet.connected) return;
+        
+        this.checkingAccount = true;
+        try {
+            const currentAddress = await connectWallet();
+            const previousAddress = App.state.wallet.address;
+            
+            if (currentAddress !== previousAddress) {
+                console.log(`[Wallet] Account changed: ${previousAddress?.slice(0, 8)}... -> ${currentAddress.slice(0, 8)}...`);
+                
+                // Update state
+                App.state.wallet.address = currentAddress;
+                
+                // Update notes store owner and clear keypairs
+                notesStore.handleAccountChange(currentAddress);
+                
+                // Update UI
+                const text = document.getElementById('wallet-text');
+                const addressDisplay = document.getElementById('wallet-dropdown-address');
+                if (text) text.textContent = Utils.truncateHex(currentAddress, 7, 6);
+                if (addressDisplay) addressDisplay.textContent = currentAddress;
+                
+                // Reload notes for the new account
+                await NotesTable.reload();
+                
+                // Notify callbacks
+                for (const callback of accountChangeCallbacks) {
+                    try {
+                        callback(currentAddress);
+                    } catch (e) {
+                        console.error('[Wallet] Account change callback error:', e);
+                    }
+                }
+                
+                Toast.show('Account changed - notes updated', 'success');
+            }
+        } catch (e) {
+            // Wallet may have been disconnected externally
+            if (App.state.wallet.connected) {
+                console.warn('[Wallet] Failed to check account:', e.message);
+            }
+        } finally {
+            this.checkingAccount = false;
+        }
     },
     
     toggleDropdown() {
@@ -169,6 +257,9 @@ export const Wallet = {
             const publicKey = await connectWallet();
             App.state.wallet = { connected: true, address: publicKey };
             
+            // Set the owner in notes store for filtering
+            notesStore.handleAccountChange(publicKey);
+            
             btn.classList.add('border-emerald-500', 'bg-emerald-500/10');
             text.textContent = Utils.truncateHex(App.state.wallet.address, 7, 6);
             dropdownIcon?.classList.remove('hidden');
@@ -201,6 +292,9 @@ export const Wallet = {
         // Enable submit buttons
         updateSubmitButtons(true);
         
+        // Load notes for this account
+        await NotesTable.reload();
+        
         // Notify registered callbacks (Withdraw, Transact prefill recipient)
         for (const callback of walletConnectCallbacks) {
             try {
@@ -218,6 +312,14 @@ export const Wallet = {
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
         
         App.state.wallet = { connected: false, address: null };
+        
+        // Clear owner in notes store
+        notesStore.handleAccountChange(null);
+        
+        // Clear notes from UI (no owner = empty list)
+        App.state.notes = [];
+        NotesTable.render();
+        
         btn.classList.remove('border-emerald-500', 'bg-emerald-500/10');
         text.textContent = 'Connect Freighter';
         dropdownIcon?.classList.add('hidden');

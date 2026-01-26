@@ -44,7 +44,7 @@ setTransferNotesTableRef(NotesTable);
 document.addEventListener('DOMContentLoaded', async () => {
     // Initialize core UI components
     Templates.init();
-    Storage.load();
+    Storage.loadFromLocalStorage(); // Load any legacy localStorage notes
     
     // Initialize navigation and wallet
     Tabs.init();

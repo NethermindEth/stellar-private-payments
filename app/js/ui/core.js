@@ -9,6 +9,7 @@ import {
     deriveEncryptionKeypairFromSignature,
     derivePublicKey,
 } from '../bridge.js';
+import { notesStore } from '../state/index.js';
 
 // Application State - shared across all UI modules
 export const App = {
@@ -134,25 +135,54 @@ export const Utils = {
     }
 };
 
-// Storage
+// Storage - loads notes from IndexedDB filtered by current owner
 export const Storage = {
     KEY: 'poolstellar_notes',
     
-    save() {
+    /**
+     * Saves a note to IndexedDB with the current owner.
+     * @param {Object} note - Note to save
+     */
+    async save(note) {
         try {
-            localStorage.setItem(this.KEY, JSON.stringify(App.state.notes));
+            await notesStore.saveNote(note);
+            // Reload the notes list to include the new one
+            await this.load();
         } catch (e) {
             console.error('Storage save failed:', e);
         }
     },
     
-    load() {
+    /**
+     * Loads notes for the current owner from IndexedDB.
+     * Notes are filtered by the connected wallet address.
+     */
+    async load() {
         try {
-            const data = localStorage.getItem(this.KEY);
-            if (data) App.state.notes = JSON.parse(data);
+            // Get notes from IndexedDB, filtered by the current owner
+            const notes = await notesStore.getNotes();
+            App.state.notes = notes;
+            console.log(`[Storage] Loaded ${notes.length} notes for current owner`);
         } catch (e) {
             console.error('Storage load failed:', e);
             App.state.notes = [];
+        }
+    },
+    
+    /**
+     * Legacy method for backwards compatibility - just calls load()
+     */
+    loadFromLocalStorage() {
+        // Keep for backwards compatibility with any code that still uses localStorage
+        try {
+            const data = localStorage.getItem(this.KEY);
+            if (data) {
+                const legacyNotes = JSON.parse(data);
+                console.log(`[Storage] Found ${legacyNotes.length} legacy notes in localStorage`);
+                // Could migrate these to IndexedDB if needed
+            }
+        } catch (e) {
+            // Ignore
         }
     }
 };

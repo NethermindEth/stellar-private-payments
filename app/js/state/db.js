@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'poolstellar';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 /**
  * Store configuration for IndexedDB schema.
@@ -29,7 +29,10 @@ const STORES = {
     },
     user_notes: {
         keyPath: 'id',
-        indexes: [{ name: 'by_spent', keyPath: 'spent' }]
+        indexes: [
+            { name: 'by_spent', keyPath: 'spent' },
+            { name: 'by_owner', keyPath: 'owner' }
+        ]
     },
     registered_public_keys: {
         keyPath: 'address',

@@ -3,7 +3,7 @@
  * @module ui/notes-table
  */
 
-import { App } from './core.js';
+import { App, Storage } from './core.js';
 import { Templates } from './templates.js';
 
 export const NotesTable = {
@@ -26,6 +26,15 @@ export const NotesTable = {
             });
         });
         
+        this.render();
+    },
+    
+    /**
+     * Reloads notes from storage and re-renders the table.
+     * Call this when the account changes to show the correct notes.
+     */
+    async reload() {
+        await Storage.load();
         this.render();
     },
     

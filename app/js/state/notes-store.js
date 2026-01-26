@@ -29,6 +29,7 @@ import {
 /**
  * @typedef {Object} UserNote
  * @property {string} id - Commitment hash 
+ * @property {string} owner - Stellar address that owns this note
  * @property {string} privateKey - Private key 
  * @property {string} blinding - Blinding factor
  * @property {string} amount - Amount as string (bigint)
@@ -39,6 +40,31 @@ import {
  * @property {number} [spentAtLedger] - Ledger when spent
  */
 
+// Current owner address for filtering notes
+let currentOwner = null;
+
+/**
+ * Sets the current owner address for note filtering.
+ * Call this when wallet connects or changes.
+ * @param {string|null} address - Stellar address or null to clear
+ */
+export function setCurrentOwner(address) {
+    const changed = currentOwner !== address;
+    currentOwner = address;
+    if (changed) {
+        console.log(`[NotesStore] Owner changed to: ${address ? address.slice(0, 8) + '...' : 'none'}`);
+    }
+    return changed;
+}
+
+/**
+ * Gets the current owner address.
+ * @returns {string|null}
+ */
+export function getCurrentOwner() {
+    return currentOwner;
+}
+
 /**
  * Saves a new note to the store.
  * @param {Object} params - Note parameters
@@ -48,11 +74,18 @@ import {
  * @param {bigint|string|number} params.amount - Note amount
  * @param {number} params.leafIndex - Leaf index in pool tree
  * @param {number} params.ledger - Ledger when created
+ * @param {string} [params.owner] - Stellar address that owns this note (defaults to currentOwner)
  * @returns {Promise<UserNote>}
  */
 export async function saveNote(params) {
+    const owner = params.owner || currentOwner;
+    if (!owner) {
+        console.warn('[NotesStore] Saving note without owner - will not be filtered by account');
+    }
+    
     const note = {
         id: normalizeHex(params.commitment),
+        owner: owner || '',
         privateKey: toHex(params.privateKey),
         blinding: toHex(params.blinding),
         amount: String(params.amount),
@@ -63,7 +96,7 @@ export async function saveNote(params) {
     };
     
     await db.put('user_notes', note);
-    console.log(`[NotesStore] Saved note ${note.id.slice(0, 10)}... at index ${note.leafIndex}`);
+    console.log(`[NotesStore] Saved note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
     return note;
 }
 
@@ -90,13 +123,26 @@ export async function markNoteSpent(commitment, ledger) {
 }
 
 /**
- * Gets all user notes.
+ * Gets all user notes for the current owner.
  * @param {Object} [options] - Filter options
  * @param {boolean} [options.unspentOnly] - Only return unspent notes
+ * @param {string} [options.owner] - Specific owner to filter by (defaults to currentOwner)
+ * @param {boolean} [options.allOwners] - If true, returns notes from all owners
  * @returns {Promise<UserNote[]>}
  */
 export async function getNotes(options = {}) {
-    const notes = await db.getAll('user_notes');
+    let notes;
+    const owner = options.owner ?? currentOwner;
+    
+    if (options.allOwners) {
+        notes = await db.getAll('user_notes');
+    } else if (owner) {
+        notes = await db.getAllByIndex('user_notes', 'by_owner', owner);
+    } else {
+        // No owner set - return empty to prevent showing other users' notes
+        console.warn('[NotesStore] getNotes called without owner, returning empty');
+        return [];
+    }
     
     if (options.unspentOnly) {
         return notes.filter(n => !n.spent);
@@ -309,12 +355,25 @@ export async function getNotePrivateKey() {
 
 // Cache management
 /**
- * Clear all cached keypairs (call on logout or wallet disconnect).
+ * Clear all cached keypairs (call on logout, wallet disconnect, or account change).
  */
 export function clearKeypairCaches() {
     cachedEncryptionKeypair = null;
     cachedNoteKeypair = null;
     console.log('[NotesStore] Cleared keypair caches');
+}
+
+/**
+ * Handle account change - clears caches and updates owner.
+ * @param {string|null} newAddress - New Stellar address or null if disconnecting
+ * @returns {boolean} True if the account actually changed
+ */
+export function handleAccountChange(newAddress) {
+    const changed = setCurrentOwner(newAddress);
+    if (changed) {
+        clearKeypairCaches();
+    }
+    return changed;
 }
 
 /**

@@ -291,9 +291,18 @@ export const Deposit = {
                 console.warn('[Deposit] Warning:', submitResult.warning);
             }
             
-            // Save notes after success
-            pendingNotes.forEach(note => App.state.notes.push(note));
-            Storage.save();
+            // Save notes after success (with owner)
+            for (const note of pendingNotes) {
+                await Storage.save({
+                    commitment: note.commitment,
+                    privateKey: privKeyBytes,
+                    blinding: fieldToHex(bigintToField(BigInt(note.blinding))),
+                    amount: note.amount,
+                    leafIndex: note.leafIndex,
+                    ledger: submitResult.ledger || 0,
+                    owner: App.state.wallet.address,
+                });
+            }
             if (NotesTableRef) NotesTableRef.render();
             
             // Sync pool state

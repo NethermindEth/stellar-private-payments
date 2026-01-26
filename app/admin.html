@@ -21,26 +21,96 @@
 
 <body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
 <div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-6 min-h-screen">
-  <header class="flex flex-col lg:flex-row lg:items-center justify-between gap-4 p-4 sm:p-6 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl" role="banner">
-    <div class="space-y-2">
-      <div class="flex items-center gap-2 text-xs uppercase tracking-[0.35em] text-brand-400">
-        <span class="w-6 h-px bg-brand-500"></span>
-        ASP Admin
+  <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-visible relative z-50" role="banner">
+    <div class="flex items-center gap-3">
+      <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg shadow-lg shadow-brand-500/25" aria-hidden="true">
+        <svg class="w-6 h-6 text-dark-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 6v12M8 10l4-4 4 4"/>
+          <circle cx="12" cy="15" r="2" fill="currentColor"/>
+        </svg>
       </div>
-      <h1 class="text-xl sm:text-2xl font-semibold">Membership and Non-Membership Control</h1>
-      <p class="text-sm text-dark-400 max-w-2xl">
-        Generate compliant leaves, inspect contract roots, and insert new leaves
-        for the ASP membership and non-membership sets.
-      </p>
+      <div>
+        <h1 class="text-lg sm:text-xl font-semibold">
+          PoolStellar <span class="text-dark-400 font-normal">ASP Admin</span>
+        </h1>
+        <p class="text-xs text-dark-500">Manage membership and non-membership trees</p>
+      </div>
     </div>
-    <div class="flex flex-wrap items-center gap-3">
-      <div class="px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-xs text-dark-300" id="networkChip">Network: --</div>
-      <div class="px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-xs text-dark-300" id="walletChip">Wallet: Disconnected</div>
-      <button class="px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="connectBtn" type="button">
-        Connect Freighter
-      </button>
+    <div class="flex items-center gap-3 overflow-visible">
+      <div class="flex items-center gap-2 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-sm text-dark-300">
+        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse-dot shadow-sm shadow-emerald-500" aria-hidden="true"></span>
+        <span id="networkChip">Network</span>
+      </div>
+      <div class="relative overflow-visible" id="wallet-container">
+        <button 
+          type="button"
+          id="connectBtn"
+          class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
+          aria-label="Connect wallet"
+        >
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+            <rect x="2" y="6" width="20" height="14" rx="2"/>
+            <path d="M22 10h-4a2 2 0 0 0 0 4h4"/>
+            <circle cx="18" cy="12" r="1" fill="currentColor"/>
+            <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>
+          </svg>
+          <span id="walletChip">Connect Freighter</span>
+        </button>
+      </div>
     </div>
   </header>
+
+  <!-- Derive Keys Section -->
+  <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="derive-heading">
+    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+      <div class="space-y-1">
+        <h2 id="derive-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Key Derivation</h2>
+        <p class="text-xs text-dark-400">
+          Sign a message to derive your ZK keys. These keys will be used to auto-fill the membership and non-membership forms.
+          <span class="text-brand-500">Keys persist when you switch accounts</span>, so you can derive for one user then sign with admin.
+        </p>
+      </div>
+      <div class="flex items-center gap-3">
+        <div class="text-right">
+          <p class="text-xs text-dark-500">Derived from account:</p>
+          <p id="derivedFromAccount" class="text-xs font-mono text-dark-300">--</p>
+        </div>
+        <button 
+          type="button"
+          id="deriveKeysBtn"
+          class="flex items-center gap-2 px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
+          </svg>
+          <span id="deriveKeysBtnText">Derive Keys</span>
+        </button>
+      </div>
+    </div>
+    
+    <!-- Derived Keys Display -->
+    <div id="derivedKeysDisplay" class="hidden mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
+      <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] uppercase tracking-wide text-dark-400">Private Key (Spending)</span>
+          <button type="button" class="copy-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" data-target="derivedPrivateKey" title="Copy">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+          </button>
+        </div>
+        <div class="font-mono text-xs text-dark-200 break-all" id="derivedPrivateKey">--</div>
+      </div>
+      <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg">
+        <div class="flex items-center justify-between mb-2">
+          <span class="text-[10px] uppercase tracking-wide text-dark-400">Public Key (ZK)</span>
+          <button type="button" class="copy-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" data-target="derivedPublicKey" title="Copy">
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+          </button>
+        </div>
+        <div class="font-mono text-xs text-brand-400 break-all" id="derivedPublicKey">--</div>
+      </div>
+    </div>
+  </section>
 
   <main id="main-content" class="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
     <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="state-heading">
@@ -162,6 +232,20 @@
     </section>
   </main>
 </div>
+
+<!-- Toast Container -->
+<div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-50" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+<!-- Toast Template -->
+<template id="tpl-toast">
+  <div class="toast flex items-center gap-3 px-4 py-3 bg-dark-800 border rounded-lg shadow-xl max-w-sm animate-slide-in" role="alert">
+    <svg class="toast-icon w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
+    <p class="toast-message flex-1 text-sm"></p>
+    <button type="button" class="toast-close p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Dismiss">
+      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+</template>
 
 <script type="module" src="js/admin.js"></script>
 </body>

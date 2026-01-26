@@ -566,7 +566,7 @@ export async function buildTransactionInputs(params) {
         
         // Pad to 2 inputs if only 1 provided. As circuit requires exactly 2 inputs
         while (inputNotes.length < 2) {
-            const dummyBlinding = BigInt(Date.now() + inputNotes.length);
+            const dummyBlinding = bytesToBigIntLE(generateBlinding());
             inputNotes.push(createDummyInput(privKeyBytes, pubKeyBytes, dummyBlinding));
         }
     }
@@ -579,7 +579,8 @@ export async function buildTransactionInputs(params) {
 
     // Ensure we have exactly 2 outputs (pad with dummy if needed)
     while (outputNotes.length < 2) {
-        outputNotes.push(createOutput(0n, pubKeyBytes, BigInt(Date.now())));
+        const dummyBlinding = bytesToBigIntLE(generateBlinding());
+        outputNotes.push(createOutput(0n, pubKeyBytes, dummyBlinding));
     }
 
     // Encrypt output notes
@@ -789,10 +790,10 @@ export async function generateWithdrawProof(params, options = {}) {
     if (changeOutputs.length > 0) {
         outputs = changeOutputs;
     } else {
-        // Auto-generate change output
+        // Auto-generate change output with proper random blindings
         outputs = [
-            { amount: change, blinding: BigInt(Date.now()) },
-            { amount: 0n, blinding: BigInt(Date.now() + 1) }, // Dummy second output
+            { amount: change, blinding: bytesToBigIntLE(generateBlinding()) },
+            { amount: 0n, blinding: bytesToBigIntLE(generateBlinding()) }, // Dummy second output
         ];
     }
 
@@ -864,7 +865,7 @@ export async function generateTransferProof(params, options = {}) {
     
     // Ensure we have exactly 2 outputs
     while (outputs.length < 2) {
-        outputs.push({ amount: 0n, blinding: BigInt(Date.now() + outputs.length) });
+        outputs.push({ amount: 0n, blinding: bytesToBigIntLE(generateBlinding()) });
     }
 
     return generateTransactionProof(

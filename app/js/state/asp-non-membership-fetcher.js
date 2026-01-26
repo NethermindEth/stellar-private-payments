@@ -7,7 +7,7 @@
 
 import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
 import { xdr, Address, TransactionBuilder, Account, Operation } from '@stellar/stellar-sdk';
-import {bytesToHex, hexToBytes} from './utils.js';
+import { bytesToHex, hexToBytes, BN254_MODULUS } from './utils.js';
 
 /**
  * @typedef {Object} SMTNonMembershipProof
@@ -165,9 +165,10 @@ export async function fetchNonMembershipProof(key) {
 }
 
 /**
- * Converts various types to Uint8Array.
- * Handles hex strings, Buffer, Uint8Array, BigInt, and null/undefined.
- * @param {string|Buffer|Uint8Array|BigInt|null|undefined} value
+ * Converts various types to Uint8Array (32 bytes, little-endian for circuit use).
+ * Handles hex strings, Uint8Array, ArrayBuffer, BigInt, and null/undefined.
+ * BigInt values are reduced modulo BN254 to ensure they're valid field elements.
+ * @param {string|Uint8Array|ArrayBuffer|BigInt|null|undefined} value
  * @returns {Uint8Array}
  */
 function toBytes(value) {
@@ -177,20 +178,29 @@ function toBytes(value) {
     if (value instanceof Uint8Array) {
         return value;
     }
-    if (Buffer.isBuffer(value)) {
+    if (value instanceof ArrayBuffer) {
         return new Uint8Array(value);
     }
+    // Handle Buffer-like objects (has buffer property pointing to ArrayBuffer)
+    if (value && typeof value === 'object' && value.buffer instanceof ArrayBuffer) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
     if (typeof value === 'bigint') {
-        // Convert BigInt to 32-byte big-endian representation
-        const hex = value.toString(16).padStart(64, '0');
-        return hexToBytes(hex);
+        // Reduce to BN254 field modulus to ensure valid field element
+        const reduced = value % BN254_MODULUS;
+        // Convert to 32-byte little-endian representation (for circuit compatibility)
+        const bytes = new Uint8Array(32);
+        let v = reduced;
+        for (let i = 0; i < 32; i++) {
+            bytes[i] = Number(v & 0xffn);
+            v >>= 8n;
+        }
+        return bytes;
     }
     if (typeof value === 'string') {
-        return hexToBytes(value);
-    }
-    // Handle objects with buffer property
-    if (value && typeof value === 'object' && value.buffer) {
-        return new Uint8Array(value.buffer);
+        // Hex strings are big-endian, convert to little-endian for circuit
+        const beBytes = hexToBytes(value);
+        return beBytes.reverse();
     }
     console.warn('[ASPNonMembershipFetcher] Unknown value type:', typeof value, value);
     return new Uint8Array(32);
