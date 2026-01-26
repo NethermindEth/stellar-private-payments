@@ -375,57 +375,12 @@ async function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndexHi
         const syncedProof = await stateManager.getASPMembershipProof(leafIndex);
         console.log('[TxBuilder] Synced proof from StateManager:', syncedProof ? 'found' : 'null');
         if (syncedProof) {
-            // Tree returns LE bytes; convert to bigint for comparison with on-chain root
-            const syncedRootLE = bytesToBigIntLE(syncedProof.root);
-            
-            // Also compute BE interpretation for debugging
-            const rootBytesReversed = Uint8Array.from(syncedProof.root).reverse();
-            const syncedRootBE = bytesToBigIntBE(rootBytesReversed);
-            
-            console.log('[TxBuilder] Membership root comparison:', {
-                syncedRootLE: '0x' + syncedRootLE.toString(16).padStart(64, '0'),
-                syncedRootBE: '0x' + syncedRootBE.toString(16).padStart(64, '0'),
-                expectedRoot: '0x' + membershipRoot.toString(16).padStart(64, '0'),
-                matchLE: syncedRootLE === membershipRoot,
-                matchBE: syncedRootBE === membershipRoot,
-            });
-            
-            // Use LE interpretation (standard for ark-ff based trees)
-            const syncedRoot = syncedRootLE;
+            const syncedRoot = bytesToBigIntLE(syncedProof.root);
             
             if (syncedRoot === membershipRoot) {
                 console.log('[TxBuilder] Using synced ASP membership proof');
-                
-                // Verify the proof locally before using it
-                if (stateManager.verifyASPMembershipProofLocally) {
-                    const verification = stateManager.verifyASPMembershipProofLocally(
-                        membershipLeaf,
-                        syncedProof,
-                        membershipRoot
-                    );
-                    console.log('[TxBuilder] Local membership proof verification:', {
-                        valid: verification.valid,
-                        computedRoot: '0x' + verification.computedRoot.toString(16).padStart(64, '0'),
-                        expectedRoot: '0x' + verification.expectedRoot.toString(16).padStart(64, '0'),
-                    });
-                    
-                    if (!verification.valid) {
-                        console.error('[TxBuilder] LOCAL PROOF VERIFICATION FAILED!');
-                        console.error('[TxBuilder] The merkle proof does not compute to the expected root.');
-                        console.error('[TxBuilder] This will cause the on-chain verification to fail.');
-                        console.error('[TxBuilder] Intermediate hashes:', verification.details.intermediateHashes);
-                    }
-                }
-                
                 const pathElements = sliceFieldElements(syncedProof.path_elements, LEVELS);
                 const pathIndices = bytesToBigIntStringLE(syncedProof.path_indices);
-                console.log('[TxBuilder] Membership proof details:', {
-                    leaf: bytesToBigIntStringLE(membershipLeaf),
-                    blinding: membershipBlinding.toString(),
-                    pathIndices,
-                    pathElementsCount: pathElements.length,
-                    pathElements: pathElements.slice(0, 3).map(e => e.slice(0, 20) + '...'),
-                });
                 return {
                     leaf: bytesToBigIntStringLE(membershipLeaf),
                     blinding: membershipBlinding.toString(),
@@ -725,11 +680,6 @@ export async function generateTransactionProof(params, options = {}) {
     const { proof, publicInputs, timings } = await ProverClient.prove(circuitInputs, {
         sorobanFormat: true,
     });
-    
-    // Note: Local verification with Soroban-format proofs may not work as the verifier
-    // expects compressed format. We'll focus on comparing public inputs instead.
-    console.log('[TxBuilder] Proof generated:', proof.length, 'bytes (Soroban format)');
-    console.log('[TxBuilder] Public inputs:', publicInputs.length, 'bytes');
 
     // Parse proof bytes into Soroban structure
     const proofStruct = {
@@ -753,46 +703,6 @@ export async function generateTransactionProof(params, options = {}) {
         asp_membership_root: params.membershipRoot,
         asp_non_membership_root: params.nonMembershipRoot,
     };
-
-    // Parse public inputs from the proof response (LE bytes, 32 bytes per element)
-    const proofPublicInputs = [];
-    const numPublicInputs = publicInputs.length / 32;
-    for (let i = 0; i < numPublicInputs; i++) {
-        const chunk = publicInputs.slice(i * 32, (i + 1) * 32);
-        proofPublicInputs.push(bytesToBigIntLE(chunk));
-    }
-    
-    // Build expected public inputs array (what we'll send to the contract)
-    const expectedPublicInputs = [
-        params.poolRoot,
-        publicAmountField,
-        extDataHash.bigInt,
-        params.membershipRoot,  // For input 0
-        params.membershipRoot,  // For input 1
-        params.nonMembershipRoot,  // For input 0
-        params.nonMembershipRoot,  // For input 1
-        inputNotes[0].nullifierBig,
-        inputNotes[1].nullifierBig,
-        outputNotes[0].commitmentBig,
-        outputNotes[1].commitmentBig,
-    ];
-    
-    // Compare proof's public inputs with expected
-    console.log('[TxBuilder] Comparing public inputs (proof vs expected):');
-    let publicInputsMismatch = false;
-    for (let i = 0; i < Math.max(proofPublicInputs.length, expectedPublicInputs.length); i++) {
-        const fromProof = proofPublicInputs[i];
-        const expected = expectedPublicInputs[i];
-        const match = fromProof === expected;
-        if (!match) publicInputsMismatch = true;
-        console.log(`  [${i}] ${match ? 'OK' : 'MISMATCH!'} proof=${fromProof?.toString()} expected=${expected?.toString()}`);
-    }
-    
-    if (publicInputsMismatch) {
-        console.error('[TxBuilder] PUBLIC INPUTS MISMATCH DETECTED!');
-        console.error('[TxBuilder] The public inputs from the proof do not match what we will send to the contract.');
-        console.error('[TxBuilder] This WILL cause on-chain verification to fail.');
-    }
 
     return {
         proof: proofStruct,

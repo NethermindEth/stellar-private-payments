@@ -251,16 +251,8 @@ export async function readASPMembershipState(contractId) {
         ]);
 
         if (rootResult.success) {
-            const rawValue = rootResult.value;
-            const formattedRoot = formatU256(rawValue);
-            console.log('[Stellar] ASP Membership root formatting:', {
-                rawType: typeof rawValue,
-                rawValue: typeof rawValue === 'bigint' ? '0x' + rawValue.toString(16) : String(rawValue).slice(0, 70),
-                formatted: formattedRoot,
-                formattedLength: formattedRoot.length,
-            });
-            results.root = formattedRoot;
-            results.rootRaw = rawValue;
+            results.root = formatU256(rootResult.value);
+            results.rootRaw = rootResult.value;
         }
         if (levelsResult.success) results.levels = levelsResult.value;
         if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;

@@ -186,19 +186,6 @@ async function handleProve(data, messageId) {
         // Step 2: Generate proof
         const proveTime = performance.now();
         let proofBytes;
-        // DEBUG: Generate compressed proof and verify locally
-        const compressedProof = generateProofBytes(witnessBytes);
-        const debugPublicInputs = extractPublicInputs(witnessBytes);
-        try {
-            const localVerified = verifyProofLocal(compressedProof, debugPublicInputs);
-            console.log(`[Worker] DEBUG: Local arkworks verification: ${localVerified ? 'PASSED' : 'FAILED'}`);
-            if (!localVerified) {
-                console.error('[Worker] DEBUG: Proof failed local verification with embedded VK');
-            }
-        } catch (verifyErr) {
-            console.error('[Worker] DEBUG: Local verification error:', verifyErr?.message || verifyErr);
-        }
-        
         if (sorobanFormat) {
             // Generate directly in Soroban uncompressed format (256 bytes)
             proofBytes = generateProofBytesSoroban(witnessBytes);
