@@ -216,9 +216,47 @@ export const Withdraw = {
                 console.log('[Withdraw] On-chain pool root:', poolRoot.toString(16));
                 if (localRootBigInt !== poolRoot) {
                     console.error('[Withdraw] Pool root mismatch! Local tree out of sync.');
-                    throw new Error(`Pool state out of sync. Local: ${localLeafCount} leaves, On-chain: ${onChainLeafCount} leaves. Try clearing data and refreshing.`);
+                    setLoadingText('Pool out of sync, rebuilding...');
+                    await StateManager.startSync({ forceRefresh: true });
+                    await StateManager.rebuildPoolTree();
+                    
+                    // Re-fetch state and re-check
+                    const newStates = await readAllContractStates();
+                    const newPoolRoot = BigInt(newStates.pool.merkleRoot || '0x0');
+                    const newLocalRootLE = poolStore.getRoot();
+                    let newLocalRootBigInt = 0n;
+                    for (let i = 0; i < newLocalRootLE.length; i++) {
+                        newLocalRootBigInt = (newLocalRootBigInt << 8n) | BigInt(newLocalRootLE[newLocalRootLE.length - 1 - i]);
+                    }
+                    
+                    if (newLocalRootBigInt !== newPoolRoot) {
+                        throw new Error(`Pool state still out of sync after rebuild. Try refreshing the page.`);
+                    }
+                    
+                    // Re-build merkle proofs with synced tree
+                    setLoadingText('Re-gathering input notes...');
+                    inputNotes.length = 0;
+                    totalInputAmount = 0n;
+                    for (const input of noteInputs) {
+                        const noteId = input.value.trim();
+                        if (!noteId) continue;
+                        const normalizedId = noteId.toLowerCase();
+                        let note = App.state.notes.find(n => n.id === normalizedId || n.id === noteId);
+                        if (!note) {
+                            const dbNote = await notesStore.getNoteByCommitment(noteId);
+                            if (dbNote && !dbNote.spent) note = dbNote;
+                        }
+                        if (!note) continue;
+                        const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                        if (merkleProof) {
+                            inputNotes.push({ ...note, merkleProof });
+                            totalInputAmount += BigInt(note.amount);
+                        }
+                    }
+                    console.log('[Withdraw] Pool synced, rebuilt proofs for', inputNotes.length, 'notes');
+                } else {
+                    console.log('[Withdraw] Pool roots match - local tree is synced');
                 }
-                console.log('[Withdraw] Pool roots match - local tree is synced');
             }
             
             setLoadingText('Generating ZK proof...');

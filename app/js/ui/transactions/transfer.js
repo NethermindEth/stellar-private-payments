@@ -274,6 +274,62 @@ export const Transfer = {
                 nonMembership: states.aspNonMembership.root?.length || 0,
             });
             
+            // Verify local pool tree is in sync with on-chain state
+            const localPoolRootLE = poolStore.getRoot();
+            const localLeafCount = poolStore.getNextIndex();
+            const onChainLeafCount = states.pool.nextIndex || 0;
+            
+            if (localPoolRootLE) {
+                let localRootBigInt = 0n;
+                for (let i = 0; i < localPoolRootLE.length; i++) {
+                    localRootBigInt = (localRootBigInt << 8n) | BigInt(localPoolRootLE[localPoolRootLE.length - 1 - i]);
+                }
+                console.log('[Transfer] Pool sync check:', {
+                    localRoot: localRootBigInt.toString(16),
+                    onChainRoot: poolRoot.toString(16),
+                    localLeaves: localLeafCount,
+                    onChainLeaves: onChainLeafCount,
+                });
+                
+                if (localRootBigInt !== poolRoot) {
+                    console.error('[Transfer] Pool root mismatch! Local tree out of sync.');
+                    // Try to resync before failing
+                    setLoadingText('Pool out of sync, rebuilding...');
+                    await StateManager.startSync({ forceRefresh: true });
+                    await StateManager.rebuildPoolTree();
+                    
+                    // Re-fetch state and re-check
+                    const newStates = await readAllContractStates();
+                    const newPoolRoot = BigInt(newStates.pool.merkleRoot || '0x0');
+                    const newLocalRootLE = poolStore.getRoot();
+                    let newLocalRootBigInt = 0n;
+                    for (let i = 0; i < newLocalRootLE.length; i++) {
+                        newLocalRootBigInt = (newLocalRootBigInt << 8n) | BigInt(newLocalRootLE[newLocalRootLE.length - 1 - i]);
+                    }
+                    
+                    if (newLocalRootBigInt !== newPoolRoot) {
+                        throw new Error(`Pool state still out of sync after rebuild. Try refreshing the page.`);
+                    }
+                    
+                    // Re-build merkle proofs with synced tree
+                    setLoadingText('Re-gathering input notes...');
+                    inputNotes.length = 0; // Clear and rebuild
+                    for (const input of transferNoteInputs) {
+                        const noteId = input.value.trim();
+                        if (!noteId) continue;
+                        const normalizedId = noteId.toLowerCase();
+                        let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+                        if (!note) {
+                            const dbNote = await notesStore.getNoteByCommitment(noteId);
+                            if (dbNote && !dbNote.spent) note = dbNote;
+                        }
+                        if (!note) continue;
+                        const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
+                        if (merkleProof) inputNotes.push({ ...note, merkleProof });
+                    }
+                }
+            }
+            
             setLoadingText('Generating ZK proof...');
             const proofResult = await generateTransferProof({
                 privKeyBytes,

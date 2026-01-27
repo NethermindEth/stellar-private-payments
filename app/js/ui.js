@@ -48,7 +48,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     
     // Initialize navigation and wallet
     Tabs.init();
-    Wallet.init();
+    await Wallet.init(); // Wait for wallet detection to complete before rendering notes
     
     // Initialize transaction forms
     Deposit.init();

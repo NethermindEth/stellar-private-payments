@@ -8,7 +8,7 @@ import { validateWalletNetwork, registerPublicKey, getLatestLedger } from '../st
 import { App, Utils, Toast, deriveKeysFromWallet, Storage } from './core.js';
 import { setTabsRef } from './templates.js';
 import { fieldToHex } from '../bridge.js';
-import { publicKeyStore, notesStore } from '../state/index.js';
+import { publicKeyStore, notesStore, StateManager, poolStore } from '../state/index.js';
 import { bytesToHex } from '../state/utils.js';
 import { NotesTable } from './notes-table.js';
 
@@ -192,6 +192,16 @@ export const Wallet = {
                 // Reload notes for the new account
                 await NotesTable.reload();
                 
+                // Refresh pool state to ensure merkle tree is in sync
+                console.log('[Wallet] Refreshing pool state after account switch...');
+                try {
+                    await StateManager.startSync({ forceRefresh: true });
+                    await StateManager.rebuildPoolTree();
+                    console.log('[Wallet] Pool state refreshed, tree has', poolStore.getNextIndex(), 'leaves');
+                } catch (syncErr) {
+                    console.warn('[Wallet] Pool sync failed after account switch:', syncErr.message);
+                }
+                
                 // Notify callbacks
                 for (const callback of accountChangeCallbacks) {
                     try {
@@ -201,7 +211,7 @@ export const Wallet = {
                     }
                 }
                 
-                Toast.show('Account changed - notes updated', 'success');
+                Toast.show('Account changed - state synced', 'success');
             }
         } catch (e) {
             // Wallet may have been disconnected externally

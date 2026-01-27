@@ -422,7 +422,20 @@ export async function initializeKeypairs() {
         return false;
     }
     
-    const note = await getUserNoteKeypair();
+    // Delay to let Freighter settle between signature requests.
+    // Rapid successive requests can fail due to Freighter's internal state.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    let note = await getUserNoteKeypair();
+    
+    // If encryption worked but spending failed, it's likely a timing issue.
+    // Retry once more with a longer delay.
+    if (!note && encryption) {
+        console.log('[NotesStore] Retrying spending key derivation after delay...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        note = await getUserNoteKeypair();
+    }
+    
     if (!note) {
         return false;
     }
@@ -432,41 +445,58 @@ export async function initializeKeypairs() {
 
 /**
  * Request a signature from Freighter and decode it.
+ * Includes retry logic for transient Freighter failures.
  * @param {string} message - Message to sign
  * @param {string} purpose - Purpose for logging
  * @returns {Promise<Uint8Array|null>} 64-byte Ed25519 signature or null
  */
 async function requestSignature(message, purpose) {
-    try {
-        // Pass current owner address to ensure Freighter signs with the correct account.
-        // This prevents race conditions after account switches where Freighter might
-        // still reference a stale account context on the first signature attempt.
-        const opts = currentOwner ? { address: currentOwner } : {};
-        const result = await signWalletMessage(message, opts);
-        
-        if (!result.signedMessage) {
-            console.warn(`[NotesStore] User rejected ${purpose} signature`);
-            return null;
+    const MAX_RETRIES = 2;
+    let lastError = null;
+    
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            // Pass current owner address to ensure Freighter signs with the correct account.
+            // This prevents race conditions after account switches where Freighter might
+            // still reference a stale account context on the first signature attempt.
+            const opts = currentOwner ? { address: currentOwner } : {};
+            const result = await signWalletMessage(message, opts);
+            
+            if (!result.signedMessage) {
+                console.warn(`[NotesStore] User rejected ${purpose} signature`);
+                return null;
+            }
+            
+            // Decode base64 to bytes
+            const signatureBytes = Uint8Array.from(
+                atob(result.signedMessage),
+                c => c.charCodeAt(0)
+            );
+            
+            if (signatureBytes.length !== 64) {
+                console.error(`[NotesStore] Invalid ${purpose} signature length:`, signatureBytes.length);
+                return null;
+            }
+            
+            return signatureBytes;
+        } catch (e) {
+            lastError = e;
+            
+            // Actual user rejection - don't retry
+            if (e.code === 'USER_REJECTED') {
+                console.warn(`[NotesStore] User rejected ${purpose} signature request`);
+                return null;
+            }
+            
+            // Transient error - retry after delay
+            if (attempt < MAX_RETRIES) {
+                console.warn(`[NotesStore] ${purpose} signature failed (attempt ${attempt + 1}), retrying...`, e.message);
+                await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+                continue;
+            }
         }
-        
-        // Decode base64 to bytes
-        const signatureBytes = Uint8Array.from(
-            atob(result.signedMessage),
-            c => c.charCodeAt(0)
-        );
-        
-        if (signatureBytes.length !== 64) {
-            console.error(`[NotesStore] Invalid ${purpose} signature length:`, signatureBytes.length);
-            return null;
-        }
-        
-        return signatureBytes;
-    } catch (e) {
-        if (e.code === 'USER_REJECTED') {
-            console.warn(`[NotesStore] User rejected ${purpose} signature request`);
-            return null;
-        }
-        console.error(`[NotesStore] Failed to get ${purpose} signature:`, e);
-        return null;
     }
+    
+    console.error(`[NotesStore] Failed to get ${purpose} signature after retries:`, lastError);
+    return null;
 }

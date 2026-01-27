@@ -4,7 +4,8 @@
  */
 
 import { StateManager } from '../state/index.js';
-import { Toast } from './core.js';
+import { Toast, Storage } from './core.js';
+import { NotesTable } from './notes-table.js';
 
 export const SyncUI = {
     statusEl: null,
@@ -119,10 +120,17 @@ export const SyncUI = {
         }
     },
 
-    onComplete(data) {
+    async onComplete(data) {
         this.show(`Synced: ${data.poolLeavesCount} pool, ${data.aspMembershipLeavesCount} ASP`, false);
         this.hide();
         this.hideWarning();
+        
+        // Refresh notes if any were found or marked spent
+        if (data.notesFound > 0 || data.notesMarkedSpent > 0) {
+            await Storage.load();
+            NotesTable.render();
+        }
+        
         Toast.show('State synchronized successfully', 'success');
     },
 
@@ -178,10 +186,11 @@ export const SyncUI = {
         try {
             let keysInitialized = StateManager.hasAuthenticatedKeys();
             if (!keysInitialized) {
-                this.show('Authenticating for note scanning...');
+                this.show('Please sign to derive your keys...');
+                Toast.show('Sign the messages in Freighter to scan for notes', 'info');
                 keysInitialized = await StateManager.initializeUserKeys();
                 if (!keysInitialized) {
-                    Toast.show('Authentication required to scan for notes', 'error');
+                    Toast.show('Signature required to scan for notes (cancelled)', 'error');
                     this.hide();
                     return;
                 }

@@ -918,9 +918,22 @@ export async function generateTransferProof(params, options = {}) {
         ...changeOutputs,
     ];
     
+    console.log('[TxBuilder] Transfer outputs before padding:', {
+        recipientOutputCount: recipientOutputs.length,
+        changeOutputCount: changeOutputs.length,
+        totalOutputs: outputs.length,
+        amounts: outputs.map(o => o.amount.toString()),
+    });
+    
     // Ensure we have exactly 2 outputs
     while (outputs.length < 2) {
         outputs.push({ amount: 0n, blinding: bytesToBigIntLE(generateBlinding()) });
+    }
+    
+    // Circuit only supports exactly 2 outputs
+    if (outputs.length > 2) {
+        console.error('[TxBuilder] Too many outputs:', outputs.length);
+        throw new Error(`Transfer supports max 2 outputs, got ${outputs.length}`);
     }
 
     return generateTransactionProof(
