@@ -38,6 +38,8 @@ import {
  * @property {number} createdAtLedger - Ledger when created
  * @property {boolean} spent - Whether the note has been spent
  * @property {number} [spentAtLedger] - Ledger when spent
+ * @property {boolean} [isReceived] - True if note was received via transfer (vs created by user)
+ * @property {boolean} [isLegacy] - True if note was created with legacy byte order (before endianness fix)
  */
 
 // Current owner address for filtering notes
@@ -75,6 +77,8 @@ export function getCurrentOwner() {
  * @param {number} params.leafIndex - Leaf index in pool tree
  * @param {number} params.ledger - Ledger when created
  * @param {string} [params.owner] - Stellar address that owns this note (defaults to currentOwner)
+ * @param {boolean} [params.isReceived=false] - True if note was received via transfer (discovered by scanning)
+ * @param {boolean} [params.isLegacy=false] - True if note was created with legacy byte order (before endianness fix)
  * @returns {Promise<UserNote>}
  */
 export async function saveNote(params) {
@@ -84,7 +88,7 @@ export async function saveNote(params) {
     }
     
     const note = {
-        id: normalizeHex(params.commitment),
+        id: normalizeHex(params.commitment).toLowerCase(),
         owner: owner || '',
         privateKey: toHex(params.privateKey),
         blinding: toHex(params.blinding),
@@ -93,10 +97,13 @@ export async function saveNote(params) {
         createdAt: new Date().toISOString(),
         createdAtLedger: params.ledger,
         spent: false,
+        isReceived: params.isReceived || false,
+        isLegacy: params.isLegacy || false,
     };
     
     await db.put('user_notes', note);
-    console.log(`[NotesStore] Saved note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
+    const noteType = note.isReceived ? 'received' : 'created';
+    console.log(`[NotesStore] Saved ${noteType} note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
     return note;
 }
 
@@ -107,7 +114,7 @@ export async function saveNote(params) {
  * @returns {Promise<boolean>} True if note was found and marked
  */
 export async function markNoteSpent(commitment, ledger) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     const note = await db.get('user_notes', id);
     
     if (!note) {
@@ -152,12 +159,12 @@ export async function getNotes(options = {}) {
 }
 
 /**
- * Gets a note by commitment.
+ * Gets a note by commitment (case-insensitive hex comparison).
  * @param {string} commitment - Note commitment
  * @returns {Promise<UserNote|null>}
  */
 export async function getNoteByCommitment(commitment) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     return await db.get('user_notes', id) || null;
 }
 
@@ -230,7 +237,7 @@ export async function importNotes(file) {
  * @returns {Promise<void>}
  */
 export async function deleteNote(commitment) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     await db.del('user_notes', id);
 }
 
@@ -385,6 +392,26 @@ export function hasAuthenticatedKeys() {
 }
 
 /**
+ * Set authenticated keys directly (used when keys are derived elsewhere).
+ * This allows note scanning to work after deposits/withdraws/transfers
+ * without prompting for additional signatures.
+ * 
+ * @param {Object} keys
+ * @param {Object} keys.encryptionKeypair - X25519 keypair { publicKey, secretKey }
+ * @param {Uint8Array} keys.notePrivateKey - BN254 private key
+ * @param {Uint8Array} keys.notePublicKey - BN254 public key
+ */
+export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePublicKey }) {
+    if (encryptionKeypair) {
+        cachedEncryptionKeypair = encryptionKeypair;
+    }
+    if (notePrivateKey && notePublicKey) {
+        cachedNoteKeypair = { privateKey: notePrivateKey, publicKey: notePublicKey };
+    }
+    console.log('[NotesStore] Keys cached from external derivation');
+}
+
+/**
  * Initialize both keypairs (prompts user for two signatures).
  * Call this during login/setup flow.
  * @returns {Promise<boolean>} True if both keypairs were derived successfully
@@ -411,7 +438,11 @@ export async function initializeKeypairs() {
  */
 async function requestSignature(message, purpose) {
     try {
-        const result = await signWalletMessage(message);
+        // Pass current owner address to ensure Freighter signs with the correct account.
+        // This prevents race conditions after account switches where Freighter might
+        // still reference a stale account context on the first signature attempt.
+        const opts = currentOwner ? { address: currentOwner } : {};
+        const result = await signWalletMessage(message, opts);
         
         if (!result.signedMessage) {
             console.warn(`[NotesStore] User rejected ${purpose} signature`);

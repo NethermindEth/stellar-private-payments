@@ -70,7 +70,6 @@ let cachedCircuitWasm = null;
 let downloadPromise = null;
 
 // Caching (Cache API)
-
 /**
  * Get cached artifact from Cache API
  * @param {string} url 
@@ -319,7 +318,7 @@ export async function initWitnessModuleWasm() {
  */
 export async function initWitnessModule(circuitWasmUrl, r1csUrl) {
     await initWitnessModuleWasm();
-
+ 
     if (witnessInitialized && witnessCalc) {
         return getCircuitInfo();
     }
@@ -566,6 +565,23 @@ export function bigintToField(value) {
 export { decimal_to_field_bytes as decimalToField };
 export { hex_to_field_bytes as hexToField };
 export { field_bytes_to_hex as fieldToHex };
+
+/**
+ * Convert little-endian bytes to BigInt.
+ * 
+ * Field elements from the prover are serialized as LE bytes.
+ * This correctly interprets them as BigInt for circuit inputs.
+ * 
+ * @param {Uint8Array} bytes - Little-endian bytes (32 bytes for field elements)
+ * @returns {bigint} The BigInt value
+ */
+export function bytesToBigIntLE(bytes) {
+    let result = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) {
+        result = (result << 8n) | BigInt(bytes[i]);
+    }
+    return result;
+}
 
 // Witness Generation
 

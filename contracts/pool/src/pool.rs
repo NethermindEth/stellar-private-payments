@@ -140,8 +140,10 @@ pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
 pub struct Account {
     /// Owner address of the account
     pub owner: Address,
-    /// Public encryption key for receiving encrypted outputs
-    pub public_key: Bytes,
+    /// X25519 encryption public key for encrypting note data (32 bytes)
+    pub encryption_key: Bytes,
+    /// BN254 note public key for creating commitments (32 bytes)
+    pub note_key: Bytes,
 }
 
 // Contract clients for cross-contract dependencies
@@ -207,18 +209,22 @@ pub struct NewNullifierEvent {
     pub nullifier: U256,
 }
 
-/// Event emitted when a user registers their public key
+/// Event emitted when a user registers their public keys
 ///
-/// This event allows other users to discover encryption keys for sending
-/// private transfers.
+/// This event allows other users to discover keys for sending private transfers.
+/// Two key types are required:
+/// - encryption_key: X25519 key for encrypting note data (amount, blinding)
+/// - note_key: BN254 key for creating commitments in the ZK circuit
 #[contractevent]
 #[derive(Clone)]
 pub struct PublicKeyEvent {
     /// Address of the account owner
     #[topic]
     pub owner: Address,
-    /// Public encryption key
-    pub key: Bytes,
+    /// X25519 encryption public key
+    pub encryption_key: Bytes,
+    /// BN254 note public key
+    pub note_key: Bytes,
 }
 
 /// Privacy Pool Contract
@@ -629,7 +635,8 @@ impl PoolContract {
         account.owner.require_auth();
         PublicKeyEvent {
             owner: account.owner,
-            key: account.public_key,
+            encryption_key: account.encryption_key,
+            note_key: account.note_key,
         }
         .publish(&env);
     }

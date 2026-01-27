@@ -5,7 +5,7 @@
 
 import { signWalletTransaction, signWalletAuthEntry } from '../../wallet.js';
 import { readAllContractStates, submitPoolTransaction } from '../../stellar.js';
-import { StateManager, poolStore } from '../../state/index.js';
+import { StateManager, poolStore, notesStore } from '../../state/index.js';
 import { generateWithdrawProof } from '../../transaction-builder.js';
 import { App, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
@@ -238,12 +238,16 @@ export const Withdraw = {
             
             console.log('[Withdraw] Transaction submitted:', submitResult.txHash);
             
-            inputNotes.forEach(inputNote => {
+            // Mark input notes as spent in IndexedDB
+            for (const inputNote of inputNotes) {
+                await notesStore.markNoteSpent(inputNote.id, submitResult.ledger || 0);
+                // Also update in-memory state
                 const note = App.state.notes.find(n => n.id === inputNote.id);
                 if (note) note.spent = true;
-            });
+            }
             
-            Storage.save();
+            // Reload notes from storage to ensure consistency
+            await Storage.load();
             if (NotesTableRef) NotesTableRef.render();
             
             try {

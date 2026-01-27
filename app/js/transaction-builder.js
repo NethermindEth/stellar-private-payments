@@ -274,11 +274,43 @@ function createRealInput(privKeyBytes, pubKeyBytes, note, merkleProof) {
     const blinding = BigInt(note.blinding);
     const leafIndex = note.leafIndex;
     
+    // Validate blinding is within field bounds
+    if (blinding >= BN254_MODULUS) {
+        console.error(`[TxBuilder] Note blinding exceeds field modulus!`, {
+            noteId: note.id?.slice(0, 16),
+            storedBlinding: note.blinding?.slice?.(0, 40) || note.blinding,
+            blindingBigInt: blinding.toString().slice(0, 40) + '...',
+        });
+        throw new Error(
+            `Note at index ${leafIndex} has corrupted blinding. ` +
+            `This note may have been created with a buggy version. ` +
+            `Please clear notes in browser storage and re-deposit.`
+        );
+    }
+    
     const amountBytes = bigintToField(amount);
     const blindingBytes = bigintToField(blinding);
     
+    // For legacy notes (created before endianness fix), use reversed public key
+    let effectivePubKey = pubKeyBytes;
+    if (note.isLegacy) {
+        effectivePubKey = new Uint8Array([...pubKeyBytes]).reverse();
+        console.log('[TxBuilder] Using reversed pubKey for legacy note');
+    }
+    
     // Compute commitment: poseidon2(amount, pubKey, blinding)
-    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+    const commitment = computeCommitment(amountBytes, effectivePubKey, blindingBytes);
+    
+    // Debug logging for received notes
+    if (note.isReceived) {
+        console.log('[TxBuilder] Spending received note:', {
+            noteId: note.id?.slice(0, 20) + '...',
+            amount: amount.toString(),
+            isLegacy: note.isLegacy,
+            computedCommitment: fieldToHex(commitment),
+            expectedCommitment: note.id,
+        });
+    }
     
     // Path indices as BigInt for nullifier computation
     const pathIndicesBytes = merkleProof.path_indices;
@@ -322,6 +354,16 @@ function createOutput(amount, pubKeyBytes, blinding) {
     const amountBytes = bigintToField(amount);
     const blindingBytes = bigintToField(blinding);
     const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
+    
+    // Diagnostic logging for debugging commitment issues
+    // Using fieldToHex to show BE hex (matches on-chain storage format)
+    console.log('[TxBuilder] createOutput commitment inputs:', {
+        amount: amount.toString(),
+        amountHex: fieldToHex(amountBytes),
+        pubKeyHex: fieldToHex(pubKeyBytes),
+        blindingHex: fieldToHex(blindingBytes),
+        commitmentHex: fieldToHex(commitment),
+    });
 
     return {
         amount,
@@ -515,12 +557,14 @@ function encryptOutput(outputNote, encryptionPubKey) {
  *
  * @param {Object} params
  * @param {Uint8Array} params.privKeyBytes - User's BN254 private key (for spending)
- * @param {Uint8Array} params.encryptionPubKey - User's X25519 public key (for note encryption)
+ * @param {Uint8Array} params.encryptionPubKey - User's X25519 public key (for encrypting own notes)
  * @param {bigint} params.poolRoot - Current pool merkle root (on-chain)
  * @param {bigint} params.membershipRoot - ASP membership root (on-chain)
  * @param {bigint} params.nonMembershipRoot - ASP non-membership root (on-chain)
  * @param {Array<{amount: bigint, blinding: bigint}>} params.inputs - Input notes (use [] for deposits)
- * @param {Array<{amount: bigint, blinding: bigint, recipientPubKey?: Uint8Array}>} params.outputs - Output notes
+ * @param {Array<{amount: bigint, blinding: bigint, recipientPubKey?: Uint8Array, recipientEncryptionPubKey?: Uint8Array}>} params.outputs - Output notes
+ *        - recipientPubKey: BN254 note key for commitment (defaults to sender's key)
+ *        - recipientEncryptionPubKey: X25519 encryption key for encrypting note data (defaults to sender's key)
  * @param {Object} params.extData - External data (recipient, ext_amount, fee)
  * @param {Object} [params.stateManager] - StateManager for on-chain proofs
  * @param {number} [params.membershipLeafIndex=0] - User's leaf index in membership tree
@@ -545,6 +589,11 @@ export async function buildTransactionInputs(params) {
     // Derive public key
     const pubKeyBytes = derivePublicKey(privKeyBytes);
     const privKeyBigInt = bytesToBigIntLE(privKeyBytes);
+    
+    // Log for debugging (fieldToHex shows BE hex to match on-chain format)
+    console.log('[TxBuilder] Using keypair:', {
+        pubKeyHex: fieldToHex(pubKeyBytes),
+    });
 
     // Create input notes
     const inputNotes = [];
@@ -571,21 +620,27 @@ export async function buildTransactionInputs(params) {
         }
     }
 
-    // Create output notes
-    const outputNotes = outputs.map((out) => {
+    // Create output notes and track encryption keys for each
+    const outputNotes = [];
+    const outputEncryptionKeys = [];
+    
+    for (const out of outputs) {
         const recipientPubKey = out.recipientPubKey || pubKeyBytes;
-        return createOutput(out.amount, recipientPubKey, out.blinding);
-    });
+        const recipientEncKey = out.recipientEncryptionPubKey || encryptionPubKey;
+        outputNotes.push(createOutput(out.amount, recipientPubKey, out.blinding));
+        outputEncryptionKeys.push(recipientEncKey);
+    }
 
     // Ensure we have exactly 2 outputs (pad with dummy if needed)
     while (outputNotes.length < 2) {
         const dummyBlinding = bytesToBigIntLE(generateBlinding());
         outputNotes.push(createOutput(0n, pubKeyBytes, dummyBlinding));
+        outputEncryptionKeys.push(encryptionPubKey); // Dummy outputs use sender's key
     }
 
-    // Encrypt output notes
-    const encryptedOutput0 = encryptOutput(outputNotes[0], encryptionPubKey);
-    const encryptedOutput1 = encryptOutput(outputNotes[1], encryptionPubKey);
+    // Encrypt output notes using each output's specific encryption key
+    const encryptedOutput0 = encryptOutput(outputNotes[0], outputEncryptionKeys[0]);
+    const encryptedOutput1 = encryptOutput(outputNotes[1], outputEncryptionKeys[1]);
 
     // Build complete ext_data with encrypted outputs
     const completeExtData = {

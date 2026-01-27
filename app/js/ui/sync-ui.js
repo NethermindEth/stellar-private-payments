@@ -138,17 +138,73 @@ export const SyncUI = {
     async startSync() {
         this.show('Starting sync...');
         try {
+            // Only scan notes if keys are already authenticated (from previous action)
+            // Don't prompt for authentication during regular sync
+            const keysInitialized = StateManager.hasAuthenticatedKeys();
+            
             const status = await StateManager.startSync({
                 onProgress: (p) => this.onProgress(p),
                 forceRefresh: true,
+                scanNotes: keysInitialized,
+                checkSpent: keysInitialized,
             });
             await StateManager.rebuildPoolTree();
+            
             if (status.status === 'broken') {
                 this.showWarning(status.message);
+            } else if (status.status === 'complete') {
+                let msg = `Synced: ${status.poolLeavesCount} pool leaves`;
+                if (status.notesFound > 0) {
+                    msg += `, found ${status.notesFound} new note(s)!`;
+                    Toast.show(msg, 'success');
+                }
+                if (status.notesMarkedSpent > 0) {
+                    console.log(`[SyncUI] Marked ${status.notesMarkedSpent} notes as spent`);
+                }
             }
         } catch (err) {
             console.error('[SyncUI] Sync failed:', err);
             Toast.show('Sync failed: ' + err.message, 'error');
+            this.hide();
+        }
+    },
+    
+    /**
+     * Scans for notes received from others.
+     * Requires authenticated keys.
+     */
+    async scanForNotes() {
+        this.show('Checking authentication...');
+        try {
+            let keysInitialized = StateManager.hasAuthenticatedKeys();
+            if (!keysInitialized) {
+                this.show('Authenticating for note scanning...');
+                keysInitialized = await StateManager.initializeUserKeys();
+                if (!keysInitialized) {
+                    Toast.show('Authentication required to scan for notes', 'error');
+                    this.hide();
+                    return;
+                }
+            }
+            
+            this.show('Scanning for received notes...');
+            const result = await StateManager.startSync({
+                onProgress: (p) => this.onProgress(p),
+                forceRefresh: false,
+                scanNotes: true,
+                checkSpent: true,
+            });
+            
+            if (result.notesFound > 0) {
+                Toast.show(`Found ${result.notesFound} new note(s)!`, 'success');
+            } else {
+                Toast.show('No new notes found', 'info');
+            }
+            
+            this.hide();
+        } catch (err) {
+            console.error('[SyncUI] Scan failed:', err);
+            Toast.show('Scan failed: ' + err.message, 'error');
             this.hide();
         }
     },
@@ -171,16 +227,26 @@ export const SyncUI = {
         try {
             await StateManager.clearAll();
             console.log('[SyncUI] State cleared, starting fresh sync...');
-            this.show('Re-syncing from scratch...');
             
+            // Only scan notes if keys are already authenticated
+            // Don't prompt for authentication during resync
+            const keysInitialized = StateManager.hasAuthenticatedKeys();
+            
+            this.show('Re-syncing from scratch...');
             const status = await StateManager.startSync({
                 onProgress: (p) => this.onProgress(p),
                 forceRefresh: true,
+                scanNotes: keysInitialized,
+                checkSpent: keysInitialized,
             });
             await StateManager.rebuildPoolTree();
             
             if (status.status === 'complete') {
-                Toast.show(`Resynced: ${status.aspMembershipLeavesCount} ASP membership leaves, ${status.poolLeavesCount} pool leaves`, 'success');
+                let msg = `Resynced: ${status.aspMembershipLeavesCount} ASP membership, ${status.poolLeavesCount} pool leaves`;
+                if (status.notesFound > 0) {
+                    msg += `, found ${status.notesFound} note(s)`;
+                }
+                Toast.show(msg, 'success');
             } else if (status.status === 'broken') {
                 this.showWarning(status.message);
             }

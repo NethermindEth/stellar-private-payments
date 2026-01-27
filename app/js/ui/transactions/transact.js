@@ -5,8 +5,8 @@
 
 import { signWalletTransaction, signWalletAuthEntry } from '../../wallet.js';
 import { readAllContractStates, getDeployedContracts, submitPoolTransaction } from '../../stellar.js';
-import { StateManager, poolStore } from '../../state/index.js';
-import { generateBlinding, fieldToHex } from '../../bridge.js';
+import { StateManager, poolStore, notesStore } from '../../state/index.js';
+import { generateBlinding, fieldToHex, bytesToBigIntLE, bigintToField } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
 import { onWalletConnect } from '../navigation.js';
@@ -194,7 +194,7 @@ export const Transact = {
             document.querySelectorAll('#transact-outputs .advanced-output-row').forEach((row, idx) => {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const blindingBytes = generateBlinding();
-                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                const blinding = bytesToBigIntLE(blindingBytes);
                 const recipient = outputRecipients[idx];
                 outputs.push({ 
                     amount: BigInt(Math.round(amount * 1e7)), 
@@ -278,7 +278,7 @@ export const Transact = {
                     id: noteId,
                     commitment: noteId,
                     amount: amountStroops,
-                    blinding: outputNote.blinding.toString(),
+                    blinding: fieldToHex(outputNote.blindingBytes),
                     leafIndex,
                     spent: false,
                     isDummy,
@@ -317,14 +317,26 @@ export const Transact = {
             
             console.log('[Transact] Transaction submitted:', submitResult.txHash);
             
-            pendingNotes.forEach(note => App.state.notes.push(note));
+            // Save new notes to IndexedDB
+            for (const note of pendingNotes) {
+                await notesStore.saveNote({
+                    commitment: note.commitment,
+                    privateKey: privKeyBytes,
+                    blinding: note.blinding,
+                    amount: note.amount,
+                    leafIndex: note.leafIndex,
+                    ledger: submitResult.ledger || 0,
+                    owner: note.owner,
+                });
+            }
             
-            inputNotes.forEach(inputNote => {
-                const note = App.state.notes.find(n => n.id === inputNote.id);
-                if (note) note.spent = true;
-            });
+            // Mark spent notes
+            for (const inputNote of inputNotes) {
+                await notesStore.markNoteSpent(inputNote.id, submitResult.ledger || 0);
+            }
             
-            Storage.save();
+            // Reload notes for UI
+            await Storage.load();
             if (NotesTableRef) NotesTableRef.render();
             
             try {

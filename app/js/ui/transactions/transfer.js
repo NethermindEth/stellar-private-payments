@@ -5,9 +5,10 @@
 
 import { signWalletTransaction, signWalletAuthEntry } from '../../wallet.js';
 import { readAllContractStates, getDeployedContracts, submitPoolTransaction } from '../../stellar.js';
-import { StateManager, poolStore } from '../../state/index.js';
+import { StateManager, poolStore, notesStore } from '../../state/index.js';
+import { hexToBytes } from '../../state/utils.js';
 import { generateTransferProof } from '../../transaction-builder.js';
-import { generateBlinding, fieldToHex } from '../../bridge.js';
+import { generateBlinding, fieldToHex, bytesToBigIntLE, hexToField } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
 
@@ -52,7 +53,8 @@ export const Transfer = {
     },
     
     /**
-     * Opens address book search modal/panel to look up a public key by Stellar address.
+     * Opens address book search modal/panel to look up public keys by Stellar address.
+     * Populates both note key (BN254) and encryption key (X25519) fields.
      */
     async openAddressBookLookup() {
         const address = prompt('Enter Stellar address to look up (G...):');
@@ -69,14 +71,27 @@ export const Transfer = {
             const result = await StateManager.searchPublicKey(address);
             
             if (result.found) {
-                const recipientInput = document.getElementById('transfer-recipient-key');
-                if (recipientInput) {
-                    recipientInput.value = result.record.publicKey;
-                    recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+                // Use new fields if available, fallback to legacy publicKey
+                const encryptionKey = result.record.encryptionKey || result.record.publicKey;
+                const noteKey = result.record.noteKey || result.record.publicKey;
+                
+                // Set the note key (BN254 - used for commitment)
+                const noteKeyInput = document.getElementById('transfer-recipient-key');
+                if (noteKeyInput) {
+                    noteKeyInput.value = noteKey;
+                    noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
                 }
-                Toast.show(`Found public key (${result.source})`, 'success');
+                
+                // Set the encryption key (X25519 - used for encrypting note data)
+                const encKeyInput = document.getElementById('transfer-recipient-enc-key');
+                if (encKeyInput) {
+                    encKeyInput.value = encryptionKey;
+                    encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                }
+                
+                Toast.show(`Found keys (${result.source})`, 'success');
             } else {
-                Toast.show('No registered public key found for this address', 'error');
+                Toast.show('No registered public keys found for this address', 'error');
             }
         } catch (e) {
             console.error('[Transfer] Address lookup failed:', e);
@@ -125,9 +140,17 @@ export const Transfer = {
             return;
         }
         
-        const recipientKey = document.getElementById('transfer-recipient-key').value.trim();
-        if (!recipientKey) {
-            Toast.show('Please enter recipient public key', 'error');
+        // Get recipient note key (BN254 - used for commitment)
+        const recipientNoteKey = document.getElementById('transfer-recipient-key').value.trim();
+        if (!recipientNoteKey) {
+            Toast.show('Please enter recipient note key (BN254)', 'error');
+            return;
+        }
+        
+        // Get recipient encryption key (X25519 - used for encrypting note data)
+        const recipientEncKey = document.getElementById('transfer-recipient-enc-key')?.value.trim();
+        if (!recipientEncKey) {
+            Toast.show('Please enter recipient encryption key (X25519)', 'error');
             return;
         }
         
@@ -165,15 +188,28 @@ export const Transfer = {
                 signDelay: 500,
             });
             
-            let recipientPubKeyBytes;
+            // Parse recipient note key (BN254 - for commitment)
+            // We use hexToField to properly convert from BE hex to LE bytes (Soroban uses BE, proofs were generated using arkworks and LE)
+            let recipientNoteKeyBytes;
             try {
-                const cleanHex = recipientKey.startsWith('0x') ? recipientKey.slice(2) : recipientKey;
-                recipientPubKeyBytes = new Uint8Array(cleanHex.match(/.{2}/g).map(b => parseInt(b, 16)));
-                if (recipientPubKeyBytes.length !== 32) {
+                recipientNoteKeyBytes = hexToField(recipientNoteKey);
+                if (recipientNoteKeyBytes.length !== 32) {
                     throw new Error('Invalid length');
                 }
             } catch {
-                throw new Error('Invalid recipient public key format. Expected 64 hex characters.');
+                throw new Error('Invalid recipient note key format. Expected 64 hex characters.');
+            }
+            
+            // Parse recipient encryption key (X25519 - for encryption)
+            // X25519 keys are raw bytes (not field elements), so use hexToBytes (no reversal)
+            let recipientEncKeyBytes;
+            try {
+                recipientEncKeyBytes = hexToBytes(recipientEncKey);
+                if (recipientEncKeyBytes.length !== 32) {
+                    throw new Error('Invalid length');
+                }
+            } catch {
+                throw new Error('Invalid recipient encryption key format. Expected 64 hex characters.');
             }
             
             setLoadingText('Gathering input notes...');
@@ -204,7 +240,7 @@ export const Transfer = {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 if (amount > 0) {
                     const blindingBytes = generateBlinding();
-                    const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                    const blinding = bytesToBigIntLE(blindingBytes);
                     recipientOutputs.push({ amount: BigInt(Math.round(amount * 1e7)), blinding });
                 }
             });
@@ -226,12 +262,18 @@ export const Transfer = {
                 nonMembership: states.aspNonMembership.root || '0',
             });
             
+            console.log('[Transfer] Lengths of hex', {
+                pool: states.pool.merkleRoot.length,
+                membership: states.aspMembership.root.length,
+                nonMembership: states.aspNonMembership.root?.length || 0,
+            });
+            
             setLoadingText('Generating ZK proof...');
             const proofResult = await generateTransferProof({
                 privKeyBytes,
                 encryptionPubKey: encryptionKeypair.publicKey,
-                recipientPubKey: recipientPubKeyBytes,
-                recipientEncryptionPubKey: recipientPubKeyBytes,
+                recipientPubKey: recipientNoteKeyBytes,           // BN254 - for commitment
+                recipientEncryptionPubKey: recipientEncKeyBytes,  // X25519 - for encryption
                 poolRoot,
                 membershipRoot,
                 nonMembershipRoot,
@@ -261,10 +303,10 @@ export const Transfer = {
                     id: noteId,
                     commitment: noteId,
                     amount: amountStroops,
-                    blinding: outputNote.blinding.toString(),
+                    blinding: fieldToHex(outputNote.blindingBytes),
                     spent: false,
                     isDummy,
-                    owner: recipientKey,
+                    owner: recipientNoteKey,
                     createdAt: new Date().toISOString()
                 };
                 
@@ -296,14 +338,42 @@ export const Transfer = {
             
             console.log('[Transfer] Transaction submitted:', submitResult.txHash);
             
-            inputNotes.forEach(inputNote => {
+            // Mark input notes as spent in IndexedDB
+            for (const inputNote of inputNotes) {
+                await notesStore.markNoteSpent(inputNote.id, submitResult.ledger || 0);
+                // Also update in-memory state
                 const note = App.state.notes.find(n => n.id === inputNote.id);
                 if (note) note.spent = true;
-            });
+            }
             
-            Storage.save();
+            // In a transfer, all outputs in recipientOutputs go to the recipient.
+            const recipientOutputCount = recipientOutputs.length;
+            const poolNextIndex = states.pool.nextIndex || 0;
+            
+            for (let i = recipientOutputCount; i < proofResult.outputNotes.length; i++) {
+                const outputNote = proofResult.outputNotes[i];
+                const noteId = fieldToHex(outputNote.commitmentBytes);
+                const leafIndex = poolNextIndex + i;
+                
+                // Only save non-dummy change outputs (amount > 0)
+                if (outputNote.amount > 0n) {
+                    await notesStore.saveNote({
+                        commitment: noteId,
+                        privateKey: privKeyBytes,
+                        blinding: outputNote.blindingBytes,
+                        amount: Number(outputNote.amount),
+                        leafIndex,
+                        ledger: submitResult.ledger || 0,
+                        isReceived: false,
+                    });
+                    console.log(`[Transfer] Saved sender's change note ${noteId.slice(0, 10)}... at index ${leafIndex}`);
+                }
+            }
+            
+            // Reload notes from storage to ensure consistency
+            await Storage.load();
             if (NotesTableRef) NotesTableRef.render();
-            Toast.show('Transfer successful! Share the note files with the recipient.', 'success');
+            Toast.show('Transfer successful! The recipient can scan for new notes.', 'success');
         } catch (e) {
             console.error('[Transfer] Error:', e);
             Toast.show('Transfer failed: ' + e.message, 'error');

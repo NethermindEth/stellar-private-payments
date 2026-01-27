@@ -223,6 +223,11 @@ export const ContractReader = {
         const refreshBtn = document.getElementById('btn-refresh-state');
         refreshBtn.addEventListener('click', () => this.refreshAll());
         
+        const scanNotesBtn = document.getElementById('btn-scan-notes');
+        if (scanNotesBtn && SyncUIRef) {
+            scanNotesBtn.addEventListener('click', () => SyncUIRef.scanForNotes());
+        }
+        
         const forceResyncBtn = document.getElementById('btn-force-resync');
         if (forceResyncBtn && SyncUIRef) {
             forceResyncBtn.addEventListener('click', () => SyncUIRef.forceResync());

@@ -23,6 +23,8 @@ import {
     computeNullifier, 
     computeSignature,
     decryptNoteData,
+    bigintToField,
+    fieldToHex,
 } from '../bridge.js';
 import { hexToBytes, bytesToHex, normalizeHex } from './utils.js';
 
@@ -88,6 +90,14 @@ export async function tryDecryptNote(encryptedOutput) {
 }
 
 /**
+ * Result of commitment verification.
+ * @typedef {Object} CommitmentVerifyResult
+ * @property {boolean} valid - Whether the commitment matches
+ * @property {boolean} isLegacy - Whether the note was created with legacy byte order
+ * @property {Uint8Array} [effectivePubKey] - The public key that matched (for legacy notes, this is reversed)
+ */
+
+/**
  * Verifies that a decrypted note matches the on-chain commitment.
  * 
  * The commitment is: Poseidon2(amount, notePublicKey, blinding, domain=0x01)
@@ -95,22 +105,66 @@ export async function tryDecryptNote(encryptedOutput) {
  * We use our note public key (derived from Freighter signature via Poseidon2)
  * to verify that this commitment was indeed addressed to us.
  * 
+ * Also tries reversed byte order to support notes created before the endianness fix.
+ * 
  * @param {DecryptedNote} decrypted - Decrypted note data { amount, blinding }
  * @param {Uint8Array} notePublicKey - User's note public key
  * @param {string} expectedCommitment - On-chain commitment hash
- * @returns {boolean} True if commitment matches
+ * @returns {CommitmentVerifyResult} Verification result with legacy detection
  */
 export function verifyNoteCommitment(decrypted, notePublicKey, expectedCommitment) {
     try {
         // Compute commitment: Poseidon2(amount, publicKey, blinding, domain=0x01)
-        const amountBytes = bigintToBytes(decrypted.amount, 8);
-        const computed = computeCommitment(amountBytes, notePublicKey, decrypted.blinding);
-        const computedHex = bytesToHex(computed);
+        // All inputs must be 32-byte field elements
+        const amountBytes = bigintToField(decrypted.amount);
         
-        return normalizeHex(computedHex) === normalizeHex(expectedCommitment);
+        // Validate inputs before computing commitment
+        if (amountBytes.length !== 32) {
+            console.warn(`[NoteScanner] Amount bytes wrong length: ${amountBytes.length}, amount: ${decrypted.amount}`);
+            return { valid: false, isLegacy: false };
+        }
+        if (notePublicKey.length !== 32) {
+            console.warn(`[NoteScanner] Note public key wrong length: ${notePublicKey.length}`);
+            return { valid: false, isLegacy: false };
+        }
+        if (decrypted.blinding.length !== 32) {
+            console.warn(`[NoteScanner] Blinding wrong length: ${decrypted.blinding.length}`);
+            return { valid: false, isLegacy: false };
+        }
+        
+        const expectedNorm = normalizeHex(expectedCommitment).toLowerCase();
+        
+        // Try with current LE public key (correct format)
+        // Note: computeCommitment returns LE bytes, but on-chain commitments are stored as BE.
+        // Use fieldToHex to convert LE bytes to BE hex for comparison.
+        const computed = computeCommitment(amountBytes, notePublicKey, decrypted.blinding);
+        const computedHex = fieldToHex(computed); // LE bytes → BE hex (matches on-chain format)
+        const computedNorm = normalizeHex(computedHex).toLowerCase();
+        
+        if (computedNorm === expectedNorm) {
+            return { valid: true, isLegacy: false, effectivePubKey: notePublicKey };
+        }
+        
+        // Try with reversed public key (legacy BE format from before endianness fix)
+        const reversedPubKey = new Uint8Array([...notePublicKey]).reverse();
+        const computedReversed = computeCommitment(amountBytes, reversedPubKey, decrypted.blinding);
+        const computedReversedHex = fieldToHex(computedReversed);
+        const computedReversedNorm = normalizeHex(computedReversedHex).toLowerCase();
+        
+        if (computedReversedNorm === expectedNorm) {
+            console.warn(`[NoteScanner] Note was created with LEGACY byte order (before fix). Commitment matches with reversed key.`);
+            return { valid: true, isLegacy: true, effectivePubKey: reversedPubKey };
+        }
+        
+        console.log(`[NoteScanner] Commitment mismatch:`, {
+            computed: computedHex,
+            reversed: computedReversedHex,
+            expected: expectedCommitment,
+        });
+        return { valid: false, isLegacy: false };
     } catch (e) {
-        console.error('[NoteScanner] Commitment verification failed:', e);
-        return false;
+        console.error('[NoteScanner] Commitment verification failed:', e?.message || e?.toString() || e);
+        return { valid: false, isLegacy: false };
     }
 }
 
@@ -137,6 +191,11 @@ export async function scanForNotes(options = {}) {
         return { scanned: 0, found: 0, notes: [], alreadyKnown: 0 };
     }
     
+    // Log the keypair for debugging (fieldToHex shows BE hex to match on-chain format)
+    console.log('[NoteScanner] Using note keypair:', {
+        pubKeyHex: fieldToHex(noteKeypair.publicKey),
+    });
+    
     // Determine start ledger
     const startLedger = fullRescan ? 0 : (fromLedger ?? lastScannedLedger);
     
@@ -158,7 +217,9 @@ export async function scanForNotes(options = {}) {
             onProgress(i, outputs.length);
         }
         
-        // Skip if we already have this note
+        // Skip if we already have this note (case-insensitive comparison via normalizeHex)
+        // Notes created locally (deposits, transfers, change) are saved before scanning,
+        // so they'll be found here and skipped - not duplicated or marked as received.
         const existing = await notesStore.getNoteByCommitment(output.commitment);
         if (existing) {
             result.alreadyKnown++;
@@ -171,27 +232,44 @@ export async function scanForNotes(options = {}) {
             continue; // Not addressed to us
         }
         
+        console.log('[NoteScanner] Before decryption succeeded', decrypted);
+        
         // Verify the commitment matches using our note public key
-        if (!verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment)) {
+        const verifyResult = verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment);
+        if (!verifyResult.valid) {
             console.warn('[NoteScanner] Decryption succeeded but commitment mismatch - ignoring');
             continue;
         }
         
-        // Save the discovered note with our note private key
-        // The private key is deterministic, so we store it for convenience
-        // (it can always be re-derived from Freighter)
+        // Double-check we don't already have this note (handles potential race conditions)
+        // This uses normalized comparison to handle any hex format differences
+        const doubleCheck = await notesStore.getNoteByCommitment(output.commitment);
+        if (doubleCheck) {
+            result.alreadyKnown++;
+            console.log(`[NoteScanner] Note ${output.commitment.slice(0, 10)}... already exists (race condition avoided)`);
+            continue;
+        }
+        
+        // Save the discovered note with our note private key.
+        // Mark as received since it wasn't in our local store before scanning.
+        // Notes we created locally are saved immediately, so they won't reach here.
+        // Store isLegacy flag so we know which byte order to use when spending.
+        // Use fieldToHex for blinding to match the format used when creating notes (BE hex).
         const note = await notesStore.saveNote({
             commitment: output.commitment,
             privateKey: noteKeypair.privateKey,
-            blinding: decrypted.blinding,
+            blinding: fieldToHex(decrypted.blinding),
             amount: decrypted.amount,
             leafIndex: output.index,
             ledger: output.ledger,
+            isReceived: true,
+            isLegacy: verifyResult.isLegacy,
         });
         
         result.notes.push(note);
         result.found++;
         
+        console.log(`[NoteScanner] Discovered received note ${output.commitment.slice(0, 10)}... at index ${output.index}`);
         emit('noteDiscovered', note);
     }
     
@@ -225,10 +303,24 @@ export async function checkSpentNotes() {
     
     for (const note of unspentNotes) {
         try {
+            // Validate note has required fields
+            if (!note.privateKey || note.privateKey === '0x' || note.privateKey.length < 66) {
+                console.warn(`[NoteScanner] Skipping note ${note.id?.slice(0, 10)}... - invalid or missing privateKey`);
+                continue;
+            }
+            
+            const privateKeyBytes = hexToBytes(note.privateKey);
+            const commitmentBytes = hexToBytes(note.id);
+            
+            if (privateKeyBytes.length !== 32 || commitmentBytes.length !== 32) {
+                console.warn(`[NoteScanner] Skipping note - invalid key/commitment length`);
+                continue;
+            }
+            
             // Derive nullifier for this note using its stored private key
             const nullifier = deriveNullifierForNote(
-                hexToBytes(note.privateKey),
-                hexToBytes(note.id), // commitment
+                privateKeyBytes,
+                commitmentBytes,
                 note.leafIndex
             );
             
@@ -248,7 +340,7 @@ export async function checkSpentNotes() {
                 emit('noteSpent', { commitment: note.id, ledger: spentLedger });
             }
         } catch (e) {
-            console.error('[NoteScanner] Error checking note spent status:', e);
+            console.error('[NoteScanner] Error checking note spent status:', e?.message || e?.toString() || e);
         }
     }
     
@@ -261,53 +353,24 @@ export async function checkSpentNotes() {
  * Derives the nullifier for a note.
  * Nullifier = hash(commitment, pathIndices, signature)
  * 
+ * The path indices are encoded as a single field element: sum(bit[i] * 2^i)
+ * where bit[i] = (leafIndex >> i) & 1
+ * 
  * @param {Uint8Array} privateKey - Note's private key
  * @param {Uint8Array} commitment - Note commitment
  * @param {number} leafIndex - Leaf index in merkle tree
  * @returns {Uint8Array} Nullifier hash
  */
 export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
-    // Path indices are the binary representation of leafIndex
-    const treeDepth = 10;
-    const pathIndices = [];
-    let idx = leafIndex;
-    for (let i = 0; i < treeDepth; i++) {
-        pathIndices.push(idx & 1);
-        idx = idx >> 1;
-    }
+    // Path indices is the leaf index itself (it encodes the path through the tree)
+    // Convert to 32-byte field element
+    const pathIndicesBytes = bigintToField(BigInt(leafIndex));
     
-    // Compute signature = hash(privateKey, commitment, pathIndices[0])
-    const signature = computeSignature(privateKey, commitment, pathIndices[0]);
-    
-    // Convert pathIndices to field elements for nullifier computation
-    // pathIndices is encoded as a single number: sum(pathIndices[i] * 2^i)
-    let pathIndicesValue = 0n;
-    for (let i = 0; i < pathIndices.length; i++) {
-        if (pathIndices[i]) {
-            pathIndicesValue |= (1n << BigInt(i));
-        }
-    }
-    
-    const pathIndicesBytes = bigintToBytes(pathIndicesValue, 32);
+    // Compute signature = hash(privateKey, commitment, pathIndices)
+    const signature = computeSignature(privateKey, commitment, pathIndicesBytes);
     
     // Nullifier = hash(commitment, pathIndices, signature)
     return computeNullifier(commitment, pathIndicesBytes, signature);
-}
-
-/**
- * Converts a bigint to little-endian bytes.
- * @param {bigint} value 
- * @param {number} length - Byte length
- * @returns {Uint8Array}
- */
-function bigintToBytes(value, length) {
-    const bytes = new Uint8Array(length);
-    let v = value;
-    for (let i = 0; i < length; i++) {
-        bytes[i] = Number(v & 0xFFn);
-        v = v >> 8n;
-    }
-    return bytes;
 }
 
 /**

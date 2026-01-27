@@ -18,6 +18,7 @@ import {
     fieldToHex,
     bigintToField,
     poseidon2Hash2,
+    bytesToBigIntLE,
 } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
@@ -195,14 +196,14 @@ export const Deposit = {
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const amountBigInt = BigInt(Math.floor(amount * 1e7));
                 const blindingBytes = generateBlinding();
-                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                const blinding = bytesToBigIntLE(blindingBytes);
                 outputs.push({ amount: amountBigInt, blinding });
             });
             
             // Ensure exactly 2 outputs
             while (outputs.length < 2) {
                 const blindingBytes = generateBlinding();
-                const blinding = BigInt('0x' + fieldToHex(blindingBytes).slice(2));
+                const blinding = bytesToBigIntLE(blindingBytes);
                 outputs.push({ amount: 0n, blinding });
             }
             

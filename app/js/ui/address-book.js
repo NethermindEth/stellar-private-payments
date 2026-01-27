@@ -246,7 +246,7 @@ export const AddressBook = {
     },
     
     /**
-     * Renders a search result.
+     * Renders a search result showing both encryption and note keys.
      * @param {Object} record - Public key record
      * @param {string} source - 'local' or 'onchain'
      */
@@ -256,6 +256,10 @@ export const AddressBook = {
         
         const sourceLabel = source === 'onchain' ? 'Found on-chain' : 'Found locally';
         const sourceBadgeClass = source === 'onchain' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-brand-500/20 text-brand-400';
+        
+        // Use new fields if available, fallback to legacy publicKey
+        const encryptionKey = record.encryptionKey || record.publicKey;
+        const noteKey = record.noteKey || record.publicKey;
         
         container.innerHTML = `
             <div class="p-4 bg-dark-800 border border-dark-700 rounded-lg">
@@ -269,16 +273,20 @@ export const AddressBook = {
                         <dd class="font-mono text-dark-300 text-right break-all max-w-[300px]">${record.address}</dd>
                     </div>
                     <div class="flex justify-between items-start">
-                        <dt class="text-dark-500">Public Key</dt>
-                        <dd class="font-mono text-brand-400 text-right break-all max-w-[300px]">${Utils.truncateHex(record.publicKey, 12, 12)}</dd>
+                        <dt class="text-dark-500">Encryption Key <span class="text-dark-600">(X25519)</span></dt>
+                        <dd class="font-mono text-brand-400 text-right break-all max-w-[300px]">${Utils.truncateHex(encryptionKey, 12, 12)}</dd>
+                    </div>
+                    <div class="flex justify-between items-start">
+                        <dt class="text-dark-500">Note Key <span class="text-dark-600">(BN254)</span></dt>
+                        <dd class="font-mono text-emerald-400 text-right break-all max-w-[300px]">${Utils.truncateHex(noteKey, 12, 12)}</dd>
                     </div>
                 </dl>
                 <div class="flex gap-2 mt-4">
                     <button type="button" class="search-use-transfer flex-1 px-3 py-2 bg-brand-500 hover:bg-brand-400 text-dark-950 text-xs font-semibold rounded transition-colors">
                         Use in Transfer
                     </button>
-                    <button type="button" class="search-copy-pubkey px-3 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-300 text-xs rounded transition-colors">
-                        Copy Key
+                    <button type="button" class="search-copy-keys px-3 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-300 text-xs rounded transition-colors">
+                        Copy Keys
                     </button>
                     <button type="button" class="search-clear px-3 py-2 bg-dark-700 hover:bg-dark-600 border border-dark-600 text-dark-400 text-xs rounded transition-colors">
                         Clear
@@ -287,13 +295,13 @@ export const AddressBook = {
             </div>
         `;
         
-        // Attach event listeners
+        // Attach event listeners - pass both keys to transfer
         container.querySelector('.search-use-transfer')?.addEventListener('click', () => {
-            this.useInTransfer(record.publicKey);
+            this.useInTransfer(encryptionKey, noteKey);
         });
         
-        container.querySelector('.search-copy-pubkey')?.addEventListener('click', () => {
-            Utils.copyToClipboard(record.publicKey);
+        container.querySelector('.search-copy-keys')?.addEventListener('click', () => {
+            Utils.copyToClipboard(`Encryption: ${encryptionKey}\\nNote: ${noteKey}`);
         });
         
         container.querySelector('.search-clear')?.addEventListener('click', () => {
@@ -349,39 +357,61 @@ export const AddressBook = {
         const row = App.templates.addressBookRow.content.cloneNode(true).firstElementChild;
         row.dataset.address = record.address;
         
+        // Use new fields if available, fallback to legacy publicKey
+        const encryptionKey = record.encryptionKey || record.publicKey;
+        const noteKey = record.noteKey || record.publicKey;
+        
         row.querySelector('.ab-address').textContent = Utils.truncateHex(record.address, 8, 8);
-        row.querySelector('.ab-pubkey').textContent = Utils.truncateHex(record.publicKey, 10, 8);
+        row.querySelector('.ab-notekey').textContent = Utils.truncateHex(noteKey, 8, 6);
+        row.querySelector('.ab-enckey').textContent = Utils.truncateHex(encryptionKey, 8, 6);
         row.querySelector('.ab-date').textContent = record.registeredAt 
             ? Utils.formatDate(record.registeredAt)
             : `Ledger ${record.ledger}`;
         
-        // Use in transfer button
+        // Use in transfer button - pass both keys
         row.querySelector('.use-transfer-btn')?.addEventListener('click', () => {
-            this.useInTransfer(record.publicKey);
+            this.useInTransfer(encryptionKey, noteKey);
         });
         
-        // Copy public key button
-        row.querySelector('.copy-pubkey-btn')?.addEventListener('click', () => {
-            Utils.copyToClipboard(record.publicKey);
+        // Copy note key button
+        row.querySelector('.copy-notekey-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(noteKey);
+            Toast.show('Note key copied', 'success');
+        });
+        
+        // Copy encryption key button
+        row.querySelector('.copy-enckey-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(encryptionKey);
+            Toast.show('Encryption key copied', 'success');
         });
         
         // Copy address button
         row.querySelector('.copy-address-btn')?.addEventListener('click', () => {
             Utils.copyToClipboard(record.address);
+            Toast.show('Address copied', 'success');
         });
         
         return row;
     },
     
     /**
-     * Fills the transfer recipient field and switches to transfer tab.
-     * @param {string} publicKey - Public key to use
+     * Fills the transfer recipient fields and switches to transfer tab.
+     * @param {string} encryptionKey - X25519 encryption public key
+     * @param {string} noteKey - BN254 note public key
      */
-    useInTransfer(publicKey) {
-        const recipientInput = document.getElementById('transfer-recipient-key');
-        if (recipientInput) {
-            recipientInput.value = publicKey;
-            recipientInput.dispatchEvent(new Event('input', { bubbles: true }));
+    useInTransfer(encryptionKey, noteKey) {
+        // Set the note key (used for commitment)
+        const noteKeyInput = document.getElementById('transfer-recipient-key');
+        if (noteKeyInput) {
+            noteKeyInput.value = noteKey;
+            noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        // Set the encryption key (used for encrypting note data)
+        const encKeyInput = document.getElementById('transfer-recipient-enc-key');
+        if (encKeyInput) {
+            encKeyInput.value = encryptionKey;
+            encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
         
         // Switch to transfer tab
@@ -392,6 +422,6 @@ export const AddressBook = {
         // Also switch section back to notes
         this.switchSection('notes');
         
-        Toast.show('Public key added to transfer', 'success');
+        Toast.show('Keys added to transfer', 'success');
     }
 };

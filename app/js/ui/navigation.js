@@ -9,6 +9,7 @@ import { App, Utils, Toast, deriveKeysFromWallet, Storage } from './core.js';
 import { setTabsRef } from './templates.js';
 import { fieldToHex } from '../bridge.js';
 import { publicKeyStore, notesStore } from '../state/index.js';
+import { bytesToHex } from '../state/utils.js';
 import { NotesTable } from './notes-table.js';
 
 // Callbacks for wallet connection events (set by transaction modules)
@@ -343,7 +344,8 @@ export const Wallet = {
     },
     
     /**
-     * Registers the user's public key on-chain for address book discovery.
+     * Registers the user's public keys on-chain for address book discovery.
+     * Registers both the X25519 encryption key and BN254 note key.
      */
     async registerPublicKey() {
         if (!App.state.wallet.connected) {
@@ -354,21 +356,28 @@ export const Wallet = {
         Toast.show('Preparing registration...', 'info');
         
         try {
-            // Derive keys from wallet signatures
-            const { encryptionKeypair } = await deriveKeysFromWallet({
+            // Derive both keypairs from wallet signatures
+            const { pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
                 onStatus: (msg) => console.log('[Register]', msg),
                 signDelay: 300,
             });
             
-            // Get the public key as hex string
-            const publicKeyHex = fieldToHex(encryptionKeypair.publicKey);
+            // Get keys as hex strings for logging/storage
+            // Note: X25519 keys are raw bytes (not field elements), so use bytesToHex
+            // BN254 note keys are field elements, so use fieldToHex for BE hex representation
+            const encryptionKeyHex = bytesToHex(encryptionKeypair.publicKey);
+            const noteKeyHex = fieldToHex(pubKeyBytes);
             
-            console.log('[Register] Registering public key:', publicKeyHex.slice(0, 20) + '...');
+            console.log('[Register] Registering keys:', {
+                encryptionKey: encryptionKeyHex.slice(0, 20) + '...',
+                noteKey: noteKeyHex.slice(0, 20) + '...',
+            });
             
-            // Call the pool.register() function
+            // Call the pool.register() function with both keys
             const result = await registerPublicKey({
                 owner: App.state.wallet.address,
-                publicKey: encryptionKeypair.publicKey,
+                encryptionKey: encryptionKeypair.publicKey,
+                noteKey: pubKeyBytes,
                 signerOptions: {
                     publicKey: App.state.wallet.address,
                     signTransaction: signWalletTransaction,
@@ -382,14 +391,15 @@ export const Wallet = {
                     const ledger = await getLatestLedger();
                     await publicKeyStore.processPublicKeyEvent({
                         owner: App.state.wallet.address,
-                        key: publicKeyHex,
+                        encryption_key: encryptionKeyHex,
+                        note_key: noteKeyHex,
                     }, ledger);
                     console.log('[Register] Added to local store');
                 } catch (storeError) {
                     console.warn('[Register] Failed to add to local store:', storeError);
                 }
                 
-                Toast.show('Public key registered successfully!', 'success');
+                Toast.show('Public keys registered successfully!', 'success');
                 console.log('[Register] Transaction hash:', result.txHash);
             } else {
                 throw new Error(result.error || 'Registration failed');

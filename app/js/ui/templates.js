@@ -259,6 +259,7 @@ export const Templates = {
         const row = App.templates.noteRow.content.cloneNode(true).firstElementChild;
         row.dataset.status = note.spent ? 'spent' : 'unspent';
         row.dataset.id = note.id;
+        row.dataset.received = note.isReceived ? 'true' : 'false';
         
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
         // Note.amount is in stroops - convert to XLM for display
@@ -275,6 +276,15 @@ export const Templates = {
         } else {
             badge.textContent = 'Unspent';
             badge.classList.add('bg-emerald-500/20', 'text-emerald-400');
+        }
+        
+        // Add "Received" indicator for notes that were transferred to us
+        if (note.isReceived) {
+            const receivedBadge = document.createElement('span');
+            receivedBadge.className = 'px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-500/20 text-purple-400 ml-1';
+            receivedBadge.textContent = 'Received';
+            receivedBadge.title = 'This note was received from another user';
+            badge.parentElement?.appendChild(receivedBadge);
         }
         
         // Use button - fills note in current tab's input (or switches to withdraw if in deposit)

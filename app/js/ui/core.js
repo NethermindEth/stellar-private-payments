@@ -81,6 +81,13 @@ export async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDel
     const pubKeyBytes = derivePublicKey(privKeyBytes);
     const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
     
+    // Cache keys for note scanning (so sync can scan without prompting again)
+    notesStore.setAuthenticatedKeys({
+        encryptionKeypair,
+        notePrivateKey: privKeyBytes,
+        notePublicKey: pubKeyBytes,
+    });
+    
     console.log('[KeyDerivation] Derived keys from wallet signatures');
     
     return { privKeyBytes, pubKeyBytes, encryptionKeypair };
@@ -197,13 +204,18 @@ export const Toast = {
         // Set content
         toast.querySelector('.toast-message').textContent = message;
         
-        // Set icon
+        // Set icon and color based on type
         const icon = toast.querySelector('.toast-icon');
         if (type === 'success') {
             icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
             toast.classList.add('border-emerald-500/50');
             icon.classList.add('text-emerald-500');
+        } else if (type === 'info') {
+            icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>';
+            toast.classList.add('border-brand-500/50');
+            icon.classList.add('text-brand-500');
         } else {
+            // error
             icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>';
             toast.classList.add('border-red-500/50');
             icon.classList.add('text-red-500');

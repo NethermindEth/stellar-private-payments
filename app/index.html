@@ -380,38 +380,58 @@
                         aria-labelledby="tab-transfer"
                         class="tab-panel hidden space-y-6"
                     >
-                        <!-- Recipient Public Key -->
-                        <div>
-                            <label for="transfer-recipient-key" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
-                                Recipient Public Key <span class="normal-case text-dark-500">(who will own the new notes)</span>
-                            </label>
-                            <div class="flex gap-2">
-                                <input 
-                                    type="text"
-                                    id="transfer-recipient-key"
-                                    placeholder="0x... (64 hex characters)"
-                                    class="flex-1 px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
-                                    autocomplete="off"
-                                    spellcheck="false"
-                                >
+                        <!-- Recipient Keys -->
+                        <div class="space-y-4">
+                            <div class="flex items-center justify-between">
+                                <h4 class="text-xs font-medium text-dark-400 uppercase tracking-wide">Recipient Keys</h4>
                                 <button 
                                     type="button"
                                     id="transfer-addressbook-btn"
-                                    class="px-3 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-dark-400 hover:text-brand-500 transition-colors"
+                                    class="flex items-center gap-1.5 px-2.5 py-1.5 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-xs text-dark-400 hover:text-brand-500 transition-colors"
                                     title="Search Address Book"
                                     aria-label="Search address book for recipient"
                                 >
-                                    <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                                         <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
                                         <circle cx="9" cy="7" r="4"/>
                                         <circle cx="19" cy="11" r="3"/>
                                         <path d="M21 21l-2-2"/>
                                     </svg>
+                                    Lookup
                                 </button>
                             </div>
-                            <p class="text-xs text-dark-500 mt-1">
-                                Enter the recipient's ZK public key (not their Stellar address).
-                            </p>
+                            
+                            <!-- Note Key (BN254) - used for commitment -->
+                            <div>
+                                <label for="transfer-recipient-key" class="block text-xs font-medium text-dark-400 mb-1.5">
+                                    Note Key <span class="text-dark-500">(BN254)</span>
+                                </label>
+                                <input 
+                                    type="text"
+                                    id="transfer-recipient-key"
+                                    placeholder="0x... (64 hex characters)"
+                                    class="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500 placeholder:text-dark-600 placeholder:font-sans"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <p class="text-[10px] text-dark-500 mt-1">Used to create the note commitment (recipient proves ownership)</p>
+                            </div>
+                            
+                            <!-- Encryption Key (X25519) - used for encrypting note data -->
+                            <div>
+                                <label for="transfer-recipient-enc-key" class="block text-xs font-medium text-dark-400 mb-1.5">
+                                    Encryption Key <span class="text-dark-500">(X25519)</span>
+                                </label>
+                                <input 
+                                    type="text"
+                                    id="transfer-recipient-enc-key"
+                                    placeholder="0x... (64 hex characters)"
+                                    class="w-full px-4 py-2.5 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600 placeholder:font-sans"
+                                    autocomplete="off"
+                                    spellcheck="false"
+                                >
+                                <p class="text-[10px] text-dark-500 mt-1">Used to encrypt note data (recipient can decrypt to see amount)</p>
+                            </div>
                         </div>
 
                         <!-- Balance Equation -->
@@ -646,6 +666,19 @@
                                     <path d="M23 4v6h-6"/>
                                     <path d="M1 20v-6h6"/>
                                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+                                </svg>
+                            </button>
+                            <button 
+                                type="button"
+                                id="btn-scan-notes"
+                                class="p-1.5 text-dark-400 hover:text-purple-500 transition-colors"
+                                title="Scan for received notes"
+                                aria-label="Scan for notes transferred to you"
+                            >
+                                <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                    <circle cx="11" cy="11" r="8"/>
+                                    <path d="M21 21l-4.35-4.35"/>
+                                    <path d="M11 8v6M8 11h6"/>
                                 </svg>
                             </button>
                             <button 
@@ -945,11 +978,18 @@
                 </div>
                 
                 <div class="flex-1 overflow-auto min-h-[200px]">
-                    <table class="w-full min-w-[600px]" aria-describedby="section-tab-addressbook">
+                    <table class="w-full min-w-[700px]" aria-describedby="section-tab-addressbook">
                         <thead class="bg-dark-800 sticky top-0">
                             <tr>
                                 <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Stellar Address</th>
-                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Public Key</th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">
+                                    <span>Note Key</span>
+                                    <span class="text-dark-600 font-normal normal-case ml-1">(BN254)</span>
+                                </th>
+                                <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">
+                                    <span>Encryption Key</span>
+                                    <span class="text-dark-600 font-normal normal-case ml-1">(X25519)</span>
+                                </th>
                                 <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Registered</th>
                                 <th scope="col" class="px-4 py-3 text-left text-xs font-semibold text-dark-500 uppercase tracking-wide">Actions</th>
                             </tr>
@@ -1101,8 +1141,16 @@
             </td>
             <td class="px-4 py-3">
                 <div class="flex items-center gap-2">
-                    <span class="ab-pubkey font-mono text-sm text-brand-400"></span>
-                    <button type="button" class="copy-pubkey-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Copy public key" aria-label="Copy public key">
+                    <span class="ab-notekey font-mono text-sm text-emerald-400"></span>
+                    <button type="button" class="copy-notekey-btn p-1 text-dark-500 hover:text-emerald-500 transition-colors" title="Copy note key" aria-label="Copy note key">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
+                    </button>
+                </div>
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                    <span class="ab-enckey font-mono text-sm text-brand-400"></span>
+                    <button type="button" class="copy-enckey-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Copy encryption key" aria-label="Copy encryption key">
                         <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
                     </button>
                 </div>
