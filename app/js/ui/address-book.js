@@ -479,33 +479,105 @@ export const AddressBook = {
     },
     
     /**
-     * Fills the transfer recipient fields and switches to transfer tab.
+     * Fills recipient fields in transfer or transact mode.
+     * If in transact mode, stays there and fills the first empty output.
+     * If first output has keys filled, tries the second output.
+     * If in transfer mode (or any other), switches to transfer tab.
      * @param {string} encryptionKey - X25519 encryption public key
      * @param {string} noteKey - BN254 note public key
      */
     useInTransfer(encryptionKey, noteKey) {
-        // Set the note key (used for commitment)
+        // Check if we're in transact mode
+        if (App.state.activeTab === 'transact') {
+            this.fillTransactOutput(encryptionKey, noteKey);
+            return;
+        }
+        
+        // Default: fill transfer fields and switch to transfer tab
         const noteKeyInput = document.getElementById('transfer-recipient-key');
         if (noteKeyInput) {
             noteKeyInput.value = noteKey;
             noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
         
-        // Set the encryption key (used for encrypting note data)
         const encKeyInput = document.getElementById('transfer-recipient-enc-key');
         if (encKeyInput) {
             encKeyInput.value = encryptionKey;
             encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
         }
         
-        // Switch to transfer tab
         if (TabsRef) {
             TabsRef.switch('transfer');
         }
         
-        // Also switch section back to notes
+        Toast.show('Keys added to transfer', 'success');
+    },
+    
+    /**
+     * Fills transact mode output fields with recipient keys.
+     * Finds the first output with empty keys, or the second if first is filled.
+     * @param {string} encryptionKey - X25519 encryption public key
+     * @param {string} noteKey - BN254 note public key
+     */
+    fillTransactOutput(encryptionKey, noteKey) {
+        const outputs = document.querySelectorAll('#transact-outputs .advanced-output-row');
+        if (!outputs.length) {
+            Toast.show('No output rows found', 'error');
+            return;
+        }
+        
+        // Find the first output with empty keys
+        let targetRow = null;
+        for (const row of outputs) {
+            const noteKeyInput = row.querySelector('.output-note-key');
+            const encKeyInput = row.querySelector('.output-enc-key');
+            
+            const noteKeyEmpty = !noteKeyInput?.value.trim();
+            const encKeyEmpty = !encKeyInput?.value.trim();
+            
+            if (noteKeyEmpty && encKeyEmpty) {
+                targetRow = row;
+                break;
+            }
+        }
+        
+        // If no completely empty output found, try to find one with at least one empty key
+        if (!targetRow) {
+            for (const row of outputs) {
+                const noteKeyInput = row.querySelector('.output-note-key');
+                const encKeyInput = row.querySelector('.output-enc-key');
+                
+                const noteKeyEmpty = !noteKeyInput?.value.trim();
+                const encKeyEmpty = !encKeyInput?.value.trim();
+                
+                if (noteKeyEmpty || encKeyEmpty) {
+                    targetRow = row;
+                    break;
+                }
+            }
+        }
+        
+        if (!targetRow) {
+            Toast.show('All outputs already have recipients', 'info');
+            return;
+        }
+        
+        const noteKeyInput = targetRow.querySelector('.output-note-key');
+        const encKeyInput = targetRow.querySelector('.output-enc-key');
+        
+        if (noteKeyInput) {
+            noteKeyInput.value = noteKey;
+            noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        if (encKeyInput) {
+            encKeyInput.value = encryptionKey;
+            encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
         this.switchSection('notes');
         
-        Toast.show('Keys added to transfer', 'success');
+        const outputIndex = parseInt(targetRow.dataset.index || '0', 10) + 1;
+        Toast.show(`Keys added to output ${outputIndex}`, 'success');
     }
 };

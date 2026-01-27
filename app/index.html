@@ -10,7 +10,7 @@
     
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
-    <meta property="og:title" content="PoolStellar - Compliant Private System">
+    <meta property="og:title" content="PoolStellar - Private Payment System">
     <meta property="og:description" content="Privacy-preserving transactions on Stellar with zero-knowledge proofs.">
     <meta property="og:image" content="/assets/og-image.png">
     <meta name="twitter:card" content="summary_large_image">
@@ -20,7 +20,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
     
-    <title>PoolStellar - Compliant Private System</title>
+    <title>PoolStellar - Private Payment System</title>
     
     <!-- Tailwind CSS -->
     <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
@@ -52,7 +52,7 @@
                     </svg>
                 </div>
                 <h1 class="text-lg sm:text-xl font-semibold">
-                    PoolStellar <span class="text-dark-400 font-normal">Compliant Private System</span>
+                    PoolStellar <span class="text-dark-400 font-normal">Private Payment System</span>
                 </h1>
             </div>
             <div class="flex items-center gap-3 overflow-visible">
@@ -1202,18 +1202,30 @@
                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
                 </button>
             </div>
-            <div class="flex items-center gap-2">
-                <label class="text-xs text-dark-500 flex-shrink-0">To:</label>
-                <input 
-                    type="text"
-                    class="output-recipient-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
-                    placeholder="Yourself (leave empty) or enter recipient key"
-                    autocomplete="off"
-                    spellcheck="false"
-                >
-                <button type="button" class="output-lookup-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Look up by address" aria-label="Look up public key">
-                    <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-                </button>
+            <div class="space-y-1.5">
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-dark-500 flex-shrink-0 w-16">Note key:</label>
+                    <input 
+                        type="text"
+                        class="output-note-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
+                        placeholder="BN254 key (leave empty for self)"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                    <button type="button" class="output-lookup-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" title="Look up by address" aria-label="Look up public key">
+                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
+                    </button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-dark-500 flex-shrink-0 w-16">Enc key:</label>
+                    <input 
+                        type="text"
+                        class="output-enc-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
+                        placeholder="X25519 key (leave empty for self)"
+                        autocomplete="off"
+                        spellcheck="false"
+                    >
+                </div>
             </div>
         </div>
     </template>

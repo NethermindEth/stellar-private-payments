@@ -1,5 +1,5 @@
 /**
- * PoolStellar Compliant Private System
+ * PoolStellar Private Payment System
  * Main UI entry point - imports and initializes all UI modules.
  * 
  * @module ui

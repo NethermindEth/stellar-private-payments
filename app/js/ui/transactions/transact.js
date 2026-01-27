@@ -6,7 +6,8 @@
 import { signWalletTransaction, signWalletAuthEntry } from '../../wallet.js';
 import { readAllContractStates, getDeployedContracts, submitPoolTransaction } from '../../stellar.js';
 import { StateManager, poolStore, notesStore } from '../../state/index.js';
-import { generateBlinding, fieldToHex, bytesToBigIntLE, bigintToField } from '../../bridge.js';
+import { hexToBytes } from '../../state/utils.js';
+import { generateBlinding, fieldToHex, bytesToBigIntLE, bigintToField, hexToField } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
 import { onWalletConnect } from '../navigation.js';
@@ -81,18 +82,24 @@ export const Transact = {
     
     /**
      * Gets the recipient configuration for each output.
-     * Empty recipient key means "self". Returns array of { isSelf: boolean, publicKey: string|null }.
+     * Empty keys mean "self". Returns array of { isSelf: boolean, noteKey: string|null, encryptionKey: string|null }.
      */
     getOutputRecipients() {
         const recipients = [];
         document.querySelectorAll('#transact-outputs .advanced-output-row').forEach(row => {
-            const recipientKey = row.querySelector('.output-recipient-key');
-            const keyValue = recipientKey?.value.trim() || '';
-            const isSelf = keyValue === '';
+            const noteKeyInput = row.querySelector('.output-note-key');
+            const encKeyInput = row.querySelector('.output-enc-key');
+            
+            const noteKey = noteKeyInput?.value.trim() || '';
+            const encKey = encKeyInput?.value.trim() || '';
+            
+            // Output is "self" only if BOTH keys are empty
+            const isSelf = noteKey === '' && encKey === '';
             
             recipients.push({
                 isSelf,
-                publicKey: isSelf ? null : keyValue,
+                noteKey: isSelf ? null : noteKey,
+                encryptionKey: isSelf ? null : encKey,
             });
         });
         return recipients;
@@ -176,7 +183,22 @@ export const Transact = {
             
             // Get per-output recipient configuration
             const outputRecipients = this.getOutputRecipients();
-            const hasExternalRecipient = outputRecipients.some(r => !r.isSelf && r.publicKey);
+            const hasExternalRecipient = outputRecipients.some(r => !r.isSelf);
+            
+            // Validate that external recipients have both keys
+            for (let i = 0; i < outputRecipients.length; i++) {
+                const r = outputRecipients[i];
+                if (!r.isSelf) {
+                    if (!r.noteKey) {
+                        Toast.show(`Output ${i + 1}: Missing BN254 note key`, 'error');
+                        throw new Error('Missing recipient note key');
+                    }
+                    if (!r.encryptionKey) {
+                        Toast.show(`Output ${i + 1}: Missing X25519 encryption key`, 'error');
+                        throw new Error('Missing recipient encryption key');
+                    }
+                }
+            }
             
             setLoadingText('Gathering input notes...');
             const inputNotes = [];
@@ -212,19 +234,48 @@ export const Transact = {
                 inputNotes.push({ ...note, merkleProof });
             }
             
+            // Parse recipient keys and build outputs
             const outputs = [];
-            document.querySelectorAll('#transact-outputs .advanced-output-row').forEach((row, idx) => {
+            for (let idx = 0; idx < outputRecipients.length; idx++) {
+                const row = document.querySelectorAll('#transact-outputs .advanced-output-row')[idx];
                 const amount = parseFloat(row.querySelector('.output-amount').value) || 0;
                 const blindingBytes = generateBlinding();
                 const blinding = bytesToBigIntLE(blindingBytes);
                 const recipient = outputRecipients[idx];
+                
+                let recipientNoteKeyBytes = null;
+                let recipientEncKeyBytes = null;
+                
+                if (!recipient.isSelf) {
+                    // Parse BN254 note key (use hexToField for LE bytes)
+                    try {
+                        recipientNoteKeyBytes = hexToField(recipient.noteKey);
+                        if (recipientNoteKeyBytes.length !== 32) {
+                            throw new Error('Invalid length');
+                        }
+                    } catch {
+                        throw new Error(`Output ${idx + 1}: Invalid note key format. Expected 64 hex characters.`);
+                    }
+                    
+                    // Parse X25519 encryption key (raw bytes, use hexToBytes)
+                    try {
+                        recipientEncKeyBytes = hexToBytes(recipient.encryptionKey);
+                        if (recipientEncKeyBytes.length !== 32) {
+                            throw new Error('Invalid length');
+                        }
+                    } catch {
+                        throw new Error(`Output ${idx + 1}: Invalid encryption key format. Expected 64 hex characters.`);
+                    }
+                }
+                
                 outputs.push({ 
                     amount: BigInt(Math.round(amount * 1e7)), 
                     blinding,
                     isSelf: recipient?.isSelf ?? true,
-                    recipientPublicKey: recipient?.publicKey || null,
+                    recipientNoteKey: recipientNoteKeyBytes,
+                    recipientEncryptionKey: recipientEncKeyBytes,
                 });
-            });
+            }
             
             const membershipBlindingInput = document.getElementById('transact-membership-blinding');
             const membershipBlinding = membershipBlindingInput ? BigInt(membershipBlindingInput.value || '0') : 0n;
@@ -346,10 +397,10 @@ export const Transact = {
                 const leafIndex = poolNextIndex + outputIndex;
                 const amountStroops = Number(outputNote.amount);
                 
-                // Determine note owner - either self or specified recipient
+                // Determine note owner - either self or specified recipient (use noteKey for external)
                 const noteOwner = recipientInfo?.isSelf 
                     ? App.state.wallet.address 
-                    : (recipientInfo?.publicKey || App.state.wallet.address);
+                    : (recipientInfo?.noteKey || App.state.wallet.address);
                 
                 const note = {
                     id: noteId,
@@ -360,6 +411,7 @@ export const Transact = {
                     spent: false,
                     isDummy,
                     owner: noteOwner,
+                    isReceived: !recipientInfo?.isSelf,
                     createdAt: new Date().toISOString()
                 };
                 
@@ -394,7 +446,7 @@ export const Transact = {
             
             console.log('[Transact] Transaction submitted:', submitResult.txHash);
             
-            // Save new notes to IndexedDB
+            // Save new notes to IndexedDB (explicitly mark as not received - user created these)
             for (const note of pendingNotes) {
                 await notesStore.saveNote({
                     commitment: note.commitment,
@@ -404,6 +456,7 @@ export const Transact = {
                     leafIndex: note.leafIndex,
                     ledger: submitResult.ledger || 0,
                     owner: note.owner,
+                    isReceived: false,
                 });
             }
             

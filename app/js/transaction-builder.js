@@ -291,22 +291,14 @@ function createRealInput(privKeyBytes, pubKeyBytes, note, merkleProof) {
     const amountBytes = bigintToField(amount);
     const blindingBytes = bigintToField(blinding);
     
-    // For legacy notes (created before endianness fix), use reversed public key
-    let effectivePubKey = pubKeyBytes;
-    if (note.isLegacy) {
-        effectivePubKey = new Uint8Array([...pubKeyBytes]).reverse();
-        console.log('[TxBuilder] Using reversed pubKey for legacy note');
-    }
-    
     // Compute commitment: poseidon2(amount, pubKey, blinding)
-    const commitment = computeCommitment(amountBytes, effectivePubKey, blindingBytes);
+    const commitment = computeCommitment(amountBytes, pubKeyBytes, blindingBytes);
     
     // Debug logging for received notes
     if (note.isReceived) {
         console.log('[TxBuilder] Spending received note:', {
             noteId: note.id?.slice(0, 20) + '...',
             amount: amount.toString(),
-            isLegacy: note.isLegacy,
             computedCommitment: fieldToHex(commitment),
             expectedCommitment: note.id,
         });
@@ -562,9 +554,9 @@ function encryptOutput(outputNote, encryptionPubKey) {
  * @param {bigint} params.membershipRoot - ASP membership root (on-chain)
  * @param {bigint} params.nonMembershipRoot - ASP non-membership root (on-chain)
  * @param {Array<{amount: bigint, blinding: bigint}>} params.inputs - Input notes (use [] for deposits)
- * @param {Array<{amount: bigint, blinding: bigint, recipientPubKey?: Uint8Array, recipientEncryptionPubKey?: Uint8Array}>} params.outputs - Output notes
- *        - recipientPubKey: BN254 note key for commitment (defaults to sender's key)
- *        - recipientEncryptionPubKey: X25519 encryption key for encrypting note data (defaults to sender's key)
+ * @param {Array<{amount: bigint, blinding: bigint, recipientNoteKey?: Uint8Array, recipientEncryptionKey?: Uint8Array}>} params.outputs - Output notes
+ *        - recipientNoteKey (or recipientPubKey): BN254 note key for commitment (defaults to sender's key)
+ *        - recipientEncryptionKey (or recipientEncryptionPubKey): X25519 encryption key (defaults to sender's key)
  * @param {Object} params.extData - External data (recipient, ext_amount, fee)
  * @param {Object} [params.stateManager] - StateManager for on-chain proofs
  * @param {number} [params.membershipLeafIndex=0] - User's leaf index in membership tree
@@ -625,8 +617,9 @@ export async function buildTransactionInputs(params) {
     const outputEncryptionKeys = [];
     
     for (const out of outputs) {
-        const recipientPubKey = out.recipientPubKey || pubKeyBytes;
-        const recipientEncKey = out.recipientEncryptionPubKey || encryptionPubKey;
+        // Support both naming conventions: recipientNoteKey (transact) and recipientPubKey (transfer)
+        const recipientPubKey = out.recipientNoteKey || out.recipientPubKey || pubKeyBytes;
+        const recipientEncKey = out.recipientEncryptionKey || out.recipientEncryptionPubKey || encryptionPubKey;
         outputNotes.push(createOutput(out.amount, recipientPubKey, out.blinding));
         outputEncryptionKeys.push(recipientEncKey);
     }

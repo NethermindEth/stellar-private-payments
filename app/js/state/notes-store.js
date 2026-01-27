@@ -39,7 +39,6 @@ import {
  * @property {boolean} spent - Whether the note has been spent
  * @property {number} [spentAtLedger] - Ledger when spent
  * @property {boolean} [isReceived] - True if note was received via transfer (vs created by user)
- * @property {boolean} [isLegacy] - True if note was created with legacy byte order (before endianness fix)
  */
 
 // Current owner address for filtering notes
@@ -78,7 +77,6 @@ export function getCurrentOwner() {
  * @param {number} params.ledger - Ledger when created
  * @param {string} [params.owner] - Stellar address that owns this note (defaults to currentOwner)
  * @param {boolean} [params.isReceived=false] - True if note was received via transfer (discovered by scanning)
- * @param {boolean} [params.isLegacy=false] - True if note was created with legacy byte order (before endianness fix)
  * @returns {Promise<UserNote>}
  */
 export async function saveNote(params) {
@@ -98,7 +96,6 @@ export async function saveNote(params) {
         createdAtLedger: params.ledger,
         spent: false,
         isReceived: params.isReceived || false,
-        isLegacy: params.isLegacy || false,
     };
     
     await db.put('user_notes', note);

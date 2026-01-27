@@ -369,6 +369,7 @@ export const Transfer = {
                     spent: false,
                     isDummy,
                     owner: recipientNoteKey,
+                    isReceived: true,
                     createdAt: new Date().toISOString()
                 };
                 

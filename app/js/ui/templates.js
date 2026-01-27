@@ -82,7 +82,8 @@ export const Templates = {
     /**
      * Creates an advanced output row with per-output recipient selection.
      * Used in Transact mode where each output can go to a different recipient.
-     * Empty recipient = self, filled = other recipient.
+     * Each output requires two keys: BN254 note key and X25519 encryption key.
+     * Empty keys = self, filled = other recipient.
      * @param {number} index - Row index
      * @param {number} initialValue - Initial amount value
      * @returns {HTMLElement}
@@ -92,7 +93,8 @@ export const Templates = {
         row.dataset.index = index;
         
         const amountInput = row.querySelector('.output-amount');
-        const recipientKey = row.querySelector('.output-recipient-key');
+        const noteKeyInput = row.querySelector('.output-note-key');
+        const encKeyInput = row.querySelector('.output-enc-key');
         const lookupBtn = row.querySelector('.output-lookup-btn');
         
         amountInput.value = initialValue;
@@ -114,7 +116,7 @@ export const Templates = {
             amountInput.dispatchEvent(new Event('input', { bubbles: true }));
         });
         
-        // Address book lookup for recipient
+        // Address book lookup fills both keys
         lookupBtn?.addEventListener('click', async () => {
             const address = prompt('Enter Stellar address to look up (G...):');
             if (!address) return;
@@ -130,11 +132,16 @@ export const Templates = {
                 const result = await StateManager.searchPublicKey(address);
                 
                 if (result.found) {
-                    recipientKey.value = result.record.publicKey;
-                    recipientKey.dispatchEvent(new Event('input', { bubbles: true }));
-                    Toast.show(`Found public key (${result.source})`, 'success');
+                    const encryptionKey = result.record.encryptionKey || result.record.publicKey;
+                    const noteKey = result.record.noteKey || result.record.publicKey;
+                    
+                    noteKeyInput.value = noteKey;
+                    noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    encKeyInput.value = encryptionKey;
+                    encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+                    Toast.show(`Found keys (${result.source})`, 'success');
                 } else {
-                    Toast.show('No registered public key found for this address', 'error');
+                    Toast.show('No registered public keys found for this address', 'error');
                 }
             } catch (e) {
                 console.error('[Templates] Address lookup failed:', e);
@@ -240,6 +247,10 @@ export const Templates = {
                         const currentOwner = App.state.wallet.address || notesStore.getCurrentOwner();
                         console.log('[Templates] Saving note with owner:', currentOwner?.slice(0, 10));
                         
+                        // Preserve isReceived from file if present, otherwise default to true
+                        // (most file imports are from receiving notes from others)
+                        const isReceivedFromFile = data.isReceived !== undefined ? data.isReceived : true;
+                        
                         const savedNote = await notesStore.saveNote({
                             commitment: noteId,
                             privateKey: data.privateKey || new Uint8Array(32), // May be missing/invalid
@@ -247,8 +258,8 @@ export const Templates = {
                             amount: Number(data.amount),
                             leafIndex: data.leafIndex ?? 0,
                             ledger: 0,
-                            isReceived: true, // Mark as received since it came from a file
-                            owner: currentOwner, // Explicitly set owner
+                            isReceived: isReceivedFromFile,
+                            owner: currentOwner,
                         });
                         
                         console.log('[Templates] Note saved with ID:', savedNote.id);
@@ -350,7 +361,7 @@ export const Templates = {
         // Add "Received" indicator for notes that were transferred to us
         if (note.isReceived) {
             const receivedBadge = document.createElement('span');
-            receivedBadge.className = 'px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-500/20 text-purple-400 ml-1';
+            receivedBadge.className = 'inline-flex px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded-full bg-purple-500/20 text-purple-400 ml-1';
             receivedBadge.textContent = 'Received';
             receivedBadge.title = 'This note was received from another user';
             badge.parentElement?.appendChild(receivedBadge);
@@ -410,6 +421,7 @@ export const Templates = {
                     blinding: note.blinding,
                     leafIndex: note.leafIndex,
                     createdAt: note.createdAt,
+                    isReceived: note.isReceived || false,
                     version: 1,
                 };
                 const blob = new Blob([JSON.stringify(noteData, null, 2)], { type: 'application/json' });

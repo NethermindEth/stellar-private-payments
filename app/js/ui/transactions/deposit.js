@@ -260,6 +260,7 @@ export const Deposit = {
                     leafIndex,
                     spent: false,
                     isDummy,
+                    isReceived: false,
                     createdAt: new Date().toISOString()
                 };
                 
@@ -293,7 +294,7 @@ export const Deposit = {
                 console.warn('[Deposit] Warning:', submitResult.warning);
             }
             
-            // Save notes after success (with owner)
+            // Save notes after success (explicitly mark as not received - user deposited these)
             for (const note of pendingNotes) {
                 await Storage.save({
                     commitment: note.commitment,
@@ -303,6 +304,7 @@ export const Deposit = {
                     leafIndex: note.leafIndex,
                     ledger: submitResult.ledger || 0,
                     owner: App.state.wallet.address,
+                    isReceived: false,
                 });
             }
             if (NotesTableRef) NotesTableRef.render();
