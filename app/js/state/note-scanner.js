@@ -18,7 +18,6 @@
 import * as db from './db.js';
 import * as notesStore from './notes-store.js';
 import * as poolStore from './pool-store.js';
-import * as publicKeyStore from './public-key-store.js';
 import { 
     computeCommitment, 
     computeNullifier, 
@@ -205,7 +204,7 @@ export async function scanForNotes(options = {}) {
             continue; // Not addressed to us
         }
         // Skip dummy 0-value notes
-        if (decrypted.amount === 0n || decrypted.amount === 0) {
+        if (decrypted.amount === 0n) {
             console.log('[NoteScanner] Skipping 0-value dummy note');
             continue;
         }

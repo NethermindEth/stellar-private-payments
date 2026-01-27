@@ -14,6 +14,19 @@ import { Templates } from '../templates.js';
 import { AddressBook } from '../address-book.js';
 import { getTransactionErrorMessage } from '../errors.js';
 
+/**
+ * Converts LE bytes to BigInt.
+ * @param {Uint8Array} bytes - Little-endian byte array
+ * @returns {bigint}
+ */
+function leBytesToBigInt(bytes) {
+    let result = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) {
+        result = (result << 8n) | BigInt(bytes[i]);
+    }
+    return result;
+}
+
 // Forward reference - set by main init
 let NotesTableRef = null;
 
@@ -82,9 +95,8 @@ export const Transfer = {
     updateBalance() {
         let inputsTotalStroops = 0;
         document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
-            const noteId = input.value.trim();
-            const normalizedId = noteId.toLowerCase();
-            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+            const noteId = input.value.trim().toLowerCase();
+            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
             if (note) {
                 inputsTotalStroops += Number(note.amount);
             } else if (input.dataset.uploadedAmount) {
@@ -147,12 +159,10 @@ export const Transfer = {
         
         let hasInput = false;
         document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
-            const noteId = input.value.trim();
-            const normalizedId = noteId.toLowerCase();
-            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
-            if (note && note.amount > 0) {
-                hasInput = true;
-            } else if (input.dataset.uploadedAmount && Number(input.dataset.uploadedAmount) > 0) {
+            const noteId = input.value.trim().toLowerCase();
+            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+            if ((note && note.amount > 0) || 
+                (input.dataset.uploadedAmount && Number(input.dataset.uploadedAmount) > 0)) {
                 hasInput = true;
             }
         });
@@ -208,11 +218,10 @@ export const Transfer = {
             
             const transferNoteInputs = document.querySelectorAll('#transfer-inputs .note-input');
             for (const input of transferNoteInputs) {
-                const noteId = input.value.trim();
+                const noteId = input.value.trim().toLowerCase();
                 if (!noteId) continue;
                 
-                const normalizedId = noteId.toLowerCase();
-                let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+                let note = App.state.notes.find(n => n.id === noteId && !n.spent);
                 
                 // If not found in memory, try fetching directly from database
                 if (!note) {
@@ -280,10 +289,7 @@ export const Transfer = {
             const onChainLeafCount = states.pool.nextIndex || 0;
             
             if (localPoolRootLE) {
-                let localRootBigInt = 0n;
-                for (let i = 0; i < localPoolRootLE.length; i++) {
-                    localRootBigInt = (localRootBigInt << 8n) | BigInt(localPoolRootLE[localPoolRootLE.length - 1 - i]);
-                }
+                const localRootBigInt = leBytesToBigInt(localPoolRootLE);
                 console.log('[Transfer] Pool sync check:', {
                     localRoot: localRootBigInt.toString(16),
                     onChainRoot: poolRoot.toString(16),
@@ -302,11 +308,7 @@ export const Transfer = {
                     const newStates = await readAllContractStates();
                     const newPoolRoot = BigInt(newStates.pool.merkleRoot || '0x0');
                     const newLocalRootLE = poolStore.getRoot();
-                    let newLocalRootBigInt = 0n;
-                    for (let i = 0; i < newLocalRootLE.length; i++) {
-                        newLocalRootBigInt = (newLocalRootBigInt << 8n) | BigInt(newLocalRootLE[newLocalRootLE.length - 1 - i]);
-                    }
-                    
+                    const newLocalRootBigInt = leBytesToBigInt(newLocalRootLE);
                     if (newLocalRootBigInt !== newPoolRoot) {
                         throw new Error(`Pool state still out of sync after rebuild. Try refreshing the page.`);
                     }
@@ -315,10 +317,9 @@ export const Transfer = {
                     setLoadingText('Re-gathering input notes...');
                     inputNotes.length = 0; // Clear and rebuild
                     for (const input of transferNoteInputs) {
-                        const noteId = input.value.trim();
+                        const noteId = input.value.trim().toLowerCase();
                         if (!noteId) continue;
-                        const normalizedId = noteId.toLowerCase();
-                        let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+                        let note = App.state.notes.find(n => n.id === noteId && !n.spent);
                         if (!note) {
                             const dbNote = await notesStore.getNoteByCommitment(noteId);
                             if (dbNote && !dbNote.spent) note = dbNote;
