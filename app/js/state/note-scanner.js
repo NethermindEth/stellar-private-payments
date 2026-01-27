@@ -234,6 +234,14 @@ export async function scanForNotes(options = {}) {
         
         console.log('[NoteScanner] Before decryption succeeded', decrypted);
         
+        // Skip dummy 0-value notes. These are padding outputs created by the circuit
+        // when there's no output notes. They get encrypted with the sender's own key, so
+        // the sender can decrypt them when scanning, but they have no value and should not be stored.
+        if (decrypted.amount === 0n || decrypted.amount === 0) {
+            console.log('[NoteScanner] Skipping 0-value dummy note');
+            continue;
+        }
+        
         // Verify the commitment matches using our note public key
         const verifyResult = verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment);
         if (!verifyResult.valid) {

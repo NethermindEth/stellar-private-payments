@@ -5,6 +5,7 @@
 
 export { App, Utils, Storage, Toast, deriveKeysFromWallet } from './core.js';
 export { Templates, setTabsRef } from './templates.js';
+export { getTransactionErrorMessage, getFriendlyErrorMessage, getErrorMessage } from './errors.js';
 export { Tabs, Wallet, onWalletConnect, onWalletDisconnect, onAccountChange } from './navigation.js';
 export { NotesTable } from './notes-table.js';
 export { AddressBook, setAddressBookTabsRef } from './address-book.js';

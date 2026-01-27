@@ -22,6 +22,7 @@ import {
 } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
+import { getTransactionErrorMessage } from '../errors.js';
 
 // Forward reference - set by main init
 let NotesTableRef = null;
@@ -322,7 +323,7 @@ export const Deposit = {
             Toast.show(`Deposited ${totalAmount} XLM! ${txDisplay}`, 'success');
         } catch (e) {
             console.error('[Deposit] Error:', e);
-            Toast.show('Deposit failed: ' + e.message, 'error');
+            Toast.show(getTransactionErrorMessage(e, 'Deposit'), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');

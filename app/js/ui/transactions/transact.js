@@ -10,6 +10,7 @@ import { generateBlinding, fieldToHex, bytesToBigIntLE, bigintToField } from '..
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
 import { onWalletConnect } from '../navigation.js';
+import { getTransactionErrorMessage } from '../errors.js';
 
 // Forward reference - set by main init
 let NotesTableRef = null;
@@ -101,8 +102,14 @@ export const Transact = {
         let inputsTotalStroops = 0;
         document.querySelectorAll('#transact-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
-            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note) inputsTotalStroops += Number(note.amount);
+            const normalizedId = noteId.toLowerCase();
+            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+            if (note) {
+                inputsTotalStroops += Number(note.amount);
+            } else if (input.dataset.uploadedAmount) {
+                // Use amount from uploaded file if note not in local state
+                inputsTotalStroops += Number(input.dataset.uploadedAmount);
+            }
         });
         const inputsTotal = inputsTotalStroops / 1e7;
         
@@ -179,8 +186,23 @@ export const Transact = {
                 const noteId = input.value.trim();
                 if (!noteId) continue;
                 
-                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-                if (!note) continue;
+                const normalizedId = noteId.toLowerCase();
+                let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+                
+                // If not found in memory, try fetching directly from database
+                if (!note) {
+                    console.warn('[Transact] Note not in App.state, trying database lookup:', noteId.slice(0, 20));
+                    const dbNote = await notesStore.getNoteByCommitment(noteId);
+                    if (dbNote && !dbNote.spent) {
+                        note = dbNote;
+                        console.log('[Transact] Found note in database:', dbNote.id.slice(0, 20));
+                    }
+                }
+                
+                if (!note) {
+                    console.warn('[Transact] Note not found anywhere:', noteId);
+                    continue;
+                }
                 
                 const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
                 if (!merkleProof) {
@@ -355,7 +377,7 @@ export const Transact = {
             }
         } catch (e) {
             console.error('[Transact] Error:', e);
-            Toast.show('Transaction failed: ' + e.message, 'error');
+            Toast.show(getTransactionErrorMessage(e, 'Transaction'), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');

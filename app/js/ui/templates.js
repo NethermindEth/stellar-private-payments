@@ -3,8 +3,8 @@
  * @module ui/templates
  */
 
-import { App, Utils, Toast } from './core.js';
-import { StateManager } from '../state/index.js';
+import { App, Utils, Toast, Storage } from './core.js';
+import { StateManager, notesStore } from '../state/index.js';
 
 // Forward reference - set by navigation.js after it loads
 let TabsRef = null;
@@ -187,10 +187,19 @@ export const Templates = {
                 valueDisplay.textContent = `${amountXLM} XLM`;
                 valueDisplay.classList.remove('text-dark-500');
                 valueDisplay.classList.add('text-brand-400');
+            } else if (noteInput.dataset.uploadedAmount) {
+                // Use amount from uploaded file if note not in local state
+                const amount = Number(noteInput.dataset.uploadedAmount);
+                const amountXLM = amount / 1e7;
+                valueDisplay.textContent = `${amountXLM} XLM`;
+                valueDisplay.classList.remove('text-dark-500');
+                valueDisplay.classList.add('text-brand-400', 'italic');
+                valueDisplay.title = 'Amount from uploaded file (note not in local storage)';
             } else {
                 valueDisplay.textContent = '0 XLM';
                 valueDisplay.classList.add('text-dark-500');
-                valueDisplay.classList.remove('text-brand-400');
+                valueDisplay.classList.remove('text-brand-400', 'italic');
+                valueDisplay.title = '';
             }
         });
         
@@ -198,15 +207,75 @@ export const Templates = {
         const processFile = async (file) => {
             try {
                 const text = await file.text();
+                // Clear any previous uploaded amount
+                delete noteInput.dataset.uploadedAmount;
+                
                 try {
                     const data = JSON.parse(text);
-                    noteInput.value = data.id || text.trim();
-                } catch {
+                    const noteId = data.id || data.commitment || text.trim();
+                    noteInput.value = noteId;
+                    
+                    console.log('[Templates] Processing note file:', {
+                        id: noteId?.slice(0, 20),
+                        amount: data.amount,
+                        hasBlinding: !!data.blinding,
+                        hasPrivateKey: !!data.privateKey,
+                        leafIndex: data.leafIndex,
+                    });
+                    
+                    // Store the amount from the file for display
+                    if (data.amount !== undefined) {
+                        noteInput.dataset.uploadedAmount = String(data.amount);
+                    }
+                    
+                    // Import note to local storage if it has required fields and doesn't exist
+                    const existingNote = await notesStore.getNoteByCommitment(noteId);
+                    console.log('[Templates] Existing note lookup:', existingNote ? 'found' : 'not found');
+                    
+                    if (!existingNote && data.amount !== undefined) {
+                        // Save note to IndexedDB so it can be used in transactions.
+                        // Notes from other users won't have a valid privateKey for this wallet,
+                        // so proof generation will fail - but at least the UI flow works.
+                        // Use App.state.wallet.address as owner (more reliable than notesStore.getCurrentOwner)
+                        const currentOwner = App.state.wallet.address || notesStore.getCurrentOwner();
+                        console.log('[Templates] Saving note with owner:', currentOwner?.slice(0, 10));
+                        
+                        const savedNote = await notesStore.saveNote({
+                            commitment: noteId,
+                            privateKey: data.privateKey || new Uint8Array(32), // May be missing/invalid
+                            blinding: data.blinding || '0x' + '0'.repeat(64),
+                            amount: Number(data.amount),
+                            leafIndex: data.leafIndex ?? 0,
+                            ledger: 0,
+                            isReceived: true, // Mark as received since it came from a file
+                            owner: currentOwner, // Explicitly set owner
+                        });
+                        
+                        console.log('[Templates] Note saved with ID:', savedNote.id);
+                        
+                        // Update input with the normalized ID (lowercase, with 0x prefix)
+                        noteInput.value = savedNote.id;
+                        
+                        // Reload notes to update App.state.notes
+                        await Storage.load();
+                        console.log('[Templates] App.state.notes reloaded, count:', App.state.notes.length);
+                        
+                        Toast.show('Note imported from file', 'success');
+                    } else if (existingNote) {
+                        // Use the stored ID format for consistency
+                        noteInput.value = existingNote.id;
+                        Toast.show('Note loaded (already in storage)', 'success');
+                    } else {
+                        Toast.show('Note loaded from file', 'success');
+                    }
+                } catch (parseError) {
+                    console.warn('[Templates] Failed to parse note file:', parseError);
                     noteInput.value = text.trim();
+                    Toast.show('Note ID loaded from file', 'info');
                 }
                 noteInput.dispatchEvent(new Event('input', { bubbles: true }));
-                Toast.show('Note loaded from file', 'success');
-            } catch {
+            } catch (e) {
+                console.error('[Templates] Failed to process file:', e);
                 Toast.show('Failed to read file', 'error');
             }
         };

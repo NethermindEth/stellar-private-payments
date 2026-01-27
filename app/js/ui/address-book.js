@@ -19,6 +19,8 @@ export function setAddressBookTabsRef(tabs) {
 
 export const AddressBook = {
     isInitialized: false,
+    _filterDebounceTimer: null,
+    _cachedRegistrations: null,
     
     init() {
         // Store template reference
@@ -33,6 +35,12 @@ export const AddressBook = {
         const searchInput = document.getElementById('addressbook-search');
         const searchBtn = document.getElementById('addressbook-search-btn');
         
+        // Live filtering as user types (debounced)
+        searchInput?.addEventListener('input', () => {
+            this.debouncedFilter(searchInput.value.trim());
+        });
+        
+        // Enter key for exact on-chain lookup (full address)
         searchInput?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') {
                 this.search(searchInput.value.trim());
@@ -50,6 +58,7 @@ export const AddressBook = {
                 icon.classList.add('animate-spin');
             }
             try {
+                this._cachedRegistrations = null;
                 await this.render();
             } finally {
                 if (icon) {
@@ -60,10 +69,73 @@ export const AddressBook = {
         
         // Listen for new registrations
         StateManager.on('publicKeyRegistered', () => {
+            this._cachedRegistrations = null;
             this.render();
         });
         
         this.isInitialized = true;
+    },
+    
+    /**
+     * Debounces the filter operation to avoid excessive updates while typing.
+     * @param {string} searchTerm - Current search input value
+     */
+    debouncedFilter(searchTerm) {
+        if (this._filterDebounceTimer) {
+            clearTimeout(this._filterDebounceTimer);
+        }
+        this._filterDebounceTimer = setTimeout(() => {
+            this.filterTable(searchTerm);
+        }, 150);
+    },
+    
+    /**
+     * Filters the address book table in real-time without notifications.
+     * Shows all entries when search is empty.
+     * @param {string} searchTerm - Filter term (prefix match)
+     */
+    async filterTable(searchTerm) {
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const searchResult = document.getElementById('addressbook-search-result');
+        
+        if (!tbody) return;
+        
+        // Hide search result panel during filtering
+        searchResult?.classList.add('hidden');
+        
+        // Get cached registrations or fetch them
+        if (!this._cachedRegistrations) {
+            try {
+                this._cachedRegistrations = await StateManager.getRecentPublicKeys(100);
+            } catch (error) {
+                console.error('[AddressBook] Failed to load registrations:', error);
+                return;
+            }
+        }
+        
+        const registrations = this._cachedRegistrations;
+        
+        // Filter by prefix if search term provided
+        const term = searchTerm.toUpperCase();
+        const matches = term 
+            ? registrations.filter(r => r.address.toUpperCase().startsWith(term))
+            : registrations;
+        
+        tbody.replaceChildren();
+        
+        if (matches.length === 0) {
+            empty?.classList.remove('hidden');
+            empty?.classList.add('flex');
+            return;
+        }
+        
+        empty?.classList.add('hidden');
+        empty?.classList.remove('flex');
+        
+        matches.forEach(record => {
+            tbody.appendChild(this.createRow(record));
+        });
     },
     
     /**
@@ -98,12 +170,14 @@ export const AddressBook = {
     
     /**
      * Renders the address book table with recent registrations.
+     * Respects the current search filter if one is active.
      */
     async render() {
         const tbody = document.getElementById('addressbook-tbody');
         const empty = document.getElementById('empty-addressbook');
         const loading = document.getElementById('addressbook-loading');
         const searchResult = document.getElementById('addressbook-search-result');
+        const searchInput = document.getElementById('addressbook-search');
         
         if (!tbody) return;
         
@@ -114,11 +188,18 @@ export const AddressBook = {
         tbody.replaceChildren();
         
         try {
-            const registrations = await StateManager.getRecentPublicKeys(20);
+            const registrations = await StateManager.getRecentPublicKeys(100);
+            this._cachedRegistrations = registrations;
             
             loading?.classList.add('hidden');
             
-            if (registrations.length === 0) {
+            // If there's an active search filter, apply it
+            const currentFilter = searchInput?.value.trim().toUpperCase() || '';
+            const filtered = currentFilter 
+                ? registrations.filter(r => r.address.toUpperCase().startsWith(currentFilter))
+                : registrations;
+            
+            if (filtered.length === 0) {
                 empty?.classList.remove('hidden');
                 empty?.classList.add('flex');
                 return;
@@ -127,7 +208,7 @@ export const AddressBook = {
             empty?.classList.add('hidden');
             empty?.classList.remove('flex');
             
-            registrations.forEach(record => {
+            filtered.forEach(record => {
                 tbody.appendChild(this.createRow(record));
             });
         } catch (error) {
@@ -197,52 +278,55 @@ export const AddressBook = {
     },
     
     /**
-     * Searches for a public key by address.
-     * @param {string} address - Stellar address to search
+     * Searches for public keys by address prefix or full address.
+     * For full 56-char addresses starting with G, performs on-chain lookup.
+     * For partial input, filters the local table.
+     * @param {string} searchTerm - Full Stellar address or prefix to search
      */
-    async search(address) {
-        if (!address) {
-            Toast.show('Enter an address to search', 'error');
+    async search(searchTerm) {
+        // If empty, just show all results
+        if (!searchTerm) {
+            await this.render();
             return;
         }
         
-        // Validate address format (basic check)
-        if (!address.startsWith('G') || address.length !== 56) {
-            Toast.show('Invalid Stellar address format', 'error');
-            return;
-        }
+        // Normalize to uppercase for consistent matching
+        const term = searchTerm.toUpperCase();
         
         const searchResult = document.getElementById('addressbook-search-result');
         const tbody = document.getElementById('addressbook-tbody');
         const empty = document.getElementById('empty-addressbook');
         const loading = document.getElementById('addressbook-loading');
         
-        // Show loading state
-        loading?.classList.remove('hidden');
-        empty?.classList.add('hidden');
-        searchResult?.classList.add('hidden');
-        tbody?.replaceChildren();
-        
-        try {
-            const result = await StateManager.searchPublicKey(address);
+        // If it's a full valid address, do exact on-chain lookup
+        if (term.startsWith('G') && term.length === 56) {
+            loading?.classList.remove('hidden');
+            empty?.classList.add('hidden');
+            searchResult?.classList.add('hidden');
+            tbody?.replaceChildren();
             
-            loading?.classList.add('hidden');
-            
-            if (result.found) {
-                // Show search result
-                searchResult?.classList.remove('hidden');
-                this.renderSearchResult(result.record, result.source);
-                Toast.show(`Found public key (${result.source})`, 'success');
-            } else {
-                // Show not found
-                searchResult?.classList.remove('hidden');
-                this.renderSearchNotFound(address);
+            try {
+                const result = await StateManager.searchPublicKey(term);
+                loading?.classList.add('hidden');
+                
+                if (result.found) {
+                    searchResult?.classList.remove('hidden');
+                    this.renderSearchResult(result.record, result.source);
+                    Toast.show(`Found public key (${result.source})`, 'success');
+                } else {
+                    searchResult?.classList.remove('hidden');
+                    this.renderSearchNotFound(term);
+                }
+            } catch (error) {
+                console.error('[AddressBook] Search failed:', error);
+                loading?.classList.add('hidden');
+                Toast.show('Search failed: ' + error.message, 'error');
             }
-        } catch (error) {
-            console.error('[AddressBook] Search failed:', error);
-            loading?.classList.add('hidden');
-            Toast.show('Search failed: ' + error.message, 'error');
+            return;
         }
+        
+        // For partial search, use the live filter
+        await this.filterTable(searchTerm);
     },
     
     /**

@@ -934,6 +934,7 @@
                                 class="w-64 px-3 py-1.5 pr-8 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:font-sans placeholder:text-dark-500"
                                 autocomplete="off"
                                 spellcheck="false"
+                                title="Type a full address or partial prefix to filter"
                             >
                             <button 
                                 type="button" 
@@ -1217,26 +1218,6 @@
         </div>
     </template>
 
-    <!-- Address Book Row Template -->
-        <tr class="addressbook-row hover:bg-dark-800/50 transition-colors" data-address="">
-            <td class="px-4 py-3 font-mono text-xs text-dark-300 ab-address"></td>
-            <td class="px-4 py-3 font-mono text-xs text-brand-400 ab-pubkey"></td>
-            <td class="px-4 py-3 text-sm text-dark-400 ab-date"></td>
-            <td class="px-4 py-3">
-                <div class="flex gap-1">
-                    <button type="button" class="use-transfer-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Use in Transfer" aria-label="Use in transfer">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 7l-10 10M7 7h10v10"/></svg>
-                    </button>
-                    <button type="button" class="copy-pubkey-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy public key" aria-label="Copy public key">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-                    </button>
-                    <button type="button" class="copy-address-btn p-1.5 bg-dark-700 hover:bg-dark-600 border border-dark-600 rounded text-dark-400 hover:text-brand-500 transition-colors" title="Copy address" aria-label="Copy address">
-                        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-                    </button>
-                </div>
-            </td>
-        </tr>
-    </template>
 
     <script data-trunk data-target-path="js" data-integrity="none" src="js/ui.js" type="module"></script>
 </body>

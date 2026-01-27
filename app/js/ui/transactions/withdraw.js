@@ -10,6 +10,7 @@ import { generateWithdrawProof } from '../../transaction-builder.js';
 import { App, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
 import { onWalletConnect } from '../navigation.js';
+import { getTransactionErrorMessage } from '../errors.js';
 
 // Forward reference - set by main init
 let NotesTableRef = null;
@@ -67,12 +68,16 @@ export const Withdraw = {
         let totalStroops = 0n;
         document.querySelectorAll('#withdraw-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
-            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
+            const normalizedId = noteId.toLowerCase();
+            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
             if (note) {
                 const amountStroops = note.amount < 1000 
                     ? BigInt(Math.round(note.amount * 1e7))
                     : BigInt(note.amount);
                 totalStroops += amountStroops;
+            } else if (input.dataset.uploadedAmount) {
+                // Use amount from uploaded file if note not in local state
+                totalStroops += BigInt(input.dataset.uploadedAmount);
             }
         });
         const totalXLM = Number(totalStroops) / 1e7;
@@ -133,8 +138,24 @@ export const Withdraw = {
                 const noteId = input.value.trim();
                 if (!noteId) continue;
                 
-                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-                if (!note) continue;
+                // Normalize ID for comparison (storage uses lowercase)
+                const normalizedId = noteId.toLowerCase();
+                let note = App.state.notes.find(n => n.id === normalizedId || n.id === noteId);
+                
+                // If not found in memory, try fetching directly from database
+                if (!note) {
+                    console.warn('[Withdraw] Note not in App.state, trying database lookup:', noteId.slice(0, 20));
+                    const dbNote = await notesStore.getNoteByCommitment(noteId);
+                    if (dbNote && !dbNote.spent) {
+                        note = dbNote;
+                        console.log('[Withdraw] Found note in database:', dbNote.id.slice(0, 20));
+                    }
+                }
+                
+                if (!note) {
+                    console.warn('[Withdraw] Note not found anywhere:', noteId, 'Available in state:', App.state.notes.map(n => n.id.slice(0, 16)));
+                    continue;
+                }
                 
                 const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
                 if (!merkleProof) {
@@ -273,7 +294,7 @@ export const Withdraw = {
             this.updateTotal();
         } catch (e) {
             console.error('[Withdraw] Error:', e);
-            Toast.show('Withdrawal failed: ' + e.message, 'error');
+            Toast.show(getTransactionErrorMessage(e, 'Withdrawal'), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');

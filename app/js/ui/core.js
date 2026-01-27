@@ -130,7 +130,10 @@ export const Utils = {
     },
 
     downloadFile(data, filename) {
-        const blob = new Blob([data], { type: 'application/json' });
+        // Handle both Blob and string/object data
+        const blob = data instanceof Blob 
+            ? data 
+            : new Blob([typeof data === 'string' ? data : JSON.stringify(data)], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;

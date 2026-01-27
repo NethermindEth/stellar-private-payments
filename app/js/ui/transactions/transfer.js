@@ -11,6 +11,8 @@ import { generateTransferProof } from '../../transaction-builder.js';
 import { generateBlinding, fieldToHex, bytesToBigIntLE, hexToField } from '../../bridge.js';
 import { App, Utils, Toast, Storage, deriveKeysFromWallet } from '../core.js';
 import { Templates } from '../templates.js';
+import { AddressBook } from '../address-book.js';
+import { getTransactionErrorMessage } from '../errors.js';
 
 // Forward reference - set by main init
 let NotesTableRef = null;
@@ -53,58 +55,42 @@ export const Transfer = {
     },
     
     /**
-     * Opens address book search modal/panel to look up public keys by Stellar address.
-     * Populates both note key (BN254) and encryption key (X25519) fields.
+     * Opens address book by scrolling to the section and switching to the address book tab.
+     * User can then search or select an entry to populate the recipient fields.
      */
-    async openAddressBookLookup() {
-        const address = prompt('Enter Stellar address to look up (G...):');
-        if (!address) return;
+    openAddressBookLookup() {
+        // Switch to address book section
+        AddressBook.switchSection('addressbook');
         
-        if (!address.startsWith('G') || address.length !== 56) {
-            Toast.show('Invalid Stellar address format', 'error');
-            return;
+        // Scroll to the notes/address book section
+        const section = document.getElementById('section-panel-addressbook');
+        if (section) {
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
         }
         
-        Toast.show('Searching...', 'info');
-        
-        try {
-            const result = await StateManager.searchPublicKey(address);
-            
-            if (result.found) {
-                // Use new fields if available, fallback to legacy publicKey
-                const encryptionKey = result.record.encryptionKey || result.record.publicKey;
-                const noteKey = result.record.noteKey || result.record.publicKey;
-                
-                // Set the note key (BN254 - used for commitment)
-                const noteKeyInput = document.getElementById('transfer-recipient-key');
-                if (noteKeyInput) {
-                    noteKeyInput.value = noteKey;
-                    noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-                
-                // Set the encryption key (X25519 - used for encrypting note data)
-                const encKeyInput = document.getElementById('transfer-recipient-enc-key');
-                if (encKeyInput) {
-                    encKeyInput.value = encryptionKey;
-                    encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                }
-                
-                Toast.show(`Found keys (${result.source})`, 'success');
-            } else {
-                Toast.show('No registered public keys found for this address', 'error');
+        // Focus the search input
+        setTimeout(() => {
+            const searchInput = document.getElementById('addressbook-search');
+            if (searchInput) {
+                searchInput.focus();
             }
-        } catch (e) {
-            console.error('[Transfer] Address lookup failed:', e);
-            Toast.show('Lookup failed: ' + e.message, 'error');
-        }
+        }, 300);
+        
+        Toast.show('Select a recipient from the address book', 'info');
     },
     
     updateBalance() {
         let inputsTotalStroops = 0;
         document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
-            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note) inputsTotalStroops += Number(note.amount);
+            const normalizedId = noteId.toLowerCase();
+            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+            if (note) {
+                inputsTotalStroops += Number(note.amount);
+            } else if (input.dataset.uploadedAmount) {
+                // Use amount from uploaded file if note not in local state
+                inputsTotalStroops += Number(input.dataset.uploadedAmount);
+            }
         });
         const inputsTotal = inputsTotalStroops / 1e7;
         
@@ -162,8 +148,13 @@ export const Transfer = {
         let hasInput = false;
         document.querySelectorAll('#transfer-inputs .note-input').forEach(input => {
             const noteId = input.value.trim();
-            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-            if (note && note.amount > 0) hasInput = true;
+            const normalizedId = noteId.toLowerCase();
+            const note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+            if (note && note.amount > 0) {
+                hasInput = true;
+            } else if (input.dataset.uploadedAmount && Number(input.dataset.uploadedAmount) > 0) {
+                hasInput = true;
+            }
         });
         
         if (!hasInput) {
@@ -220,8 +211,23 @@ export const Transfer = {
                 const noteId = input.value.trim();
                 if (!noteId) continue;
                 
-                const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-                if (!note) continue;
+                const normalizedId = noteId.toLowerCase();
+                let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && !n.spent);
+                
+                // If not found in memory, try fetching directly from database
+                if (!note) {
+                    console.warn('[Transfer] Note not in App.state, trying database lookup:', noteId.slice(0, 20));
+                    const dbNote = await notesStore.getNoteByCommitment(noteId);
+                    if (dbNote && !dbNote.spent) {
+                        note = dbNote;
+                        console.log('[Transfer] Found note in database:', dbNote.id.slice(0, 20));
+                    }
+                }
+                
+                if (!note) {
+                    console.warn('[Transfer] Note not found anywhere:', noteId);
+                    continue;
+                }
                 
                 const merkleProof = await poolStore.getMerkleProof(note.leafIndex);
                 if (!merkleProof) {
@@ -376,7 +382,7 @@ export const Transfer = {
             Toast.show('Transfer successful! The recipient can scan for new notes.', 'success');
         } catch (e) {
             console.error('[Transfer] Error:', e);
-            Toast.show('Transfer failed: ' + e.message, 'error');
+            Toast.show(getTransactionErrorMessage(e, 'Transfer'), 'error');
         } finally {
             btn.disabled = false;
             btnText.classList.remove('hidden');
