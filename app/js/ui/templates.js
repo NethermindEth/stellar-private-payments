@@ -5,6 +5,7 @@
 
 import { App, Utils, Toast, Storage } from './core.js';
 import { StateManager, notesStore } from '../state/index.js';
+import { AddressBook } from './address-book.js';
 
 // Forward reference - set by navigation.js after it loads
 let TabsRef = null;
@@ -116,37 +117,17 @@ export const Templates = {
             amountInput.dispatchEvent(new Event('input', { bubbles: true }));
         });
         
-        // Address book lookup fills both keys
-        lookupBtn?.addEventListener('click', async () => {
-            const address = prompt('Enter Stellar address to look up (G...):');
-            if (!address) return;
-            
-            if (!address.startsWith('G') || address.length !== 56) {
-                Toast.show('Invalid Stellar address format', 'error');
-                return;
+        // Address book lookup - scroll to address book section
+        lookupBtn?.addEventListener('click', () => {
+            AddressBook.switchSection('addressbook');
+            const section = document.getElementById('section-panel-addressbook');
+            if (section) {
+                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }
-            
-            Toast.show('Searching...', 'info');
-            
-            try {
-                const result = await StateManager.searchPublicKey(address);
-                
-                if (result.found) {
-                    const encryptionKey = result.record.encryptionKey || result.record.publicKey;
-                    const noteKey = result.record.noteKey || result.record.publicKey;
-                    
-                    noteKeyInput.value = noteKey;
-                    noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    encKeyInput.value = encryptionKey;
-                    encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
-                    Toast.show(`Found keys (${result.source})`, 'success');
-                } else {
-                    Toast.show('No registered public keys found for this address', 'error');
-                }
-            } catch (e) {
-                console.error('[Templates] Address lookup failed:', e);
-                Toast.show('Lookup failed: ' + e.message, 'error');
-            }
+            setTimeout(() => {
+                document.getElementById('addressbook-search')?.focus();
+            }, 300);
+            Toast.show('Select a recipient from the address book', 'info');
         });
         
         // Copy button
