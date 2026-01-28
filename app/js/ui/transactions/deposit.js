@@ -210,7 +210,7 @@ export const Deposit = {
             
             // Step 4: Generate proof
             const contracts = getDeployedContracts();
-            const totalAmountStroops = BigInt(Math.floor(totalAmount * 1_000_000_0));
+            const totalAmountStroops = BigInt(Math.floor(totalAmount * 10_000_000));
             
             setLoadingText('Generating ZK proof...');
             const proofResult = await generateDepositProof({

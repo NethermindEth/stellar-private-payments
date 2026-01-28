@@ -211,8 +211,8 @@ pub struct NewNullifierEvent {
 
 /// Event emitted when a user registers their public keys
 ///
-/// This event allows other users to discover keys for sending private transfers.
-/// Two key types are required:
+/// This event allows other users to discover keys for sending private
+/// transfers. Two key types are required:
 /// - encryption_key: X25519 key for encrypting note data (amount, blinding)
 /// - note_key: BN254 key for creating commitments in the ZK circuit
 #[contractevent]

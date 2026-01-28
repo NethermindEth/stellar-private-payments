@@ -59,13 +59,23 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
-    
-    // Rerun if testdata key files are missing (deleted) or changed
-    // Note: We only track the 3 essential files. vk_const.rs can be regenerated from vk.json.
+
+    // Rerun if testdata key files are missing or changed
     let testdata_dir = crate_dir.join("../scripts/testdata");
-    println!("cargo:rerun-if-changed={}", testdata_dir.join("compliant_test_proving_key.bin").display());
-    println!("cargo:rerun-if-changed={}", testdata_dir.join("compliant_test_vk.json").display());
-    println!("cargo:rerun-if-changed={}", testdata_dir.join("compliant_test_vk_soroban.bin").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir
+            .join("compliant_test_proving_key.bin")
+            .display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir.join("compliant_test_vk.json").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir.join("compliant_test_vk_soroban.bin").display()
+    );
 
     // === CIRCOMLIB DEPENDENCY ===
     // Import circomlib library (only if not already present)
@@ -167,7 +177,7 @@ fn main() -> Result<()> {
                         .join("wasm")
                         .join(format!("{circuit_name}_js"))
                         .join(format!("{circuit_name}.wasm"));
-                    
+
                     if !wasm_path.exists() {
                         // WASM doesn't exist but keys might be needed - force recompilation
                         println!(
@@ -177,7 +187,12 @@ fn main() -> Result<()> {
                         // Don't continue, let the compilation proceed
                     } else {
                         // WASM exists, try key generation
-                        match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                        match generate_keys_if_needed(
+                            &crate_dir,
+                            &out_dir,
+                            &circuit_name,
+                            &r1cs_file,
+                        ) {
                             Ok(_) => {}
                             Err(e) => {
                                 println!("cargo:warning=Key generation failed: {e}");
@@ -258,11 +273,17 @@ fn main() -> Result<()> {
                 match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
                     Ok(generated) => {
                         if generated {
-                            println!("cargo:warning=Key generation completed for {}", circuit_name);
+                            println!(
+                                "cargo:warning=Key generation completed for {}",
+                                circuit_name
+                            );
                         }
                     }
                     Err(e) => {
-                        println!("cargo:warning=Key generation failed for {}: {}", circuit_name, e);
+                        println!(
+                            "cargo:warning=Key generation failed for {}: {}",
+                            circuit_name, e
+                        );
                     }
                 }
             }
@@ -758,9 +779,11 @@ fn generate_groth16_keys(
     Ok((pk, vk))
 }
 
-/// Check if the essential Groth16 keys exist (the 3 files needed for proving/verification).
+/// Check if the essential Groth16 keys exist (the 3 files needed for
+/// proving/verification).
 ///
-/// Returns (all_exist, missing_files) where missing_files lists which are absent.
+/// Returns (all_exist, missing_files) where missing_files lists which are
+/// absent.
 fn check_essential_keys_exist(
     pk_path: &Path,
     vk_path: &Path,
@@ -781,11 +804,12 @@ fn check_essential_keys_exist(
 
 /// Check if Groth16 keys need to be regenerated.
 ///
-/// IMPORTANT: Key regeneration is DANGEROUS after deployment because Groth16 keys
-/// are generated with random parameters. Regenerating keys will make proofs
-/// incompatible with already-deployed contracts.
+/// Key regeneration is DANGEROUS after deployment because Groth16
+/// keys are generated with random parameters. Regenerating keys will make
+/// proofs incompatible with already-deployed contracts.
 ///
-/// Returns (needs_generation, reason) where reason explains why regeneration is needed.
+/// Returns (needs_generation, reason) where reason explains why regeneration is
+/// needed.
 fn check_keys_need_generation(
     pk_path: &Path,
     vk_path: &Path,
@@ -796,59 +820,59 @@ fn check_keys_need_generation(
 ) -> (bool, String) {
     // Check if essential key files exist (the 3 needed for proving/verification)
     let (essential_exist, missing) = check_essential_keys_exist(pk_path, vk_path, vk_soroban_path);
-    
+
     if !essential_exist {
         // Essential files are missing - must generate
-        return (true, format!("Missing essential key files: {}", missing.join(", ")));
+        return (
+            true,
+            format!("Missing essential key files: {}", missing.join(", ")),
+        );
     }
-    
+
     // Essential keys exist. Check if force regeneration was requested.
     if force_regen {
-        return (true, "REGEN_KEYS=1 was set - forcing key regeneration".to_string());
+        return (
+            true,
+            "REGEN_KEYS=1 was set - forcing key regeneration".to_string(),
+        );
     }
-    
-    // Essential keys exist and no force flag. Check if r1cs is newer (warning only).
-    if r1cs_file.exists() {
-        if let (Ok(r1cs_meta), Ok(pk_meta)) = (fs::metadata(r1cs_file), fs::metadata(pk_path)) {
-            if let (Ok(r1cs_time), Ok(pk_time)) = (r1cs_meta.modified(), pk_meta.modified()) {
-                if r1cs_time > pk_time {
-                    println!(
-                        "cargo:warning=WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
-                    );
-                    println!(
-                        "cargo:warning=If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 cargo build"
-                    );
-                    println!(
-                        "cargo:warning=Then REDEPLOY contracts with the new verification key!"
-                    );
-                }
-            }
-        }
+
+    // Essential keys exist and no force flag. Check if r1cs is newer (warning
+    // only).
+    if r1cs_file.exists()
+        && let (Ok(r1cs_meta), Ok(pk_meta)) = (fs::metadata(r1cs_file), fs::metadata(pk_path))
+        && let (Ok(r1cs_time), Ok(pk_time)) = (r1cs_meta.modified(), pk_meta.modified())
+        && r1cs_time > pk_time
+    {
+        println!(
+            "cargo:warning=WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
+        );
+        println!(
+            "cargo:warning=If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 cargo build"
+        );
+        println!("cargo:warning=Then REDEPLOY contracts with the new verification key!");
     }
-    
+
     // Note: vk_const.rs is optional (only for embedding VK in contracts).
     // We don't trigger regeneration just for this file since it would create
     // new incompatible keys. The user must explicitly use REGEN_KEYS=1.
     if !vk_const_path.exists() {
-        println!(
-            "cargo:warning=Note: vk_const.rs is missing but essential keys exist - skipping"
-        );
+        println!("cargo:warning=Note: vk_const.rs is missing but essential keys exist - skipping");
         println!(
             "cargo:warning=Run REGEN_KEYS=1 BUILD_TESTS=1 cargo build if you need vk_const.rs"
         );
     }
-    
-    (false, "Essential keys exist and REGEN_KEYS not set".to_string())
+
+    (
+        false,
+        "Essential keys exist and REGEN_KEYS not set".to_string(),
+    )
 }
 
 /// Generate Groth16 keys if they don't exist or REGEN_KEYS=1 is set.
 ///
-/// IMPORTANT: Key regeneration is opt-in to prevent accidentally breaking
-/// deployed contracts. Groth16 trusted setup uses random parameters, so
-/// regenerating keys creates INCOMPATIBLE proving/verification key pairs.
-///
 /// Set `REGEN_KEYS=1` environment variable to force regeneration (e.g., after
-/// circuit changes). Remember to REDEPLOY contracts with the new VK!
+/// circuit changes). Redeployment of contracts will be needed after this.
 ///
 /// # Arguments
 ///
@@ -920,9 +944,7 @@ fn generate_keys_if_needed(
             wasm_path.display()
         );
         println!("cargo:warning=This usually happens when:");
-        println!(
-            "cargo:warning=  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 cargo build)"
-        );
+        println!("cargo:warning=  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 cargo build)");
         println!("cargo:warning=  2. WASM compilation failed earlier in the build");
         println!(
             "cargo:warning=  3. OUT_DIR was cleaned (try: cargo clean && BUILD_TESTS=1 cargo build)"
@@ -978,7 +1000,7 @@ fn generate_keys_if_needed(
                 vk.gamma_abc_g1.len(),
                 vk.gamma_abc_g1.len().saturating_sub(1)
             );
-            
+
             Ok(true)
         }
         Err(e) => {
