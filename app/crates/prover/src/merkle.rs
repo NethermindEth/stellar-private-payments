@@ -130,32 +130,64 @@ impl MerkleTree {
         })
     }
 
-    /// Insert a leaf and return its index
+    /// Insert a leaf at the next available index and return that index
     #[wasm_bindgen]
     pub fn insert(&mut self, leaf_bytes: &[u8]) -> Result<u32, JsValue> {
-        let leaf = bytes_to_scalar(leaf_bytes)?;
-        let index = self.next_index;
+        let index = u32::try_from(self.next_index)
+            .map_err(|_| JsValue::from_str("Index too large for u32"))?;
+        self.insert_at(leaf_bytes, index)
+    }
 
-        let max_leaves = 1u64 << self.depth;
-        if index >= max_leaves {
-            return Err(JsValue::from_str("Merkle tree is full"));
+    /// Insert a leaf at a specific index and return that index
+    ///
+    /// Allows out-of-order insertion and overwriting existing leaves.
+    /// Errors if `index` exceeds `next_index` (would create a gap).
+    #[wasm_bindgen]
+    pub fn insert_at(&mut self, leaf_bytes: &[u8], index: u32) -> Result<u32, JsValue> {
+        let leaf = bytes_to_scalar(leaf_bytes)?;
+        self.insert_at_internal(leaf, index)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
+    fn insert_at_internal(
+        &mut self,
+        leaf: Scalar,
+        index: u32,
+    ) -> Result<u32, alloc::string::String> {
+        let index_u64 = u64::from(index);
+
+        if index_u64 > self.next_index {
+            return Err(format!(
+                "insert_at: index {} exceeds next_index {}, would create gap",
+                index, self.next_index
+            ));
         }
 
-        let index_usize =
-            usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
+        let max_leaves = 1u64 << self.depth;
+        if index_u64 >= max_leaves {
+            return Err("Merkle tree is full".into());
+        }
 
-        // Insert leaf
-        self.levels_data[0][index_usize] = leaf;
+        let index_usize = usize::try_from(index).map_err(|_| "Index too large")?;
 
-        // Update path to root
-        let mut current_index = index_usize;
+        self.update_path(index_usize, leaf);
+
+        let next = index_u64.checked_add(1).ok_or("Index overflow")?;
+        self.next_index = self.next_index.max(next);
+
+        Ok(index)
+    }
+
+    fn update_path(&mut self, index: usize, leaf: Scalar) {
+        self.levels_data[0][index] = leaf;
+
+        let mut current_index = index;
         let mut current_hash = leaf;
 
         for level in 0..self.depth {
-            let sibling_index = current_index ^ 1; // Toggle last bit to get sibling
+            let sibling_index = current_index ^ 1;
             let sibling = self.levels_data[level][sibling_index];
 
-            // Compute parent hash
             let (left, right) = if current_index.is_multiple_of(2) {
                 (current_hash, sibling)
             } else {
@@ -165,20 +197,9 @@ impl MerkleTree {
             current_hash = poseidon2_compression(left, right);
             current_index /= 2;
 
-            // Update parent level
-            let parent_level = level
-                .checked_add(1)
-                .ok_or_else(|| JsValue::from_str("Level overflow"))?;
+            let parent_level = level.checked_add(1).expect("level < depth <= 32");
             self.levels_data[parent_level][current_index] = current_hash;
         }
-
-        self.next_index = self
-            .next_index
-            .checked_add(1)
-            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
-
-        // index is bounded by max_leaves (1 << depth where depth <= 32)
-        u32::try_from(index).map_err(|_| JsValue::from_str("Index too large for u32"))
     }
 
     /// Get the current root
@@ -286,4 +307,91 @@ pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>,
     }
 
     Ok(scalar_to_bytes(&current_level[0]))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::serialization::scalar_to_bytes;
+
+    fn leaf(val: u64) -> Vec<u8> {
+        scalar_to_bytes(&Scalar::from(val))
+    }
+
+    #[test]
+    fn insert_at_index_zero_empty_tree() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        let idx = tree.insert_at(&leaf(42), 0).expect("insert_at 0");
+        assert_eq!(idx, 0);
+        assert_eq!(tree.next_index(), 1);
+    }
+
+    #[test]
+    fn insert_at_equals_next_index() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        tree.insert(&leaf(1)).expect("insert 0");
+        tree.insert(&leaf(2)).expect("insert 1");
+        assert_eq!(tree.next_index(), 2);
+
+        let idx = tree.insert_at(&leaf(3), 2).expect("insert_at 2");
+        assert_eq!(idx, 2);
+        assert_eq!(tree.next_index(), 3);
+    }
+
+    #[test]
+    fn insert_at_beyond_next_index_errors() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        let err = tree
+            .insert_at_internal(Scalar::from(1u64), 1)
+            .expect_err("should reject gap");
+        assert!(err.contains("exceeds next_index"));
+    }
+
+    #[test]
+    fn insert_at_overwrites_without_advancing() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        tree.insert(&leaf(1)).expect("insert 0");
+        tree.insert(&leaf(2)).expect("insert 1");
+        tree.insert(&leaf(3)).expect("insert 2");
+
+        let root_before = tree.root();
+        let next_before = tree.next_index();
+
+        tree.insert_at(&leaf(99), 1).expect("overwrite index 1");
+
+        assert_eq!(tree.next_index(), next_before);
+        assert_ne!(tree.root(), root_before);
+    }
+
+    #[test]
+    fn insert_at_then_get_proof_matches_root() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        tree.insert_at(&leaf(10), 0).expect("insert_at 0");
+        tree.insert_at(&leaf(20), 1).expect("insert_at 1");
+
+        let proof = tree.get_proof(0).expect("proof for 0");
+        assert_eq!(proof.root(), tree.root());
+
+        let proof = tree.get_proof(1).expect("proof for 1");
+        assert_eq!(proof.root(), tree.root());
+    }
+
+    #[test]
+    fn equivalence_insert_vs_insert_at() {
+        let leaves: Vec<Vec<u8>> = (1..=5).map(leaf).collect();
+
+        let mut sequential = MerkleTree::new(4).expect("new tree");
+        for l in &leaves {
+            sequential.insert(l).expect("insert");
+        }
+
+        let mut indexed = MerkleTree::new(4).expect("new tree");
+        for (i, l) in leaves.iter().enumerate() {
+            let idx = u32::try_from(i).expect("index fits u32");
+            indexed.insert_at(l, idx).expect("insert_at");
+        }
+
+        assert_eq!(sequential.root(), indexed.root());
+        assert_eq!(sequential.next_index(), indexed.next_index());
+    }
 }
