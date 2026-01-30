@@ -66,8 +66,8 @@ If you want to try it out:
     ```bash
     stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
     ```
-    Or, direcly access `http://localhost:8080/admin.html` and use the UI to add public keys.
-    Please note that the adming UI allows deriving keys for ANY account.
+    Or, directly access `http://localhost:8080/admin.html` and use the UI to add public keys.
+    Please note that the admin UI allows deriving keys for ANY account.
     But insertion MUST be signed by the ASP admin account.
     You can add your Freighter account to your Stellar-cli keys with `stellar keys add <NAME_FOR_ACCOUNT> --seed-phrase`.
     This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
