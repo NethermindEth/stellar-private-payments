@@ -87,16 +87,10 @@ export async function processLeafAdded(event, ledger) {
     
     // Update merkle tree
     if (merkleTree) {
-        // Enforce ordering
-        const nextIdx = Number(merkleTree.next_index);
-        if (index !== nextIdx) {
-            throw new Error(`Out-of-order insertion: expected ${nextIdx}, got ${index}`);
-        }
-        
         const leafBytes = hexToBytesForTree(leaf);
-        console.log(`[ASPMembershipStore] Inserting leaf bytes (LE for tree):`, bytesToHex(leafBytes));
-        
-        merkleTree.insert(leafBytes);
+        console.log(`[ASPMembershipStore] Inserting leaf at index ${index} (LE for tree):`, bytesToHex(leafBytes));
+
+        merkleTree.insert_at(leafBytes, index);
         
         // Verify root matches contract
         // Tree returns LE bytes, contract root is BE hex

@@ -74,7 +74,7 @@ export async function rebuildTree() {
         }
         
         const commitmentBytes = hexToBytesForTree(leaf.commitment);
-        merkleTree.insert(commitmentBytes);
+        merkleTree.insert_at(commitmentBytes, leaf.index);
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
@@ -117,7 +117,7 @@ export async function processNewCommitment(event, ledger) {
     // Update merkle tree
     if (merkleTree) {
         const commitmentBytes = hexToBytesForTree(commitment);
-        merkleTree.insert(commitmentBytes);
+        merkleTree.insert_at(commitmentBytes, index);
     }
 }
 
