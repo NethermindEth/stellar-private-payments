@@ -548,6 +548,25 @@ export function deserializeMerkleTree(data) {
     return MerkleTree.deserialize(data);
 }
 
+/**
+ * Build a Merkle tree from indexed leaves in one bottom-up pass.
+ * @param {number} depth
+ * @param {Uint8Array} zeroLeafBytes - 32 bytes LE
+ * @param {Array<{index: number, leaf: Uint8Array}>} indexedLeaves
+ * @returns {MerkleTree}
+ */
+export function buildMerkleTreeFromLeaves(depth, zeroLeafBytes, indexedLeaves) {
+    const packed = new Uint8Array(indexedLeaves.length * 36);
+    const view = new DataView(packed.buffer);
+    for (let i = 0; i < indexedLeaves.length; i++) {
+        const { index, leaf } = indexedLeaves[i];
+        const offset = i * 36;
+        view.setUint32(offset, index, true);
+        packed.set(leaf, offset + 4);
+    }
+    return MerkleTree.build_from_leaves(depth, zeroLeafBytes, packed);
+}
+
 export { MerkleTree, MerkleProof, WasmSparseMerkleTree };
 
 // Serialization Utilities
