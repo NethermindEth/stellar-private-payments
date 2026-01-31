@@ -222,8 +222,9 @@ export async function startSync(options = {}) {
             metadata.poolSync.lastCursor = poolResult.cursor;
             metadata.poolSync.syncBroken = false;
             
-            // Always rebuild tree after sync to ensure consistency
-            await poolStore.rebuildTree();
+            if (!poolStore.isTreeInitialized()) {
+                await poolStore.rebuildTree();
+            }
         }
         
         emit('syncProgress', { phase: 'asp_membership', progress: 50 });

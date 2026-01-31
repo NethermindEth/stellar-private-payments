@@ -304,4 +304,8 @@ export async function clear() {
     console.log('[PoolStore] Cleared all data');
 }
 
+export function isTreeInitialized() {
+    return merkleTree !== null;
+}
+
 export { POOL_TREE_DEPTH };
