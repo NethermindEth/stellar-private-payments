@@ -10,6 +10,7 @@
 import * as db from './db.js';
 import {
     createMerkleTreeWithZeroLeaf,
+    buildMerkleTreeFromLeaves,
     serializeMerkleTree,
     deserializeMerkleTree,
 } from '../bridge.js';
@@ -84,28 +85,27 @@ export async function init() {
  * @returns {Promise<number>} Number of leaves in the rebuilt tree
  */
 export async function rebuildTree() {
-    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
-    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
-    
-    // Use cursor to iterate leaves in index order without loading all into memory
-    let leafCount = 0;
-    let expectedIndex = 0;
-    
+    const leaves = [];
+
     await db.iterate('pool_leaves', (leaf) => {
-        // Verify sequential ordering (merkle tree requires ordered insertion)
-        if (leaf.index !== expectedIndex) {
-            console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+        leaves.push({
+            index: leaf.index,
+            leaf: hexToBytesForTree(leaf.commitment),
+        });
+    }, { direction: 'next' });
+
+    if (leaves.length > 100) {
+        merkleTree = buildMerkleTreeFromLeaves(POOL_TREE_DEPTH, zeroLeaf, leaves);
+    } else {
+        merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
+        for (const leaf of leaves) {
+            merkleTree.insert_at(leaf.leaf, leaf.index);
         }
-        
-        const commitmentBytes = hexToBytesForTree(leaf.commitment);
-        merkleTree.insert_at(commitmentBytes, leaf.index);
-        leafCount++;
-        expectedIndex = leaf.index + 1;
-    }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
+    }
 
     await persistTree();
-    return leafCount;
+    return leaves.length;
 }
 
 /**

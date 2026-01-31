@@ -11,6 +11,7 @@
 import * as db from './db.js';
 import {
     createMerkleTreeWithZeroLeaf,
+    buildMerkleTreeFromLeaves,
     serializeMerkleTree,
     deserializeMerkleTree,
 } from '../bridge.js';
@@ -64,30 +65,27 @@ export async function init() {
         }
     }
 
-    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
-    console.log(`[ASPMembershipStore] Initializing with ZERO_LEAF_HEX: ${ZERO_LEAF_HEX}`);
     const zeroLeafLE = hexToBytesForTree(ZERO_LEAF_HEX);
-
-    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
-
-    // Use cursor to iterate leaves in index order without loading all into memory
-    let leafCount = 0;
-    let expectedIndex = 0;
+    const leaves = [];
 
     await db.iterate('asp_membership_leaves', (leaf) => {
-        if (leaf.index !== expectedIndex) {
-            console.error(`[ASPMembershipStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
-            throw new Error('[ASPMembershipStore] Gap in leaf indices, aborting init');
-        }
-
-        const leafBytes = hexToBytesForTree(leaf.leaf);
-        merkleTree.insert(leafBytes);
-        leafCount++;
-        expectedIndex = leaf.index + 1;
+        leaves.push({
+            index: leaf.index,
+            leaf: hexToBytesForTree(leaf.leaf),
+        });
     }, { direction: 'next' });
 
+    if (leaves.length > 100) {
+        merkleTree = buildMerkleTreeFromLeaves(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE, leaves);
+    } else {
+        merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
+        for (const leaf of leaves) {
+            merkleTree.insert_at(leaf.leaf, leaf.index);
+        }
+    }
+
     await persistTree();
-    console.log(`[ASPMembershipStore] Initialized with ${leafCount} leaves`);
+    console.log(`[ASPMembershipStore] Initialized with ${leaves.length} leaves`);
 }
 
 /**
