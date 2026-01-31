@@ -5,6 +5,7 @@
 
 use alloc::{format, vec, vec::Vec};
 
+use ark_ff::PrimeField;
 use wasm_bindgen::prelude::*;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
@@ -264,6 +265,97 @@ impl MerkleTree {
     pub fn depth(&self) -> usize {
         self.depth
     }
+
+    /// Serialize the tree to bytes for storage
+    ///
+    /// Wire format (all LE): `[depth: u32][next_index: u64][level 0 .. level depth scalars]`
+    #[wasm_bindgen]
+    pub fn serialize(&self) -> Vec<u8> {
+        let depth_u32 = u32::try_from(self.depth).expect("depth <= 32");
+        let mut buf = Vec::new();
+        buf.extend_from_slice(&depth_u32.to_le_bytes());
+        buf.extend_from_slice(&self.next_index.to_le_bytes());
+        for level in &self.levels_data {
+            for scalar in level {
+                buf.extend_from_slice(&scalar_to_bytes(scalar));
+            }
+        }
+        buf
+    }
+
+    /// Reconstruct a tree from bytes produced by `serialize()`
+    #[wasm_bindgen]
+    pub fn deserialize(data: &[u8]) -> Result<MerkleTree, JsValue> {
+        Self::deserialize_internal(data).map_err(|e| JsValue::from_str(&e))
+    }
+
+    fn deserialize_internal(data: &[u8]) -> Result<MerkleTree, alloc::string::String> {
+        if data.len() < 12 {
+            return Err("Data too short for header".into());
+        }
+
+        let depth_u32 =
+            u32::from_le_bytes(data[..4].try_into().map_err(|_| "Invalid depth bytes")?);
+        let depth = usize::try_from(depth_u32).map_err(|_| "Depth too large for platform")?;
+
+        if depth == 0 || depth > 32 {
+            return Err("Depth must be between 1 and 32".into());
+        }
+
+        let next_index =
+            u64::from_le_bytes(data[4..12].try_into().map_err(|_| "Invalid next_index bytes")?);
+
+        let num_leaves = 1usize
+            .checked_shl(depth_u32)
+            .ok_or("Leaf count overflow")?;
+        let total_scalars = num_leaves
+            .checked_mul(2)
+            .and_then(|n| n.checked_sub(1))
+            .ok_or("Total size overflow")?;
+        let expected_len = total_scalars
+            .checked_mul(FIELD_SIZE)
+            .and_then(|n| n.checked_add(12))
+            .ok_or("Expected length overflow")?;
+
+        if data.len() != expected_len {
+            return Err(format!(
+                "Expected {} bytes, got {}",
+                expected_len,
+                data.len()
+            ));
+        }
+
+        let scalars = &data[12..];
+        let mut levels_data =
+            Vec::with_capacity(depth.checked_add(1).ok_or("Capacity overflow")?);
+        let mut offset = 0usize;
+        let mut level_size = num_leaves;
+
+        for _ in 0..=depth {
+            let level_bytes = level_size
+                .checked_mul(FIELD_SIZE)
+                .ok_or("Level bytes overflow")?;
+            let end = offset
+                .checked_add(level_bytes)
+                .ok_or("Offset overflow")?;
+
+            levels_data.push(
+                scalars[offset..end]
+                    .chunks_exact(FIELD_SIZE)
+                    .map(Scalar::from_le_bytes_mod_order)
+                    .collect(),
+            );
+
+            offset = end;
+            level_size /= 2;
+        }
+
+        Ok(MerkleTree {
+            levels_data,
+            depth,
+            next_index,
+        })
+    }
 }
 
 /// Compute merkle root from leaves
@@ -393,5 +485,62 @@ mod tests {
 
         assert_eq!(sequential.root(), indexed.root());
         assert_eq!(sequential.next_index(), indexed.next_index());
+    }
+
+    #[test]
+    fn serialize_deserialize_roundtrip() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        tree.insert(&leaf(1)).expect("insert 0");
+        tree.insert(&leaf(2)).expect("insert 1");
+        tree.insert(&leaf(3)).expect("insert 2");
+
+        let data = tree.serialize();
+        let restored = MerkleTree::deserialize_internal(&data).expect("deserialize");
+
+        assert_eq!(tree.root(), restored.root());
+        assert_eq!(tree.next_index(), restored.next_index());
+        assert_eq!(tree.depth(), restored.depth());
+    }
+
+    #[test]
+    fn serialize_deserialize_with_insert_at() {
+        let mut tree = MerkleTree::new(4).expect("new tree");
+        tree.insert(&leaf(1)).expect("insert 0");
+        tree.insert(&leaf(2)).expect("insert 1");
+        tree.insert_at(&leaf(99), 0).expect("overwrite 0");
+
+        let data = tree.serialize();
+        let restored = MerkleTree::deserialize_internal(&data).expect("deserialize");
+
+        assert_eq!(tree.root(), restored.root());
+        assert_eq!(tree.next_index(), restored.next_index());
+    }
+
+    #[test]
+    fn deserialize_empty_errors() {
+        let err = MerkleTree::deserialize_internal(&[])
+            .err()
+            .expect("should reject empty");
+        assert!(err.contains("too short"));
+    }
+
+    #[test]
+    fn deserialize_invalid_depth_errors() {
+        let mut data = vec![0u8; 12];
+        data[..4].copy_from_slice(&0u32.to_le_bytes());
+        let err = MerkleTree::deserialize_internal(&data)
+            .err()
+            .expect("should reject depth 0");
+        assert!(err.contains("Depth"));
+    }
+
+    #[test]
+    fn deserialize_truncated_errors() {
+        let tree = MerkleTree::new(4).expect("new tree");
+        let data = tree.serialize();
+        let err = MerkleTree::deserialize_internal(&data[..data.len().saturating_sub(1)])
+            .err()
+            .expect("should reject truncated");
+        assert!(err.contains("Expected"));
     }
 }
