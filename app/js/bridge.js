@@ -540,6 +540,14 @@ export function createMerkleTreeWithZeroLeaf(depth, zeroLeafBytes) {
     return MerkleTree.new_with_zero_leaf(depth, zeroLeafBytes);
 }
 
+export function serializeMerkleTree(tree) {
+    return tree.serialize();
+}
+
+export function deserializeMerkleTree(data) {
+    return MerkleTree.deserialize(data);
+}
+
 export { MerkleTree, MerkleProof, WasmSparseMerkleTree };
 
 // Serialization Utilities
