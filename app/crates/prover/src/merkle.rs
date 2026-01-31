@@ -356,6 +356,77 @@ impl MerkleTree {
             next_index,
         })
     }
+
+    /// Build a tree from indexed leaves in one bottom-up pass
+    ///
+    /// Input `leaves_data` is `[index: u32 LE, leaf: 32 bytes]` repeated.
+    #[wasm_bindgen]
+    pub fn build_from_leaves(
+        depth: usize,
+        zero_leaf_bytes: &[u8],
+        leaves_data: &[u8],
+    ) -> Result<MerkleTree, JsValue> {
+        let zero = bytes_to_scalar(zero_leaf_bytes)?;
+        Self::build_from_leaves_internal(depth, zero, leaves_data)
+            .map_err(|e| JsValue::from_str(&e))
+    }
+
+    fn build_from_leaves_internal(
+        depth: usize,
+        zero: Scalar,
+        leaves_data: &[u8],
+    ) -> Result<MerkleTree, alloc::string::String> {
+        if depth == 0 || depth > 32 {
+            return Err("Depth must be between 1 and 32".into());
+        }
+
+        const ENTRY_SIZE: usize = FIELD_SIZE + 4;
+
+        if !leaves_data.len().is_multiple_of(ENTRY_SIZE) {
+            return Err("leaves_data length must be a multiple of 36".into());
+        }
+
+        let depth_u32 = u32::try_from(depth).expect("depth <= 32");
+        let num_leaves = 1usize
+            .checked_shl(depth_u32)
+            .ok_or("Leaf count overflow")?;
+
+        let mut levels_data = vec![vec![zero; num_leaves]];
+        let mut max_index: Option<u32> = None;
+
+        for chunk in leaves_data.chunks_exact(ENTRY_SIZE) {
+            let index = u32::from_le_bytes(
+                chunk[..4].try_into().map_err(|_| "Invalid index bytes")?,
+            );
+            let index_usize = usize::try_from(index).map_err(|_| "Index too large")?;
+
+            if index_usize >= num_leaves {
+                return Err(format!("Leaf index {} out of bounds", index));
+            }
+
+            levels_data[0][index_usize] = Scalar::from_le_bytes_mod_order(&chunk[4..]);
+            max_index = Some(max_index.map_or(index, |m| m.max(index)));
+        }
+
+        for level in 0..depth {
+            let parents: Vec<Scalar> = levels_data[level]
+                .chunks(2)
+                .map(|pair| poseidon2_compression(pair[0], pair[1]))
+                .collect();
+            levels_data.push(parents);
+        }
+
+        let next_index = match max_index {
+            Some(idx) => u64::from(idx).checked_add(1).ok_or("Index overflow")?,
+            None => 0,
+        };
+
+        Ok(MerkleTree {
+            levels_data,
+            depth,
+            next_index,
+        })
+    }
 }
 
 /// Compute merkle root from leaves
@@ -408,6 +479,12 @@ mod tests {
 
     fn leaf(val: u64) -> Vec<u8> {
         scalar_to_bytes(&Scalar::from(val))
+    }
+
+    fn pack_entry(index: u32, val: u64) -> Vec<u8> {
+        let mut entry = index.to_le_bytes().to_vec();
+        entry.extend_from_slice(&leaf(val));
+        entry
     }
 
     #[test]
@@ -542,5 +619,75 @@ mod tests {
             .err()
             .expect("should reject truncated");
         assert!(err.contains("Expected"));
+    }
+
+    #[test]
+    fn build_from_leaves_equivalence() {
+        let zero = Scalar::from(0u64);
+
+        let mut sequential = MerkleTree::new(4).expect("new tree");
+        for v in 1..=5u64 {
+            sequential.insert(&leaf(v)).expect("insert");
+        }
+
+        let leaves_data: Vec<u8> = (1..=5u64)
+            .enumerate()
+            .flat_map(|(i, v)| {
+                let idx = u32::try_from(i).expect("index fits u32");
+                pack_entry(idx, v)
+            })
+            .collect();
+
+        let batch = MerkleTree::build_from_leaves_internal(4, zero, &leaves_data)
+            .expect("build_from_leaves");
+
+        assert_eq!(sequential.root(), batch.root());
+        assert_eq!(sequential.next_index(), batch.next_index());
+    }
+
+    #[test]
+    fn build_from_leaves_empty() {
+        let zero = Scalar::from(0u64);
+
+        let empty = MerkleTree::build_from_leaves_internal(4, zero, &[])
+            .expect("build empty");
+        let fresh = MerkleTree::new(4).expect("new tree");
+
+        assert_eq!(empty.root(), fresh.root());
+        assert_eq!(empty.next_index(), 0);
+    }
+
+    #[test]
+    fn build_from_leaves_single() {
+        let zero = Scalar::from(0u64);
+
+        let batch = MerkleTree::build_from_leaves_internal(4, zero, &pack_entry(0, 42))
+            .expect("build single");
+
+        let mut single = MerkleTree::new(4).expect("new tree");
+        single.insert(&leaf(42)).expect("insert");
+
+        assert_eq!(batch.root(), single.root());
+        assert_eq!(batch.next_index(), 1);
+    }
+
+    #[test]
+    fn build_from_leaves_out_of_bounds() {
+        let zero = Scalar::from(0u64);
+
+        let err = MerkleTree::build_from_leaves_internal(4, zero, &pack_entry(16, 1))
+            .err()
+            .expect("should reject out of bounds");
+        assert!(err.contains("out of bounds"));
+    }
+
+    #[test]
+    fn build_from_leaves_invalid_length() {
+        let zero = Scalar::from(0u64);
+
+        let err = MerkleTree::build_from_leaves_internal(4, zero, &[0u8; 35])
+            .err()
+            .expect("should reject bad length");
+        assert!(err.contains("multiple of 36"));
     }
 }
