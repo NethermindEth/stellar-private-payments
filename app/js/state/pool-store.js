@@ -8,7 +8,11 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import {
+    createMerkleTreeWithZeroLeaf,
+    serializeMerkleTree,
+    deserializeMerkleTree,
+} from '../bridge.js';
 import { 
     bytesToHex, 
     normalizeU256ToHex, 
@@ -22,6 +26,17 @@ import {
 const POOL_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
+
+async function persistTree() {
+    if (!merkleTree) return;
+    const data = serializeMerkleTree(merkleTree);
+    await db.put('tree_snapshots', {
+        id: 'pool',
+        data,
+        nextIndex: Number(merkleTree.next_index),
+        timestamp: Date.now(),
+    });
+}
 
 /**
  * @typedef {Object} PoolLeaf
@@ -50,6 +65,16 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
+    const snapshot = await db.get('tree_snapshots', 'pool');
+    if (snapshot && snapshot.data) {
+        try {
+            merkleTree = deserializeMerkleTree(snapshot.data);
+            console.log(`[PoolStore] Restored tree from snapshot (${snapshot.nextIndex} leaves)`);
+            return;
+        } catch (e) {
+            console.warn('[PoolStore] Snapshot restore failed, rebuilding:', e);
+        }
+    }
     await rebuildTree();
 }
 
@@ -78,7 +103,8 @@ export async function rebuildTree() {
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
-    
+
+    await persistTree();
     return leafCount;
 }
 
@@ -119,6 +145,8 @@ export async function processNewCommitment(event, ledger) {
         const commitmentBytes = hexToBytesForTree(commitment);
         merkleTree.insert_at(commitmentBytes, index);
     }
+
+    await persistTree();
 }
 
 /**
@@ -270,6 +298,7 @@ export async function clear() {
     await db.clear('pool_leaves');
     await db.clear('pool_nullifiers');
     await db.clear('pool_encrypted_outputs');
+    await db.del('tree_snapshots', 'pool');
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
     merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
     console.log('[PoolStore] Cleared all data');

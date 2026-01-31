@@ -9,7 +9,11 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import {
+    createMerkleTreeWithZeroLeaf,
+    serializeMerkleTree,
+    deserializeMerkleTree,
+} from '../bridge.js';
 import { 
     bytesToHex,
     hexToBytes,
@@ -23,6 +27,17 @@ import {
 const ASP_MEMBERSHIP_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
+
+async function persistTree() {
+    if (!merkleTree) return;
+    const data = serializeMerkleTree(merkleTree);
+    await db.put('tree_snapshots', {
+        id: 'asp_membership',
+        data,
+        nextIndex: Number(merkleTree.next_index),
+        timestamp: Date.now(),
+    });
+}
 
 /**
  * @typedef {Object} ASPMembershipLeaf
@@ -38,28 +53,40 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
+    const snapshot = await db.get('tree_snapshots', 'asp_membership');
+    if (snapshot && snapshot.data) {
+        try {
+            merkleTree = deserializeMerkleTree(snapshot.data);
+            console.log(`[ASPMembershipStore] Restored tree from snapshot (${snapshot.nextIndex} leaves)`);
+            return;
+        } catch (e) {
+            console.warn('[ASPMembershipStore] Snapshot restore failed, rebuilding:', e);
+        }
+    }
+
     // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
     console.log(`[ASPMembershipStore] Initializing with ZERO_LEAF_HEX: ${ZERO_LEAF_HEX}`);
     const zeroLeafLE = hexToBytesForTree(ZERO_LEAF_HEX);
-    
+
     merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
-    
+
     // Use cursor to iterate leaves in index order without loading all into memory
     let leafCount = 0;
     let expectedIndex = 0;
-    
+
     await db.iterate('asp_membership_leaves', (leaf) => {
         if (leaf.index !== expectedIndex) {
             console.error(`[ASPMembershipStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
             throw new Error('[ASPMembershipStore] Gap in leaf indices, aborting init');
         }
-        
+
         const leafBytes = hexToBytesForTree(leaf.leaf);
         merkleTree.insert(leafBytes);
         leafCount++;
         expectedIndex = leaf.index + 1;
     }, { direction: 'next' });
-    
+
+    await persistTree();
     console.log(`[ASPMembershipStore] Initialized with ${leafCount} leaves`);
 }
 
@@ -103,7 +130,8 @@ export async function processLeafAdded(event, ledger) {
             console.error(`  Local:    ${computedRoot}`);
         }
     }
-    
+
+    await persistTree();
     console.log(`[ASPMembershipStore] Stored leaf at index ${index}`);
 }
 
@@ -237,6 +265,7 @@ export async function findLeafByHash(leafHash) {
  */
 export async function clear() {
     await db.clear('asp_membership_leaves');
+    await db.del('tree_snapshots', 'asp_membership');
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
     merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeaf);
     console.log('[ASPMembershipStore] Cleared all data');
