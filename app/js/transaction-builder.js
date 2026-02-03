@@ -25,12 +25,10 @@ import {
     fieldToHex,
     poseidon2Hash2,
     encryptNoteData,
-    generateBlinding,
+    generateBlinding, getBN256Modulus, getZeroLeaf,
 } from './bridge.js';
 import * as ProverClient from './prover-client.js';
 import { 
-    BN254_MODULUS, 
-    ZERO_LEAF_HEX, 
     TREE_DEPTH, 
     SMT_DEPTH,
 } from './state/utils.js';
@@ -38,7 +36,7 @@ import {
 // Circuit constants - aliased from centralized utils for local readability
 const LEVELS = TREE_DEPTH;
 const SMT_LEVELS = SMT_DEPTH;
-const BN256_MOD = BN254_MODULUS;
+const BN256_MOD = BigInt(getBN256Modulus());
 
 /**
  * Converts a signed amount to its field element representation (U256).
@@ -275,7 +273,7 @@ function createRealInput(privKeyBytes, pubKeyBytes, note, merkleProof) {
     const leafIndex = note.leafIndex;
     
     // Validate blinding is within field bounds
-    if (blinding >= BN254_MODULUS) {
+    if (blinding >= BN256_MOD) {
         console.error(`[TxBuilder] Note blinding exceeds field modulus!`, {
             noteId: note.id?.slice(0, 16),
             storedBlinding: note.blinding?.slice?.(0, 40) || note.blinding,
@@ -431,7 +429,7 @@ async function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndexHi
     // Fallback: Build local membership tree (for testing or when not synced)
     // This will only work if the on-chain tree has ONLY this user's leaf at the specified index
     console.warn('[TxBuilder] Building local membership tree - ensure ASP membership is synced for production');
-    const zeroLeaf = hexToField(ZERO_LEAF_HEX);
+    const zeroLeaf = hexToField(getZeroLeaf());
     const membershipTree = createMerkleTreeWithZeroLeaf(LEVELS, zeroLeaf);
     const totalLeaves = 1 << LEVELS;
 

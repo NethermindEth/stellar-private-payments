@@ -7,7 +7,8 @@
 
 import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
 import { xdr, Address, TransactionBuilder, Account, Operation } from '@stellar/stellar-sdk';
-import { bytesToHex, hexToBytes, BN254_MODULUS } from './utils.js';
+import { bytesToHex, hexToBytes } from './utils.js';
+import { getBN256Modulus } from "../bridge";
 
 /**
  * @typedef {Object} SMTNonMembershipProof
@@ -187,7 +188,7 @@ function toBytes(value) {
     }
     if (typeof value === 'bigint') {
         // Reduce to BN254 field modulus to ensure valid field element
-        const reduced = value % BN254_MODULUS;
+        const reduced = value % BigInt(getBN256Modulus());
         // Convert to 32-byte little-endian representation (for circuit compatibility)
         const bytes = new Uint8Array(32);
         let v = reduced;

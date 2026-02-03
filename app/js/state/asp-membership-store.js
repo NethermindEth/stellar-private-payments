@@ -9,19 +9,17 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import {createMerkleTreeWithZeroLeaf, getZeroLeaf} from '../bridge.js';
 import { 
     bytesToHex,
-    hexToBytes,
     normalizeU256ToHex, 
     hexToBytesForTree,
-    ZERO_LEAF_HEX,
     TREE_DEPTH,
 } from './utils.js';
 
 // Alias for backwards compatibility
 const ASP_MEMBERSHIP_TREE_DEPTH = TREE_DEPTH;
-
+const ZERO_LEAF_HEX = getZeroLeaf();
 let merkleTree = null;
 
 /**

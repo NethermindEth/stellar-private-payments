@@ -46,6 +46,14 @@ function version() {
   return 'mock-version';
 }
 
+function zero_leaf() {
+  return new Uint8Array(32);
+}
+
+function bn256_modulus() {
+  return new Uint8Array(32);
+}
+
 module.exports = {
   __esModule: true,
   default: initProverModule,
@@ -54,4 +62,6 @@ module.exports = {
   MerkleProof,
   u64_to_field_bytes,
   version,
+  zero_leaf,
+  bn256_modulus,
 };

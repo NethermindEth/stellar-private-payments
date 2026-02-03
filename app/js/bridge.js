@@ -20,10 +20,8 @@ import initProverModule, {
     compute_signature,
     compute_nullifier,
     poseidon2_hash2,
-    poseidon2_hash3,
     poseidon2_compression_wasm,
     u64_to_field_bytes,
-    decimal_to_field_bytes,
     hex_to_field_bytes,
     field_bytes_to_hex,
     derive_keypair_from_signature,
@@ -32,8 +30,9 @@ import initProverModule, {
     encrypt_note_data,
     decrypt_note_data,
     convert_proof_to_soroban,
-    convert_vk_to_soroban,
     version as proverVersion,
+    bn256_modulus,
+    zero_leaf
 } from './prover.js';
 
 // Witness Module (ark-circom WASM)
@@ -453,7 +452,6 @@ export function isProverReady() {
 }
 
 // Circuit Info
-
 /**
  * Get circuit info
  */
@@ -507,11 +505,6 @@ export { compute_nullifier as computeNullifier };
  */
 export { poseidon2_hash2 as poseidon2Hash2 };
 
-/**
- * Poseidon2 hash with 3 inputs
- */
-export { poseidon2_hash3 as poseidon2Hash3 };
-
 
 /**
  * Poseidon2 compression
@@ -562,7 +555,6 @@ export function bigintToField(value) {
     return hex_to_field_bytes(hex);
 }
 
-export { decimal_to_field_bytes as decimalToField };
 export { hex_to_field_bytes as hexToField };
 export { field_bytes_to_hex as fieldToHex };
 
@@ -712,26 +704,6 @@ export function generateProofBytesSoroban(witnessBytes) {
         throw new Error('Prover not initialized. Call initProver() first.');
     }
     return prover.prove_bytes_uncompressed(witnessBytes);
-}
-
-/**
- * Convert compressed verifying key to Soroban-compatible format.
- * 
- * @param {Uint8Array} vkBytes - Compressed verifying key bytes
- * @returns {Uint8Array} Soroban-compatible VK bytes
- */
-export function vkBytesToSoroban(vkBytes) {
-    return convert_vk_to_soroban(vkBytes);
-}
-
-/**
- * Get verifying key in Soroban-compatible format.
- * 
- * @returns {Uint8Array} Soroban-compatible VK bytes
- */
-export function getVerifyingKeySoroban() {
-    const vkBytes = getVerifyingKey();
-    return vkBytesToSoroban(vkBytes);
 }
 
 /**
@@ -904,4 +876,24 @@ export async function proveAndVerify(inputs, onProgress) {
     const verified = verifyProofLocal(proof, publicInputs);
 
     return { proof, publicInputs, verified };
+}
+
+
+// We copy this helper function here to keep bridge.js self-contained.
+// This way we don't need to bundle it with additional files from the frontend.
+/**
+ * Transforms bytes into a hex String
+ * @param bytes
+ * @returns {string}
+ */
+function bytesToHex(bytes) {
+    return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function getBN256Modulus() {
+    return bytesToHex(bn256_modulus())
+}
+
+export function getZeroLeaf() {
+    return bytesToHex(zero_leaf())
 }

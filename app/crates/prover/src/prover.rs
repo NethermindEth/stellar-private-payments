@@ -493,57 +493,6 @@ pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> 
         .map_err(|e| JsValue::from_str(&format!("Failed to deserialize proof: {}", e)))?;
     Ok(proof_to_uncompressed_bytes(&proof))
 }
-
-/// Converts a compressed verifying key to Soroban-compatible uncompressed
-/// format.
-///
-/// Output structure (concatenated bytes):
-/// - alpha (64 bytes): G1 point
-/// - beta (128 bytes): G2 point (c1||c0 ordering)
-/// - gamma (128 bytes): G2 point (c1||c0 ordering)
-/// - delta (128 bytes): G2 point (c1||c0 ordering)
-/// - ic_count (4 bytes): u32 little-endian count of IC points
-/// - ic[0..n] (64 bytes each): G1 points
-#[wasm_bindgen]
-pub fn convert_vk_to_soroban(vk_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
-    let vk = VerifyingKey::<Bn254>::deserialize_compressed(vk_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to deserialize VK: {}", e)))?;
-
-    let ic_count = vk.gamma_abc_g1.len();
-
-    // VK format: alpha(64) + beta(128) + gamma(128) + delta(128) + ic_count(4) +
-    // ic(64*n)
-    const HEADER_SIZE: usize = 452; // Fixed size 
-    let ic_bytes = ic_count
-        .checked_mul(64)
-        .ok_or_else(|| JsValue::from_str("IC count overflow"))?;
-    let total_size = HEADER_SIZE
-        .checked_add(ic_bytes)
-        .ok_or_else(|| JsValue::from_str("Total size overflow"))?;
-
-    let mut out = Vec::with_capacity(total_size);
-
-    // alpha (G1)
-    out.extend_from_slice(&g1_bytes_uncompressed(&vk.alpha_g1));
-
-    // beta, gamma, delta (G2 with c1||c0 ordering)
-    out.extend_from_slice(&g2_bytes_uncompressed(&vk.beta_g2));
-    out.extend_from_slice(&g2_bytes_uncompressed(&vk.gamma_g2));
-    out.extend_from_slice(&g2_bytes_uncompressed(&vk.delta_g2));
-
-    // IC count as u32 LE
-    let ic_count_u32 =
-        u32::try_from(ic_count).map_err(|_| JsValue::from_str("IC count exceeds u32 max"))?;
-    out.extend_from_slice(&ic_count_u32.to_le_bytes());
-
-    // IC points (G1)
-    for ic in &vk.gamma_abc_g1 {
-        out.extend_from_slice(&g1_bytes_uncompressed(ic));
-    }
-
-    Ok(out)
-}
-
 /// Standalone verification function
 #[wasm_bindgen]
 pub fn verify_proof(

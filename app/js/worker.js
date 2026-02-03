@@ -26,7 +26,6 @@ import {
     extractPublicInputs,
     verifyProofLocal,
     getVerifyingKey,
-    getVerifyingKeySoroban,
     getCircuitInfo,
     proofBytesToSoroban,
     
@@ -315,7 +314,7 @@ function handleGetVerifyingKey(data = {}) {
     
     try {
         const { sorobanFormat } = data;
-        const vkBytes = sorobanFormat ? getVerifyingKeySoroban() : getVerifyingKey();
+        const vkBytes = getVerifyingKey();
         return { success: true, verifyingKey: Array.from(vkBytes), sorobanFormat: !!sorobanFormat };
     } catch (error) {
         return { success: false, error: error.message };

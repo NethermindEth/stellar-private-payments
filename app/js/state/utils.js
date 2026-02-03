@@ -3,12 +3,6 @@
  * @module state/utils
  */
 
-// BN254 (alt_bn128) field modulus used in the ZK circuits
-export const BN254_MODULUS = BigInt('0x30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001');
-
-// Zero leaf for merkle trees - poseidon2("XLM"). Must match contract's get_zeroes()[0]
-export const ZERO_LEAF_HEX = '0x25302288db99350344974183ce310d63b53abb9ef0f8575753eed36e0118f9ce';
-
 // Tree depths - must match circuit and contract deployments
 export const TREE_DEPTH = 10;
 export const SMT_DEPTH = 10;

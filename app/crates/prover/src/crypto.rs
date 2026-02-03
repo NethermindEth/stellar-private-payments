@@ -17,6 +17,19 @@ use zkhash::{
     },
 };
 
+// Useful constants
+/// BN256 modulus as Big Endian bytes
+pub const BN256_MOD_BYTES: [u8; 32] = [
+    48, 100, 78, 114, 225, 49, 160, 41, 184, 80, 69, 182, 129, 129, 88, 93, 40, 51, 232, 72, 121,
+    185, 112, 145, 67, 225, 245, 147, 240, 0, 0, 1,
+];
+
+/// Zero leaf value as Big Endian bytes
+pub const ZERO_LEAF_BYTES: [u8; 32] = [
+    37, 48, 34, 136, 219, 153, 53, 3, 68, 151, 65, 131, 206, 49, 13, 99, 181, 58, 187, 158, 240,
+    248, 87, 87, 83, 238, 211, 110, 1, 24, 249, 206,
+];
+
 /// Poseidon2 hash with 2 inputs and optional domain separation (t=3, r=2, c=1)
 ///
 /// This is the core hash function used throughout the crate for merkle trees
@@ -88,25 +101,6 @@ pub fn poseidon2_hash2(
     Ok(scalar_to_bytes(&result))
 }
 
-/// Poseidon2 hash with 3 inputs and domain separation
-///
-/// Matches the Circom Poseidon2(3) template
-#[wasm_bindgen]
-pub fn poseidon2_hash3(
-    input0: &[u8],
-    input1: &[u8],
-    input2: &[u8],
-    domain_separation: u8,
-) -> Result<Vec<u8>, JsValue> {
-    let a = bytes_to_scalar(input0)?;
-    let b = bytes_to_scalar(input1)?;
-    let c = bytes_to_scalar(input2)?;
-    let domain = Scalar::from(domain_separation);
-
-    let result = poseidon2_hash3_internal(a, b, c, Some(domain));
-    Ok(scalar_to_bytes(&result))
-}
-
 /// Derive public key from private key
 ///
 /// publicKey = Poseidon2(privateKey, 0, domain=0x03)
@@ -174,6 +168,18 @@ pub fn compute_nullifier(
     // Domain separation 0x02 for nullifier
     let nullifier = poseidon2_hash3_internal(comm, indices, sig, Some(Scalar::from(2u64)));
     Ok(scalar_to_bytes(&nullifier))
+}
+
+/// Returns BN256 modulus as Big Endian bytes
+#[wasm_bindgen]
+pub fn bn256_modulus() -> Vec<u8> {
+    BN256_MOD_BYTES.to_vec()
+}
+
+/// Returns Zero leaf used in merkle trees as Big Endian bytes
+#[wasm_bindgen]
+pub fn zero_leaf() -> Vec<u8> {
+    ZERO_LEAF_BYTES.to_vec()
 }
 
 /// Internal public key derivation
