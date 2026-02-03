@@ -3,11 +3,9 @@ use zkhash::{
     poseidon2::{
         poseidon2::Poseidon2,
         poseidon2_instance_bn256::{
-            POSEIDON2_BN256_PARAMS_2,
-            POSEIDON2_BN256_PARAMS_3,
-            POSEIDON2_BN256_PARAMS_4,
-        }
-    }
+            POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
+        },
+    },
 };
 
 #[test]
