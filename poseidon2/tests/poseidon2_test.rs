@@ -8,44 +8,25 @@ use zkhash::{
     },
 };
 
-fn main() {
+#[test]
+fn bn256_instances() {
     type Scalar = FpBN256;
     // T = 2
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
     let t = poseidon2.get_t();
     let input: Vec<Scalar> = (0..t).map(|i| Scalar::from(i as u64)).collect();
     let perm = poseidon2.permutation(&input);
-    println!(
-        "POSEIDON2 (t={t}) HASH(0,1): { }",
-        perm.iter()
-            .map(|x| format!("{x}"))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
-
+    assert_eq!(perm.len(), t);
     // T = 3
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
     let t = poseidon2.get_t();
     let input: Vec<Scalar> = (0..t).map(|i| Scalar::from(i as u64)).collect();
     let perm = poseidon2.permutation(&input);
-    println!(
-        "POSEIDON2 (t={t}) HASH(0, 1, 2): { }",
-        perm.iter()
-            .map(|x| format!("{x}"))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
-
+    assert_eq!(perm.len(), t);
     // T = 4
     let poseidon2 = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
     let t = poseidon2.get_t();
     let input: Vec<Scalar> = (0..t).map(|i| Scalar::from(i as u64)).collect();
     let perm = poseidon2.permutation(&input);
-    println!(
-        "POSEIDON2 (t={t}) HASH(0, 1, 2, 3): { }",
-        perm.iter()
-            .map(|x| format!("{x}"))
-            .collect::<Vec<String>>()
-            .join(", ")
-    );
+    assert_eq!(perm.len(), t);
 }
