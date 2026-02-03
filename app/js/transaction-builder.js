@@ -433,12 +433,7 @@ async function buildMembershipProofData(pubKeyBytes, membershipRoot, leafIndexHi
     console.warn('[TxBuilder] Building local membership tree - ensure ASP membership is synced for production');
     const zeroLeaf = hexToField(ZERO_LEAF_HEX);
     const membershipTree = createMerkleTreeWithZeroLeaf(LEVELS, zeroLeaf);
-    const totalLeaves = 1 << LEVELS;
-
-    // Insert leaves in order, placing the actual leaf at the correct index
-    for (let i = 0; i < totalLeaves; i++) {
-        membershipTree.insert(i === leafIndex ? membershipLeaf : zeroLeaf);
-    }
+    membershipTree.insert_at(membershipLeaf, leafIndex);
 
     const membershipProof = membershipTree.get_proof(leafIndex);
     const membershipRootBytes = membershipTree.root();

@@ -9,7 +9,12 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import {
+    createMerkleTreeWithZeroLeaf,
+    buildMerkleTreeFromLeaves,
+    serializeMerkleTree,
+    deserializeMerkleTree,
+} from '../bridge.js';
 import { 
     bytesToHex,
     hexToBytes,
@@ -23,6 +28,17 @@ import {
 const ASP_MEMBERSHIP_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
+
+async function persistTree() {
+    if (!merkleTree) return;
+    const data = serializeMerkleTree(merkleTree);
+    await db.put('tree_snapshots', {
+        id: 'asp_membership',
+        data,
+        nextIndex: Number(merkleTree.next_index),
+        timestamp: Date.now(),
+    });
+}
 
 /**
  * @typedef {Object} ASPMembershipLeaf
@@ -38,29 +54,38 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
-    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
-    console.log(`[ASPMembershipStore] Initializing with ZERO_LEAF_HEX: ${ZERO_LEAF_HEX}`);
-    const zeroLeafLE = hexToBytesForTree(ZERO_LEAF_HEX);
-    
-    merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
-    
-    // Use cursor to iterate leaves in index order without loading all into memory
-    let leafCount = 0;
-    let expectedIndex = 0;
-    
-    await db.iterate('asp_membership_leaves', (leaf) => {
-        if (leaf.index !== expectedIndex) {
-            console.error(`[ASPMembershipStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
-            throw new Error('[ASPMembershipStore] Gap in leaf indices, aborting init');
+    const snapshot = await db.get('tree_snapshots', 'asp_membership');
+    if (snapshot && snapshot.data) {
+        try {
+            merkleTree = deserializeMerkleTree(snapshot.data);
+            console.log(`[ASPMembershipStore] Restored tree from snapshot (${snapshot.nextIndex} leaves)`);
+            return;
+        } catch (e) {
+            console.warn('[ASPMembershipStore] Snapshot restore failed, rebuilding:', e);
         }
-        
-        const leafBytes = hexToBytesForTree(leaf.leaf);
-        merkleTree.insert(leafBytes);
-        leafCount++;
-        expectedIndex = leaf.index + 1;
+    }
+
+    const zeroLeafLE = hexToBytesForTree(ZERO_LEAF_HEX);
+    const leaves = [];
+
+    await db.iterate('asp_membership_leaves', (leaf) => {
+        leaves.push({
+            index: leaf.index,
+            leaf: hexToBytesForTree(leaf.leaf),
+        });
     }, { direction: 'next' });
-    
-    console.log(`[ASPMembershipStore] Initialized with ${leafCount} leaves`);
+
+    if (leaves.length > 100) {
+        merkleTree = buildMerkleTreeFromLeaves(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE, leaves);
+    } else {
+        merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeafLE);
+        for (const leaf of leaves) {
+            merkleTree.insert_at(leaf.leaf, leaf.index);
+        }
+    }
+
+    await persistTree();
+    console.log(`[ASPMembershipStore] Initialized with ${leaves.length} leaves`);
 }
 
 /**
@@ -87,16 +112,10 @@ export async function processLeafAdded(event, ledger) {
     
     // Update merkle tree
     if (merkleTree) {
-        // Enforce ordering
-        const nextIdx = Number(merkleTree.next_index);
-        if (index !== nextIdx) {
-            throw new Error(`Out-of-order insertion: expected ${nextIdx}, got ${index}`);
-        }
-        
         const leafBytes = hexToBytesForTree(leaf);
-        console.log(`[ASPMembershipStore] Inserting leaf bytes (LE for tree):`, bytesToHex(leafBytes));
-        
-        merkleTree.insert(leafBytes);
+        console.log(`[ASPMembershipStore] Inserting leaf at index ${index} (LE for tree):`, bytesToHex(leafBytes));
+
+        merkleTree.insert_at(leafBytes, index);
         
         // Verify root matches contract
         // Tree returns LE bytes, contract root is BE hex
@@ -109,7 +128,8 @@ export async function processLeafAdded(event, ledger) {
             console.error(`  Local:    ${computedRoot}`);
         }
     }
-    
+
+    await persistTree();
     console.log(`[ASPMembershipStore] Stored leaf at index ${index}`);
 }
 
@@ -243,6 +263,7 @@ export async function findLeafByHash(leafHash) {
  */
 export async function clear() {
     await db.clear('asp_membership_leaves');
+    await db.del('tree_snapshots', 'asp_membership');
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
     merkleTree = createMerkleTreeWithZeroLeaf(ASP_MEMBERSHIP_TREE_DEPTH, zeroLeaf);
     console.log('[ASPMembershipStore] Cleared all data');

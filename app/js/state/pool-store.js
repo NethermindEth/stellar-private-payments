@@ -8,7 +8,12 @@
  */
 
 import * as db from './db.js';
-import { createMerkleTreeWithZeroLeaf } from '../bridge.js';
+import {
+    createMerkleTreeWithZeroLeaf,
+    buildMerkleTreeFromLeaves,
+    serializeMerkleTree,
+    deserializeMerkleTree,
+} from '../bridge.js';
 import { 
     bytesToHex, 
     normalizeU256ToHex, 
@@ -22,6 +27,17 @@ import {
 const POOL_TREE_DEPTH = TREE_DEPTH;
 
 let merkleTree = null;
+
+async function persistTree() {
+    if (!merkleTree) return;
+    const data = serializeMerkleTree(merkleTree);
+    await db.put('tree_snapshots', {
+        id: 'pool',
+        data,
+        nextIndex: Number(merkleTree.next_index),
+        timestamp: Date.now(),
+    });
+}
 
 /**
  * @typedef {Object} PoolLeaf
@@ -50,6 +66,16 @@ let merkleTree = null;
  * @returns {Promise<void>}
  */
 export async function init() {
+    const snapshot = await db.get('tree_snapshots', 'pool');
+    if (snapshot && snapshot.data) {
+        try {
+            merkleTree = deserializeMerkleTree(snapshot.data);
+            console.log(`[PoolStore] Restored tree from snapshot (${snapshot.nextIndex} leaves)`);
+            return;
+        } catch (e) {
+            console.warn('[PoolStore] Snapshot restore failed, rebuilding:', e);
+        }
+    }
     await rebuildTree();
 }
 
@@ -59,27 +85,27 @@ export async function init() {
  * @returns {Promise<number>} Number of leaves in the rebuilt tree
  */
 export async function rebuildTree() {
-    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
-    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
-    
-    // Use cursor to iterate leaves in index order without loading all into memory
-    let leafCount = 0;
-    let expectedIndex = 0;
-    
+    const leaves = [];
+
     await db.iterate('pool_leaves', (leaf) => {
-        // Verify sequential ordering (merkle tree requires ordered insertion)
-        if (leaf.index !== expectedIndex) {
-            console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
+        leaves.push({
+            index: leaf.index,
+            leaf: hexToBytesForTree(leaf.commitment),
+        });
+    }, { direction: 'next' });
+
+    if (leaves.length > 100) {
+        merkleTree = buildMerkleTreeFromLeaves(POOL_TREE_DEPTH, zeroLeaf, leaves);
+    } else {
+        merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
+        for (const leaf of leaves) {
+            merkleTree.insert_at(leaf.leaf, leaf.index);
         }
-        
-        const commitmentBytes = hexToBytesForTree(leaf.commitment);
-        merkleTree.insert(commitmentBytes);
-        leafCount++;
-        expectedIndex = leaf.index + 1;
-    }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
-    
-    return leafCount;
+    }
+
+    await persistTree();
+    return leaves.length;
 }
 
 /**
@@ -117,8 +143,10 @@ export async function processNewCommitment(event, ledger) {
     // Update merkle tree
     if (merkleTree) {
         const commitmentBytes = hexToBytesForTree(commitment);
-        merkleTree.insert(commitmentBytes);
+        merkleTree.insert_at(commitmentBytes, index);
     }
+
+    await persistTree();
 }
 
 /**
@@ -270,9 +298,14 @@ export async function clear() {
     await db.clear('pool_leaves');
     await db.clear('pool_nullifiers');
     await db.clear('pool_encrypted_outputs');
+    await db.del('tree_snapshots', 'pool');
     const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
     merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
     console.log('[PoolStore] Cleared all data');
+}
+
+export function isTreeInitialized() {
+    return merkleTree !== null;
 }
 
 export { POOL_TREE_DEPTH };
