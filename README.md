@@ -1,4 +1,5 @@
-# Private transactions for Stellar
+# Private Transactions for Stellar
+
 [![Docs](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/docs.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/docs.yml)
 [![Lint](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/linter.yml)
 [![Build](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/build-and-test.yml)
@@ -6,20 +7,214 @@
 [![UB](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/ub-detection.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/ub-detection.yml)
 [![Coverage](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/coverage.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/coverage.yml)
 
-
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-A compliant privacy payment system for the Stellar network.
+> **Disclaimer**: This project is a **Proof of Concept (PoC)** and prototype implementation. It is intended for research and educational purposes only. The code has not been audited and should not be used in production environments with real assets.
 
-It uses similar techniques with privacy pools, to create associations sets in order to prove membership or non membership
-for a specific deposit and thus regulate the pool.
+A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
-### Tests
-For building the testing circom you need to run
+The system incorporates **Administrative Service Providers (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
+
+## Features
+
+- **Private Transactions**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
+- **Zero-Knowledge Proofs**: Groth16 proofs generated via Circom circuits
+- **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
+- **Browser-Based Proving**: Client-side proof generation using WebAssembly
+- **Stellar Integration**: Built on Soroban smart contracts
+
+## Demo Application
+The demo application consists on three main parts:
+- **Frontend**: Provides a nice user interface for interacting with the system. 
+- **Circuits**: Where the real zk-magic happens and constraints are defined.
+- **Smart Contracts**: They define the state of the system, and how transactions are processed.
+
+If you want to try it out:
+
+1. Install dependencies
+    ```bash
+      make install
+    ``` 
+   
+
+2. Compile the project, including circuit tests:
+    ```bash
+      make circuits-build # or BUILD_TESTS=1 cargo build
+    ```
+   
+
+3. Deploy the contracts to a Stellar network:
+    ```bash
+    ./scripts/deploy.sh <network> \                     # e.g. testnet
+      --deployer <identity> \                           # Must be added in stellar-cli keys
+      --asp-levels 10 \                                 # Number of levels in the ASP trees
+      --pool-levels 10 \                                # Number of levels in the pool Merkle tree
+      --max-deposit 1000000000 \                        # Maximum deposit amount (in Stroops)
+      --vk-file scripts/testdata/compliant_test_vk.json # Verification key file
+    ```
+   If you already have deployed contracts, make sure their addresses are updated in `scripts/deployments.json`.
+
+4. Serve frontend
+    ```bash
+      make serve
+    ```
+    Open `http://localhost:8080` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
+    You might need to delete the browser cache from previous runs. Go to `Application` -> `Clear storage`.
+
+
+5. The pool is ready to use. But you will need to populate the ASP membership smart contracts with some public keys. You can do it directly from the stellar-cli:
+    ```bash
+    stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
+    ```
+    Or, directly access `http://localhost:8080/admin.html` and use the UI to add public keys.
+    Please note that the admin UI allows deriving keys for ANY account.
+    But insertion MUST be signed by the ASP admin account.
+    You can add your Freighter account to your Stellar-cli keys with `stellar keys add <NAME_FOR_ACCOUNT> --seed-phrase`.
+    This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
+
+
+6. Go back to `http://localhost:8080` and try it out!
+
+### Architecture Overview
+
+#### Transaction Flow
+
+1. **Deposit**: User deposits tokens into the pool, creating a commitment (UTXO). No input notes are spent, creates output notes.
+2. **Withdraw**: User proves ownership of commitments and withdraws tokens. Inputs notes are spent, no output notes are created.
+3. **Transfer**: User spends existing commitments and creates new ones, all done privately.  Input notes are spent, and output notes under a new public key are created.
+4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
+
+#### Zero-Knowledge Circuits
+
+The main transaction circuit proves:
+- Ownership of input UTXOs (knowledge of private keys)
+- Correct nullifier computation (prevents double-spending)
+- Valid Merkle proofs for input commitments
+- Correct output commitment computation
+- Balance conservation (inputs = outputs + public amount)
+- ASP membership/non-membership proofs
+
+#### Smart Contracts
+
+- **Pool**: Main contract handling deposits, transfers, and withdrawals
+- **Circom Groth16 Verifier**: On-chain verification of ZK proofs
+- **ASP Membership**: Merkle tree of approved public keys
+- **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
+
+## Project Structure
 
 ```
-BUILD_TESTS=1 cargo build
+stellar-private-transactions/
+├── app/                        # Browser-based frontend application (See app/README.md for more information)
+│   ├── crates/                 # Rust WASM modules
+│   │   ├── prover/             # Groth16 proof generation
+│   │   └── witness/            # Circom witness calculator
+│   ├── js/                     # JavaScript frontend code
+│   │   ├── state/              # State management (IndexedDB, sync)
+│   │   ├── ui/                 # UI components 
+│   │   └── *.js                # Core modules (bridge, wallet, stellar)
+│   └── index.html              # Main application entry
+├── circuits/                   # Circom ZK circuits
+│   ├── src/
+│   │   ├── poseidon2/          # Poseidon2 hash circuits
+│   │   ├── smt/                # Sparse Merkle tree circuits
+│   │   ├── test/               # Circuit test utilities
+│   │   ├── compliantTransaction.circom  # Main transaction circuit
+│   │   └── *.circom            # Supporting circuits
+│   └── build.rs                # Circuit compilation build script
+├── contracts/                  # Soroban smart contracts
+│   ├── asp-membership/         # ASP membership Merkle tree
+│   ├── asp-non-membership/     # ASP non-membership sparse Merkle tree
+│   ├── circom-groth16-verifier/# On-chain Groth16 proof verifier
+│   ├── pool/                   # Main privacy pool contract
+│   ├── soroban-utils/          # Shared utilities (Poseidon2, etc.)
+│   └── types/                  # Shared contract types
+├── e2e-tests/                  # End-to-end integration tests
+├── poseidon2/                  # Poseidon2 hash implementation
+├── scripts/                    # Deployment and utility scripts
+│   ├── deploy.sh               # Contract deployment script
+│   └── deployments.json        # Deployment output
+└── Makefile                    # Build automation
 ```
+
+## Prerequisites
+
+- **Rust** 1.92.0 or later (see `rust-toolchain.toml`).
+- **Circom** 2.2.2 or later for circuit compilation.
+- **Stellar CLI** for contract deployment.
+- **Node.js** for frontend dependencies.
+- **wasm-pack** for building WASM modules.
+- **Trunk** for serving the web application.
+
+## Building and testing crates
+
+### Building Circuits
+To explicitly build them:
+
+```bash
+# Build circuits
+cargo build -p circuits
+```
+
+The circuit crate also exposes 2 flags:
+- **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
+For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `scripts/testdata`, it will generate them.
+- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist. Should not generally be used, as it might cause issues with deployed contracts.
+
+Also, for efficiency reasons, some tests are ignored by default. To run them:
+```bash
+# Test circuits requires the flag to be enabled
+BUILD_TESTS=1 cargo test -p circuits -- --ignored
+```
+### Building Contracts
+
+```bash
+# Build all contracts
+stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package pool
+stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package asp-membership
+stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package asp-non-membership
+stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package circom-groth16-verifier
+
+# Or use the deployment script which builds automatically
+./scripts/deploy.sh --help
+```
+
+### Deploying Contracts
+You can use the script `scripts/deploy.sh` to deploy contracts to a Stellar network.
+An example can be found in the _Demo Application_ section..
+
+See `./scripts/deploy.sh --help` for all options.
+
+
+### End-to-End Tests
+
+The E2E tests generate real Groth16 proofs and verify them, locally, using contracts and the Soroban-SDK. To run them:
+```bash
+cargo test -p e2e-tests
+```
+
+### JavaScript Tests
+
+```bash
+cd app
+npm test
+```
+
+## Limitations
+
+As a proof of concept, this implementation has several limitations:
+
+- **No Groth16 Ceremony**: The Common Reference String (CRS) was not generated doing a decentralized ceremony.
+- **Single circuit support**: Now the demo only showcases a single circuit (2 inputs, 2 outputs). Support for multiple circuits might be added in the future.
+- **No Stellar Events**: The demo relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for longer periods of time. It requires a dedicated indexer serving events to users.
+- **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts. But this has not been tested in the UI.
+- **Not Audited**: The code has not undergone security audits.
+- **Error Handling**: Error handling may not cover all edge cases.
+
+
+## AI tools disclosure
+The content published here may have been refined/augmented by the use of large language models (LLM), computer programs designed to comprehend and generate human language. However, any output refined/generated with the assistance of such programs has been reviewed, edited and revised by Nethermind.
+
 
 ## License
 
@@ -27,4 +222,4 @@ Apache 2.0
 
 ## Would like to contribute?
 
-see [Contributing](./CONTRIBUTING.md).
+See [Contributing](./CONTRIBUTING.md).
