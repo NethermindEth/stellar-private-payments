@@ -15,7 +15,7 @@ use soroban_sdk::{Env, U256, Vec, contracttype};
 use soroban_utils::{get_zeroes, poseidon2_compress};
 
 /// Number of roots kept in history for proof verification
-const ROOT_HISTORY_SIZE: u32 = 100;
+const ROOT_HISTORY_SIZE: u32 = 90;
 
 // Errors
 #[derive(Clone, Debug)]
