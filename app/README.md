@@ -5,12 +5,14 @@
 Browser-based zero-knowledge proof generation for private Stellar transactions. This application allows users to interact with the privacy pool contracts directly from their browser, with client-side proof generation.
 
 ## Features
-
-- Client-side Groth16 proof generation via WebAssembly
-- Freighter wallet integration for Stellar transactions
-- Local state management with IndexedDB
-- Real-time synchronization with on-chain state
 - Support for deposits, transfers, and withdrawals
+- Real-time synchronization with on-chain state
+- Freighter wallet integration for Stellar transactions
+- Client-side Groth16 proof generation via WebAssembly
+- Local state management with IndexedDB
+- Note encryption/decryption
+- Simulation of ASP providers for testing
+
 
 ## Architecture
 
