@@ -86,7 +86,8 @@ fn main() -> Result<()> {
     let mut circom_files = find_circom_files(&src_dir);
 
     // Optionally include test circuits when BUILD_TESTS=1
-    // This includes both src/test/ and any other test directories (e.g., circomlib/test/)
+    // This includes both src/test/ and any other test directories (e.g.,
+    // circomlib/test/)
     let build_tests = env::var("BUILD_TESTS").is_ok();
     if build_tests {
         println!("cargo:warning=Including test circuits in build...");
@@ -443,7 +444,8 @@ fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
     find_circom_files_impl(dir, true)
 }
 
-/// Internal implementation that allows controlling whether to skip test directories.
+/// Internal implementation that allows controlling whether to skip test
+/// directories.
 fn find_circom_files_impl(dir: &Path, skip_test_dirs: bool) -> Vec<PathBuf> {
     let mut circom_files = Vec::new();
 
