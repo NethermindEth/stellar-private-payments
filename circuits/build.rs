@@ -86,10 +86,12 @@ fn main() -> Result<()> {
     let mut circom_files = find_circom_files(&src_dir);
 
     // Optionally include test circuits when BUILD_TESTS=1
+    // This includes both src/test/ and any other test directories (e.g., circomlib/test/)
     let build_tests = env::var("BUILD_TESTS").is_ok();
     if build_tests {
         println!("cargo:warning=Including test circuits in build...");
-        circom_files.extend(find_circom_files(&crate_dir.join("src/test")));
+        // Re-scan src/ without skipping test directories to include all test circuits
+        circom_files = find_circom_files_impl(&src_dir, false);
     } else {
         println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
     }
@@ -432,11 +434,17 @@ fn check_dependencies_need_rebuild(
 /// # Arguments
 ///
 /// * `dir` - Directory to search for Circom files
+/// * `skip_test_dirs` - If true, skip directories named "test"
 ///
 /// # Returns
 ///
 /// Returns a vector of paths to Circom files that contain a main component.
 fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
+    find_circom_files_impl(dir, true)
+}
+
+/// Internal implementation that allows controlling whether to skip test directories.
+fn find_circom_files_impl(dir: &Path, skip_test_dirs: bool) -> Vec<PathBuf> {
     let mut circom_files = Vec::new();
 
     // Recursively search for .circom files
@@ -449,7 +457,11 @@ fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
                     circom_files.push(PathBuf::from("./").join(path));
                 }
             } else if path.is_dir() {
-                circom_files.extend(find_circom_files(&path));
+                // Skip "test" directories when skip_test_dirs is true
+                if skip_test_dirs && path.file_name().is_some_and(|name| name == "test") {
+                    continue;
+                }
+                circom_files.extend(find_circom_files_impl(&path, skip_test_dirs));
             }
         }
     } else {
