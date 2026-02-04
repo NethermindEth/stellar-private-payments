@@ -16,6 +16,6 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     - name: Build
-      run: cargo test --workspace --verbose --no-run
+      run: REGEN_KEYS=1 BUILD_TESTS=1 cargo test --workspace --verbose --no-run
     - name: Run tests
       run: cargo test --workspace --verbose
