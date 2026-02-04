@@ -1,13 +1,14 @@
-DIST_DIR := dist
+DIST_DIR ?= dist
+BUILD_TESTS ?=
 
 .PHONY: serve
 serve: build
-	unset NO_COLOR && trunk serve
+	unset NO_COLOR && trunk serve --dist $(DIST_DIR)
 
 .PHONY: build
 build: circuits-build wasm-witness install
 	@echo "Building frontend with trunk..."
-	unset NO_COLOR && trunk build
+	unset NO_COLOR && trunk build  --dist $(DIST_DIR)
 
 .PHONY: wasm-witness
 wasm-witness:
@@ -23,7 +24,7 @@ wasm-witness:
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	BUILD_TESTS=1 cargo build -p circuits
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) OUT_DIR=$(DIST_DIR) cargo build -p circuits
 
 .PHONY: install
 install:
@@ -34,5 +35,5 @@ install:
 
 .PHONY: clean
 clean:
-	rm -rf $(DIST_DIR)
+	trunk clean --dist $(DIST_DIR)
 	cargo clean
