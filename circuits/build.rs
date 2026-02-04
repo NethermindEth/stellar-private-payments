@@ -46,6 +46,9 @@ use type_analysis::check_types::check_types;
 const CURVE_ID: &str = "bn128";
 
 fn main() -> Result<()> {
+    println!(
+        "cargo:warning=Circuits builder Copyright (C) 2025 Stellar Development Foundation. This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions."
+    );
     // === PATH SETUP ===
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
     let src_dir = crate_dir.join("src");
