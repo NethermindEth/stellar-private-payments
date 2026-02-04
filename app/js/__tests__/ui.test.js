@@ -2,6 +2,9 @@
 jest.mock('../prover.js', () => require('../__mocks__/prover.js'), { virtual: true });
 jest.mock('../witness/witness.js', () => require('../__mocks__/witness.js'), { virtual: true });
 
+// Mock prover-client.js to avoid import.meta.url issues in test environment
+jest.mock('../prover-client.js', () => require('../__mocks__/prover-client.js'), { virtual: true });
+
 jest.mock('../wallet.js', () => ({
   __esModule: true,
   connectWallet: jest.fn(),

@@ -6,8 +6,9 @@
  */
 
 import { getSorobanServer, getDeployedContracts, scValToNative, getNetwork } from '../stellar.js';
-import { xdr, Address, TransactionBuilder, Account } from '@stellar/stellar-sdk';
-import {bytesToHex, hexToBytes} from './utils.js';
+import { xdr, Address, TransactionBuilder, Account, Operation } from '@stellar/stellar-sdk';
+import { bytesToHex, hexToBytes } from './utils.js';
+import { getBN256Modulus } from "../bridge";
 
 /**
  * @typedef {Object} SMTNonMembershipProof
@@ -18,6 +19,16 @@ import {bytesToHex, hexToBytes} from './utils.js';
  * @property {Uint8Array} notFoundValue - Value at collision point (or zero)
  * @property {boolean} isOld0 - True if path ended at empty branch
  */
+
+/**
+ * Creates an enum-style key for Soroban contract storage.
+ * Soroban enum DataKey variants serialize as scvVec([scvSymbol(variant), ...values]).
+ * @param {string} variant - Enum variant name (e.g., 'Root', 'Admin')
+ * @returns {xdr.ScVal}
+ */
+function createEnumKey(variant) {
+    return xdr.ScVal.scvVec([xdr.ScVal.scvSymbol(variant)]);
+}
 
 /**
  * Fetches the current root of the ASP Non-Membership SMT.
@@ -33,8 +44,9 @@ export async function fetchRoot() {
         const server = getSorobanServer();
         const contractId = contracts.aspNonMembership;
         
-        // Build the ledger key for Root
-        const rootKey = xdr.ScVal.scvSymbol('Root');
+        // Build the ledger key for Root using enum-style key format
+        // DataKey::Root serializes as scvVec([scvSymbol("Root")])
+        const rootKey = createEnumKey('Root');
         const ledgerKey = xdr.LedgerKey.contractData(
             new xdr.LedgerKeyContractData({
                 contract: new Address(contractId).toScAddress(),
@@ -90,15 +102,10 @@ export async function fetchNonMembershipProof(key) {
             args: [keyU256],
         });
 
-        const op = xdr.Operation.fromXDR(
-            xdr.Operation.invokeHostFunction(
-                new xdr.InvokeHostFunctionOp({
-                    hostFunction: xdr.HostFunction.hostFunctionTypeInvokeContract(invokeArgs),
-                    auth: [],
-                })
-            ).toXDR(),
-            'base64'
-        );
+        const op = Operation.invokeHostFunction({
+            func: xdr.HostFunction.hostFunctionTypeInvokeContract(invokeArgs),
+            auth: [],
+        });
 
         // Build a minimal transaction for simulation
         const txBuilder = new TransactionBuilder(
@@ -132,16 +139,20 @@ export async function fetchNonMembershipProof(key) {
                 };
             }
             
+            // Fetch root
+            const rootResult = await fetchRoot();
+            if (!rootResult.success) {
+                return { success: false, error: `Failed to fetch root: ${rootResult.error}` };
+            }
+            
             // Build non-membership proof
             const proof = {
-                root: hexToBytes(await fetchRoot().then(r => r.root)),
+                root: toBytes(rootResult.root),
                 key: hexToBytes(keyHex),
-                siblings: (findResult.siblings || []).map(s =>
-                    typeof s === 'string' ? hexToBytes(s) : s
-                ),
-                notFoundKey: findResult.not_found_key || findResult.notFoundKey,
-                notFoundValue: findResult.not_found_value || findResult.notFoundValue,
-                isOld0: findResult.is_old0 || findResult.isOld0,
+                siblings: (findResult.siblings || []).map(s => toBytes(s)),
+                notFoundKey: toBytes(findResult.not_found_key || findResult.notFoundKey),
+                notFoundValue: toBytes(findResult.not_found_value || findResult.notFoundValue),
+                isOld0: findResult.is_old0 ?? findResult.isOld0 ?? false,
             };
             
             return { success: true, proof };
@@ -152,6 +163,48 @@ export async function fetchNonMembershipProof(key) {
         console.error('[ASPNonMembershipFetcher] Failed to fetch proof:', error);
         return { success: false, error: error.message };
     }
+}
+
+/**
+ * Converts various types to Uint8Array (32 bytes, little-endian for circuit use).
+ * Handles hex strings, Uint8Array, ArrayBuffer, BigInt, and null/undefined.
+ * BigInt values are reduced modulo BN254 to ensure they're valid field elements.
+ * @param {string|Uint8Array|ArrayBuffer|BigInt|null|undefined} value
+ * @returns {Uint8Array}
+ */
+function toBytes(value) {
+    if (value === null || value === undefined) {
+        return new Uint8Array(32); // Return zero bytes
+    }
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    // Handle Buffer-like objects (has buffer property pointing to ArrayBuffer)
+    if (value && typeof value === 'object' && value.buffer instanceof ArrayBuffer) {
+        return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+    }
+    if (typeof value === 'bigint') {
+        // Reduce to BN254 field modulus to ensure valid field element
+        const reduced = value % BigInt(getBN256Modulus());
+        // Convert to 32-byte little-endian representation (for circuit compatibility)
+        const bytes = new Uint8Array(32);
+        let v = reduced;
+        for (let i = 0; i < 32; i++) {
+            bytes[i] = Number(v & 0xffn);
+            v >>= 8n;
+        }
+        return bytes;
+    }
+    if (typeof value === 'string') {
+        // Hex strings are big-endian, convert to little-endian for circuit
+        const beBytes = hexToBytes(value);
+        return beBytes.reverse();
+    }
+    console.warn('[ASPNonMembershipFetcher] Unknown value type:', typeof value, value);
+    return new Uint8Array(32);
 }
 
 /**

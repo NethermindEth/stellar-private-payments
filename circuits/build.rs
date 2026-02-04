@@ -58,6 +58,24 @@ fn main() -> Result<()> {
     println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
+    println!("cargo:rerun-if-env-changed=REGEN_KEYS");
+
+    // Rerun if testdata key files are missing or changed
+    let testdata_dir = crate_dir.join("../scripts/testdata");
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir
+            .join("compliant_test_proving_key.bin")
+            .display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir.join("compliant_test_vk.json").display()
+    );
+    println!(
+        "cargo:rerun-if-changed={}",
+        testdata_dir.join("compliant_test_vk_soroban.bin").display()
+    );
 
     // === CIRCOMLIB DEPENDENCY ===
     // Import circomlib library (only if not already present)
@@ -154,9 +172,37 @@ fn main() -> Result<()> {
 
                 // Still check if we need to generate keys for compliant_test
                 if circuit_name == "compliant_test" {
-                    generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file)?;
+                    // Check if WASM exists before attempting key generation
+                    let wasm_path = out_dir
+                        .join("wasm")
+                        .join(format!("{circuit_name}_js"))
+                        .join(format!("{circuit_name}.wasm"));
+
+                    if !wasm_path.exists() {
+                        // WASM doesn't exist but keys might be needed - force recompilation
+                        println!(
+                            "cargo:warning=WASM missing for {} - forcing recompilation to enable key generation",
+                            circuit_name
+                        );
+                        // Don't continue, let the compilation proceed
+                    } else {
+                        // WASM exists, try key generation
+                        match generate_keys_if_needed(
+                            &crate_dir,
+                            &out_dir,
+                            &circuit_name,
+                            &r1cs_file,
+                        ) {
+                            Ok(_) => {}
+                            Err(e) => {
+                                println!("cargo:warning=Key generation failed: {e}");
+                            }
+                        }
+                        continue;
+                    }
+                } else {
+                    continue;
                 }
-                continue;
             }
         }
 
@@ -207,15 +253,40 @@ fn main() -> Result<()> {
         .expect("SYM file generation failed");
 
         // === WASM GENERATION ===
-
-        if let Err(e) = compile_wasm(&circom_file, &out_dir, vcp) {
-            println!("cargo:warning=Skipping in-process WASM generation for {circom_file:?}: {e}");
-        }
+        let wasm_success = match compile_wasm(&circom_file, &out_dir, vcp) {
+            Ok(()) => true,
+            Err(e) => {
+                println!("cargo:warning=WASM generation failed for {circom_file:?}: {e}");
+                false
+            }
+        };
 
         // === GROTH16 Proving/Verifying key generation for test circuits ===
         // For now we only generate keys for the compliant test circuit.
         if circuit_name == "compliant_test" {
-            generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file)?;
+            if !wasm_success {
+                println!(
+                    "cargo:warning=Skipping key generation for {} - WASM compilation failed",
+                    circuit_name
+                );
+            } else {
+                match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                    Ok(generated) => {
+                        if generated {
+                            println!(
+                                "cargo:warning=Key generation completed for {}",
+                                circuit_name
+                            );
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "cargo:warning=Key generation failed for {}: {}",
+                            circuit_name, e
+                        );
+                    }
+                }
+            }
         }
     }
 
@@ -708,11 +779,100 @@ fn generate_groth16_keys(
     Ok((pk, vk))
 }
 
-/// Generate Groth16 keys if they don't exist or are older than the R1CS file.
+/// Check if the essential Groth16 keys exist (the 3 files needed for
+/// proving/verification).
 ///
-/// This function checks if the proving and verification keys exist and are
-/// up-to-date. If not, it generates new keys and writes them to the
-/// `scripts/testdata/` directory.
+/// Returns (all_exist, missing_files) where missing_files lists which are
+/// absent.
+fn check_essential_keys_exist(
+    pk_path: &Path,
+    vk_path: &Path,
+    vk_soroban_path: &Path,
+) -> (bool, Vec<&'static str>) {
+    let mut missing = Vec::new();
+    if !pk_path.exists() {
+        missing.push("proving_key.bin");
+    }
+    if !vk_path.exists() {
+        missing.push("vk.json");
+    }
+    if !vk_soroban_path.exists() {
+        missing.push("vk_soroban.bin");
+    }
+    (missing.is_empty(), missing)
+}
+
+/// Check if Groth16 keys need to be regenerated.
+///
+/// Key regeneration is DANGEROUS after deployment because Groth16
+/// keys are generated with random parameters. Regenerating keys will make
+/// proofs incompatible with already-deployed contracts.
+///
+/// Returns (needs_generation, reason) where reason explains why regeneration is
+/// needed.
+fn check_keys_need_generation(
+    pk_path: &Path,
+    vk_path: &Path,
+    vk_soroban_path: &Path,
+    vk_const_path: &Path,
+    r1cs_file: &Path,
+    force_regen: bool,
+) -> (bool, String) {
+    // Check if essential key files exist (the 3 needed for proving/verification)
+    let (essential_exist, missing) = check_essential_keys_exist(pk_path, vk_path, vk_soroban_path);
+
+    if !essential_exist {
+        // Essential files are missing - must generate
+        return (
+            true,
+            format!("Missing essential key files: {}", missing.join(", ")),
+        );
+    }
+
+    // Essential keys exist. Check if force regeneration was requested.
+    if force_regen {
+        return (
+            true,
+            "REGEN_KEYS=1 was set - forcing key regeneration".to_string(),
+        );
+    }
+
+    // Essential keys exist and no force flag. Check if r1cs is newer (warning
+    // only).
+    if r1cs_file.exists()
+        && let (Ok(r1cs_meta), Ok(pk_meta)) = (fs::metadata(r1cs_file), fs::metadata(pk_path))
+        && let (Ok(r1cs_time), Ok(pk_time)) = (r1cs_meta.modified(), pk_meta.modified())
+        && r1cs_time > pk_time
+    {
+        println!(
+            "cargo:warning=WARNING: R1CS is newer than keys, but NOT regenerating to avoid breaking deployed contracts."
+        );
+        println!(
+            "cargo:warning=If you need new keys (e.g., circuit changed), run: REGEN_KEYS=1 BUILD_TESTS=1 cargo build"
+        );
+        println!("cargo:warning=Then REDEPLOY contracts with the new verification key!");
+    }
+
+    // Note: vk_const.rs is optional (only for embedding VK in contracts).
+    // We don't trigger regeneration just for this file since it would create
+    // new incompatible keys. The user must explicitly use REGEN_KEYS=1.
+    if !vk_const_path.exists() {
+        println!("cargo:warning=Note: vk_const.rs is missing but essential keys exist - skipping");
+        println!(
+            "cargo:warning=Run REGEN_KEYS=1 BUILD_TESTS=1 cargo build if you need vk_const.rs"
+        );
+    }
+
+    (
+        false,
+        "Essential keys exist and REGEN_KEYS not set".to_string(),
+    )
+}
+
+/// Generate Groth16 keys if they don't exist or REGEN_KEYS=1 is set.
+///
+/// Set `REGEN_KEYS=1` environment variable to force regeneration (e.g., after
+/// circuit changes). Redeployment of contracts will be needed after this.
 ///
 /// # Arguments
 ///
@@ -720,47 +880,79 @@ fn generate_groth16_keys(
 /// * `out_dir` - The output directory containing WASM files
 /// * `circuit_name` - Name of the circuit (e.g., "compliant_test")
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
+///
+/// # Returns
+///
+/// Returns `Ok(true)` if keys were generated, `Ok(false)` if skipped,
+/// or an error if generation failed critically.
 fn generate_keys_if_needed(
     crate_dir: &Path,
     out_dir: &Path,
     circuit_name: &str,
     r1cs_file: &Path,
-) -> Result<()> {
+) -> Result<bool> {
     // Output keys to scripts/testdata/
     let keys_dir = crate_dir.join("../scripts/testdata");
     fs::create_dir_all(&keys_dir).context("Could not create scripts/testdata")?;
 
     let pk_path = keys_dir.join(format!("{circuit_name}_proving_key.bin"));
     let vk_path = keys_dir.join(format!("{circuit_name}_vk.json"));
+    let vk_soroban_path = keys_dir.join(format!("{circuit_name}_vk_soroban.bin"));
+    let vk_const_path = keys_dir.join(format!("{circuit_name}_vk_const.rs"));
 
-    // Check if keys already exist and are newer than the r1cs
-    if pk_path.exists() && vk_path.exists() && r1cs_file.exists() {
-        let pk_modified = fs::metadata(&pk_path)?.modified()?;
-        let vk_modified = fs::metadata(&vk_path)?.modified()?;
-        let r1cs_modified = fs::metadata(r1cs_file)?.modified()?;
-
-        if pk_modified > r1cs_modified && vk_modified > r1cs_modified {
-            println!(
-                "cargo:warning=Skipping key generation for {} (keys up to date)",
-                circuit_name
-            );
-            return Ok(());
-        }
+    // Check for force regeneration flag
+    let force_regen = env::var("REGEN_KEYS").is_ok();
+    if force_regen {
+        println!("cargo:warning=REGEN_KEYS=1 detected - will regenerate keys");
+        println!("cargo:warning=WARNING: Remember to REDEPLOY contracts with the new VK!");
     }
 
-    // Generate keys
+    // Check if keys need regeneration
+    let (needs_generation, reason) = check_keys_need_generation(
+        &pk_path,
+        &vk_path,
+        &vk_soroban_path,
+        &vk_const_path,
+        r1cs_file,
+        force_regen,
+    );
+
+    if !needs_generation {
+        println!(
+            "cargo:warning=Skipping key generation for {} ({})",
+            circuit_name, reason
+        );
+        return Ok(false);
+    }
+
+    println!(
+        "cargo:warning=Key generation needed for {}: {}",
+        circuit_name, reason
+    );
+
+    // Check for WASM file
     let wasm_path = out_dir
         .join("wasm")
         .join(format!("{circuit_name}_js"))
         .join(format!("{circuit_name}.wasm"));
 
     if !wasm_path.exists() {
+        // WASM is required for key generation - this is an error condition
         println!(
-            "cargo:warning=Skipping key generation for {} (WASM not found at {})",
+            "cargo:warning=ERROR: Cannot generate keys for {} - WASM file not found at {}",
             circuit_name,
             wasm_path.display()
         );
-        return Ok(());
+        println!("cargo:warning=This usually happens when:");
+        println!("cargo:warning=  1. BUILD_TESTS=1 was not set (run: BUILD_TESTS=1 cargo build)");
+        println!("cargo:warning=  2. WASM compilation failed earlier in the build");
+        println!(
+            "cargo:warning=  3. OUT_DIR was cleaned (try: cargo clean && BUILD_TESTS=1 cargo build)"
+        );
+        return Err(anyhow!(
+            "WASM file not found for key generation: {}",
+            wasm_path.display()
+        ));
     }
 
     println!("cargo:warning=Generating Groth16 keys for {circuit_name}...");
@@ -773,22 +965,49 @@ fn generate_keys_if_needed(
                 println!("cargo:warning=Proving key written to {}", pk_path.display());
             }
 
-            // Write verification key (JSON)
+            // Write verification key (snarkjs JSON format)
             if let Err(e) = write_verification_key(&vk, &vk_path) {
-                println!("cargo:warning=Failed to write verification key: {e}");
+                println!("cargo:warning=Failed to write verification key JSON: {e}");
             } else {
                 println!(
-                    "cargo:warning=Verification key written to {}",
+                    "cargo:warning=Verification key (snark JSON) written to {}",
                     vk_path.display()
                 );
             }
+
+            // Write verification key for Soroban binary format
+            if let Err(e) = write_verification_key_soroban_bin(&vk, &vk_soroban_path) {
+                println!("cargo:warning=Failed to write VK Soroban binary: {e}");
+            } else {
+                println!(
+                    "cargo:warning=Verification key (Soroban bin) written to {}",
+                    vk_soroban_path.display()
+                );
+            }
+
+            // Write verification key (const Rust) for potential embedding in contract
+            if let Err(e) = write_verification_key_rust_const(&vk, &vk_const_path) {
+                println!("cargo:warning=Failed to write VK Rust const: {e}");
+            } else {
+                println!(
+                    "cargo:warning=Verification key (Rust const) written to {}",
+                    vk_const_path.display()
+                );
+            }
+
+            println!(
+                "cargo:warning=VK has {} IC points ({} public inputs)",
+                vk.gamma_abc_g1.len(),
+                vk.gamma_abc_g1.len().saturating_sub(1)
+            );
+
+            Ok(true)
         }
         Err(e) => {
             println!("cargo:warning=Failed to generate keys for {circuit_name}: {e}");
+            Err(e)
         }
     }
-
-    Ok(())
 }
 
 /// Write the proving key to a binary file using compressed serialization.
@@ -839,10 +1058,12 @@ fn g1_to_snarkjs(p: &G1Affine) -> Value {
 }
 
 /// Convert a G2Affine point to snarkjs JSON format.
+/// snarkjs uses [c1, c0] ordering (imaginary first, real second) for Fq2
+/// elements.
 fn g2_to_snarkjs(p: &G2Affine) -> Value {
     json!([
-        [fq_to_decimal(&p.x.c0), fq_to_decimal(&p.x.c1)],
-        [fq_to_decimal(&p.y.c0), fq_to_decimal(&p.y.c1)],
+        [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
+        [fq_to_decimal(&p.y.c1), fq_to_decimal(&p.y.c0)],
         ["1", "0"]
     ])
 }
@@ -852,4 +1073,134 @@ fn fq_to_decimal(f: &Fq) -> String {
     let bigint = f.into_bigint();
     let bytes = bigint.to_bytes_be();
     num_bigint::BigUint::from_bytes_be(&bytes).to_string()
+}
+
+// Soroban-compatible serialization functions.
+// Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering.
+
+/// Converts a BigInteger to 32-byte big-endian representation.
+fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
+    let bytes = value.to_bytes_be();
+    let mut out = [0u8; 32];
+    let start = 32usize.saturating_sub(bytes.len());
+    out[start..].copy_from_slice(&bytes[..bytes.len().min(32)]);
+    out
+}
+
+/// Converts a G1Affine point to 64-byte Soroban format.
+fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
+    out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
+    out
+}
+
+/// Converts a G2Affine point to 128-byte Soroban format with c1||c0 ordering.
+fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    // Soroban ordering: c1 (imaginary) || c0 (real)
+    out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
+    out[32..64].copy_from_slice(&bigint_to_be_32(p.x.c0.into_bigint()));
+    out[64..96].copy_from_slice(&bigint_to_be_32(p.y.c1.into_bigint()));
+    out[96..].copy_from_slice(&bigint_to_be_32(p.y.c0.into_bigint()));
+    out
+}
+
+/// Write the verification key as a Rust const file for embedding in contracts.
+///
+/// Generates a file with embedded byte arrays that can be included in Soroban
+/// contracts.
+fn write_verification_key_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
+    let ic_count = vk.gamma_abc_g1.len();
+
+    let alpha_bytes = g1_to_soroban_bytes(&vk.alpha_g1);
+    let beta_bytes = g2_to_soroban_bytes(&vk.beta_g2);
+    let gamma_bytes = g2_to_soroban_bytes(&vk.gamma_g2);
+    let delta_bytes = g2_to_soroban_bytes(&vk.delta_g2);
+
+    let mut ic_arrays = Vec::with_capacity(ic_count);
+    for ic in &vk.gamma_abc_g1 {
+        ic_arrays.push(g1_to_soroban_bytes(ic));
+    }
+
+    let mut content = String::new();
+    content.push_str("//! Auto-generated verification key constants for Soroban contracts.\n");
+    content.push_str(
+        "//! DO NOT EDIT - regenerate by running `BUILD_TESTS=1 cargo build` in circuits/\n\n",
+    );
+    content.push_str("#![allow(dead_code)]\n\n");
+
+    // Alpha (G1)
+    content.push_str("/// Alpha point (G1, 64 bytes)\n");
+    content.push_str(&format!(
+        "pub const VK_ALPHA: [u8; 64] = {:?};\n\n",
+        alpha_bytes
+    ));
+
+    // Beta (G2)
+    content.push_str("/// Beta point (G2, 128 bytes, c1||c0 ordering)\n");
+    content.push_str(&format!(
+        "pub const VK_BETA: [u8; 128] = {:?};\n\n",
+        beta_bytes
+    ));
+
+    // Gamma (G2)
+    content.push_str("/// Gamma point (G2, 128 bytes, c1||c0 ordering)\n");
+    content.push_str(&format!(
+        "pub const VK_GAMMA: [u8; 128] = {:?};\n\n",
+        gamma_bytes
+    ));
+
+    // Delta (G2)
+    content.push_str("/// Delta point (G2, 128 bytes, c1||c0 ordering)\n");
+    content.push_str(&format!(
+        "pub const VK_DELTA: [u8; 128] = {:?};\n\n",
+        delta_bytes
+    ));
+
+    // IC count
+    content.push_str("/// Number of IC points (public inputs + 1)\n");
+    content.push_str(&format!("pub const VK_IC_COUNT: usize = {};\n\n", ic_count));
+
+    // IC points as array of arrays
+    content.push_str("/// IC points (G1, 64 bytes each)\n");
+    content.push_str(&format!("pub const VK_IC: [[u8; 64]; {}] = [\n", ic_count));
+    for ic in &ic_arrays {
+        content.push_str(&format!("    {:?},\n", ic));
+    }
+    content.push_str("];\n");
+
+    fs::write(path, content).context("Failed to write VK Rust const file")?;
+    Ok(())
+}
+
+/// Write the verification key as binary Soroban-compatible format.
+fn write_verification_key_soroban_bin(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
+    let ic_count = vk.gamma_abc_g1.len();
+
+    // VK binary format: alpha(64) + beta(128) + gamma(128) + delta(128) +
+    // ic_count(4) + ic(64*n) Fixed header size: 64 + 128 + 128 + 128 + 4 = 452
+    // bytes
+    const HEADER_SIZE: usize = 452;
+    let ic_bytes = ic_count.checked_mul(64).context("IC count overflow")?;
+    let total_size = HEADER_SIZE
+        .checked_add(ic_bytes)
+        .context("Total size overflow")?;
+
+    let mut bytes = Vec::with_capacity(total_size);
+
+    bytes.extend_from_slice(&g1_to_soroban_bytes(&vk.alpha_g1));
+    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.beta_g2));
+    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.gamma_g2));
+    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.delta_g2));
+
+    let ic_count_u32 = u32::try_from(ic_count).context("IC count exceeds u32 max")?;
+    bytes.extend_from_slice(&ic_count_u32.to_le_bytes());
+
+    for ic in &vk.gamma_abc_g1 {
+        bytes.extend_from_slice(&g1_to_soroban_bytes(ic));
+    }
+
+    fs::write(path, &bytes).context("Failed to write VK Soroban binary")?;
+    Ok(())
 }

@@ -31,7 +31,7 @@ use zkhash::{
 };
 
 /// Number of levels in the pool's commitment Merkle tree
-pub const LEVELS: usize = 5;
+pub const LEVELS: usize = 10;
 
 /// Number of membership proofs required per input
 pub const N_MEM_PROOFS: usize = 1;
@@ -40,7 +40,7 @@ pub const N_MEM_PROOFS: usize = 1;
 pub const N_NON_PROOFS: usize = 1;
 
 /// Number of levels in the ASP membership Merkle tree
-pub const ASP_MEMBERSHIP_LEVELS: u32 = 5;
+pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;

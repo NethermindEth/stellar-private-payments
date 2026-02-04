@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'poolstellar';
-const DB_VERSION = 2;
+const DB_VERSION = 4;
 
 /**
  * Store configuration for IndexedDB schema.
@@ -29,18 +29,27 @@ const STORES = {
     },
     user_notes: {
         keyPath: 'id',
-        indexes: [{ name: 'by_spent', keyPath: 'spent' }]
+        indexes: [
+            { name: 'by_spent', keyPath: 'spent' },
+            { name: 'by_owner', keyPath: 'owner' }
+        ]
+    },
+    registered_public_keys: {
+        keyPath: 'address',
+        indexes: [{ name: 'by_ledger', keyPath: 'ledger' }]
     }
 };
 
 let dbInstance = null;
+let dbClosing = false;
 
 /**
  * Opens the IndexedDB database, creating stores if needed.
  * @returns {Promise<IDBDatabase>}
  */
 function openDatabase() {
-    if (dbInstance) {
+    // Return cached instance only if it's valid and not closing
+    if (dbInstance && !dbClosing) {
         return Promise.resolve(dbInstance);
     }
 
@@ -54,11 +63,21 @@ function openDatabase() {
 
         request.onsuccess = () => {
             dbInstance = request.result;
+            dbClosing = false;
+            
             dbInstance.onversionchange = () => {
+                dbClosing = true;
                 dbInstance.close();
                 dbInstance = null;
                 console.warn('[DB] Database version changed, connection closed');
             };
+            
+            dbInstance.onclose = () => {
+                dbClosing = false;
+                dbInstance = null;
+                console.warn('[DB] Database connection closed');
+            };
+            
             resolve(dbInstance);
         };
 
@@ -97,9 +116,24 @@ function openDatabase() {
  * @returns {Promise<IDBTransaction>}
  */
 async function getTransaction(storeNames, mode = 'readonly') {
-    const db = await openDatabase();
     const names = Array.isArray(storeNames) ? storeNames : [storeNames];
-    return db.transaction(names, mode);
+    
+    // Retry once if connection was closed
+    for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+            const db = await openDatabase();
+            return db.transaction(names, mode);
+        } catch (error) {
+            if (attempt === 0 && error.name === 'InvalidStateError') {
+                // Connection might be closing, reset and retry
+                dbInstance = null;
+                dbClosing = false;
+                console.warn('[DB] Connection invalid, retrying...');
+                continue;
+            }
+            throw error;
+        }
+    }
 }
 
 /**
@@ -343,9 +377,23 @@ export async function deleteDatabase() {
         };
         request.onerror = () => reject(request.error);
         request.onblocked = () => {
-            console.warn('[DB] Database deletion blocked');
+            console.warn('[DB] Database deletion blocked - close all other tabs and try again');
+            // Still resolve after a delay to allow the operation to proceed
+            setTimeout(resolve, 1000);
         };
     });
+}
+
+/**
+ * Force resets the database by deleting and reinitializing.
+ * Use this when database upgrades fail.
+ * @returns {Promise<void>}
+ */
+export async function forceReset() {
+    console.log('[DB] Force resetting database...');
+    await deleteDatabase();
+    await init();
+    console.log('[DB] Database force reset complete');
 }
 
 /**

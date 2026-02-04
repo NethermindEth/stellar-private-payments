@@ -2,7 +2,7 @@
 
 use soroban_sdk::{
     Bytes, BytesN, Vec, contracterror, contracttype,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    crypto::bn254::{Bn254G1Affine, Bn254G2Affine},
 };
 
 /// Errors that can occur during Groth16 proof verification.
@@ -21,6 +21,7 @@ pub enum Groth16Error {
 }
 
 /// Groth16 verification key for BN254 curve (byte-oriented).
+/// All G2 points use Soroban's c1||c0 (imaginary||real) ordering.
 #[contracttype]
 #[derive(Clone)]
 pub struct VerificationKeyBytes {
@@ -32,12 +33,13 @@ pub struct VerificationKeyBytes {
 }
 
 /// Groth16 proof composed of points A, B, and C.
+/// G2 point B uses Soroban's c1||c0 (imaginary||real) ordering.
 #[derive(Clone)]
 #[contracttype]
 pub struct Groth16Proof {
-    pub a: G1Affine,
-    pub b: G2Affine,
-    pub c: G1Affine,
+    pub a: Bn254G1Affine,
+    pub b: Bn254G2Affine,
+    pub c: Bn254G1Affine,
 }
 
 impl Groth16Proof {
@@ -47,11 +49,16 @@ impl Groth16Proof {
     }
 }
 
-// Layout: a.x | a.y | b.x_0 | b.x_1 | b.y_0 | b.y_1 | c.x | c.y (all 32-byte
-// big-endian)
+/// Size of a single BN254 field element in bytes.
 pub const FIELD_ELEMENT_SIZE: u32 = 32;
+
+/// Size of a G1 point
 pub const G1_SIZE: u32 = FIELD_ELEMENT_SIZE * 2;
+
+/// Size of a G2 point
 pub const G2_SIZE: u32 = FIELD_ELEMENT_SIZE * 4;
+
+/// Total proof size: A (G1) || B (G2) || C (G1) = 64 + 128 + 64 = 256 bytes.
 pub const PROOF_SIZE: u32 = G1_SIZE + G2_SIZE + G1_SIZE;
 
 impl TryFrom<Bytes> for Groth16Proof {
@@ -62,19 +69,19 @@ impl TryFrom<Bytes> for Groth16Proof {
             return Err(Groth16Error::MalformedProof);
         }
 
-        let a = G1Affine::from_bytes(
+        let a = Bn254G1Affine::from_bytes(
             value
                 .slice(0..G1_SIZE)
                 .try_into()
                 .map_err(|_| Groth16Error::MalformedProof)?,
         );
-        let b = G2Affine::from_bytes(
+        let b = Bn254G2Affine::from_bytes(
             value
                 .slice(G1_SIZE..G1_SIZE + G2_SIZE)
                 .try_into()
                 .map_err(|_| Groth16Error::MalformedProof)?,
         );
-        let c = G1Affine::from_bytes(
+        let c = Bn254G1Affine::from_bytes(
             value
                 .slice(G1_SIZE + G2_SIZE..)
                 .try_into()

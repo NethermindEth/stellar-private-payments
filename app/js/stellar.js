@@ -3,7 +3,7 @@
  * Specialized for Pool, ASP Membership, and ASP Non-Membership contracts
  * @see https://developers.stellar.org/docs/build/guides/dapps/frontend-guide
  */
-import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative } from '@stellar/stellar-sdk';
+import { Horizon, rpc, Networks, Address, xdr, scValToNative as sdkScValToNative, contract, ScInt } from '@stellar/stellar-sdk';
 
 const SUPPORTED_NETWORK = 'testnet';
 
@@ -443,9 +443,12 @@ export async function getContractEvents(contractId, options = {}) {
             filters: [{
                 type: 'contract',
                 contractIds: [contractId],
-                topics: options.topics || [],
+                // Use ** to match zero or more topic segments
+                topics: options.topics || [['**']],
             }],
-            limit: options.limit || 50,
+            pagination: {
+                limit: options.limit || 50,
+            },
         });
 
         const events = result.events.map(event => ({
@@ -539,59 +542,102 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         return { success: false, events: [], error: 'startLedger or cursor required' };
     }
 
+    const network = getNetwork();
+    const rpcUrl = network.rpcUrl;
+    
+    // RPC has a search limit - it won't scan many ledgers at once.
+    // We need to search in chunks to cover the full range.
+    const CHUNK_SIZE = 5000; // Search 5000 ledgers at a time
+
     try {
-        const server = getSorobanServer();
-        // Only accumulate events if no callback is provided (for backward compat)
         const allEvents = onPage ? null : [];
         let cursor = initialCursor;
         let latestLedger = 0;
         let totalCount = 0;
+        let currentStartLedger = startLedger;
 
-        // eslint-disable-next-line no-constant-condition
-        while (true) {
-            const requestParams = {
+        // First, get the latest ledger to know when to stop
+        const infoResponse = await fetch(rpcUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'getLatestLedger',
+            }),
+        });
+        const infoJson = await infoResponse.json();
+        latestLedger = infoJson.result?.sequence || 0;
+        
+        console.log('[Stellar] Fetching events in chunks:', {
+            contractId,
+            startLedger,
+            latestLedger,
+            chunkSize: CHUNK_SIZE,
+            totalRange: latestLedger - startLedger,
+        });
+
+        // Search in chunks from startLedger to latestLedger
+        while (currentStartLedger < latestLedger) {
+            const params = {
+                startLedger: currentStartLedger,
                 filters: [{
-                    type: 'contract',
                     contractIds: [contractId],
                 }],
-                limit: pageSize,
+                pagination: {
+                    limit: pageSize,
+                },
             };
 
-            if (cursor) {
-                requestParams.cursor = cursor;
-            } else {
-                requestParams.startLedger = startLedger;
+            const requestBody = {
+                jsonrpc: '2.0',
+                id: Date.now(),
+                method: 'getEvents',
+                params,
+            };
+
+            const response = await fetch(rpcUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+            });
+
+            const json = await response.json();
+            
+            if (json.error) {
+                throw new Error(json.error.message || JSON.stringify(json.error));
             }
 
-            const result = await server.getEvents(requestParams);
-            latestLedger = result.latestLedger;
+            const result = json.result;
 
-            const pageEvents = result.events.map(event => ({
+            // Parse events - raw API returns base64 XDR, need to decode
+            const pageEvents = (result.events || []).map(event => ({
                 id: event.id,
                 ledger: event.ledger,
                 type: event.type,
                 contractId: event.contractId,
-                topic: event.topic.map(t => scValToNative(t)),
-                value: scValToNative(event.value),
+                topic: event.topic.map(t => scValToNative(xdr.ScVal.fromXDR(t, 'base64'))),
+                value: scValToNative(xdr.ScVal.fromXDR(event.value, 'base64')),
             }));
 
             if (pageEvents.length > 0) {
                 totalCount += pageEvents.length;
-                cursor = pageEvents[pageEvents.length - 1].id;
+                cursor = result.cursor || pageEvents[pageEvents.length - 1].id;
                 
                 if (onPage) {
-                    // Stream mode: process and discard
                     onPage(pageEvents, cursor);
                 } else {
-                    // Batch mode: accumulate for return
                     allEvents.push(...pageEvents);
                 }
+                
+                console.log(`[Stellar] Found ${pageEvents.length} events in chunk starting at ledger ${currentStartLedger}`);
             }
 
-            if (result.events.length < pageSize) {
-                break;
-            }
+            // Move to next chunk
+            currentStartLedger += CHUNK_SIZE;
         }
+
+        console.log(`[Stellar] Search complete: ${totalCount} total events found`);
 
         return { 
             success: true, 
@@ -602,7 +648,7 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         };
     } catch (error) {
         console.error('[Stellar] Failed to fetch all events:', error);
-        return { success: false, error: error.message, events: [], count: 0 };
+        return { success: false, error: error.message, events: [], count: 0, cursor: initialCursor };
     }
 }
 
@@ -687,12 +733,17 @@ export function scValToNative(scVal) {
 }
 
 /**
- * Format U256 value to hex string.
+ * Format U256 value to hex string with proper 64-char padding.
+ * Ensures consistent representation for BigInt conversion.
  * @param {any} value - U256 value (bigint, string, or object)
- * @returns {string} Hex string representation
+ * @returns {string} Hex string representation (0x + 64 hex chars)
  */
 function formatU256(value) {
-    if (typeof value === 'string') return value;
+    if (typeof value === 'string') {
+        // Ensure proper 64-char padding for hex strings
+        const hex = value.startsWith('0x') ? value.slice(2) : value;
+        return '0x' + hex.padStart(64, '0');
+    }
     if (typeof value === 'bigint') return '0x' + value.toString(16).padStart(64, '0');
     if (typeof value === 'object' && value !== null) {
         try {
@@ -769,5 +820,355 @@ export function formatAddress(address, startChars = 4, endChars = 4) {
 }
 
 initializeNetwork();
+
+// Pool contract client cache
+let poolClient = null;
+let poolClientPublicKey = null;
+
+/**
+ * Creates a signer object compatible with the Stellar SDK contract client.
+ * Uses Freighter wallet for signing transactions and auth entries.
+ *
+ * @param {string} publicKey - User's Stellar public key
+ * @param {string} networkPassphrase - Network passphrase for signing
+ * @param {function} signTransaction - Function to sign transactions (from wallet.js)
+ * @param {function} signAuthEntry - Function to sign auth entries (from wallet.js)
+ * @returns {Object} Signer object with signTransaction and signAuthEntry methods
+ */
+export function createFreighterSigner(publicKey, networkPassphrase, signTransaction, signAuthEntry) {
+    return {
+        signTransaction: async (transactionXdr, opts = {}) => {
+            // SDK expects { signedTxXdr, signerAddress } object, not just the XDR string
+            return signTransaction(transactionXdr, {
+                networkPassphrase,
+                address: publicKey,
+                ...opts,
+            });
+        },
+        signAuthEntry: async (entryXdr, opts = {}) => {
+            // SDK expects { signedAuthEntry } object
+            return signAuthEntry(entryXdr, {
+                networkPassphrase,
+                address: publicKey,
+                ...opts,
+            });
+        },
+    };
+}
+
+/**
+ * Get or create the Pool contract client.
+ * Uses the contract spec from on-chain to build the client dynamically.
+ *
+ * @param {Object} signerOptions - Options for creating the signer
+ * @param {string} signerOptions.publicKey - User's Stellar public key
+ * @param {function} signerOptions.signTransaction - Function to sign transactions
+ * @param {function} signerOptions.signAuthEntry - Function to sign auth entries
+ * @param {boolean} [forceRefresh=false] - Force creation of new client
+ * @returns {Promise<contract.Client>} Pool contract client
+ */
+export async function getPoolClient(signerOptions, forceRefresh = false) {
+    const contracts = getDeployedContracts();
+    if (!contracts?.pool) {
+        throw new Error('Deployments not loaded. Call loadDeployedContracts() first.');
+    }
+
+    const network = getNetwork();
+
+// If signer changed, force refresh to avoid auth signature mismatch
+    const signerChanged =
+        poolClient &&
+        poolClientPublicKey &&
+        poolClientPublicKey !== signerOptions.publicKey;
+
+    if (signerChanged) {
+        console.log('[Stellar] Pool client signer changed - refreshing client');
+        forceRefresh = true;
+    }
+
+// Return cached client if available and not forcing refresh
+    if (poolClient && !forceRefresh) {
+        return poolClient;
+    }
+
+    const signer = createFreighterSigner(
+        signerOptions.publicKey,
+        network.passphrase,
+        signerOptions.signTransaction,
+        signerOptions.signAuthEntry
+    );
+
+    console.log('[Stellar] Loading Pool contract client from RPC...');
+    poolClient = await contract.Client.from({
+        contractId: contracts.pool,
+        rpcUrl: network.rpcUrl,
+        networkPassphrase: network.passphrase,
+        publicKey: signerOptions.publicKey,
+        signTransaction: signer.signTransaction,
+        signAuthEntry: signer.signAuthEntry,
+    });
+    poolClientPublicKey = signerOptions.publicKey;
+
+
+    console.log('[Stellar] Pool contract client ready');
+    return poolClient;
+}
+
+/**
+ * Converts various types to Uint8Array for Soroban contract calls.
+ * Handles Uint8Array, ArrayBuffer, and array-like objects.
+ *
+ * @param {Uint8Array|ArrayBuffer|Array<number>} value - Value to convert
+ * @returns {Uint8Array} Value as Uint8Array
+ */
+function toBytes(value) {
+    if (value instanceof Uint8Array) {
+        return value;
+    }
+    if (value instanceof ArrayBuffer) {
+        return new Uint8Array(value);
+    }
+    if (Array.isArray(value)) {
+        return new Uint8Array(value);
+    }
+    // Handle objects with buffer-like properties
+    if (value && typeof value === 'object' && 'length' in value) {
+        return new Uint8Array(Array.from(value));
+    }
+    throw new Error(`Cannot convert ${typeof value} to Uint8Array`);
+}
+
+/**
+ * Convert a BigInt to a U256 compatible object for Soroban.
+ *
+ * @param {bigint} value - BigInt value to convert
+ * @returns {bigint} Value as BigInt (SDK handles conversion)
+ */
+function toU256(value) {
+    // The SDK contract client handles BigInt -> U256 conversion
+    return value;
+}
+
+/**
+ * Convert a BigInt to an I256 ScVal for Soroban.
+ * Uses ScInt which properly handles negative values via two's complement.
+ *
+ * @param {bigint} value - BigInt value (can be negative for withdrawals)
+ * @returns {xdr.ScVal} I256 ScVal
+ */
+function toI256(value) {
+    return new ScInt(value, { type: 'i256' }).toScVal();
+}
+
+/**
+ * Submit a transact call to the Pool contract.
+ *
+ * @param {Object} params
+ * @param {Object} params.proof - Proof data from transaction builder
+ * @param {Object} params.proof.proof - Groth16 proof { a: Uint8Array(64), b: Uint8Array(128), c: Uint8Array(64) }
+ * @param {bigint} params.proof.root - Pool merkle root
+ * @param {bigint[]} params.proof.input_nullifiers - Input nullifiers
+ * @param {bigint} params.proof.output_commitment0 - First output commitment
+ * @param {bigint} params.proof.output_commitment1 - Second output commitment
+ * @param {bigint} params.proof.public_amount - Public amount (deposit positive, withdraw negative)
+ * @param {Uint8Array} params.proof.ext_data_hash - 32-byte ext data hash
+ * @param {bigint} params.proof.asp_membership_root - ASP membership root
+ * @param {bigint} params.proof.asp_non_membership_root - ASP non-membership root
+ * @param {Object} params.extData - External data
+ * @param {string} params.extData.recipient - Recipient address
+ * @param {bigint} params.extData.ext_amount - External amount
+ * @param {bigint} [params.extData.fee=0n] - Relayer fee
+ * @param {Uint8Array} params.extData.encrypted_output0 - Encrypted output 0
+ * @param {Uint8Array} params.extData.encrypted_output1 - Encrypted output 1
+ * @param {string} params.sender - Sender address (must match signer)
+ * @param {Object} params.signerOptions - Signer options for getPoolClient
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function submitPoolTransaction(params) {
+    const { proof, extData, sender, signerOptions } = params;
+
+    try {
+        console.log('[Stellar] Preparing pool transaction...');
+
+        // Get pool client with signer
+        const client = await getPoolClient(signerOptions);
+
+        // Format proof for contract. Ensure Uint8Array for byte fields
+        const contractProof = {
+            proof: {
+                a: toBytes(proof.proof.a),
+                b: toBytes(proof.proof.b),
+                c: toBytes(proof.proof.c),
+            },
+            root: toU256(proof.root),
+            input_nullifiers: proof.input_nullifiers.map(n => toU256(n)),
+            output_commitment0: toU256(proof.output_commitment0),
+            output_commitment1: toU256(proof.output_commitment1),
+            public_amount: toU256(proof.public_amount),
+            ext_data_hash: toBytes(proof.ext_data_hash),
+            asp_membership_root: toU256(proof.asp_membership_root),
+            asp_non_membership_root: toU256(proof.asp_non_membership_root),
+        };
+
+        // Format ext_data for contract (must match ExtData struct in pool.rs)
+        // Use ScInt for I256 which handles negative values via two's complement
+        const contractExtData = {
+            encrypted_output0: toBytes(extData.encrypted_output0),
+            encrypted_output1: toBytes(extData.encrypted_output1),
+            ext_amount: new ScInt(extData.ext_amount, { type: 'i256' }).toScVal(),
+            recipient: extData.recipient,
+        };
+
+        console.log('[Stellar] Calling transact...', {
+            proof: { root: proof.root.toString(16) },
+            ext_amount: extData.ext_amount.toString(),
+        });
+        
+        // Debug: log all fields to find undefined values
+        console.log('[Stellar] contractProof fields:', {
+            proof_a: contractProof.proof?.a?.length,
+            proof_b: contractProof.proof?.b?.length,
+            proof_c: contractProof.proof?.c?.length,
+            root: typeof contractProof.root,
+            input_nullifiers: contractProof.input_nullifiers?.length,
+            output_commitment0: typeof contractProof.output_commitment0,
+            output_commitment1: typeof contractProof.output_commitment1,
+            public_amount: typeof contractProof.public_amount,
+            ext_data_hash: contractProof.ext_data_hash?.length,
+            asp_membership_root: typeof contractProof.asp_membership_root,
+            asp_non_membership_root: typeof contractProof.asp_non_membership_root,
+        });
+        console.log('[Stellar] contractExtData fields:', {
+            encrypted_output0: contractExtData.encrypted_output0?.length,
+            encrypted_output1: contractExtData.encrypted_output1?.length,
+            ext_amount: contractExtData.ext_amount?.switch?.()?.name,
+            recipient: contractExtData.recipient,
+        });
+
+        // Build the transaction (this will simulate)
+        let tx;
+        try {
+            tx = await client.transact({
+                proof: contractProof,
+                ext_data: contractExtData,
+                sender,
+            });
+            console.log('[Stellar] Transaction built successfully');
+        } catch (buildError) {
+            console.error('[Stellar] Transaction build error:', buildError);
+            
+            // Check if simulation failed
+            const errorMsg = String(buildError?.message || '');
+            if (errorMsg.includes('simulation') || errorMsg.includes('Simulation')) {
+                throw new Error(`Transaction simulation failed: ${errorMsg}`);
+            }
+            throw buildError;
+        }
+
+        console.log('[Stellar] Signing and sending transaction...');
+        
+        // Use simple signAndSend like the working code
+        const sent = await tx.signAndSend();
+        const txHash = sent.sendTransactionResponse?.hash;
+        
+        console.log('[Stellar] Transaction submitted successfully:', txHash);
+
+        return {
+            success: true,
+            txHash,
+        };
+    } catch (error) {
+        console.error('[Stellar] Transaction submission failed:', error);
+        
+        // Check if this is a parsing error that might have happened after submission
+        const errorMsg = String(error?.message || '');
+        if (errorMsg.includes('switch') || errorMsg.includes('Cannot read properties')) {
+            console.warn('[Stellar] SDK parsing error - transaction status uncertain');
+            return {
+                success: false,
+                error: 'SDK parsing error - check Stellar Expert for transaction status',
+                warning: errorMsg,
+            };
+        }
+        
+        return {
+            success: false,
+            error: error.message || String(error),
+        };
+    }
+}
+
+/**
+ * Submit a deposit transaction to the Pool contract.
+ * Convenience wrapper around submitPoolTransaction for deposits.
+ *
+ * @param {Object} proofResult - Result from generateDepositProof()
+ * @param {Object} signerOptions - Signer options (publicKey, signTransaction, signAuthEntry)
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function submitDeposit(proofResult, signerOptions) {
+    return submitPoolTransaction({
+        proof: proofResult.sorobanProof,
+        extData: proofResult.extData,
+        sender: signerOptions.publicKey,
+        signerOptions,
+    });
+}
+
+/**
+ * Register public keys on the Pool contract for address book discovery.
+ * This allows other users to find your keys for sending you transfers.
+ *
+ * Two keys are required:
+ * - encryptionKey: X25519 key for encrypting note data (amount, blinding)
+ * - noteKey: BN254 key for creating commitments in the ZK circuit
+ *
+ * @param {Object} params
+ * @param {string} params.owner - Owner's Stellar address
+ * @param {Uint8Array} params.encryptionKey - X25519 encryption public key (32 bytes)
+ * @param {Uint8Array} params.noteKey - BN254 note public key (32 bytes)
+ * @param {Object} params.signerOptions - Signer options for getPoolClient
+ * @returns {Promise<{success: boolean, txHash?: string, error?: string}>}
+ */
+export async function registerPublicKey(params) {
+    const { owner, encryptionKey, noteKey, signerOptions } = params;
+
+    try {
+        console.log('[Stellar] Registering public keys...');
+
+        const client = await getPoolClient(signerOptions);
+
+        // Format account data for contract
+        const account = {
+            owner,
+            encryption_key: toBytes(encryptionKey),
+            note_key: toBytes(noteKey),
+        };
+
+        console.log('[Stellar] Calling register...', {
+            owner: owner.slice(0, 8) + '...',
+            encryptionKeyLength: encryptionKey.length,
+            noteKeyLength: noteKey.length,
+        });
+
+        // Build and send the transaction
+        const tx = await client.register({ account });
+        const sent = await tx.signAndSend();
+        const txHash = sent.sendTransactionResponse?.hash;
+
+        console.log('[Stellar] Registration submitted:', txHash);
+
+        return {
+            success: true,
+            txHash,
+        };
+    } catch (error) {
+        console.error('[Stellar] Registration failed:', error);
+        return {
+            success: false,
+            error: error.message || String(error),
+        };
+    }
+}
 
 export { NETWORKS, SUPPORTED_NETWORK };

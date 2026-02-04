@@ -23,6 +23,9 @@ import {
     computeNullifier, 
     computeSignature,
     decryptNoteData,
+    bigintToField,
+    fieldToHex,
+    hexToField,
 } from '../bridge.js';
 import { hexToBytes, bytesToHex, normalizeHex } from './utils.js';
 
@@ -103,13 +106,39 @@ export async function tryDecryptNote(encryptedOutput) {
 export function verifyNoteCommitment(decrypted, notePublicKey, expectedCommitment) {
     try {
         // Compute commitment: Poseidon2(amount, publicKey, blinding, domain=0x01)
-        const amountBytes = bigintToBytes(decrypted.amount, 8);
-        const computed = computeCommitment(amountBytes, notePublicKey, decrypted.blinding);
-        const computedHex = bytesToHex(computed);
+        const amountBytes = bigintToField(decrypted.amount);
         
-        return normalizeHex(computedHex) === normalizeHex(expectedCommitment);
+        if (amountBytes.length !== 32) {
+            console.warn(`[NoteScanner] Amount bytes wrong length: ${amountBytes.length}, amount: ${decrypted.amount}`);
+            return false;
+        }
+        if (notePublicKey.length !== 32) {
+            console.warn(`[NoteScanner] Note public key wrong length: ${notePublicKey.length}`);
+            return false;
+        }
+        if (decrypted.blinding.length !== 32) {
+            console.warn(`[NoteScanner] Blinding wrong length: ${decrypted.blinding.length}`);
+            return false;
+        }
+        
+        const expectedNorm = normalizeHex(expectedCommitment).toLowerCase();
+        
+        // computeCommitment returns LE bytes, use fieldToHex to convert to BE hex for comparison
+        const computed = computeCommitment(amountBytes, notePublicKey, decrypted.blinding);
+        const computedHex = fieldToHex(computed);
+        const computedNorm = normalizeHex(computedHex).toLowerCase();
+        
+        if (computedNorm === expectedNorm) {
+            return true;
+        }
+        
+        console.log(`[NoteScanner] Commitment mismatch:`, {
+            computed: computedHex,
+            expected: expectedCommitment,
+        });
+        return false;
     } catch (e) {
-        console.error('[NoteScanner] Commitment verification failed:', e);
+        console.error('[NoteScanner] Commitment verification failed:', e?.message || e?.toString() || e);
         return false;
     }
 }
@@ -137,6 +166,9 @@ export async function scanForNotes(options = {}) {
         return { scanned: 0, found: 0, notes: [], alreadyKnown: 0 };
     }
     
+    const derivedPubKeyHex = fieldToHex(noteKeypair.publicKey);
+    console.log('[NoteScanner] Using note keypair:', { pubKeyHex: derivedPubKeyHex });
+    
     // Determine start ledger
     const startLedger = fullRescan ? 0 : (fromLedger ?? lastScannedLedger);
     
@@ -158,7 +190,8 @@ export async function scanForNotes(options = {}) {
             onProgress(i, outputs.length);
         }
         
-        // Skip if we already have this note
+        // Skip if we already have this note (case-insensitive comparison via normalizeHex)
+        // Notes created locally are saved before scanning, so they'll be found here and skipped
         const existing = await notesStore.getNoteByCommitment(output.commitment);
         if (existing) {
             result.alreadyKnown++;
@@ -170,28 +203,44 @@ export async function scanForNotes(options = {}) {
         if (!decrypted) {
             continue; // Not addressed to us
         }
+        // Skip dummy 0-value notes
+        if (decrypted.amount === 0n) {
+            console.log('[NoteScanner] Skipping 0-value dummy note');
+            continue;
+        }
         
         // Verify the commitment matches using our note public key
-        if (!verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment)) {
+        const isValidCommitment = verifyNoteCommitment(decrypted, noteKeypair.publicKey, output.commitment);
+        if (!isValidCommitment) {
             console.warn('[NoteScanner] Decryption succeeded but commitment mismatch - ignoring');
             continue;
         }
         
-        // Save the discovered note with our note private key
-        // The private key is deterministic, so we store it for convenience
-        // (it can always be re-derived from Freighter)
+        // Double-check we don't already have this note (handles potential race conditions)
+        const doubleCheck = await notesStore.getNoteByCommitment(output.commitment);
+        if (doubleCheck) {
+            result.alreadyKnown++;
+            console.log(`[NoteScanner] Note ${output.commitment.slice(0, 10)}... already exists (race condition avoided)`);
+            continue;
+        }
+        
+        // Save the discovered note with our note private key.
+        // Mark as received since it wasn't in our local store before scanning.
+        // Notes we created locally are saved immediately, so they won't reach here.
         const note = await notesStore.saveNote({
             commitment: output.commitment,
             privateKey: noteKeypair.privateKey,
-            blinding: decrypted.blinding,
+            blinding: fieldToHex(decrypted.blinding),
             amount: decrypted.amount,
             leafIndex: output.index,
             ledger: output.ledger,
+            isReceived: true,
         });
         
         result.notes.push(note);
         result.found++;
         
+        console.log(`[NoteScanner] Discovered received note ${output.commitment.slice(0, 10)}... at index ${output.index}`);
         emit('noteDiscovered', note);
     }
     
@@ -221,38 +270,50 @@ export async function scanForNotes(options = {}) {
 export async function checkSpentNotes() {
     const unspentNotes = await notesStore.getUnspentNotes();
     
+    const nullifierCount = await db.count('pool_nullifiers');
+    console.log(`[NoteScanner] Checking ${unspentNotes.length} unspent notes against ${nullifierCount} synced nullifiers`);
+    
     let markedSpent = 0;
+    let skipped = 0;
     
     for (const note of unspentNotes) {
         try {
-            // Derive nullifier for this note using its stored private key
-            const nullifier = deriveNullifierForNote(
-                hexToBytes(note.privateKey),
-                hexToBytes(note.id), // commitment
-                note.leafIndex
-            );
+            if (!note.privateKey || note.privateKey === '0x' || note.privateKey.length < 66) {
+                console.warn(`[NoteScanner] Skipping note ${note.id?.slice(0, 10)}... - invalid privateKey`);
+                skipped++;
+                continue;
+            }
             
+            // Convert from BE hex to LE bytes (field format)
+            const privateKeyBytes = hexToField(note.privateKey);
+            const commitmentBytes = hexToField(note.id);
+            
+            if (privateKeyBytes.length !== 32 || commitmentBytes.length !== 32) {
+                console.warn(`[NoteScanner] Skipping note ${note.id?.slice(0, 10)}... - invalid length`);
+                skipped++;
+                continue;
+            }
+            
+            const nullifier = deriveNullifierForNote(privateKeyBytes, commitmentBytes, note.leafIndex);
             const nullifierHex = bytesToHex(nullifier);
-            
-            // Check if this nullifier exists on-chain
             const isSpent = await poolStore.isNullifierSpent(nullifierHex);
             
             if (isSpent) {
-                // Get the ledger when it was spent
                 const nullifierRecord = await db.get('pool_nullifiers', normalizeHex(nullifierHex));
                 const spentLedger = nullifierRecord?.ledger || 0;
                 
                 await notesStore.markNoteSpent(note.id, spentLedger);
                 markedSpent++;
                 
+                console.log(`[NoteScanner] Note ${note.id.slice(0, 10)}... marked as spent`);
                 emit('noteSpent', { commitment: note.id, ledger: spentLedger });
             }
         } catch (e) {
-            console.error('[NoteScanner] Error checking note spent status:', e);
+            console.error('[NoteScanner] Error checking note spent status:', e?.message || e?.toString() || e);
         }
     }
     
-    console.log(`[NoteScanner] Checked ${unspentNotes.length} notes, marked ${markedSpent} as spent`);
+    console.log(`[NoteScanner] Checked ${unspentNotes.length} notes: ${markedSpent} marked spent, ${skipped} skipped`);
     
     return { checked: unspentNotes.length, markedSpent };
 }
@@ -261,54 +322,24 @@ export async function checkSpentNotes() {
  * Derives the nullifier for a note.
  * Nullifier = hash(commitment, pathIndices, signature)
  * 
+ * The path indices are encoded as a single field element: sum(bit[i] * 2^i)
+ * where bit[i] = (leafIndex >> i) & 1
+ * 
  * @param {Uint8Array} privateKey - Note's private key
  * @param {Uint8Array} commitment - Note commitment
  * @param {number} leafIndex - Leaf index in merkle tree
  * @returns {Uint8Array} Nullifier hash
  */
 export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
-    // Path indices are the binary representation of leafIndex
-    // Notes are in the pool tree, which has depth 20
-    const treeDepth = 20; // Match POOL_TREE_DEPTH
-    const pathIndices = [];
-    let idx = leafIndex;
-    for (let i = 0; i < treeDepth; i++) {
-        pathIndices.push(idx & 1);
-        idx = idx >> 1;
-    }
+    // Path indices is the leaf index itself (it encodes the path through the tree)
+    // Convert to 32-byte field element
+    const pathIndicesBytes = bigintToField(BigInt(leafIndex));
     
-    // Compute signature = hash(privateKey, commitment, pathIndices[0])
-    const signature = computeSignature(privateKey, commitment, pathIndices[0]);
-    
-    // Convert pathIndices to field elements for nullifier computation
-    // pathIndices is encoded as a single number: sum(pathIndices[i] * 2^i)
-    let pathIndicesValue = 0n;
-    for (let i = 0; i < pathIndices.length; i++) {
-        if (pathIndices[i]) {
-            pathIndicesValue |= (1n << BigInt(i));
-        }
-    }
-    
-    const pathIndicesBytes = bigintToBytes(pathIndicesValue, 32);
+    // Compute signature = hash(privateKey, commitment, pathIndices)
+    const signature = computeSignature(privateKey, commitment, pathIndicesBytes);
     
     // Nullifier = hash(commitment, pathIndices, signature)
     return computeNullifier(commitment, pathIndicesBytes, signature);
-}
-
-/**
- * Converts a bigint to little-endian bytes.
- * @param {bigint} value 
- * @param {number} length - Byte length
- * @returns {Uint8Array}
- */
-function bigintToBytes(value, length) {
-    const bytes = new Uint8Array(length);
-    let v = value;
-    for (let i = 0; i < length; i++) {
-        bytes[i] = Number(v & 0xFFn);
-        v = v >> 8n;
-    }
-    return bytes;
 }
 
 /**

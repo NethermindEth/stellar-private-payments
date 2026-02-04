@@ -22,10 +22,12 @@ import {
     // Witness & Proof
     generateWitness,
     generateProofBytes,
+    generateProofBytesSoroban,
     extractPublicInputs,
     verifyProofLocal,
     getVerifyingKey,
     getCircuitInfo,
+    proofBytesToSoroban,
     
     // Crypto utilities
     derivePublicKey,
@@ -164,7 +166,7 @@ async function handleClearCache() {
  */
 async function handleProve(data, messageId) {
     try {
-        const { inputs } = data;
+        const { inputs, sorobanFormat } = data;
         // Lazy init prover if needed
         if (!proverReady) {
             const onProgress = (loaded, total, message) => {
@@ -175,8 +177,6 @@ async function handleProve(data, messageId) {
         }
         
         // Step 1: Generate witness
-        // We measure witness generation and proof generation separately
-        // Total time is the sum of these two processes (it's accumulated over witness time after prints).
         const witnessTime = performance.now();
         const witnessBytes = await generateWitness(inputs);
         const witnessOnlyTime = performance.now() - witnessTime;
@@ -184,23 +184,52 @@ async function handleProve(data, messageId) {
         
         // Step 2: Generate proof
         const proveTime = performance.now();
-        const proofBytes = generateProofBytes(witnessBytes);
-        console.log(`[Worker] Proof generation: ${(performance.now() - proveTime).toFixed(0)}ms`);
+        let proofBytes;
+        if (sorobanFormat) {
+            // Generate directly in Soroban uncompressed format (256 bytes)
+            proofBytes = generateProofBytesSoroban(witnessBytes);
+            console.log(`[Worker] Proof generation (Soroban): ${(performance.now() - proveTime).toFixed(0)}ms`);
+        } else {
+            // Generate compressed format
+            proofBytes = generateProofBytes(witnessBytes);
+            console.log(`[Worker] Proof generation: ${(performance.now() - proveTime).toFixed(0)}ms`);
+        }
         
         // Step 3: Extract public inputs
+        console.log('[Worker] Extracting public inputs...');
         const publicInputsBytes = extractPublicInputs(witnessBytes);
+        console.log(`[Worker] Public inputs extracted: ${publicInputsBytes?.length || 0} bytes`);
         
+        // Convert to arrays for serialization
+        const proofArray = Array.from(proofBytes);
+        const publicInputsArray = Array.from(publicInputsBytes);
+        console.log(`[Worker] Proof: ${proofArray.length} bytes, Public inputs: ${publicInputsArray.length} bytes`);
         
         return {
             success: true,
-            proof: Array.from(proofBytes),
-            publicInputs: Array.from(publicInputsBytes),
+            proof: proofArray,
+            publicInputs: publicInputsArray,
+            sorobanFormat: !!sorobanFormat,
             timings: {
                 witness: witnessOnlyTime,
                 prove: performance.now() - proveTime,
                 total: performance.now() - witnessTime,
             },
         };
+    } catch (error) {
+        console.error('[Worker] handleProve error:', error);
+        return { success: false, error: error?.message || String(error) || 'Proof generation failed' };
+    }
+}
+
+/**
+ * Convert compressed proof to Soroban format
+ */
+function handleConvertProofToSoroban(data) {
+    try {
+        const { proofBytes } = data;
+        const sorobanProof = proofBytesToSoroban(new Uint8Array(proofBytes));
+        return { success: true, proof: Array.from(sorobanProof) };
     } catch (error) {
         return { success: false, error: error.message };
     }
@@ -216,13 +245,28 @@ function handleVerify(data) {
     
     try {
         const { proofBytes, publicInputsBytes } = data;
-        const verified = verifyProofLocal(
-            new Uint8Array(proofBytes),
-            new Uint8Array(publicInputsBytes)
-        );
+        
+        // Log sizes for debugging
+        const proofArr = new Uint8Array(proofBytes);
+        const pubInputsArr = new Uint8Array(publicInputsBytes);
+        console.log(`[Worker] Verifying proof: ${proofArr.length} bytes, public inputs: ${pubInputsArr.length} bytes`);
+        
+        // Expected sizes for Groth16 BN254:
+        // - Proof: 256 bytes (Soroban format) or 192 bytes (compressed)
+        // - Public inputs: 32 bytes per element
+        const numPublicInputs = pubInputsArr.length / 32;
+        console.log(`[Worker] Number of public inputs: ${numPublicInputs}`);
+        
+        const verified = verifyProofLocal(proofArr, pubInputsArr);
+        console.log(`[Worker] Verification result: ${verified}`);
         return { success: true, verified };
     } catch (error) {
-        return { success: false, error: error.message };
+        // Capture as much error info as possible
+        const errorMsg = error?.message || error?.toString() || String(error) || 'Unknown verification error';
+        console.error('[Worker] Verification error:', error);
+        console.error('[Worker] Error message:', errorMsg);
+        console.error('[Worker] Error stack:', error?.stack);
+        return { success: false, error: errorMsg };
     }
 }
 
@@ -263,14 +307,15 @@ function handleComputeCommitment(data) {
 /**
  * Get the verifying key
  */
-function handleGetVerifyingKey() {
+function handleGetVerifyingKey(data = {}) {
     if (!proverReady) {
         return { success: false, error: 'Prover not initialized' };
     }
     
     try {
+        const { sorobanFormat } = data;
         const vkBytes = getVerifyingKey();
-        return { success: true, verifyingKey: Array.from(vkBytes) };
+        return { success: true, verifyingKey: Array.from(vkBytes), sorobanFormat: !!sorobanFormat };
     } catch (error) {
         return { success: false, error: error.message };
     }
@@ -343,6 +388,10 @@ self.onmessage = async function(event) {
             result = await handleProve(data, messageId);
             break;
             
+        case 'CONVERT_PROOF_TO_SOROBAN':
+            result = handleConvertProofToSoroban(data);
+            break;
+            
         case 'VERIFY':
             result = handleVerify(data);
             break;
@@ -358,7 +407,7 @@ self.onmessage = async function(event) {
             
         // Info
         case 'GET_VERIFYING_KEY':
-            result = handleGetVerifyingKey();
+            result = handleGetVerifyingKey(data);
             break;
             
         case 'GET_CIRCUIT_INFO':

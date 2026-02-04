@@ -15,8 +15,8 @@ use crate::{
     types::{FIELD_SIZE, Groth16Proof},
 };
 use alloc::{format, vec::Vec};
-use ark_bn254::{Bn254, Fr};
-use ark_ff::{AdditiveGroup, Field};
+use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
+use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
@@ -27,6 +27,59 @@ use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
 use wasm_bindgen::prelude::*;
+
+// Soroban-compatible encoding helpers.
+// Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering, while arkworks
+// uses c0||c1.
+
+/// Converts a BigInteger to 32-byte big-endian representation.
+fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
+    let bytes = value.to_bytes_be();
+    let mut out = [0u8; 32];
+    let start = 32usize.saturating_sub(bytes.len());
+    out[start..].copy_from_slice(&bytes[..bytes.len().min(32)]);
+    out
+}
+
+/// Converts a G1Affine point to 64-byte uncompressed big-endian format.
+/// Format: x (32 bytes BE) || y (32 bytes BE)
+fn g1_bytes_uncompressed(p: &G1Affine) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    let x_bytes = bigint_to_be_32(p.x.into_bigint());
+    let y_bytes = bigint_to_be_32(p.y.into_bigint());
+    out[..32].copy_from_slice(&x_bytes);
+    out[32..].copy_from_slice(&y_bytes);
+    out
+}
+
+/// Converts a G2Affine point to 128-byte uncompressed format with Soroban
+/// ordering. Soroban/Ethereum-compatible: c1 (imaginary) || c0 (real) for each
+/// coordinate. Format: x.c1 || x.c0 || y.c1 || y.c0 (each 32 bytes BE)
+fn g2_bytes_uncompressed(p: &G2Affine) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    let x0 = bigint_to_be_32(p.x.c0.into_bigint());
+    let x1 = bigint_to_be_32(p.x.c1.into_bigint());
+    let y0 = bigint_to_be_32(p.y.c0.into_bigint());
+    let y1 = bigint_to_be_32(p.y.c1.into_bigint());
+
+    // Soroban ordering: c1 || c0 for each coordinate
+    out[..32].copy_from_slice(&x1);
+    out[32..64].copy_from_slice(&x0);
+    out[64..96].copy_from_slice(&y1);
+    out[96..].copy_from_slice(&y0);
+    out
+}
+
+/// Converts a compressed arkworks proof to uncompressed bytes for Soroban
+/// contracts. Output: A (64 bytes) || B (128 bytes) || C (64 bytes) = 256 bytes
+/// total
+fn proof_to_uncompressed_bytes(proof: &Proof<Bn254>) -> Vec<u8> {
+    let mut out = Vec::with_capacity(256);
+    out.extend_from_slice(&g1_bytes_uncompressed(&proof.a));
+    out.extend_from_slice(&g2_bytes_uncompressed(&proof.b));
+    out.extend_from_slice(&g1_bytes_uncompressed(&proof.c));
+    out
+}
 
 /// A circuit that replays R1CS constraints with pre-computed witness
 ///
@@ -301,6 +354,59 @@ impl Prover {
         Ok(proof.to_bytes())
     }
 
+    /// Generate proof and return as uncompressed bytes compatiblew with
+    /// Soroban.
+    ///
+    /// Format: [A (64 bytes) || B (128 bytes) || C (64 bytes)] = 256 bytes
+    /// G2 points use Soroban-compatible c1||c0 (imaginary||real) ordering.
+    #[wasm_bindgen]
+    pub fn prove_bytes_uncompressed(&self, witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+        // Validate witness size
+        if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
+            return Err(JsValue::from_str(&format!(
+                "Invalid witness size: {} bytes (not multiple of {})",
+                witness_bytes.len(),
+                FIELD_SIZE
+            )));
+        }
+
+        let num_witness_elements = witness_bytes.len() / FIELD_SIZE;
+
+        if num_witness_elements < self.r1cs.num_wires as usize {
+            return Err(JsValue::from_str(&format!(
+                "Witness too short: {} elements, circuit needs {} wires",
+                num_witness_elements, self.r1cs.num_wires
+            )));
+        }
+
+        let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
+        for chunk in witness_bytes.chunks_exact(FIELD_SIZE) {
+            witness.push(bytes_to_fr(chunk)?);
+        }
+
+        let circuit = R1CSCircuit {
+            r1cs: self.r1cs.clone(),
+            witness,
+        };
+
+        let mut rng = OsRng;
+        let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
+            .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {}", e)))?;
+
+        Ok(proof_to_uncompressed_bytes(&proof))
+    }
+
+    /// Convert compressed proof bytes to uncompressed Soroban format.
+    ///
+    /// Input: compressed proof [A || B || C]
+    /// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
+    #[wasm_bindgen]
+    pub fn proof_bytes_to_uncompressed(&self, proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+        let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
+            .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+        Ok(proof_to_uncompressed_bytes(&proof))
+    }
+
     /// Get public inputs from witness
     ///
     /// Returns the public input portion of the witness as bytes
@@ -376,7 +482,18 @@ impl Prover {
     }
 }
 
-/// Standalone verification function (when you only have the VK)
+/// Standalone function to convert compressed proof to Soroban format.
+///
+/// Input: compressed proof [A || B || C]
+/// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
+/// G2 points use Soroban-compatible c1||c0 ordering.
+#[wasm_bindgen]
+pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
+        .map_err(|e| JsValue::from_str(&format!("Failed to deserialize proof: {}", e)))?;
+    Ok(proof_to_uncompressed_bytes(&proof))
+}
+/// Standalone verification function
 #[wasm_bindgen]
 pub fn verify_proof(
     vk_bytes: &[u8],

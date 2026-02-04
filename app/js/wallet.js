@@ -163,18 +163,27 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
  * @param {string} message - Message to sign.
  * @param {Object} [opts] - Optional signing context.
  * @param {string} [opts.address] - Specific account to sign with.
+ * @param {string} [opts.networkPassphrase] - Network passphrase for signing context.
  * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
  */
 export async function signWalletMessage(message, opts = {}) {
     await ensureFreighterReady();
 
-    const { signedMessage, signerAddress, error } = await signMessage(message, opts);
+    console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
+    const result = await signMessage(message, opts);
+    console.log('[Wallet] signMessage result:', { 
+        hasSignedMessage: !!result?.signedMessage,
+        hasError: !!result?.error,
+        error: result?.error,
+    });
+    
+    const { signedMessage, signerAddress, error } = result || {};
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
     }
     // If SignMessage returns null
     if (!signedMessage) {
-        throw new Error('No signature returned. Probably the used rejected');
+        throw new Error('No signature returned. User may have rejected the request.');
     }   
 
     return { signedMessage, signerAddress };

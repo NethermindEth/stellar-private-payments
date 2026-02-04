@@ -13,15 +13,15 @@ import initProverModule, {
     Prover,
     MerkleTree,
     MerkleProof,
+    WasmSparseMerkleTree,
     derive_public_key,
     derive_public_key_hex,
     compute_commitment,
     compute_signature,
     compute_nullifier,
     poseidon2_hash2,
-    poseidon2_hash3,
+    poseidon2_compression_wasm,
     u64_to_field_bytes,
-    decimal_to_field_bytes,
     hex_to_field_bytes,
     field_bytes_to_hex,
     derive_keypair_from_signature,
@@ -29,7 +29,10 @@ import initProverModule, {
     generate_random_blinding,
     encrypt_note_data,
     decrypt_note_data,
+    convert_proof_to_soroban,
     version as proverVersion,
+    bn256_modulus,
+    zero_leaf
 } from './prover.js';
 
 // Witness Module (ark-circom WASM)
@@ -66,7 +69,6 @@ let cachedCircuitWasm = null;
 let downloadPromise = null;
 
 // Caching (Cache API)
-
 /**
  * Get cached artifact from Cache API
  * @param {string} url 
@@ -315,7 +317,7 @@ export async function initWitnessModuleWasm() {
  */
 export async function initWitnessModule(circuitWasmUrl, r1csUrl) {
     await initWitnessModuleWasm();
-
+ 
     if (witnessInitialized && witnessCalc) {
         return getCircuitInfo();
     }
@@ -450,7 +452,6 @@ export function isProverReady() {
 }
 
 // Circuit Info
-
 /**
  * Get circuit info
  */
@@ -504,10 +505,11 @@ export { compute_nullifier as computeNullifier };
  */
 export { poseidon2_hash2 as poseidon2Hash2 };
 
+
 /**
- * Poseidon2 hash with 3 inputs
+ * Poseidon2 compression
  */
-export { poseidon2_hash3 as poseidon2Hash3 };
+export { poseidon2_compression_wasm as poseidon2_compression_wasm };
 
 // Merkle Tree Operations
 
@@ -520,7 +522,18 @@ export function createMerkleTree(depth) {
     return new MerkleTree(depth);
 }
 
-export { MerkleTree, MerkleProof };
+/**
+ * Create a new Merkle tree with a custom zero leaf value.
+ * Used for matching contract implementations that use non-zero empty leaves.
+ * @param {number} depth - Tree depth (e.g., 5 for 2^5 leaves)
+ * @param {Uint8Array} zeroLeafBytes - Custom zero leaf value as 32 bytes (Little-Endian)
+ * @returns {MerkleTree} Merkle tree instance
+ */
+export function createMerkleTreeWithZeroLeaf(depth, zeroLeafBytes) {
+    return MerkleTree.new_with_zero_leaf(depth, zeroLeafBytes);
+}
+
+export { MerkleTree, MerkleProof, WasmSparseMerkleTree };
 
 // Serialization Utilities
 
@@ -542,9 +555,25 @@ export function bigintToField(value) {
     return hex_to_field_bytes(hex);
 }
 
-export { decimal_to_field_bytes as decimalToField };
 export { hex_to_field_bytes as hexToField };
 export { field_bytes_to_hex as fieldToHex };
+
+/**
+ * Convert little-endian bytes to BigInt.
+ * 
+ * Field elements from the prover are serialized as LE bytes.
+ * This correctly interprets them as BigInt for circuit inputs.
+ * 
+ * @param {Uint8Array} bytes - Little-endian bytes (32 bytes for field elements)
+ * @returns {bigint} The BigInt value
+ */
+export function bytesToBigIntLE(bytes) {
+    let result = 0n;
+    for (let i = bytes.length - 1; i >= 0; i--) {
+        result = (result << 8n) | BigInt(bytes[i]);
+    }
+    return result;
+}
 
 // Witness Generation
 
@@ -652,6 +681,29 @@ export function getVerifyingKey() {
         throw new Error('Prover not initialized. Call initProver() first.');
     }
     return prover.get_verifying_key();
+}
+
+/**
+ * Convert compressed proof bytes to Soroban-compatible uncompressed format.
+ *
+ * @param {Uint8Array} proofBytes - Compressed proof bytes from generateProofBytes()
+ * @returns {Uint8Array} Uncompressed proof bytes ready for Soroban contracts
+ */
+export function proofBytesToSoroban(proofBytes) {
+    return convert_proof_to_soroban(proofBytes);
+}
+
+/**
+ * Generate proof and return as uncompressed Soroban-ready bytes.
+ * 
+ * @param {Uint8Array} witnessBytes - Witness from generateWitness()
+ * @returns {Uint8Array} Uncompressed proof bytes [A || B || C] = 256 bytes
+ */
+export function generateProofBytesSoroban(witnessBytes) {
+    if (!proverInitialized || !prover) {
+        throw new Error('Prover not initialized. Call initProver() first.');
+    }
+    return prover.prove_bytes_uncompressed(witnessBytes);
 }
 
 /**
@@ -824,4 +876,24 @@ export async function proveAndVerify(inputs, onProgress) {
     const verified = verifyProofLocal(proof, publicInputs);
 
     return { proof, publicInputs, verified };
+}
+
+
+// We copy this helper function here to keep bridge.js self-contained.
+// This way we don't need to bundle it with additional files from the frontend.
+/**
+ * Transforms bytes into a hex String
+ * @param bytes
+ * @returns {string}
+ */
+function bytesToHex(bytes) {
+    return '0x' + Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
+}
+
+export function getBN256Modulus() {
+    return bytesToHex(bn256_modulus())
+}
+
+export function getZeroLeaf() {
+    return bytesToHex(zero_leaf())
 }

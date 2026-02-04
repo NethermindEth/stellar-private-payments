@@ -16,6 +16,7 @@
 import * as db from './db.js';
 import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
+import * as publicKeyStore from './public-key-store.js';
 import * as noteScanner from './note-scanner.js';
 import * as notesStore from './notes-store.js';
 import { getRetentionConfig, ledgersToDuration } from './retention-verifier.js';
@@ -151,6 +152,7 @@ export async function checkSyncGap() {
  * @param {function} [options.onProgress] - Progress callback: (progress) => void
  * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes
  * @param {boolean} [options.checkSpent=true] - Whether to check spent status
+ * @param {boolean} [options.forceRefresh=false] - Ignore cached cursor and sync from recent ledger
  * @returns {Promise<SyncStatus>}
  */
 export async function startSync(options = {}) {
@@ -159,7 +161,7 @@ export async function startSync(options = {}) {
     }
     
     isSyncing = true;
-    const { onProgress, scanNotes = true, checkSpent = true } = options;
+    const { onProgress, scanNotes = true, checkSpent = true, forceRefresh = false } = options;
     
     try {
         let metadata = await getSyncMetadata() || createDefaultMetadata();
@@ -189,20 +191,25 @@ export async function startSync(options = {}) {
         }
         
         // Determine start ledger for each contract
-        const poolStartLedger = metadata.poolSync.lastLedger || 
-            Math.max(1, latestLedger - retentionConfig.window);
-        const aspStartLedger = metadata.aspMembershipSync.lastLedger || 
-            Math.max(1, latestLedger - retentionConfig.window);
+        // Always calculate from retention window - cursor takes precedence if available
+        const retentionStartLedger = Math.max(1, latestLedger - retentionConfig.window);
+        const poolStartLedger = retentionStartLedger;
+        const aspStartLedger = retentionStartLedger;
         
         emit('syncProgress', { phase: 'pool', progress: 0 });
         
         // Sync Pool events (streaming mode - events processed in onPage callback)
         let poolEventCount = 0;
+        let publicKeyCount = 0;
+        const poolCursor = forceRefresh ? null : metadata.poolSync.lastCursor;
         const poolResult = await fetchAllPoolEvents({
             startLedger: poolStartLedger,
-            cursor: metadata.poolSync.lastCursor,
+            cursor: poolCursor,
             onPage: async (events, cursor) => {
                 await poolStore.processEvents(events);
+                // Also process PublicKeyEvent for address book
+                const pkResult = await publicKeyStore.processEvents(events);
+                publicKeyCount += pkResult.registrations;
                 poolEventCount += events.length;
                 if (onProgress) {
                     onProgress({ phase: 'pool', events: events.length, cursor });
@@ -214,28 +221,67 @@ export async function startSync(options = {}) {
             metadata.poolSync.lastLedger = poolResult.latestLedger;
             metadata.poolSync.lastCursor = poolResult.cursor;
             metadata.poolSync.syncBroken = false;
+            
+            // Always rebuild tree after sync to ensure consistency
+            await poolStore.rebuildTree();
         }
         
         emit('syncProgress', { phase: 'asp_membership', progress: 50 });
         
         // Sync ASP Membership events (streaming mode)
         let aspEventCount = 0;
+        let aspLeafAddedCount = 0;
+        const aspCursor = forceRefresh ? null : metadata.aspMembershipSync.lastCursor;
+        
+        console.log('[SyncController] Starting ASP Membership sync:', {
+            startLedger: aspStartLedger,
+            latestLedger,
+            hasCursor: !!aspCursor,
+            cursor: aspCursor ? aspCursor.slice(0, 20) + '...' : null,
+            retentionWindow: retentionConfig.window,
+        });
+        
         const aspResult = await fetchAllASPMembershipEvents({
             startLedger: aspStartLedger,
-            cursor: metadata.aspMembershipSync.lastCursor,
+            cursor: aspCursor,
             onPage: async (events, cursor) => {
-                await aspMembershipStore.processEvents(events);
+                const leafEvents = await aspMembershipStore.processEvents(events);
                 aspEventCount += events.length;
+                aspLeafAddedCount += leafEvents;
                 if (onProgress) {
                     onProgress({ phase: 'asp_membership', events: events.length, cursor });
                 }
             },
         });
         
+        console.log('[SyncController] ASP Membership sync complete:', {
+            totalEvents: aspEventCount,
+            leafAddedEvents: aspLeafAddedCount,
+            success: aspResult.success,
+        });
+        
         if (aspResult.success) {
             metadata.aspMembershipSync.lastLedger = aspResult.latestLedger;
             metadata.aspMembershipSync.lastCursor = aspResult.cursor;
             metadata.aspMembershipSync.syncBroken = false;
+            
+            // Check if local tree matches on-chain state
+            const localLeafCount = await aspMembershipStore.getLeafCount();
+            const { readASPMembershipState } = await import('../stellar.js');
+            const onChainState = await readASPMembershipState();
+            
+            if (onChainState.success) {
+                const onChainLeafCount = onChainState.nextIndex || 0;
+                if (localLeafCount < onChainLeafCount) {
+                    console.warn('[SyncController] ASP Membership sync incomplete:');
+                    console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
+                    console.warn('  Some events may be outside RPC retention window (24h-7d)');
+                    console.warn('  Admin may need to re-add missing membership leaves');
+                    metadata.aspMembershipSync.syncBroken = true;
+                } else {
+                    console.log(`[SyncController] ASP Membership in sync: ${localLeafCount}/${onChainLeafCount} leaves`);
+                }
+            }
         }
         
         // Update metadata
@@ -283,6 +329,7 @@ export async function startSync(options = {}) {
             message: `Synced ${poolEventCount} pool events, ${aspEventCount} ASP membership events`,
             poolLeavesCount: await poolStore.getLeafCount(),
             aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
+            registeredPublicKeys: publicKeyCount,
             lastSyncedLedger: Math.max(
                 metadata.poolSync.lastLedger,
                 metadata.aspMembershipSync.lastLedger
@@ -388,6 +435,7 @@ export function isSyncInProgress() {
 export async function clearAndReset() {
     await poolStore.clear();
     await aspMembershipStore.clear();
+    await publicKeyStore.clear();
     await db.del('sync_metadata', getNetwork().name);
     console.log('[SyncController] Cleared all data and reset sync state');
 }

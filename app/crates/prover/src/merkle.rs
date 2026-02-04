@@ -69,13 +69,31 @@ pub struct MerkleTree {
     next_index: u64,
 }
 
-// TODO: For now we implement a full merkle tree for quick prototyping. We
-// should implement a partial merkle tree next to minimize storage on user side
+// TODO: For now we implement a full merkle tree. We should study if a partial
+// merkle tree is enough. To minimize storage on user side
 #[wasm_bindgen]
 impl MerkleTree {
-    /// Create a new Merkle tree with given depth
+    /// Create a new Merkle tree with given depth and default zero leaf (0)
     #[wasm_bindgen(constructor)]
     pub fn new(depth: usize) -> Result<MerkleTree, JsValue> {
+        Self::build_tree(depth, Scalar::from(0u64))
+    }
+
+    /// Create a new Merkle tree with a custom zero leaf value.
+    /// This allows matching contract implementations that use non-zero empty
+    /// leaves (e.g., poseidon2("XLM") as the zero value).
+    ///
+    /// # Arguments
+    /// * `depth` - Tree depth (1-32)
+    /// * `zero_leaf_bytes` - Custom zero leaf value as 32 bytes (Little-Endian)
+    #[wasm_bindgen]
+    pub fn new_with_zero_leaf(depth: usize, zero_leaf_bytes: &[u8]) -> Result<MerkleTree, JsValue> {
+        let zero = bytes_to_scalar(zero_leaf_bytes)?;
+        Self::build_tree(depth, zero)
+    }
+
+    /// Internal helper to build the tree with a given zero value
+    fn build_tree(depth: usize, zero: Scalar) -> Result<MerkleTree, JsValue> {
         if depth == 0 || depth > 32 {
             return Err(JsValue::from_str("Depth must be between 1 and 32"));
         }
@@ -85,7 +103,6 @@ impl MerkleTree {
         let num_leaves = 1usize.checked_shl(depth_u32).ok_or_else(|| {
             JsValue::from_str("Depth too large for this platform, would overflow")
         })?;
-        let zero = Scalar::from(0u64);
 
         // Initialize all levels with zeros
         let capacity = depth
@@ -96,7 +113,7 @@ impl MerkleTree {
         // Leaves at level 0
         levels_data.push(vec![zero; num_leaves]);
 
-        // Build empty tree (all zeros hash to zero with Poseidon)
+        // Build empty tree by hashing up
         let mut current_level_size = num_leaves;
         let mut prev_hash = zero;
 

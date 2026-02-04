@@ -5,11 +5,15 @@
 
 use ark_bn254::Fr;
 use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
-use num_bigint::BigInt;
+use num_bigint::{BigInt, Sign};
 // These are part of the reduced STD that is browser compatible
 use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
 use wasm_bindgen::prelude::*;
 use wasmer::{Module, Store};
+
+/// BN254 scalar field modulus
+const BN254_FIELD_MODULUS: &str =
+    "21888242871839275222246405745257275088548364400416034343698204186575808495617";
 
 /// Initialize the WASM module
 #[wasm_bindgen(start)]
@@ -120,6 +124,37 @@ impl WitnessCalculator {
     }
 }
 
+/// Convert a BigInt to its field element representation.
+/// Negative numbers are converted to p - |value| where p is the field modulus.
+/// Relevant for ZK proof computation. For on-chain token transfer
+/// we use a I256 passed to the contract.
+fn to_field_element(bi: BigInt) -> BigInt {
+    let modulus =
+        BigInt::parse_bytes(BN254_FIELD_MODULUS.as_bytes(), 10).expect("Invalid field modulus");
+
+    if bi.sign() == Sign::Minus {
+        let abs_value = bi
+            .checked_mul(&BigInt::from(-1))
+            .expect("Overflow in getting the abs value"); // Get absolute value
+
+        // Check absolute value must be less than the field modulus
+        assert!(
+            abs_value < modulus,
+            "Negative value {} exceeds field modulus",
+            bi
+        );
+
+        // For negative n: field_element = p - |n|
+        modulus
+            .checked_sub(&abs_value)
+            .expect("Overflow in field element computation")
+    } else {
+        // Validate: positive value must be less than the field modulus
+        assert!(bi < modulus, "Value {} exceeds field modulus", bi);
+        bi
+    }
+}
+
 /// Check if a JSON value is an array containing only primitives.
 fn is_pure_array(value: &serde_json::Value) -> bool {
     use serde_json::Value;
@@ -169,7 +204,11 @@ fn flatten_input(
                         current_key
                     )));
                 };
-                inputs.entry(current_key).or_default().push(bi);
+                // Convert to field element (handles negative numbers)
+                inputs
+                    .entry(current_key)
+                    .or_default()
+                    .push(to_field_element(bi));
             }
             Value::String(s) => {
                 let bi = if let Some(hex) = s.strip_prefix("0x") {
@@ -180,7 +219,11 @@ fn flatten_input(
                 let bi = bi.ok_or_else(|| {
                     JsValue::from_str(&format!("Invalid bigint for {}: {}", current_key, s))
                 })?;
-                inputs.entry(current_key).or_default().push(bi);
+                // Convert to field element (handles negative numbers)
+                inputs
+                    .entry(current_key)
+                    .or_default()
+                    .push(to_field_element(bi));
             }
             Value::Array(arr) => {
                 // Pure arrays get flattened to a single key as in
@@ -243,7 +286,10 @@ fn flatten_pure_array(
                     } else {
                         return Err(JsValue::from_str(&format!("Invalid number for {}", key)));
                     };
-                    inputs.entry(key.to_string()).or_default().push(bi);
+                    inputs
+                        .entry(key.to_string())
+                        .or_default()
+                        .push(to_field_element(bi));
                 }
                 Value::String(s) => {
                     let bi = if let Some(hex) = s.strip_prefix("0x") {
@@ -254,7 +300,10 @@ fn flatten_pure_array(
                     let bi = bi.ok_or_else(|| {
                         JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s))
                     })?;
-                    inputs.entry(key.to_string()).or_default().push(bi);
+                    inputs
+                        .entry(key.to_string())
+                        .or_default()
+                        .push(to_field_element(bi));
                 }
                 Value::Array(arr) => {
                     if !arr.is_empty() {
@@ -303,7 +352,7 @@ fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
 
     for bi in witness {
         // Convert BigInt to 32 LE bytes
-        let (sign, mut be_bytes) = bi.to_bytes_be();
+        let (sign, be_bytes) = bi.to_bytes_be();
 
         // Check it fits in 32 bytes
         assert!(
@@ -311,11 +360,12 @@ fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
             "Field element exceeds 32 bytes in witness"
         );
 
-        // Handle negative numbers (should not happen in valid circuits)
-        if sign == num_bigint::Sign::Minus {
-            // For field elements this shouldn't happen, but pad to 32 anyway
-            be_bytes = vec![0u8; 32];
-        }
+        // Negative numbers should not occur in witness output since inputs
+        // are converted to field elements. Assert this invariant.
+        assert!(
+            sign != Sign::Minus,
+            "Negative number in witness output - inputs should be field elements"
+        );
 
         // Pad to 32 bytes (big-endian)
         let mut padded = vec![0u8; 32];

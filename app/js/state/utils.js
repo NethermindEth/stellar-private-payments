@@ -3,6 +3,10 @@
  * @module state/utils
  */
 
+// Tree depths - must match circuit and contract deployments
+export const TREE_DEPTH = 10;
+export const SMT_DEPTH = 10;
+
 /**
  * Converts hex string to Uint8Array.
  * @param {string} hex - Hex string (with or without 0x prefix)
@@ -100,4 +104,19 @@ export function normalizeU256ToHex(value) {
  */
 export function reverseBytes(bytes) {
     return bytes.reverse();
+}
+
+/**
+ * Converts hex string to LE bytes for Rust Merkle tree insertion.
+ * 
+ * The Rust Merkle tree uses from_le_bytes_mod_order (LE).
+ * Soroban stores U256 as BE and converts via BigUint::from_bytes_be.
+ * We reverse BE to LE to ensure the same numeric value.
+ * 
+ * @param {string} hex - Hex string (BE representation of U256)
+ * @returns {Uint8Array} LE bytes for Rust tree insertion
+ */
+export function hexToBytesForTree(hex) {
+    const beBytes = hexToBytes(hex);
+    return beBytes.reverse();
 }

@@ -29,6 +29,7 @@ import {
 /**
  * @typedef {Object} UserNote
  * @property {string} id - Commitment hash 
+ * @property {string} owner - Stellar address that owns this note
  * @property {string} privateKey - Private key 
  * @property {string} blinding - Blinding factor
  * @property {string} amount - Amount as string (bigint)
@@ -37,7 +38,33 @@ import {
  * @property {number} createdAtLedger - Ledger when created
  * @property {boolean} spent - Whether the note has been spent
  * @property {number} [spentAtLedger] - Ledger when spent
+ * @property {boolean} [isReceived] - True if note was received via transfer (vs created by user)
  */
+
+// Current owner address for filtering notes
+let currentOwner = null;
+
+/**
+ * Sets the current owner address for note filtering.
+ * Call this when wallet connects or changes.
+ * @param {string|null} address - Stellar address or null to clear
+ */
+export function setCurrentOwner(address) {
+    const changed = currentOwner !== address;
+    currentOwner = address;
+    if (changed) {
+        console.log(`[NotesStore] Owner changed to: ${address ? address.slice(0, 8) + '...' : 'none'}`);
+    }
+    return changed;
+}
+
+/**
+ * Gets the current owner address.
+ * @returns {string|null}
+ */
+export function getCurrentOwner() {
+    return currentOwner;
+}
 
 /**
  * Saves a new note to the store.
@@ -48,11 +75,19 @@ import {
  * @param {bigint|string|number} params.amount - Note amount
  * @param {number} params.leafIndex - Leaf index in pool tree
  * @param {number} params.ledger - Ledger when created
+ * @param {string} [params.owner] - Stellar address that owns this note (defaults to currentOwner)
+ * @param {boolean} [params.isReceived=false] - True if note was received via transfer (discovered by scanning)
  * @returns {Promise<UserNote>}
  */
 export async function saveNote(params) {
+    const owner = params.owner || currentOwner;
+    if (!owner) {
+        console.warn('[NotesStore] Saving note without owner - will not be filtered by account');
+    }
+    
     const note = {
-        id: normalizeHex(params.commitment),
+        id: normalizeHex(params.commitment).toLowerCase(),
+        owner: owner || '',
         privateKey: toHex(params.privateKey),
         blinding: toHex(params.blinding),
         amount: String(params.amount),
@@ -60,10 +95,12 @@ export async function saveNote(params) {
         createdAt: new Date().toISOString(),
         createdAtLedger: params.ledger,
         spent: false,
+        isReceived: params.isReceived || false,
     };
     
     await db.put('user_notes', note);
-    console.log(`[NotesStore] Saved note ${note.id.slice(0, 10)}... at index ${note.leafIndex}`);
+    const noteType = note.isReceived ? 'received' : 'created';
+    console.log(`[NotesStore] Saved ${noteType} note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
     return note;
 }
 
@@ -74,7 +111,7 @@ export async function saveNote(params) {
  * @returns {Promise<boolean>} True if note was found and marked
  */
 export async function markNoteSpent(commitment, ledger) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     const note = await db.get('user_notes', id);
     
     if (!note) {
@@ -90,13 +127,26 @@ export async function markNoteSpent(commitment, ledger) {
 }
 
 /**
- * Gets all user notes.
+ * Gets all user notes for the current owner.
  * @param {Object} [options] - Filter options
  * @param {boolean} [options.unspentOnly] - Only return unspent notes
+ * @param {string} [options.owner] - Specific owner to filter by (defaults to currentOwner)
+ * @param {boolean} [options.allOwners] - If true, returns notes from all owners
  * @returns {Promise<UserNote[]>}
  */
 export async function getNotes(options = {}) {
-    const notes = await db.getAll('user_notes');
+    let notes;
+    const owner = options.owner ?? currentOwner;
+    
+    if (options.allOwners) {
+        notes = await db.getAll('user_notes');
+    } else if (owner) {
+        notes = await db.getAllByIndex('user_notes', 'by_owner', owner);
+    } else {
+        // No owner set - return empty to prevent showing other users' notes
+        console.warn('[NotesStore] getNotes called without owner, returning empty');
+        return [];
+    }
     
     if (options.unspentOnly) {
         return notes.filter(n => !n.spent);
@@ -106,12 +156,12 @@ export async function getNotes(options = {}) {
 }
 
 /**
- * Gets a note by commitment.
+ * Gets a note by commitment (case-insensitive hex comparison).
  * @param {string} commitment - Note commitment
  * @returns {Promise<UserNote|null>}
  */
 export async function getNoteByCommitment(commitment) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     return await db.get('user_notes', id) || null;
 }
 
@@ -184,7 +234,7 @@ export async function importNotes(file) {
  * @returns {Promise<void>}
  */
 export async function deleteNote(commitment) {
-    const id = normalizeHex(commitment);
+    const id = normalizeHex(commitment).toLowerCase();
     await db.del('user_notes', id);
 }
 
@@ -309,7 +359,7 @@ export async function getNotePrivateKey() {
 
 // Cache management
 /**
- * Clear all cached keypairs (call on logout or wallet disconnect).
+ * Clear all cached keypairs (call on logout, wallet disconnect, or account change).
  */
 export function clearKeypairCaches() {
     cachedEncryptionKeypair = null;
@@ -318,11 +368,44 @@ export function clearKeypairCaches() {
 }
 
 /**
+ * Handle account change - clears caches and updates owner.
+ * @param {string|null} newAddress - New Stellar address or null if disconnecting
+ * @returns {boolean} True if the account actually changed
+ */
+export function handleAccountChange(newAddress) {
+    const changed = setCurrentOwner(newAddress);
+    if (changed) {
+        clearKeypairCaches();
+    }
+    return changed;
+}
+
+/**
  * Check if user has authenticated (has cached keys).
  * @returns {boolean}
  */
 export function hasAuthenticatedKeys() {
     return cachedEncryptionKeypair !== null && cachedNoteKeypair !== null;
+}
+
+/**
+ * Set authenticated keys directly (used when keys are derived elsewhere).
+ * This allows note scanning to work after deposits/withdraws/transfers
+ * without prompting for additional signatures.
+ * 
+ * @param {Object} keys
+ * @param {Object} keys.encryptionKeypair - X25519 keypair { publicKey, secretKey }
+ * @param {Uint8Array} keys.notePrivateKey - BN254 private key
+ * @param {Uint8Array} keys.notePublicKey - BN254 public key
+ */
+export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePublicKey }) {
+    if (encryptionKeypair) {
+        cachedEncryptionKeypair = encryptionKeypair;
+    }
+    if (notePrivateKey && notePublicKey) {
+        cachedNoteKeypair = { privateKey: notePrivateKey, publicKey: notePublicKey };
+    }
+    console.log('[NotesStore] Keys cached from external derivation');
 }
 
 /**
@@ -336,7 +419,20 @@ export async function initializeKeypairs() {
         return false;
     }
     
-    const note = await getUserNoteKeypair();
+    // Delay to let Freighter settle between signature requests.
+    // Rapid successive requests can fail due to Freighter's internal state.
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    let note = await getUserNoteKeypair();
+    
+    // If encryption worked but spending failed, it's likely a timing issue.
+    // Retry once more with a longer delay.
+    if (!note && encryption) {
+        console.log('[NotesStore] Retrying spending key derivation after delay...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        note = await getUserNoteKeypair();
+    }
+    
     if (!note) {
         return false;
     }
@@ -346,37 +442,58 @@ export async function initializeKeypairs() {
 
 /**
  * Request a signature from Freighter and decode it.
+ * Includes retry logic for transient Freighter failures.
  * @param {string} message - Message to sign
  * @param {string} purpose - Purpose for logging
  * @returns {Promise<Uint8Array|null>} 64-byte Ed25519 signature or null
  */
 async function requestSignature(message, purpose) {
-    try {
-        const result = await signWalletMessage(message);
-        
-        if (!result.signedMessage) {
-            console.warn(`[NotesStore] User rejected ${purpose} signature`);
-            return null;
+    const MAX_RETRIES = 2;
+    let lastError = null;
+    
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            // Pass current owner address to ensure Freighter signs with the correct account.
+            // This prevents race conditions after account switches where Freighter might
+            // still reference a stale account context on the first signature attempt.
+            const opts = currentOwner ? { address: currentOwner } : {};
+            const result = await signWalletMessage(message, opts);
+            
+            if (!result.signedMessage) {
+                console.warn(`[NotesStore] User rejected ${purpose} signature`);
+                return null;
+            }
+            
+            // Decode base64 to bytes
+            const signatureBytes = Uint8Array.from(
+                atob(result.signedMessage),
+                c => c.charCodeAt(0)
+            );
+            
+            if (signatureBytes.length !== 64) {
+                console.error(`[NotesStore] Invalid ${purpose} signature length:`, signatureBytes.length);
+                return null;
+            }
+            
+            return signatureBytes;
+        } catch (e) {
+            lastError = e;
+            
+            // Actual user rejection - don't retry
+            if (e.code === 'USER_REJECTED') {
+                console.warn(`[NotesStore] User rejected ${purpose} signature request`);
+                return null;
+            }
+            
+            // Transient error - retry after delay
+            if (attempt < MAX_RETRIES) {
+                console.warn(`[NotesStore] ${purpose} signature failed (attempt ${attempt + 1}), retrying...`, e.message);
+                await new Promise(resolve => setTimeout(resolve, 500 * (attempt + 1)));
+                continue;
+            }
         }
-        
-        // Decode base64 to bytes
-        const signatureBytes = Uint8Array.from(
-            atob(result.signedMessage),
-            c => c.charCodeAt(0)
-        );
-        
-        if (signatureBytes.length !== 64) {
-            console.error(`[NotesStore] Invalid ${purpose} signature length:`, signatureBytes.length);
-            return null;
-        }
-        
-        return signatureBytes;
-    } catch (e) {
-        if (e.code === 'USER_REJECTED') {
-            console.warn(`[NotesStore] User rejected ${purpose} signature request`);
-            return null;
-        }
-        console.error(`[NotesStore] Failed to get ${purpose} signature:`, e);
-        return null;
     }
+    
+    console.error(`[NotesStore] Failed to get ${purpose} signature after retries:`, lastError);
+    return null;
 }

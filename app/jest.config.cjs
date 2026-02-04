@@ -6,5 +6,6 @@ module.exports = {
   clearMocks: true,
   moduleNameMapper: {
     '^\\./prover\\.js$': '<rootDir>/js/__mocks__/prover.js',
+    '^\\./prover-client\\.js$': '<rootDir>/js/__mocks__/prover-client.js',
   },
 };

@@ -1,19 +1,25 @@
 import { contract } from '@stellar/stellar-sdk';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
+import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
 import { loadDeployedContracts, readASPMembershipState, readASPNonMembershipState } from './stellar.js';
-import { initProverWasm, derivePublicKey, poseidon2Hash2, bigintToField, fieldToHex } from './bridge.js';
+import { initProverWasm, derivePublicKey, poseidon2Hash2, bigintToField, fieldToHex, deriveNotePrivateKeyFromSignature } from './bridge.js';
 
-// -----------------------------
 // DOM element references
-// -----------------------------
-
-
 const statusEl = document.getElementById('status');
 const logEl = document.getElementById('log');
 const networkChip = document.getElementById('networkChip');
 const walletChip = document.getElementById('walletChip');
 const connectBtn = document.getElementById('connectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
+
+// Key derivation elements
+const deriveKeysBtn = document.getElementById('deriveKeysBtn');
+const deriveKeysBtnText = document.getElementById('deriveKeysBtnText');
+const derivedFromAccount = document.getElementById('derivedFromAccount');
+const derivedKeysDisplay = document.getElementById('derivedKeysDisplay');
+const derivedPrivateKeyEl = document.getElementById('derivedPrivateKey');
+const derivedPublicKeyEl = document.getElementById('derivedPublicKey');
+const toastContainer = document.getElementById('toast-container');
+const toastTemplate = document.getElementById('tpl-toast');
 
 // Contract/state display
 const membershipContractInput = document.getElementById('membershipContract');
@@ -54,6 +60,14 @@ const state = {
   nonMembershipClientId: null,
   cryptoReady: false,
   computedMembershipLeaf: null,
+  // Derived keys (persist across account changes)
+  derivedKeys: {
+    sourceAccount: null,
+    privateKeyHex: null,
+    publicKeyHex: null,
+    privateKeyBytes: null,
+    publicKeyBytes: null,
+  },
 };
 
 const statusBaseClass = statusEl ? statusEl.className : '';
@@ -83,6 +97,35 @@ function log(message) {
 function shortAddress(address) {
   if (!address) return 'Disconnected';
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
+}
+
+// Toast notification system
+function showToast(message, type = 'success', duration = 4000) {
+  if (!toastContainer || !toastTemplate) return;
+  const toast = toastTemplate.content.cloneNode(true).firstElementChild;
+  
+  toast.querySelector('.toast-message').textContent = message;
+  
+  const icon = toast.querySelector('.toast-icon');
+  if (type === 'success') {
+    icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
+    toast.classList.add('border-emerald-500/50');
+    icon.classList.add('text-emerald-500');
+  } else {
+    icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>';
+    toast.classList.add('border-red-500/50');
+    icon.classList.add('text-red-500');
+  }
+  
+  toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
+  
+  toastContainer.appendChild(toast);
+  
+  setTimeout(() => {
+    toast.style.opacity = '0';
+    toast.style.transform = 'translateX(100%)';
+    setTimeout(() => toast.remove(), 200);
+  }, duration);
 }
 
 // -----------------------------
@@ -192,6 +235,103 @@ async function ensureCryptoReady() {
   }
 }
 
+// Derive ZK keys from wallet signature
+async function deriveKeys() {
+  try {
+    ensureWalletConnected();
+    await ensureCryptoReady();
+
+    setStatus('Sign message to derive keys...', 'info');
+    deriveKeysBtnText.textContent = 'Signing...';
+    deriveKeysBtn.disabled = true;
+
+    let spendingResult;
+    try {
+      spendingResult = await signWalletMessage('Privacy Pool Spending Key [v1]', {
+        networkPassphrase: state.networkPassphrase,
+        address: state.address,
+      });
+    } catch (e) {
+      if (e.code === 'USER_REJECTED') {
+        throw new Error('Please approve the message signature to derive your spending key');
+      }
+      throw e;
+    }
+
+    if (!spendingResult?.signedMessage) {
+      throw new Error('Spending key signature rejected');
+    }
+
+    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
+    const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
+    const pubKeyBytes = derivePublicKey(privKeyBytes);
+    
+    const privateKeyHex = fieldToHex(privKeyBytes);
+    const publicKeyHex = fieldToHex(pubKeyBytes);
+
+    // Store in state (persists across account changes)
+    state.derivedKeys = {
+      sourceAccount: state.address,
+      privateKeyHex,
+      publicKeyHex,
+      privateKeyBytes: privKeyBytes,
+      publicKeyBytes: pubKeyBytes,
+    };
+
+    // Update UI
+    updateDerivedKeysDisplay();
+    autofillKeys();
+
+    setStatus('Keys derived successfully', 'ok');
+    showToast('Keys derived and auto-filled!', 'success');
+    log(`Keys derived for account: ${shortAddress(state.address)}`);
+    log(`Public Key: ${publicKeyHex}`);
+  } catch (err) {
+    setStatus('Key derivation failed', 'error');
+    showToast(err.message, 'error');
+    log(`Key derivation error: ${err.message}`);
+  } finally {
+    deriveKeysBtnText.textContent = 'Derive Keys';
+    deriveKeysBtn.disabled = false;
+  }
+}
+
+// Update the derived keys display section
+function updateDerivedKeysDisplay() {
+  if (!state.derivedKeys.privateKeyHex) {
+    derivedKeysDisplay.classList.add('hidden');
+    derivedFromAccount.textContent = '--';
+    return;
+  }
+
+  derivedKeysDisplay.classList.remove('hidden');
+  derivedFromAccount.textContent = shortAddress(state.derivedKeys.sourceAccount);
+  derivedPrivateKeyEl.textContent = state.derivedKeys.privateKeyHex;
+  derivedPublicKeyEl.textContent = state.derivedKeys.publicKeyHex;
+}
+
+// Auto-fill the membership and non-membership input fields with derived keys
+function autofillKeys() {
+  if (!state.derivedKeys.publicKeyHex) return;
+
+  // Auto-fill membership leaf builder
+  if (privateKeyInput) {
+    privateKeyInput.value = state.derivedKeys.privateKeyHex;
+  }
+  if (publicKeyInput) {
+    publicKeyInput.value = state.derivedKeys.publicKeyHex;
+  }
+
+  // Auto-fill non-membership (blocked key = public key)
+  if (blockedKeyInput) {
+    blockedKeyInput.value = state.derivedKeys.publicKeyHex;
+    // Trigger sync if "value equals key" is checked
+    syncNonMembershipValue();
+  }
+
+  log('Auto-filled keys in membership and non-membership forms');
+}
+
 // -----------------------------
 // Wallet & network actions
 // -----------------------------
@@ -204,13 +344,34 @@ async function connect() {
     state.address = address;
     state.networkPassphrase = net.networkPassphrase;
     state.rpcUrl = net.sorobanRpcUrl || 'https://soroban-testnet.stellar.org';
-    walletChip.textContent = `Wallet: ${shortAddress(address)}`;
-    networkChip.textContent = `Network: ${net.network || 'unknown'}`;
+    
+    // Update wallet button to show connected state
+    walletChip.textContent = shortAddress(address);
+    networkChip.textContent = net.network || 'Testnet';
+    connectBtn.classList.remove('bg-dark-800', 'hover:bg-dark-700');
+    connectBtn.classList.add('bg-brand-500/10', 'border-brand-500/30', 'text-brand-400');
+    
+    // Invalidate contract clients (new account may have different auth)
+    state.membershipClient = null;
+    state.nonMembershipClient = null;
+    
     setStatus('Wallet connected', 'ok');
     log(`Wallet connected: ${address}`);
+    showToast(`Connected: ${shortAddress(address)}`, 'success');
+    
+    // If no keys derived yet, prompt to derive
+    if (!state.derivedKeys.privateKeyHex) {
+      log('Tip: Click "Derive Keys" to generate ZK keys for this account');
+    }
   } catch (err) {
-    setStatus('Wallet error', 'error');
-    log(`Wallet connection failed: ${err.message}`);
+    if (err.code === 'USER_REJECTED') {
+      setStatus('Connection cancelled', 'info');
+      log('Wallet connection cancelled by user');
+    } else {
+      setStatus('Wallet error', 'error');
+      log(`Wallet connection failed: ${err.message}`);
+      showToast('Wallet connection failed', 'error');
+    }
   }
 }
 
@@ -408,6 +569,9 @@ connectBtn.addEventListener('click', () => {
 refreshBtn.addEventListener('click', () => {
   refreshState();
 });
+deriveKeysBtn.addEventListener('click', () => {
+  deriveKeys();
+});
 computeMembershipLeafBtn.addEventListener('click', () => {
   computeMembershipLeaf();
 });
@@ -428,6 +592,22 @@ valueSameCheckbox.addEventListener('change', () => {
 });
 blockedKeyInput.addEventListener('input', () => {
   syncNonMembershipValue();
+});
+
+// Copy button handlers for derived keys display
+document.querySelectorAll('#derivedKeysDisplay .copy-btn').forEach(btn => {
+  btn.addEventListener('click', async () => {
+    const targetId = btn.dataset.target;
+    const targetEl = document.getElementById(targetId);
+    if (targetEl && targetEl.textContent !== '--') {
+      try {
+        await navigator.clipboard.writeText(targetEl.textContent);
+        showToast('Copied to clipboard!', 'success');
+      } catch {
+        showToast('Failed to copy', 'error');
+      }
+    }
+  });
 });
 
 async function init() {
