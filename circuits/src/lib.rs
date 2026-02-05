@@ -11,6 +11,4 @@ extern crate alloc;
 /// Core circuit utilities
 pub mod core;
 
-/// Test utilities
-#[cfg(feature = "circom-tests")]
 pub mod test;
