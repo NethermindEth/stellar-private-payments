@@ -64,7 +64,7 @@ app/
 │       └── Cargo.toml
 │
 ├── js/
-│   ├── state/                     # State management
+│   ├── state/                     # State management (see ARCHITECTURE.md)
 │   │   ├── db.js                  # IndexedDB wrapper
 │   │   ├── pool-store.js          # Pool state tracking
 │   │   ├── notes-store.js         # User notes (UTXOs)
