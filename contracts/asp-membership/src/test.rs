@@ -10,9 +10,26 @@ use zkhash::{
     poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2},
 };
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 #[test]
 fn test_init_valid() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     env.register(ASPMembership, (admin, 3u32));
 }
@@ -20,7 +37,7 @@ fn test_init_valid() {
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_zero() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     env.register(ASPMembership, (admin, 0u32));
 }
@@ -28,14 +45,14 @@ fn test_init_invalid_levels_zero() {
 #[test]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_too_large() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     env.register(ASPMembership, (admin, 33u32));
 }
 
 #[test]
 fn test_constructor_sets_admin_and_levels() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let levels = 3u32;
     let contract_id = env.register(ASPMembership, (admin.clone(), levels));
@@ -53,7 +70,7 @@ fn test_constructor_sets_admin_and_levels() {
 
 #[test]
 fn test_get_root() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -95,7 +112,7 @@ fn test_get_root() {
 
 #[test]
 fn test_hash_pair() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -122,7 +139,7 @@ fn test_hash_pair() {
 
 #[test]
 fn test_insert_leaf() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -148,7 +165,7 @@ fn test_insert_leaf() {
 #[test]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_insert_leaf_requires_admin() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -162,7 +179,7 @@ fn test_insert_leaf_requires_admin() {
 #[test]
 #[should_panic]
 fn test_insert_leaf_merkle_tree_full() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 2u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -183,7 +200,7 @@ fn test_insert_leaf_merkle_tree_full() {
 
 #[test]
 fn test_update_admin() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
@@ -208,7 +225,7 @@ fn test_update_admin() {
 
 #[test]
 fn test_new_admin_can_insert_after_update() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let new_admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
@@ -235,7 +252,7 @@ fn test_new_admin_can_insert_after_update() {
 
 #[test]
 fn test_multiple_insertions() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin.clone(), 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -285,7 +302,7 @@ fn u256_to_scalar(_env: &Env, u256: &U256) -> Scalar {
 #[test]
 fn test_hash_pair_consistency_1() {
     // Verify that hash_pair on-chain matches poseidon2_compression off-chain
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -313,7 +330,7 @@ fn test_hash_pair_consistency_1() {
 #[test]
 fn test_hash_pair_consistency_2() {
     // Verify that hash_pair on-chain matches poseidon2_compression off-chain
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPMembership, (admin, 3u32));
     let client = ASPMembershipClient::new(&env, &contract_id);
@@ -351,7 +368,7 @@ fn test_hash_pair_consistency_2() {
 
 #[test]
 fn test_merkle_consistency() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     // Initialize with 2 levels (4 leaves)
     let levels = 2u32;
