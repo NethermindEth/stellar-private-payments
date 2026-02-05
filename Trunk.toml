@@ -40,7 +40,6 @@ cp target/wasm-witness/witness_bg.wasm $TRUNK_STAGING_DIR/js/witness/ 2>/dev/nul
 
 # Static files
 cp app/js/bridge.js $TRUNK_STAGING_DIR/js/
-cp app/test.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
 cp scripts/deployments.json $TRUNK_STAGING_DIR/ 2>/dev/null || true
 """]
