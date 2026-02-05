@@ -34,7 +34,11 @@ fn test_init_valid() {
     env.register(ASPMembership, (admin, 3u32));
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_zero() {
     let env = test_env();
@@ -42,7 +46,11 @@ fn test_init_invalid_levels_zero() {
     env.register(ASPMembership, (admin, 0u32));
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #3)")]
 fn test_init_invalid_levels_too_large() {
     let env = test_env();
@@ -162,7 +170,11 @@ fn test_insert_leaf() {
     assert_eq!(next_index1, 2, "NextIndex should be 2 after two insertions");
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn test_insert_leaf_requires_admin() {
     let env = test_env();
@@ -176,7 +188,11 @@ fn test_insert_leaf_requires_admin() {
     client.insert_leaf(&leaf);
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic]
 fn test_insert_leaf_merkle_tree_full() {
     let env = test_env();
