@@ -110,7 +110,7 @@ stellar-private-transactions/
 │   │   ├── prover/             # Groth16 proof generation
 │   │   └── witness/            # Circom witness calculator
 │   ├── js/                     # JavaScript frontend code
-│   │   ├── state/              # State management (IndexedDB, sync)
+│   │   ├── state/              # State management (IndexedDB, sync) (see app/ARCHITECTURE.md for more information)
 │   │   ├── ui/                 # UI components 
 │   │   └── *.js                # Core modules (bridge, wallet, stellar)
 │   └── index.html              # Main application entry
