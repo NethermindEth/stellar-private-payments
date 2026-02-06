@@ -11,20 +11,20 @@ default = ["std"]
 std = []
 
 [dependencies]
-# Core dependencies
-ark-bn254 = { workspace = true }
-ark-ff = { workspace = true }
-ark-std = { workspace = true }
-zkhash = { workspace = true }
 
 # Test utilities dependencies
 anyhow = { workspace = true }
+# Core dependencies
+ark-bn254 = { workspace = true }
 ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
+ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
+ark-std = { workspace = true }
 num-bigint = { workspace = true }
 num-integer = { workspace = true }
+zkhash = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
