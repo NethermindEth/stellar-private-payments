@@ -49,12 +49,12 @@ stellar-private-transactions/
 - [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
 - [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
-- **Node.js** for frontend dependencies.
-- **wasm-pack** for building WASM modules.
-- **Trunk** for serving the web application.
-* [cargo deny](https://github.com/EmbarkStudios/cargo-deny)
-* [typos](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
-* [cargo sort](https://github.com/DevinR528/cargo-sort)
+- [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
+- [**Wasm-pack**](https://github.com/drager/wasm-pack) for building WASM modules.
+- [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
+- [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
+- [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
+- [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
 
 ## Building and testing crates
 
