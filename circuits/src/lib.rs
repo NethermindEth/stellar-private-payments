@@ -11,5 +11,6 @@ extern crate alloc;
 /// Core circuit utilities
 pub mod core;
 
-/// Test utilities
+/// Test utilities (requires std for file I/O)
+#[cfg(feature = "std")]
 pub mod test;
