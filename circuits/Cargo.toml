@@ -9,35 +9,15 @@ publish.workspace = true
 [features]
 default = ["std"]
 std = []
-circom-tests = [
-    "std",
-    "dep:ark-circom",
-    "dep:ark-serialize",
-    "dep:anyhow",
-    "dep:ark-groth16",
-    "dep:ark-snark",
-    "dep:num-bigint",
-    "dep:num-integer",
-]
 
 [dependencies]
-# Core dependencies (always available, no_std compatible)
+# Core dependencies
 ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
 ark-std = { workspace = true }
 zkhash = { workspace = true }
 
-# Optional dependencies (for circom-tests feature)
-anyhow = { workspace = true, optional = true }
-ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false, optional = true }
-ark-groth16 = { workspace = true, optional = true }
-ark-serialize = { workspace = true, optional = true }
-ark-snark = { workspace = true, optional = true }
-num-bigint = { workspace = true, optional = true }
-num-integer = { workspace = true, optional = true }
-
-[dev-dependencies]
-# Enable circom-tests deps for running tests
+# Test utilities dependencies
 anyhow = { workspace = true }
 ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
 ark-groth16 = { workspace = true }
