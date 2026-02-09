@@ -43,10 +43,10 @@ import initWitnessWasm, {
 
 // Configuration
 const DEFAULT_CONFIG = {
-    circuitName: 'compliant_test',
-    circuitWasmUrl: '/circuits/compliant_test.wasm',
-    provingKeyUrl: '/keys/compliant_test_proving_key.bin',
-    r1csUrl: '/circuits/compliant_test.r1cs',
+    circuitName: 'policy_test',
+    circuitWasmUrl: '/circuits/policy_test.wasm',
+    provingKeyUrl: '/keys/policy_test_proving_key.bin',
+    r1csUrl: '/circuits/policy_test.r1cs',
     cacheName: 'zk-proving-artifacts',
 };
 
@@ -275,7 +275,7 @@ export async function isProvingCached() {
  * Call before any initialization if using non-default paths
  * 
  * @param {Object} options
- * @param {string} options.circuitName - Circuit name (e.g., 'compliant_test')
+ * @param {string} options.circuitName - Circuit name (e.g., 'policy_test')
  * @param {string} options.circuitWasmUrl - URL to circuit.wasm
  * @param {string} options.provingKeyUrl - URL to proving key
  * @param {string} options.r1csUrl - URL to R1CS file

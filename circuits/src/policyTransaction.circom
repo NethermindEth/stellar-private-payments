@@ -1,6 +1,6 @@
 pragma circom 2.2.2;
 
-// Compliant Transaction Circuit
+// Policy Transaction Circuit
 // Extends the base transaction with membership and non-membership proof verification for association sets support
 
 include "./smt/smtverifier.circom";
@@ -27,20 +27,20 @@ bus NonMembershipProof(levels) {
     signal isOld0;                  // Boolean indicator to signal if the oldKey should be used or not (0 for not using it)
 }
 
-// Compliant Transaction Circuit
+// Policy Transaction Circuit
 // * nIns: Number of inputs
 // * nOuts: Number of outputs
 // * nMembershipProofs: Number of membership proofs for each input
 // * nNonMembershipProofs: Number of non-membership proofs for each input
 // * levels: Number of levels in the Merkle tree
 // * smtLevels: Number of levels in the Sparse Merkle Tree
-template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
+template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
     /** PUBLIC INPUTS **/
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
     
-    // Compliance inputs
+    // Policy inputs
     input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs]; 
     input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     signal input membershipRoots[nIns][nMembershipProofs];
@@ -68,7 +68,7 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
     component inNullifierHasher[nIns];
     component inTree[nIns];
     component inCheckRoot[nIns];
-    component complianceMembershipHasher[nIns][nMembershipProofs];
+    component policyMembershipHasher[nIns][nMembershipProofs];
     component membershipVerifiers[nIns][nMembershipProofs];
     component nonMembershipVerifiers[nIns][nNonMembershipProofs];
     component n2bs[nIns][nNonMembershipProofs];
@@ -123,16 +123,16 @@ template CompliantTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProo
         // were already checked as outputs in the previous transaction (or zero amount UTXOs that don't
         // need to be checked either).
         
-        // Compliance checks
+        // Policy checks
         // 1. Verify membership proofs
         for (var i = 0; i < nMembershipProofs; i++) {
             membershipVerifiers[tx][i] = MerkleProof(levels);
             // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            complianceMembershipHasher[tx][i] = Poseidon2(2);
-            complianceMembershipHasher[tx][i].inputs[0] <== inKeypair[tx].publicKey;
-            complianceMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
-            complianceMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
-            membershipProofs[tx][i].leaf === complianceMembershipHasher[tx][i].out;
+            policyMembershipHasher[tx][i] = Poseidon2(2);
+            policyMembershipHasher[tx][i].inputs[0] <== inKeypair[tx].publicKey;
+            policyMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
+            policyMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
+            membershipProofs[tx][i].leaf === policyMembershipHasher[tx][i].out;
             
             // Verify Membership
             membershipVerifiers[tx][i].leaf <== membershipProofs[tx][i].leaf;

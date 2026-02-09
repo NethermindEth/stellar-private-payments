@@ -50,7 +50,7 @@ If you want to try it out:
       --asp-levels 10 \                                 # Number of levels in the ASP trees
       --pool-levels 10 \                                # Number of levels in the pool Merkle tree
       --max-deposit 1000000000 \                        # Maximum deposit amount (in Stroops)
-      --vk-file scripts/testdata/compliant_test_vk.json # Verification key file
+      --vk-file scripts/testdata/policy_test_vk.json # Verification key file
     ```
    If you already have deployed contracts, make sure their addresses are updated in `scripts/deployments.json`.
 
@@ -134,7 +134,7 @@ If you compile, build, or deploy this project (e.g., hosting the `dist/` folder 
 2.  Include the appropriate `LICENSE` and `NOTICE` files in your deployment directory.
 3.  Make the source code available to your end-users as required by the LGPLv3 (if you are distributing the compiled circuits).
 
-The maintainers of this repository provide the source code "as is" and assume no responsibility for the compliance of downstream builds or deployments.
+The maintainers of this repository provide the source code "as is" and assume no responsibility for the downstream builds or deployments.
 
 ## Would like to contribute?
 

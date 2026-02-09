@@ -45,7 +45,7 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
 
-/// Returns the path to the pre-generated proving key for the compliant_test
+/// Returns the path to the pre-generated proving key for the policy_test
 /// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
 fn proving_key_path() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
@@ -53,7 +53,7 @@ fn proving_key_path() -> std::path::PathBuf {
     manifest_dir
         .parent()
         .expect("Failed to get workspace root")
-        .join("scripts/testdata/compliant_test_proving_key.bin")
+        .join("scripts/testdata/policy_test_proving_key.bin")
 }
 
 /// Addresses of deployed contracts for E2E tests
@@ -256,7 +256,7 @@ pub fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigIn
 
 /// Generate a Groth16 proof for a transaction
 ///
-/// Builds the complete witness for the compliance circuit and generates
+/// Builds the complete witness for the policy circuit and generates
 /// a Groth16 proof. This includes membership proofs, non-membership proofs,
 /// and all transaction data.
 ///
@@ -285,7 +285,7 @@ pub fn generate_proof(
     non_membership: &[NonMembership],
     ext_data_hash: Option<BigInt>,
 ) -> Result<CircomResult> {
-    let (wasm, r1cs) = load_artifacts("compliant_test")?;
+    let (wasm, r1cs) = load_artifacts("policy_test")?;
 
     let n_inputs = case.inputs.len();
     let witness = prepare_transaction_witness(case, leaves, LEVELS)?;

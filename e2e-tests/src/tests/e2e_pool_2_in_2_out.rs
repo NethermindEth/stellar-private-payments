@@ -28,7 +28,7 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 ///
 /// This test demonstrates a complete integration:
 /// 1. Creates a transaction case (2 inputs, 2 outputs)
-/// 2. Generates a real Groth16 proof using the compliance circuit
+/// 2. Generates a real Groth16 proof using the policy circuit
 /// 3. Deploys all contracts (Pool, ASP Membership, ASP Non-Membership,
 ///    Verifier) and syncs the state
 /// 4. Initializes the verifier with the real verification key from proof

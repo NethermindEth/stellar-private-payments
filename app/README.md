@@ -2,7 +2,7 @@
 
 > **Disclaimer**: This is a **Proof of Concept (PoC)** application intended for demonstration and research purposes only. It has not been audited and should not be used with real assets.
 
-Browser-based zero-knowledge proof generation for private Stellar transactions. This application allows users to interact with the privacy pool contracts directly from their browser, with client-side proof generation.
+Browser-based zero-knowledge proof generation for private Stellar payments. This application allows users to interact with the privacy pool contracts directly from their browser, with client-side proof generation.
 
 ## Features
 - Support for deposits, transfers, and withdrawals

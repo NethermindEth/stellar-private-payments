@@ -121,7 +121,7 @@ pub fn prepare_transaction_witness(
     })
 }
 
-/// Populates Circom tester inputs for compliant and regular transactions
+/// Populates Circom tester inputs for policy-enabled and regular transactions
 ///
 /// Builds the input structure required by the Circom circuit tester from a
 /// transaction case and its witness data. Includes all public and private
