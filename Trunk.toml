@@ -54,3 +54,28 @@ command_arguments = ["-c", """
 ./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/admin.js --external:./bridge.js --bundle --outfile=dist/.stage/js/admin.js --format=esm
 """]
+
+# Run wasm-opt with bulk-memory support on both prover and witness
+# We run it as a post-hook because we were not able to pass required flags directly to Trunk
+[[hooks]]
+stage = "post_build"
+command = "sh"
+command_arguments = ["-c", """
+WASM_OPT="$HOME/.cache/trunk/wasm-opt-version_123/bin/wasm-opt"
+OPT_FLAGS="--enable-bulk-memory --enable-nontrapping-float-to-int --enable-sign-ext -O3"
+
+PROVER_WASM="dist/js/prover_bg.wasm"
+if [ -x "$WASM_OPT" ] && [ -f "$PROVER_WASM" ]; then
+    "$WASM_OPT" $OPT_FLAGS -o "$PROVER_WASM.opt" "$PROVER_WASM" && mv "$PROVER_WASM.opt" "$PROVER_WASM"
+else
+    echo "[wasm-opt] Skipped prover: wasm-opt=$WASM_OPT exists=$([ -x \"$WASM_OPT\" ] && echo yes || echo no), file exists=$([ -f \"$PROVER_WASM\" ] && echo yes || echo no)"
+fi
+
+WITNESS_WASM="dist/js/witness/witness_bg.wasm"
+if [ -x "$WASM_OPT" ] && [ -f "$WITNESS_WASM" ]; then
+    "$WASM_OPT" $OPT_FLAGS -o "$WITNESS_WASM.opt" "$WITNESS_WASM" && mv "$WITNESS_WASM.opt" "$WITNESS_WASM"
+else
+    echo "[wasm-opt] Skipped witness: file exists=$([ -f \"$WITNESS_WASM\" ] && echo yes || echo no)"
+fi
+
+"""]

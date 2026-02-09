@@ -23,7 +23,7 @@ wasm-witness:
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	BUILD_TESTS=1 cargo build -p circuits
+	BUILD_TESTS=1 cargo build -p circuits --release
 
 .PHONY: install
 install:
