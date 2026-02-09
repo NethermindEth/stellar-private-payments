@@ -5,7 +5,7 @@ serve: build
 	unset NO_COLOR && trunk serve
 
 .PHONY: build
-build: circuits-build wasm-witness install
+build: install circuits-build wasm-witness
 	@echo "Building frontend with trunk..."
 	unset NO_COLOR && trunk build
 
