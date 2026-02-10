@@ -1,8 +1,12 @@
+# Output directory for trunk build artifacts; override with DIST_DIR=<path> to
+# change where serve, build, and clean write/read compiled assets.
 DIST_DIR ?= dist
 BUILD_TESTS ?=
 
 .PHONY: serve
 serve: build
+	# --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
+	# it's useful for generating a different serving path
 	unset NO_COLOR && trunk serve --dist $(DIST_DIR)
 
 .PHONY: build
