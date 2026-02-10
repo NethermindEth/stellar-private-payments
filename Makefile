@@ -6,12 +6,12 @@ serve: build
 	unset NO_COLOR && trunk serve --dist $(DIST_DIR)
 
 .PHONY: build
-build: circuits-build wasm-witness install
+build: install circuits-build wasm-witness
 	@echo "Building frontend with trunk..."
 	unset NO_COLOR && trunk build  --dist $(DIST_DIR)
 
 .PHONY: wasm-witness
-wasm-witness:
+wasm-witness: install
 	@echo "Building witness WASM module..."
 	@mkdir -p target/wasm-witness
 	wasm-pack build app/crates/witness \
