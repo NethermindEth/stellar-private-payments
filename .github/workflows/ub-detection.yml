@@ -5,9 +5,9 @@ name: UB (undefined behavior) detection
 
 on:
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
   push:
-    branches: [ "main" ]
+    branches: ["main"]
 
 env:
   CARGO_TERM_COLOR: always
@@ -26,4 +26,8 @@ jobs:
       - run: |
           rustup +nightly component add miri
           cargo +nightly miri setup
-          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib
+          # Strict provenance for all crates except circom-groth16-verifier
+          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib --workspace --exclude circom-groth16-verifier
+          # circom-groth16-verifier uses ark-groth16 → rayon → crossbeam-epoch,
+          # which does integer-to-pointer casts incompatible with strict provenance.
+          MIRIFLAGS="-Zmiri-permissive-provenance" cargo +nightly miri test --lib -p circom-groth16-verifier
