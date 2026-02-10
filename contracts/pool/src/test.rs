@@ -131,9 +131,26 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     }
 }
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 #[test]
 fn pool_constructor_sets_state() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
@@ -177,7 +194,7 @@ fn pool_constructor_sets_state() {
 
 #[test]
 fn merkle_init_only_once() {
-    let env = Env::default();
+    let env = test_env();
     // As MerkleTreeWithHistory is now a module
     // We need to register the contract first to access the env.storage of a smart
     // contract
@@ -207,7 +224,7 @@ fn merkle_init_only_once() {
 
 #[test]
 fn merkle_insert_updates_root_and_index() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
@@ -248,7 +265,7 @@ fn merkle_insert_updates_root_and_index() {
 
 #[test]
 fn merkle_insert_fails_when_full() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 1u32;
@@ -281,7 +298,7 @@ fn merkle_insert_fails_when_full() {
 
 #[test]
 fn merkle_init_rejects_zero_levels() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
@@ -307,7 +324,7 @@ fn merkle_init_rejects_zero_levels() {
 
 #[test]
 fn transact_rejects_unknown_root() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
@@ -355,7 +372,7 @@ fn transact_rejects_unknown_root() {
 
 #[test]
 fn transact_rejects_bad_ext_hash() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
@@ -403,7 +420,7 @@ fn transact_rejects_bad_ext_hash() {
 
 #[test]
 fn transact_rejects_bad_public_amount() {
-    let env = Env::default();
+    let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;

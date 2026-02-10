@@ -99,9 +99,26 @@ fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr
     )
 }
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 #[test]
 fn verifies_valid_proof() {
-    let env = Env::default();
+    let env = test_env();
     let (vk_bytes, proof, public_inputs, _) = build_test(&env);
     let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
     let client = CircomGroth16VerifierClient::new(&env, &contract_id);
@@ -113,7 +130,7 @@ fn verifies_valid_proof() {
 
 #[test]
 fn rejects_wrong_public_input_length() {
-    let env = Env::default();
+    let env = test_env();
     let (vk_bytes, proof, _public_inputs, inputs) = build_test(&env);
     let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
     let client = CircomGroth16VerifierClient::new(&env, &contract_id);
@@ -133,7 +150,7 @@ fn rejects_wrong_public_input_length() {
 
 #[test]
 fn groth16_proof_parsing_checks_size() {
-    let env = Env::default();
+    let env = test_env();
     let (_vk_bytes, proof, _public_inputs, _) = build_test(&env);
 
     let encoded = serialize_proof(&env, &proof);

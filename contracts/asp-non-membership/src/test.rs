@@ -3,9 +3,26 @@
 use super::*;
 use soroban_sdk::{Address, Bytes, Env, U256, testutils::Address as _};
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 #[test]
 fn test_init() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -17,7 +34,7 @@ fn test_init() {
 
 #[test]
 fn test_insert_leaf() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -35,7 +52,7 @@ fn test_insert_leaf() {
 
 #[test]
 fn test_update_leaf() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     env.mock_all_auths();
@@ -57,7 +74,7 @@ fn test_update_leaf() {
 
 #[test]
 fn test_insert_multiple_keys() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -76,10 +93,14 @@ fn test_insert_multiple_keys() {
     assert_ne!(root, U256::from_u32(&env, 0u32));
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic]
 fn test_duplicate_insert_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -97,10 +118,14 @@ fn test_duplicate_insert_fails() {
     client.insert_leaf(&key, &second_value);
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic]
 fn test_update_nonexistent_key_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -116,7 +141,7 @@ fn test_update_nonexistent_key_fails() {
 /// Test that matches the circuits test: insert key=1, value=42
 #[test]
 fn test_root_consistency_with_circuits_insert_1_42() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -144,7 +169,7 @@ fn test_root_consistency_with_circuits_insert_1_42() {
 /// value=100
 #[test]
 fn test_root_consistency_with_circuits_update_1_100() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -181,7 +206,7 @@ fn test_root_consistency_with_circuits_update_1_100() {
 /// key=2, value=324
 #[test]
 fn test_root_consistency_with_circuits_insert_2_324() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -217,7 +242,7 @@ fn test_root_consistency_with_circuits_insert_2_324() {
 
 #[test]
 fn test_find_key_public_method() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -302,7 +327,7 @@ fn test_find_key_public_method() {
 
 #[test]
 fn test_delete_single_leaf() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -340,7 +365,7 @@ fn test_delete_single_leaf() {
 
 #[test]
 fn test_delete_from_two_keys() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -385,7 +410,7 @@ fn test_delete_from_two_keys() {
 
 #[test]
 fn test_delete_from_multiple_keys() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -421,10 +446,14 @@ fn test_delete_from_multiple_keys() {
     }
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #2)")] // KeyNotFound = 2
 fn test_delete_nonexistent_key_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -441,10 +470,14 @@ fn test_delete_nonexistent_key_fails() {
     client.delete_leaf(&key_nonexistent);
 }
 
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #2)")] // KeyNotFound = 2
 fn test_delete_from_empty_tree_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin.clone(),));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -461,7 +494,7 @@ fn test_delete_from_empty_tree_fails() {
 /// Test verify_non_membership in an empty tree
 #[test]
 fn test_verify_non_membership_empty_tree() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -488,7 +521,7 @@ fn test_verify_non_membership_empty_tree() {
 /// false)
 #[test]
 fn test_verify_non_membership_single_leaf_collision() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -535,7 +568,7 @@ fn test_verify_non_membership_single_leaf_collision() {
 /// Test verify_non_membership returns false when the key actually exists
 #[test]
 fn test_verify_non_membership_key_exists_returns_false() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -568,7 +601,7 @@ fn test_verify_non_membership_key_exists_returns_false() {
 /// Test verify_non_membership with multiple leaves - collision case
 #[test]
 fn test_verify_non_membership_multiple_leaves_collision() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -601,10 +634,15 @@ fn test_verify_non_membership_multiple_leaves_collision() {
 }
 
 /// Test verify_non_membership fails with wrong siblings
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #4)")] // InvalidProof = 4
 fn test_verify_non_membership_wrong_siblings_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -635,10 +673,15 @@ fn test_verify_non_membership_wrong_siblings_fails() {
 }
 
 /// Test verify_non_membership fails with wrong not_found_key
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #4)")] // InvalidProof = 4
 fn test_verify_non_membership_wrong_not_found_key_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -665,10 +708,15 @@ fn test_verify_non_membership_wrong_not_found_key_fails() {
 }
 
 /// Test verify_non_membership fails with wrong not_found_value
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #4)")] // InvalidProof = 4
 fn test_verify_non_membership_wrong_not_found_value_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -695,10 +743,15 @@ fn test_verify_non_membership_wrong_not_found_value_fails() {
 }
 
 /// Test verify_non_membership fails with wrong number of siblings
+///
+/// This test is skipped under Miri because the panic formatting path triggers
+/// undefined behavior in the `ethnum` crate's unsafe formatting code.
+/// See: https://github.com/nlordell/ethnum-rs/issues/34
 #[test]
+#[cfg_attr(miri, ignore)]
 #[should_panic(expected = "Error(Contract, #4)")] // InvalidProof = 4
 fn test_verify_non_membership_wrong_siblings_length_fails() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -729,7 +782,7 @@ fn test_verify_non_membership_wrong_siblings_length_fails() {
 /// Test verify_non_membership after deletion (key was in tree, now deleted)
 #[test]
 fn test_verify_non_membership_after_deletion() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -769,7 +822,7 @@ fn test_verify_non_membership_after_deletion() {
 /// Test verify_non_membership after deleting all leaves (tree becomes empty)
 #[test]
 fn test_verify_non_membership_after_all_deleted() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
@@ -805,7 +858,7 @@ fn test_verify_non_membership_after_all_deleted() {
 /// Test mixed scenario: insert, verify non-membership, delete, verify again
 #[test]
 fn test_verify_non_membership_comprehensive_scenario() {
-    let env = Env::default();
+    let env = test_env();
     let admin = Address::generate(&env);
     let contract_id = env.register(ASPNonMembership, (admin,));
     let client = ASPNonMembershipClient::new(&env, &contract_id);
