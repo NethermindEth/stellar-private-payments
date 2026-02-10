@@ -26,13 +26,13 @@ if ! typos; then
 fi
 
 # Linting
-if ! BUILD_TESTS=1 cargo clippy --all-targets --all-features -- -D warnings; then
+if ! cargo clippy --all-targets --all-features -- -D warnings; then
     echo "❌ Clippy violations (check warnings above)"
     exit 5
 fi
 
 # Tests
-if ! REGEN_KEYS=1 BUILD_TESTS=1 cargo test --workspace --verbose; then
+if ! BUILD_TESTS=1 cargo test --workspace --verbose; then
     echo "❌ Test failures detected"
     exit 6
 fi
