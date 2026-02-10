@@ -1,13 +1,9 @@
-# The workflow has been manually disabled until the Soroban SDK team has fixed this issue
-# https://github.com/stellar/rs-soroban-sdk/issues/1582
-
 name: UB (undefined behavior) detection
 
 on:
-  pull_request:
-    branches: ["main"]
-  push:
-    branches: ["main"]
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -17,7 +13,6 @@ env:
 
 jobs:
   ub-detection:
-    if: github.event.pull_request.draft == false
     name: Check for undefined behaviour (UB)
     timeout-minutes: 480
     runs-on: ubuntu-latest
