@@ -23,6 +23,23 @@ use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false, 
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 /// Full E2E test: Generate a real proof, deploy contracts, and call transact
 /// which verifies the zk-proof
 ///
@@ -35,9 +52,10 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 ///    generation
 /// 5. Calls the `transact` function on the pool contract
 #[test]
+#[cfg_attr(miri,ignore)]
 fn test_e2e_transact_with_real_proof() -> Result<()> {
     // Create ExtData and compute its hash
-    let env = Env::default();
+    let env = test_env();
     let temp_recipient = Address::generate(&env);
 
     let ext_data = ExtData {
