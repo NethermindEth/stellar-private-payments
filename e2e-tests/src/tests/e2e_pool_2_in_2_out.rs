@@ -31,7 +31,7 @@ fn test_env() -> Env {
     {
         use soroban_sdk::testutils::EnvTestConfig;
         Env::new_with_config(EnvTestConfig {
-            capture_snapshot_at_drop: false, 
+            capture_snapshot_at_drop: false,
         })
     }
     #[cfg(not(miri))]
@@ -52,7 +52,7 @@ fn test_env() -> Env {
 ///    generation
 /// 5. Calls the `transact` function on the pool contract
 #[test]
-#[cfg_attr(miri,ignore)]
+#[cfg_attr(miri, ignore)]
 fn test_e2e_transact_with_real_proof() -> Result<()> {
     // Create ExtData and compute its hash
     let env = test_env();
