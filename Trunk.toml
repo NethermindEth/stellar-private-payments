@@ -21,28 +21,27 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p dist/.stage/circuits dist/.stage/keys dist/.stage/js/witness
+mkdir -p $TRUNK_STAGING_DIR/circuits $TRUNK_STAGING_DIR/keys $TRUNK_STAGING_DIR/js/witness
 
 # Circuit artifacts from Cargo build output
 CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
 if [ -n "$CIRCUIT_OUT" ]; then
-    cp "$CIRCUIT_OUT"/*.r1cs dist/.stage/circuits/ 2>/dev/null || true
-    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm dist/.stage/circuits/ 2>/dev/null || true
+    cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
+    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
 fi
 
 # Proving keys
-cp scripts/testdata/*_proving_key.bin dist/.stage/keys/ 2>/dev/null || true
-cp scripts/testdata/*_vk.json dist/.stage/keys/ 2>/dev/null || true
+cp scripts/testdata/*_proving_key.bin $TRUNK_STAGING_DIR/keys/ 2>/dev/null || true
+cp scripts/testdata/*_vk.json $TRUNK_STAGING_DIR/keys/ 2>/dev/null || true
 
 # Witness WASM module
-cp target/wasm-witness/witness.js dist/.stage/js/witness/ 2>/dev/null || true
-cp target/wasm-witness/witness_bg.wasm dist/.stage/js/witness/ 2>/dev/null || true
+cp target/wasm-witness/witness.js $TRUNK_STAGING_DIR/js/witness/ 2>/dev/null || true
+cp target/wasm-witness/witness_bg.wasm $TRUNK_STAGING_DIR/js/witness/ 2>/dev/null || true
 
 # Static files
-cp app/js/bridge.js dist/.stage/js/
-cp app/test.html dist/.stage/ 2>/dev/null || true
-cp app/admin.html dist/.stage/ 2>/dev/null || true
-cp scripts/deployments.json dist/.stage/ 2>/dev/null || true
+cp app/js/bridge.js $TRUNK_STAGING_DIR/js/
+cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
+cp scripts/deployments.json $TRUNK_STAGING_DIR/ 2>/dev/null || true
 """]
 
 # Bundle JS with esbuild
@@ -50,7 +49,7 @@ cp scripts/deployments.json dist/.stage/ 2>/dev/null || true
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/ui.js --format=esm
-./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=dist/.stage/js/worker.js --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --external:./bridge.js --bundle --outfile=dist/.stage/js/admin.js --format=esm
+./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
+./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=$TRUNK_STAGING_DIR/js/worker.js --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --external:./bridge.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
 """]
