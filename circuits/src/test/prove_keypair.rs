@@ -77,7 +77,7 @@ mod tests {
     }
 
     #[test]
-    #[cfg_attr(miri,ignore)]
+    #[cfg_attr(miri, ignore)]
     fn test_keypair_test_matrix() -> anyhow::Result<()> {
         // === PATH SETUP ===
         let (wasm, r1cs) = load_artifacts("keypair_test")?;
