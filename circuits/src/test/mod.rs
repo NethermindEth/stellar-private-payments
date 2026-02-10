@@ -1,6 +1,7 @@
 //! Test utilities for circuit proving and verification.
 //!
-//! This module is only compiled when the `circom-tests` feature is enabled.
+//! This module is only compiled when the `std` feature is enabled, as it
+//! depends on file I/O and other std-only types.
 
 #![allow(missing_docs)]
 

@@ -6,10 +6,6 @@ repository.workspace = true
 license.workspace = true
 publish = false
 
-[features]
-default = ["circom-tests"]
-circom-tests = ["circuits/circom-tests"]
-
 [dependencies]
 anyhow = { workspace = true }
 ark-bn254 = { workspace = true }
@@ -19,7 +15,7 @@ asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
-circuits = { path = "../circuits", features = ["circom-tests"] }
+circuits = { path = "../circuits" }
 num-bigint = { workspace = true }
 
 # Contract dependencies

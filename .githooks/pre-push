@@ -1,5 +1,5 @@
 #!/bin/sh
-set -e 
+set -e
 
 # Dependency sorting
 if ! cargo sort --workspace --check; then
@@ -32,7 +32,7 @@ if ! cargo clippy --all-targets --all-features -- -D warnings; then
 fi
 
 # Tests
-if ! cargo test --workspace --verbose; then
+if ! BUILD_TESTS=1 cargo test --workspace --verbose; then
     echo "❌ Test failures detected"
     exit 6
 fi

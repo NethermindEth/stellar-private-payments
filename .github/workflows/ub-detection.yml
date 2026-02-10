@@ -1,9 +1,9 @@
-# The workflow has been manually disabled until the Soroban SDK team has fixed this issue
-# https://github.com/stellar/rs-soroban-sdk/issues/1582
-
 name: UB (undefined behavior) detection
 
-on: push
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
 
 env:
   CARGO_TERM_COLOR: always
@@ -13,13 +13,16 @@ env:
 
 jobs:
   ub-detection:
-    if: github.event.pull_request.draft == false
     name: Check for undefined behaviour (UB)
-    timeout-minutes: 30
+    timeout-minutes: 480
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - run: |
           rustup +nightly component add miri
           cargo +nightly miri setup
-          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib
+          # Strict provenance for all crates except circom-groth16-verifier
+          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib --workspace --exclude circom-groth16-verifier
+          # circom-groth16-verifier uses ark-groth16 → rayon → crossbeam-epoch,
+          # which does integer-to-pointer casts incompatible with strict provenance.
+          MIRIFLAGS="-Zmiri-permissive-provenance" cargo +nightly miri test --lib -p circom-groth16-verifier
