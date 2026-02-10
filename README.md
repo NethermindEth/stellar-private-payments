@@ -1,4 +1,4 @@
-# Private Transactions for Stellar
+# Private Payments for Stellar
 
 [![Docs](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/docs.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/docs.yml)
 [![Lint](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-transactions/actions/workflows/linter.yml)
@@ -17,7 +17,7 @@ The system incorporates **Administrative Service Providers (ASPs)** as a control
 
 ## Features
 
-- **Private Transactions**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
+- **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
 - **Zero-Knowledge Proofs**: Groth16 proofs generated via Circom circuits
 - **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
