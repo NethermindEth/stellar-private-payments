@@ -83,3 +83,4 @@ ark-serialize = { git = "https://github.com/arkworks-rs/algebra.git" }
 ark-bn254 = { git = "https://github.com/arkworks-rs/algebra.git" }
 ark-r1cs-std = { git = "https://github.com/arkworks-rs/r1cs-std.git" }
 ark-groth16 = { git = "https://github.com/arkworks-rs/groth16.git" }
+rkyv = { git = "https://github.com/rkyv/rkyv" }
