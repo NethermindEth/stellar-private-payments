@@ -24,7 +24,7 @@ wasm-witness:
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) OUT_DIR=$(DIST_DIR) cargo build -p circuits
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits
 
 .PHONY: install
 install:
