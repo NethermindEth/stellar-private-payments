@@ -92,7 +92,6 @@ allow-git = [
     "https://github.com/arkworks-rs/groth16",
     "https://github.com/arkworks-rs/crypto-primitives",
     "https://github.com/arkworks-rs/circom-compat",
-    "https://github.com/rkyv/rkyv",
 ]
 
 [sources.allow-org]
