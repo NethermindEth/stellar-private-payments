@@ -45,6 +45,3 @@ regex = "1"
 serde_json = "1.0"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 wast = "39.0.0"
-
-[lints]
-workspace = true
