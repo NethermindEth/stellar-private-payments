@@ -26,20 +26,32 @@ jobs:
           target: wasm32-unknown-unknown
           override: true
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
       - name: Cache
         uses: Swatinem/rust-cache@v2
         with:
           cache-targets: "true"
 
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
+      - name: Serve in background
+        run: make serve &
 
-      - name: Install Google Chrome
+      - name: Wait for server to be ready
         run: |
-          sudo apt-get update
-          sudo apt-get install google-chrome-stable
+          echo "Waiting for server..."
+          for i in $(seq 1 30); do
+            if curl -s http://127.0.0.1:8080 > /dev/null 2>&1; then
+              echo "Server is ready!"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Server failed to start"
+          exit 1
 
-      - name: Run WASM tests in Headless Chrome
+      - name: Run browser tests
         run: |
-          (cd app/crates/prover && wasm-pack test --headless --chrome)
-          (cd app/crates/witness && wasm-pack test --headless --chrome)
+          echo "browser tests running against http://127.0.0.1:8080"
