@@ -43,7 +43,7 @@ jobs:
         run: |
           echo "Waiting for server..."
           for i in $(seq 1 30); do
-            if curl -s http://127.0.0.1:8080 > /dev/null 2>&1; then
+            if curl -s http://127.0.0.1:8000 > /dev/null 2>&1; then
               echo "Server is ready!"
               exit 0
             fi
