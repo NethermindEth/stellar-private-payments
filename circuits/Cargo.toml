@@ -8,23 +8,35 @@ publish.workspace = true
 
 [features]
 default = ["std"]
-std = []
+std = [
+    "anyhow",
+    "ark-bn254",
+    "ark-circom",
+    "ark-ff",
+    "ark-groth16",
+    "ark-serialize",
+    "ark-snark",
+    "ark-std",
+    "num-bigint",
+    "num-integer",
+]
 
 [dependencies]
 
-# Test utilities dependencies
-anyhow = { workspace = true }
-# Core dependencies
-ark-bn254 = { workspace = true }
-ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
-ark-ff = { workspace = true }
-ark-groth16 = { workspace = true }
-ark-serialize = { workspace = true }
-ark-snark = { workspace = true }
-ark-std = { workspace = true }
-num-bigint = { workspace = true }
-num-integer = { workspace = true }
+# Core dependencies (no_std compatible)
 zkhash = { workspace = true }
+
+# Test utilities dependencies (std only — used by the `test` module)
+anyhow = { workspace = true, optional = true }
+ark-bn254 = { workspace = true, optional = true }
+ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false, optional = true }
+ark-ff = { workspace = true, optional = true }
+ark-groth16 = { workspace = true, optional = true }
+ark-serialize = { workspace = true, optional = true }
+ark-snark = { workspace = true, optional = true }
+ark-std = { workspace = true, optional = true }
+num-bigint = { workspace = true, optional = true }
+num-integer = { workspace = true, optional = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
