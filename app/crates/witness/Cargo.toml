@@ -40,7 +40,7 @@ wasmer = { workspace = true, features = ["default"] }
 wasmer = { workspace = true, features = ["js-default"] }
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3"
+wasm-bindgen-test = { workspace = true }
 
 [lints]
 workspace = true
