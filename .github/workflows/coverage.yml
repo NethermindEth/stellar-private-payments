@@ -2,7 +2,11 @@ name: Coverage (Push)
 
 on:
   push:
-    branches: ['**']  # all branches, including main
+    branches: ["main"]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 permissions:
   contents: read
@@ -10,12 +14,15 @@ permissions:
 
 jobs:
   coverage-push:
+    timeout-minutes: 45
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - run: cargo install cargo-llvm-cov
-      - run: rustup component add llvm-tools-preview
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload branch coverage artifact

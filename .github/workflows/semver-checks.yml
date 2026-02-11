@@ -2,10 +2,14 @@ name: Semver checks
 
 on:
   pull_request:
-    branches: [ "main" ]
-    paths: ['**/Cargo.toml']  # Only run when Cargo.toml changes
+    branches: ["main"]
+    paths: ["**/Cargo.toml"] # Only run when Cargo.toml changes
   push:
-    tags: ['v*']  # Run on version tags
+    tags: ["v*"] # Run on version tags
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 # Limit permissions to minimum required
 permissions:
@@ -17,6 +21,7 @@ env:
 
 jobs:
   semver:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -25,6 +30,8 @@ jobs:
         with:
           # cargo-semver-checks needs the full git history to compare versions
           fetch-depth: 0
+
+      - uses: dtolnay/rust-toolchain@stable
 
       - name: Cache cargo registry
         uses: actions/cache@v4
@@ -49,7 +56,7 @@ jobs:
           else
             # Extract version without 'v' prefix for comparison
             version=${latest_tag#v}
-          
+
             # Check if version is >= 0.1.0 (using semver comparison)
             if printf '%s\n%s\n' "0.1.0" "$version" | sort -V | head -n1 | grep -q "^0\.1\.0$"; then
               echo "Found suitable baseline tag: $latest_tag (>= v0.1.0)"

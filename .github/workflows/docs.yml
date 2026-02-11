@@ -8,6 +8,7 @@ jobs:
     permissions:
       contents: write
     name: Documentation
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
@@ -15,6 +16,9 @@ jobs:
         with:
           fetch-depth: 1
           persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
 
       - name: Setup pages
         id: pages
@@ -24,7 +28,7 @@ jobs:
         run: cargo clean --doc
 
       - name: Build documentation
-        run: RUSTDOCFLAGS="--html-in-header" cargo doc --no-deps -p circuits
+        run: cargo doc --no-deps -p circuits
 
       - name: Remove lock file
         run: rm target/doc/.lock

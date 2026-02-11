@@ -1,6 +1,14 @@
 name: Linter check
 
-on: push
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -10,11 +18,17 @@ env:
 
 jobs:
   linter_check:
+    timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install nightly rustfmt
-        run: rustup component add rustfmt --toolchain nightly
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - uses: Swatinem/rust-cache@v2
       - name: Run Fmt
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
 
@@ -22,4 +36,4 @@ jobs:
         run: cargo clippy --all-targets --all-features
 
       - name: Check typos
-        uses: crate-ci/typos@master
+        uses: crate-ci/typos@v1.42.0
