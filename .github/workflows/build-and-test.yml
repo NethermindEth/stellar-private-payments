@@ -2,9 +2,13 @@ name: Build and test code
 
 on:
   push:
-    branches: [ "main" ]
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
+    branches: ["main"]
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -12,10 +16,13 @@ env:
 
 jobs:
   build:
+    timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
-    - uses: actions/checkout@v4
-    - name: Build
-      run: BUILD_TESTS=1 cargo test --workspace --verbose --no-run
-    - name: Run tests
-      run: cargo test --workspace --verbose
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build
+        run: BUILD_TESTS=1 cargo test --workspace --verbose --no-run
+      - name: Run tests
+        run: cargo test --workspace --verbose

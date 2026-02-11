@@ -2,11 +2,17 @@ name: Contracts Build
 
 on:
   pull_request:
+    branches: ["main"]
   push:
     branches: ["main"]
 
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
 jobs:
   build-contracts:
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -17,9 +23,11 @@ jobs:
 
       - name: Install System dependencies
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev libudev-dev pkg-config
-        
+
       - name: Install wasm target
         run: rustup target add wasm32v1-none
+
+      - uses: Swatinem/rust-cache@v2
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@v25.1.0
