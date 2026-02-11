@@ -17,3 +17,6 @@ ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 contract-types = { workspace = true }
 soroban-sdk = { workspace = true }
+
+[lints]
+workspace = true
