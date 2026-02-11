@@ -75,8 +75,12 @@ function installFreighterMock(config) {
         };
         break;
       case "SUBMIT_BLOB":
+        // signMessage() uses SUBMIT_BLOB internally. The freighter-api maps
+        // signedBlob → signedMessage, then the app does atob(signedMessage)
+        // to derive keys. Must be valid base64, exactly 64 bytes (Ed25519).
         payload = {
-          signedBlob: "AAAA_MOCK_SIGNED_BLOB",
+          signedBlob:
+            "AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQ==",
           signerAddress: publicKey,
         };
         break;
