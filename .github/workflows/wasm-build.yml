@@ -20,7 +20,7 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
-        with: 
+        with:
           profile: minimal
           toolchain: stable
           target: wasm32-unknown-unknown
@@ -33,11 +33,13 @@ jobs:
 
       - name: Install wasm-pack
         run: cargo install wasm-pack
-        
+
       - name: Install Google Chrome
         run: |
           sudo apt-get update
           sudo apt-get install google-chrome-stable
-        
+
       - name: Run WASM tests in Headless Chrome
-        run: wasm-pack test --headless --chrome 
+        run: |
+          wasm-pack test --headless --chrome app/crates/prover
+          wasm-pack test --headless --chrome app/crates/witness
