@@ -23,9 +23,6 @@ std = [
 
 [dependencies]
 
-# Core dependencies (no_std compatible)
-zkhash = { workspace = true }
-
 # Test utilities dependencies (std only — used by the `test` module)
 anyhow = { workspace = true, optional = true }
 ark-bn254 = { workspace = true, optional = true }
@@ -37,6 +34,9 @@ ark-snark = { workspace = true, optional = true }
 ark-std = { workspace = true, optional = true }
 num-bigint = { workspace = true, optional = true }
 num-integer = { workspace = true, optional = true }
+
+# Core dependencies (no_std compatible)
+zkhash = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
