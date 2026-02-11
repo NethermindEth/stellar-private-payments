@@ -41,5 +41,5 @@ jobs:
 
       - name: Run WASM tests in Headless Chrome
         run: |
-          cd app/crates/prover && wasm-pack test --headless --chrome
-          cd app/crates/witness && wasm-pack test --headless --chrome
+          (cd app/crates/prover && wasm-pack test --headless --chrome)
+          (cd app/crates/witness && wasm-pack test --headless --chrome)
