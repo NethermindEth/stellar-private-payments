@@ -25,9 +25,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
-      - uses: dtolnay/rust-toolchain@nightly
-        with:
-          components: rustfmt
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --component rustfmt --profile minimal
       - uses: Swatinem/rust-cache@v2
       - name: Run Fmt
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
