@@ -38,5 +38,10 @@ e2e-tests/test_snapshots/*
 app/node_modules
 dist/
 
+# Playwright E2E
+app/e2e/.freighter-extension/
+app/e2e/test-results/
+app/e2e/playwright-report/
+
 # Scripts
 scripts/testdata/*
