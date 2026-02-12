@@ -1,0 +1,89 @@
+name: E2E Tests
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+jobs:
+  e2e-tests:
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Rust
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-targets: "true"
+
+      - name: Cache cargo-binstall
+        id: cache-binstall
+        uses: actions/cache@v4
+        with:
+          path: ~/.cargo/bin/cargo-binstall
+          key: cargo-binstall-1.12.3
+
+      - name: Install cargo-binstall
+        if: steps.cache-binstall.outputs.cache-hit != 'true'
+        run: curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+
+      - name: Cache CLI tools
+        id: cache-cli
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cargo/bin/trunk
+          key: cli-tools-${{ runner.os }}-wasm-pack-trunk
+
+      - name: Install wasm-pack & trunk
+        if: steps.cache-cli.outputs.cache-hit != 'true'
+        run: cargo binstall wasm-pack trunk --no-confirm --locked
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "23"
+          cache: "npm"
+          cache-dependency-path: app/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci
+        working-directory: app
+
+      - name: Download Freighter extension & install Playwright Chromium
+        run: |
+          npm run test:e2e:download-extension &
+          npx playwright install chromium --with-deps &
+          wait
+        working-directory: app
+
+      - name: Build frontend
+        run: make build
+
+      - name: Run Playwright E2E tests
+        run: npm run test:e2e e2e/tests/deposit-flow.spec.js
+        working-directory: app
+
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            app/e2e/test-results/
+            app/e2e/playwright-report/
+          retention-days: 7

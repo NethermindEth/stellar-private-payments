@@ -4,15 +4,20 @@
   "description": "Private payments app on Stellar",
   "main": "js/app.js",
   "scripts": {
-    "test": "jest"
+    "test": "jest",
+    "test:e2e": "playwright test --config e2e/playwright.config.js",
+    "test:e2e:headed": "playwright test --config e2e/playwright.config.js --headed",
+    "test:e2e:download-extension": "node e2e/helpers/download-extension.js"
   },
   "author": "",
   "devDependencies": {
     "@babel/core": "^7.25.2",
     "@babel/preset-env": "^7.25.4",
+    "@playwright/test": "^1.50.0",
     "babel-jest": "^29.7.0",
     "esbuild": "^0.27.2",
     "jest": "^29.7.0",
+    "serve": "^14.2.0",
     "tailwindcss": "^4.1.18"
   },
   "dependencies": {

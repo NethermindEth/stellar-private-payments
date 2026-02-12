@@ -1,6 +1,7 @@
 name: WASM Build
 
 on:
+  workflow_dispatch:
   push:
     branches: ["main"]
   pull_request:
@@ -20,16 +21,26 @@ jobs:
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
+        with:
+          profile: minimal
+          toolchain: stable
+          target: wasm32-unknown-unknown
+          override: true
 
       - name: Cache
         uses: Swatinem/rust-cache@v2
         with:
           cache-targets: "true"
 
-      - name: Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
+      - name: Install wasm-pack
+        run: cargo install wasm-pack
 
-      - name: Build
-        run: make build
+      - name: Install Google Chrome
+        run: |
+          sudo apt-get update
+          sudo apt-get install google-chrome-stable
+
+      - name: Run WASM tests in Headless Chrome
+        run: |
+          (cd app/crates/prover && wasm-pack test --headless --chrome)
+          (cd app/crates/witness && wasm-pack test --headless --chrome)
