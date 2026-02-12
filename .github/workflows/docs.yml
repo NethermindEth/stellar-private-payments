@@ -34,9 +34,7 @@ jobs:
           cd docs/src
           for f in *.md; do
             if [ -L "$f" ]; then
-              target=$(readlink "$f")
-              rm "$f"
-              cp "$target" "$f"
+              cp --remove-destination "$(readlink -f "$f")" "$f"
             fi
           done
 

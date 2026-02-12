@@ -1,1 +1,0 @@
-../../circuits/src/circomlib/circuits/README.md
