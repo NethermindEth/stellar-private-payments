@@ -23,6 +23,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Build
-        run: BUILD_TESTS=1 cargo test --workspace --verbose --no-run
+        run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace --verbose
+        run: cargo test --workspace --include-ignored
