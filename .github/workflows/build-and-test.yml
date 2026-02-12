@@ -25,4 +25,4 @@ jobs:
       - name: Build
         run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace --include-ignored
+        run: cargo test --workspace -- --include-ignored
