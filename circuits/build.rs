@@ -12,7 +12,7 @@
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
 //! The script also generates Groth16 proving and verification
-//! keys for the main test circuit (compliant_test) and outputs them to
+//! keys for the main test circuit (policy_test) and outputs them to
 //! `scripts/testdata/`.
 //!
 //! The output directory is exposed as en environment variable
@@ -67,17 +67,15 @@ fn main() -> Result<()> {
     let testdata_dir = crate_dir.join("../scripts/testdata");
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir
-            .join("compliant_test_proving_key.bin")
-            .display()
+        testdata_dir.join("policy_test_proving_key.bin").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir.join("compliant_test_vk.json").display()
+        testdata_dir.join("policy_test_vk.json").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir.join("compliant_test_vk_soroban.bin").display()
+        testdata_dir.join("policy_test_vk_soroban.bin").display()
     );
 
     // === CIRCOMLIB DEPENDENCY ===
@@ -176,8 +174,8 @@ fn main() -> Result<()> {
                     circom_file.display()
                 );
 
-                // Still check if we need to generate keys for compliant_test
-                if circuit_name == "compliant_test" {
+                // Still check if we need to generate keys for policy_test
+                if circuit_name == "policy_test" {
                     // Check if WASM exists before attempting key generation
                     let wasm_path = out_dir
                         .join("wasm")
@@ -268,8 +266,8 @@ fn main() -> Result<()> {
         };
 
         // === GROTH16 Proving/Verifying key generation for test circuits ===
-        // For now we only generate keys for the compliant test circuit.
-        if circuit_name == "compliant_test" {
+        // For now we only generate keys for the policy test circuit.
+        if circuit_name == "policy_test" {
             if !wasm_success {
                 println!(
                     "cargo:warning=Skipping key generation for {} - WASM compilation failed",
@@ -895,7 +893,7 @@ fn check_keys_need_generation(
 ///
 /// * `crate_dir` - The circuits crate directory
 /// * `out_dir` - The output directory containing WASM files
-/// * `circuit_name` - Name of the circuit (e.g., "compliant_test")
+/// * `circuit_name` - Name of the circuit (e.g., "policy_test")
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
 ///
 /// # Returns

@@ -26,7 +26,7 @@ stellar-private-transactions/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
 │   │   ├── smt/                # Sparse Merkle tree circuits
 │   │   ├── test/               # Circuit test utilities
-│   │   ├── compliantTransaction.circom  # Main transaction circuit
+│   │   ├── policyTransaction.circom  # Main transaction circuit
 │   │   └── *.circom            # Supporting circuits
 │   └── build.rs                # Circuit compilation build script
 ├── contracts/                  # Soroban smart contracts

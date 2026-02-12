@@ -313,8 +313,8 @@ mod tests {
         }
     }
 
-    fn compliance_artifacts() -> Result<(PathBuf, PathBuf)> {
-        load_artifacts("compliant_test")
+    fn policy_artifacts() -> Result<(PathBuf, PathBuf)> {
+        load_artifacts("policy_test")
     }
 
     #[test]
@@ -322,7 +322,7 @@ mod tests {
     fn test_tx_1in_1out() -> Result<()> {
         // One real input (in1), one dummy input (in0.amount = 0).
         // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let case = TxCase::new(
             vec![
@@ -385,7 +385,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_2in_1out() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let a = Scalar::from(9u64);
         let b = Scalar::from(4u64);
@@ -453,7 +453,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_1in_2out_split() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let total = Scalar::from(20u64);
         let a0 = Scalar::from(6u64);
@@ -521,7 +521,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_2in_2out_split() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let a = Scalar::from(15u64);
         let b = Scalar::from(8u64);
@@ -592,7 +592,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_chained_spend() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         // Tx1 produces an output that Tx2 spends
         let chain_priv = Scalar::from(777u64);
@@ -721,7 +721,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_only_adds_notes_deposit() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         // both inputs dummy -> Merkle checks gated off by amount=0
         let case = TxCase::new(
@@ -787,7 +787,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_only_spends_notes_withdraw_one_real() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let spend = Scalar::from(9u64);
 
@@ -854,7 +854,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_only_spends_notes_withdraw_two_real() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let a = Scalar::from(5u64);
         let b = Scalar::from(11u64);
@@ -923,7 +923,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_same_nullifier_should_fail() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         // Same note material used twice
         let privk = Scalar::from(7777u64);
@@ -1005,7 +1005,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_membership_should_fail_wrong_privkey() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let case = TxCase::new(
             vec![
@@ -1086,7 +1086,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_membership_should_fail_wrong_path() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let case = TxCase::new(
             vec![
@@ -1166,7 +1166,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_membership_should_fail_wrong_root() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let case = TxCase::new(
             vec![
@@ -1244,7 +1244,7 @@ mod tests {
     fn test_non_membership_fails() -> Result<()> {
         // One real input (in1), one dummy input (in0.amount = 0).
         // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         let case = TxCase::new(
             vec![
@@ -1333,7 +1333,7 @@ mod tests {
     #[test]
     #[ignore]
     fn test_tx_randomized_stress() -> Result<()> {
-        let (wasm, r1cs) = compliance_artifacts()?;
+        let (wasm, r1cs) = policy_artifacts()?;
 
         #[inline]
         fn next_u64(state: &mut u128) -> u64 {

@@ -9,7 +9,7 @@ mod prove_merkle;
 mod prove_poseidon2;
 mod prove_sparse;
 
-mod prove_compliance;
 mod prove_keypair;
+mod prove_policy;
 mod prove_transaction;
 pub mod utils;

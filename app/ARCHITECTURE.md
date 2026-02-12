@@ -61,7 +61,7 @@ We must make sure it is synced with the on-chain contract.
 
 ### ASP Membership Store (`asp-membership-store.js`)
 
-Manages the Association Set Provider (ASP) membership tree for compliance proofs.
+Manages the Association Set Provider (ASP) membership tree for membership and non-membership policy proofs.
 
 **Persistent Data (IndexedDB):**
 - `asp_membership_leaves`: Sequential membership leaves with their roots

@@ -1,7 +1,8 @@
 //! Privacy Pool Contract
 //!
 //! This contract implements a privacy-preserving transaction pool with embedded
-//! compliance. It enables users to deposit, transfer, and withdraw
+//! policy (membership and non-membership in an association set).
+//! It enables users to deposit, transfer, and withdraw
 //! tokens while maintaining transaction privacy through zero-knowledge proofs.
 //!
 //! # Architecture
@@ -83,9 +84,9 @@ pub struct Proof {
     pub public_amount: U256,
     /// Hash of the external data (binds proof to transaction parameters)
     pub ext_data_hash: BytesN<32>,
-    /// Merkle root the compliance membership proof was generated against
+    /// Merkle root the policy membership proof was generated against
     pub asp_membership_root: U256,
-    /// Merkle root the compliance NON-membership proof was generated against
+    /// Merkle root the policy NON-membership proof was generated against
     pub asp_non_membership_root: U256,
 }
 
@@ -412,7 +413,7 @@ impl PoolContract {
             &proof.public_amount,
         )));
         public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
-        // Add compliance roots. Order is important.
+        // Add policy roots. Order is important.
         for _ in 0..proof.input_nullifiers.len() {
             public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
                 env,
