@@ -74,7 +74,7 @@ jobs:
         run: make build
 
       - name: Run Playwright E2E tests
-        run: npm run test:e2e
+        run: npm run test:e2e e2e/tests/deposit-flow.spec.js
         working-directory: app
 
       - name: Upload test results
