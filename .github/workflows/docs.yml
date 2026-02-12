@@ -29,7 +29,20 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --no-default-features
 
+      - name: Resolve symlinks in docs
+        run: |
+          cd docs/src
+          for f in *.md; do
+            if [ -L "$f" ]; then
+              target=$(readlink "$f")
+              rm "$f"
+              cp "$target" "$f"
+            fi
+          done
+
       - name: Build mdBook
+        env:
+          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_url }}/
         run: mdbook build docs/
 
       - name: Clean docs folder
