@@ -1,0 +1,8 @@
+[book]
+title = "Stellar Private Payments"
+authors = ["NethermindEth"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/NethermindEth/stellar-private-payments"

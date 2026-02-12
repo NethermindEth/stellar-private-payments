@@ -26,19 +26,27 @@ jobs:
         id: pages
         uses: actions/configure-pages@v5
 
+      - name: Install mdBook
+        run: cargo install mdbook --no-default-features
+
+      - name: Build mdBook
+        run: mdbook build docs/
+
       - name: Clean docs folder
         run: cargo clean --doc
 
-      - name: Build documentation
-        run: cargo doc --no-deps -p circuits
+      - name: Build API documentation
+        run: cargo doc --no-deps --workspace
 
-      - name: Remove lock file
-        run: rm target/doc/.lock
+      - name: Combine outputs
+        run: |
+          rm -f target/doc/.lock
+          cp -r target/doc docs/book/api
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: target/doc
+          path: docs/book
 
   publish-docs:
     permissions:
