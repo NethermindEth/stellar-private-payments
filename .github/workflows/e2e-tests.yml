@@ -71,7 +71,7 @@ jobs:
         working-directory: app
 
       - name: Build frontend
-        run: make build
+        run: make serve
 
       - name: Run Playwright E2E tests
         run: npm run test:e2e e2e/tests/deposit-flow.spec.js
