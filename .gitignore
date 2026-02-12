@@ -45,3 +45,6 @@ app/e2e/playwright-report/
 
 # Scripts
 scripts/testdata/*
+
+# mdBook
+docs/book/
