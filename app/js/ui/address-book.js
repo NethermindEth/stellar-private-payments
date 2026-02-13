@@ -3,8 +3,8 @@
  * @module ui/address-book
  */
 
-import { StateManager } from "../state/index.js";
-import { App, Utils, Toast } from "./core.js";
+import { StateManager } from '../state/index.js';
+import { App, Utils, Toast } from './core.js';
 
 // Forward reference to Tabs for switching to transfer
 let TabsRef = null;
@@ -14,236 +14,225 @@ let TabsRef = null;
  * @param {Object} tabs - The Tabs module
  */
 export function setAddressBookTabsRef(tabs) {
-  TabsRef = tabs;
+    TabsRef = tabs;
 }
 
 export const AddressBook = {
-  isInitialized: false,
-  _filterDebounceTimer: null,
-  _cachedRegistrations: null,
-
-  init() {
-    // Store template reference
-    App.templates.addressBookRow = document.getElementById(
-      "tpl-addressbook-row",
-    );
-
-    // Section tab switching
-    document.querySelectorAll(".section-tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () =>
-        this.switchSection(btn.dataset.sectionTab),
-      );
-    });
-
-    // Search functionality
-    const searchInput = document.getElementById("addressbook-search");
-    const searchBtn = document.getElementById("addressbook-search-btn");
-
-    // Live filtering as user types (debounced)
-    searchInput?.addEventListener("input", () => {
-      this.debouncedFilter(searchInput.value.trim());
-    });
-
-    // Enter key for exact on-chain lookup (full address)
-    searchInput?.addEventListener("keypress", (e) => {
-      if (e.key === "Enter") {
-        this.search(searchInput.value.trim());
-      }
-    });
-
-    searchBtn?.addEventListener("click", () => {
-      this.search(searchInput?.value.trim());
-    });
-
-    // Refresh button
-    document
-      .getElementById("addressbook-refresh-btn")
-      ?.addEventListener("click", async () => {
-        const icon = document.getElementById("addressbook-refresh-icon");
-        if (icon) {
-          icon.classList.add("animate-spin");
+    isInitialized: false,
+    _filterDebounceTimer: null,
+    _cachedRegistrations: null,
+    
+    init() {
+        // Store template reference
+        App.templates.addressBookRow = document.getElementById('tpl-addressbook-row');
+        
+        // Section tab switching
+        document.querySelectorAll('.section-tab-btn').forEach(btn => {
+            btn.addEventListener('click', () => this.switchSection(btn.dataset.sectionTab));
+        });
+        
+        // Search functionality
+        const searchInput = document.getElementById('addressbook-search');
+        const searchBtn = document.getElementById('addressbook-search-btn');
+        
+        // Live filtering as user types (debounced)
+        searchInput?.addEventListener('input', () => {
+            this.debouncedFilter(searchInput.value.trim());
+        });
+        
+        // Enter key for exact on-chain lookup (full address)
+        searchInput?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                this.search(searchInput.value.trim());
+            }
+        });
+        
+        searchBtn?.addEventListener('click', () => {
+            this.search(searchInput?.value.trim());
+        });
+        
+        // Refresh button
+        document.getElementById('addressbook-refresh-btn')?.addEventListener('click', async () => {
+            const icon = document.getElementById('addressbook-refresh-icon');
+            if (icon) {
+                icon.classList.add('animate-spin');
+            }
+            try {
+                this._cachedRegistrations = null;
+                await this.render();
+            } finally {
+                if (icon) {
+                    icon.classList.remove('animate-spin');
+                }
+            }
+        });
+        
+        // Listen for new registrations
+        StateManager.on('publicKeyRegistered', () => {
+            this._cachedRegistrations = null;
+            this.render();
+        });
+        
+        this.isInitialized = true;
+    },
+    
+    /**
+     * Debounces the filter operation to avoid excessive updates while typing.
+     * @param {string} searchTerm - Current search input value
+     */
+    debouncedFilter(searchTerm) {
+        if (this._filterDebounceTimer) {
+            clearTimeout(this._filterDebounceTimer);
         }
+        this._filterDebounceTimer = setTimeout(() => {
+            this.filterTable(searchTerm);
+        }, 150);
+    },
+    
+    /**
+     * Filters the address book table in real-time without notifications.
+     * Shows all entries when search is empty.
+     * @param {string} searchTerm - Filter term (prefix match)
+     */
+    async filterTable(searchTerm) {
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const searchResult = document.getElementById('addressbook-search-result');
+        
+        if (!tbody) return;
+        
+        // Hide search result panel during filtering
+        searchResult?.classList.add('hidden');
+        
+        // Get cached registrations or fetch them
+        if (!this._cachedRegistrations) {
+            try {
+                this._cachedRegistrations = await StateManager.getRecentPublicKeys(100);
+            } catch (error) {
+                console.error('[AddressBook] Failed to load registrations:', error);
+                return;
+            }
+        }
+        
+        const registrations = this._cachedRegistrations;
+        
+        // Filter by prefix if search term provided
+        const term = searchTerm.toUpperCase();
+        const matches = term 
+            ? registrations.filter(r => r.address.toUpperCase().startsWith(term))
+            : registrations;
+        
+        tbody.replaceChildren();
+        
+        if (matches.length === 0) {
+            empty?.classList.remove('hidden');
+            empty?.classList.add('flex');
+            return;
+        }
+        
+        empty?.classList.add('hidden');
+        empty?.classList.remove('flex');
+        
+        matches.forEach(record => {
+            tbody.appendChild(this.createRow(record));
+        });
+    },
+    
+    /**
+     * Switches between notes and address book sections.
+     * @param {string} section - 'notes' or 'addressbook'
+     */
+    switchSection(section) {
+        document.querySelectorAll('.section-tab-btn').forEach(btn => {
+            const isActive = btn.dataset.sectionTab === section;
+            btn.setAttribute('aria-selected', isActive);
+            btn.classList.toggle('bg-dark-800', isActive);
+            btn.classList.toggle('text-brand-500', isActive);
+            btn.classList.toggle('border-brand-500/30', isActive);
+            btn.classList.toggle('border', isActive);
+            btn.classList.toggle('text-dark-400', !isActive);
+        });
+        
+        document.querySelectorAll('.section-panel').forEach(panel => {
+            panel.classList.add('hidden');
+        });
+        
+        const targetPanel = document.getElementById(`section-panel-${section}`);
+        if (targetPanel) {
+            targetPanel.classList.remove('hidden');
+        }
+        
+        // Render address book when switching to it
+        if (section === 'addressbook') {
+            this.render();
+        }
+    },
+    
+    /**
+     * Renders the address book table with recent registrations.
+     * Respects the current search filter if one is active.
+     */
+    async render() {
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const loading = document.getElementById('addressbook-loading');
+        const searchResult = document.getElementById('addressbook-search-result');
+        const searchInput = document.getElementById('addressbook-search');
+        
+        if (!tbody) return;
+        
+        // Show loading, hide others
+        loading?.classList.remove('hidden');
+        empty?.classList.add('hidden');
+        searchResult?.classList.add('hidden');
+        tbody.replaceChildren();
+        
         try {
-          this._cachedRegistrations = null;
-          await this.render();
-        } finally {
-          if (icon) {
-            icon.classList.remove("animate-spin");
-          }
+            const registrations = await StateManager.getRecentPublicKeys(100);
+            this._cachedRegistrations = registrations;
+            
+            loading?.classList.add('hidden');
+            
+            // If there's an active search filter, apply it
+            const currentFilter = searchInput?.value.trim().toUpperCase() || '';
+            const filtered = currentFilter 
+                ? registrations.filter(r => r.address.toUpperCase().startsWith(currentFilter))
+                : registrations;
+            
+            if (filtered.length === 0) {
+                empty?.classList.remove('hidden');
+                empty?.classList.add('flex');
+                return;
+            }
+            
+            empty?.classList.add('hidden');
+            empty?.classList.remove('flex');
+            
+            filtered.forEach(record => {
+                tbody.appendChild(this.createRow(record));
+            });
+        } catch (error) {
+            console.error('[AddressBook] Failed to load registrations:', error);
+            loading?.classList.add('hidden');
+            
+            // Check if this is a database upgrade issue
+            if (error.name === 'NotFoundError' || error.message?.includes('object stores was not found')) {
+                this.renderDatabaseUpgradeError();
+            } else {
+                empty?.classList.remove('hidden');
+            }
         }
-      });
-
-    // Listen for new registrations
-    StateManager.on("publicKeyRegistered", () => {
-      this._cachedRegistrations = null;
-      this.render();
-    });
-
-    this.isInitialized = true;
-  },
-
-  /**
-   * Debounces the filter operation to avoid excessive updates while typing.
-   * @param {string} searchTerm - Current search input value
-   */
-  debouncedFilter(searchTerm) {
-    if (this._filterDebounceTimer) {
-      clearTimeout(this._filterDebounceTimer);
-    }
-    this._filterDebounceTimer = setTimeout(() => {
-      this.filterTable(searchTerm);
-    }, 150);
-  },
-
-  /**
-   * Filters the address book table in real-time without notifications.
-   * Shows all entries when search is empty.
-   * @param {string} searchTerm - Filter term (prefix match)
-   */
-  async filterTable(searchTerm) {
-    const tbody = document.getElementById("addressbook-tbody");
-    const empty = document.getElementById("empty-addressbook");
-    const searchResult = document.getElementById("addressbook-search-result");
-
-    if (!tbody) return;
-
-    // Hide search result panel during filtering
-    searchResult?.classList.add("hidden");
-
-    // Get cached registrations or fetch them
-    if (!this._cachedRegistrations) {
-      try {
-        this._cachedRegistrations = await StateManager.getRecentPublicKeys(100);
-      } catch (error) {
-        console.error("[AddressBook] Failed to load registrations:", error);
-        return;
-      }
-    }
-
-    const registrations = this._cachedRegistrations;
-
-    // Filter by prefix if search term provided
-    const term = searchTerm.toUpperCase();
-    const matches = term
-      ? registrations.filter((r) => r.address.toUpperCase().startsWith(term))
-      : registrations;
-
-    tbody.replaceChildren();
-
-    if (matches.length === 0) {
-      empty?.classList.remove("hidden");
-      empty?.classList.add("flex");
-      return;
-    }
-
-    empty?.classList.add("hidden");
-    empty?.classList.remove("flex");
-
-    matches.forEach((record) => {
-      tbody.appendChild(this.createRow(record));
-    });
-  },
-
-  /**
-   * Switches between notes and address book sections.
-   * @param {string} section - 'notes' or 'addressbook'
-   */
-  switchSection(section) {
-    document.querySelectorAll(".section-tab-btn").forEach((btn) => {
-      const isActive = btn.dataset.sectionTab === section;
-      btn.setAttribute("aria-selected", isActive);
-      btn.classList.toggle("bg-dark-800", isActive);
-      btn.classList.toggle("text-brand-500", isActive);
-      btn.classList.toggle("border-brand-500/30", isActive);
-      btn.classList.toggle("border", isActive);
-      btn.classList.toggle("text-dark-400", !isActive);
-    });
-
-    document.querySelectorAll(".section-panel").forEach((panel) => {
-      panel.classList.add("hidden");
-    });
-
-    const targetPanel = document.getElementById(`section-panel-${section}`);
-    if (targetPanel) {
-      targetPanel.classList.remove("hidden");
-    }
-
-    // Render address book when switching to it
-    if (section === "addressbook") {
-      this.render();
-    }
-  },
-
-  /**
-   * Renders the address book table with recent registrations.
-   * Respects the current search filter if one is active.
-   */
-  async render() {
-    const tbody = document.getElementById("addressbook-tbody");
-    const empty = document.getElementById("empty-addressbook");
-    const loading = document.getElementById("addressbook-loading");
-    const searchResult = document.getElementById("addressbook-search-result");
-    const searchInput = document.getElementById("addressbook-search");
-
-    if (!tbody) return;
-
-    // Show loading, hide others
-    loading?.classList.remove("hidden");
-    empty?.classList.add("hidden");
-    searchResult?.classList.add("hidden");
-    tbody.replaceChildren();
-
-    try {
-      const registrations = await StateManager.getRecentPublicKeys(100);
-      this._cachedRegistrations = registrations;
-
-      loading?.classList.add("hidden");
-
-      // If there's an active search filter, apply it
-      const currentFilter = searchInput?.value.trim().toUpperCase() || "";
-      const filtered = currentFilter
-        ? registrations.filter((r) =>
-            r.address.toUpperCase().startsWith(currentFilter),
-          )
-        : registrations;
-
-      if (filtered.length === 0) {
-        empty?.classList.remove("hidden");
-        empty?.classList.add("flex");
-        return;
-      }
-
-      empty?.classList.add("hidden");
-      empty?.classList.remove("flex");
-
-      filtered.forEach((record) => {
-        tbody.appendChild(this.createRow(record));
-      });
-    } catch (error) {
-      console.error("[AddressBook] Failed to load registrations:", error);
-      loading?.classList.add("hidden");
-
-      // Check if this is a database upgrade issue
-      if (
-        error.name === "NotFoundError" ||
-        error.message?.includes("object stores was not found")
-      ) {
-        this.renderDatabaseUpgradeError();
-      } else {
-        empty?.classList.remove("hidden");
-      }
-    }
-  },
-
-  /**
-   * Renders a message when database needs upgrade (store not found).
-   */
-  renderDatabaseUpgradeError() {
-    const container = document.getElementById("addressbook-search-result");
-    if (!container) return;
-
-    container.classList.remove("hidden");
-    container.innerHTML = `
+    },
+    
+    /**
+     * Renders a message when database needs upgrade (store not found).
+     */
+    renderDatabaseUpgradeError() {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        container.classList.remove('hidden');
+        container.innerHTML = `
             <div class="p-4 bg-orange-500/10 border border-orange-500/30 rounded-lg">
                 <div class="flex items-center gap-2 mb-2">
                     <svg class="w-4 h-4 text-orange-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -269,106 +258,94 @@ export const AddressBook = {
                 </p>
             </div>
         `;
-
-    container
-      .querySelector(".refresh-page-btn")
-      ?.addEventListener("click", () => {
-        window.location.reload();
-      });
-
-    container
-      .querySelector(".force-reset-btn")
-      ?.addEventListener("click", async () => {
-        if (
-          confirm(
-            "This will delete all local data including notes. You will need to sync again. Continue?",
-          )
-        ) {
-          try {
-            await StateManager.forceResetDatabase();
-            Toast.show("Database reset. Refreshing...", "success");
-            setTimeout(() => window.location.reload(), 1000);
-          } catch (e) {
-            console.error("[AddressBook] Force reset failed:", e);
-            Toast.show("Reset failed: " + e.message, "error");
-          }
+        
+        container.querySelector('.refresh-page-btn')?.addEventListener('click', () => {
+            window.location.reload();
+        });
+        
+        container.querySelector('.force-reset-btn')?.addEventListener('click', async () => {
+            if (confirm('This will delete all local data including notes. You will need to sync again. Continue?')) {
+                try {
+                    await StateManager.forceResetDatabase();
+                    Toast.show('Database reset. Refreshing...', 'success');
+                    setTimeout(() => window.location.reload(), 1000);
+                } catch (e) {
+                    console.error('[AddressBook] Force reset failed:', e);
+                    Toast.show('Reset failed: ' + e.message, 'error');
+                }
+            }
+        });
+    },
+    
+    /**
+     * Searches for public keys by address prefix or full address.
+     * For full 56-char addresses starting with G, performs on-chain lookup.
+     * For partial input, filters the local table.
+     * @param {string} searchTerm - Full Stellar address or prefix to search
+     */
+    async search(searchTerm) {
+        // If empty, just show all results
+        if (!searchTerm) {
+            await this.render();
+            return;
         }
-      });
-  },
-
-  /**
-   * Searches for public keys by address prefix or full address.
-   * For full 56-char addresses starting with G, performs on-chain lookup.
-   * For partial input, filters the local table.
-   * @param {string} searchTerm - Full Stellar address or prefix to search
-   */
-  async search(searchTerm) {
-    // If empty, just show all results
-    if (!searchTerm) {
-      await this.render();
-      return;
-    }
-
-    // Normalize to uppercase for consistent matching
-    const term = searchTerm.toUpperCase();
-
-    const searchResult = document.getElementById("addressbook-search-result");
-    const tbody = document.getElementById("addressbook-tbody");
-    const empty = document.getElementById("empty-addressbook");
-    const loading = document.getElementById("addressbook-loading");
-
-    // If it's a full valid address, do exact on-chain lookup
-    if (term.startsWith("G") && term.length === 56) {
-      loading?.classList.remove("hidden");
-      empty?.classList.add("hidden");
-      searchResult?.classList.add("hidden");
-      tbody?.replaceChildren();
-
-      try {
-        const result = await StateManager.searchPublicKey(term);
-        loading?.classList.add("hidden");
-
-        if (result.found) {
-          searchResult?.classList.remove("hidden");
-          this.renderSearchResult(result.record, result.source);
-          Toast.show(`Found public key (${result.source})`, "success");
-        } else {
-          searchResult?.classList.remove("hidden");
-          this.renderSearchNotFound(term);
+        
+        // Normalize to uppercase for consistent matching
+        const term = searchTerm.toUpperCase();
+        
+        const searchResult = document.getElementById('addressbook-search-result');
+        const tbody = document.getElementById('addressbook-tbody');
+        const empty = document.getElementById('empty-addressbook');
+        const loading = document.getElementById('addressbook-loading');
+        
+        // If it's a full valid address, do exact on-chain lookup
+        if (term.startsWith('G') && term.length === 56) {
+            loading?.classList.remove('hidden');
+            empty?.classList.add('hidden');
+            searchResult?.classList.add('hidden');
+            tbody?.replaceChildren();
+            
+            try {
+                const result = await StateManager.searchPublicKey(term);
+                loading?.classList.add('hidden');
+                
+                if (result.found) {
+                    searchResult?.classList.remove('hidden');
+                    this.renderSearchResult(result.record, result.source);
+                    Toast.show(`Found public key (${result.source})`, 'success');
+                } else {
+                    searchResult?.classList.remove('hidden');
+                    this.renderSearchNotFound(term);
+                }
+            } catch (error) {
+                console.error('[AddressBook] Search failed:', error);
+                loading?.classList.add('hidden');
+                Toast.show('Search failed: ' + error.message, 'error');
+            }
+            return;
         }
-      } catch (error) {
-        console.error("[AddressBook] Search failed:", error);
-        loading?.classList.add("hidden");
-        Toast.show("Search failed: " + error.message, "error");
-      }
-      return;
-    }
-
-    // For partial search, use the live filter
-    await this.filterTable(searchTerm);
-  },
-
-  /**
-   * Renders a search result showing both encryption and note keys.
-   * @param {Object} record - Public key record
-   * @param {string} source - 'local' or 'onchain'
-   */
-  renderSearchResult(record, source) {
-    const container = document.getElementById("addressbook-search-result");
-    if (!container) return;
-
-    const sourceLabel =
-      source === "onchain" ? "Found on-chain" : "Found locally";
-    const sourceBadgeClass =
-      source === "onchain"
-        ? "bg-emerald-500/20 text-emerald-400"
-        : "bg-brand-500/20 text-brand-400";
-
-    // Use new fields if available, fallback to legacy publicKey
-    const encryptionKey = record.encryptionKey || record.publicKey;
-    const noteKey = record.noteKey || record.publicKey;
-
-    container.innerHTML = `
+        
+        // For partial search, use the live filter
+        await this.filterTable(searchTerm);
+    },
+    
+    /**
+     * Renders a search result showing both encryption and note keys.
+     * @param {Object} record - Public key record
+     * @param {string} source - 'local' or 'onchain'
+     */
+    renderSearchResult(record, source) {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        const sourceLabel = source === 'onchain' ? 'Found on-chain' : 'Found locally';
+        const sourceBadgeClass = source === 'onchain' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-brand-500/20 text-brand-400';
+        
+        // Use new fields if available, fallback to legacy publicKey
+        const encryptionKey = record.encryptionKey || record.publicKey;
+        const noteKey = record.noteKey || record.publicKey;
+        
+        container.innerHTML = `
             <div class="p-4 bg-dark-800 border border-dark-700 rounded-lg">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-sm font-semibold text-dark-200">Search Result</h4>
@@ -402,50 +379,36 @@ export const AddressBook = {
             </div>
         `;
 
-    container.querySelector(".search-source").textContent = sourceLabel;
-    container.querySelector(".search-addr").textContent = record.address;
-    container.querySelector(".search-enckey").textContent = Utils.truncateHex(
-      encryptionKey,
-      12,
-      12,
-    );
-    container.querySelector(".search-notekey").textContent = Utils.truncateHex(
-      noteKey,
-      12,
-      12,
-    );
+        container.querySelector('.search-source').textContent = sourceLabel;
+        container.querySelector('.search-addr').textContent = record.address;
+        container.querySelector('.search-enckey').textContent = Utils.truncateHex(encryptionKey, 12, 12);
+        container.querySelector('.search-notekey').textContent = Utils.truncateHex(noteKey, 12, 12);
 
-    // Attach event listeners - pass both keys to transfer
-    container
-      .querySelector(".search-use-transfer")
-      ?.addEventListener("click", () => {
-        this.useInTransfer(encryptionKey, noteKey);
-      });
-
-    container
-      .querySelector(".search-copy-keys")
-      ?.addEventListener("click", () => {
-        Utils.copyToClipboard(
-          `Encryption: ${encryptionKey}\\nNote: ${noteKey}`,
-        );
-      });
-
-    container.querySelector(".search-clear")?.addEventListener("click", () => {
-      container.classList.add("hidden");
-      document.getElementById("addressbook-search").value = "";
-      this.render();
-    });
-  },
-
-  /**
-   * Renders a not-found search result.
-   * @param {string} address - The searched address
-   */
-  renderSearchNotFound(address) {
-    const container = document.getElementById("addressbook-search-result");
-    if (!container) return;
-
-    container.innerHTML = `
+        // Attach event listeners - pass both keys to transfer
+        container.querySelector('.search-use-transfer')?.addEventListener('click', () => {
+            this.useInTransfer(encryptionKey, noteKey);
+        });
+        
+        container.querySelector('.search-copy-keys')?.addEventListener('click', () => {
+            Utils.copyToClipboard(`Encryption: ${encryptionKey}\\nNote: ${noteKey}`);
+        });
+        
+        container.querySelector('.search-clear')?.addEventListener('click', () => {
+            container.classList.add('hidden');
+            document.getElementById('addressbook-search').value = '';
+            this.render();
+        });
+    },
+    
+    /**
+     * Renders a not-found search result.
+     * @param {string} address - The searched address
+     */
+    renderSearchNotFound(address) {
+        const container = document.getElementById('addressbook-search-result');
+        if (!container) return;
+        
+        container.innerHTML = `
             <div class="p-4 bg-dark-800 border border-red-500/30 rounded-lg">
                 <div class="flex items-center gap-2 mb-2">
                     <svg class="w-4 h-4 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -467,180 +430,161 @@ export const AddressBook = {
             </div>
         `;
 
-    container.querySelector(".search-address").textContent = Utils.truncateHex(
-      address,
-      8,
-      8,
-    );
+        container.querySelector('.search-address').textContent = Utils.truncateHex(address, 8, 8);
 
-    container.querySelector(".search-clear")?.addEventListener("click", () => {
-      container.classList.add("hidden");
-      document.getElementById("addressbook-search").value = "";
-      this.render();
-    });
-  },
-
-  /**
-   * Creates a table row for an address book entry.
-   * @param {Object} record - Public key record
-   * @returns {HTMLElement}
-   */
-  createRow(record) {
-    const row =
-      App.templates.addressBookRow.content.cloneNode(true).firstElementChild;
-    row.dataset.address = record.address;
-
-    // Use new fields if available, fallback to legacy publicKey
-    const encryptionKey = record.encryptionKey || record.publicKey;
-    const noteKey = record.noteKey || record.publicKey;
-
-    row.querySelector(".ab-address").textContent = Utils.truncateHex(
-      record.address,
-      8,
-      8,
-    );
-    row.querySelector(".ab-notekey").textContent = Utils.truncateHex(
-      noteKey,
-      8,
-      6,
-    );
-    row.querySelector(".ab-enckey").textContent = Utils.truncateHex(
-      encryptionKey,
-      8,
-      6,
-    );
-    row.querySelector(".ab-date").textContent = record.registeredAt
-      ? Utils.formatDate(record.registeredAt)
-      : `Ledger ${record.ledger}`;
-
-    // Use in transfer button - pass both keys
-    row.querySelector(".use-transfer-btn")?.addEventListener("click", () => {
-      this.useInTransfer(encryptionKey, noteKey);
-    });
-
-    // Copy note key button
-    row.querySelector(".copy-notekey-btn")?.addEventListener("click", () => {
-      Utils.copyToClipboard(noteKey);
-      Toast.show("Note key copied", "success");
-    });
-
-    // Copy encryption key button
-    row.querySelector(".copy-enckey-btn")?.addEventListener("click", () => {
-      Utils.copyToClipboard(encryptionKey);
-      Toast.show("Encryption key copied", "success");
-    });
-
-    // Copy address button
-    row.querySelector(".copy-address-btn")?.addEventListener("click", () => {
-      Utils.copyToClipboard(record.address);
-      Toast.show("Address copied", "success");
-    });
-
-    return row;
-  },
-
-  /**
-   * Fills recipient fields in transfer or transact mode.
-   * If in transact mode, stays there and fills the first empty output.
-   * If first output has keys filled, tries the second output.
-   * If in transfer mode (or any other), switches to transfer tab.
-   * @param {string} encryptionKey - X25519 encryption public key
-   * @param {string} noteKey - BN254 note public key
-   */
-  useInTransfer(encryptionKey, noteKey) {
-    // Check if we're in transact mode
-    if (App.state.activeTab === "transact") {
-      this.fillTransactOutput(encryptionKey, noteKey);
-      return;
-    }
-
-    // Default: fill transfer fields and switch to transfer tab
-    const noteKeyInput = document.getElementById("transfer-recipient-key");
-    if (noteKeyInput) {
-      noteKeyInput.value = noteKey;
-      noteKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    const encKeyInput = document.getElementById("transfer-recipient-enc-key");
-    if (encKeyInput) {
-      encKeyInput.value = encryptionKey;
-      encKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    if (TabsRef) {
-      TabsRef.switch("transfer");
-    }
-
-    Toast.show("Keys added to transfer", "success");
-  },
-
-  /**
-   * Fills transact mode output fields with recipient keys.
-   * Finds the first output with empty keys, or the second if first is filled.
-   * @param {string} encryptionKey - X25519 encryption public key
-   * @param {string} noteKey - BN254 note public key
-   */
-  fillTransactOutput(encryptionKey, noteKey) {
-    const outputs = document.querySelectorAll(
-      "#transact-outputs .advanced-output-row",
-    );
-    if (!outputs.length) {
-      Toast.show("No output rows found", "error");
-      return;
-    }
-
-    // Find the first output with empty keys
-    let targetRow = null;
-    for (const row of outputs) {
-      const noteKeyInput = row.querySelector(".output-note-key");
-      const encKeyInput = row.querySelector(".output-enc-key");
-
-      const noteKeyEmpty = !noteKeyInput?.value.trim();
-      const encKeyEmpty = !encKeyInput?.value.trim();
-
-      if (noteKeyEmpty && encKeyEmpty) {
-        targetRow = row;
-        break;
-      }
-    }
-
-    // If no completely empty output found, try to find one with at least one empty key
-    if (!targetRow) {
-      for (const row of outputs) {
-        const noteKeyInput = row.querySelector(".output-note-key");
-        const encKeyInput = row.querySelector(".output-enc-key");
-
-        const noteKeyEmpty = !noteKeyInput?.value.trim();
-        const encKeyEmpty = !encKeyInput?.value.trim();
-
-        if (noteKeyEmpty || encKeyEmpty) {
-          targetRow = row;
-          break;
+        container.querySelector('.search-clear')?.addEventListener('click', () => {
+            container.classList.add('hidden');
+            document.getElementById('addressbook-search').value = '';
+            this.render();
+        });
+    },
+    
+    /**
+     * Creates a table row for an address book entry.
+     * @param {Object} record - Public key record
+     * @returns {HTMLElement}
+     */
+    createRow(record) {
+        const row = App.templates.addressBookRow.content.cloneNode(true).firstElementChild;
+        row.dataset.address = record.address;
+        
+        // Use new fields if available, fallback to legacy publicKey
+        const encryptionKey = record.encryptionKey || record.publicKey;
+        const noteKey = record.noteKey || record.publicKey;
+        
+        row.querySelector('.ab-address').textContent = Utils.truncateHex(record.address, 8, 8);
+        row.querySelector('.ab-notekey').textContent = Utils.truncateHex(noteKey, 8, 6);
+        row.querySelector('.ab-enckey').textContent = Utils.truncateHex(encryptionKey, 8, 6);
+        row.querySelector('.ab-date').textContent = record.registeredAt 
+            ? Utils.formatDate(record.registeredAt)
+            : `Ledger ${record.ledger}`;
+        
+        // Use in transfer button - pass both keys
+        row.querySelector('.use-transfer-btn')?.addEventListener('click', () => {
+            this.useInTransfer(encryptionKey, noteKey);
+        });
+        
+        // Copy note key button
+        row.querySelector('.copy-notekey-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(noteKey);
+            Toast.show('Note key copied', 'success');
+        });
+        
+        // Copy encryption key button
+        row.querySelector('.copy-enckey-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(encryptionKey);
+            Toast.show('Encryption key copied', 'success');
+        });
+        
+        // Copy address button
+        row.querySelector('.copy-address-btn')?.addEventListener('click', () => {
+            Utils.copyToClipboard(record.address);
+            Toast.show('Address copied', 'success');
+        });
+        
+        return row;
+    },
+    
+    /**
+     * Fills recipient fields in transfer or transact mode.
+     * If in transact mode, stays there and fills the first empty output.
+     * If first output has keys filled, tries the second output.
+     * If in transfer mode (or any other), switches to transfer tab.
+     * @param {string} encryptionKey - X25519 encryption public key
+     * @param {string} noteKey - BN254 note public key
+     */
+    useInTransfer(encryptionKey, noteKey) {
+        // Check if we're in transact mode
+        if (App.state.activeTab === 'transact') {
+            this.fillTransactOutput(encryptionKey, noteKey);
+            return;
         }
-      }
+        
+        // Default: fill transfer fields and switch to transfer tab
+        const noteKeyInput = document.getElementById('transfer-recipient-key');
+        if (noteKeyInput) {
+            noteKeyInput.value = noteKey;
+            noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        const encKeyInput = document.getElementById('transfer-recipient-enc-key');
+        if (encKeyInput) {
+            encKeyInput.value = encryptionKey;
+            encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        if (TabsRef) {
+            TabsRef.switch('transfer');
+        }
+        
+        Toast.show('Keys added to transfer', 'success');
+    },
+    
+    /**
+     * Fills transact mode output fields with recipient keys.
+     * Finds the first output with empty keys, or the second if first is filled.
+     * @param {string} encryptionKey - X25519 encryption public key
+     * @param {string} noteKey - BN254 note public key
+     */
+    fillTransactOutput(encryptionKey, noteKey) {
+        const outputs = document.querySelectorAll('#transact-outputs .advanced-output-row');
+        if (!outputs.length) {
+            Toast.show('No output rows found', 'error');
+            return;
+        }
+        
+        // Find the first output with empty keys
+        let targetRow = null;
+        for (const row of outputs) {
+            const noteKeyInput = row.querySelector('.output-note-key');
+            const encKeyInput = row.querySelector('.output-enc-key');
+            
+            const noteKeyEmpty = !noteKeyInput?.value.trim();
+            const encKeyEmpty = !encKeyInput?.value.trim();
+            
+            if (noteKeyEmpty && encKeyEmpty) {
+                targetRow = row;
+                break;
+            }
+        }
+        
+        // If no completely empty output found, try to find one with at least one empty key
+        if (!targetRow) {
+            for (const row of outputs) {
+                const noteKeyInput = row.querySelector('.output-note-key');
+                const encKeyInput = row.querySelector('.output-enc-key');
+                
+                const noteKeyEmpty = !noteKeyInput?.value.trim();
+                const encKeyEmpty = !encKeyInput?.value.trim();
+                
+                if (noteKeyEmpty || encKeyEmpty) {
+                    targetRow = row;
+                    break;
+                }
+            }
+        }
+        
+        if (!targetRow) {
+            Toast.show('All outputs already have recipients', 'info');
+            return;
+        }
+        
+        const noteKeyInput = targetRow.querySelector('.output-note-key');
+        const encKeyInput = targetRow.querySelector('.output-enc-key');
+        
+        if (noteKeyInput) {
+            noteKeyInput.value = noteKey;
+            noteKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        if (encKeyInput) {
+            encKeyInput.value = encryptionKey;
+            encKeyInput.dispatchEvent(new Event('input', { bubbles: true }));
+        }
+        
+        this.switchSection('notes');
+        
+        const outputIndex = parseInt(targetRow.dataset.index || '0', 10) + 1;
+        Toast.show(`Keys added to output ${outputIndex}`, 'success');
     }
-
-    if (!targetRow) {
-      Toast.show("All outputs already have recipients", "info");
-      return;
-    }
-
-    const noteKeyInput = targetRow.querySelector(".output-note-key");
-    const encKeyInput = targetRow.querySelector(".output-enc-key");
-
-    if (noteKeyInput) {
-      noteKeyInput.value = noteKey;
-      noteKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    if (encKeyInput) {
-      encKeyInput.value = encryptionKey;
-      encKeyInput.dispatchEvent(new Event("input", { bubbles: true }));
-    }
-
-    this.switchSection("notes");
-
-    const outputIndex = parseInt(targetRow.dataset.index || "0", 10) + 1;
-    Toast.show(`Keys added to output ${outputIndex}`, "success");
-  },
 };
