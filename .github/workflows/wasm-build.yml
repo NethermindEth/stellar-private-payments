@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           profile: minimal
           toolchain: stable

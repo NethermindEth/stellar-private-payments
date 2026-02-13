@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
-      - uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
           components: clippy
@@ -39,4 +39,4 @@ jobs:
         run: cargo clippy --all-targets --all-features
 
       - name: Check typos
-        uses: crate-ci/typos@9d44f002244429c8e5bef03d48e2e2ba708e48c3 # v1.42.0
+        uses: crate-ci/typos@bb4666ad77b539a6b4ce4eda7ebb6de553704021 # v1.42.0

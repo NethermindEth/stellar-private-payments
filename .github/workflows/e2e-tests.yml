@@ -23,7 +23,7 @@ jobs:
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
           targets: wasm32-unknown-unknown
@@ -35,7 +35,7 @@ jobs:
 
       - name: Cache cargo-binstall
         id: cache-binstall
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94d9d67 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: ~/.cargo/bin/cargo-binstall
           key: cargo-binstall-1.12.3
@@ -46,7 +46,7 @@ jobs:
 
       - name: Cache CLI tools
         id: cache-cli
-        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94d9d67 # v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/bin/wasm-pack

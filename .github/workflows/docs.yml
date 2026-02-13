@@ -21,7 +21,7 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
-      - uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
@@ -62,7 +62,7 @@ jobs:
           cp -r target/doc docs/book/api
 
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@56afc609e74202f3d62db1be86977428bd3a18c2 # v3
+        uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
           path: docs/book
 
@@ -78,4 +78,4 @@ jobs:
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
-        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac553fd0d31 # v4
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
