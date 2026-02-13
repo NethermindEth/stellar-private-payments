@@ -1,9 +1,10 @@
 name: Build and test code
 
 on:
-  schedule:
-    - cron: "0 2 * * *"
-  workflow_dispatch:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
@@ -24,4 +25,4 @@ jobs:
       - name: Build
         run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace -- --include-ignored
+        run: cargo test -- --ignored
