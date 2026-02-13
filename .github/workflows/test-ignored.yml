@@ -1,4 +1,4 @@
-name: Build and test code
+name: Build and test ignored code
 
 on:
   push:
