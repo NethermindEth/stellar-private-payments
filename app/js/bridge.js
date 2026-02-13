@@ -63,17 +63,16 @@ function validateArtifactUrl(url) {
     if (typeof url !== 'string' || url.length === 0) {
         throw new Error('Artifact URL must be a non-empty string');
     }
-    // Block absolute URLs with protocol (e.g., https://evil.com/...)
-    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:\/\//.test(url)) {
+    // Block absolute URLs with scheme prefix (e.g., https://evil.com, http:evil.com, data:...)
+    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(url)) {
         throw new Error(`Artifact URL must be a relative path, got absolute URL: ${url}`);
     }
     // Block protocol-relative URLs (e.g., //evil.com/...)
     if (url.startsWith('//')) {
         throw new Error(`Artifact URL must not be protocol-relative: ${url}`);
     }
-    // Block path traversal
-    const normalized = new URL(url, 'https://dummy.invalid').pathname;
-    if (normalized !== new URL(normalized, 'https://dummy.invalid').pathname) {
+    // Block path traversal (e.g., /circuits/../../admin)
+    if (/(?:^|\/)\.\.(?:\/|$)/.test(url)) {
         throw new Error(`Artifact URL contains path traversal: ${url}`);
     }
     return url;
