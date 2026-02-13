@@ -36,6 +36,8 @@ jobs:
 
       - name: Install Stellar CLI
         uses: stellar/stellar-cli@a048a57a75762458b487052e0021ea704a926bee # v25.1.0
+        with:
+          version: v25.1.0
 
       - name: Build contracts
         run: |
