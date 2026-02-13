@@ -13,7 +13,7 @@
 
 A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
-The system incorporates **Administrative Service Providers (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
+The system incorporates **Association Set Provider (ASPs)** as a control mechanism to provide illicit activity safeguards through association sets. ASPs maintain membership and non-membership Merkle trees that allow proving whether specific deposits are part of approved or blocked sets, enabling pool operators to enforce administrative controls without compromising user privacy.
 
 ## Features
 
@@ -28,6 +28,7 @@ The demo application consists on three main parts:
 - **Frontend**: Provides a nice user interface for interacting with the system. 
 - **Circuits**: Where the real zk-magic happens and constraints are defined.
 - **Smart Contracts**: They define the state of the system, and how transactions are processed.
+The Frontend includes the [user-facing part](#transaction-flow) and an example of an [ASP admin page](#asp-admin-page) which will be separated according to roles in the main application
 
 If you want to try it out:
 
@@ -88,7 +89,7 @@ If you want to try it out:
 #### ASP Admin Page
 ![ASP Admin Page](/assets/demo-002.png)
 
-This is the administrative control panel for managing the **Administrative Service Provider (ASP)** membership trees. It allows you to:
+This is the administrative control panel for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
