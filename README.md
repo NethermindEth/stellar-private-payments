@@ -153,3 +153,7 @@ The maintainers of this repository provide the source code "as is" and assume no
 ## Would like to contribute?
 
 See [Contributing](./CONTRIBUTING.md).
+
+## Credit
+
+The Horizen labs implementation of [Poseidon2](https://github.com/HorizenLabs/poseidon2) is used in this repository and we give them the credit to it. 
