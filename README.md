@@ -78,11 +78,24 @@ If you want to try it out:
 ### Architecture Overview
 
 #### Transaction Flow
+![Deposit Page](/assets/demo-001.png)
 
 1. **Deposit**: User deposits tokens into the pool, creating a commitment (UTXO). No input notes are spent, creates output notes.
 2. **Withdraw**: User proves ownership of commitments and withdraws tokens. Inputs notes are spent, no output notes are created.
 3. **Transfer**: User spends existing commitments and creates new ones, all done privately.  Input notes are spent, and output notes under a new public key are created.
 4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
+
+#### ASP Admin Page
+![ASP Admin Page](/assets/demo-002.png)
+
+This is the administrative control panel for managing the **Administrative Service Provider (ASP)** membership trees. It allows you to:
+
+1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
+2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
+3. **Derive keys** for accounts - Generate derived keys for any account (though insertion must be signed by the ASP admin account)
+
+This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8080/admin.html`
+
 
 #### Zero-Knowledge Circuits
 
