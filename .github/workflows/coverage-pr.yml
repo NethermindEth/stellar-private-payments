@@ -20,19 +20,20 @@ jobs:
     outputs:
       pct: ${{ steps.cov.outputs.coverage }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
         with:
+          toolchain: stable
           components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+      - uses: taiki-e/install-action@7db4f7f3e8f2c0e82e1b5fc7e3cefb8c8a498e1e # cargo-llvm-cov
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
         with:
           name: coverage-lcov
           path: lcov.info
@@ -76,23 +77,24 @@ jobs:
       # 2) Fallback: if no artifact, checkout base commit and compute base coverage here
       - name: Checkout base
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Setup Rust (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
         with:
+          toolchain: stable
           components: llvm-tools-preview
 
       - name: Cache (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
 
       - name: Install cargo-llvm-cov (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        uses: taiki-e/install-action@cargo-llvm-cov
+        uses: taiki-e/install-action@7db4f7f3e8f2c0e82e1b5fc7e3cefb8c8a498e1e # cargo-llvm-cov
 
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
@@ -123,7 +125,7 @@ jobs:
           body-includes: "<!-- coverage-bot -->"
 
       - name: Comment only if head < base
-        uses: actions/github-script@v7
+        uses: actions/github-script@60a0d83039c74a4aee543508d2ffcb1c3799cdea # v7
         with:
           script: |
             const base = parseFloat(`${{ steps.basecov.outputs.coverage }}`);

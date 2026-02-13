@@ -20,21 +20,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@a54b7f31ebfbf58913f6bf8bb5d8523a23a41a63 # stable
         with:
+          toolchain: stable
           targets: wasm32-unknown-unknown
 
       - name: Cache Rust
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
         with:
           cache-targets: "true"
 
       - name: Cache cargo-binstall
         id: cache-binstall
-        uses: actions/cache@v4
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94d9d67 # v4
         with:
           path: ~/.cargo/bin/cargo-binstall
           key: cargo-binstall-1.12.3
@@ -45,7 +46,7 @@ jobs:
 
       - name: Cache CLI tools
         id: cache-cli
-        uses: actions/cache@v4
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94d9d67 # v4
         with:
           path: |
             ~/.cargo/bin/wasm-pack
@@ -57,7 +58,7 @@ jobs:
         run: cargo binstall wasm-pack trunk --no-confirm --locked
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af # v4
         with:
           node-version: "23"
           cache: "npm"
@@ -83,7 +84,7 @@ jobs:
 
       - name: Upload test results
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
         with:
           name: playwright-report
           path: |
