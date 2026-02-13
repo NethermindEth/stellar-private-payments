@@ -38,6 +38,9 @@ jobs:
             fi
           done
 
+      - name: Copy assets into docs source
+        run: cp -r assets docs/src/assets
+
       - name: Build mdBook
         env:
           MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_url }}/

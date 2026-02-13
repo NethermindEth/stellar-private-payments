@@ -43,5 +43,5 @@ clean:
 	cargo clean
 
 .PHONY: doc
-doc: 
-	mdbook build docs/ && cargo doc --no-deps --workspace && cp -r target/doc docs/book/api && open docs/book/index.html
+doc:
+	cp -r assets docs/src/assets && mdbook build docs/ && rm -rf docs/src/assets && cargo doc --no-deps --workspace && cp -r target/doc docs/book/api && open docs/book/index.html

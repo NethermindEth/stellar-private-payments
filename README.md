@@ -79,7 +79,7 @@ If you want to try it out:
 ### Architecture Overview
 
 #### Transaction Flow
-![Deposit Page](/assets/demo-001.png)
+![Deposit Page](assets/demo-001.png)
 
 1. **Deposit**: User deposits tokens into the pool, creating a commitment (UTXO). No input notes are spent, creates output notes.
 2. **Withdraw**: User proves ownership of commitments and withdraws tokens. Inputs notes are spent, no output notes are created.
@@ -87,7 +87,7 @@ If you want to try it out:
 4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
 
 #### ASP Admin Page
-![ASP Admin Page](/assets/demo-002.png)
+![ASP Admin Page](assets/demo-002.png)
 
 This is the administrative control panel for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
 
