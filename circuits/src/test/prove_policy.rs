@@ -20,7 +20,7 @@ mod tests {
     };
     use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
-    const LEVELS: usize = 5;
+    const LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
 

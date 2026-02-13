@@ -1,6 +1,9 @@
 #!/bin/sh
 set -e
 
+echo "⚠️ Some tests are ignored because they take a long time"
+echo "⚠️ you can run them with ('BUILD_TESTS=1 cargo test -p circuits -- --ignored') "
+
 # Dependency sorting
 if ! cargo sort --workspace --check; then
     echo "❌ Dependencies should be sorted (run 'cargo sort --workspace')"

@@ -1,4 +1,4 @@
-name: Build and test code
+name: Build and test ignored code
 
 on:
   push:
@@ -16,7 +16,7 @@ env:
 
 jobs:
   build:
-    timeout-minutes: 30
+    timeout-minutes: 480
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,4 +25,4 @@ jobs:
       - name: Build
         run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace
+        run: cargo test -- --ignored
