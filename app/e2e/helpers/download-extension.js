@@ -8,7 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 
 const VERSION = process.argv[2] || '5.37.1';
 const URL = `https://github.com/stellar/freighter/releases/download/${VERSION}/build-${VERSION}.zip`;
@@ -24,10 +24,10 @@ if (fs.existsSync(path.join(OUT_DIR, 'manifest.json'))) {
 fs.mkdirSync(OUT_DIR, { recursive: true });
 
 console.log(`Downloading Freighter ${VERSION} from ${URL}...`);
-execSync(`curl -fsSL -o "${ZIP_PATH}" "${URL}"`, { stdio: 'inherit' });
+execFileSync('curl', ['-fsSL', '-o', ZIP_PATH, URL], { stdio: 'inherit' });
 
 console.log('Extracting...');
-execSync(`unzip -o "${ZIP_PATH}" -d "${OUT_DIR}"`, { stdio: 'inherit' });
+execFileSync('unzip', ['-o', ZIP_PATH, '-d', OUT_DIR], { stdio: 'inherit' });
 
 // The ZIP may extract into a subdirectory (e.g. build/). If so, move contents up.
 const buildSubdir = path.join(OUT_DIR, 'build');
