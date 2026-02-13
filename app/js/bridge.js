@@ -447,6 +447,8 @@ export async function init(circuitWasmUrl, provingKeyBytes, r1csBytes) {
     await initProverWasm();
 
     // Load circuit WASM for witness calculator
+    // URL is validated by validateArtifactUrl() which blocks absolute URLs,
+    // protocol-relative URLs, and path traversal attacks
     const response = await fetch(validateArtifactUrl(circuitWasmUrl));
     if (!response.ok) {
         throw new Error(`Failed to fetch circuit WASM: ${response.status}`);
