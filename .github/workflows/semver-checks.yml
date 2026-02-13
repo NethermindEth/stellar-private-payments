@@ -26,15 +26,17 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
           # cargo-semver-checks needs the full git history to compare versions
           fetch-depth: 0
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
 
       - name: Cache cargo registry
-        uses: actions/cache@v4
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             ~/.cargo/registry/index/
@@ -71,7 +73,7 @@ jobs:
 
       - name: Check semver compatibility
         if: steps.get-baseline.outputs.skip == 'false'
-        uses: obi1kenobi/cargo-semver-checks-action@v2
+        uses: obi1kenobi/cargo-semver-checks-action@5b298c9520f7096a4683c0bd981a7ac5a7e249ae # v2
         with:
           baseline-rev: ${{ steps.get-baseline.outputs.baseline_rev }}
           verbose: true
