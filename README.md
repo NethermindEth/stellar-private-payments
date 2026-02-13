@@ -156,4 +156,5 @@ See [Contributing](./CONTRIBUTING.md).
 
 ## Credit
 
-The Horizen labs implementation of [Poseidon2](https://github.com/HorizenLabs/poseidon2) is used in this repository and we give them the credit to it. 
+Credit goes to Horizen Labs for their [Poseidon2 implementation](https://github.com/HorizenLabs/poseidon2), which is integrated into this repository.
+
