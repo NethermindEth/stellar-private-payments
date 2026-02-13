@@ -5,7 +5,6 @@ Detailed API documentation generated from source code via `rustdoc`.
 ## Core
 
 - [circuits](api/circuits/index.html)
-- [zkhash (poseidon2)](api/zkhash/index.html)
 
 ## App (WASM)
 
