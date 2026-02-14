@@ -21,3 +21,6 @@ asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
+
+[lints]
+workspace = true

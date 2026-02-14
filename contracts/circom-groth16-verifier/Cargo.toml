@@ -23,3 +23,6 @@ ark-relations = { workspace = true }
 ark-std = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }
+
+[lints]
+workspace = true

@@ -5,6 +5,13 @@
 //! tracking. The contract maintains a Merkle tree where each leaf represents a
 //! member, and the root serves as a commitment to the entire membership set.
 #![no_std]
+#![allow(
+    missing_docs,
+    clippy::arithmetic_side_effects,
+    clippy::unwrap_used,
+    clippy::cast_sign_loss,
+    clippy::cast_possible_truncation
+)]
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
 };

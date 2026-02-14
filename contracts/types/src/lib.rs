@@ -1,4 +1,6 @@
+//! Shared types for Stellar private transaction contracts.
 #![no_std]
+#![allow(missing_docs)]
 
 use soroban_sdk::{
     Bytes, BytesN, Vec, contracterror, contracttype,

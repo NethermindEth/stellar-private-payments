@@ -1,7 +1,7 @@
-#![no_std]
-
 //! Groth16 verifier contract for Circom proofs on Soroban using the native
 //! BN254 precompile.
+#![no_std]
+#![allow(missing_docs, clippy::arithmetic_side_effects)]
 
 // Use Soroban's allocator for heap allocations
 extern crate alloc;
@@ -87,8 +87,13 @@ impl CircomGroth16Verifier {
         let mut vk_x = vk.ic.get(0).ok_or(Groth16Error::MalformedPublicInputs)?;
 
         for i in 0..pub_inputs.len() {
-            let s = pub_inputs.get(i).unwrap();
-            let v = vk.ic.get(i + 1).unwrap();
+            let s = pub_inputs
+                .get(i)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
+            let v = vk
+                .ic
+                .get(i + 1)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
             let prod = bn.g1_mul(&v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);
         }
