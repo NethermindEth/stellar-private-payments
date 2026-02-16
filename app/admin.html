@@ -147,6 +147,26 @@
           <div class="font-mono text-xs text-dark-200 break-all" id="nonMembershipRoot">--</div>
         </div>
       </div>
+      <!-- Admin Insert Only Toggle -->
+      <div class="mt-4 p-3 rounded-lg bg-dark-800 border border-dark-700">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <div class="text-[10px] uppercase tracking-wide text-dark-400">Admin-Only Leaf Insert</div>
+            <p class="text-xs text-dark-500 mt-0.5">When enabled, only the admin can insert membership leaves. When disabled, anyone can insert.</p>
+          </div>
+          <div class="flex items-center gap-3 flex-shrink-0">
+            <span id="adminInsertOnlyStatus" class="text-xs font-mono text-dark-300">--</span>
+            <button
+              type="button"
+              id="toggleAdminInsertOnlyBtn"
+              class="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-xs font-semibold hover:border-brand-500 hover:text-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled
+            >
+              Toggle
+            </button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="membership-heading">

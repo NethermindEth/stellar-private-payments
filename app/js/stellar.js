@@ -243,11 +243,12 @@ export async function readASPMembershipState(contractId) {
         };
 
         // Fetch keys in parallel
-        const [rootResult, levelsResult, nextIndexResult, adminResult] = await Promise.all([
+        const [rootResult, levelsResult, nextIndexResult, adminResult, adminInsertOnlyResult] = await Promise.all([
             readLedgerEntry(contractId, createEnumKey('Root')),
             readLedgerEntry(contractId, createEnumKey('Levels')),
             readLedgerEntry(contractId, createEnumKey('NextIndex')),
             readLedgerEntry(contractId, createEnumKey('Admin')),
+            readLedgerEntry(contractId, createEnumKey('AdminInsertOnly')),
         ]);
 
         if (rootResult.success) {
@@ -257,6 +258,7 @@ export async function readASPMembershipState(contractId) {
         if (levelsResult.success) results.levels = levelsResult.value;
         if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;
         if (adminResult.success) results.admin = adminResult.value;
+        results.adminInsertOnly = adminInsertOnlyResult.success ? adminInsertOnlyResult.value : true;
 
         if (results.levels !== undefined) {
             results.capacity = Math.pow(2, results.levels);
