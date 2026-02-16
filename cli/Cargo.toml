@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 # CLI
-clap = { version = "4", features = ["derive"] }
+clap = { version = "4", features = ["derive", "env"] }
 
 # ZK (same as e2e-tests)
 ark-bn254 = { workspace = true }
@@ -49,6 +49,9 @@ anyhow = { workspace = true }
 dirs = "6"
 toml = "0.8"
 getrandom = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

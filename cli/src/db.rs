@@ -87,10 +87,9 @@ struct Store {
     registered_keys: HashMap<String, RegisteredKey>,
 }
 
-/// Database path for a given network.
-pub fn db_path(network: &str) -> Result<PathBuf> {
-    let base = dirs::config_dir().context("Could not determine config directory")?;
-    Ok(base.join("stellar").join("spp").join(format!("{network}.json")))
+/// Database path for a given network and pool.
+pub fn db_path(network: &str, pool: &str) -> Result<PathBuf> {
+    crate::config::pool_data_path(network, pool)
 }
 
 /// JSON file-backed database.
@@ -100,9 +99,9 @@ pub struct Database {
 }
 
 impl Database {
-    /// Open (or create) the database for the given network.
-    pub fn open(network: &str) -> Result<Self> {
-        let path = db_path(network)?;
+    /// Open (or create) the database for the given network and pool.
+    pub fn open(network: &str, pool: &str) -> Result<Self> {
+        let path = db_path(network, pool)?;
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create db dir {}", parent.display()))?;

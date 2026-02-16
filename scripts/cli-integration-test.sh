@@ -21,6 +21,13 @@ DEPLOYMENTS_JSON="$SCRIPT_DIR/deployments.json"
 DEPLOYMENTS_BACKUP=""
 NETWORK="testnet"
 
+# dirs::config_dir() on macOS = ~/Library/Application Support, Linux = ~/.config
+if [[ "$(uname)" == "Darwin" ]]; then
+  SPP_CONFIG_DIR="$HOME/Library/Application Support/stellar/spp"
+else
+  SPP_CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/stellar/spp"
+fi
+
 PASS_COUNT=0
 FAIL_COUNT=0
 
@@ -69,10 +76,8 @@ cleanup() {
     echo "Restored original deployments.json"
   fi
   # Remove the testnet config created by `spp init` so it doesn't affect real use
-  local spp_config_dir
-  spp_config_dir="${XDG_CONFIG_HOME:-$HOME/.config}/stellar/spp"
-  rm -f "$spp_config_dir/testnet.toml" 2>/dev/null
-  rm -f "$spp_config_dir/testnet.db" 2>/dev/null
+  rm -f "$SPP_CONFIG_DIR/testnet.toml" "$SPP_CONFIG_DIR/testnet.json" "$SPP_CONFIG_DIR/testnet.db" 2>/dev/null
+  rm -rf "$SPP_CONFIG_DIR/testnet" 2>/dev/null
 }
 
 trap cleanup EXIT
@@ -203,6 +208,10 @@ fi
 # ---------------------------------------------------------------------------
 # PHASE 1 — Init & Sync
 # ---------------------------------------------------------------------------
+
+# Clean any stale spp data from prior runs before testing
+rm -f "$SPP_CONFIG_DIR/testnet.toml" "$SPP_CONFIG_DIR/testnet.json" "$SPP_CONFIG_DIR/testnet.db" 2>/dev/null
+rm -rf "$SPP_CONFIG_DIR/testnet" 2>/dev/null
 
 banner "PHASE 1: Init & Sync"
 

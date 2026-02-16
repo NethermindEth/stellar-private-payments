@@ -6,12 +6,12 @@ use clap::{Parser, Subcommand};
 #[derive(Parser)]
 #[command(name = "stellar-spp", about = "Private payments on Stellar")]
 pub struct Cli {
-    /// Stellar network name (e.g., testnet, mainnet, standalone)
-    #[arg(long, global = true, default_value = "testnet")]
+    /// Stellar network name (matches `stellar network add` aliases)
+    #[arg(long, global = true, default_value = "testnet", env = "STELLAR_NETWORK")]
     pub network: String,
 
-    /// Pool contract address (overrides deployment config)
-    #[arg(long, global = true)]
+    /// Pool name (use `stellar spp pool ls` to see available pools)
+    #[arg(long, global = true, env = "STELLAR_SPP_POOL")]
     pub pool: Option<String>,
 
     #[command(subcommand)]
@@ -82,6 +82,10 @@ pub enum Commands {
     #[command(subcommand)]
     Notes(NotesCommand),
 
+    /// Pool management commands
+    #[command(subcommand)]
+    Pool(PoolCommand),
+
     /// ASP admin commands
     #[command(subcommand)]
     Admin(AdminCommand),
@@ -128,6 +132,46 @@ pub enum NotesCommand {
     Import {
         /// Path to the JSON file
         file: String,
+    },
+}
+
+/// Pool management subcommands.
+#[derive(Subcommand)]
+pub enum PoolCommand {
+    /// Add a pool from deployments.json or explicit flags
+    Add {
+        /// Pool name
+        name: String,
+        /// Pool contract ID (overrides deployments.json)
+        #[arg(long)]
+        pool_id: Option<String>,
+        /// ASP membership contract ID
+        #[arg(long)]
+        asp_membership: Option<String>,
+        /// ASP non-membership contract ID
+        #[arg(long)]
+        asp_non_membership: Option<String>,
+        /// Groth16 verifier contract ID
+        #[arg(long)]
+        verifier: Option<String>,
+        /// Deployer G... address
+        #[arg(long)]
+        deployer: Option<String>,
+        /// Admin G... address
+        #[arg(long)]
+        admin: Option<String>,
+    },
+    /// List pools for the current network
+    Ls,
+    /// Remove a pool
+    Rm {
+        /// Pool name
+        name: String,
+    },
+    /// Set the default pool
+    Use {
+        /// Pool name
+        name: String,
     },
 }
 

@@ -81,10 +81,7 @@ fn scan_notes_inner(
 }
 
 /// Export a note to JSON and print to stdout.
-pub fn export_note(note_id: &str) -> Result<()> {
-    // We need a database connection but don't know the network.
-    // Try testnet by default.
-    let db = Database::open("testnet")?;
+pub fn export_note(db: &Database, note_id: &str) -> Result<()> {
     let note = db
         .get_note(note_id)?
         .ok_or_else(|| anyhow::anyhow!("Note not found: {note_id}"))?;
@@ -106,7 +103,7 @@ pub fn export_note(note_id: &str) -> Result<()> {
 }
 
 /// Import a note from a JSON file.
-pub fn import_note(file: &str) -> Result<()> {
+pub fn import_note(db: &Database, file: &str) -> Result<()> {
     let contents = std::fs::read_to_string(file)
         .with_context(|| format!("Failed to read {file}"))?;
 
@@ -125,9 +122,6 @@ pub fn import_note(file: &str) -> Result<()> {
 
     let parsed: NoteJson =
         serde_json::from_str(&contents).context("Failed to parse note JSON")?;
-
-    let db = Database::open("testnet")?;
-    db.migrate()?;
 
     db.upsert_note(&UserNote {
         id: parsed.id,
