@@ -42,8 +42,8 @@ cp target/release/stellar-spp ~/.cargo/bin/
 ## Quick Start
 
 ```bash
-# 1. Initialize: loads contract addresses from deployments.json, creates local data store, runs initial sync
-stellar spp init
+# 1. Add a pool: loads contract addresses from deployments.json, creates local data store, runs initial sync
+stellar spp pool add default --sync
 
 # 2. Derive and inspect your ZK keys
 stellar spp keys show --source alice
@@ -77,7 +77,6 @@ All identity flags (`--source`, `--account`, `--to`, `--new-admin`) accept Stell
 
 | Command | Description |
 |---------|-------------|
-| `stellar spp init` | Load deployment config from `deployments.json`, create the local data store, and run an initial event sync |
 | `stellar spp sync` | Incremental sync: fetch new on-chain events since the last sync |
 | `stellar spp status [--source <id>]` | Show sync status, pool statistics, and (optionally) the balance for an identity |
 
@@ -110,7 +109,7 @@ All identity flags (`--source`, `--account`, `--to`, `--new-admin`) accept Stell
 
 | Command | Description |
 |---------|-------------|
-| `stellar spp pool add <name> [--pool-id <C...> --asp-membership <C...> --asp-non-membership <C...> --verifier <C...>]` | Add a pool from `deployments.json` or explicit contract IDs |
+| `stellar spp pool add <name> [--sync] [--pool-id <C...> --asp-membership <C...> --asp-non-membership <C...> --verifier <C...>]` | Add a pool from `deployments.json` or explicit contract IDs; `--sync` runs an initial event sync |
 | `stellar spp pool ls` | List pools for the current network, showing which is the default |
 | `stellar spp pool rm <name>` | Remove a pool and its local data |
 | `stellar spp pool use <name>` | Set the default pool for the current network |
@@ -236,7 +235,7 @@ cli/
 
 ## Configuration
 
-On `stellar spp init`, the CLI reads `scripts/deployments.json` from the workspace and saves a pool config (e.g. `.../{network}/pools/default.toml`):
+On `stellar spp pool add`, the CLI reads `scripts/deployments.json` from the workspace (or uses explicit `--pool-id` flags) and saves a pool config (e.g. `.../{network}/pools/default.toml`):
 
 ```toml
 network = "testnet"

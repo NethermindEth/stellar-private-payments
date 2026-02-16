@@ -24,7 +24,6 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Init => cmd_init(&cli),
         Commands::Sync => cmd_sync(&cli),
         Commands::Status { ref source } => cmd_status(&cli, source.as_deref()),
         Commands::Keys(ref sub) => match sub {
@@ -61,6 +60,7 @@ fn main() -> Result<()> {
                 verifier,
                 deployer,
                 admin,
+                sync,
             } => cmd_pool_add(
                 &cli,
                 name,
@@ -70,6 +70,7 @@ fn main() -> Result<()> {
                 verifier.as_deref(),
                 deployer.as_deref(),
                 admin.as_deref(),
+                *sync,
             ),
             PoolCommand::Ls => cmd_pool_ls(&cli),
             PoolCommand::Rm { name } => cmd_pool_rm(&cli, name),
@@ -101,38 +102,6 @@ fn resolve_pool(cli: &Cli) -> Result<String> {
     net_cfg.default_pool.context(
         "No default pool set. Use --pool <name> or run: stellar spp pool use <name>",
     )
-}
-
-/// Initialize deployment config and perform initial sync.
-fn cmd_init(cli: &Cli) -> Result<()> {
-    let pool_name = cli.pool.as_deref().unwrap_or("default");
-    config::maybe_migrate(&cli.network)?;
-    let cfg = config::load_or_create_config(&cli.network, pool_name)?;
-
-    // Set as default if this is the first pool
-    let mut net_cfg = config::load_network_config(&cli.network)?;
-    if net_cfg.default_pool.is_none() {
-        net_cfg.default_pool = Some(pool_name.to_string());
-        config::save_network_config(&cli.network, &net_cfg)?;
-    }
-
-    println!("Deployment config for network '{}', pool '{pool_name}':", cli.network);
-    println!("  Pool:               {}", cfg.pool);
-    println!("  ASP Membership:     {}", cfg.asp_membership);
-    println!("  ASP Non-Membership: {}", cfg.asp_non_membership);
-    println!("  Verifier:           {}", cfg.verifier);
-
-    let database = db::Database::open(&cli.network, pool_name)?;
-    database.migrate()?;
-    println!(
-        "\nDatabase initialized at {}",
-        db::db_path(&cli.network, pool_name)?.display()
-    );
-
-    println!("\nRunning initial sync...");
-    sync::sync_all(&database, &cfg, &cli.network)?;
-    println!("Initial sync complete.");
-    Ok(())
 }
 
 /// Incremental event sync.
@@ -310,6 +279,7 @@ fn cmd_pool_add(
     verifier: Option<&str>,
     deployer: Option<&str>,
     admin: Option<&str>,
+    do_sync: bool,
 ) -> Result<()> {
     config::validate_pool_name(name)?;
     config::maybe_migrate(&cli.network)?;
@@ -347,7 +317,18 @@ fn cmd_pool_add(
     } else {
         println!("Pool '{name}' added.");
     }
-    println!("  Pool contract: {}", cfg.pool);
+    println!("  Pool contract:      {}", cfg.pool);
+    println!("  ASP Membership:     {}", cfg.asp_membership);
+    println!("  ASP Non-Membership: {}", cfg.asp_non_membership);
+    println!("  Verifier:           {}", cfg.verifier);
+
+    if do_sync {
+        let database = db::Database::open(&cli.network, name)?;
+        database.migrate()?;
+        println!("\nRunning initial sync...");
+        sync::sync_all(&database, &cfg, &cli.network)?;
+        println!("Sync complete.");
+    }
 
     Ok(())
 }
@@ -360,7 +341,7 @@ fn cmd_pool_ls(cli: &Cli) -> Result<()> {
 
     if pools.is_empty() {
         println!("No pools configured for network '{}'.", cli.network);
-        println!("Run `stellar spp init` or `stellar spp pool add <name>` to add one.");
+        println!("Run `stellar spp pool add <name>` to add one.");
         return Ok(());
     }
 

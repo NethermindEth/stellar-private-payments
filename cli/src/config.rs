@@ -248,13 +248,6 @@ pub fn load_config(network: &str, pool: &str) -> Result<DeploymentConfig> {
     load_pool_config(network, pool)
 }
 
-/// Load config from `deployments.json` and save as a named pool.
-pub fn load_or_create_config(network: &str, pool: &str) -> Result<DeploymentConfig> {
-    let cfg = load_from_deployments_json(network)?;
-    save_pool_config(network, pool, &cfg)?; // validates pool name
-    Ok(cfg)
-}
-
 /// Load deployment config from the workspace `scripts/deployments.json`.
 pub fn load_from_deployments_json(network: &str) -> Result<DeploymentConfig> {
     // Try to find deployments.json relative to the binary or well-known paths

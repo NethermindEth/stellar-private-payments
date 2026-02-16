@@ -122,10 +122,10 @@ pub fn get_oldest_ledger(contract_id: &str, network: &str) -> Result<Option<u64>
         if nums.len() >= 2 {
             let min_ledger = nums[0];
             let max_ledger = nums[1];
-            // The RPC scan window is ~10,000 ledgers. Start from
-            // max - 10,000 to ensure we can reach recent events.
-            // Clamp to min_ledger so we don't go below the valid range.
-            let start = max_ledger.saturating_sub(10_000).max(min_ledger);
+            // The RPC scan window is ~9,965 ledgers (not exactly 10,000).
+            // Use 9,000 to leave comfortable headroom so events near the
+            // current max aren't missed due to boundary jitter.
+            let start = max_ledger.saturating_sub(9_000).max(min_ledger);
             return Ok(Some(start));
         }
         // Fallback: only got one number (min), use it with buffer

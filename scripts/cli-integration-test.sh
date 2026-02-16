@@ -213,21 +213,13 @@ fi
 rm -f "$SPP_CONFIG_DIR/testnet.toml" "$SPP_CONFIG_DIR/testnet.json" "$SPP_CONFIG_DIR/testnet.db" 2>/dev/null
 rm -rf "$SPP_CONFIG_DIR/testnet" 2>/dev/null
 
-banner "PHASE 1: Init & Sync"
+banner "PHASE 1: Pool Add & Sync"
 
-output="$(run_spp init)"
+output="$(run_spp pool add default --sync)"
 if echo "$output" | grep -q "Pool" && echo "$output" | grep -qi "C[A-Z0-9]\{55\}"; then
-  pass "spp init — mentions Pool and contract ID"
+  pass "spp pool add default --sync — mentions Pool and contract ID"
 else
-  fail "spp init — expected Pool mention and contract ID"
-  echo "$output"
-fi
-
-output="$(run_spp sync)"
-if [[ $? -eq 0 ]]; then
-  pass "spp sync"
-else
-  fail "spp sync"
+  fail "spp pool add default --sync — expected Pool mention and contract ID"
   echo "$output"
 fi
 

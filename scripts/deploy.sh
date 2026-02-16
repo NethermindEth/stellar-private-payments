@@ -181,11 +181,16 @@ deploy_contract() {
   local wasm="$2"
   shift 2
   local output
-  if [[ $# -gt 0 ]]; then
-    output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" -- "$@" 2>&1)"
-  else
-    output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" 2>&1)"
-  fi
+  local attempt
+  for attempt in 1 2 3; do
+    if [[ $# -gt 0 ]]; then
+      output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" -- "$@" 2>&1)" && break
+    else
+      output="$(stellar contract deploy --wasm "$wasm" --source-account "$DEPLOYER" --network "$NETWORK" 2>&1)" && break
+    fi
+    echo "  deploy $name attempt $attempt failed, retrying in 5s..." >&2
+    sleep 5
+  done
   local id
   id="$(grep -Eo 'C[A-Z0-9]{55}' <<<"$output" | head -1 || true)"
   [[ -n "$id" ]] || { echo "$output" >&2; die "failed to parse contract id for $name"; }

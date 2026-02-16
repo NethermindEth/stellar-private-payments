@@ -21,9 +21,6 @@ pub struct Cli {
 /// Top-level commands.
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Set deployment config and perform initial sync
-    Init,
-
     /// Incremental event sync
     Sync,
 
@@ -160,6 +157,9 @@ pub enum PoolCommand {
         /// Admin G... address
         #[arg(long)]
         admin: Option<String>,
+        /// Run an initial sync after adding the pool
+        #[arg(long)]
+        sync: bool,
     },
     /// List pools for the current network
     Ls,
