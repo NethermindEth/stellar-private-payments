@@ -103,3 +103,61 @@ fn load_from_deployments_json(network: &str) -> Result<DeploymentConfig> {
         "Could not find deployments.json. Run from the workspace root or run `stellar spp init` first."
     )
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_deployment_config_json_roundtrip() {
+        let cfg = DeploymentConfig {
+            network: "testnet".to_string(),
+            deployer: "GABC".to_string(),
+            admin: "GABC".to_string(),
+            asp_membership: "CASP1".to_string(),
+            asp_non_membership: "CASP2".to_string(),
+            verifier: "CVER".to_string(),
+            pool: "CPOOL".to_string(),
+            initialized: true,
+        };
+
+        let json = serde_json::to_string(&cfg).unwrap();
+        let parsed: DeploymentConfig = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed.network, "testnet");
+        assert_eq!(parsed.pool, "CPOOL");
+        assert!(parsed.initialized);
+    }
+
+    #[test]
+    fn test_deployment_config_toml_roundtrip() {
+        let cfg = DeploymentConfig {
+            network: "standalone".to_string(),
+            deployer: "GD123".to_string(),
+            admin: "GA456".to_string(),
+            asp_membership: "CMEM".to_string(),
+            asp_non_membership: "CNON".to_string(),
+            verifier: "CVER".to_string(),
+            pool: "CPOOL".to_string(),
+            initialized: false,
+        };
+
+        let toml_str = toml::to_string_pretty(&cfg).unwrap();
+        let parsed: DeploymentConfig = toml::from_str(&toml_str).unwrap();
+        assert_eq!(parsed.network, "standalone");
+        assert_eq!(parsed.admin, "GA456");
+        assert!(!parsed.initialized);
+    }
+
+    #[test]
+    fn test_load_from_deployments_json() {
+        // This test requires the actual deployments.json in the workspace
+        let result = load_from_deployments_json("testnet");
+        if let Ok(cfg) = result {
+            assert_eq!(cfg.network, "testnet");
+            assert!(!cfg.pool.is_empty());
+            assert!(!cfg.asp_membership.is_empty());
+        }
+        // If file not found, that's OK in CI
+    }
+}

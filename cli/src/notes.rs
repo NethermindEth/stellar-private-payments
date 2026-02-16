@@ -139,3 +139,216 @@ pub fn import_note(file: &str) -> Result<()> {
     Ok(())
 }
 
+/// Scan notes using provided key material and database (for testing).
+///
+/// This variant avoids calling the `stellar` CLI for key resolution.
+#[cfg(test)]
+pub fn scan_notes_with_keys(
+    db: &Database,
+    note_privkey: &zkhash::fields::bn256::FpBN256,
+    enc_priv: &[u8; 32],
+) -> Result<u64> {
+    let note_pubkey = crypto::derive_public_key(note_privkey);
+    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
+    let privkey_le_hex = hex::encode(crypto::scalar_to_le_bytes(note_privkey));
+
+    let encrypted_outputs = db.get_encrypted_outputs()?;
+    let mut found: u64 = 0;
+
+    for (commitment_hex, idx, encrypted_data, ledger) in &encrypted_outputs {
+        if db.get_note(commitment_hex)?.is_some() {
+            continue;
+        }
+
+        if let Some((amount, blinding)) = crypto::decrypt_note(enc_priv, encrypted_data)? {
+                let expected_commitment = crypto::commitment(
+                    zkhash::fields::bn256::FpBN256::from(amount),
+                    note_pubkey,
+                    blinding,
+                );
+                let expected_hex = crypto::scalar_to_hex_be(&expected_commitment);
+
+                if *commitment_hex != expected_hex {
+                    continue;
+                }
+
+                let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding));
+
+                let path_indices = zkhash::fields::bn256::FpBN256::from(*idx);
+                let sig = crypto::sign(*note_privkey, expected_commitment, path_indices);
+                let nul = crypto::nullifier(expected_commitment, path_indices, sig);
+                let nul_hex = crypto::scalar_to_hex_be(&nul);
+                let spent = if db.has_nullifier(&nul_hex)? { 1u64 } else { 0u64 };
+
+                db.upsert_note(&UserNote {
+                    id: commitment_hex.clone(),
+                    owner: pubkey_hex.clone(),
+                    private_key: privkey_le_hex.clone(),
+                    blinding: blinding_hex,
+                    amount,
+                    leaf_index: *idx,
+                    spent,
+                    is_received: 1,
+                    ledger: Some(*ledger),
+                })?;
+
+                found = found.saturating_add(1);
+        }
+    }
+
+    Ok(found)
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+    use crate::crypto;
+    use zkhash::fields::bn256::FpBN256 as Scalar;
+
+    fn test_db() -> Database {
+        Database::open_in_memory().expect("in-memory DB")
+    }
+
+    #[test]
+    fn test_scan_finds_own_notes() {
+        let db = test_db();
+
+        // Generate keypair
+        let note_privkey = Scalar::from(12345u64);
+        let note_pubkey = crypto::derive_public_key(&note_privkey);
+
+        // Generate encryption keypair
+        let mut enc_priv_bytes = [0u8; 32];
+        getrandom::getrandom(&mut enc_priv_bytes).unwrap();
+        let enc_secret = x25519_dalek::StaticSecret::from(enc_priv_bytes);
+        let enc_public = x25519_dalek::PublicKey::from(&enc_secret);
+
+        // Create a note and encrypt it
+        let amount = 5000u64;
+        let blinding = Scalar::from(99999u64);
+        let commitment_val = crypto::commitment(Scalar::from(amount), note_pubkey, blinding);
+        let commitment_hex = crypto::scalar_to_hex_be(&commitment_val);
+
+        let encrypted = crypto::encrypt_note(enc_public.as_bytes(), amount, &blinding).unwrap();
+
+        // Store encrypted output in DB
+        db.insert_encrypted_output(&commitment_hex, 0, &encrypted, 100)
+            .unwrap();
+
+        // Scan
+        let found = scan_notes_with_keys(&db, &note_privkey, &enc_secret.to_bytes()).unwrap();
+        assert_eq!(found, 1, "should find 1 note");
+
+        // Verify the note was stored
+        let note = db.get_note(&commitment_hex).unwrap().expect("note exists");
+        assert_eq!(note.amount, 5000);
+        assert_eq!(note.spent, 0);
+        assert_eq!(note.is_received, 1);
+    }
+
+    #[test]
+    fn test_scan_ignores_others_notes() {
+        let db = test_db();
+
+        // Our key
+        let our_privkey = Scalar::from(111u64);
+
+        // Someone else's keys
+        let other_privkey = Scalar::from(222u64);
+        let other_pubkey = crypto::derive_public_key(&other_privkey);
+
+        // Someone else's encryption key
+        let mut other_enc_bytes = [0u8; 32];
+        getrandom::getrandom(&mut other_enc_bytes).unwrap();
+        let other_enc_secret = x25519_dalek::StaticSecret::from(other_enc_bytes);
+        let other_enc_public = x25519_dalek::PublicKey::from(&other_enc_secret);
+
+        // Our encryption key
+        let mut our_enc_bytes = [0u8; 32];
+        getrandom::getrandom(&mut our_enc_bytes).unwrap();
+
+        // Create a note encrypted for someone else
+        let amount = 1000u64;
+        let blinding = Scalar::from(42u64);
+        let commitment_val = crypto::commitment(Scalar::from(amount), other_pubkey, blinding);
+        let commitment_hex = crypto::scalar_to_hex_be(&commitment_val);
+
+        let encrypted =
+            crypto::encrypt_note(other_enc_public.as_bytes(), amount, &blinding).unwrap();
+
+        db.insert_encrypted_output(&commitment_hex, 0, &encrypted, 50)
+            .unwrap();
+
+        // Scan with our keys — should find nothing
+        let found = scan_notes_with_keys(&db, &our_privkey, &our_enc_bytes).unwrap();
+        assert_eq!(found, 0, "should not find notes encrypted for others");
+    }
+
+    #[test]
+    fn test_scan_skips_already_known() {
+        let db = test_db();
+
+        let note_privkey = Scalar::from(333u64);
+        let note_pubkey = crypto::derive_public_key(&note_privkey);
+
+        let mut enc_priv_bytes = [0u8; 32];
+        getrandom::getrandom(&mut enc_priv_bytes).unwrap();
+        let enc_secret = x25519_dalek::StaticSecret::from(enc_priv_bytes);
+        let enc_public = x25519_dalek::PublicKey::from(&enc_secret);
+
+        let amount = 2000u64;
+        let blinding = Scalar::from(7777u64);
+        let commitment_val = crypto::commitment(Scalar::from(amount), note_pubkey, blinding);
+        let commitment_hex = crypto::scalar_to_hex_be(&commitment_val);
+
+        let encrypted = crypto::encrypt_note(enc_public.as_bytes(), amount, &blinding).unwrap();
+        db.insert_encrypted_output(&commitment_hex, 0, &encrypted, 100)
+            .unwrap();
+
+        // First scan — finds the note
+        let found1 = scan_notes_with_keys(&db, &note_privkey, &enc_secret.to_bytes()).unwrap();
+        assert_eq!(found1, 1);
+
+        // Second scan — should skip (already known)
+        let found2 = scan_notes_with_keys(&db, &note_privkey, &enc_secret.to_bytes()).unwrap();
+        assert_eq!(found2, 0, "should skip already known notes");
+    }
+
+    #[test]
+    fn test_scan_detects_spent_notes() {
+        let db = test_db();
+
+        let note_privkey = Scalar::from(444u64);
+        let note_pubkey = crypto::derive_public_key(&note_privkey);
+
+        let mut enc_priv_bytes = [0u8; 32];
+        getrandom::getrandom(&mut enc_priv_bytes).unwrap();
+        let enc_secret = x25519_dalek::StaticSecret::from(enc_priv_bytes);
+        let enc_public = x25519_dalek::PublicKey::from(&enc_secret);
+
+        let amount = 3000u64;
+        let blinding = Scalar::from(8888u64);
+        let commitment_val = crypto::commitment(Scalar::from(amount), note_pubkey, blinding);
+        let commitment_hex = crypto::scalar_to_hex_be(&commitment_val);
+
+        let encrypted = crypto::encrypt_note(enc_public.as_bytes(), amount, &blinding).unwrap();
+        db.insert_encrypted_output(&commitment_hex, 0, &encrypted, 100)
+            .unwrap();
+
+        // Compute and store the nullifier to simulate spending
+        let path_indices = Scalar::from(0u64);
+        let sig = crypto::sign(note_privkey, commitment_val, path_indices);
+        let nul = crypto::nullifier(commitment_val, path_indices, sig);
+        let nul_hex = crypto::scalar_to_hex_be(&nul);
+        db.insert_nullifier(&nul_hex, 101).unwrap();
+
+        // Scan — should find note and mark it as spent
+        let found = scan_notes_with_keys(&db, &note_privkey, &enc_secret.to_bytes()).unwrap();
+        assert_eq!(found, 1);
+
+        let note = db.get_note(&commitment_hex).unwrap().unwrap();
+        assert_eq!(note.spent, 1, "note should be marked as spent");
+    }
+}
+

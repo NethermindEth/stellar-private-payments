@@ -607,3 +607,164 @@ fn serialize_ext_data_for_invoke(
     });
     Ok(json.to_string())
 }
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn make_note(id: &str, amount: u64, leaf_index: u64) -> UserNote {
+        UserNote {
+            id: id.to_string(),
+            owner: "owner".to_string(),
+            private_key: "pk".to_string(),
+            blinding: hex::encode([0u8; 32]),
+            amount,
+            leaf_index,
+            spent: 0,
+            is_received: 0,
+            ledger: Some(1),
+        }
+    }
+
+    // ========== select_notes_for_amount ==========
+
+    #[test]
+    fn test_select_exact_amount() {
+        let notes = vec![make_note("a", 500, 0), make_note("b", 300, 1)];
+        let (selected, total) = select_notes_for_amount(&notes, 500).unwrap();
+        assert_eq!(selected.len(), 1);
+        assert_eq!(total, 500);
+    }
+
+    #[test]
+    fn test_select_two_notes() {
+        let notes = vec![make_note("a", 300, 0), make_note("b", 400, 1)];
+        let (selected, total) = select_notes_for_amount(&notes, 600).unwrap();
+        assert_eq!(selected.len(), 2);
+        assert_eq!(total, 700);
+    }
+
+    #[test]
+    fn test_select_insufficient_balance() {
+        let notes = vec![make_note("a", 100, 0)];
+        let result = select_notes_for_amount(&notes, 500);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("Insufficient"), "error: {msg}");
+    }
+
+    #[test]
+    fn test_select_empty_notes() {
+        let notes: Vec<UserNote> = vec![];
+        let result = select_notes_for_amount(&notes, 100);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_select_too_many_notes() {
+        let notes = vec![
+            make_note("a", 100, 0),
+            make_note("b", 100, 1),
+            make_note("c", 100, 2),
+        ];
+        let result = select_notes_for_amount(&notes, 300);
+        assert!(result.is_err());
+        let msg = result.unwrap_err().to_string();
+        assert!(msg.contains("consolidate"), "error: {msg}");
+    }
+
+    // ========== compute_ext_data_hash ==========
+
+    #[test]
+    fn test_ext_data_hash_deterministic() {
+        let enc0 = vec![0u8; 112];
+        let enc1 = vec![1u8; 112];
+
+        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
+        let h2 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
+        assert_eq!(h1, h2, "ext_data_hash should be deterministic");
+    }
+
+    #[test]
+    fn test_ext_data_hash_changes_with_recipient() {
+        let enc0 = vec![0u8; 112];
+        let enc1 = vec![1u8; 112];
+
+        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
+        let h2 = compute_ext_data_hash("GXYZ", 1000, &enc0, &enc1).unwrap();
+        assert_ne!(h1, h2, "different recipients should produce different hashes");
+    }
+
+    #[test]
+    fn test_ext_data_hash_changes_with_amount() {
+        let enc0 = vec![0u8; 112];
+        let enc1 = vec![1u8; 112];
+
+        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
+        let h2 = compute_ext_data_hash("GABC", 2000, &enc0, &enc1).unwrap();
+        assert_ne!(h1, h2, "different amounts should produce different hashes");
+    }
+
+    #[test]
+    fn test_ext_data_hash_negative_amount() {
+        let enc0 = vec![0u8; 112];
+        let enc1 = vec![1u8; 112];
+
+        // Should not panic with negative amount (withdrawal case)
+        let result = compute_ext_data_hash("GABC", -500, &enc0, &enc1);
+        assert!(result.is_ok());
+    }
+
+    // ========== bn256_modulus ==========
+
+    #[test]
+    fn test_bn256_modulus_is_prime_field_order() {
+        let modulus = bn256_modulus();
+        // BN254 scalar field order (well-known value)
+        // = 21888242871839275222246405745257275088548364400416034343698204186575808495617
+        let expected_hex = "30644e72e131a029b85045b68181585d2833e84879b9709143e1f593f0000001";
+        let expected = num_bigint::BigUint::parse_bytes(expected_hex.as_bytes(), 16).unwrap();
+        assert_eq!(modulus, expected, "BN256 modulus should match known value");
+    }
+
+    // ========== find_asp_membership_index ==========
+
+    #[test]
+    fn test_find_asp_membership_index_default() {
+        let db = Database::open_in_memory().unwrap();
+        let pubkey = Scalar::from(42u64);
+        // No ASP leaves — should default to 0
+        let idx = find_asp_membership_index(&db, &pubkey).unwrap();
+        assert_eq!(idx, 0);
+    }
+
+    #[test]
+    fn test_find_asp_membership_index_found() {
+        let db = Database::open_in_memory().unwrap();
+        let pubkey = Scalar::from(42u64);
+        let leaf = crypto::membership_leaf(pubkey, Scalar::zero());
+        let leaf_hex = crypto::scalar_to_hex_be(&leaf);
+
+        db.insert_asp_leaf(7, &leaf_hex, 100).unwrap();
+
+        let idx = find_asp_membership_index(&db, &pubkey).unwrap();
+        assert_eq!(idx, 7);
+    }
+
+    // ========== Serialization helpers ==========
+
+    #[test]
+    fn test_serialize_ext_data_for_invoke() {
+        let enc0 = vec![0xABu8; 4];
+        let enc1 = vec![0xCDu8; 4];
+
+        let result = serialize_ext_data_for_invoke("GABC", -100, &enc0, &enc1).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
+
+        assert_eq!(parsed["recipient"], "GABC");
+        assert_eq!(parsed["ext_amount"], "-100");
+        assert_eq!(parsed["encrypted_output0"], "abababab");
+        assert_eq!(parsed["encrypted_output1"], "cdcdcdcd");
+    }
+}

@@ -69,6 +69,17 @@ impl Database {
         Ok(Self { conn })
     }
 
+    /// Open an in-memory database (for testing).
+    #[cfg(test)]
+    pub fn open_in_memory() -> Result<Self> {
+        let conn = Connection::open_in_memory().context("Failed to open in-memory database")?;
+        conn.execute_batch("PRAGMA foreign_keys=ON;")
+            .context("Failed to set pragmas")?;
+        let db = Self { conn };
+        db.migrate()?;
+        Ok(db)
+    }
+
     /// Run schema migrations.
     pub fn migrate(&self) -> Result<()> {
         self.conn
@@ -460,5 +471,285 @@ impl Database {
     /// Get a reference to the underlying connection.
     pub fn conn(&self) -> &Connection {
         &self.conn
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used)]
+mod tests {
+    use super::*;
+
+    fn test_db() -> Database {
+        Database::open_in_memory().expect("in-memory DB")
+    }
+
+    // ========== Sync metadata ==========
+
+    #[test]
+    fn test_sync_metadata_default() {
+        let db = test_db();
+        assert_eq!(db.get_last_ledger("pool").unwrap(), 0);
+        assert_eq!(db.get_last_cursor("pool").unwrap(), None);
+    }
+
+    #[test]
+    fn test_sync_metadata_update() {
+        let db = test_db();
+        db.update_sync_metadata("pool", 100, Some("cursor_abc"))
+            .unwrap();
+        assert_eq!(db.get_last_ledger("pool").unwrap(), 100);
+        assert_eq!(
+            db.get_last_cursor("pool").unwrap(),
+            Some("cursor_abc".to_string())
+        );
+
+        // Upsert
+        db.update_sync_metadata("pool", 200, Some("cursor_def"))
+            .unwrap();
+        assert_eq!(db.get_last_ledger("pool").unwrap(), 200);
+        assert_eq!(
+            db.get_last_cursor("pool").unwrap(),
+            Some("cursor_def".to_string())
+        );
+    }
+
+    #[test]
+    fn test_sync_metadata_multiple_contracts() {
+        let db = test_db();
+        db.update_sync_metadata("pool", 100, None).unwrap();
+        db.update_sync_metadata("asp_membership", 50, Some("abc"))
+            .unwrap();
+
+        assert_eq!(db.get_last_ledger("pool").unwrap(), 100);
+        assert_eq!(db.get_last_ledger("asp_membership").unwrap(), 50);
+        assert_eq!(db.get_last_cursor("pool").unwrap(), None);
+        assert_eq!(
+            db.get_last_cursor("asp_membership").unwrap(),
+            Some("abc".to_string())
+        );
+    }
+
+    // ========== Pool leaves ==========
+
+    #[test]
+    fn test_pool_leaves() {
+        let db = test_db();
+        assert_eq!(db.pool_leaf_count().unwrap(), 0);
+        assert!(db.get_pool_leaves().unwrap().is_empty());
+
+        db.insert_pool_leaf(0, "aabb", 10).unwrap();
+        db.insert_pool_leaf(5, "ccdd", 12).unwrap();
+
+        assert_eq!(db.pool_leaf_count().unwrap(), 2);
+
+        let leaves = db.get_pool_leaves().unwrap();
+        assert_eq!(leaves, vec![(0, "aabb".to_string()), (5, "ccdd".to_string())]);
+    }
+
+    #[test]
+    fn test_pool_leaf_insert_or_ignore() {
+        let db = test_db();
+        db.insert_pool_leaf(0, "aabb", 10).unwrap();
+        // Duplicate index — should be ignored
+        db.insert_pool_leaf(0, "aabb", 20).unwrap();
+        assert_eq!(db.pool_leaf_count().unwrap(), 1);
+    }
+
+    // ========== Nullifiers ==========
+
+    #[test]
+    fn test_nullifiers() {
+        let db = test_db();
+        assert!(!db.has_nullifier("nul1").unwrap());
+        assert_eq!(db.nullifier_count().unwrap(), 0);
+
+        db.insert_nullifier("nul1", 5).unwrap();
+        assert!(db.has_nullifier("nul1").unwrap());
+        assert!(!db.has_nullifier("nul2").unwrap());
+        assert_eq!(db.nullifier_count().unwrap(), 1);
+    }
+
+    // ========== Encrypted outputs ==========
+
+    #[test]
+    fn test_encrypted_outputs() {
+        let db = test_db();
+        let data1 = vec![1u8; 112];
+        let data2 = vec![2u8; 112];
+        db.insert_encrypted_output("cm1", 0, &data1, 10).unwrap();
+        db.insert_encrypted_output("cm2", 1, &data2, 11).unwrap();
+
+        let outputs = db.get_encrypted_outputs().unwrap();
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs[0].0, "cm1");
+        assert_eq!(outputs[0].1, 0);
+        assert_eq!(outputs[0].2, data1);
+        assert_eq!(outputs[0].3, 10);
+        assert_eq!(outputs[1].0, "cm2");
+    }
+
+    // ========== ASP membership leaves ==========
+
+    #[test]
+    fn test_asp_leaves() {
+        let db = test_db();
+        assert_eq!(db.asp_leaf_count().unwrap(), 0);
+
+        db.insert_asp_leaf(0, "leaf0", 100).unwrap();
+        db.insert_asp_leaf(3, "leaf3", 101).unwrap();
+
+        assert_eq!(db.asp_leaf_count().unwrap(), 2);
+
+        let leaves = db.get_asp_leaves().unwrap();
+        assert_eq!(leaves, vec![(0, "leaf0".to_string()), (3, "leaf3".to_string())]);
+    }
+
+    // ========== User notes ==========
+
+    fn make_note(id: &str, owner: &str, amount: u64) -> UserNote {
+        UserNote {
+            id: id.to_string(),
+            owner: owner.to_string(),
+            private_key: "pk_hex".to_string(),
+            blinding: "bl_hex".to_string(),
+            amount,
+            leaf_index: 0,
+            spent: 0,
+            is_received: 0,
+            ledger: Some(42),
+        }
+    }
+
+    #[test]
+    fn test_user_note_upsert_and_get() {
+        let db = test_db();
+        let note = make_note("cm_abc", "owner1", 1000);
+        db.upsert_note(&note).unwrap();
+
+        let fetched = db.get_note("cm_abc").unwrap().expect("note should exist");
+        assert_eq!(fetched.id, "cm_abc");
+        assert_eq!(fetched.owner, "owner1");
+        assert_eq!(fetched.amount, 1000);
+        assert_eq!(fetched.spent, 0);
+    }
+
+    #[test]
+    fn test_user_note_not_found() {
+        let db = test_db();
+        assert!(db.get_note("nonexistent").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_user_note_upsert_updates_spent() {
+        let db = test_db();
+        let mut note = make_note("cm1", "owner1", 500);
+        db.upsert_note(&note).unwrap();
+
+        note.spent = 1;
+        db.upsert_note(&note).unwrap();
+
+        let fetched = db.get_note("cm1").unwrap().unwrap();
+        assert_eq!(fetched.spent, 1);
+    }
+
+    #[test]
+    fn test_list_notes() {
+        let db = test_db();
+        let mut n1 = make_note("cm1", "ownerA", 100);
+        n1.leaf_index = 0;
+        let mut n2 = make_note("cm2", "ownerA", 200);
+        n2.leaf_index = 1;
+        let mut n3 = make_note("cm3", "ownerB", 300);
+        n3.leaf_index = 2;
+
+        db.upsert_note(&n1).unwrap();
+        db.upsert_note(&n2).unwrap();
+        db.upsert_note(&n3).unwrap();
+
+        let owner_a = db.list_notes("ownerA").unwrap();
+        assert_eq!(owner_a.len(), 2);
+        assert_eq!(owner_a[0].amount, 100);
+        assert_eq!(owner_a[1].amount, 200);
+
+        let owner_b = db.list_notes("ownerB").unwrap();
+        assert_eq!(owner_b.len(), 1);
+    }
+
+    #[test]
+    fn test_list_unspent_notes() {
+        let db = test_db();
+        let mut n1 = make_note("cm1", "ownerA", 100);
+        n1.leaf_index = 0;
+        let mut n2 = make_note("cm2", "ownerA", 200);
+        n2.leaf_index = 1;
+        n2.spent = 1;
+
+        db.upsert_note(&n1).unwrap();
+        db.upsert_note(&n2).unwrap();
+
+        let unspent = db.list_unspent_notes("ownerA").unwrap();
+        assert_eq!(unspent.len(), 1);
+        assert_eq!(unspent[0].amount, 100);
+    }
+
+    #[test]
+    fn test_mark_note_spent() {
+        let db = test_db();
+        let note = make_note("cm1", "ownerA", 500);
+        db.upsert_note(&note).unwrap();
+
+        db.mark_note_spent("cm1").unwrap();
+
+        let fetched = db.get_note("cm1").unwrap().unwrap();
+        assert_eq!(fetched.spent, 1);
+    }
+
+    // ========== Registered public keys ==========
+
+    #[test]
+    fn test_public_key_upsert_and_get() {
+        let db = test_db();
+        let key = RegisteredKey {
+            address: "GABC".to_string(),
+            note_key: "nk_hex".to_string(),
+            encryption_key: "ek_hex".to_string(),
+            ledger: 99,
+        };
+        db.upsert_public_key(&key).unwrap();
+
+        let fetched = db.get_public_key("GABC").unwrap().expect("key should exist");
+        assert_eq!(fetched.note_key, "nk_hex");
+        assert_eq!(fetched.encryption_key, "ek_hex");
+        assert_eq!(fetched.ledger, 99);
+    }
+
+    #[test]
+    fn test_public_key_not_found() {
+        let db = test_db();
+        assert!(db.get_public_key("GNONE").unwrap().is_none());
+    }
+
+    #[test]
+    fn test_public_key_upsert_overwrites() {
+        let db = test_db();
+        let key1 = RegisteredKey {
+            address: "GABC".to_string(),
+            note_key: "old".to_string(),
+            encryption_key: "old_ek".to_string(),
+            ledger: 1,
+        };
+        db.upsert_public_key(&key1).unwrap();
+
+        let key2 = RegisteredKey {
+            address: "GABC".to_string(),
+            note_key: "new".to_string(),
+            encryption_key: "new_ek".to_string(),
+            ledger: 2,
+        };
+        db.upsert_public_key(&key2).unwrap();
+
+        let fetched = db.get_public_key("GABC").unwrap().unwrap();
+        assert_eq!(fetched.note_key, "new");
+        assert_eq!(fetched.ledger, 2);
     }
 }
