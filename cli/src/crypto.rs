@@ -108,6 +108,11 @@ pub fn scalar_to_le_bytes(s: &Scalar) -> [u8; 32] {
     buf
 }
 
+/// Convert a scalar to little-endian hex string.
+pub fn scalar_to_hex_le(s: &Scalar) -> String {
+    hex::encode(scalar_to_le_bytes(s))
+}
+
 /// Convert little-endian bytes to scalar.
 pub fn le_bytes_to_scalar(bytes: &[u8]) -> Scalar {
     Scalar::from_le_bytes_mod_order(bytes)

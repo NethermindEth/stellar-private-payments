@@ -14,11 +14,22 @@ use crate::keys;
 /// Returns the number of new notes found.
 pub fn scan_notes(db: &Database, identity: &str, network: &str) -> Result<u64> {
     let note_privkey = keys::derive_note_private_key(identity, network)?;
-    let note_pubkey = crypto::derive_public_key(&note_privkey);
-    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
-    let privkey_le_hex = hex::encode(crypto::scalar_to_le_bytes(&note_privkey));
-
     let (_enc_pub, enc_priv) = keys::derive_encryption_keypair(identity, network)?;
+    scan_notes_inner(db, &note_privkey, &enc_priv)
+}
+
+/// Core note scanning logic shared by `scan_notes` and `scan_notes_with_keys`.
+///
+/// Iterates over all encrypted outputs, attempts decryption, verifies the
+/// commitment, checks nullifier status, and upserts discovered notes.
+fn scan_notes_inner(
+    db: &Database,
+    note_privkey: &zkhash::fields::bn256::FpBN256,
+    enc_priv: &[u8; 32],
+) -> Result<u64> {
+    let note_pubkey = crypto::derive_public_key(note_privkey);
+    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
+    let privkey_le_hex = crypto::scalar_to_hex_le(note_privkey);
 
     let encrypted_outputs = db.get_encrypted_outputs()?;
     let mut found: u64 = 0;
@@ -30,44 +41,39 @@ pub fn scan_notes(db: &Database, identity: &str, network: &str) -> Result<u64> {
         }
 
         // Try to decrypt
-        match crypto::decrypt_note(&enc_priv, encrypted_data)? {
-            Some((amount, blinding)) => {
-                // Verify commitment matches
-                let expected_commitment =
-                    crypto::commitment(zkhash::fields::bn256::FpBN256::from(amount), note_pubkey, blinding);
-                let expected_hex = crypto::scalar_to_hex_be(&expected_commitment);
+        if let Some((amount, blinding)) = crypto::decrypt_note(enc_priv, encrypted_data)? {
+            // Verify commitment matches
+            let expected_commitment =
+                crypto::commitment(zkhash::fields::bn256::FpBN256::from(amount), note_pubkey, blinding);
+            let expected_hex = crypto::scalar_to_hex_be(&expected_commitment);
 
-                if *commitment_hex != expected_hex {
-                    // Commitment doesn't match — might be for a different pubkey
-                    continue;
-                }
-
-                let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding));
-
-                // Check if already spent by checking nullifier
-                let path_indices = zkhash::fields::bn256::FpBN256::from(*idx);
-                let sig = crypto::sign(note_privkey, expected_commitment, path_indices);
-                let nul = crypto::nullifier(expected_commitment, path_indices, sig);
-                let nul_hex = crypto::scalar_to_hex_be(&nul);
-                let spent = if db.has_nullifier(&nul_hex)? { 1u64 } else { 0u64 };
-
-                db.upsert_note(&UserNote {
-                    id: commitment_hex.clone(),
-                    owner: pubkey_hex.clone(),
-                    private_key: privkey_le_hex.clone(),
-                    blinding: blinding_hex,
-                    amount,
-                    leaf_index: *idx,
-                    spent,
-                    is_received: 1,
-                    ledger: Some(*ledger),
-                })?;
-
-                found = found.saturating_add(1);
+            if *commitment_hex != expected_hex {
+                // Commitment doesn't match — might be for a different pubkey
+                continue;
             }
-            None => {
-                // Not for us, skip
-            }
+
+            let blinding_hex = crypto::scalar_to_hex_le(&blinding);
+
+            // Check if already spent by checking nullifier
+            let path_indices = zkhash::fields::bn256::FpBN256::from(*idx);
+            let sig = crypto::sign(*note_privkey, expected_commitment, path_indices);
+            let nul = crypto::nullifier(expected_commitment, path_indices, sig);
+            let nul_hex = crypto::scalar_to_hex_be(&nul);
+            let spent = if db.has_nullifier(&nul_hex)? { 1u64 } else { 0u64 };
+
+            db.upsert_note(&UserNote {
+                id: commitment_hex.clone(),
+                owner: pubkey_hex.clone(),
+                private_key: privkey_le_hex.clone(),
+                blinding: blinding_hex,
+                amount,
+                leaf_index: *idx,
+                spent,
+                is_received: 1,
+                ledger: Some(*ledger),
+            })?;
+
+            found = found.saturating_add(1);
         }
     }
 
@@ -148,55 +154,7 @@ pub fn scan_notes_with_keys(
     note_privkey: &zkhash::fields::bn256::FpBN256,
     enc_priv: &[u8; 32],
 ) -> Result<u64> {
-    let note_pubkey = crypto::derive_public_key(note_privkey);
-    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
-    let privkey_le_hex = hex::encode(crypto::scalar_to_le_bytes(note_privkey));
-
-    let encrypted_outputs = db.get_encrypted_outputs()?;
-    let mut found: u64 = 0;
-
-    for (commitment_hex, idx, encrypted_data, ledger) in &encrypted_outputs {
-        if db.get_note(commitment_hex)?.is_some() {
-            continue;
-        }
-
-        if let Some((amount, blinding)) = crypto::decrypt_note(enc_priv, encrypted_data)? {
-                let expected_commitment = crypto::commitment(
-                    zkhash::fields::bn256::FpBN256::from(amount),
-                    note_pubkey,
-                    blinding,
-                );
-                let expected_hex = crypto::scalar_to_hex_be(&expected_commitment);
-
-                if *commitment_hex != expected_hex {
-                    continue;
-                }
-
-                let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding));
-
-                let path_indices = zkhash::fields::bn256::FpBN256::from(*idx);
-                let sig = crypto::sign(*note_privkey, expected_commitment, path_indices);
-                let nul = crypto::nullifier(expected_commitment, path_indices, sig);
-                let nul_hex = crypto::scalar_to_hex_be(&nul);
-                let spent = if db.has_nullifier(&nul_hex)? { 1u64 } else { 0u64 };
-
-                db.upsert_note(&UserNote {
-                    id: commitment_hex.clone(),
-                    owner: pubkey_hex.clone(),
-                    private_key: privkey_le_hex.clone(),
-                    blinding: blinding_hex,
-                    amount,
-                    leaf_index: *idx,
-                    spent,
-                    is_received: 1,
-                    ledger: Some(*ledger),
-                })?;
-
-                found = found.saturating_add(1);
-        }
-    }
-
-    Ok(found)
+    scan_notes_inner(db, note_privkey, enc_priv)
 }
 
 #[cfg(test)]

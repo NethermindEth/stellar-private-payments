@@ -32,27 +32,48 @@ const N_NON_PROOFS: usize = 1;
 
 /// Input note for proof generation.
 pub struct InputNote {
+    /// Leaf index in the pool Merkle tree.
     pub leaf_index: usize,
+    /// Note private key.
     pub priv_key: Scalar,
+    /// Note blinding factor.
     pub blinding: Scalar,
+    /// Note amount (0 for dummy inputs).
     pub amount: Scalar,
 }
 
 /// Output note for proof generation.
 pub struct OutputNote {
+    /// Recipient's note public key.
     pub pub_key: Scalar,
+    /// Random blinding factor.
     pub blinding: Scalar,
+    /// Output amount.
     pub amount: Scalar,
 }
 
 /// Result of proof generation.
 pub struct ProofResult {
+    /// The Groth16 proof (a, b, c curve points).
     pub proof: Proof<Bn254>,
+    /// Public inputs vector from the circuit.
     pub public_inputs: Vec<Fr>,
+    /// Verification key (for local re-verification).
     pub vk: VerifyingKey<Bn254>,
+    /// Pool Merkle root used in the proof.
+    pub root: Scalar,
+    /// Input nullifiers.
+    pub nullifiers: Vec<Scalar>,
+    /// Output commitments.
+    pub output_commitments: Vec<Scalar>,
+    /// ASP membership roots (one per input × membership proof).
+    pub membership_roots: Vec<Scalar>,
+    /// ASP non-membership roots (one per input × non-membership proof).
+    pub non_membership_roots: Vec<Scalar>,
 }
 
-fn scalar_to_bigint(s: Scalar) -> BigInt {
+/// Convert a scalar field element to a `BigInt` for circuit inputs.
+pub fn scalar_to_bigint(s: Scalar) -> BigInt {
     let bi = s.into_bigint();
     let bytes_le = bi.to_bytes_le();
     let u = BigUint::from_bytes_le(&bytes_le);
@@ -95,6 +116,10 @@ fn load_proving_key() -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>, Prepare
 /// Generate a Groth16 proof for a transaction.
 ///
 /// Follows the pattern from `e2e-tests/src/tests/utils.rs`.
+///
+/// For zero-amount (dummy) inputs, the Merkle inclusion check is disabled by
+/// the circuit's `ForceEqualIfEnabled` component, so the pool tree is not
+/// modified for those inputs.
 #[allow(clippy::too_many_arguments)]
 pub fn generate_proof(
     inputs: &[InputNote],
@@ -105,14 +130,15 @@ pub fn generate_proof(
     asp_membership_leaves: &[Scalar],
     asp_membership_index: usize,
     asp_membership_blinding: Scalar,
-    non_membership_key: &BigInt,
 ) -> Result<ProofResult> {
     let cfg = load_circom_config()?;
     let (pk, vk, pvk) = load_proving_key()?;
 
     let n_inputs = inputs.len();
 
-    // Build input commitments and place in pool tree
+    // Build input commitments. Only place non-zero-amount inputs in the pool
+    // tree — for zero-amount (dummy) inputs the circuit's Merkle root check
+    // is gated off by `ForceEqualIfEnabled(enabled=amount)`.
     let mut leaves = pool_leaves.to_vec();
     let mut commitments = Vec::with_capacity(n_inputs);
     let mut public_keys = Vec::with_capacity(n_inputs);
@@ -122,7 +148,9 @@ pub fn generate_proof(
         let cm = crypto::commitment(note.amount, pk_scalar, note.blinding);
         public_keys.push(pk_scalar);
         commitments.push(cm);
-        leaves[note.leaf_index] = cm;
+        if !note.amount.is_zero() {
+            leaves[note.leaf_index] = cm;
+        }
     }
 
     // Pool Merkle root and proofs
@@ -161,8 +189,10 @@ pub fn generate_proof(
     }
 
     // Output commitments
+    let mut output_commitments = Vec::with_capacity(outputs.len());
     for out in outputs {
         let cm = crypto::commitment(out.amount, out.pub_key, out.blinding);
+        output_commitments.push(cm);
         builder.push_input("outputCommitment", scalar_to_bigint(cm));
         builder.push_input("outAmount", scalar_to_bigint(out.amount));
         builder.push_input("outPubkey", scalar_to_bigint(out.pub_key));
@@ -170,7 +200,8 @@ pub fn generate_proof(
     }
 
     // Membership proofs
-    let mut membership_roots = Vec::new();
+    let mut membership_roots_bigint = Vec::new();
+    let mut membership_roots_scalar = Vec::new();
     for _j in 0..N_MEM_PROOFS {
         // Build membership tree with all public keys
         let mut mem_leaves = asp_membership_leaves.to_vec();
@@ -202,37 +233,27 @@ pub fn generate_proof(
                 );
             }
 
-            membership_roots.push(scalar_to_bigint(mem_root));
+            membership_roots_bigint.push(scalar_to_bigint(mem_root));
+            membership_roots_scalar.push(mem_root);
         }
     }
-    for mr in &membership_roots {
+    for mr in &membership_roots_bigint {
         builder.push_input("membershipRoots", mr.clone());
     }
 
-    // Non-membership proofs
-    let mut non_membership_roots = Vec::new();
+    // Non-membership proofs — prove each input's public key is NOT in the
+    // sanctioned set (the ASP non-membership sparse Merkle tree).
+    // We use empty overrides so the proof root matches the on-chain root.
+    // If the on-chain tree is empty (root=0), an empty-tree non-inclusion
+    // proof trivially proves non-membership for any key.
+    let mut non_membership_roots_bigint = Vec::new();
+    let mut non_membership_roots_scalar = Vec::new();
     for _j in 0..N_NON_PROOFS {
         for (i, pk_scalar) in public_keys.iter().enumerate() {
-            let overrides: Vec<(BigInt, BigInt)> = public_keys
-                .iter()
-                .enumerate()
-                .map(|(idx, pk)| {
-                    let idx_u64 = idx as u64;
-                    let factor = idx_u64
-                        .checked_add(1)
-                        .and_then(|n| n.checked_mul(100_000))
-                        .and_then(|n| n.checked_add(idx_u64))
-                        .and_then(|n| n.checked_add(1))
-                        .expect("factor overflow");
-                    let override_key = Scalar::from(factor);
-                    let leaf = crypto::poseidon2_hash2(*pk, Scalar::zero(), Some(Scalar::from(1u64)));
-                    (scalar_to_bigint(override_key), scalar_to_bigint(leaf))
-                })
-                .collect();
-
+            let nm_key = scalar_to_bigint(*pk_scalar);
             let proof = circuits::test::utils::sparse_merkle_tree::prepare_smt_proof_with_overrides(
-                non_membership_key,
-                &overrides,
+                &nm_key,
+                &[],
                 merkle::POOL_LEVELS,
             );
 
@@ -255,10 +276,14 @@ pub fn generate_proof(
                 builder.push_input(format!("{key_prefix}.siblings"), sib.clone());
             }
 
-            non_membership_roots.push(proof.root.clone());
+            // Convert root BigInt to Scalar for the result
+            let root_bu = proof.root.to_biguint()
+                .unwrap_or_default();
+            non_membership_roots_scalar.push(Scalar::from(root_bu.clone()));
+            non_membership_roots_bigint.push(proof.root.clone());
         }
     }
-    for nmr in &non_membership_roots {
+    for nmr in &non_membership_roots_bigint {
         builder.push_input("nonMembershipRoots", nmr.clone());
     }
 
@@ -286,5 +311,10 @@ pub fn generate_proof(
         proof,
         public_inputs,
         vk,
+        root,
+        nullifiers,
+        output_commitments,
+        membership_roots: membership_roots_scalar,
+        non_membership_roots: non_membership_roots_scalar,
     })
 }

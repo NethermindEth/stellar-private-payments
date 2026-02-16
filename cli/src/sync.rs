@@ -2,15 +2,21 @@
 //!
 //! Uses `stellar events --output json` to fetch contract events and stores
 //! them in the SQLite database.
+//!
+//! The stellar CLI returns events with topics and values as base64-encoded
+//! XDR `ScVal`. This module decodes them using the `stellar-xdr` crate.
 
 use anyhow::{Context, Result};
 use serde::Deserialize;
+use stellar_xdr::curr::{self as xdr, ReadXdr, ScVal};
 
 use crate::config::DeploymentConfig;
 use crate::db::Database;
 use crate::stellar;
 
 /// A single event from `stellar events --output json`.
+///
+/// Topics and value are base64-encoded XDR `ScVal` strings.
 #[derive(Debug, Deserialize)]
 #[allow(dead_code)]
 struct StellarEvent {
@@ -19,8 +25,10 @@ struct StellarEvent {
     ledger: Option<u64>,
     #[serde(rename = "contractId")]
     contract_id: Option<String>,
-    topic: Option<Vec<serde_json::Value>>,
-    value: Option<serde_json::Value>,
+    /// Base64-encoded XDR ScVal topic strings.
+    topic: Option<Vec<String>>,
+    /// Base64-encoded XDR ScVal value string.
+    value: Option<String>,
     #[serde(rename = "pagingToken")]
     paging_token: Option<String>,
     id: Option<String>,
@@ -44,46 +52,61 @@ fn sync_contract(
     let last_ledger = db.get_last_ledger(contract_type)?;
     let last_cursor = db.get_last_cursor(contract_type)?;
 
-    // Start from ledger 1 if never synced, else from last known ledger
-    let start = if last_ledger == 0 { 1 } else { last_ledger };
+    // On first sync, determine a good start ledger within the RPC scan window.
+    // Also handles the case where a stored last_ledger has fallen behind
+    // the window (ledger retention is finite on public networks).
+    let start = if last_ledger == 0 {
+        // On first sync, find the valid scan window. Returns None for local networks
+        // where ledger 1 is already valid.
+        (stellar::get_oldest_ledger(contract_id, network)?).unwrap_or(1)
+    } else {
+        last_ledger
+    };
 
     let mut cursor = last_cursor;
     let mut max_ledger = last_ledger;
+    let mut adjusted_start = start;
 
     loop {
         let json_str = match stellar::fetch_events(
             contract_id,
-            start,
+            adjusted_start,
             cursor.as_deref(),
             network,
         ) {
             Ok(s) => s,
             Err(e) => {
-                // If events command fails (e.g., no events), just break
                 let msg = e.to_string();
                 if msg.contains("not found") || msg.contains("No events") || msg.is_empty() {
                     break;
+                }
+                // If the start ledger fell behind the RPC window, adjust
+                if msg.contains("ledger range")
+                    && let Ok(Some(min)) = stellar::get_oldest_ledger(contract_id, network)
+                {
+                    adjusted_start = min;
+                    continue;
                 }
                 return Err(e).context("Failed to fetch events");
             }
         };
 
-        if json_str.is_empty() {
+        // The stellar CLI returns "No events" (exit 0) when no matching events
+        // exist in the scan window.
+        if json_str.is_empty() || json_str == "No events" {
             break;
         }
 
-        // stellar events --output json can return a JSON array or individual objects
+        // stellar events --output json returns either a JSON array or a stream of
+        // pretty-printed JSON objects. Use serde's streaming deserializer to handle both.
         let events: Vec<StellarEvent> = if json_str.starts_with('[') {
             serde_json::from_str(&json_str)
                 .context("Failed to parse events JSON array")?
         } else {
-            // Try parsing as newline-delimited JSON
-            json_str
-                .lines()
-                .filter(|l| !l.trim().is_empty())
-                .map(serde_json::from_str)
+            let de = serde_json::Deserializer::from_str(&json_str);
+            de.into_iter::<StellarEvent>()
                 .collect::<Result<Vec<_>, _>>()
-                .context("Failed to parse events JSON lines")?
+                .context("Failed to parse events JSON stream")?
         };
 
         if events.is_empty() {
@@ -117,22 +140,19 @@ fn sync_contract(
 
 /// Process a single event and store it in the database.
 fn process_event(db: &Database, contract_type: &str, event: &StellarEvent) -> Result<()> {
-    let topics = match &event.topic {
-        Some(t) => t,
-        None => return Ok(()),
+    let topic_strings = match &event.topic {
+        Some(t) if !t.is_empty() => t,
+        _ => return Ok(()),
     };
 
     let ledger = event.ledger.unwrap_or(0);
 
-    // Extract the event name from topics
-    let event_name = topics
-        .first()
-        .and_then(|v| v.as_str())
-        .unwrap_or("");
+    // Decode the first topic (event name) from base64 XDR
+    let event_name = decode_xdr_symbol(&topic_strings[0]).unwrap_or_default();
 
     match contract_type {
-        "pool" => process_pool_event(db, event_name, topics, &event.value, ledger),
-        "asp_membership" => process_asp_event(db, event_name, &event.value, ledger),
+        "pool" => process_pool_event(db, &event_name, topic_strings, &event.value, ledger),
+        "asp_membership" => process_asp_event(db, &event_name, &event.value, ledger),
         _ => Ok(()),
     }
 }
@@ -141,43 +161,58 @@ fn process_event(db: &Database, contract_type: &str, event: &StellarEvent) -> Re
 fn process_pool_event(
     db: &Database,
     event_name: &str,
-    topics: &[serde_json::Value],
-    value: &Option<serde_json::Value>,
+    topics: &[String],
+    value: &Option<String>,
     ledger: u64,
 ) -> Result<()> {
     match event_name {
-        "NewCommitmentEvent" | "new_commitment" => {
+        // Soroban #[contractevent] auto-generates snake_case event names
+        "new_commitment_event" => {
             // Topic[1] is the commitment (U256)
-            let commitment = extract_u256_from_topic(topics.get(1))?;
-            let val = value.as_ref().context("Missing value for commitment event")?;
+            let commitment_hex = topics
+                .get(1)
+                .and_then(|t| decode_xdr_u256_hex(t).ok())
+                .context("Missing commitment in topic[1]")?;
 
-            // Value contains {index, encrypted_output}
-            let index = extract_u64_field(val, "index")
-                .or_else(|_| extract_u64_field(val, "0"))?;
-            let encrypted_output = extract_bytes_field(val, "encrypted_output")
-                .or_else(|_| extract_bytes_field(val, "1"))?;
+            let val_xdr = value.as_deref().context("Missing value for commitment event")?;
+            let val_map = decode_xdr_map(val_xdr)?;
 
-            db.insert_pool_leaf(index, &commitment, ledger)?;
-            db.insert_encrypted_output(&commitment, index, &encrypted_output, ledger)?;
+            let index = val_map
+                .get("index")
+                .and_then(scval_to_u64)
+                .context("Missing/invalid 'index' in commitment event")?;
+            let encrypted_output = val_map
+                .get("encrypted_output")
+                .and_then(scval_to_bytes)
+                .context("Missing/invalid 'encrypted_output' in commitment event")?;
+
+            db.insert_pool_leaf(index, &commitment_hex, ledger)?;
+            db.insert_encrypted_output(&commitment_hex, index, &encrypted_output, ledger)?;
         }
-        "NewNullifierEvent" | "new_nullifier" => {
-            let nullifier = extract_u256_from_topic(topics.get(1))?;
-            db.insert_nullifier(&nullifier, ledger)?;
+        "new_nullifier_event" => {
+            let nullifier_hex = topics
+                .get(1)
+                .and_then(|t| decode_xdr_u256_hex(t).ok())
+                .context("Missing nullifier in topic[1]")?;
+            db.insert_nullifier(&nullifier_hex, ledger)?;
         }
-        "PublicKeyEvent" | "public_key" => {
-            // Topic[1] is the owner address
+        "public_key_event" => {
+            // Topic[1] is the owner address (XDR Address)
             let address = topics
                 .get(1)
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+                .and_then(|t| decode_xdr_address(t).ok())
+                .unwrap_or_default();
 
-            if let Some(val) = value {
-                let note_key = extract_hex_field(val, "note_key")
-                    .or_else(|_| extract_hex_field(val, "1"))
+            if let Some(val_xdr) = value.as_deref() {
+                let val_map = decode_xdr_map(val_xdr)?;
+
+                let note_key = val_map
+                    .get("note_key")
+                    .and_then(scval_to_hex)
                     .unwrap_or_default();
-                let encryption_key = extract_hex_field(val, "encryption_key")
-                    .or_else(|_| extract_hex_field(val, "0"))
+                let encryption_key = val_map
+                    .get("encryption_key")
+                    .and_then(scval_to_hex)
                     .unwrap_or_default();
 
                 if !address.is_empty() && !note_key.is_empty() && !encryption_key.is_empty() {
@@ -199,86 +234,127 @@ fn process_pool_event(
 fn process_asp_event(
     db: &Database,
     event_name: &str,
-    value: &Option<serde_json::Value>,
+    value: &Option<String>,
     ledger: u64,
 ) -> Result<()> {
-    if event_name != "LeafAdded" && event_name != "leaf_added" {
+    // ASP membership uses #[contractevent(topics = ["LeafAdded"])]
+    if event_name != "LeafAdded" {
         return Ok(());
     }
 
-    let val = value.as_ref().context("Missing value for ASP event")?;
+    let val_xdr = value.as_deref().context("Missing value for ASP event")?;
+    let val_map = decode_xdr_map(val_xdr)?;
 
-    let leaf = extract_hex_field(val, "leaf")
-        .or_else(|_| extract_hex_field(val, "0"))?;
-    let index = extract_u64_field(val, "index")
-        .or_else(|_| extract_u64_field(val, "1"))?;
+    let leaf = val_map
+        .get("leaf")
+        .and_then(scval_to_hex)
+        .context("Missing/invalid 'leaf' in ASP event")?;
+    let index = val_map
+        .get("index")
+        .and_then(scval_to_u64)
+        .context("Missing/invalid 'index' in ASP event")?;
 
     db.insert_asp_leaf(index, &leaf, ledger)?;
     Ok(())
 }
 
-// ==================== Helpers ====================
+// ==================== XDR Decoding Helpers ====================
 
-/// Extract a U256 hex string from a topic value.
-fn extract_u256_from_topic(val: Option<&serde_json::Value>) -> Result<String> {
-    let v = val.context("Missing topic value")?;
-    // Could be a string directly, or a nested structure
-    if let Some(s) = v.as_str() {
-        return Ok(s.to_string());
+use xdr::Limits;
+
+/// Decode a base64-encoded XDR ScVal as a Symbol string.
+fn decode_xdr_symbol(b64: &str) -> Option<String> {
+    let scval = ScVal::from_xdr_base64(b64, Limits::none()).ok()?;
+    match scval {
+        ScVal::Symbol(s) => Some(s.to_string()),
+        _ => None,
     }
-    // Try as object with bytes field
-    if let Some(s) = v.as_object().and_then(|obj| obj.get("bytes")).and_then(|b| b.as_str()) {
-        return Ok(s.to_string());
-    }
-    // Fallback: serialize as string
-    Ok(v.to_string())
 }
 
-/// Extract a u64 from a JSON value field.
-fn extract_u64_field(val: &serde_json::Value, field: &str) -> Result<u64> {
-    let v = val
-        .get(field)
-        .context(format!("Missing field '{field}'"))?;
-    if let Some(n) = v.as_u64() {
-        return Ok(n);
+/// Decode a base64-encoded XDR ScVal containing a U256 to a big-endian hex string.
+fn decode_xdr_u256_hex(b64: &str) -> Result<String> {
+    let scval = ScVal::from_xdr_base64(b64, Limits::none()).context("Invalid XDR in topic")?;
+    match scval {
+        ScVal::U256(parts) => {
+            // U256Parts: hi_hi, hi_lo, lo_hi, lo_lo (each u64, big-endian)
+            let mut buf = [0u8; 32];
+            buf[..8].copy_from_slice(&parts.hi_hi.to_be_bytes());
+            buf[8..16].copy_from_slice(&parts.hi_lo.to_be_bytes());
+            buf[16..24].copy_from_slice(&parts.lo_hi.to_be_bytes());
+            buf[24..32].copy_from_slice(&parts.lo_lo.to_be_bytes());
+            Ok(hex::encode(buf))
+        }
+        ScVal::Bytes(b) => Ok(hex::encode(b.as_slice())),
+        _ => anyhow::bail!("Expected U256 or Bytes in topic, got {:?}", scval),
     }
-    if let Some(s) = v.as_str() {
-        return s.parse().context(format!("Invalid u64 in field '{field}'"));
-    }
-    anyhow::bail!("Cannot parse field '{field}' as u64")
 }
 
-/// Extract bytes from a JSON value field (hex-encoded).
-fn extract_bytes_field(val: &serde_json::Value, field: &str) -> Result<Vec<u8>> {
-    let v = val
-        .get(field)
-        .context(format!("Missing field '{field}'"))?;
-    if let Some(s) = v.as_str() {
-        let s = s.strip_prefix("0x").unwrap_or(s);
-        return hex::decode(s).context(format!("Invalid hex in field '{field}'"));
+/// Decode a base64-encoded XDR ScVal containing an Address to a G.../C... string.
+fn decode_xdr_address(b64: &str) -> Result<String> {
+    let scval =
+        ScVal::from_xdr_base64(b64, Limits::none()).context("Invalid XDR in address topic")?;
+    match scval {
+        ScVal::Address(addr) => match addr {
+            xdr::ScAddress::Account(acct) => {
+                let xdr::PublicKey::PublicKeyTypeEd25519(key) = acct.0;
+                Ok(stellar_strkey::ed25519::PublicKey(key.0).to_string())
+            }
+            xdr::ScAddress::Contract(hash) => {
+                Ok(stellar_strkey::Contract(hash.0.into()).to_string())
+            }
+            _ => anyhow::bail!("Unsupported address type"),
+        },
+        _ => anyhow::bail!("Expected Address in topic, got {:?}", scval),
     }
-    // Could be an array of numbers
-    if let Some(arr) = v.as_array() {
-        let bytes: Result<Vec<u8>, _> = arr
-            .iter()
-            .map(|x| {
-                x.as_u64()
-                    .and_then(|n| u8::try_from(n).ok())
-                    .context("Invalid byte value")
-            })
-            .collect();
-        return bytes;
-    }
-    anyhow::bail!("Cannot parse field '{field}' as bytes")
 }
 
-/// Extract a hex string from a JSON value field.
-fn extract_hex_field(val: &serde_json::Value, field: &str) -> Result<String> {
-    let v = val
-        .get(field)
-        .context(format!("Missing field '{field}'"))?;
-    if let Some(s) = v.as_str() {
-        return Ok(s.to_string());
+/// Decode a base64-encoded XDR ScVal as a Map, returning entries by symbol key.
+fn decode_xdr_map(b64: &str) -> Result<std::collections::HashMap<String, ScVal>> {
+    let scval = ScVal::from_xdr_base64(b64, Limits::none()).context("Invalid XDR in value")?;
+
+    let mut map = std::collections::HashMap::new();
+    match scval {
+        ScVal::Map(Some(entries)) => {
+            for entry in entries.iter() {
+                if let ScVal::Symbol(key) = &entry.key {
+                    map.insert(key.to_string(), entry.val.clone());
+                }
+            }
+        }
+        _ => anyhow::bail!("Expected Map in event value, got {:?}", scval),
     }
-    anyhow::bail!("Cannot parse field '{field}' as hex string")
+    Ok(map)
+}
+
+/// Extract a u64 from a ScVal (U32 or U64).
+fn scval_to_u64(val: &ScVal) -> Option<u64> {
+    match val {
+        ScVal::U32(n) => Some(u64::from(*n)),
+        ScVal::U64(n) => Some(*n),
+        _ => None,
+    }
+}
+
+/// Extract bytes from a ScVal (Bytes or U256) as a big-endian hex string.
+fn scval_to_hex(val: &ScVal) -> Option<String> {
+    match val {
+        ScVal::Bytes(b) => Some(hex::encode(b.as_slice())),
+        ScVal::U256(parts) => {
+            let mut buf = [0u8; 32];
+            buf[..8].copy_from_slice(&parts.hi_hi.to_be_bytes());
+            buf[8..16].copy_from_slice(&parts.hi_lo.to_be_bytes());
+            buf[16..24].copy_from_slice(&parts.lo_hi.to_be_bytes());
+            buf[24..32].copy_from_slice(&parts.lo_lo.to_be_bytes());
+            Some(hex::encode(buf))
+        }
+        _ => None,
+    }
+}
+
+/// Extract raw bytes from a ScVal (Bytes).
+fn scval_to_bytes(val: &ScVal) -> Option<Vec<u8>> {
+    match val {
+        ScVal::Bytes(b) => Some(b.to_vec()),
+        _ => None,
+    }
 }

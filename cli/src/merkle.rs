@@ -20,12 +20,27 @@ pub const POOL_TREE_SIZE: usize = 1 << POOL_LEVELS;
 /// ASP tree size (2^ASP_LEVELS).
 pub const ASP_TREE_SIZE: usize = 1 << ASP_LEVELS;
 
+/// The default ("zero") leaf value used by on-chain Merkle trees.
+///
+/// Computed as `Poseidon2("XLM")` = `poseidon2_hash3(88, 76, 77, domain=0)`.
+/// This must match `get_zeroes()[0]` in `contracts/soroban-utils/src/poseidon2.rs`.
+pub fn zero_leaf() -> Scalar {
+    crypto::poseidon2_hash3(
+        Scalar::from(88u64),  // 'X'
+        Scalar::from(76u64),  // 'L'
+        Scalar::from(77u64),  // 'M'
+        None,                 // domain = 0
+    )
+}
+
 /// Build pool leaves array from database.
 ///
 /// Returns a vector of length `POOL_TREE_SIZE` with commitments placed at their
-/// indices (zero-filled for empty slots).
+/// indices. Empty slots are filled with [`zero_leaf()`] to match the on-chain
+/// Merkle tree default.
 pub fn build_pool_leaves(db: &Database) -> Result<Vec<Scalar>> {
-    let mut leaves = vec![Scalar::from(0u64); POOL_TREE_SIZE];
+    let zero = zero_leaf();
+    let mut leaves = vec![zero; POOL_TREE_SIZE];
     let db_leaves = db.get_pool_leaves()?;
 
     for (idx, commitment_hex) in &db_leaves {
@@ -41,7 +56,8 @@ pub fn build_pool_leaves(db: &Database) -> Result<Vec<Scalar>> {
 
 /// Build ASP membership leaves array from database.
 pub fn build_asp_leaves(db: &Database) -> Result<Vec<Scalar>> {
-    let mut leaves = vec![Scalar::from(0u64); ASP_TREE_SIZE];
+    let zero = zero_leaf();
+    let mut leaves = vec![zero; ASP_TREE_SIZE];
     let db_leaves = db.get_asp_leaves()?;
 
     for (idx, leaf_hex) in &db_leaves {
@@ -159,9 +175,10 @@ mod tests {
         let db = test_db();
         let leaves = build_pool_leaves(&db).unwrap();
         assert_eq!(leaves.len(), POOL_TREE_SIZE);
-        // All should be zero
+        // All should be the default zero leaf
+        let zero = zero_leaf();
         for leaf in &leaves {
-            assert_eq!(*leaf, Scalar::from(0u64));
+            assert_eq!(*leaf, zero);
         }
     }
 
@@ -181,8 +198,8 @@ mod tests {
         let leaves = build_pool_leaves(&db).unwrap();
         assert_eq!(leaves[0], val);
         assert_eq!(leaves[5], val2);
-        // Others should be zero
-        assert_eq!(leaves[1], Scalar::from(0u64));
+        // Others should be the default zero leaf
+        assert_eq!(leaves[1], zero_leaf());
     }
 
     #[test]
@@ -210,6 +227,6 @@ mod tests {
 
         let leaves = build_asp_leaves(&db).unwrap();
         assert_eq!(leaves[2], val);
-        assert_eq!(leaves[0], Scalar::from(0u64));
+        assert_eq!(leaves[0], zero_leaf());
     }
 }

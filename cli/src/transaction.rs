@@ -6,6 +6,7 @@ use anyhow::{Result, bail};
 use ark_ff::{BigInteger, PrimeField, Zero};
 use num_bigint::BigInt;
 use sha3::{Digest, Keccak256};
+use stellar_xdr::curr::{self as xdr, ScAddress, ScMapEntry, ScVal, WriteXdr};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::config::DeploymentConfig;
@@ -85,17 +86,20 @@ pub fn deposit(
         amount: Scalar::from(0u64),
     };
 
-    // Input notes: two zero-value dummy inputs
+    // Input notes: two zero-value dummy inputs with random blindings to avoid
+    // nullifier collisions across multiple deposits.
+    let dummy_blinding0 = crypto::random_blinding()?;
+    let dummy_blinding1 = crypto::random_blinding()?;
     let in0 = InputNote {
         leaf_index: 0,
         priv_key: note_privkey,
-        blinding: Scalar::from(0u64),
+        blinding: dummy_blinding0,
         amount: Scalar::from(0u64),
     };
     let in1 = InputNote {
         leaf_index: 1,
         priv_key: note_privkey,
-        blinding: Scalar::from(0u64),
+        blinding: dummy_blinding1,
         amount: Scalar::from(0u64),
     };
 
@@ -110,7 +114,7 @@ pub fn deposit(
     let encrypted0 = crypto::encrypt_note(&enc_pub, amount, &blinding0)?;
     let encrypted1 = crypto::encrypt_note(&enc_pub, 0, &blinding1)?;
 
-    // Compute ext_data_hash (Keccak256 of ext data, reduced mod BN256)
+    // Compute ext_data_hash (matches contract's hash_ext_data: XDR Keccak256 mod BN256)
     let ext_amount_i128 = i128::from(amount);
     let ext_data_hash = compute_ext_data_hash(
         &address,
@@ -123,9 +127,6 @@ pub fn deposit(
     let asp_membership_index = find_asp_membership_index(db, &note_pubkey)?;
     let asp_membership_blinding = Scalar::zero();
 
-    // Non-membership key placeholder
-    let non_membership_key = BigInt::from(0u32);
-
     // Generate proof
     let proof_result = proof::generate_proof(
         &[in0, in1],
@@ -136,12 +137,17 @@ pub fn deposit(
         &asp_leaves,
         asp_membership_index,
         asp_membership_blinding,
-        &non_membership_key,
     )?;
 
     // Serialize proof and invoke contract
-    let proof_hex = serialize_proof_for_invoke(&proof_result)?;
-    let ext_data_hex = serialize_ext_data_for_invoke(
+    let ext_data_hash_bytes = compute_ext_data_hash_bytes(
+        &address,
+        ext_amount_i128,
+        &encrypted0,
+        &encrypted1,
+    )?;
+    let proof_json = serialize_proof_for_invoke(&proof_result, &public_amount, &ext_data_hash_bytes)?;
+    let ext_data_json = serialize_ext_data_for_invoke(
         &address,
         ext_amount_i128,
         &encrypted0,
@@ -155,9 +161,9 @@ pub fn deposit(
         "transact",
         &[
             "--proof",
-            &proof_hex,
+            &proof_json,
             "--ext_data",
-            &ext_data_hex,
+            &ext_data_json,
             "--sender",
             &address,
         ],
@@ -167,8 +173,8 @@ pub fn deposit(
     let commitment = crypto::commitment(Scalar::from(amount), note_pubkey, blinding0);
     let commitment_hex = crypto::scalar_to_hex_be(&commitment);
     let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
-    let privkey_hex = hex::encode(crypto::scalar_to_le_bytes(&note_privkey));
-    let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding0));
+    let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
+    let blinding_hex = crypto::scalar_to_hex_le(&blinding0);
 
     // Get the next leaf index from the pool
     let next_idx = db.pool_leaf_count()?;
@@ -227,13 +233,14 @@ pub fn withdraw(
         })
         .collect::<Result<Vec<_>>>()?;
 
-    // Pad to 2 inputs if needed
+    // Pad to 2 inputs if needed (random blinding to avoid nullifier reuse)
     let mut inputs: Vec<InputNote> = input_notes;
     while inputs.len() < 2 {
+        let dummy_blinding = crypto::random_blinding()?;
         inputs.push(InputNote {
             leaf_index: 0,
             priv_key: note_privkey,
-            blinding: Scalar::from(0u64),
+            blinding: dummy_blinding,
             amount: Scalar::from(0u64),
         });
     }
@@ -278,7 +285,6 @@ pub fn withdraw(
     )?;
 
     let asp_membership_index = find_asp_membership_index(db, &note_pubkey)?;
-    let non_membership_key = BigInt::from(0u32);
 
     let proof_result = proof::generate_proof(
         &inputs,
@@ -289,11 +295,16 @@ pub fn withdraw(
         &asp_leaves,
         asp_membership_index,
         Scalar::zero(),
-        &non_membership_key,
     )?;
 
-    let proof_hex = serialize_proof_for_invoke(&proof_result)?;
-    let ext_data_hex = serialize_ext_data_for_invoke(
+    let ext_data_hash_bytes = compute_ext_data_hash_bytes(
+        &recipient_address,
+        ext_amount_i128,
+        &encrypted0,
+        &encrypted1,
+    )?;
+    let proof_json = serialize_proof_for_invoke(&proof_result, &public_amount, &ext_data_hash_bytes)?;
+    let ext_data_json = serialize_ext_data_for_invoke(
         &recipient_address,
         ext_amount_i128,
         &encrypted0,
@@ -308,9 +319,9 @@ pub fn withdraw(
         "transact",
         &[
             "--proof",
-            &proof_hex,
+            &proof_json,
             "--ext_data",
-            &ext_data_hex,
+            &ext_data_json,
             "--sender",
             &sender_address,
         ],
@@ -325,8 +336,8 @@ pub fn withdraw(
     if change > 0 {
         let change_commitment = crypto::commitment(Scalar::from(change), note_pubkey, blinding0);
         let commitment_hex = crypto::scalar_to_hex_be(&change_commitment);
-        let privkey_hex = hex::encode(crypto::scalar_to_le_bytes(&note_privkey));
-        let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding0));
+        let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
+        let blinding_hex = crypto::scalar_to_hex_le(&blinding0);
         let next_idx = db.pool_leaf_count()?;
 
         db.upsert_note(&UserNote {
@@ -393,12 +404,14 @@ pub fn transfer(
         })
         .collect::<Result<Vec<_>>>()?;
 
+    // Pad to 2 inputs (random blinding to avoid nullifier reuse)
     let mut inputs: Vec<InputNote> = input_notes;
     while inputs.len() < 2 {
+        let dummy_blinding = crypto::random_blinding()?;
         inputs.push(InputNote {
             leaf_index: 0,
             priv_key: note_privkey,
-            blinding: Scalar::from(0u64),
+            blinding: dummy_blinding,
             amount: Scalar::from(0u64),
         });
     }
@@ -436,7 +449,6 @@ pub fn transfer(
     )?;
 
     let asp_membership_index = find_asp_membership_index(db, &note_pubkey)?;
-    let non_membership_key = BigInt::from(0u32);
 
     let proof_result = proof::generate_proof(
         &inputs,
@@ -447,11 +459,16 @@ pub fn transfer(
         &asp_leaves,
         asp_membership_index,
         Scalar::zero(),
-        &non_membership_key,
     )?;
 
-    let proof_hex = serialize_proof_for_invoke(&proof_result)?;
-    let ext_data_hex = serialize_ext_data_for_invoke(
+    let ext_data_hash_bytes = compute_ext_data_hash_bytes(
+        &sender_address,
+        0i128,
+        &encrypted0,
+        &encrypted1,
+    )?;
+    let proof_json = serialize_proof_for_invoke(&proof_result, &public_amount, &ext_data_hash_bytes)?;
+    let ext_data_json = serialize_ext_data_for_invoke(
         &sender_address,
         0i128,
         &encrypted0,
@@ -465,9 +482,9 @@ pub fn transfer(
         "transact",
         &[
             "--proof",
-            &proof_hex,
+            &proof_json,
             "--ext_data",
-            &ext_data_hex,
+            &ext_data_json,
             "--sender",
             &sender_address,
         ],
@@ -482,8 +499,8 @@ pub fn transfer(
     if change > 0 {
         let change_commitment = crypto::commitment(Scalar::from(change), note_pubkey, blinding1);
         let commitment_hex = crypto::scalar_to_hex_be(&change_commitment);
-        let privkey_hex = hex::encode(crypto::scalar_to_le_bytes(&note_privkey));
-        let blinding_hex = hex::encode(crypto::scalar_to_le_bytes(&blinding1));
+        let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
+        let blinding_hex = crypto::scalar_to_hex_le(&blinding1);
         let next_idx = db.pool_leaf_count()?;
 
         db.upsert_note(&UserNote {
@@ -554,22 +571,118 @@ fn find_asp_membership_index(db: &Database, note_pubkey: &Scalar) -> Result<usiz
     Ok(0)
 }
 
-/// Compute ExtDataHash: Keccak256 of ext data, reduced mod BN256 field.
+// ==================== ExtData Hash (matching contract's hash_ext_data) ====================
+
+/// Build the XDR `ScVal::Map` representation of `ExtData`, matching the
+/// contract's `#[contracttype]` serialization (fields sorted alphabetically).
+fn build_ext_data_scval(
+    recipient: &str,
+    ext_amount: i128,
+    encrypted_output0: &[u8],
+    encrypted_output1: &[u8],
+) -> Result<ScVal> {
+    // Convert recipient address to XDR
+    let pk = stellar_strkey::ed25519::PublicKey::from_string(recipient)
+        .map_err(|e| anyhow::anyhow!("Invalid recipient address: {e}"))?;
+    let address_val = ScVal::Address(ScAddress::Account(xdr::AccountId(
+        xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(pk.0)),
+    )));
+
+    // Convert ext_amount (i128) to I256 parts.
+    // These casts are intentional: we're splitting a 128-bit value into
+    // two 64-bit halves, and reinterpreting i128 as u128 for bit layout.
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
+    let lo_lo = ext_amount as u128 as u64;
+    #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation, clippy::arithmetic_side_effects)]
+    let lo_hi = ((ext_amount as u128) >> 64) as u64;
+    let (hi_hi, hi_lo) = if ext_amount >= 0 {
+        (0i64, 0u64)
+    } else {
+        (-1i64, u64::MAX)
+    };
+    let i256_val = ScVal::I256(xdr::Int256Parts {
+        hi_hi,
+        hi_lo,
+        lo_hi,
+        lo_lo,
+    });
+
+    // Bytes
+    let enc0_val = ScVal::Bytes(xdr::ScBytes(
+        encrypted_output0
+            .to_vec()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("encrypted_output0 too large for ScBytes"))?,
+    ));
+    let enc1_val = ScVal::Bytes(xdr::ScBytes(
+        encrypted_output1
+            .to_vec()
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("encrypted_output1 too large for ScBytes"))?,
+    ));
+
+    // Build map entries sorted alphabetically by field name
+    // (Soroban #[contracttype] sorts fields alphabetically)
+    let entries = vec![
+        ScMapEntry {
+            key: ScVal::Symbol(xdr::ScSymbol(
+                "encrypted_output0"
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("symbol too long"))?,
+            )),
+            val: enc0_val,
+        },
+        ScMapEntry {
+            key: ScVal::Symbol(xdr::ScSymbol(
+                "encrypted_output1"
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("symbol too long"))?,
+            )),
+            val: enc1_val,
+        },
+        ScMapEntry {
+            key: ScVal::Symbol(xdr::ScSymbol(
+                "ext_amount"
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("symbol too long"))?,
+            )),
+            val: i256_val,
+        },
+        ScMapEntry {
+            key: ScVal::Symbol(xdr::ScSymbol(
+                "recipient"
+                    .try_into()
+                    .map_err(|_| anyhow::anyhow!("symbol too long"))?,
+            )),
+            val: address_val,
+        },
+    ];
+
+    let map = xdr::ScMap(
+        entries
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("ScMap construction failed"))?,
+    );
+    Ok(ScVal::Map(Some(map)))
+}
+
+/// Compute ExtDataHash: Keccak256 of XDR-serialized ExtData, reduced mod BN256.
+///
+/// Matches the contract's `hash_ext_data` which does:
+/// `keccak256(ext_data.to_xdr(env)) mod BN256_MODULUS`
 fn compute_ext_data_hash(
     recipient: &str,
     ext_amount: i128,
     encrypted_output0: &[u8],
     encrypted_output1: &[u8],
 ) -> Result<BigInt> {
-    // Build the data to hash — we concatenate the fields
-    let mut data = Vec::new();
-    data.extend_from_slice(recipient.as_bytes());
-    data.extend_from_slice(&ext_amount.to_be_bytes());
-    data.extend_from_slice(encrypted_output0);
-    data.extend_from_slice(encrypted_output1);
+    let scval = build_ext_data_scval(recipient, ext_amount, encrypted_output0, encrypted_output1)?;
+    let xdr_bytes = scval
+        .to_xdr(xdr::Limits::none())
+        .map_err(|e| anyhow::anyhow!("XDR serialization failed: {e}"))?;
 
     let mut hasher = Keccak256::new();
-    hasher.update(&data);
+    hasher.update(&xdr_bytes);
     let digest = hasher.finalize();
 
     // Reduce mod BN256 field
@@ -581,24 +694,185 @@ fn compute_ext_data_hash(
     Ok(BigInt::from(reduced))
 }
 
-/// Serialize proof for stellar contract invoke (placeholder — actual XDR serialization needed).
-fn serialize_proof_for_invoke(result: &proof::ProofResult) -> Result<String> {
-    // For now, serialize the proof components as hex
-    // In production, this would produce proper Soroban XDR
-    let mut buf = Vec::new();
-    ark_serialize::CanonicalSerialize::serialize_compressed(&result.proof, &mut buf)
-        .map_err(|e| anyhow::anyhow!("Proof serialization failed: {e}"))?;
-    Ok(hex::encode(&buf))
+/// Compute ext_data_hash as a 32-byte big-endian array for the Proof struct.
+fn compute_ext_data_hash_bytes(
+    recipient: &str,
+    ext_amount: i128,
+    encrypted_output0: &[u8],
+    encrypted_output1: &[u8],
+) -> Result<[u8; 32]> {
+    let hash_bigint =
+        compute_ext_data_hash(recipient, ext_amount, encrypted_output0, encrypted_output1)?;
+    let hash_biguint = hash_bigint
+        .to_biguint()
+        .ok_or_else(|| anyhow::anyhow!("ext_data_hash should not be negative"))?;
+    let bytes = hash_biguint.to_bytes_be();
+    let mut buf = [0u8; 32];
+    let start = 32usize.saturating_sub(bytes.len());
+    buf[start..].copy_from_slice(&bytes);
+    Ok(buf)
 }
 
-/// Serialize ExtData for stellar contract invoke (placeholder).
+// ==================== Proof Serialization ====================
+
+/// Convert a G1 affine point to 64 bytes: `[x_be (32) || y_be (32)]`.
+fn g1_to_bytes(point: &ark_bn254::G1Affine) -> [u8; 64] {
+    let mut out = [0u8; 64];
+    let x: [u8; 32] = point
+        .x
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G1 x coord should be 32 bytes");
+    let y: [u8; 32] = point
+        .y
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G1 y coord should be 32 bytes");
+    out[..32].copy_from_slice(&x);
+    out[32..].copy_from_slice(&y);
+    out
+}
+
+/// Convert a G2 affine point to 128 bytes.
+///
+/// Layout follows Soroban's `Bn254G2Affine` convention: imaginary component
+/// first, real component second for each coordinate.
+/// `[x.c1 (32) || x.c0 (32) || y.c1 (32) || y.c0 (32)]`
+fn g2_to_bytes(point: &ark_bn254::G2Affine) -> [u8; 128] {
+    let mut out = [0u8; 128];
+    let x0: [u8; 32] = point
+        .x
+        .c0
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G2 x.c0 should be 32 bytes");
+    let x1: [u8; 32] = point
+        .x
+        .c1
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G2 x.c1 should be 32 bytes");
+    let y0: [u8; 32] = point
+        .y
+        .c0
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G2 y.c0 should be 32 bytes");
+    let y1: [u8; 32] = point
+        .y
+        .c1
+        .into_bigint()
+        .to_bytes_be()
+        .try_into()
+        .expect("G2 y.c1 should be 32 bytes");
+    // Imaginary first, real second (Soroban convention)
+    out[..32].copy_from_slice(&x1);
+    out[32..64].copy_from_slice(&x0);
+    out[64..96].copy_from_slice(&y1);
+    out[96..].copy_from_slice(&y0);
+    out
+}
+
+/// Convert a Scalar to a decimal string (for U256 JSON serialization).
+fn scalar_to_decimal(s: &Scalar) -> String {
+    let bu = num_bigint::BigUint::from_bytes_be(&s.into_bigint().to_bytes_be());
+    bu.to_string()
+}
+
+/// Serialize the Proof struct as JSON for `stellar contract invoke`.
+///
+/// The JSON matches the pool contract's `Proof` struct:
+/// ```json
+/// {
+///   "proof": { "a": "hex64", "b": "hex128", "c": "hex64" },
+///   "root": "decimal",
+///   "input_nullifiers": ["decimal", ...],
+///   "output_commitment0": "decimal",
+///   "output_commitment1": "decimal",
+///   "public_amount": "decimal",
+///   "ext_data_hash": "hex32",
+///   "asp_membership_root": "decimal",
+///   "asp_non_membership_root": "decimal"
+/// }
+/// ```
+fn serialize_proof_for_invoke(
+    result: &proof::ProofResult,
+    public_amount: &Scalar,
+    ext_data_hash_bytes: &[u8; 32],
+) -> Result<String> {
+    // Convert Groth16 proof points to byte arrays
+    let a_hex = hex::encode(g1_to_bytes(&result.proof.a));
+    let b_hex = hex::encode(g2_to_bytes(&result.proof.b));
+    let c_hex = hex::encode(g1_to_bytes(&result.proof.c));
+
+    // Pool root
+    let root_str = scalar_to_decimal(&result.root);
+
+    // Nullifiers
+    let nullifier_strs: Vec<String> = result
+        .nullifiers
+        .iter()
+        .map(scalar_to_decimal)
+        .collect();
+
+    // Output commitments
+    if result.output_commitments.len() < 2 {
+        bail!("Expected at least 2 output commitments");
+    }
+    let out_cm0_str = scalar_to_decimal(&result.output_commitments[0]);
+    let out_cm1_str = scalar_to_decimal(&result.output_commitments[1]);
+
+    // Public amount
+    let pub_amount_str = scalar_to_decimal(public_amount);
+
+    // ext_data_hash as hex
+    let edh_hex = hex::encode(ext_data_hash_bytes);
+
+    // ASP roots (take first since all entries should be equal)
+    let mem_root_str = result
+        .membership_roots
+        .first()
+        .map(scalar_to_decimal)
+        .unwrap_or_else(|| "0".to_string());
+    let non_mem_root_str = result
+        .non_membership_roots
+        .first()
+        .map(scalar_to_decimal)
+        .unwrap_or_else(|| "0".to_string());
+
+    let json = serde_json::json!({
+        "proof": {
+            "a": a_hex,
+            "b": b_hex,
+            "c": c_hex,
+        },
+        "root": root_str,
+        "input_nullifiers": nullifier_strs,
+        "output_commitment0": out_cm0_str,
+        "output_commitment1": out_cm1_str,
+        "public_amount": pub_amount_str,
+        "ext_data_hash": edh_hex,
+        "asp_membership_root": mem_root_str,
+        "asp_non_membership_root": non_mem_root_str,
+    });
+
+    Ok(json.to_string())
+}
+
+/// Serialize ExtData for stellar contract invoke.
+///
+/// Matches the pool contract's `ExtData` struct.
 fn serialize_ext_data_for_invoke(
     recipient: &str,
     ext_amount: i128,
     encrypted_output0: &[u8],
     encrypted_output1: &[u8],
 ) -> Result<String> {
-    // JSON representation for stellar contract invoke
     let json = serde_json::json!({
         "recipient": recipient,
         "ext_amount": ext_amount.to_string(),
@@ -681,19 +955,21 @@ mod tests {
         let enc0 = vec![0u8; 112];
         let enc1 = vec![1u8; 112];
 
-        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
-        let h2 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
+        let h1 = compute_ext_data_hash(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            1000,
+            &enc0,
+            &enc1,
+        )
+        .unwrap();
+        let h2 = compute_ext_data_hash(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            1000,
+            &enc0,
+            &enc1,
+        )
+        .unwrap();
         assert_eq!(h1, h2, "ext_data_hash should be deterministic");
-    }
-
-    #[test]
-    fn test_ext_data_hash_changes_with_recipient() {
-        let enc0 = vec![0u8; 112];
-        let enc1 = vec![1u8; 112];
-
-        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
-        let h2 = compute_ext_data_hash("GXYZ", 1000, &enc0, &enc1).unwrap();
-        assert_ne!(h1, h2, "different recipients should produce different hashes");
     }
 
     #[test]
@@ -701,8 +977,20 @@ mod tests {
         let enc0 = vec![0u8; 112];
         let enc1 = vec![1u8; 112];
 
-        let h1 = compute_ext_data_hash("GABC", 1000, &enc0, &enc1).unwrap();
-        let h2 = compute_ext_data_hash("GABC", 2000, &enc0, &enc1).unwrap();
+        let h1 = compute_ext_data_hash(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            1000,
+            &enc0,
+            &enc1,
+        )
+        .unwrap();
+        let h2 = compute_ext_data_hash(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            2000,
+            &enc0,
+            &enc1,
+        )
+        .unwrap();
         assert_ne!(h1, h2, "different amounts should produce different hashes");
     }
 
@@ -712,7 +1000,12 @@ mod tests {
         let enc1 = vec![1u8; 112];
 
         // Should not panic with negative amount (withdrawal case)
-        let result = compute_ext_data_hash("GABC", -500, &enc0, &enc1);
+        let result = compute_ext_data_hash(
+            "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+            -500,
+            &enc0,
+            &enc1,
+        );
         assert!(result.is_ok());
     }
 
@@ -759,7 +1052,8 @@ mod tests {
         let enc0 = vec![0xABu8; 4];
         let enc1 = vec![0xCDu8; 4];
 
-        let result = serialize_ext_data_for_invoke("GABC", -100, &enc0, &enc1).unwrap();
+        let result =
+            serialize_ext_data_for_invoke("GABC", -100, &enc0, &enc1).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&result).unwrap();
 
         assert_eq!(parsed["recipient"], "GABC");

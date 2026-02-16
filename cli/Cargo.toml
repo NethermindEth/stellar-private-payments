@@ -38,7 +38,7 @@ sha2 = { workspace = true }
 stellar-strkey = "0.0.11"
 ed25519-dalek = { version = "2.1", features = ["alloc"] }
 sha3 = "0.10"
-stellar-xdr = { version = "25.0.0", features = ["std", "curr"] }
+stellar-xdr = { version = "25.0.0", features = ["std", "curr", "base64"] }
 
 # Infra
 rusqlite = { version = "0.34", features = ["bundled"] }

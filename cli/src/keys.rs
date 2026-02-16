@@ -76,7 +76,3 @@ pub fn derive_encryption_keypair(identity: &str, network: &str) -> Result<([u8; 
     Ok((*public.as_bytes(), secret.to_bytes()))
 }
 
-/// Get the G... public address for a stellar identity.
-pub fn resolve_address(identity: &str, network: &str) -> Result<String> {
-    stellar::keys_address(identity, network)
-}
