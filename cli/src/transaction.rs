@@ -169,27 +169,9 @@ pub fn deposit(
         ],
     )?;
 
-    // Save note to database
-    let commitment = crypto::commitment(Scalar::from(amount), note_pubkey, blinding0);
-    let commitment_hex = crypto::scalar_to_hex_be(&commitment);
-    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
-    let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
-    let blinding_hex = crypto::scalar_to_hex_le(&blinding0);
-
-    // Get the next leaf index from the pool
+    // Save deposit note
     let next_idx = db.pool_leaf_count()?;
-
-    db.upsert_note(&UserNote {
-        id: commitment_hex,
-        owner: pubkey_hex,
-        private_key: privkey_hex,
-        blinding: blinding_hex,
-        amount,
-        leaf_index: next_idx,
-        spent: 0,
-        is_received: 0,
-        ledger: None,
-    })?;
+    save_note(db, amount, note_pubkey, note_privkey, blinding0, next_idx)?;
 
     Ok(())
 }
@@ -217,33 +199,9 @@ pub fn withdraw(
         anyhow::anyhow!("Insufficient balance")
     })?;
 
-    // Build input notes from selected
-    let input_notes: Vec<InputNote> = selected
-        .iter()
-        .map(|n| {
-            let blinding_bytes = hex::decode(&n.blinding)?;
-            let blinding = crypto::le_bytes_to_scalar(&blinding_bytes);
-            Ok(InputNote {
-                leaf_index: usize::try_from(n.leaf_index)
-                    .map_err(|_| anyhow::anyhow!("leaf index overflow"))?,
-                priv_key: note_privkey,
-                blinding,
-                amount: Scalar::from(n.amount),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    // Pad to 2 inputs if needed (random blinding to avoid nullifier reuse)
-    let mut inputs: Vec<InputNote> = input_notes;
-    while inputs.len() < 2 {
-        let dummy_blinding = crypto::random_blinding()?;
-        inputs.push(InputNote {
-            leaf_index: 0,
-            priv_key: note_privkey,
-            blinding: dummy_blinding,
-            amount: Scalar::from(0u64),
-        });
-    }
+    // Build and pad input notes
+    let mut inputs = user_notes_to_inputs(&selected, note_privkey)?;
+    pad_inputs_to_two(&mut inputs, note_privkey)?;
 
     // Output 0: change note (back to self)
     let blinding0 = crypto::random_blinding()?;
@@ -334,23 +292,8 @@ pub fn withdraw(
 
     // Save change note
     if change > 0 {
-        let change_commitment = crypto::commitment(Scalar::from(change), note_pubkey, blinding0);
-        let commitment_hex = crypto::scalar_to_hex_be(&change_commitment);
-        let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
-        let blinding_hex = crypto::scalar_to_hex_le(&blinding0);
         let next_idx = db.pool_leaf_count()?;
-
-        db.upsert_note(&UserNote {
-            id: commitment_hex,
-            owner: pubkey_hex,
-            private_key: privkey_hex,
-            blinding: blinding_hex,
-            amount: change,
-            leaf_index: next_idx,
-            spent: 0,
-            is_received: 0,
-            ledger: None,
-        })?;
+        save_note(db, change, note_pubkey, note_privkey, blinding0, next_idx)?;
     }
 
     Ok(())
@@ -389,32 +332,9 @@ pub fn transfer(
         anyhow::anyhow!("Insufficient balance")
     })?;
 
-    let input_notes: Vec<InputNote> = selected
-        .iter()
-        .map(|n| {
-            let blinding_bytes = hex::decode(&n.blinding)?;
-            let blinding = crypto::le_bytes_to_scalar(&blinding_bytes);
-            Ok(InputNote {
-                leaf_index: usize::try_from(n.leaf_index)
-                    .map_err(|_| anyhow::anyhow!("leaf index overflow"))?,
-                priv_key: note_privkey,
-                blinding,
-                amount: Scalar::from(n.amount),
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    // Pad to 2 inputs (random blinding to avoid nullifier reuse)
-    let mut inputs: Vec<InputNote> = input_notes;
-    while inputs.len() < 2 {
-        let dummy_blinding = crypto::random_blinding()?;
-        inputs.push(InputNote {
-            leaf_index: 0,
-            priv_key: note_privkey,
-            blinding: dummy_blinding,
-            amount: Scalar::from(0u64),
-        });
-    }
+    // Build and pad input notes
+    let mut inputs = user_notes_to_inputs(&selected, note_privkey)?;
+    pad_inputs_to_two(&mut inputs, note_privkey)?;
 
     // Output 0: to recipient
     // Output 1: change back to self
@@ -497,29 +417,74 @@ pub fn transfer(
 
     // Save change note
     if change > 0 {
-        let change_commitment = crypto::commitment(Scalar::from(change), note_pubkey, blinding1);
-        let commitment_hex = crypto::scalar_to_hex_be(&change_commitment);
-        let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
-        let blinding_hex = crypto::scalar_to_hex_le(&blinding1);
-        let next_idx = db.pool_leaf_count()?;
-
-        db.upsert_note(&UserNote {
-            id: commitment_hex,
-            owner: pubkey_hex,
-            private_key: privkey_hex,
-            blinding: blinding_hex,
-            amount: change,
-            leaf_index: next_idx.saturating_add(1), // output1 is at next_idx+1
-            spent: 0,
-            is_received: 0,
-            ledger: None,
-        })?;
+        let next_idx = db.pool_leaf_count()?.saturating_add(1); // output1 is at next_idx+1
+        save_note(db, change, note_pubkey, note_privkey, blinding1, next_idx)?;
     }
 
     Ok(())
 }
 
 // ==================== Helpers ====================
+
+/// Convert selected `UserNote`s into circuit `InputNote`s.
+fn user_notes_to_inputs(selected: &[UserNote], note_privkey: Scalar) -> Result<Vec<InputNote>> {
+    selected
+        .iter()
+        .map(|n| {
+            let blinding_bytes = hex::decode(&n.blinding)?;
+            let blinding = crypto::le_bytes_to_scalar(&blinding_bytes);
+            Ok(InputNote {
+                leaf_index: usize::try_from(n.leaf_index)
+                    .map_err(|_| anyhow::anyhow!("leaf index overflow"))?,
+                priv_key: note_privkey,
+                blinding,
+                amount: Scalar::from(n.amount),
+            })
+        })
+        .collect::<Result<Vec<_>>>()
+}
+
+/// Pad input notes to 2 with zero-amount dummies (random blinding to avoid nullifier reuse).
+fn pad_inputs_to_two(inputs: &mut Vec<InputNote>, note_privkey: Scalar) -> Result<()> {
+    while inputs.len() < 2 {
+        let dummy_blinding = crypto::random_blinding()?;
+        inputs.push(InputNote {
+            leaf_index: 0,
+            priv_key: note_privkey,
+            blinding: dummy_blinding,
+            amount: Scalar::from(0u64),
+        });
+    }
+    Ok(())
+}
+
+/// Save an output note to the database.
+fn save_note(
+    db: &Database,
+    amount: u64,
+    note_pubkey: Scalar,
+    note_privkey: Scalar,
+    blinding: Scalar,
+    leaf_index: u64,
+) -> Result<()> {
+    let commitment = crypto::commitment(Scalar::from(amount), note_pubkey, blinding);
+    let commitment_hex = crypto::scalar_to_hex_be(&commitment);
+    let pubkey_hex = crypto::scalar_to_hex_be(&note_pubkey);
+    let privkey_hex = crypto::scalar_to_hex_le(&note_privkey);
+    let blinding_hex = crypto::scalar_to_hex_le(&blinding);
+
+    db.upsert_note(&UserNote {
+        id: commitment_hex,
+        owner: pubkey_hex,
+        private_key: privkey_hex,
+        blinding: blinding_hex,
+        amount,
+        leaf_index,
+        spent: 0,
+        is_received: 0,
+        ledger: None,
+    })
+}
 
 /// Select unspent notes to cover the requested amount.
 /// Returns (selected_notes, total_amount).

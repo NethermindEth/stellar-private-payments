@@ -6,7 +6,7 @@
 use anyhow::{Result, bail};
 use ark_bn254::{Bn254, Fr};
 use ark_circom::{CircomBuilder, CircomConfig};
-use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey};
 use ark_serialize::CanonicalDeserialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
@@ -56,10 +56,6 @@ pub struct OutputNote {
 pub struct ProofResult {
     /// The Groth16 proof (a, b, c curve points).
     pub proof: Proof<Bn254>,
-    /// Public inputs vector from the circuit.
-    pub public_inputs: Vec<Fr>,
-    /// Verification key (for local re-verification).
-    pub vk: VerifyingKey<Bn254>,
     /// Pool Merkle root used in the proof.
     pub root: Scalar,
     /// Input nullifiers.
@@ -73,7 +69,7 @@ pub struct ProofResult {
 }
 
 /// Convert a scalar field element to a `BigInt` for circuit inputs.
-pub fn scalar_to_bigint(s: Scalar) -> BigInt {
+fn scalar_to_bigint(s: Scalar) -> BigInt {
     let bi = s.into_bigint();
     let bytes_le = bi.to_bytes_le();
     let u = BigUint::from_bytes_le(&bytes_le);
@@ -99,18 +95,17 @@ fn load_circom_config() -> Result<CircomConfig<Fr>> {
 }
 
 /// Load the embedded proving key.
-fn load_proving_key() -> Result<(ProvingKey<Bn254>, VerifyingKey<Bn254>, PreparedVerifyingKey<Bn254>)> {
+fn load_proving_key() -> Result<(ProvingKey<Bn254>, PreparedVerifyingKey<Bn254>)> {
     if PROVING_KEY.is_empty() {
         bail!("Proving key not embedded. Ensure scripts/testdata/policy_test_proving_key.bin exists.");
     }
 
     let pk: ProvingKey<Bn254> = ProvingKey::deserialize_compressed(&mut &PROVING_KEY[..])
         .map_err(|e| anyhow::anyhow!("Failed to deserialize proving key: {e}"))?;
-    let vk = pk.vk.clone();
-    let pvk = Groth16::<Bn254>::process_vk(&vk)
+    let pvk = Groth16::<Bn254>::process_vk(&pk.vk)
         .map_err(|e| anyhow::anyhow!("process_vk failed: {e}"))?;
 
-    Ok((pk, vk, pvk))
+    Ok((pk, pvk))
 }
 
 /// Generate a Groth16 proof for a transaction.
@@ -132,7 +127,7 @@ pub fn generate_proof(
     asp_membership_blinding: Scalar,
 ) -> Result<ProofResult> {
     let cfg = load_circom_config()?;
-    let (pk, vk, pvk) = load_proving_key()?;
+    let (pk, pvk) = load_proving_key()?;
 
     let n_inputs = inputs.len();
 
@@ -309,8 +304,6 @@ pub fn generate_proof(
 
     Ok(ProofResult {
         proof,
-        public_inputs,
-        vk,
         root,
         nullifiers,
         output_commitments,

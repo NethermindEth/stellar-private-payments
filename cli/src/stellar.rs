@@ -141,32 +141,6 @@ pub fn get_oldest_ledger(contract_id: &str, network: &str) -> Result<Option<u64>
     );
 }
 
-/// Invoke a contract function (simulation only, no submission).
-pub fn contract_invoke_view(
-    contract_id: &str,
-    source: &str,
-    network: &str,
-    function: &str,
-    extra_args: &[&str],
-) -> Result<String> {
-    let mut args = vec![
-        "contract",
-        "invoke",
-        "--id",
-        contract_id,
-        "--source-account",
-        source,
-        "--network",
-        network,
-        "--send",
-        "no",
-        "--",
-        function,
-    ];
-    args.extend_from_slice(extra_args);
-    run_stellar(&args)
-}
-
 /// Invoke a contract function (submit transaction).
 pub fn contract_invoke(
     contract_id: &str,

@@ -1,7 +1,7 @@
 //! Event fetching and incremental sync.
 //!
 //! Uses `stellar events --output json` to fetch contract events and stores
-//! them in the SQLite database.
+//! them in the local JSON database.
 //!
 //! The stellar CLI returns events with topics and values as base64-encoded
 //! XDR `ScVal`. This module decodes them using the `stellar-xdr` crate.
@@ -18,13 +18,8 @@ use crate::stellar;
 ///
 /// Topics and value are base64-encoded XDR `ScVal` strings.
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
 struct StellarEvent {
-    #[serde(rename = "type")]
-    event_type: Option<String>,
     ledger: Option<u64>,
-    #[serde(rename = "contractId")]
-    contract_id: Option<String>,
     /// Base64-encoded XDR ScVal topic strings.
     topic: Option<Vec<String>>,
     /// Base64-encoded XDR ScVal value string.

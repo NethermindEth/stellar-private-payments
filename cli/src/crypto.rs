@@ -11,15 +11,16 @@ use zkhash::{
     fields::bn256::FpBN256 as Scalar,
     poseidon2::{
         poseidon2::Poseidon2,
-        poseidon2_instance_bn256::{
-            POSEIDON2_BN256_PARAMS_2, POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4,
-        },
+        poseidon2_instance_bn256::{POSEIDON2_BN256_PARAMS_3, POSEIDON2_BN256_PARAMS_4},
     },
 };
+#[cfg(test)]
+use zkhash::poseidon2::poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_2;
 
 // ==================== Poseidon2 hashing ====================
 
 /// Poseidon2 compression (2 inputs, feed-forward). Used for Merkle tree nodes.
+#[cfg(test)]
 pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_2);
     let input = [left, right];
@@ -119,6 +120,7 @@ pub fn le_bytes_to_scalar(bytes: &[u8]) -> Scalar {
 }
 
 /// Convert scalar to big-endian bytes (32 bytes).
+#[cfg(test)]
 pub fn scalar_to_be_bytes(s: &Scalar) -> [u8; 32] {
     let mut buf = [0u8; 32];
     let be = s.into_bigint().to_bytes_be();

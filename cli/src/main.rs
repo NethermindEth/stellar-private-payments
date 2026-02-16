@@ -2,26 +2,18 @@
 //!
 //! Invoked as `stellar spp <command>`.
 
-#[allow(dead_code)]
 mod admin;
 mod cli;
 mod config;
-#[allow(dead_code)]
 mod crypto;
-#[allow(dead_code)]
 mod db;
 mod display;
-#[allow(dead_code)]
 mod keys;
-#[allow(dead_code)]
 mod merkle;
 mod notes;
-#[allow(dead_code)]
 mod proof;
-#[allow(dead_code)]
 mod stellar;
 mod sync;
-#[allow(dead_code)]
 mod transaction;
 
 use anyhow::Result;
