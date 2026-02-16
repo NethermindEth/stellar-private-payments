@@ -34,7 +34,7 @@ circuits-build:
 install:
 	@echo "Installing frontend dependencies..."
 	@npm install --prefix app
-	@rustup target add wasm32v1-none 2>/dev/null || true
+	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
 	@command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
 
