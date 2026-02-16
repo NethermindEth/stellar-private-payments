@@ -42,7 +42,7 @@ cp target/release/stellar-spp ~/.cargo/bin/
 ## Quick Start
 
 ```bash
-# 1. Initialize: loads contract addresses from deployments.json, creates local DB, runs initial sync
+# 1. Initialize: loads contract addresses from deployments.json, creates local data store, runs initial sync
 stellar spp init
 
 # 2. Derive and inspect your ZK keys
@@ -69,7 +69,7 @@ stellar spp notes scan --source alice
 
 ## Command Reference
 
-All commands accept the global flags `--network <name>` (default: `testnet`) and `--pool <C...>` (overrides the pool contract address from config).
+All commands accept the global flags `--network <name>` (default: `testnet`) and `--pool <name>` (selects a named pool). These can also be set via the `STELLAR_NETWORK` and `STELLAR_SPP_POOL` environment variables.
 
 All identity flags (`--source`, `--account`, `--to`, `--new-admin`) accept Stellar CLI identity names (e.g., `alice`, `admin`) -- never raw keys.
 
@@ -77,7 +77,7 @@ All identity flags (`--source`, `--account`, `--to`, `--new-admin`) accept Stell
 
 | Command | Description |
 |---------|-------------|
-| `stellar spp init` | Load deployment config from `deployments.json`, create the SQLite database, and run an initial event sync |
+| `stellar spp init` | Load deployment config from `deployments.json`, create the local data store, and run an initial event sync |
 | `stellar spp sync` | Incremental sync: fetch new on-chain events since the last sync |
 | `stellar spp status [--source <id>]` | Show sync status, pool statistics, and (optionally) the balance for an identity |
 
@@ -105,6 +105,15 @@ All identity flags (`--source`, `--account`, `--to`, `--new-admin`) accept Stell
 | `stellar spp notes scan --source <id>` | Decrypt on-chain encrypted outputs to discover notes addressed to this identity |
 | `stellar spp notes export <note-id>` | Export a note (by commitment hex) to JSON on stdout |
 | `stellar spp notes import <file>` | Import a note from a JSON file |
+
+### Pool Management
+
+| Command | Description |
+|---------|-------------|
+| `stellar spp pool add <name> [--pool-id <C...> --asp-membership <C...> --asp-non-membership <C...> --verifier <C...>]` | Add a pool from `deployments.json` or explicit contract IDs |
+| `stellar spp pool ls` | List pools for the current network, showing which is the default |
+| `stellar spp pool rm <name>` | Remove a pool and its local data |
+| `stellar spp pool use <name>` | Set the default pool for the current network |
 
 ### ASP Administration
 
@@ -152,26 +161,37 @@ All network operations delegate to the `stellar` CLI via subprocess calls. This 
 | Read contract state | `stellar contract invoke --id <contract> --send no -- <function>` |
 | Submit transaction | `stellar contract invoke --id <contract> --source-account <id> -- <function> <args>` |
 
-### Local State (SQLite)
+### Local State (JSON)
 
-Each network has a separate SQLite database at `~/.config/stellar/spp/{network}.db`. Tables:
+State is stored per-pool as JSON files under the platform config directory (`~/Library/Application Support/stellar/spp/` on macOS, `~/.config/stellar/spp/` on Linux):
 
-| Table | Purpose |
-|-------|---------|
-| `sync_metadata` | Tracks the last synced ledger and cursor per contract |
+```
+{network}/
+  config.toml                   # NetworkConfig: default_pool name
+  pools/
+    {pool_name}.toml            # DeploymentConfig: contract IDs, network, admin
+    {pool_name}.json            # Pool data store (synced events, notes, keys)
+```
+
+Each pool's JSON data store contains:
+
+| Key | Purpose |
+|-----|---------|
+| `sync_metadata` | Last synced ledger and cursor per contract type |
 | `pool_leaves` | Pool commitment Merkle tree leaves (index, commitment hex, ledger) |
-| `pool_nullifiers` | Spent nullifier set |
-| `pool_encrypted_outputs` | Encrypted note data from `NewCommitmentEvent` events |
-| `asp_membership_leaves` | ASP membership Merkle tree leaves from `LeafAdded` events |
+| `nullifiers` | Spent nullifier set |
+| `encrypted_outputs` | Encrypted note data from `NewCommitmentEvent` events |
+| `asp_leaves` | ASP membership Merkle tree leaves from `LeafAdded` events |
 | `user_notes` | Decrypted/created notes with amount, blinding, spent status |
-| `registered_public_keys` | Public key registry from `PublicKeyEvent` events |
-| `config` | Key-value store for deployment metadata |
+| `registered_keys` | Public key registry from `PublicKeyEvent` events |
+
+Old flat-file configs (`{network}.toml`/`.json`) are automatically migrated to the per-pool layout as a pool named `default`.
 
 ### Proof Generation
 
 The CLI embeds the compiled circuit artifacts (WASM, R1CS) and the pre-generated Groth16 proving key directly into the binary. Proof generation follows the same pipeline as `e2e-tests/src/tests/utils.rs`:
 
-1. Build a `TxCase` with input notes (from SQLite) and output notes (freshly generated)
+1. Build a `TxCase` with input notes (from local store) and output notes (freshly generated)
 2. Place input commitments in the pool Merkle tree and compute proofs
 3. Compute membership proofs against the ASP Merkle tree
 4. Compute non-membership proofs against the ASP sparse Merkle tree
@@ -200,12 +220,12 @@ cli/
   src/
     main.rs                 # Entry point, clap dispatch, command handlers
     cli.rs                  # Clap derive structs for all commands and flags
-    config.rs               # Deployment config loading (deployments.json / TOML)
-    db.rs                   # SQLite schema, migrations, typed queries
+    config.rs               # Deployment config, pool management, path resolution, migration
+    db.rs                   # JSON file-backed storage for pool state
     stellar.rs              # Subprocess wrapper for `stellar` CLI calls
     keys.rs                 # Stellar identity resolution, BN254/X25519 derivation
     crypto.rs               # Poseidon2 hashing, scalar conversions, note encryption
-    merkle.rs               # In-memory Merkle tree reconstruction from SQLite
+    merkle.rs               # In-memory Merkle tree reconstruction from local state
     sync.rs                 # Event fetching, incremental sync engine
     proof.rs                # Circuit input assembly, Groth16 proving (embedded artifacts)
     transaction.rs          # Deposit/withdraw/transfer: proof gen + contract invocation
@@ -216,7 +236,7 @@ cli/
 
 ## Configuration
 
-On `stellar spp init`, the CLI reads `scripts/deployments.json` from the workspace and saves a TOML config to `~/.config/stellar/spp/{network}.toml`:
+On `stellar spp init`, the CLI reads `scripts/deployments.json` from the workspace and saves a pool config (e.g. `.../{network}/pools/default.toml`):
 
 ```toml
 network = "testnet"
@@ -229,7 +249,19 @@ verifier = "CCIQN..."
 initialized = true
 ```
 
-Subsequent commands load from this file. The `--pool` global flag can override the pool contract address for any command.
+Subsequent commands load from this file. Pool resolution follows this order:
+
+1. `--pool <name>` flag
+2. `STELLAR_SPP_POOL` environment variable
+3. Default pool from `.../{network}/config.toml`
+
+To manage multiple pools on the same network (e.g. different deployments), use the `pool` subcommands:
+
+```bash
+stellar spp pool add staging --pool-id CABC... --asp-membership CDEF... --asp-non-membership CGHI... --verifier CJKL...
+stellar spp pool use staging
+stellar spp pool ls
+```
 
 ## Note Format (Import/Export)
 
