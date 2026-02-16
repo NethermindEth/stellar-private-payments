@@ -5,7 +5,7 @@
 # the full CLI flow: init, key derivation, registration, deposit, transfer,
 # withdrawal — all with real ZK proofs.
 #
-# Usage: scripts/integration-test.sh
+# Usage: cli/integration-test.sh
 #
 # Prerequisites: stellar, curl, cargo in PATH; internet access (testnet RPC +
 # friendbot).
@@ -14,10 +14,11 @@
 # Helpers
 # ---------------------------------------------------------------------------
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+CLI_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT_DIR="$(cd "$CLI_DIR/.." && pwd)"
+SCRIPTS_DIR="$ROOT_DIR/scripts"
 BINARY="$ROOT_DIR/target/debug/stellar-spp"
-DEPLOYMENTS_JSON="$SCRIPT_DIR/deployments.json"
+DEPLOYMENTS_JSON="$SCRIPTS_DIR/deployments.json"
 DEPLOYMENTS_BACKUP=""
 NETWORK="testnet"
 
@@ -181,13 +182,13 @@ done
 
 banner "Deploy contracts"
 
-VK_FILE="$SCRIPT_DIR/testdata/policy_test_vk.json"
+VK_FILE="$SCRIPTS_DIR/testdata/policy_test_vk.json"
 if [[ ! -f "$VK_FILE" ]]; then
   fail "verification key not found at $VK_FILE"
   exit 1
 fi
 
-if "$SCRIPT_DIR/deploy.sh" "$NETWORK" \
+if "$SCRIPTS_DIR/deploy.sh" "$NETWORK" \
   --deployer "$ADMIN_ID" \
   --asp-levels 10 \
   --pool-levels 10 \
