@@ -3,6 +3,7 @@ members = [
     "app/crates/prover",
     "app/crates/witness",
     "circuits",
+    "cli",
     "contracts/*",
     "e2e-tests",
     "poseidon2",

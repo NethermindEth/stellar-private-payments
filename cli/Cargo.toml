@@ -1,0 +1,54 @@
+[package]
+name = "stellar-spp"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+description = "Stellar CLI plugin for private payments"
+
+[[bin]]
+name = "stellar-spp"
+path = "src/main.rs"
+
+[dependencies]
+# CLI
+clap = { version = "4", features = ["derive"] }
+
+# ZK (same as e2e-tests)
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
+ark-groth16 = { workspace = true }
+ark-serialize = { workspace = true }
+ark-snark = { workspace = true }
+ark-std = { workspace = true }
+ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
+num-bigint = { workspace = true }
+circuits = { path = "../circuits" }
+
+# Poseidon2
+zkhash = { workspace = true }
+
+# Encryption (same as prover crate)
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
+x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
+sha2 = { workspace = true }
+
+# Stellar
+stellar-strkey = "0.0.11"
+ed25519-dalek = { version = "2.1", features = ["alloc"] }
+sha3 = "0.10"
+stellar-xdr = { version = "25.0.0", features = ["std", "curr"] }
+
+# Infra
+rusqlite = { version = "0.34", features = ["bundled"] }
+serde = { workspace = true, features = ["derive"] }
+serde_json = "1.0"
+hex = "0.4"
+anyhow = { workspace = true }
+dirs = "6"
+toml = "0.8"
+getrandom = "0.2"
+
+[lints]
+workspace = true
