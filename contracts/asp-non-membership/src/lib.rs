@@ -23,6 +23,12 @@
 //! switch to IPFS-based storage later if needed.
 
 #![no_std]
+#![allow(
+    missing_docs,
+    clippy::arithmetic_side_effects,
+    clippy::unwrap_used,
+    clippy::cast_possible_truncation
+)]
 use soroban_sdk::{
     Address, Env, U256, Vec, contract, contracterror, contractevent, contractimpl, contracttype,
     vec,
