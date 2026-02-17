@@ -52,6 +52,32 @@ const DEFAULT_CONFIG = {
 
 let config = { ...DEFAULT_CONFIG };
 
+/**
+ * Validate that a URL is a safe relative path (same-origin, no traversal).
+ * Prevents request forgery by ensuring URLs don't target unintended endpoints.
+ * @param {string} url - The URL to validate
+ * @returns {string} The validated URL
+ * @throws {Error} If the URL is unsafe
+ */
+function validateArtifactUrl(url) {
+    if (typeof url !== 'string' || url.length === 0) {
+        throw new Error('Artifact URL must be a non-empty string');
+    }
+    // Block absolute URLs with scheme prefix (e.g., https://evil.com, http:evil.com, data:...)
+    if (/^[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(url)) {
+        throw new Error(`Artifact URL must be a relative path, got absolute URL: ${url}`);
+    }
+    // Block protocol-relative URLs (e.g., //evil.com/...)
+    if (url.startsWith('//')) {
+        throw new Error(`Artifact URL must not be protocol-relative: ${url}`);
+    }
+    // Block path traversal (e.g., /circuits/../../admin)
+    if (/(?:^|\/)\.\.(?:\/|$)/.test(url)) {
+        throw new Error(`Artifact URL contains path traversal: ${url}`);
+    }
+    return url;
+}
+
 // State
 let prover = null;
 let witnessCalc = null;
@@ -281,6 +307,12 @@ export async function isProvingCached() {
  * @param {string} options.r1csUrl - URL to R1CS file
  */
 export function configure(options) {
+    const urlFields = ['circuitWasmUrl', 'provingKeyUrl', 'r1csUrl'];
+    for (const field of urlFields) {
+        if (options[field] !== undefined) {
+            validateArtifactUrl(options[field]);
+        }
+    }
     config = { ...config, ...options };
 }
 
@@ -322,8 +354,8 @@ export async function initWitnessModule(circuitWasmUrl, r1csUrl) {
         return getCircuitInfo();
     }
 
-    const wasmUrl = circuitWasmUrl || config.circuitWasmUrl;
-    const r1cs = r1csUrl || config.r1csUrl;
+    const wasmUrl = validateArtifactUrl(circuitWasmUrl || config.circuitWasmUrl);
+    const r1cs = validateArtifactUrl(r1csUrl || config.r1csUrl);
 
     // Load circuit WASM
     let circuitWasm = cachedCircuitWasm || await getCached(wasmUrl);
@@ -415,7 +447,9 @@ export async function init(circuitWasmUrl, provingKeyBytes, r1csBytes) {
     await initProverWasm();
 
     // Load circuit WASM for witness calculator
-    const response = await fetch(circuitWasmUrl);
+    // URL is validated by validateArtifactUrl() which blocks absolute URLs,
+    // protocol-relative URLs, and path traversal attacks
+    const response = await fetch(validateArtifactUrl(circuitWasmUrl));
     if (!response.ok) {
         throw new Error(`Failed to fetch circuit WASM: ${response.status}`);
     }
