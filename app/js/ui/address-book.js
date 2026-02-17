@@ -349,20 +349,20 @@ export const AddressBook = {
             <div class="p-4 bg-dark-800 border border-dark-700 rounded-lg">
                 <div class="flex items-center justify-between mb-3">
                     <h4 class="text-sm font-semibold text-dark-200">Search Result</h4>
-                    <span class="px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded ${sourceBadgeClass}">${sourceLabel}</span>
+                    <span class="search-source px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide rounded ${sourceBadgeClass}"></span>
                 </div>
                 <dl class="space-y-2 text-xs">
                     <div class="flex justify-between items-start">
                         <dt class="text-dark-500">Address</dt>
-                        <dd class="font-mono text-dark-300 text-right break-all max-w-[300px]">${record.address}</dd>
+                        <dd class="search-addr font-mono text-dark-300 text-right break-all max-w-[300px]"></dd>
                     </div>
                     <div class="flex justify-between items-start">
                         <dt class="text-dark-500">Encryption Key <span class="text-dark-600">(X25519)</span></dt>
-                        <dd class="font-mono text-brand-400 text-right break-all max-w-[300px]">${Utils.truncateHex(encryptionKey, 12, 12)}</dd>
+                        <dd class="search-enckey font-mono text-brand-400 text-right break-all max-w-[300px]"></dd>
                     </div>
                     <div class="flex justify-between items-start">
                         <dt class="text-dark-500">Note Key <span class="text-dark-600">(BN254)</span></dt>
-                        <dd class="font-mono text-emerald-400 text-right break-all max-w-[300px]">${Utils.truncateHex(noteKey, 12, 12)}</dd>
+                        <dd class="search-notekey font-mono text-emerald-400 text-right break-all max-w-[300px]"></dd>
                     </div>
                 </dl>
                 <div class="flex gap-2 mt-4">
@@ -378,7 +378,12 @@ export const AddressBook = {
                 </div>
             </div>
         `;
-        
+
+        container.querySelector('.search-source').textContent = sourceLabel;
+        container.querySelector('.search-addr').textContent = record.address;
+        container.querySelector('.search-enckey').textContent = Utils.truncateHex(encryptionKey, 12, 12);
+        container.querySelector('.search-notekey').textContent = Utils.truncateHex(noteKey, 12, 12);
+
         // Attach event listeners - pass both keys to transfer
         container.querySelector('.search-use-transfer')?.addEventListener('click', () => {
             this.useInTransfer(encryptionKey, noteKey);
@@ -414,7 +419,7 @@ export const AddressBook = {
                     <h4 class="text-sm font-semibold text-red-400">Not Found</h4>
                 </div>
                 <p class="text-xs text-dark-400 mb-3">
-                    No registered public key found for <span class="font-mono text-dark-300">${Utils.truncateHex(address, 8, 8)}</span>
+                    No registered public key found for <span class="font-mono text-dark-300 search-address"></span>
                 </p>
                 <p class="text-xs text-dark-500">
                     The user may not have registered their public key yet. Ask them to register via the wallet menu.
@@ -424,7 +429,9 @@ export const AddressBook = {
                 </button>
             </div>
         `;
-        
+
+        container.querySelector('.search-address').textContent = Utils.truncateHex(address, 8, 8);
+
         container.querySelector('.search-clear')?.addEventListener('click', () => {
             container.classList.add('hidden');
             document.getElementById('addressbook-search').value = '';
