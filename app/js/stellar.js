@@ -258,7 +258,8 @@ export async function readASPMembershipState(contractId) {
         if (levelsResult.success) results.levels = levelsResult.value;
         if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;
         if (adminResult.success) results.admin = adminResult.value;
-        results.adminInsertOnly = adminInsertOnlyResult.success ? adminInsertOnlyResult.value : true;
+        results.adminInsertOnly = adminInsertOnlyResult.value;
+        if (adminInsertOnlyResult.success) results.adminInsertOnly = adminInsertOnlyResult.value;
 
         if (results.levels !== undefined) {
             results.capacity = Math.pow(2, results.levels);

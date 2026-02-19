@@ -536,8 +536,11 @@ async function toggleAdminInsertOnly() {
     if (!contractId) {
       throw new Error('Membership contract ID is required');
     }
-
-    const currentValue = state.adminInsertOnly ?? true;
+    
+    if (state.adminInsertOnly === null || state.adminInsertOnly === undefined) {
+      throw new Error('Cannot toggle: admin-only insert state is unknown. Refresh contract state first.');
+    }
+    const currentValue = state.adminInsertOnly;
     const newValue = !currentValue;
 
     setStatus(
