@@ -273,11 +273,19 @@ export async function startSync(options = {}) {
             if (onChainState.success) {
                 const onChainLeafCount = onChainState.nextIndex || 0;
                 if (localLeafCount < onChainLeafCount) {
-                    console.warn('[SyncController] ASP Membership sync incomplete:');
-                    console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
-                    console.warn('  Some events may be outside RPC retention window (24h-7d)');
-                    console.warn('  Admin may need to re-add missing membership leaves');
-                    metadata.aspMembershipSync.syncBroken = true;
+                    // Only mark broken if we're actually outside the retention window.
+                    // A count mismatch within the window is a warning, not a broken sync.
+                    const currentGapCheck = await checkSyncGap();
+                    if (currentGapCheck.status === 'broken') {
+                        console.warn('[SyncController] ASP Membership sync incomplete - outside retention window:');
+                        console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
+                        console.warn('  Admin may need to re-add missing membership leaves');
+                        metadata.aspMembershipSync.syncBroken = true;
+                    } else {
+                        console.warn('[SyncController] ASP Membership count mismatch (within retention window):');
+                        console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
+                        console.warn('  Events predating the retention window are not accessible via RPC');
+                    }
                 } else {
                     console.log(`[SyncController] ASP Membership in sync: ${localLeafCount}/${onChainLeafCount} leaves`);
                 }
