@@ -166,6 +166,14 @@
             </button>
           </div>
         </div>
+        <!-- Warning shown when admin-only insert is disabled -->
+        <div id="openInsertWarning" class="hidden mt-3 flex items-start gap-2 rounded-lg bg-amber-950/40 border border-amber-700/50 px-3 py-2">
+          <span class="text-amber-400 text-xs mt-0.5">&#9888;</span>
+          <p class="text-xs text-amber-300 leading-relaxed">
+            <span class="font-semibold uppercase tracking-wide">Warning:</span>
+            Admin-only insert is disabled. Anyone can now add membership leaves to the ASP. This bypasses the intended access-control safeguard and may allow untrusted parties to insert themselves into the approved set.
+          </p>
+        </div>
       </div>
     </section>
 

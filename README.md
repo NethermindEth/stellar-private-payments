@@ -99,6 +99,8 @@ This provides **illicit activity safeguards** while maintaining user privacy. Th
 
 The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
 
+> **WARNING:** Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
+
 
 #### Zero-Knowledge Circuits
 

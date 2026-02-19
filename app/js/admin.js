@@ -44,6 +44,7 @@ const insertMembershipLeafBtn = document.getElementById('insertMembershipLeafBtn
 // Admin insert only toggle
 const adminInsertOnlyStatusEl = document.getElementById('adminInsertOnlyStatus');
 const toggleAdminInsertOnlyBtn = document.getElementById('toggleAdminInsertOnlyBtn');
+const openInsertWarningEl = document.getElementById('openInsertWarning');
 
 // Non-membership leaf builder inputs
 const blockedKeyInput = document.getElementById('blockedKey');
@@ -518,6 +519,7 @@ function updateAdminInsertOnlyDisplay(value) {
   if (value === undefined || value === null) {
     adminInsertOnlyStatusEl.textContent = '--';
     toggleAdminInsertOnlyBtn.disabled = true;
+    openInsertWarningEl.classList.add('hidden');
     return;
   }
   state.adminInsertOnly = value;
@@ -527,6 +529,8 @@ function updateAdminInsertOnlyDisplay(value) {
     : 'text-xs font-mono text-amber-400';
   toggleAdminInsertOnlyBtn.textContent = value ? 'Disable' : 'Enable';
   toggleAdminInsertOnlyBtn.disabled = !state.address;
+  // Show warning when anyone can insert (admin-only is disabled)
+  openInsertWarningEl.classList.toggle('hidden', value);
 }
 
 async function toggleAdminInsertOnly() {
