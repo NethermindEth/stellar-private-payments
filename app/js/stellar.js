@@ -556,6 +556,16 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         let totalCount = 0;
         let currentStartLedger = startLedger;
 
+        // If resuming from a cursor, align to the chunk boundary containing that cursor.
+        // Stellar event cursor format: "<ledger>-<tx_index>-<event_index>"
+        if (initialCursor) {
+            const cursorLedger = parseInt(initialCursor.split("-")[0], 10);
+            if (!isNaN(cursorLedger) && cursorLedger >= startLedger) {
+                const chunksElapsed = Math.floor((cursorLedger - startLedger) / CHUNK_SIZE);
+                currentStartLedger = startLedger + chunksElapsed * CHUNK_SIZE;
+            }
+        }
+
         // First, get the latest ledger to know when to stop
         const infoResponse = await fetch(rpcUrl, {
             method: 'POST',
@@ -579,14 +589,15 @@ export async function fetchAllContractEvents(contractId, options = {}) {
 
         // Search in chunks from startLedger to latestLedger
         while (currentStartLedger < latestLedger) {
+            // cursor and startLedger are mutually exclusive in the Stellar RPC.
+            // Send cursor on the first request when resuming; use startLedger otherwise.
+            const pagination = cursor ? { limit: pageSize, cursor } : { limit: pageSize };
             const params = {
-                startLedger: currentStartLedger,
+                ...(cursor ? {} : { startLedger: currentStartLedger }),
                 filters: [{
                     contractIds: [contractId],
                 }],
-                pagination: {
-                    limit: pageSize,
-                },
+                pagination,
             };
 
             const requestBody = {
@@ -631,6 +642,9 @@ export async function fetchAllContractEvents(contractId, options = {}) {
                 }
                 
                 console.log(`[Stellar] Found ${pageEvents.length} events in chunk starting at ledger ${currentStartLedger}`);
+            } else {
+                // No events in this chunk - clear cursor so the next chunk uses startLedger
+                cursor = null;
             }
 
             // Move to next chunk
