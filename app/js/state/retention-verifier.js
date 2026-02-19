@@ -93,9 +93,9 @@ async function canFetchEventsFrom(server, startLedger) {
             errorMsg.includes('out of range')) {
             return false;
         }
-        // Other errors might be temporary, log and assume available
-        console.warn('[Retention] Event fetch error:', errorMsg);
-        return false;
+        // Other errors are transient (network, timeout) - assume ledger is available
+        console.warn('[Retention] Event fetch error (non-retention, assuming available):', errorMsg);
+        return true;
     }
 }
 
