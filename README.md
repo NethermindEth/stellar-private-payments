@@ -125,6 +125,7 @@ As a proof of concept, this implementation has several limitations:
 - **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts. But this has not been tested in the UI.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
+- **Ledger Retention**: The RPC used has a ledger retention of 7 days, and notes beyond this limit will be inacessible 
 
 
 ## AI tools disclosure
