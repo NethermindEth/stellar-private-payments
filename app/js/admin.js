@@ -41,6 +41,11 @@ const computedMembershipLeafDecEl = document.getElementById('computedMembershipL
 const membershipLeafInput = document.getElementById('membershipLeafInput');
 const insertMembershipLeafBtn = document.getElementById('insertMembershipLeafBtn');
 
+// Admin insert only toggle
+const adminInsertOnlyStatusEl = document.getElementById('adminInsertOnlyStatus');
+const toggleAdminInsertOnlyBtn = document.getElementById('toggleAdminInsertOnlyBtn');
+const openInsertWarningEl = document.getElementById('openInsertWarning');
+
 // Non-membership leaf builder inputs
 const blockedKeyInput = document.getElementById('blockedKey');
 const blockedValueInput = document.getElementById('blockedValue');
@@ -59,6 +64,7 @@ const state = {
   membershipClientId: null,
   nonMembershipClientId: null,
   cryptoReady: false,
+  adminInsertOnly: null,
   computedMembershipLeaf: null,
   // Derived keys (persist across account changes)
   derivedKeys: {
@@ -405,9 +411,11 @@ async function refreshState() {
       membershipRootEl.textContent = membershipState.root || '--';
       membershipLevelsEl.textContent = membershipState.levels ?? '--';
       membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
+      updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
       log('Loaded membership state');
     } else {
       log(`Membership state error: ${membershipState.error}`);
+      updateAdminInsertOnlyDisplay(undefined);
     }
 
     if (nonMembershipState.success) {
@@ -506,6 +514,62 @@ async function insertMembershipLeaf() {
   }
 }
 
+// Update the admin-insert-only status display and toggle button
+function updateAdminInsertOnlyDisplay(value) {
+  if (value === undefined || value === null) {
+    adminInsertOnlyStatusEl.textContent = '--';
+    toggleAdminInsertOnlyBtn.disabled = true;
+    openInsertWarningEl.classList.add('hidden');
+    return;
+  }
+  state.adminInsertOnly = value;
+  adminInsertOnlyStatusEl.textContent = value ? 'Enabled' : 'Disabled';
+  adminInsertOnlyStatusEl.className = value
+    ? 'text-xs font-mono text-emerald-400'
+    : 'text-xs font-mono text-amber-400';
+  toggleAdminInsertOnlyBtn.textContent = value ? 'Disable' : 'Enable';
+  toggleAdminInsertOnlyBtn.disabled = !state.address;
+  // Show warning when anyone can insert (admin-only is disabled)
+  openInsertWarningEl.classList.toggle('hidden', value);
+}
+
+async function toggleAdminInsertOnly() {
+  try {
+    ensureWalletConnected();
+    const contractId = membershipContractInput.value.trim();
+    if (!contractId) {
+      throw new Error('Membership contract ID is required');
+    }
+    
+    if (state.adminInsertOnly === null || state.adminInsertOnly === undefined) {
+      throw new Error('Cannot toggle: admin-only insert state is unknown. Refresh contract state first.');
+    }
+    const currentValue = state.adminInsertOnly;
+    const newValue = !currentValue;
+
+    setStatus(
+      `Setting admin-only insert to ${newValue ? 'enabled' : 'disabled'}...`,
+      'info',
+    );
+    const client = await getMembershipClient(contractId);
+    const tx = await client.set_admin_insert_only({ admin_only: newValue });
+    const sent = await tx.signAndSend();
+    log(
+      `Admin-only insert set to ${newValue ? 'enabled' : 'disabled'}: ${sent.sendTransactionResponse?.hash || 'ok'}`,
+    );
+    setStatus('Setting updated', 'ok');
+    showToast(
+      `Admin-only insert ${newValue ? 'enabled' : 'disabled'}`,
+      'success',
+    );
+    await refreshState();
+  } catch (err) {
+    setStatus('Toggle failed', 'error');
+    log(`Admin-only insert toggle error: ${err.message}`);
+    showToast('Failed to toggle admin-only insert', 'error');
+  }
+}
+
 function syncNonMembershipValue() {
   if (!valueSameCheckbox.checked) {
     blockedValueInput.removeAttribute('disabled');
@@ -580,6 +644,9 @@ useMembershipLeafBtn.addEventListener('click', () => {
 });
 insertMembershipLeafBtn.addEventListener('click', () => {
   insertMembershipLeaf();
+});
+toggleAdminInsertOnlyBtn.addEventListener('click', () => {
+  toggleAdminInsertOnly();
 });
 computeNonMembershipLeafBtn.addEventListener('click', () => {
   computeNonMembershipLeaf();
