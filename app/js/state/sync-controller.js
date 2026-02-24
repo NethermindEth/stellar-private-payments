@@ -114,7 +114,7 @@ export async function checkSyncGap() {
         };
     }
     
-    if (gap > retentionConfig.window) {
+    if (gap >= retentionConfig.window) {
         return {
             status: 'broken',
             message: `Offline for more than ${retentionConfig.description}. ` +
@@ -166,7 +166,7 @@ export async function startSync(options = {}) {
     try {
         let metadata = await getSyncMetadata() || createDefaultMetadata();
         const latestLedger = await getLatestLedger();
-        const retentionConfig = await getRetentionConfig();
+        const retentionConfig = await getRetentionConfig(forceRefresh);
         
         // Check for sync gap
         const gapCheck = await checkSyncGap();
@@ -192,7 +192,8 @@ export async function startSync(options = {}) {
         
         // Determine start ledger for each contract
         // Always calculate from retention window - cursor takes precedence if available
-        const retentionStartLedger = Math.max(1, latestLedger - retentionConfig.window);
+        // Retention window is inclusive of both ends: [latest - window + 1, latest]
+        const retentionStartLedger = Math.max(1, latestLedger - retentionConfig.window + 1);
         const poolStartLedger = retentionStartLedger;
         const aspStartLedger = retentionStartLedger;
         
@@ -204,6 +205,7 @@ export async function startSync(options = {}) {
         const poolCursor = forceRefresh ? null : metadata.poolSync.lastCursor;
         const poolResult = await fetchAllPoolEvents({
             startLedger: poolStartLedger,
+            endLedger: latestLedger,
             cursor: poolCursor,
             onPage: async (events, cursor) => {
                 await poolStore.processEvents(events);
@@ -243,6 +245,7 @@ export async function startSync(options = {}) {
         
         const aspResult = await fetchAllASPMembershipEvents({
             startLedger: aspStartLedger,
+            endLedger: latestLedger,
             cursor: aspCursor,
             onPage: async (events, cursor) => {
                 const leafEvents = await aspMembershipStore.processEvents(events);

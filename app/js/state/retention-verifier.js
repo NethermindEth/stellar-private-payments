@@ -4,12 +4,13 @@
  * @module state/retention-verifier
  */
 
-import { getSorobanServer, getNetwork } from '../stellar.js';
+import { getSorobanServer, getNetwork, getDeployedContracts } from '../stellar.js';
 import * as db from './db.js';
 
 const LEDGER_RATE_SECONDS = 5;
 const LEDGERS_24H = 17280;   // ~24 hours (24 * 60 * 60 / 5)
 const LEDGERS_7D = 120960;   // ~7 days (7 * 24 * 60 * 60 / 5)
+const RETENTION_PROBE_SPAN = 32; // Probe a narrow ledger range to avoid RPC scan limits
 
 /**
  * @typedef {Object} RetentionConfig
@@ -40,7 +41,7 @@ export async function detectRetentionWindow() {
     }
 
     // Try 7 days
-    const sevenDaysAgo = Math.max(1, latestLedger - LEDGERS_7D);
+    const sevenDaysAgo = Math.max(1, latestLedger - LEDGERS_7D + 1);
     if (await canFetchEventsFrom(server, sevenDaysAgo)) {
         console.log('[Retention] Detected 7-day retention window');
         return {
@@ -53,7 +54,7 @@ export async function detectRetentionWindow() {
     }
 
     // Try 24 hours
-    const oneDayAgo = Math.max(1, latestLedger - LEDGERS_24H);
+    const oneDayAgo = Math.max(1, latestLedger - LEDGERS_24H + 1);
     if (await canFetchEventsFrom(server, oneDayAgo)) {
         console.log('[Retention] Detected 24-hour retention window');
         return {
@@ -78,10 +79,19 @@ export async function detectRetentionWindow() {
  */
 async function canFetchEventsFrom(server, startLedger) {
     try {
-        // Request with minimal filters to test if ledger is in range
+        // Use a narrow [start, end] probe window so this checks retention,
+        // not broad-range scan limits on some RPC providers.
+        const endLedger = startLedger + RETENTION_PROBE_SPAN;
+        const contracts = getDeployedContracts();
+        const contractId = contracts?.pool || contracts?.aspMembership || contracts?.aspNonMembership;
+        const filters = contractId
+            ? [{ type: 'contract', contractIds: [contractId], topics: [['**']] }]
+            : [];
+
         await server.getEvents({
             startLedger,
-            filters: [],
+            endLedger,
+            filters,
             limit: 1,
         });
         return true;

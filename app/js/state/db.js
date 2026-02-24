@@ -5,7 +5,7 @@
  */
 
 const DB_NAME = 'poolstellar';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 /**
  * Store configuration for IndexedDB schema.
@@ -25,7 +25,8 @@ const STORES = {
     },
     asp_membership_leaves: {
         keyPath: 'index',
-        indexes: [{ name: 'by_leaf', keyPath: 'leaf', unique: true }]
+        // Leaves can repeat at different indices (re-adding membership), so this must be non-unique.
+        indexes: [{ name: 'by_leaf', keyPath: 'leaf', unique: false }]
     },
     user_notes: {
         keyPath: 'id',
@@ -98,9 +99,19 @@ function openDatabase() {
                 // Create any missing indexes
                 if (config.indexes) {
                     for (const idx of config.indexes) {
+                        const desiredUnique = idx.unique || false;
                         if (!store.indexNames.contains(idx.name)) {
-                            store.createIndex(idx.name, idx.keyPath, { unique: idx.unique || false });
+                            store.createIndex(idx.name, idx.keyPath, { unique: desiredUnique });
                             console.log(`[DB] Created index: ${storeName}.${idx.name}`);
+                        } else {
+                            // IndexedDB doesn't support altering index uniqueness in-place.
+                            // Recreate index during upgrade when schema expectations change.
+                            const existingIndex = store.index(idx.name);
+                            if (existingIndex.unique !== desiredUnique) {
+                                store.deleteIndex(idx.name);
+                                store.createIndex(idx.name, idx.keyPath, { unique: desiredUnique });
+                                console.log(`[DB] Recreated index: ${storeName}.${idx.name} (unique=${desiredUnique})`);
+                            }
                         }
                     }
                 }
