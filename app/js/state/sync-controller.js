@@ -114,7 +114,7 @@ export async function checkSyncGap() {
         };
     }
     
-    if (gap >= retentionConfig.window) {
+    if (gap > retentionConfig.window) {
         return {
             status: 'broken',
             message: `Offline for more than ${retentionConfig.description}. ` +
