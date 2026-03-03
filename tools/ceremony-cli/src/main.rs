@@ -1,0 +1,577 @@
+//! CLI tool that wraps `snarkjs` for a Groth16 BN254 trusted setup ceremony.
+
+use anyhow::{Context, Result, anyhow, bail};
+use clap::{ArgAction, Parser, Subcommand};
+use std::{
+    ffi::OsString,
+    path::{Path, PathBuf},
+    process::{Command, Stdio},
+};
+use zeroize::{Zeroize, Zeroizing};
+
+/// Parsed command-line arguments.
+#[derive(Debug, Parser)]
+#[command(
+    name = "ceremony-cli",
+    about = "Groth16 BN254 ceremony wrapper around snarkjs"
+)]
+struct Cli {
+    /// Subcommand to run.
+    #[command(subcommand)]
+    command: Commands,
+}
+
+/// Trusted setup ceremony operations.
+#[derive(Debug, Subcommand)]
+enum Commands {
+    /// Create an initial zkey and verify it.
+    Init(CeremonyArgs),
+    /// Contribute with internally-generated entropy and verify output.
+    Contribute(ContributeArgs),
+    /// Finalize artifacts in one command (beacon + verification key export).
+    Finalize(FinalizeArgs),
+}
+
+/// Shared init arguments.
+#[derive(Debug, clap::Args)]
+struct CeremonyArgs {
+    /// One or more .r1cs files.
+    #[arg(
+        short = 'c',
+        long = "circuits",
+        num_args = 1..,
+        default_value = "circuits/src/policyTransaction.circom"
+    )]
+    circuits: Vec<PathBuf>,
+    /// Input Powers of Tau file.
+    #[arg(short = 'p', long = "ptau")]
+    ptau: PathBuf,
+    /// Output zkey path.
+    #[arg(short = 'o', long = "output")]
+    output: PathBuf,
+    /// Overwrite output if it exists.
+    #[arg(long = "force", action = ArgAction::SetTrue)]
+    force: bool,
+}
+
+/// Contribution command arguments.
+#[derive(Debug, clap::Args)]
+struct ContributeArgs {
+    /// Input zkey to contribute to.
+    #[arg(short = 'z', long = "zkey")]
+    zkey: PathBuf,
+    /// One or more .r1cs files.
+    #[arg(
+        short = 'c',
+        long = "circuits",
+        num_args = 1..,
+        default_value = "circuits/src/policyTransaction.circom"
+    )]
+    circuits: Vec<PathBuf>,
+    /// Input Powers of Tau file.
+    #[arg(short = 'p', long = "ptau")]
+    ptau: PathBuf,
+    /// Output zkey path with your contribution.
+    #[arg(short = 'o', long = "output")]
+    output: PathBuf,
+    /// Contributor name recorded in the transcript.
+    #[arg(long = "name", default_value = "anonymous")]
+    name: String,
+    /// Overwrite output if it exists.
+    #[arg(long = "force", action = ArgAction::SetTrue)]
+    force: bool,
+}
+
+/// Finalize command arguments.
+#[derive(Debug, clap::Args)]
+struct FinalizeArgs {
+    /// Input zkey to finalize.
+    #[arg(short = 'z', long = "zkey")]
+    zkey: PathBuf,
+    /// Beacon hash in hex.
+    #[arg(long = "beacon-hash")]
+    beacon_hash: String,
+    /// Beacon power parameter.
+    #[arg(long = "beacon-power", default_value_t = 10)]
+    beacon_power: u32,
+    /// Output directory.
+    #[arg(short = 'd', long = "out-dir")]
+    out_dir: PathBuf,
+    /// Output basename.
+    #[arg(long = "basename", default_value = "circuit")]
+    basename: String,
+    /// Overwrite outputs if they exist.
+    #[arg(long = "force", action = ArgAction::SetTrue)]
+    force: bool,
+}
+
+/// Abstraction for command execution.
+trait CommandRunner {
+    /// Run a program with provided args and ensure success.
+    fn run(&self, program: &str, args: &[OsString]) -> Result<()>;
+}
+
+/// Default subprocess runner.
+struct ProcessRunner;
+
+impl CommandRunner for ProcessRunner {
+    fn run(&self, program: &str, args: &[OsString]) -> Result<()> {
+        let pretty = format_command(program, args);
+        println!("[snarkjs-wrapper] running: {pretty}");
+
+        let status = Command::new(program)
+            .args(args)
+            .stdin(Stdio::inherit())
+            .stdout(Stdio::inherit())
+            .stderr(Stdio::inherit())
+            .status()
+            .with_context(|| format!("failed to start `{pretty}`"))?;
+
+        if !status.success() {
+            bail!("command failed with status {status}: {pretty}");
+        }
+
+        Ok(())
+    }
+}
+
+/// Program entrypoint.
+fn main() -> Result<()> {
+    let cli = Cli::parse();
+    execute(cli, &ProcessRunner)
+}
+
+/// Executes parsed CLI arguments.
+fn execute(cli: Cli, runner: &dyn CommandRunner) -> Result<()> {
+    match cli.command {
+        Commands::Init(args) => init(args, runner),
+        Commands::Contribute(args) => contribute(args, runner),
+        Commands::Finalize(args) => finalize(args, runner),
+    }
+}
+
+/// Runs setup initialization for each selected circuit.
+fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
+    assert_readable_file(&args.ptau, "ptau")?;
+    assert_output_allowed(&args.output, args.force)?;
+
+    for circuit in &args.circuits {
+        let snarkjs_circuit = resolve_snarkjs_circuit_path(circuit)?;
+        let cmd = vec![
+            OsString::from("groth16"),
+            OsString::from("setup"),
+            snarkjs_circuit.as_os_str().to_owned(),
+            args.ptau.as_os_str().to_owned(),
+            args.output.as_os_str().to_owned(),
+        ];
+        runner.run("snarkjs", &cmd)?;
+
+        let verify_cmd = vec![
+            OsString::from("zkey"),
+            OsString::from("verify"),
+            snarkjs_circuit.as_os_str().to_owned(),
+            args.ptau.as_os_str().to_owned(),
+            args.output.as_os_str().to_owned(),
+        ];
+        runner.run("snarkjs", &verify_cmd)?;
+    }
+
+    print_next_steps(
+        &args.output,
+        &[
+            "Keep your entropy/private randomness secret during contributions.",
+            "Share only the new .zkey and verification transcript with the next contributor.",
+        ],
+        &[],
+    );
+
+    Ok(())
+}
+
+/// Runs contribution and immediate verification.
+fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
+    assert_readable_file(&args.zkey, "input zkey")?;
+    assert_readable_file(&args.ptau, "ptau")?;
+    let resolved_circuits = args
+        .circuits
+        .iter()
+        .map(|circuit| resolve_snarkjs_circuit_path(circuit))
+        .collect::<Result<Vec<_>>>()?;
+
+    for snarkjs_circuit in &resolved_circuits {
+        let preverify_cmd = vec![
+            OsString::from("zkey"),
+            OsString::from("verify"),
+            snarkjs_circuit.as_os_str().to_owned(),
+            args.ptau.as_os_str().to_owned(),
+            args.zkey.as_os_str().to_owned(),
+        ];
+        runner.run("snarkjs", &preverify_cmd)?;
+    }
+
+    assert_output_allowed(&args.output, args.force)?;
+
+    let entropy = generate_entropy_hex()?;
+
+    let mut contribute_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("contribute"),
+        args.zkey.as_os_str().to_owned(),
+        args.output.as_os_str().to_owned(),
+        OsString::from("--name"),
+        OsString::from(args.name.clone()),
+        OsString::from("-v"),
+    ];
+
+    contribute_cmd.push(OsString::from("-e"));
+    contribute_cmd.push(OsString::from(entropy.as_str()));
+
+    runner.run("snarkjs", &contribute_cmd)?;
+    drop(entropy);
+
+    for snarkjs_circuit in &resolved_circuits {
+        let verify_cmd = vec![
+            OsString::from("zkey"),
+            OsString::from("verify"),
+            snarkjs_circuit.as_os_str().to_owned(),
+            args.ptau.as_os_str().to_owned(),
+            args.output.as_os_str().to_owned(),
+        ];
+        runner.run("snarkjs", &verify_cmd)?;
+    }
+
+    print_next_steps(
+        &args.output,
+        &[
+            "Send only the contributed .zkey to the ceremony coordinator.",
+            "Entropy is generated automatically with OS CSPRNG and never printed.",
+        ],
+        &[],
+    );
+
+    Ok(())
+}
+
+/// Finalizes ceremony artifacts in one compact command.
+fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
+    assert_readable_file(&args.zkey, "input zkey")?;
+    assert_dir_exists(&args.out_dir)?;
+
+    let final_zkey = args.out_dir.join(format!("{}_final.zkey", args.basename));
+    let vkey_json = args
+        .out_dir
+        .join(format!("{}_verification_key.json", args.basename));
+    assert_output_allowed(&final_zkey, args.force)?;
+    assert_output_allowed(&vkey_json, args.force)?;
+
+    validate_beacon_hash(&args.beacon_hash)?;
+
+    let beacon_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("beacon"),
+        args.zkey.as_os_str().to_owned(),
+        final_zkey.as_os_str().to_owned(),
+        OsString::from(args.beacon_hash.clone()),
+        OsString::from(args.beacon_power.to_string()),
+        OsString::from("-n"),
+        OsString::from("Final Beacon phase2"),
+    ];
+    runner.run("snarkjs", &beacon_cmd)?;
+
+    let export_vkey_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("export"),
+        OsString::from("verificationkey"),
+        final_zkey.as_os_str().to_owned(),
+        vkey_json.as_os_str().to_owned(),
+    ];
+    runner.run("snarkjs", &export_vkey_cmd)?;
+
+    print_next_steps(
+        &final_zkey,
+        &[
+            "Publish the final zkey and verification key for public audit.",
+            "Record beacon parameters (hash + power) in your ceremony transcript.",
+        ],
+        &[],
+    );
+
+    Ok(())
+}
+
+/// Formats a command for terminal-safe logging.
+fn format_command(program: &str, args: &[OsString]) -> String {
+    format_command_with_redactions(program, args, &["-e", "--entropy"])
+}
+
+/// Formats a command while redacting values that follow sensitive flags.
+fn format_command_with_redactions(
+    program: &str,
+    args: &[OsString],
+    sensitive_flags: &[&str],
+) -> String {
+    let mut redacted_next = false;
+    let mut rendered = Vec::with_capacity(args.len());
+
+    for arg in args {
+        if redacted_next {
+            rendered.push(String::from("[REDACTED]"));
+            redacted_next = false;
+            continue;
+        }
+
+        let plain = arg.to_string_lossy();
+        let plain_owned = plain.into_owned();
+        if sensitive_flags.iter().any(|flag| *flag == plain_owned) {
+            rendered.push(plain_owned);
+            redacted_next = true;
+            continue;
+        }
+
+        rendered.push(
+            shlex::try_quote(&plain_owned).map_or_else(|_| plain_owned.clone(), |q| q.into_owned()),
+        );
+    }
+
+    format!("{program} {}", rendered.join(" "))
+}
+
+/// Resolves a circuit path into the `.r1cs` path expected by snarkjs.
+///
+/// If the input points to a `.circom` file, this function maps it to the
+/// sibling `.r1cs` file with the same basename.
+fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
+    assert_readable_file(path, "circuit")?;
+
+    if path
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("circom"))
+    {
+        let r1cs_path = path.with_extension("r1cs");
+        assert_readable_file(&r1cs_path, "compiled circuit (.r1cs)")?;
+        return Ok(r1cs_path);
+    }
+
+    Ok(path.to_path_buf())
+}
+
+/// Generates contribution entropy with OS CSPRNG and returns hex-encoded
+/// material wrapped in zeroizing storage.
+fn generate_entropy_hex() -> Result<Zeroizing<String>> {
+    let mut bytes = [0_u8; 32];
+    getrandom::getrandom(&mut bytes)
+        .map_err(|error| anyhow!("failed to obtain CSPRNG entropy from OS: {error}"))?;
+
+    let mut entropy = String::with_capacity(
+        bytes
+            .len()
+            .checked_mul(2)
+            .ok_or_else(|| anyhow!("failed to get the capacity of the entropy buffer"))?,
+    );
+    for byte in bytes {
+        use std::fmt::Write as _;
+        write!(&mut entropy, "{byte:02x}").context("failed to encode generated entropy")?;
+    }
+
+    bytes.zeroize();
+    Ok(Zeroizing::new(entropy))
+}
+
+/// Checks that a file exists and is not a directory.
+fn assert_readable_file(path: &Path, label: &str) -> Result<()> {
+    if !path.exists() {
+        return Err(anyhow!("{label} path does not exist: {}", path.display()));
+    }
+    if !path.is_file() {
+        return Err(anyhow!("{label} path is not a file: {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Checks that a directory exists.
+fn assert_dir_exists(path: &Path) -> Result<()> {
+    if !path.exists() {
+        return Err(anyhow!("directory does not exist: {}", path.display()));
+    }
+    if !path.is_dir() {
+        return Err(anyhow!("path is not a directory: {}", path.display()));
+    }
+    Ok(())
+}
+
+/// Prevents accidental overwrite unless explicitly requested.
+fn assert_output_allowed(path: &Path, force: bool) -> Result<()> {
+    if path.exists() && !force {
+        return Err(anyhow!(
+            "refusing to overwrite existing output `{}`; pass --force to allow",
+            path.display()
+        ));
+    }
+    Ok(())
+}
+
+/// Basic validation for beacon hash input.
+fn validate_beacon_hash(value: &str) -> Result<()> {
+    let is_hex = value.chars().all(|c| c.is_ascii_hexdigit());
+    if !is_hex || value.len() < 32 {
+        return Err(anyhow!(
+            "invalid beacon hash. expected hex string of length >= 32, got `{value}`"
+        ));
+    }
+    Ok(())
+}
+
+/// Prints contributor guidance and toxic-waste cleanup reminders.
+fn print_next_steps(zkey_path: &Path, actions: &[&str], toxic_waste: &[&str]) {
+    println!("\n=== Ceremony step complete ===");
+    println!("Produced zkey artifact: {}", zkey_path.display());
+    println!("Next actions:");
+    for action in actions {
+        println!("  - {action}");
+    }
+
+    if toxic_waste.is_empty() {
+        println!(
+            "Toxic waste cleanup: no additional local secret files were specified for this step."
+        );
+    } else {
+        println!("Toxic waste cleanup: securely delete the following as soon as possible:");
+        for item in toxic_waste {
+            println!("  - {item}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::{
+        fs,
+        sync::{Arc, Mutex},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    #[derive(Clone, Default)]
+    struct MockRunner {
+        calls: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl CommandRunner for MockRunner {
+        fn run(&self, program: &str, args: &[OsString]) -> Result<()> {
+            let entry = format_command(program, args);
+            self.calls
+                .lock()
+                .map_err(|_| anyhow!("failed to lock mock runner"))?
+                .push(entry);
+
+            if args.get(1).is_some_and(|v| v == "setup") {
+                touch(&PathBuf::from(args[4].clone()))?;
+            }
+            if args.get(1).is_some_and(|v| v == "contribute") {
+                touch(&PathBuf::from(args[3].clone()))?;
+            }
+            if args.get(1).is_some_and(|v| v == "beacon") {
+                touch(&PathBuf::from(args[3].clone()))?;
+            }
+            if args.get(2).is_some_and(|v| v == "verificationkey") {
+                touch(&PathBuf::from(args[4].clone()))?;
+            }
+
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn ceremony_e2e_flow() -> Result<()> {
+        let temp = temp_dir()?;
+        let circuit = temp.join("circuit.r1cs");
+        let ptau = temp.join("powers.ptau");
+        let zkey0 = temp.join("init.zkey");
+        let zkey1 = temp.join("contrib.zkey");
+        let out_dir = temp.join("out");
+        fs::create_dir_all(&out_dir)?;
+        fs::write(&circuit, "circuit")?;
+        fs::write(&ptau, "ptau")?;
+
+        let runner = MockRunner::default();
+
+        execute(
+            Cli {
+                command: Commands::Init(CeremonyArgs {
+                    circuits: vec![circuit.clone()],
+                    ptau: ptau.clone(),
+                    output: zkey0.clone(),
+                    force: false,
+                }),
+            },
+            &runner,
+        )?;
+
+        execute(
+            Cli {
+                command: Commands::Contribute(ContributeArgs {
+                    zkey: zkey0.clone(),
+                    circuits: vec![circuit.clone()],
+                    ptau: ptau.clone(),
+                    output: zkey1.clone(),
+                    name: String::from("alice"),
+                    force: false,
+                }),
+            },
+            &runner,
+        )?;
+
+        execute(
+            Cli {
+                command: Commands::Finalize(FinalizeArgs {
+                    zkey: zkey1.clone(),
+                    beacon_hash: String::from("0123456789abcdef0123456789abcdef"),
+                    beacon_power: 10,
+                    out_dir: out_dir.clone(),
+                    basename: String::from("demo"),
+                    force: false,
+                }),
+            },
+            &runner,
+        )?;
+
+        let calls = runner
+            .calls
+            .lock()
+            .map_err(|_| anyhow!("failed to lock mock calls"))?
+            .clone();
+
+        assert!(calls.iter().any(|line| line.contains("groth16 setup")));
+        assert!(calls.iter().any(|line| line.contains("zkey contribute")));
+        assert!(calls.iter().any(|line| line.contains("-e [REDACTED]")));
+        assert!(
+            calls
+                .iter()
+                .any(|line| line.contains("zkey verify") && line.contains("init.zkey"))
+        );
+
+        assert!(zkey0.exists());
+        assert!(zkey1.exists());
+        assert!(out_dir.join("demo_final.zkey").exists());
+        assert!(out_dir.join("demo_verification_key.json").exists());
+
+        fs::remove_dir_all(&temp)?;
+        Ok(())
+    }
+
+    fn temp_dir() -> Result<PathBuf> {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .context("clock before unix epoch")?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!("ceremony-cli-{nanos}"));
+        fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    fn touch(path: &Path) -> Result<()> {
+        fs::write(path, "")?;
+        Ok(())
+    }
+}

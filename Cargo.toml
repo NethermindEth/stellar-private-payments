@@ -6,6 +6,7 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
+    "tools/ceremony-cli",
 ]
 resolver = "3"
 
