@@ -48,3 +48,6 @@ scripts/testdata/*
 
 # mdBook
 docs/book/
+
+# Ceremony
+ceremony/

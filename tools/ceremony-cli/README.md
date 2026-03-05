@@ -21,9 +21,28 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 
 ## Prerequisites
 
-- `snarkjs` installed and available in `PATH`.
-- circuit file(s). If omitted, CLI defaults to `circuits/src/policyTransaction.circom` and resolves it to the corresponding `.r1cs`.
-- compatible `.ptau` file.
+- `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
+- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_test.r1cs` from `target/*/build/circuits-*/out/circuits/`. Run `cargo build -p circuits` to compile.
+- A compatible Powers of Tau (`.ptau`) file (see below).
+
+## Powers of Tau
+
+The ceremony requires a Phase 1 Powers of Tau file large enough for the circuit's constraint count.
+
+**Current circuit (`policy_test`):** 37,616 constraints → requires **ptau power ≥ 16** (2^16 = 65,536).
+
+Pick the right power: `ceil(log2(num_constraints))`. If unsure, run `npx snarkjs r1cs info $PATH.r1cs` to check.
+
+**Download** from the [Hermez ceremony](https://github.com/iden3/snarkjs#7-prepare-phase-2) (54 contributions + beacon, recommended by snarkjs):
+
+```bash
+curl -L -o powersOfTau28_hez_final_16.ptau \
+  https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau
+```
+
+Other powers are available at `https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_<POWER>.ptau` (powers 8–28). There are original sources hosted by `iden3`, the creator of snarkjs as well as the official Hermez ceremony artifacts.
+
+Alternative source: [PSE Perpetual Powers of Tau](https://github.com/privacy-scaling-explorations/perpetualpowersoftau) (80 contributions).
 
 ---
 
@@ -31,33 +50,43 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 
 The coordinator initializes the ceremony and finalizes outputs.
 
-### 1) Initialize the ceremony
+### 1) Build and prepare
+
+```bash
+cargo build -p circuits          # compile circuit → produces .r1cs
+cargo build -p ceremony-cli      # build the CLI
+
+curl -L -o powersOfTau28_hez_final_16.ptau \
+  https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau
+```
+
+### 2) Initialize the ceremony
 
 ```bash
 ceremony-cli init \
-  --ptau powersOfTau28_hez_final_10.ptau \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --output circuit_0000.zkey
 ```
 
-(You can still override with `--circuits <path>`.)
+The CLI auto-discovers the compiled `.r1cs` from the build output. You can override with `--circuits <path>` if needed.
 
 This executes:
 
 - `snarkjs groth16 setup ...`
 - `snarkjs zkey verify ...`
 
-Share `circuit_0000.zkey` with the first contributor.
+Share `circuit_0000.zkey` and the `.ptau` file (or its download URL) with the first contributor.
 
-### 2) Collect contributions
+### 3) Collect contributions
 
 Each contributor returns a new `.zkey` to pass to the next contributor.
 
-### 3) Finalize ceremony artifacts
+### 4) Finalize ceremony artifacts
 
 ```bash
 ceremony-cli finalize \
   --zkey circuit_final_contrib.zkey \
-  --beacon-hash 0123456789abcdef0123456789abcdef \
+  --beacon-hash $BEACON_HASH \
   --beacon-power 10 \
   --out-dir ./artifacts \
   --basename circuit
@@ -81,13 +110,26 @@ Publish these with the ceremony transcript and beacon parameters.
 
 Each contributor receives an input `.zkey` and produces a new `.zkey`.
 
+### Quick start
+
 ```bash
+# One-time setup
+cargo build -p circuits          # compile circuit (for verification)
+cargo build -p ceremony-cli      # build the CLI
+
+# Download ptau (if not provided by coordinator)
+curl -L -o powersOfTau28_hez_final_16.ptau \
+  https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau
+
+# Contribute (only 3 required args)
 ceremony-cli contribute \
   --zkey circuit_0000.zkey \
-  --ptau powersOfTau28_hez_final_10.ptau \
+  --ptau powersOfTau28_hez_final_16.ptau \
   --output circuit_0001.zkey \
-  --name "contributor-1"
+  --name "$NAME"
 ```
+
+The CLI auto-discovers the compiled `.r1cs` from the build output. No need to locate it manually.
 
 This executes:
 
@@ -104,7 +146,6 @@ What not to share:
 - any local environment details, shell history snapshots, recordings, or logs beyond normal CLI output.
 
 The CLI already keeps entropy internal, redacted, and zeroized after use.
-By default, it uses `circuits/src/policyTransaction.circom` (resolved to `.r1cs`) unless `--circuits` is provided.
 
 ## Force overwrite
 

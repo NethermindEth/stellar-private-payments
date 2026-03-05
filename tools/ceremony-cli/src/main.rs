@@ -36,14 +36,10 @@ enum Commands {
 /// Shared init arguments.
 #[derive(Debug, clap::Args)]
 struct CeremonyArgs {
-    /// One or more .r1cs files.
-    #[arg(
-        short = 'c',
-        long = "circuits",
-        num_args = 1..,
-        default_value = "circuits/src/policyTransaction.circom"
-    )]
-    circuits: Vec<PathBuf>,
+    /// One or more .r1cs files. auto-discovers
+    /// `policy_test.r1cs` from the Cargo build output directory.
+    #[arg(short = 'c', long = "circuits", num_args = 1..)]
+    circuits: Option<Vec<PathBuf>>,
     /// Input Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
@@ -61,14 +57,10 @@ struct ContributeArgs {
     /// Input zkey to contribute to.
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
-    /// One or more .r1cs files.
-    #[arg(
-        short = 'c',
-        long = "circuits",
-        num_args = 1..,
-        default_value = "circuits/src/policyTransaction.circom"
-    )]
-    circuits: Vec<PathBuf>,
+    /// One or more .r1cs files. If omitted, auto-discovers the compiled
+    /// `policy_test.r1cs` from the Cargo build output directory.
+    #[arg(short = 'c', long = "circuits", num_args = 1..)]
+    circuits: Option<Vec<PathBuf>>,
     /// Input Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
@@ -164,8 +156,9 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.ptau, "ptau")?;
     assert_output_allowed(&args.output, args.force)?;
 
-    for circuit in &args.circuits {
-        let snarkjs_circuit = resolve_snarkjs_circuit_path(circuit)?;
+    let circuits = resolve_circuits(&args.circuits)?;
+
+    for snarkjs_circuit in &circuits {
         let cmd = vec![
             OsString::from("groth16"),
             OsString::from("setup"),
@@ -202,11 +195,7 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
 fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.zkey, "input zkey")?;
     assert_readable_file(&args.ptau, "ptau")?;
-    let resolved_circuits = args
-        .circuits
-        .iter()
-        .map(|circuit| resolve_snarkjs_circuit_path(circuit))
-        .collect::<Result<Vec<_>>>()?;
+    let resolved_circuits = resolve_circuits(&args.circuits)?;
 
     for snarkjs_circuit in &resolved_circuits {
         let preverify_cmd = vec![
@@ -396,6 +385,58 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
+/// Default name of the compiled circuit as produced and verified by `cargo build -p circuits`.
+const DEFAULT_R1CS_NAME: &str = "policy_test.r1cs";
+
+/// Resolves the `--circuits` argument. If the user supplied explicit paths they
+/// are validated and returned. Otherwise we auto-discover the compiled `.r1cs`
+/// from the Cargo build output.
+fn resolve_circuits(explicit: &Option<Vec<PathBuf>>) -> Result<Vec<PathBuf>> {
+    if let Some(paths) = explicit {
+        return paths
+            .iter()
+            .map(|p| resolve_snarkjs_circuit_path(p))
+            .collect();
+    }
+
+    let discovered = discover_r1cs(DEFAULT_R1CS_NAME)?;
+    println!("[info] auto-discovered circuit: {}", discovered.display());
+    Ok(vec![discovered])
+}
+
+/// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs` file
+/// returns the most recently modified match.
+fn discover_r1cs(name: &str) -> Result<PathBuf> {
+    let pattern = format!("target/*/build/circuits-*/out/circuits/{name}");
+    let mut candidates: Vec<PathBuf> = glob::glob(&pattern)
+        .with_context(|| format!("invalid glob pattern: {pattern}"))?
+        .filter_map(|entry| entry.ok())
+        .filter(|p| p.is_file())
+        .collect();
+
+    if candidates.is_empty() {
+        bail!(
+            "no compiled circuit `{name}` found.\n\
+             Run `cargo build -p circuits` first, or pass --circuits <path> explicitly."
+        );
+    }
+
+    // Sort by time of creation which will pick the most recently modified file
+    candidates.sort_by(|a, b| {
+        let mtime = |p: &Path| {
+            p.metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
+        };
+        mtime(b).cmp(&mtime(a))
+    });
+
+    candidates
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow!("unexpected empty candidate list"))
+}
+
 /// Generates contribution entropy with OS CSPRNG and returns hex-encoded
 /// material wrapped in zeroizing storage.
 fn generate_entropy_hex() -> Result<Zeroizing<String>> {
@@ -539,7 +580,7 @@ mod tests {
         execute(
             Cli {
                 command: Commands::Init(CeremonyArgs {
-                    circuits: vec![circuit.clone()],
+                    circuits: Some(vec![circuit.clone()]),
                     ptau: ptau.clone(),
                     output: zkey0.clone(),
                     force: false,
@@ -552,7 +593,7 @@ mod tests {
             Cli {
                 command: Commands::Contribute(ContributeArgs {
                     zkey: zkey0.clone(),
-                    circuits: vec![circuit.clone()],
+                    circuits: Some(vec![circuit.clone()]),
                     ptau: ptau.clone(),
                     output: zkey1.clone(),
                     name: String::from("alice"),

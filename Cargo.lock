@@ -747,6 +747,7 @@ dependencies = [
  "anyhow",
  "clap",
  "getrandom",
+ "glob",
  "shlex",
  "zeroize",
 ]
