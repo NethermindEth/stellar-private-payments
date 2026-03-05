@@ -385,7 +385,8 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
     Ok(path.to_path_buf())
 }
 
-/// Default name of the compiled circuit as produced and verified by `cargo build -p circuits`.
+/// Default name of the compiled circuit as produced and verified by `cargo
+/// build -p circuits`.
 const DEFAULT_R1CS_NAME: &str = "policy_test.r1cs";
 
 /// Resolves the `--circuits` argument. If the user supplied explicit paths they
@@ -404,8 +405,8 @@ fn resolve_circuits(explicit: &Option<Vec<PathBuf>>) -> Result<Vec<PathBuf>> {
     Ok(vec![discovered])
 }
 
-/// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs` file
-/// returns the most recently modified match.
+/// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs`
+/// file and returns the most recently modified match.
 fn discover_r1cs(name: &str) -> Result<PathBuf> {
     let pattern = format!("target/*/build/circuits-*/out/circuits/{name}");
     let mut candidates: Vec<PathBuf> = glob::glob(&pattern)
