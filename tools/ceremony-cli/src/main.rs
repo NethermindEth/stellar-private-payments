@@ -120,7 +120,13 @@ impl CommandRunner for ProcessRunner {
             .stdout(Stdio::inherit())
             .stderr(Stdio::inherit())
             .status()
-            .with_context(|| format!("failed to start `{pretty}`"))?;
+            .map_err(|e| {
+                if e.kind() == std::io::ErrorKind::NotFound {
+                    anyhow!("`{program}` not found in PATH. Install with: npm install -g {program}")
+                } else {
+                    anyhow!("failed to start `{pretty}`: {e}")
+                }
+            })?;
 
         let elapsed = start.elapsed();
         println!(
@@ -406,11 +412,26 @@ fn resolve_circuits(explicit: &Option<Vec<PathBuf>>) -> Result<Vec<PathBuf>> {
 }
 
 /// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs`
-/// file and returns the most recently modified match.
+/// file and returns the best match (release profile preferred, then newest).
 fn discover_r1cs(name: &str) -> Result<PathBuf> {
-    let pattern = format!("target/*/build/circuits-*/out/circuits/{name}");
-    let mut candidates: Vec<PathBuf> = glob::glob(&pattern)
-        .with_context(|| format!("invalid glob pattern: {pattern}"))?
+    // Walk up from CWD to find the workspace root (contains Cargo.lock).
+    let mut root = std::env::current_dir().context("failed to determine current directory")?;
+    loop {
+        if root.join("Cargo.lock").is_file() {
+            break;
+        }
+        if !root.pop() {
+            bail!(
+                "could not find workspace root \
+                 (no Cargo.lock in any parent directory)"
+            );
+        }
+    }
+
+    let pattern = root.join(format!("target/*/build/circuits-*/out/circuits/{name}"));
+    let pattern_str = pattern.to_string_lossy();
+    let mut candidates: Vec<PathBuf> = glob::glob(&pattern_str)
+        .with_context(|| format!("invalid glob pattern: {pattern_str}"))?
         .filter_map(|entry| entry.ok())
         .filter(|p| p.is_file())
         .collect();
@@ -422,14 +443,19 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
         );
     }
 
-    // Sort by time of creation which will pick the most recently modified file
+    // Prefer release profile, then most recently modified.
     candidates.sort_by(|a, b| {
+        let is_release = |p: &Path| p.components().any(|c| c.as_os_str() == "release");
         let mtime = |p: &Path| {
             p.metadata()
                 .and_then(|m| m.modified())
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH)
         };
-        mtime(b).cmp(&mtime(a))
+        match (is_release(a), is_release(b)) {
+            (true, false) => std::cmp::Ordering::Less,
+            (false, true) => std::cmp::Ordering::Greater,
+            _ => mtime(b).cmp(&mtime(a)),
+        }
     });
 
     candidates

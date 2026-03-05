@@ -22,7 +22,7 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 ## Prerequisites
 
 - `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
-- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_test.r1cs` from `target/*/build/circuits-*/out/circuits/`. Run `cargo build -p circuits` to compile.
+- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_test.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
 - A compatible Powers of Tau (`.ptau`) file (see below).
 
 ## Powers of Tau
@@ -53,9 +53,10 @@ The coordinator initializes the ceremony and finalizes outputs.
 ### 1) Build and prepare
 
 ```bash
-cargo build -p circuits          # compile circuit → produces .r1cs
-cargo build -p ceremony-cli      # build the CLI
+cargo build -p circuits --release           # compile circuit → produces .r1cs
+cargo install --path tools/ceremony-cli    # install CLI to ~/.cargo/bin/
 
+# Download ptau (~72 MB)
 curl -L -o powersOfTau28_hez_final_16.ptau \
   https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau
 ```
@@ -114,10 +115,10 @@ Each contributor receives an input `.zkey` and produces a new `.zkey`.
 
 ```bash
 # One-time setup
-cargo build -p circuits          # compile circuit (for verification)
-cargo build -p ceremony-cli      # build the CLI
+cargo build -p circuits --release           # compile circuit (for verification)
+cargo install --path tools/ceremony-cli    # install CLI to ~/.cargo/bin/
 
-# Download ptau (if not provided by coordinator)
+# Download ptau (~72 MB, if not provided by coordinator)
 curl -L -o powersOfTau28_hez_final_16.ptau \
   https://storage.googleapis.com/zkevm/ptau/powersOfTau28_hez_final_16.ptau
 
