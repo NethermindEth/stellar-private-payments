@@ -218,18 +218,15 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
 
     let entropy = generate_entropy_hex()?;
 
-    let mut contribute_cmd = vec![
+    let contribute_cmd = vec![
         OsString::from("zkey"),
         OsString::from("contribute"),
         args.zkey.as_os_str().to_owned(),
         args.output.as_os_str().to_owned(),
-        OsString::from("--name"),
-        OsString::from(args.name.clone()),
+        OsString::from(format!("--name={}", args.name)),
         OsString::from("-v"),
+        OsString::from(format!("-e={}", entropy.as_str())),
     ];
-
-    contribute_cmd.push(OsString::from("-e"));
-    contribute_cmd.push(OsString::from(entropy.as_str()));
 
     runner.run("snarkjs", &contribute_cmd)?;
     print_file_size(&args.output)?;
@@ -279,8 +276,7 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
         final_zkey.as_os_str().to_owned(),
         OsString::from(args.beacon_hash.clone()),
         OsString::from(args.beacon_power.to_string()),
-        OsString::from("-n"),
-        OsString::from("Final Beacon phase2"),
+        OsString::from("-n=Final Beacon phase2"),
     ];
     runner.run("snarkjs", &beacon_cmd)?;
     print_file_size(&final_zkey)?;
@@ -357,6 +353,17 @@ fn format_command_with_redactions(
 
         let plain = arg.to_string_lossy();
         let plain_owned = plain.into_owned();
+
+        // Handle flag=value format (e.g. -e=secret)
+        if let Some(flag) = sensitive_flags
+            .iter()
+            .find(|f| plain_owned.starts_with(&format!("{f}=")))
+        {
+            rendered.push(format!("{flag}=[REDACTED]"));
+            continue;
+        }
+
+        // Handle flag followed by separate value (e.g. -e secret)
         if sensitive_flags.iter().any(|flag| *flag == plain_owned) {
             rendered.push(plain_owned);
             redacted_next = true;
@@ -652,7 +659,7 @@ mod tests {
 
         assert!(calls.iter().any(|line| line.contains("groth16 setup")));
         assert!(calls.iter().any(|line| line.contains("zkey contribute")));
-        assert!(calls.iter().any(|line| line.contains("-e [REDACTED]")));
+        assert!(calls.iter().any(|line| line.contains("-e=[REDACTED]")));
         assert!(
             calls
                 .iter()
