@@ -6,6 +6,7 @@ use std::{
     ffi::OsString,
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    time::Instant,
 };
 use zeroize::{Zeroize, Zeroizing};
 
@@ -119,6 +120,8 @@ impl CommandRunner for ProcessRunner {
         let pretty = format_command(program, args);
         println!("[snarkjs-wrapper] running: {pretty}");
 
+        let start = Instant::now();
+
         let status = Command::new(program)
             .args(args)
             .stdin(Stdio::inherit())
@@ -126,6 +129,12 @@ impl CommandRunner for ProcessRunner {
             .stderr(Stdio::inherit())
             .status()
             .with_context(|| format!("failed to start `{pretty}`"))?;
+
+        let elapsed = start.elapsed();
+        println!(
+            "[snarkjs-wrapper] completed in {:.2}s: {pretty}",
+            elapsed.as_secs_f64()
+        );
 
         if !status.success() {
             bail!("command failed with status {status}: {pretty}");
@@ -165,6 +174,7 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
             args.output.as_os_str().to_owned(),
         ];
         runner.run("snarkjs", &cmd)?;
+        print_file_size(&args.output)?;
 
         let verify_cmd = vec![
             OsString::from("zkey"),
@@ -227,6 +237,7 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     contribute_cmd.push(OsString::from(entropy.as_str()));
 
     runner.run("snarkjs", &contribute_cmd)?;
+    print_file_size(&args.output)?;
     drop(entropy);
 
     for snarkjs_circuit in &resolved_circuits {
@@ -277,6 +288,7 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
         OsString::from("Final Beacon phase2"),
     ];
     runner.run("snarkjs", &beacon_cmd)?;
+    print_file_size(&final_zkey)?;
 
     let export_vkey_cmd = vec![
         OsString::from("zkey"),
@@ -297,6 +309,34 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
     );
 
     Ok(())
+}
+
+/// human-readable file size
+fn print_file_size(path: &Path) -> Result<()> {
+    let metadata = std::fs::metadata(path)
+        .with_context(|| format!("failed to read metadata for {}", path.display()))?;
+    let bytes = metadata.len();
+    let human = format_bytes_human(bytes);
+    println!("[info] {}: {human}", path.display());
+    Ok(())
+}
+
+/// Format byte count
+#[allow(clippy::cast_precision_loss)]
+fn format_bytes_human(bytes: u64) -> String {
+    const KB: u64 = 1024;
+    const MB: u64 = 1024 * KB;
+    const GB: u64 = 1024 * MB;
+
+    if bytes >= GB {
+        format!("{:.2} GB", bytes as f64 / GB as f64)
+    } else if bytes >= MB {
+        format!("{:.2} MB", bytes as f64 / MB as f64)
+    } else if bytes >= KB {
+        format!("{:.2} KB", bytes as f64 / KB as f64)
+    } else {
+        format!("{bytes} B")
+    }
 }
 
 /// Formats a command for terminal-safe logging.
@@ -571,7 +611,8 @@ mod tests {
     }
 
     fn touch(path: &Path) -> Result<()> {
-        fs::write(path, "")?;
+        // fs::write(path, "")?;
+        fs::write(path, "mock-zkey-content")?;
         Ok(())
     }
 }
