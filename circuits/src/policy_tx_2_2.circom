@@ -1,5 +1,5 @@
 pragma circom 2.2.2;
-// Production entry point: PolicyTransaction with 2 inputs, 2 outputs.
+// Entry Point PolicyTransaction with 2 inputs, 2 outputs.
 include "./policyTransaction.circom";
 
 // PolicyTransaction(
