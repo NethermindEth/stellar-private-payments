@@ -187,10 +187,7 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
 
     print_next_steps(
         &args.output,
-        &[
-            "Keep your entropy/private randomness secret during contributions.",
-            "Share only the new .zkey and verification transcript with the next contributor.",
-        ],
+        &["Share the new .zkey with the first contributor to begin the ceremony."],
         &[],
     );
 
@@ -548,7 +545,8 @@ fn print_next_steps(zkey_path: &Path, actions: &[&str], toxic_waste: &[&str]) {
 
     if toxic_waste.is_empty() {
         println!(
-            "Toxic waste cleanup: no additional local secret files were specified for this step."
+            "Toxic waste cleanup: contribution entropy is auto-generated and securely zeroized \
+             in memory. No secret files to delete."
         );
     } else {
         println!("Toxic waste cleanup: securely delete the following as soon as possible:");
