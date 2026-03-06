@@ -22,14 +22,14 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 ## Prerequisites
 
 - `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
-- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_test.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
+- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_tx_2_2.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
 - A compatible Powers of Tau (`.ptau`) file (see below).
 
 ## Powers of Tau
 
 The ceremony requires a Phase 1 Powers of Tau file large enough for the circuit's constraint count.
 
-**Current circuit (`policy_test`):** 37,616 constraints → requires **ptau power ≥ 16** (2^16 = 65,536).
+**Current circuit (`policy_tx_2_2`):** 37,616 constraints → requires **ptau power ≥ 16** (2^16 = 65,536).
 
 Pick the right power: `ceil(log2(num_constraints))`. If unsure, run `npx snarkjs r1cs info $PATH.r1cs` to check.
 

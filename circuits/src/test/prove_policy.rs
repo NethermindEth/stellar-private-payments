@@ -314,7 +314,7 @@ mod tests {
     }
 
     fn policy_artifacts() -> Result<(PathBuf, PathBuf)> {
-        load_artifacts("policy_test")
+        load_artifacts("policy_tx_2_2")
     }
 
     #[test]

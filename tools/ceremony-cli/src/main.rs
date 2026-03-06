@@ -37,7 +37,7 @@ enum Commands {
 #[derive(Debug, clap::Args)]
 struct CeremonyArgs {
     /// One or more .r1cs files. auto-discovers
-    /// `policyTransaction.r1cs` from the Cargo build output directory.
+    /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
     #[arg(short = 'c', long = "circuits", num_args = 1..)]
     circuits: Option<Vec<PathBuf>>,
     /// Input Powers of Tau file.
@@ -58,7 +58,7 @@ struct ContributeArgs {
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
     /// One or more .r1cs files. If omitted, auto-discovers the compiled
-    /// `policyTransaction.r1cs` from the Cargo build output directory.
+    /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
     #[arg(short = 'c', long = "circuits", num_args = 1..)]
     circuits: Option<Vec<PathBuf>>,
     /// Input Powers of Tau file.
@@ -399,8 +399,8 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
 }
 
 /// Default name of the compiled circuit as produced and verified by `cargo
-/// build -p circuits`.
-const DEFAULT_R1CS_NAME: &str = "policyTransaction.r1cs";
+/// build -p circuits --release`.
+const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2.r1cs";
 
 /// Resolves the `--circuits` argument. If the user supplied explicit paths they
 /// are validated and returned. Otherwise we auto-discover the compiled `.r1cs`
@@ -446,7 +446,7 @@ fn discover_r1cs(name: &str) -> Result<PathBuf> {
     if candidates.is_empty() {
         bail!(
             "no compiled circuit `{name}` found.\n\
-             Run `cargo build -p circuits` first, or pass --circuits <path> explicitly."
+             Run `cargo build -p circuits --release` first, or pass --circuits <path> explicitly."
         );
     }
 

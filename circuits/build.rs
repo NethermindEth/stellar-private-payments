@@ -12,7 +12,7 @@
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
 //! The script also generates Groth16 proving and verification
-//! keys for the main test circuit (policy_test) and outputs them to
+//! keys for the main circuit (policy_tx_2_2) and outputs them to
 //! `scripts/testdata/`.
 //!
 //! The output directory is exposed as en environment variable
@@ -67,15 +67,15 @@ fn main() -> Result<()> {
     let testdata_dir = crate_dir.join("../scripts/testdata");
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_test_proving_key.bin").display()
+        testdata_dir.join("policy_tx_2_2_proving_key.bin").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_test_vk.json").display()
+        testdata_dir.join("policy_tx_2_2_vk.json").display()
     );
     println!(
         "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_test_vk_soroban.bin").display()
+        testdata_dir.join("policy_tx_2_2_vk_soroban.bin").display()
     );
 
     // === CIRCOMLIB DEPENDENCY ===
@@ -174,8 +174,8 @@ fn main() -> Result<()> {
                     circom_file.display()
                 );
 
-                // Still check if we need to generate keys for policy_test
-                if circuit_name == "policy_test" {
+                // Still check if we need to generate keys for policy_tx_2_2
+                if circuit_name == "policy_tx_2_2" {
                     // Check if WASM exists before attempting key generation
                     let wasm_path = out_dir
                         .join("wasm")
@@ -265,9 +265,9 @@ fn main() -> Result<()> {
             }
         };
 
-        // === GROTH16 Proving/Verifying key generation for test circuits ===
-        // For now we only generate keys for the policy test circuit.
-        if circuit_name == "policy_test" {
+        // === GROTH16 Proving/Verifying key generation ===
+        // For now we only generate keys for the policy_tx_2_2 circuit.
+        if circuit_name == "policy_tx_2_2" {
             if !wasm_success {
                 println!(
                     "cargo:warning=Skipping key generation for {} - WASM compilation failed",
@@ -462,6 +462,12 @@ fn find_circom_files_impl(dir: &Path, skip_test_dirs: bool) -> Vec<PathBuf> {
             } else if path.is_dir() {
                 // Skip "test" directories when skip_test_dirs is true
                 if skip_test_dirs && path.file_name().is_some_and(|name| name == "test") {
+                    continue;
+                }
+                // Always skip vendored circomlib — it contains its own
+                // `component main` entry points (e.g. sha256/main.circom)
+                // that would produce colliding artifacts.
+                if path.file_name().is_some_and(|name| name == "circomlib") {
                     continue;
                 }
                 circom_files.extend(find_circom_files_impl(&path, skip_test_dirs));
@@ -893,7 +899,7 @@ fn check_keys_need_generation(
 ///
 /// * `crate_dir` - The circuits crate directory
 /// * `out_dir` - The output directory containing WASM files
-/// * `circuit_name` - Name of the circuit (e.g., "policy_test")
+/// * `circuit_name` - Name of the circuit (e.g., "policy_tx_2_2")
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
 ///
 /// # Returns

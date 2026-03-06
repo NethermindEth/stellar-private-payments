@@ -1,5 +1,5 @@
 pragma circom 2.2.2;
-// Moved to the top level folder to ensure the main test is always compiled.
+// Production entry point: PolicyTransaction with 2 inputs, 2 outputs.
 include "./policyTransaction.circom";
 
 // PolicyTransaction(
