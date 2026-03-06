@@ -188,7 +188,6 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
     print_next_steps(
         &args.output,
         &["Share the new .zkey with the first contributor to begin the ceremony."],
-        &[],
     );
 
     Ok(())
@@ -246,7 +245,6 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
             "Send only the contributed .zkey to the ceremony coordinator.",
             "Entropy is generated automatically with OS CSPRNG and never printed.",
         ],
-        &[],
     );
 
     Ok(())
@@ -293,7 +291,6 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
             "Publish the final zkey and verification key for public audit.",
             "Record beacon parameters (hash + power) in your ceremony transcript.",
         ],
-        &[],
     );
 
     Ok(())
@@ -534,25 +531,13 @@ fn validate_beacon_hash(value: &str) -> Result<()> {
     Ok(())
 }
 
-/// Prints contributor guidance and toxic-waste cleanup reminders.
-fn print_next_steps(zkey_path: &Path, actions: &[&str], toxic_waste: &[&str]) {
+/// Prints contributor guidance after a ceremony step.
+fn print_next_steps(zkey_path: &Path, actions: &[&str]) {
     println!("\n=== Ceremony step complete ===");
     println!("Produced zkey artifact: {}", zkey_path.display());
     println!("Next actions:");
     for action in actions {
         println!("  - {action}");
-    }
-
-    if toxic_waste.is_empty() {
-        println!(
-            "Toxic waste cleanup: contribution entropy is auto-generated and securely zeroized \
-             in memory. No secret files to delete."
-        );
-    } else {
-        println!("Toxic waste cleanup: securely delete the following as soon as possible:");
-        for item in toxic_waste {
-            println!("  - {item}");
-        }
     }
 }
 
