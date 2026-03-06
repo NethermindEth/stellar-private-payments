@@ -14,7 +14,7 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 
 - Contribution entropy is generated automatically from OS CSPRNG (`getrandom`) inside the CLI.
 - Entropy is never printed to the console.
-- Logged commands redact sensitive entropy arguments (`-e [REDACTED]`).
+- Logged commands redact sensitive entropy arguments (`-e=[REDACTED]`).
 - Entropy buffer is wrapped with `zeroize` and wiped from Rust-managed memory after contribution command execution.
 
 > Note: no software can guarantee removal of all transient copies made by external processes/OS internals. This tool performs best-effort in-process secret hygiene.
@@ -135,7 +135,7 @@ The CLI auto-discovers the compiled `.r1cs` from the build output. No need to lo
 This executes:
 
 - `snarkjs zkey verify ...` (pre-verifies the input zkey before contribution)
-- `snarkjs zkey contribute ... -e [generated entropy]`
+- `snarkjs zkey contribute ... -e=[generated entropy]`
 - `snarkjs zkey verify ...` (verifies your output zkey)
 
 What to share with coordinator:
