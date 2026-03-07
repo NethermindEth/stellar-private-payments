@@ -140,11 +140,12 @@ export const Withdraw = {
                 
                 // Normalize ID for comparison (storage uses lowercase)
                 const normalizedId = noteId.toLowerCase();
-                let note = App.state.notes.find(n => n.id === normalizedId || n.id === noteId);
-                
-                // If not found in memory, try fetching directly from database
+                let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && n.blinding != null);
+
+                // If not found in memory, or secret fields are null (App.state loaded before
+                // keys were derived), fetch a freshly-decrypted copy from the database.
                 if (!note) {
-                    console.warn('[Withdraw] Note not in App.state, trying database lookup:', noteId.slice(0, 20));
+                    console.warn('[Withdraw] Note not in App.state (or not yet decrypted), trying database lookup:', noteId.slice(0, 20));
                     const dbNote = await notesStore.getNoteByCommitment(noteId);
                     if (dbNote && !dbNote.spent) {
                         note = dbNote;
@@ -241,7 +242,7 @@ export const Withdraw = {
                         const noteId = input.value.trim();
                         if (!noteId) continue;
                         const normalizedId = noteId.toLowerCase();
-                        let note = App.state.notes.find(n => n.id === normalizedId || n.id === noteId);
+                        let note = App.state.notes.find(n => (n.id === normalizedId || n.id === noteId) && n.blinding != null);
                         if (!note) {
                             const dbNote = await notesStore.getNoteByCommitment(noteId);
                             if (dbNote && !dbNote.spent) note = dbNote;

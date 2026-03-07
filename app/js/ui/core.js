@@ -38,8 +38,22 @@ export const App = {
  * @throws {Error} If user rejects signature requests
  */
 export async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDelay = 300 }) {
+    // Keys are derived from deterministic Freighter signatures and cached in memory for
+    // the lifetime of the session. Reuse the active account's cache when available so
+    // the user is only prompted once per account per session (until disconnect/reload).
+    if (notesStore.hasAuthenticatedKeys()) {
+        const encryptionKeypair = await notesStore.getUserEncryptionKeypair();
+        const noteKeypair = await notesStore.getUserNoteKeypair();
+        console.log('[KeyDerivation] Reusing cached keys — no signature required');
+        return {
+            privKeyBytes: noteKeypair.privateKey,
+            pubKeyBytes: noteKeypair.publicKey,
+            encryptionKeypair,
+        };
+    }
+
     onStatus?.('Sign message to derive keys (1/2)...');
-    
+
     let spendingResult;
     try {
         spendingResult = await signWalletMessage('Privacy Pool Spending Key [v1]', signOptions);
@@ -49,17 +63,17 @@ export async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDel
         }
         throw e;
     }
-    
+
     if (!spendingResult?.signedMessage) {
         throw new Error('Spending key signature rejected');
     }
-    
+
     if (signDelay > 0) {
         await new Promise(r => setTimeout(r, signDelay));
     }
-    
+
     onStatus?.('Sign message to derive keys (2/2)...');
-    
+
     let encryptionResult;
     try {
         encryptionResult = await signWalletMessage('Sign to access Privacy Pool [v1]', signOptions);
@@ -69,27 +83,27 @@ export async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDel
         }
         throw e;
     }
-    
+
     if (!encryptionResult?.signedMessage) {
         throw new Error('Encryption key signature rejected');
     }
-    
+
     const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
     const encryptionSigBytes = Uint8Array.from(atob(encryptionResult.signedMessage), c => c.charCodeAt(0));
-    
+
     const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
     const pubKeyBytes = derivePublicKey(privKeyBytes);
     const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-    
-    // Cache keys for note scanning (so sync can scan without prompting again)
+
+    // Populate cache so subsequent calls this session skip signing entirely.
     notesStore.setAuthenticatedKeys({
         encryptionKeypair,
         notePrivateKey: privKeyBytes,
         notePublicKey: pubKeyBytes,
     });
-    
+
     console.log('[KeyDerivation] Derived keys from wallet signatures');
-    
+
     return { privKeyBytes, pubKeyBytes, encryptionKeypair };
 }
 

@@ -20,11 +20,12 @@
 import * as db from './db.js';
 import { toHex, normalizeHex, bytesToHex, hexToBytes } from './utils.js';
 import { signWalletMessage } from '../wallet.js';
-import { 
-    deriveEncryptionKeypairFromSignature, 
+import {
+    deriveEncryptionKeypairFromSignature,
     deriveNotePrivateKeyFromSignature,
     derivePublicKey,
 } from '../bridge.js';
+import { deriveStorageKey, encryptField, decryptField } from './crypto.js';
 
 /**
  * @typedef {Object} UserNote
@@ -85,11 +86,23 @@ export async function saveNote(params) {
         console.warn('[NotesStore] Saving note without owner - will not be filtered by account');
     }
     
+    const storageKey = await getStorageKey();
+    if (!storageKey) {
+        throw new Error(
+            '[NotesStore] Cannot save note: encryption key not yet derived. ' +
+            'Call initializeKeypairs() or perform a transaction to derive keys first.'
+        );
+    }
+
+    const privateKeyHex = toHex(params.privateKey);
+    const blindingHex   = toHex(params.blinding);
+
     const note = {
         id: normalizeHex(params.commitment).toLowerCase(),
         owner: owner || '',
-        privateKey: toHex(params.privateKey),
-        blinding: toHex(params.blinding),
+        privateKey: await encryptField(privateKeyHex, storageKey),
+        blinding:   await encryptField(blindingHex,   storageKey),
+        encrypted:  true,
         amount: String(params.amount),
         leafIndex: params.leafIndex,
         createdAt: new Date().toISOString(),
@@ -97,11 +110,11 @@ export async function saveNote(params) {
         spent: false,
         isReceived: params.isReceived || false,
     };
-    
+
     await db.put('user_notes', note);
     const noteType = note.isReceived ? 'received' : 'created';
     console.log(`[NotesStore] Saved ${noteType} note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
-    return note;
+    return await decryptNote(note, storageKey);
 }
 
 /**
@@ -113,15 +126,18 @@ export async function saveNote(params) {
 export async function markNoteSpent(commitment, ledger) {
     const id = normalizeHex(commitment).toLowerCase();
     const note = await db.get('user_notes', id);
-    
+
     if (!note) {
         return false;
     }
-    
+
+    // Update spent fields on the raw (potentially encrypted) record directly —
+    // the secret fields (privateKey, blinding) are not touched, so encryption
+    // state is preserved without needing to decrypt and re-encrypt.
     note.spent = true;
     note.spentAtLedger = ledger;
     await db.put('user_notes', note);
-    
+
     console.log(`[NotesStore] Marked note ${id.slice(0, 10)}... as spent`);
     return true;
 }
@@ -137,7 +153,7 @@ export async function markNoteSpent(commitment, ledger) {
 export async function getNotes(options = {}) {
     let notes;
     const owner = options.owner ?? currentOwner;
-    
+
     if (options.allOwners) {
         notes = await db.getAll('user_notes');
     } else if (owner) {
@@ -147,12 +163,13 @@ export async function getNotes(options = {}) {
         console.warn('[NotesStore] getNotes called without owner, returning empty');
         return [];
     }
-    
+
     if (options.unspentOnly) {
-        return notes.filter(n => !n.spent);
+        notes = notes.filter(n => !n.spent);
     }
-    
-    return notes;
+
+    const storageKey = await getStorageKey();
+    return Promise.all(notes.map(n => decryptNoteWithMigration(n, storageKey)));
 }
 
 /**
@@ -162,7 +179,10 @@ export async function getNotes(options = {}) {
  */
 export async function getNoteByCommitment(commitment) {
     const id = normalizeHex(commitment).toLowerCase();
-    return await db.get('user_notes', id) || null;
+    const note = await db.get('user_notes', id) || null;
+    if (!note) return null;
+    const storageKey = await getStorageKey();
+    return decryptNoteWithMigration(note, storageKey);
 }
 
 /**
@@ -171,6 +191,19 @@ export async function getNoteByCommitment(commitment) {
  */
 export async function getUnspentNotes() {
     return getNotes({ unspentOnly: true });
+}
+
+/**
+ * Returns true if the current owner has any notes stored without encryption.
+ * Used at wallet connect to detect whether a one-time migration is needed.
+ * @returns {Promise<boolean>}
+ */
+export async function hasUnencryptedNotes() {
+    const owner = currentOwner;
+    const notes = owner
+        ? await db.getAllByIndex('user_notes', 'by_owner', owner)
+        : await db.getAll('user_notes');
+    return notes.some(n => !n.encrypted);
 }
 
 /**
@@ -187,13 +220,25 @@ export async function getBalance() {
  * @returns {Promise<Blob>}
  */
 export async function exportNotes() {
-    const notes = await db.getAll('user_notes');
+    const storageKey = await getStorageKey();
+    const rawNotes = await db.getAll('user_notes');
+
+    const hasEncryptedNotes = rawNotes.some(n => n.encrypted);
+    if (hasEncryptedNotes && !storageKey) {
+        throw new Error(
+            'Cannot export: encryption key not yet derived. ' +
+            'Please perform a transaction first to derive your keys, then export.'
+        );
+    }
+
+    // Decrypt before export so the file is portable (not tied to this user's derived key)
+    const notes = await Promise.all(rawNotes.map(n => decryptNote(n, storageKey)));
     const data = JSON.stringify({
         version: 1,
         exportedAt: new Date().toISOString(),
         notes,
     }, null, 2);
-    
+
     return new Blob([data], { type: 'application/json' });
 }
 
@@ -211,13 +256,29 @@ export async function importNotes(file) {
     }
     
     // Import notes: add new ones, update spent status if import shows spent
+    const storageKey = await getStorageKey();
+    if (!storageKey) {
+        throw new Error(
+            '[NotesStore] Cannot import notes: encryption key not yet derived. ' +
+            'Call initializeKeypairs() or perform a transaction to derive keys first.'
+        );
+    }
+
     let imported = 0;
     for (const note of json.notes) {
         const existing = await db.get('user_notes', note.id);
         if (!existing) {
-            await db.put('user_notes', note);
+            // Encrypt secret fields before storing. Exports are decrypted plaintext
+            // (see exportNotes), so imported notes always arrive unencrypted.
+            await db.put('user_notes', {
+                ...note,
+                privateKey: await encryptField(note.privateKey, storageKey),
+                blinding:   await encryptField(note.blinding,   storageKey),
+                encrypted:  true,
+            });
             imported++;
         } else if (!existing.spent && note.spent) {
+            // Update metadata only; preserve the existing note's encryption state.
             existing.spent = true;
             existing.spentAtLedger = note.spentAtLedger;
             await db.put('user_notes', existing);
@@ -256,9 +317,99 @@ const ENCRYPTION_MESSAGE = "Sign to access Privacy Pool [v1]";
 // Message signed to derive the BN254 note identity keypair
 const SPENDING_KEY_MESSAGE = "Privacy Pool Spending Key [v1]";
 
-// In-memory key caches to avoid repeated Freighter usage
-let cachedEncryptionKeypair = null;
-let cachedNoteKeypair = null;
+// In-memory key caches to avoid repeated Freighter usage.
+// Keys stay in memory only, but are scoped per account so A -> B -> A switches
+// can reuse previously-derived keys without re-prompting.
+const DEFAULT_CACHE_KEY = '__default__';
+const accountKeyCache = new Map();
+
+function getAccountCacheKey(owner = currentOwner) {
+    return owner || DEFAULT_CACHE_KEY;
+}
+
+function getAccountCache(owner = currentOwner) {
+    return accountKeyCache.get(getAccountCacheKey(owner)) || null;
+}
+
+function ensureAccountCache(owner = currentOwner) {
+    const cacheKey = getAccountCacheKey(owner);
+    let cache = accountKeyCache.get(cacheKey);
+    if (!cache) {
+        cache = {
+            encryptionKeypair: null,
+            noteKeypair: null,
+            storageKey: null,
+        };
+        accountKeyCache.set(cacheKey, cache);
+    }
+    return cache;
+}
+
+/**
+ * Get (or lazily derive) the AES-256-GCM key used to encrypt note secrets at rest.
+ * Derived from the X25519 private key via HKDF — no extra Freighter prompt needed.
+ * Returns null if the encryption keypair is not yet available.
+ * @returns {Promise<CryptoKey|null>}
+ */
+async function getStorageKey() {
+    const cache = getAccountCache();
+    if (cache?.storageKey) return cache.storageKey;
+    // Only derive from the already-cached keypair. Do NOT call getUserEncryptionKeypair()
+    // here — that would trigger a Freighter signature prompt in unexpected places (e.g.
+    // wallet connect, note table refresh). The storage key becomes available after the
+    // first explicit key-derivation call (transaction flow or initializeKeypairs()).
+    if (!cache?.encryptionKeypair) return null;
+    cache.storageKey = await deriveStorageKey(cache.encryptionKeypair.privateKey);
+    return cache.storageKey;
+}
+
+/**
+ * Decrypt a note's encrypted fields back to plaintext hex.
+ * If the note is not marked as encrypted (legacy row), it is returned unchanged.
+ * If the storage key is unavailable, the note is returned as-is (degraded).
+ * @param {Object} note - Raw note from IndexedDB
+ * @param {CryptoKey|null} storageKey
+ * @returns {Promise<Object>} Note with plaintext privateKey and blinding
+ */
+async function decryptNote(note, storageKey) {
+    if (!note || !note.encrypted) return note;
+    if (!storageKey) {
+        // Return the note without the secret fields so callers never accidentally
+        // receive raw ciphertext as if it were plaintext. The note remains usable
+        // for display (amount, id, spent, leafIndex are all unencrypted) but cannot
+        // be used for proof generation until keys are derived.
+        const { privateKey, blinding, ...rest } = note;
+        return { ...rest, privateKey: null, blinding: null };
+    }
+    return {
+        ...note,
+        privateKey: await decryptField(note.privateKey, storageKey),
+        blinding:   await decryptField(note.blinding,   storageKey),
+        encrypted:  false,
+    };
+}
+
+/**
+ * Decrypt a note, migrating plaintext legacy rows to encrypted storage on first access.
+ * @param {Object} note - Raw note from IndexedDB
+ * @param {CryptoKey|null} storageKey
+ * @returns {Promise<Object>} Note with plaintext privateKey and blinding
+ */
+async function decryptNoteWithMigration(note, storageKey) {
+    if (!note) return note;
+    if (!note.encrypted && storageKey) {
+        // Legacy plaintext row — encrypt in place so it's protected going forward
+        const migrated = {
+            ...note,
+            privateKey: await encryptField(note.privateKey, storageKey),
+            blinding:   await encryptField(note.blinding,   storageKey),
+            encrypted:  true,
+        };
+        await db.put('user_notes', migrated);
+        return note; // return original plaintext to caller
+    }
+    return decryptNote(note, storageKey);
+}
 
 
 /**
@@ -270,8 +421,9 @@ let cachedNoteKeypair = null;
  * @returns {Promise<{publicKey: Uint8Array, privateKey: Uint8Array}|null>}
  */
 export async function getUserEncryptionKeypair() {
-    if (cachedEncryptionKeypair) {
-        return cachedEncryptionKeypair;
+    const cached = getAccountCache();
+    if (cached?.encryptionKeypair) {
+        return cached.encryptionKeypair;
     }
     
     const signature = await requestSignature(ENCRYPTION_MESSAGE, 'encryption');
@@ -280,7 +432,9 @@ export async function getUserEncryptionKeypair() {
     }
     
     const keypair = deriveEncryptionKeypairFromSignature(signature);
-    cachedEncryptionKeypair = keypair;
+    const cache = ensureAccountCache();
+    cache.encryptionKeypair = keypair;
+    cache.storageKey = null;
     
     console.log('[NotesStore] Derived encryption keypair');
     return keypair;
@@ -310,8 +464,9 @@ export async function getEncryptionPublicKeyHex() {
  * @returns {Promise<{publicKey: Uint8Array, privateKey: Uint8Array}|null>}
  */
 export async function getUserNoteKeypair() {
-    if (cachedNoteKeypair) {
-        return cachedNoteKeypair;
+    const cached = getAccountCache();
+    if (cached?.noteKeypair) {
+        return cached.noteKeypair;
     }
     
     const signature = await requestSignature(SPENDING_KEY_MESSAGE, 'spending');
@@ -325,10 +480,11 @@ export async function getUserNoteKeypair() {
     // Derive public key via Poseidon2
     const publicKey = derivePublicKey(privateKey);
     
-    cachedNoteKeypair = { publicKey, privateKey };
+    const keypair = { publicKey, privateKey };
+    ensureAccountCache().noteKeypair = keypair;
     
     console.log('[NotesStore] Derived note identity keypair');
-    return cachedNoteKeypair;
+    return keypair;
 }
 
 /**
@@ -359,22 +515,24 @@ export async function getNotePrivateKey() {
 
 // Cache management
 /**
- * Clear all cached keypairs (call on logout, wallet disconnect, or account change).
+ * Clear all cached keypairs for all accounts in this session.
+ * Call on logout or wallet disconnect.
  */
 export function clearKeypairCaches() {
-    cachedEncryptionKeypair = null;
-    cachedNoteKeypair = null;
+    accountKeyCache.clear();
     console.log('[NotesStore] Cleared keypair caches');
 }
 
 /**
- * Handle account change - clears caches and updates owner.
+ * Handle account change.
+ * - Switching between non-null accounts preserves per-account session caches.
+ * - Disconnecting (null owner) clears all cached keys.
  * @param {string|null} newAddress - New Stellar address or null if disconnecting
  * @returns {boolean} True if the account actually changed
  */
 export function handleAccountChange(newAddress) {
     const changed = setCurrentOwner(newAddress);
-    if (changed) {
+    if (changed && !newAddress) {
         clearKeypairCaches();
     }
     return changed;
@@ -385,7 +543,8 @@ export function handleAccountChange(newAddress) {
  * @returns {boolean}
  */
 export function hasAuthenticatedKeys() {
-    return cachedEncryptionKeypair !== null && cachedNoteKeypair !== null;
+    const cache = getAccountCache();
+    return !!(cache?.encryptionKeypair && cache?.noteKeypair);
 }
 
 /**
@@ -397,13 +556,16 @@ export function hasAuthenticatedKeys() {
  * @param {Object} keys.encryptionKeypair - X25519 keypair { publicKey, secretKey }
  * @param {Uint8Array} keys.notePrivateKey - BN254 private key
  * @param {Uint8Array} keys.notePublicKey - BN254 public key
+ * @param {string} [keys.owner] - Owner to cache for (defaults to currentOwner)
  */
-export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePublicKey }) {
+export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePublicKey, owner }) {
+    const cache = ensureAccountCache(owner);
     if (encryptionKeypair) {
-        cachedEncryptionKeypair = encryptionKeypair;
+        cache.encryptionKeypair = encryptionKeypair;
+        cache.storageKey = null;
     }
     if (notePrivateKey && notePublicKey) {
-        cachedNoteKeypair = { privateKey: notePrivateKey, publicKey: notePublicKey };
+        cache.noteKeypair = { privateKey: notePrivateKey, publicKey: notePublicKey };
     }
     console.log('[NotesStore] Keys cached from external derivation');
 }

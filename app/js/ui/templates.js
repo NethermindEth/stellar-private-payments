@@ -221,38 +221,48 @@ export const Templates = {
                     console.log('[Templates] Existing note lookup:', existingNote ? 'found' : 'not found');
                     
                     if (!existingNote && data.amount !== undefined) {
-                        // Save note to IndexedDB so it can be used in transactions.
-                        // Notes from other users won't have a valid privateKey for this wallet,
-                        // so proof generation will fail - but at least the UI flow works.
-                        // Use App.state.wallet.address as owner (more reliable than notesStore.getCurrentOwner)
-                        const currentOwner = App.state.wallet.address || notesStore.getCurrentOwner();
-                        console.log('[Templates] Saving note with owner:', currentOwner?.slice(0, 10));
-                        
-                        // Preserve isReceived from file if present, otherwise default to true
-                        // (most file imports are from receiving notes from others)
-                        const isReceivedFromFile = data.isReceived !== undefined ? data.isReceived : true;
-                        
-                        const savedNote = await notesStore.saveNote({
-                            commitment: noteId,
-                            privateKey: data.privateKey || new Uint8Array(32), // May be missing/invalid
-                            blinding: data.blinding || '0x' + '0'.repeat(64),
-                            amount: Number(data.amount),
-                            leafIndex: data.leafIndex ?? 0,
-                            ledger: 0,
-                            isReceived: isReceivedFromFile,
-                            owner: currentOwner,
-                        });
-                        
-                        console.log('[Templates] Note saved with ID:', savedNote.id);
-                        
-                        // Update input with the normalized ID (lowercase, with 0x prefix)
-                        noteInput.value = savedNote.id;
-                        
-                        // Reload notes to update App.state.notes
-                        await Storage.load();
-                        console.log('[Templates] App.state.notes reloaded, count:', App.state.notes.length);
-                        
-                        Toast.show('Note imported from file', 'success');
+                        if (!notesStore.hasAuthenticatedKeys()) {
+                            // Encryption keys are not yet derived (user hasn't signed a transaction
+                            // this session). The note ID is already in the input — surface a clear
+                            // error so the user knows what to do next.
+                            Toast.show(
+                                'Keys not yet derived — complete a transaction first, then re-import this note file.',
+                                'error'
+                            );
+                        } else {
+                            // Save note to IndexedDB so it can be used in transactions.
+                            // Notes from other users won't have a valid privateKey for this wallet,
+                            // so proof generation will fail - but at least the UI flow works.
+                            // Use App.state.wallet.address as owner (more reliable than notesStore.getCurrentOwner)
+                            const currentOwner = App.state.wallet.address || notesStore.getCurrentOwner();
+                            console.log('[Templates] Saving note with owner:', currentOwner?.slice(0, 10));
+
+                            // Preserve isReceived from file if present, otherwise default to true
+                            // (most file imports are from receiving notes from others)
+                            const isReceivedFromFile = data.isReceived !== undefined ? data.isReceived : true;
+
+                            const savedNote = await notesStore.saveNote({
+                                commitment: noteId,
+                                privateKey: data.privateKey || new Uint8Array(32), // May be missing/invalid
+                                blinding: data.blinding || '0x' + '0'.repeat(64),
+                                amount: Number(data.amount),
+                                leafIndex: data.leafIndex ?? 0,
+                                ledger: 0,
+                                isReceived: isReceivedFromFile,
+                                owner: currentOwner,
+                            });
+
+                            console.log('[Templates] Note saved with ID:', savedNote.id);
+
+                            // Update input with the normalized ID (lowercase, with 0x prefix)
+                            noteInput.value = savedNote.id;
+
+                            // Reload notes to update App.state.notes
+                            await Storage.load();
+                            console.log('[Templates] App.state.notes reloaded, count:', App.state.notes.length);
+
+                            Toast.show('Note imported from file', 'success');
+                        }
                     } else if (existingNote) {
                         // Use the stored ID format for consistency
                         noteInput.value = existingNote.id;

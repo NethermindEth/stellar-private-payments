@@ -180,7 +180,7 @@ export const Wallet = {
                 // Update state
                 App.state.wallet.address = currentAddress;
                 
-                // Update notes store owner and clear keypairs
+                // Switch the active notes-store owner. Other accounts' session caches stay in memory.
                 notesStore.handleAccountChange(currentAddress);
                 
                 // Update UI
@@ -299,11 +299,23 @@ export const Wallet = {
         }
 
         Toast.show('Wallet connected!', 'success');
-        
+
         // Enable submit buttons
         updateSubmitButtons(true);
-        
-        // Load notes for this account
+
+        // One-time migration: if this account has pre-encryption notes in IndexedDB,
+        // derive keys now so the subsequent reload can re-encrypt them in place.
+        // This only prompts Freighter for accounts that still have plaintext notes.
+        try {
+            if (await notesStore.hasUnencryptedNotes()) {
+                Toast.show('Encrypting existing notes — please approve the signature requests.', 'info');
+                await notesStore.initializeKeypairs();
+            }
+        } catch (e) {
+            console.warn('[Wallet] Migration key derivation failed or was cancelled:', e.message);
+        }
+
+        // Load notes for this account (also triggers lazy migration for any remaining plaintext rows)
         await NotesTable.reload();
         
         // Notify registered callbacks (Withdraw, Transact prefill recipient)

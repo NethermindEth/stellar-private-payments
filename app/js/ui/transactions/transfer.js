@@ -221,11 +221,12 @@ export const Transfer = {
                 const noteId = input.value.trim().toLowerCase();
                 if (!noteId) continue;
                 
-                let note = App.state.notes.find(n => n.id === noteId && !n.spent);
-                
-                // If not found in memory, try fetching directly from database
+                let note = App.state.notes.find(n => n.id === noteId && !n.spent && n.blinding != null);
+
+                // If not found in memory, or secret fields are null (App.state loaded before
+                // keys were derived), fetch a freshly-decrypted copy from the database.
                 if (!note) {
-                    console.warn('[Transfer] Note not in App.state, trying database lookup:', noteId.slice(0, 20));
+                    console.warn('[Transfer] Note not in App.state (or not yet decrypted), trying database lookup:', noteId.slice(0, 20));
                     const dbNote = await notesStore.getNoteByCommitment(noteId);
                     if (dbNote && !dbNote.spent) {
                         note = dbNote;
