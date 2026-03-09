@@ -243,11 +243,12 @@ export async function readASPMembershipState(contractId) {
         };
 
         // Fetch keys in parallel
-        const [rootResult, levelsResult, nextIndexResult, adminResult] = await Promise.all([
+        const [rootResult, levelsResult, nextIndexResult, adminResult, adminInsertOnlyResult] = await Promise.all([
             readLedgerEntry(contractId, createEnumKey('Root')),
             readLedgerEntry(contractId, createEnumKey('Levels')),
             readLedgerEntry(contractId, createEnumKey('NextIndex')),
             readLedgerEntry(contractId, createEnumKey('Admin')),
+            readLedgerEntry(contractId, createEnumKey('AdminInsertOnly')),
         ]);
 
         if (rootResult.success) {
@@ -257,6 +258,8 @@ export async function readASPMembershipState(contractId) {
         if (levelsResult.success) results.levels = levelsResult.value;
         if (nextIndexResult.success) results.nextIndex = nextIndexResult.value;
         if (adminResult.success) results.admin = adminResult.value;
+        results.adminInsertOnly = adminInsertOnlyResult.value;
+        if (adminInsertOnlyResult.success) results.adminInsertOnly = adminInsertOnlyResult.value;
 
         if (results.levels !== undefined) {
             results.capacity = Math.pow(2, results.levels);
@@ -530,13 +533,14 @@ export async function getLatestLedger() {
  * @param {string} contractId - Contract address
  * @param {Object} options - Query options
  * @param {number} options.startLedger - Starting ledger sequence
+ * @param {number} [options.endLedger] - Optional fixed end ledger sequence
  * @param {string} [options.cursor] - Pagination cursor (for resuming)
  * @param {number} [options.pageSize=100] - Events per page
  * @param {function} [options.onPage] - Callback for each page: (events, cursor) => void
  * @returns {Promise<{success: boolean, events: Array, cursor?: string, latestLedger: number, count: number, error?: string}>}
  */
 export async function fetchAllContractEvents(contractId, options = {}) {
-    const { startLedger, cursor: initialCursor, pageSize = 100, onPage } = options;
+    const { startLedger, cursor: initialCursor, pageSize = 100, onPage, endLedger: fixedEndLedger } = options;
 
     if (!startLedger && !initialCursor) {
         return { success: false, events: [], error: 'startLedger or cursor required' };
@@ -552,22 +556,24 @@ export async function fetchAllContractEvents(contractId, options = {}) {
     try {
         const allEvents = onPage ? null : [];
         let cursor = initialCursor;
-        let latestLedger = 0;
+        let latestLedger = fixedEndLedger || 0;
         let totalCount = 0;
         let currentStartLedger = startLedger;
 
-        // First, get the latest ledger to know when to stop
-        const infoResponse = await fetch(rpcUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                jsonrpc: '2.0',
-                id: Date.now(),
-                method: 'getLatestLedger',
-            }),
-        });
-        const infoJson = await infoResponse.json();
-        latestLedger = infoJson.result?.sequence || 0;
+        // If end ledger is not fixed by caller, fetch latest to define the range.
+        if (!latestLedger) {
+            const infoResponse = await fetch(rpcUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    jsonrpc: '2.0',
+                    id: Date.now(),
+                    method: 'getLatestLedger',
+                }),
+            });
+            const infoJson = await infoResponse.json();
+            latestLedger = infoJson.result?.sequence || 0;
+        }
         
         console.log('[Stellar] Fetching events in chunks:', {
             contractId,
@@ -578,9 +584,11 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         });
 
         // Search in chunks from startLedger to latestLedger
-        while (currentStartLedger < latestLedger) {
+        while (currentStartLedger <= latestLedger) {
+            const currentEndLedger = Math.min(latestLedger, currentStartLedger + CHUNK_SIZE - 1);
             const params = {
                 startLedger: currentStartLedger,
+                endLedger: currentEndLedger,
                 filters: [{
                     contractIds: [contractId],
                 }],
@@ -605,7 +613,27 @@ export async function fetchAllContractEvents(contractId, options = {}) {
             const json = await response.json();
             
             if (json.error) {
-                throw new Error(json.error.message || JSON.stringify(json.error));
+                const message = json.error.message || JSON.stringify(json.error);
+
+                // Handle retention-window drift: if start is just below current oldest,
+                // clamp to RPC-reported oldest and continue instead of failing sync.
+                const rangeMatch = message.match(/ledger range:\s*(\d+)\s*-\s*(\d+)/i);
+                if (rangeMatch && /startledger must be within the ledger range/i.test(message)) {
+                    const oldest = Number(rangeMatch[1]);
+                    const newest = Number(rangeMatch[2]);
+
+                    if (Number.isFinite(oldest) && currentStartLedger < oldest) {
+                        console.warn('[Stellar] Adjusting startLedger to RPC oldest ledger:', {
+                            from: currentStartLedger,
+                            to: oldest,
+                            rpcLatest: newest,
+                        });
+                        currentStartLedger = oldest;
+                        continue;
+                    }
+                }
+
+                throw new Error(message);
             }
 
             const result = json.result;
@@ -625,16 +653,16 @@ export async function fetchAllContractEvents(contractId, options = {}) {
                 cursor = result.cursor || pageEvents[pageEvents.length - 1].id;
                 
                 if (onPage) {
-                    onPage(pageEvents, cursor);
+                    await onPage(pageEvents, cursor);
                 } else {
                     allEvents.push(...pageEvents);
                 }
                 
-                console.log(`[Stellar] Found ${pageEvents.length} events in chunk starting at ledger ${currentStartLedger}`);
+                console.log(`[Stellar] Found ${pageEvents.length} events in chunk ${currentStartLedger}-${currentEndLedger}`);
             }
 
             // Move to next chunk
-            currentStartLedger += CHUNK_SIZE;
+            currentStartLedger = currentEndLedger + 1;
         }
 
         console.log(`[Stellar] Search complete: ${totalCount} total events found`);
@@ -648,7 +676,10 @@ export async function fetchAllContractEvents(contractId, options = {}) {
         };
     } catch (error) {
         console.error('[Stellar] Failed to fetch all events:', error);
-        return { success: false, error: error.message, events: [], count: 0, cursor: initialCursor };
+        const errorMessage = error && typeof error === 'object' && 'message' in error
+            ? error.message
+            : String(error ?? 'Unknown error');
+        return { success: false, error: errorMessage, events: [], count: 0, cursor: initialCursor };
     }
 }
 
