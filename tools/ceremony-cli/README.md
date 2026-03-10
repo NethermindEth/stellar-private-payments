@@ -22,7 +22,7 @@ The tool logs every executed `snarkjs` command, validates input/output paths, re
 ## Prerequisites
 
 - `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
-- Compiled circuit (`.r1cs`). If `--circuits` is omitted the CLI auto-discovers the compiled `policy_tx_2_2.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
+- Compiled circuit (`.r1cs`). If `--circuit` is omitted the CLI auto-discovers the compiled `policy_tx_2_2.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
 - A compatible Powers of Tau (`.ptau`) file (see below).
 
 ## Powers of Tau
@@ -69,7 +69,7 @@ ceremony-cli init \
   --output circuit_0000.zkey
 ```
 
-The CLI auto-discovers the compiled `.r1cs` from the build output. You can override with `--circuits <path>` if needed.
+The CLI auto-discovers the compiled `.r1cs` from the build output. You can override with `--circuit <path>` if needed.
 
 This executes:
 

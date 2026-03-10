@@ -36,10 +36,10 @@ enum Commands {
 /// Shared init arguments.
 #[derive(Debug, clap::Args)]
 struct CeremonyArgs {
-    /// One or more .r1cs files. auto-discovers
+    /// Path to the `.r1cs` file. If omitted, auto-discovers
     /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
-    #[arg(short = 'c', long = "circuits", num_args = 1..)]
-    circuits: Option<Vec<PathBuf>>,
+    #[arg(short = 'c', long = "circuit")]
+    circuits: Option<PathBuf>,
     /// Input Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
@@ -57,10 +57,10 @@ struct ContributeArgs {
     /// Input zkey to contribute to.
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
-    /// One or more .r1cs files. If omitted, auto-discovers the compiled
+    /// Path to the `.r1cs` file. If omitted, auto-discovers the compiled
     /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
-    #[arg(short = 'c', long = "circuits", num_args = 1..)]
-    circuits: Option<Vec<PathBuf>>,
+    #[arg(short = 'c', long = "circuit")]
+    circuits: Option<PathBuf>,
     /// Input Powers of Tau file.
     #[arg(short = 'p', long = "ptau")]
     ptau: PathBuf,
@@ -157,33 +157,31 @@ fn execute(cli: Cli, runner: &dyn CommandRunner) -> Result<()> {
     }
 }
 
-/// Runs setup initialization for each selected circuit.
+/// Runs setup initialization for the selected circuit.
 fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.ptau, "ptau")?;
     assert_output_allowed(&args.output, args.force)?;
 
-    let circuits = resolve_circuits(&args.circuits)?;
+    let circuit = resolve_circuits(&args.circuits)?;
 
-    for snarkjs_circuit in &circuits {
-        let cmd = vec![
-            OsString::from("groth16"),
-            OsString::from("setup"),
-            snarkjs_circuit.as_os_str().to_owned(),
-            args.ptau.as_os_str().to_owned(),
-            args.output.as_os_str().to_owned(),
-        ];
-        runner.run("snarkjs", &cmd)?;
-        print_file_size(&args.output)?;
+    let cmd = vec![
+        OsString::from("groth16"),
+        OsString::from("setup"),
+        circuit.as_os_str().to_owned(),
+        args.ptau.as_os_str().to_owned(),
+        args.output.as_os_str().to_owned(),
+    ];
+    runner.run("snarkjs", &cmd)?;
+    print_file_size(&args.output)?;
 
-        let verify_cmd = vec![
-            OsString::from("zkey"),
-            OsString::from("verify"),
-            snarkjs_circuit.as_os_str().to_owned(),
-            args.ptau.as_os_str().to_owned(),
-            args.output.as_os_str().to_owned(),
-        ];
-        runner.run("snarkjs", &verify_cmd)?;
-    }
+    let verify_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("verify"),
+        circuit.as_os_str().to_owned(),
+        args.ptau.as_os_str().to_owned(),
+        args.output.as_os_str().to_owned(),
+    ];
+    runner.run("snarkjs", &verify_cmd)?;
 
     print_next_steps(
         &args.output,
@@ -197,22 +195,21 @@ fn init(args: CeremonyArgs, runner: &dyn CommandRunner) -> Result<()> {
 fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
     assert_readable_file(&args.zkey, "input zkey")?;
     assert_readable_file(&args.ptau, "ptau")?;
-    let resolved_circuits = resolve_circuits(&args.circuits)?;
+    let circuit = resolve_circuits(&args.circuits)?;
 
-    for snarkjs_circuit in &resolved_circuits {
-        let preverify_cmd = vec![
-            OsString::from("zkey"),
-            OsString::from("verify"),
-            snarkjs_circuit.as_os_str().to_owned(),
-            args.ptau.as_os_str().to_owned(),
-            args.zkey.as_os_str().to_owned(),
-        ];
-        runner.run("snarkjs", &preverify_cmd)?;
-    }
+    let preverify_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("verify"),
+        circuit.as_os_str().to_owned(),
+        args.ptau.as_os_str().to_owned(),
+        args.zkey.as_os_str().to_owned(),
+    ];
+    runner.run("snarkjs", &preverify_cmd)?;
 
     assert_output_allowed(&args.output, args.force)?;
 
     let entropy = generate_entropy_hex()?;
+    let entropy_flag = Zeroizing::new(format!("-e={}", entropy.as_str()));
 
     let contribute_cmd = vec![
         OsString::from("zkey"),
@@ -221,23 +218,22 @@ fn contribute(args: ContributeArgs, runner: &dyn CommandRunner) -> Result<()> {
         args.output.as_os_str().to_owned(),
         OsString::from(format!("--name={}", args.name)),
         OsString::from("-v"),
-        OsString::from(format!("-e={}", entropy.as_str())),
+        OsString::from(entropy_flag.as_str()),
     ];
 
     runner.run("snarkjs", &contribute_cmd)?;
     print_file_size(&args.output)?;
+    drop(entropy_flag);
     drop(entropy);
 
-    for snarkjs_circuit in &resolved_circuits {
-        let verify_cmd = vec![
-            OsString::from("zkey"),
-            OsString::from("verify"),
-            snarkjs_circuit.as_os_str().to_owned(),
-            args.ptau.as_os_str().to_owned(),
-            args.output.as_os_str().to_owned(),
-        ];
-        runner.run("snarkjs", &verify_cmd)?;
-    }
+    let verify_cmd = vec![
+        OsString::from("zkey"),
+        OsString::from("verify"),
+        circuit.as_os_str().to_owned(),
+        args.ptau.as_os_str().to_owned(),
+        args.output.as_os_str().to_owned(),
+    ];
+    runner.run("snarkjs", &verify_cmd)?;
 
     print_next_steps(
         &args.output,
@@ -396,20 +392,17 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
 /// build -p circuits --release`.
 const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2.r1cs";
 
-/// Resolves the `--circuits` argument. If the user supplied explicit paths they
-/// are validated and returned. Otherwise we auto-discover the compiled `.r1cs`
+/// Resolves the `--circuit` argument. If the user supplied an explicit path it
+/// is validated and returned. Otherwise we auto-discover the compiled `.r1cs`
 /// from the Cargo build output.
-fn resolve_circuits(explicit: &Option<Vec<PathBuf>>) -> Result<Vec<PathBuf>> {
-    if let Some(paths) = explicit {
-        return paths
-            .iter()
-            .map(|p| resolve_snarkjs_circuit_path(p))
-            .collect();
+fn resolve_circuits(explicit: &Option<PathBuf>) -> Result<PathBuf> {
+    if let Some(path) = explicit {
+        return resolve_snarkjs_circuit_path(path);
     }
 
     let discovered = discover_r1cs(DEFAULT_R1CS_NAME)?;
     println!("[info] auto-discovered circuit: {}", discovered.display());
-    Ok(vec![discovered])
+    Ok(discovered)
 }
 
 /// Searches `target/*/build/circuits-*/out/circuits/` for a compiled `.r1cs`
@@ -597,7 +590,7 @@ mod tests {
         execute(
             Cli {
                 command: Commands::Init(CeremonyArgs {
-                    circuits: Some(vec![circuit.clone()]),
+                    circuits: Some(circuit.clone()),
                     ptau: ptau.clone(),
                     output: zkey0.clone(),
                     force: false,
@@ -610,7 +603,7 @@ mod tests {
             Cli {
                 command: Commands::Contribute(ContributeArgs {
                     zkey: zkey0.clone(),
-                    circuits: Some(vec![circuit.clone()]),
+                    circuits: Some(circuit.clone()),
                     ptau: ptau.clone(),
                     output: zkey1.clone(),
                     name: String::from("alice"),
