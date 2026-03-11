@@ -12,7 +12,7 @@ serve: build
 .PHONY: build
 build: install circuits-build wasm-witness
 	@echo "Building frontend with trunk..."
-	unset NO_COLOR && trunk build  --dist $(DIST_DIR)
+	unset NO_COLOR && trunk build  --dist $(DIST_DIR) --release
 
 .PHONY: wasm-witness
 wasm-witness: install
@@ -28,7 +28,7 @@ wasm-witness: install
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits --release
 
 .PHONY: install
 install:
