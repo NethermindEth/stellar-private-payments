@@ -3,6 +3,11 @@
 DIST_DIR ?= dist
 BUILD_TESTS ?=
 
+.PHONY: release
+release: install circuits-build-release wasm-witness
+	@echo "Building frontend with trunk (release)..."
+	unset NO_COLOR && trunk build --dist $(DIST_DIR) --release
+
 .PHONY: serve
 serve: build
 	# --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
@@ -12,7 +17,7 @@ serve: build
 .PHONY: build
 build: install circuits-build wasm-witness
 	@echo "Building frontend with trunk..."
-	unset NO_COLOR && trunk build  --dist $(DIST_DIR) --release
+	unset NO_COLOR && trunk build --dist $(DIST_DIR)
 
 .PHONY: wasm-witness
 wasm-witness: install
@@ -28,6 +33,11 @@ wasm-witness: install
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits
+
+.PHONY: circuits-build-release
+circuits-build-release:
+	@echo "Building circuits in release mode (this may take a while)..."
 	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits --release
 
 .PHONY: install
