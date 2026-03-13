@@ -2,11 +2,11 @@
 # change where serve, build, and clean write/read compiled assets.
 DIST_DIR ?= dist
 BUILD_TESTS ?=
+RELEASE ?=
 
 .PHONY: release
-release: install circuits-build-release wasm-witness
-	@echo "Building frontend with trunk (release)..."
-	unset NO_COLOR && trunk build --dist $(DIST_DIR) --release
+release: RELEASE := 1
+release: build
 
 .PHONY: serve
 serve: build
@@ -17,7 +17,7 @@ serve: build
 .PHONY: build
 build: install circuits-build wasm-witness
 	@echo "Building frontend with trunk..."
-	unset NO_COLOR && trunk build --dist $(DIST_DIR)
+	unset NO_COLOR && trunk build --dist $(DIST_DIR) $(if $(RELEASE),--release)
 
 .PHONY: wasm-witness
 wasm-witness: install
@@ -33,12 +33,7 @@ wasm-witness: install
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits
-
-.PHONY: circuits-build-release
-circuits-build-release:
-	@echo "Building circuits in release mode (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits --release
+	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
 
 .PHONY: install
 install:
