@@ -1,0 +1,30 @@
+[package]
+name = "storage"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Unified SQLite storage backend for browser (WASM) and CLI (native)"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+serde = { workspace = true, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# TODO: Replace the in-memory WASM backend with sqlite-wasm-rs + SyncAccessHandlePoolVFS
+# (OPFS) for persistent storage in a browser Worker context.
+# [target.'cfg(target_arch = "wasm32")'.dependencies]
+# sqlite-wasm-rs = "0.5"
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+wasm-bindgen-test = { workspace = true }
+
+[lints]
+workspace = true
