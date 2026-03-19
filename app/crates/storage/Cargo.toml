@@ -13,7 +13,7 @@ crate-type = ["rlib"]
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
 serde = { workspace = true, features = ["std"] }
-serde_json = { version = "1.0", default-features = false, features = ["std"] }
+serde_json = { workspace = true, features = ["std"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }

@@ -27,7 +27,7 @@ getrandom = { workspace = true }
 num-bigint = { workspace = true }
 
 # JSON parsing
-serde_json = { version = "1.0", default-features = false, features = ["alloc", "std"] }
+serde_json = { workspace = true, features = ["alloc", "std"] }
 
 # WASM bindings
 wasm-bindgen = { workspace = true }
