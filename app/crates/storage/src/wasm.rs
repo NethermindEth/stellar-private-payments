@@ -1,7 +1,4 @@
 //! Temporary in-memory storage backend for the WASM target.
-//!
-//! TODO: Replace with `sqlite-wasm-rs` + `SyncAccessHandlePoolVFS` (OPFS) when
-//! porting the first JS state module to Rust requires persistent browser storage.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -12,10 +9,7 @@ use crate::types::{
 };
 
 /// In-memory storage for the WASM target.
-///
-/// `BTreeMap` keys match SQLite primary keys; ordered iteration mirrors
-/// IndexedDB cursor semantics. `RefCell` allows `&self` mutation (WASM is
-/// single-threaded).
+/// `RefCell` for `&self` mutation (single-threaded).
 pub struct Storage {
     pool_leaves: RefCell<BTreeMap<u32, PoolLeaf>>,
     pool_nullifiers: RefCell<BTreeMap<String, PoolNullifier>>,

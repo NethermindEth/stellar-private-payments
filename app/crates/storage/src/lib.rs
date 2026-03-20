@@ -1,10 +1,8 @@
 //! Unified SQLite storage for the shielded pool.
 //!
-//! [`Storage`] compiles to two backends selected by target architecture:
-//! - **Native**: `rusqlite` (CLI, tests)
-//! - **WASM**: in-memory `BTreeMap`s (temporary — to be replaced with `sqlite-wasm-rs` + OPFS)
+//! Native: `rusqlite`. WASM: in-memory `BTreeMap`s (temporary).
 
-/// Storage types mirroring the JS `@typedef` objects in `app/js/state/`.
+/// Storage types.
 pub mod types;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -1,26 +1,26 @@
 use serde::{Deserialize, Serialize};
 
-/// `pool_leaves` — `pool-store.js`
+/// Pool merkle tree leaf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolLeaf {
     /// Leaf index (primary key).
     pub index: u32,
     /// Commitment hash (hex).
     pub commitment: String,
-    /// Ledger when added.
+    /// Ledger sequence when added.
     pub ledger: u32,
 }
 
-/// `pool_nullifiers` — `pool-store.js`
+/// Spent nullifier record.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolNullifier {
     /// Nullifier hash (hex, primary key).
     pub nullifier: String,
-    /// Ledger when spent.
+    /// Ledger sequence when spent.
     pub ledger: u32,
 }
 
-/// `pool_encrypted_outputs` — `pool-store.js`
+/// Encrypted note output from a pool transaction.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolEncryptedOutput {
     /// Commitment hash (hex, primary key).
@@ -31,24 +31,24 @@ pub struct PoolEncryptedOutput {
     /// Encrypted note bytes (hex).
     #[serde(rename = "encryptedOutput")]
     pub encrypted_output: String,
-    /// Ledger when created.
+    /// Ledger sequence when created.
     pub ledger: u32,
 }
 
-/// `asp_membership_leaves` — `asp-membership-store.js`
+/// ASP membership tree leaf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AspMembershipLeaf {
     /// Leaf index (primary key).
     pub index: u32,
     /// Leaf hash (hex).
     pub leaf: String,
-    /// Tree root after insertion.
+    /// Tree root after this insertion (hex).
     pub root: String,
-    /// Ledger when added.
+    /// Ledger sequence when added.
     pub ledger: u32,
 }
 
-/// `user_notes` — `notes-store.js`
+/// User note (UTXO).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserNote {
@@ -66,17 +66,17 @@ pub struct UserNote {
     pub leaf_index: Option<u32>,
     /// ISO-8601 creation timestamp.
     pub created_at: String,
-    /// Ledger when created.
+    /// Ledger sequence when created.
     pub created_at_ledger: u32,
     /// Whether the note has been spent.
     pub spent: bool,
-    /// Ledger when spent; `None` if unspent.
+    /// Ledger sequence when spent; `None` if unspent.
     pub spent_at_ledger: Option<u32>,
-    /// `true` if received via transfer, not created locally.
+    /// `true` if received via transfer.
     pub is_received: bool,
 }
 
-/// `registered_public_keys` — `public-key-store.js`
+/// Registered public key entry.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyEntry {
@@ -88,19 +88,19 @@ pub struct PublicKeyEntry {
     pub note_key: String,
     /// Legacy alias for `encryption_key`.
     pub public_key: String,
-    /// Ledger when registered on-chain.
+    /// Ledger sequence when registered.
     pub ledger: u32,
     /// ISO-8601 timestamp when stored locally.
     pub registered_at: String,
 }
 
-/// `retention_config` — `retention-verifier.js`
+/// RPC retention window configuration.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RetentionConfig {
     /// RPC endpoint URL (primary key).
     pub rpc_endpoint: String,
-    /// Retention window in ledgers (17280 ≈ 24 h, 120960 ≈ 7 d).
+    /// Retention window in ledgers.
     pub window: u32,
     /// Human-readable description.
     pub description: String,
@@ -110,7 +110,7 @@ pub struct RetentionConfig {
     pub detected_at: String,
 }
 
-/// Inner sync cursor — `sync-controller.js`
+/// Sync cursor for a single contract.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncCursor {
@@ -122,7 +122,7 @@ pub struct SyncCursor {
     pub sync_broken: bool,
 }
 
-/// `sync_metadata` — `sync-controller.js`
+/// Per-network sync state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncMetadata {

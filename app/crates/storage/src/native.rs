@@ -50,9 +50,7 @@ impl Storage {
     }
 
     /// Iterates over pool leaves in ascending index order.
-    ///
-    /// The callback returns `true` to continue or `false` to stop early,
-    /// matching the JS cursor `return false` convention.
+    /// Callback returns `false` to stop early.
     pub fn iterate_pool_leaves(
         &self,
         mut callback: impl FnMut(PoolLeaf) -> bool,
