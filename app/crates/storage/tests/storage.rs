@@ -1,11 +1,11 @@
 //! Integration tests for the storage crate (native backend).
 
 use storage::{
+    Storage,
     types::{
         AspMembershipLeaf, PoolEncryptedOutput, PoolLeaf, PoolNullifier, PublicKeyEntry,
         RetentionConfig, SyncCursor, SyncMetadata, UserNote,
     },
-    Storage,
 };
 
 // ---------------------------------------------------------------------------
@@ -17,32 +17,21 @@ use storage::{
 const ADDR_ALICE: &str = "GBBD47IF6LWK7P7MDEVSCWR7DPUWV3NY3DTQEVFL4NAT4AQH3ZLLFLA5";
 const ADDR_BOB: &str = "GCEZWKCA5VLDNRLN3RPRJMRZOX3Z6G5CHCGZWL8AYPKVF9P5T6B4N6E";
 
-// 32-byte Poseidon2 field elements (random-looking but fixed for reproducibility)
-const COMMITMENT_1: &str =
-    "0x1a2b3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff";
-const COMMITMENT_2: &str =
-    "0x2b3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff1a";
-const COMMITMENT_3: &str =
-    "0x3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff1a2b";
-const NULLIFIER_1: &str =
-    "0xdeadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe";
-const ENC_KEY: &str =
-    "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
-const NOTE_KEY: &str =
-    "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
-const PRIVATE_KEY: &str =
-    "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
-const BLINDING: &str =
-    "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
+// 32-byte Poseidon2 field elements (random-looking but fixed for
+// reproducibility)
+const COMMITMENT_1: &str = "0x1a2b3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff";
+const COMMITMENT_2: &str = "0x2b3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff1a";
+const COMMITMENT_3: &str = "0x3c4d5e6f708192a3b4c5d6e7f80911223344556677889900aabbccddeeff1a2b";
+const NULLIFIER_1: &str = "0xdeadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe";
+const ENC_KEY: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const NOTE_KEY: &str = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+const PRIVATE_KEY: &str = "0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc";
+const BLINDING: &str = "0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd";
 
-const LEAF_1: &str =
-    "0x1111111111111111111111111111111111111111111111111111111111111111";
-const LEAF_2: &str =
-    "0x2222222222222222222222222222222222222222222222222222222222222222";
-const ROOT_1: &str =
-    "0xaaaa111111111111111111111111111111111111111111111111111111111111";
-const ROOT_2: &str =
-    "0xbbbb222222222222222222222222222222222222222222222222222222222222";
+const LEAF_1: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
+const LEAF_2: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
+const ROOT_1: &str = "0xaaaa111111111111111111111111111111111111111111111111111111111111";
+const ROOT_2: &str = "0xbbbb222222222222222222222222222222222222222222222222222222222222";
 
 // Realistic Stellar testnet ledger numbers
 const LEDGER_A: u32 = 50_000_100;
@@ -83,8 +72,16 @@ fn sample_key(address: &str, ledger: u32) -> PublicKeyEntry {
 fn sample_sync_meta(network: &str) -> SyncMetadata {
     SyncMetadata {
         network: network.into(),
-        pool_sync: SyncCursor { last_ledger: 0, last_cursor: None, sync_broken: false },
-        asp_membership_sync: SyncCursor { last_ledger: 0, last_cursor: None, sync_broken: false },
+        pool_sync: SyncCursor {
+            last_ledger: 0,
+            last_cursor: None,
+            sync_broken: false,
+        },
+        asp_membership_sync: SyncCursor {
+            last_ledger: 0,
+            last_cursor: None,
+            sync_broken: false,
+        },
         last_successful_sync: None,
     }
 }
@@ -96,10 +93,18 @@ fn sample_sync_meta(network: &str) -> SyncMetadata {
 #[test]
 fn pool_leaves_put_and_iterate() {
     let db = open();
-    db.put_pool_leaf(&PoolLeaf { index: 0, commitment: COMMITMENT_1.into(), ledger: LEDGER_A })
-        .unwrap();
-    db.put_pool_leaf(&PoolLeaf { index: 1, commitment: COMMITMENT_2.into(), ledger: LEDGER_B })
-        .unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 0,
+        commitment: COMMITMENT_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 1,
+        commitment: COMMITMENT_2.into(),
+        ledger: LEDGER_B,
+    })
+    .unwrap();
 
     let mut seen = Vec::new();
     db.iterate_pool_leaves(|leaf| {
@@ -113,8 +118,12 @@ fn pool_leaves_put_and_iterate() {
 #[test]
 fn pool_leaves_count_and_clear() {
     let db = open();
-    db.put_pool_leaf(&PoolLeaf { index: 0, commitment: COMMITMENT_1.into(), ledger: LEDGER_A })
-        .unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 0,
+        commitment: COMMITMENT_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
     assert_eq!(db.count_pool_leaves().unwrap(), 1);
     db.clear_pool_leaves().unwrap();
     assert_eq!(db.count_pool_leaves().unwrap(), 0);
@@ -123,10 +132,18 @@ fn pool_leaves_count_and_clear() {
 #[test]
 fn pool_leaves_replace_on_same_index() {
     let db = open();
-    db.put_pool_leaf(&PoolLeaf { index: 0, commitment: COMMITMENT_1.into(), ledger: LEDGER_A })
-        .unwrap();
-    db.put_pool_leaf(&PoolLeaf { index: 0, commitment: COMMITMENT_2.into(), ledger: LEDGER_B })
-        .unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 0,
+        commitment: COMMITMENT_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 0,
+        commitment: COMMITMENT_2.into(),
+        ledger: LEDGER_B,
+    })
+    .unwrap();
     assert_eq!(db.count_pool_leaves().unwrap(), 1);
 }
 
@@ -158,7 +175,11 @@ fn pool_leaves_iterate_early_stop() {
 #[test]
 fn pool_nullifiers_put_get_count() {
     let db = open();
-    db.put_nullifier(&PoolNullifier { nullifier: NULLIFIER_1.into(), ledger: LEDGER_A }).unwrap();
+    db.put_nullifier(&PoolNullifier {
+        nullifier: NULLIFIER_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
     assert!(db.get_nullifier(NULLIFIER_1).unwrap().is_some());
     assert!(db.get_nullifier(COMMITMENT_1).unwrap().is_none());
     assert_eq!(db.count_nullifiers().unwrap(), 1);
@@ -167,7 +188,11 @@ fn pool_nullifiers_put_get_count() {
 #[test]
 fn pool_nullifiers_clear() {
     let db = open();
-    db.put_nullifier(&PoolNullifier { nullifier: NULLIFIER_1.into(), ledger: LEDGER_A }).unwrap();
+    db.put_nullifier(&PoolNullifier {
+        nullifier: NULLIFIER_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
     db.clear_nullifiers().unwrap();
     assert_eq!(db.count_nullifiers().unwrap(), 0);
 }
@@ -239,10 +264,17 @@ fn asp_leaves_put_iterate_and_find() {
 
     assert_eq!(db.count_asp_membership_leaves().unwrap(), 2);
     assert_eq!(
-        db.get_asp_membership_leaf_by_hash(LEAF_2).unwrap().unwrap().index,
+        db.get_asp_membership_leaf_by_hash(LEAF_2)
+            .unwrap()
+            .unwrap()
+            .index,
         1
     );
-    assert!(db.get_asp_membership_leaf_by_hash(COMMITMENT_3).unwrap().is_none());
+    assert!(
+        db.get_asp_membership_leaf_by_hash(COMMITMENT_3)
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -275,7 +307,8 @@ fn asp_leaves_iterate_ascending_order() {
 #[test]
 fn user_notes_put_get_delete() {
     let db = open();
-    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false)).unwrap();
+    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false))
+        .unwrap();
     let fetched = db.get_note(COMMITMENT_1).unwrap().expect("should exist");
     assert_eq!(fetched.owner, ADDR_ALICE);
     assert!(!fetched.spent);
@@ -309,15 +342,21 @@ fn user_notes_pending_leaf_index_null() {
     let mut mined = fetched;
     mined.leaf_index = Some(42);
     db.put_note(&mined).unwrap();
-    assert_eq!(db.get_note(COMMITMENT_1).unwrap().unwrap().leaf_index, Some(42));
+    assert_eq!(
+        db.get_note(COMMITMENT_1).unwrap().unwrap().leaf_index,
+        Some(42)
+    );
 }
 
 #[test]
 fn user_notes_get_by_owner() {
     let db = open();
-    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false)).unwrap();
-    db.put_note(&sample_note(COMMITMENT_2, ADDR_ALICE, false)).unwrap();
-    db.put_note(&sample_note(COMMITMENT_3, ADDR_BOB, false)).unwrap();
+    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false))
+        .unwrap();
+    db.put_note(&sample_note(COMMITMENT_2, ADDR_ALICE, false))
+        .unwrap();
+    db.put_note(&sample_note(COMMITMENT_3, ADDR_BOB, false))
+        .unwrap();
 
     assert_eq!(db.get_notes_by_owner(ADDR_ALICE).unwrap().len(), 2);
     assert_eq!(db.get_notes_by_owner(ADDR_BOB).unwrap().len(), 1);
@@ -326,7 +365,8 @@ fn user_notes_get_by_owner() {
 #[test]
 fn user_notes_mark_spent_via_put() {
     let db = open();
-    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false)).unwrap();
+    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false))
+        .unwrap();
 
     let mut updated = db.get_note(COMMITMENT_1).unwrap().unwrap();
     updated.spent = true;
@@ -341,8 +381,10 @@ fn user_notes_mark_spent_via_put() {
 #[test]
 fn user_notes_get_all_and_clear() {
     let db = open();
-    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false)).unwrap();
-    db.put_note(&sample_note(COMMITMENT_2, ADDR_BOB, true)).unwrap();
+    db.put_note(&sample_note(COMMITMENT_1, ADDR_ALICE, false))
+        .unwrap();
+    db.put_note(&sample_note(COMMITMENT_2, ADDR_BOB, true))
+        .unwrap();
     assert_eq!(db.get_all_notes().unwrap().len(), 2);
     db.clear_notes().unwrap();
     assert!(db.get_all_notes().unwrap().is_empty());
@@ -351,7 +393,10 @@ fn user_notes_get_all_and_clear() {
 #[test]
 fn user_notes_is_received_roundtrip() {
     let db = open();
-    let note = UserNote { is_received: true, ..sample_note(COMMITMENT_1, ADDR_ALICE, false) };
+    let note = UserNote {
+        is_received: true,
+        ..sample_note(COMMITMENT_1, ADDR_ALICE, false)
+    };
     db.put_note(&note).unwrap();
     assert!(db.get_note(COMMITMENT_1).unwrap().unwrap().is_received);
 }
@@ -363,7 +408,8 @@ fn user_notes_is_received_roundtrip() {
 #[test]
 fn public_keys_put_get_count() {
     let db = open();
-    db.put_public_key(&sample_key(ADDR_ALICE, LEDGER_A)).unwrap();
+    db.put_public_key(&sample_key(ADDR_ALICE, LEDGER_A))
+        .unwrap();
     assert!(db.get_public_key(ADDR_ALICE).unwrap().is_some());
     assert!(db.get_public_key(ADDR_BOB).unwrap().is_none());
     assert_eq!(db.count_public_keys().unwrap(), 1);
@@ -372,11 +418,12 @@ fn public_keys_put_get_count() {
 #[test]
 fn public_keys_get_all_ordered_by_ledger_desc() {
     let db = open();
-    db.put_public_key(&sample_key(ADDR_ALICE, LEDGER_A)).unwrap();
+    db.put_public_key(&sample_key(ADDR_ALICE, LEDGER_A))
+        .unwrap();
     db.put_public_key(&sample_key(ADDR_BOB, LEDGER_C)).unwrap();
 
     let all = db.get_all_public_keys().unwrap();
-    assert_eq!(all[0].address, ADDR_BOB);  // most recent ledger first
+    assert_eq!(all[0].address, ADDR_BOB); // most recent ledger first
     assert_eq!(all[1].address, ADDR_ALICE);
 }
 
@@ -388,7 +435,13 @@ fn public_keys_get_all_ordered_by_ledger_desc() {
 fn sync_metadata_put_get_delete() {
     let db = open();
     db.put_sync_metadata(&sample_sync_meta("testnet")).unwrap();
-    assert!(!db.get_sync_metadata("testnet").unwrap().unwrap().pool_sync.sync_broken);
+    assert!(
+        !db.get_sync_metadata("testnet")
+            .unwrap()
+            .unwrap()
+            .pool_sync
+            .sync_broken
+    );
     db.delete_sync_metadata("testnet").unwrap();
     assert!(db.get_sync_metadata("testnet").unwrap().is_none());
 }
@@ -403,7 +456,10 @@ fn sync_metadata_cursor_round_trip() {
 
     let fetched = db.get_sync_metadata("testnet").unwrap().unwrap();
     assert_eq!(fetched.pool_sync.last_ledger, LEDGER_B);
-    assert_eq!(fetched.pool_sync.last_cursor.as_deref(), Some("CAAAAAAAAABkAAAAAA=="));
+    assert_eq!(
+        fetched.pool_sync.last_cursor.as_deref(),
+        Some("CAAAAAAAAABkAAAAAA==")
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -427,7 +483,11 @@ fn retention_config_put_get() {
         .unwrap()
         .unwrap();
     assert_eq!(fetched.window, 120_960);
-    assert!(db.get_retention_config("https://other.example.com").unwrap().is_none());
+    assert!(
+        db.get_retention_config("https://other.example.com")
+            .unwrap()
+            .is_none()
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -438,9 +498,21 @@ fn retention_config_put_get() {
 fn pool_leaves_batch_insert() {
     let db = open();
     let leaves = vec![
-        PoolLeaf { index: 0, commitment: COMMITMENT_1.into(), ledger: LEDGER_A },
-        PoolLeaf { index: 1, commitment: COMMITMENT_2.into(), ledger: LEDGER_B },
-        PoolLeaf { index: 2, commitment: COMMITMENT_3.into(), ledger: LEDGER_C },
+        PoolLeaf {
+            index: 0,
+            commitment: COMMITMENT_1.into(),
+            ledger: LEDGER_A,
+        },
+        PoolLeaf {
+            index: 1,
+            commitment: COMMITMENT_2.into(),
+            ledger: LEDGER_B,
+        },
+        PoolLeaf {
+            index: 2,
+            commitment: COMMITMENT_3.into(),
+            ledger: LEDGER_C,
+        },
     ];
     db.put_pool_leaves_batch(&leaves).unwrap();
     assert_eq!(db.count_pool_leaves().unwrap(), 3);
@@ -450,8 +522,18 @@ fn pool_leaves_batch_insert() {
 fn asp_leaves_batch_insert() {
     let db = open();
     let leaves = vec![
-        AspMembershipLeaf { index: 0, leaf: LEAF_1.into(), root: ROOT_1.into(), ledger: LEDGER_A },
-        AspMembershipLeaf { index: 1, leaf: LEAF_2.into(), root: ROOT_2.into(), ledger: LEDGER_B },
+        AspMembershipLeaf {
+            index: 0,
+            leaf: LEAF_1.into(),
+            root: ROOT_1.into(),
+            ledger: LEDGER_A,
+        },
+        AspMembershipLeaf {
+            index: 1,
+            leaf: LEAF_2.into(),
+            root: ROOT_2.into(),
+            ledger: LEDGER_B,
+        },
     ];
     db.put_asp_membership_leaves_batch(&leaves).unwrap();
     assert_eq!(db.count_asp_membership_leaves().unwrap(), 2);
@@ -464,9 +546,17 @@ fn asp_leaves_batch_insert() {
 #[test]
 fn clear_all_empties_every_store() {
     let db = open();
-    db.put_pool_leaf(&PoolLeaf { index: 0, commitment: COMMITMENT_1.into(), ledger: LEDGER_A })
-        .unwrap();
-    db.put_nullifier(&PoolNullifier { nullifier: NULLIFIER_1.into(), ledger: LEDGER_A }).unwrap();
+    db.put_pool_leaf(&PoolLeaf {
+        index: 0,
+        commitment: COMMITMENT_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
+    db.put_nullifier(&PoolNullifier {
+        nullifier: NULLIFIER_1.into(),
+        ledger: LEDGER_A,
+    })
+    .unwrap();
     db.put_encrypted_output(&PoolEncryptedOutput {
         commitment: COMMITMENT_2.into(),
         leaf_index: 0,
@@ -481,7 +571,8 @@ fn clear_all_empties_every_store() {
         ledger: LEDGER_A,
     })
     .unwrap();
-    db.put_note(&sample_note(COMMITMENT_3, ADDR_ALICE, false)).unwrap();
+    db.put_note(&sample_note(COMMITMENT_3, ADDR_ALICE, false))
+        .unwrap();
     db.put_public_key(&sample_key(ADDR_BOB, LEDGER_A)).unwrap();
     db.put_sync_metadata(&sample_sync_meta("testnet")).unwrap();
 

@@ -1,14 +1,14 @@
 //! Native SQLite backend using `rusqlite` with a bundled SQLite.
 
 use anyhow::Context;
-use rusqlite::{params, Connection, Error as SqlError};
+use rusqlite::{Connection, Error as SqlError, params};
 
 use crate::{
+    SCHEMA,
     types::{
         AspMembershipLeaf, PoolEncryptedOutput, PoolLeaf, PoolNullifier, PublicKeyEntry,
         RetentionConfig, SyncMetadata, UserNote,
     },
-    SCHEMA,
 };
 
 /// SQLite-backed storage for the shielded pool state.
@@ -43,7 +43,11 @@ impl Storage {
             .execute(
                 "INSERT OR REPLACE INTO pool_leaves (leaf_index, commitment, ledger)
                  VALUES (?1, ?2, ?3)",
-                params![i64::from(leaf.index), &leaf.commitment, i64::from(leaf.ledger)],
+                params![
+                    i64::from(leaf.index),
+                    &leaf.commitment,
+                    i64::from(leaf.ledger)
+                ],
             )
             .context("put_pool_leaf")?;
         Ok(())
@@ -90,7 +94,10 @@ impl Storage {
         if leaves.is_empty() {
             return Ok(());
         }
-        let tx = self.conn.unchecked_transaction().context("put_pool_leaves_batch begin")?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .context("put_pool_leaves_batch begin")?;
         {
             let mut stmt = tx
                 .prepare(
@@ -99,8 +106,12 @@ impl Storage {
                 )
                 .context("prepare put_pool_leaves_batch")?;
             for leaf in leaves {
-                stmt.execute(params![i64::from(leaf.index), &leaf.commitment, i64::from(leaf.ledger)])
-                    .context("put_pool_leaves_batch execute")?;
+                stmt.execute(params![
+                    i64::from(leaf.index),
+                    &leaf.commitment,
+                    i64::from(leaf.ledger)
+                ])
+                .context("put_pool_leaves_batch execute")?;
             }
         }
         tx.commit().context("put_pool_leaves_batch commit")
@@ -310,16 +321,15 @@ impl Storage {
     pub fn count_asp_membership_leaves(&self) -> anyhow::Result<u32> {
         let n: i64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM asp_membership_leaves",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM asp_membership_leaves", [], |row| {
+                row.get(0)
+            })
             .context("count_asp_membership_leaves")?;
         u32::try_from(n).context("count overflow")
     }
 
-    /// Inserts or replaces a batch of ASP membership leaves in a single transaction.
+    /// Inserts or replaces a batch of ASP membership leaves in a single
+    /// transaction.
     pub fn put_asp_membership_leaves_batch(
         &self,
         leaves: &[AspMembershipLeaf],
@@ -327,8 +337,10 @@ impl Storage {
         if leaves.is_empty() {
             return Ok(());
         }
-        let tx =
-            self.conn.unchecked_transaction().context("put_asp_membership_leaves_batch begin")?;
+        let tx = self
+            .conn
+            .unchecked_transaction()
+            .context("put_asp_membership_leaves_batch begin")?;
         {
             let mut stmt = tx
                 .prepare(
@@ -346,7 +358,8 @@ impl Storage {
                 .context("put_asp_membership_leaves_batch execute")?;
             }
         }
-        tx.commit().context("put_asp_membership_leaves_batch commit")
+        tx.commit()
+            .context("put_asp_membership_leaves_batch commit")
     }
 
     /// Deletes all ASP membership leaves.
@@ -509,11 +522,9 @@ impl Storage {
     pub fn count_public_keys(&self) -> anyhow::Result<u32> {
         let n: i64 = self
             .conn
-            .query_row(
-                "SELECT COUNT(*) FROM registered_public_keys",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT COUNT(*) FROM registered_public_keys", [], |row| {
+                row.get(0)
+            })
             .context("count_public_keys")?;
         u32::try_from(n).context("count overflow")
     }
@@ -649,7 +660,8 @@ impl Storage {
 // Row-mapping helpers
 // ---------------------------------------------------------------------------
 
-/// Converts an `i64` SQLite column to `u32`, returning a rusqlite error on overflow.
+/// Converts an `i64` SQLite column to `u32`, returning a rusqlite error on
+/// overflow.
 fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
     u32::try_from(val).map_err(|_| SqlError::IntegralValueOutOfRange(col, val))
 }

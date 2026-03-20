@@ -1,7 +1,6 @@
 //! Temporary in-memory storage backend for the WASM target.
 
-use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::{cell::RefCell, collections::BTreeMap};
 
 use crate::types::{
     AspMembershipLeaf, PoolEncryptedOutput, PoolLeaf, PoolNullifier, PublicKeyEntry,
@@ -47,7 +46,9 @@ impl Storage {
 
     /// Inserts or replaces a pool leaf.
     pub fn put_pool_leaf(&self, leaf: &PoolLeaf) -> anyhow::Result<()> {
-        self.pool_leaves.borrow_mut().insert(leaf.index, leaf.clone());
+        self.pool_leaves
+            .borrow_mut()
+            .insert(leaf.index, leaf.clone());
         Ok(())
     }
 
@@ -128,7 +129,12 @@ impl Storage {
 
     /// Returns all encrypted outputs.
     pub fn get_all_encrypted_outputs(&self) -> anyhow::Result<Vec<PoolEncryptedOutput>> {
-        Ok(self.pool_encrypted_outputs.borrow().values().cloned().collect())
+        Ok(self
+            .pool_encrypted_outputs
+            .borrow()
+            .values()
+            .cloned()
+            .collect())
     }
 
     /// Returns encrypted outputs with `ledger >= from_ledger`.
@@ -219,7 +225,9 @@ impl Storage {
 
     /// Inserts or replaces a user note.
     pub fn put_note(&self, note: &UserNote) -> anyhow::Result<()> {
-        self.user_notes.borrow_mut().insert(note.id.clone(), note.clone());
+        self.user_notes
+            .borrow_mut()
+            .insert(note.id.clone(), note.clone());
         Ok(())
     }
 
