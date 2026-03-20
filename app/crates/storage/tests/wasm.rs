@@ -1,6 +1,7 @@
 //! WASM integration tests for the storage crate.
 
 #![cfg(target_arch = "wasm32")]
+#![allow(clippy::unwrap_used)]
 
 use storage::{Storage, types::PoolLeaf};
 use wasm_bindgen_test::*;

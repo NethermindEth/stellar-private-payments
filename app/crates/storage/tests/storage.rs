@@ -1,5 +1,7 @@
 //! Integration tests for the storage crate (native backend).
 
+#![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
+
 use storage::{
     Storage,
     types::{
