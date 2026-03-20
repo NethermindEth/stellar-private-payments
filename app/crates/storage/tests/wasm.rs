@@ -1,7 +1,6 @@
 //! WASM integration tests for the storage crate.
 
 #![cfg(target_arch = "wasm32")]
-#![allow(clippy::unwrap_used)]
 
 use storage::{Storage, types::PoolLeaf};
 use wasm_bindgen_test::*;
@@ -10,12 +9,12 @@ wasm_bindgen_test_configure!(run_in_browser);
 
 #[wasm_bindgen_test]
 fn open_in_memory_and_roundtrip() {
-    let db = Storage::open_in_memory().expect("open_in_memory");
+    let db = Storage::open_in_memory().expect("Failed to open in-memory storage");
     db.put_pool_leaf(&PoolLeaf {
         index: 0,
         commitment: "0xabc".into(),
         ledger: 1,
     })
-    .expect("put_pool_leaf");
-    assert_eq!(db.count_pool_leaves().expect("count"), 1);
+    .expect("Failed to put pool leaf");
+    assert_eq!(db.count_pool_leaves().expect("Failed to count"), 1);
 }
