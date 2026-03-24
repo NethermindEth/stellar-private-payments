@@ -1,18 +1,12 @@
 //! Unified SQLite storage for the shielded pool.
 //!
-//! Native: `rusqlite`. WASM: in-memory `BTreeMap`s (temporary).
+//! Currently native-only (`rusqlite`).
+//! TODO: WASM backend (`sqlite-wasm-rs` + OPFS) — added when `app/js/state/db.js` is replaced.
 
 /// Storage types.
 pub mod types;
 
-#[cfg(not(target_arch = "wasm32"))]
 mod native;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
-
-#[cfg(not(target_arch = "wasm32"))]
 pub use native::Storage;
-#[cfg(target_arch = "wasm32")]
-pub use wasm::Storage;
 
 pub(crate) const SCHEMA: &str = include_str!("schema.sql");
