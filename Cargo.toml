@@ -2,6 +2,7 @@
 members = [
     "app/crates/prover",
     "app/crates/storage",
+    "app/crates/utils",
     "app/crates/witness",
     "circuits",
     "contracts/*",
@@ -34,6 +35,7 @@ circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
 getrandom = { version = "0.2", features = ["js"] }
+hex = { version = "0.4", default-features = false, features = ["std"] }
 num-bigint = { version = "0.4.6", default-features = false }
 num-integer = { version = "0.1.46", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
