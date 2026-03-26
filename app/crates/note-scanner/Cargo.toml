@@ -14,7 +14,6 @@ crate-type = ["rlib"]
 anyhow = { workspace = true, features = ["std"] }
 notes-store = { path = "../notes-store" }
 pool-store = { path = "../pool-store" }
-storage = { workspace = true }
 utils = { workspace = true }
 zkhash = { workspace = true }
 

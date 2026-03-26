@@ -2483,7 +2483,6 @@ dependencies = [
  "getrandom",
  "notes-store",
  "pool-store",
- "storage",
  "utils",
  "x25519-dalek",
  "zkhash",
