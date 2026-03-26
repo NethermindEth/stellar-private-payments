@@ -535,6 +535,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "asp-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-ff 0.5.0",
+ "circuits",
+ "storage",
+ "utils",
+ "zkhash",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.89"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2813,6 +2825,18 @@ dependencies = [
  "contract-types",
  "soroban-sdk",
  "soroban-utils",
+]
+
+[[package]]
+name = "pool-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-ff 0.5.0",
+ "circuits",
+ "storage",
+ "utils",
+ "zkhash",
 ]
 
 [[package]]

@@ -21,10 +21,10 @@ pub const SMT_DEPTH: usize = 10;
 pub const LEDGER_RATE_SECONDS: u32 = 5;
 
 /// Approximate ledger count for 24 hours (`24 * 60 * 60 / 5`).
-pub const LEDGERS_24H: u32 = 17_280;
+pub const LEDGERS_24H: u32 = 24 * 60 * 60 / LEDGER_RATE_SECONDS;
 
 /// Approximate ledger count for 7 days (`7 * 24 * 60 * 60 / 5`).
-pub const LEDGERS_7D: u32 = 120_960;
+pub const LEDGERS_7D: u32 = 7 * 24 * 60 * 60 / LEDGER_RATE_SECONDS;
 
 /// Ledger range used when probing RPC event retention.
 pub const RETENTION_PROBE_SPAN: u32 = 32;
@@ -36,14 +36,15 @@ pub const RETENTION_PROBE_SPAN: u32 = 32;
 /// Decodes a hex string (with or without `0x` prefix) to bytes.
 ///
 /// Returns an error on invalid hex characters or odd-length input.
-pub fn hex_to_bytes(hex: &str) -> Result<Vec<u8>, ::hex::FromHexError> {
-    let stripped = hex.strip_prefix("0x").unwrap_or(hex);
-    ::hex::decode(stripped)
+pub fn hex_to_bytes(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    let stripped = s.strip_prefix("0x").unwrap_or(s);
+    hex::decode(stripped)
 }
 
 /// Encodes bytes as a `0x`-prefixed lowercase hex string.
 pub fn bytes_to_hex(bytes: &[u8]) -> String {
-    format!("0x{}", ::hex::encode(bytes))
+    let body: String = bytes.iter().map(|b| format!("{b:02x}")).collect();
+    format!("0x{body}")
 }
 
 /// Ensures a hex string has a `0x` prefix.
@@ -59,8 +60,8 @@ pub fn normalize_hex(hex: &str) -> String {
 /// as required for Rust Merkle tree insertion (`from_le_bytes_mod_order`).
 ///
 /// Soroban stores U256 as big-endian; the Rust Merkle tree uses little-endian.
-pub fn hex_to_bytes_for_tree(hex: &str) -> Result<Vec<u8>, ::hex::FromHexError> {
-    let mut bytes = hex_to_bytes(hex)?;
+pub fn hex_to_bytes_for_tree(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
+    let mut bytes = hex_to_bytes(s)?;
     bytes.reverse();
     Ok(bytes)
 }
