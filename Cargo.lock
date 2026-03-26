@@ -539,11 +539,8 @@ name = "asp-store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-ff 0.5.0",
- "circuits",
  "storage",
  "utils",
- "zkhash",
 ]
 
 [[package]]
@@ -2482,7 +2479,6 @@ name = "note-scanner"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-ff 0.5.0",
  "crypto_secretbox",
  "getrandom",
  "notes-store",
@@ -2857,11 +2853,8 @@ name = "pool-store"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-ff 0.5.0",
- "circuits",
  "storage",
  "utils",
- "zkhash",
 ]
 
 [[package]]
@@ -4218,7 +4211,11 @@ checksum = "06abde3611657adf66d383f00b093d7faecc7fa57071cce2578660c9f1010821"
 name = "utils"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
+ "ark-ff 0.5.0",
+ "circuits",
  "hex",
+ "zkhash",
 ]
 
 [[package]]

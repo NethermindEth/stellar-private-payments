@@ -11,7 +11,11 @@ description = "Shared utilities for shielded pool state modules"
 crate-type = ["rlib"]
 
 [dependencies]
+anyhow = { workspace = true, features = ["std"] }
+ark-ff = { workspace = true }
+circuits = { path = "../../../circuits", default-features = false }
 hex = { workspace = true }
+zkhash = { workspace = true }
 
 [lints]
 workspace = true

@@ -4,19 +4,18 @@
 //! Scans pool encrypted outputs to find notes addressed to the user,
 //! verifies commitments via Poseidon2, and checks spent status via nullifiers.
 
-use ark_ff::PrimeField as _;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use notes_store::{NewNote, NotesStore};
 use pool_store::PoolStore;
-use utils::{bytes_to_hex, field_to_hex, hex_to_bytes, hex_to_bytes_for_tree};
+use utils::{
+    field_to_hex, hex_to_bytes, hex_to_bytes_for_tree,
+    merkle::{FIELD_SIZE, le_bytes_to_scalar, scalar_to_array},
+};
 use x25519_dalek::{PublicKey, StaticSecret};
 use zkhash::{
     fields::bn256::FpBN256 as Scalar,
     poseidon2::{poseidon2::Poseidon2, poseidon2_instance_bn256::POSEIDON2_BN256_PARAMS_4},
 };
-
-/// Size of a BN254 field element in bytes.
-const FIELD_SIZE: usize = 32;
 
 /// Minimum encrypted output size: ephemeral pubkey (32) + nonce (24) +
 /// ciphertext (40) + tag (16).
@@ -277,7 +276,7 @@ pub fn check_spent_notes(
         }
 
         let nullifier_le = derive_nullifier_for_note(&private_key_le, &commitment_le, leaf_index)?;
-        let nullifier_hex = bytes_to_hex(&nullifier_le);
+        let nullifier_hex = field_to_hex(&nullifier_le);
 
         if let Some(nullifier_record) = pool.get_nullifier(&nullifier_hex)? {
             notes.mark_spent(&note.id, nullifier_record.ledger)?;
@@ -286,28 +285,4 @@ pub fn check_spent_notes(
     }
 
     Ok(result)
-}
-
-// ---------------------------------------------------------------------------
-// Private helpers
-// ---------------------------------------------------------------------------
-
-fn le_bytes_to_scalar(bytes: &[u8]) -> anyhow::Result<Scalar> {
-    anyhow::ensure!(
-        bytes.len() == FIELD_SIZE,
-        "expected {FIELD_SIZE} bytes, got {}",
-        bytes.len()
-    );
-    Ok(Scalar::from_le_bytes_mod_order(bytes))
-}
-
-fn scalar_to_array(s: &Scalar) -> [u8; FIELD_SIZE] {
-    let mut out = [0u8; FIELD_SIZE];
-    let bigint = s.into_bigint();
-    for (i, limb) in bigint.0.iter().enumerate() {
-        let start = i.saturating_mul(8);
-        let end = start.saturating_add(8).min(FIELD_SIZE);
-        out[start..end].copy_from_slice(&limb.to_le_bytes()[..end.saturating_sub(start)]);
-    }
-    out
 }

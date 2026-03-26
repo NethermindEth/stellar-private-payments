@@ -3,6 +3,8 @@
 //! Literal port of the pure-logic portions of `app/js/state/utils.js` and
 //! `app/js/state/retention-verifier.js`. No Stellar RPC calls; no DB access.
 
+pub mod merkle;
+
 // ---------------------------------------------------------------------------
 // Tree constants — must match circuit and contract deployments.
 // ---------------------------------------------------------------------------

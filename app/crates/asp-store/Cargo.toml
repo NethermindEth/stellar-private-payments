@@ -12,11 +12,8 @@ crate-type = ["rlib"]
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
-ark-ff = { workspace = true }
-circuits = { path = "../../../circuits", default-features = false }
 storage = { workspace = true }
 utils = { workspace = true }
-zkhash = { workspace = true }
 
 [lints]
 workspace = true
