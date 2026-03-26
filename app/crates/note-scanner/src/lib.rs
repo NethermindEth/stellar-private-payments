@@ -168,10 +168,6 @@ pub struct ScanKeys<'a> {
     pub note_private_key_le: &'a [u8],
     /// BN254 note public key (LE bytes).
     pub note_public_key_le: &'a [u8],
-    /// Owner Stellar address.
-    pub owner: &'a str,
-    /// ISO-8601 timestamp for new notes.
-    pub created_at: &'a str,
 }
 
 /// Scans pool encrypted outputs to discover notes addressed to this user.
@@ -179,6 +175,8 @@ pub fn scan_for_notes(
     pool: &PoolStore,
     notes: &NotesStore,
     keys: &ScanKeys<'_>,
+    owner: &str,
+    created_at: &str,
     from_ledger: Option<u32>,
 ) -> anyhow::Result<ScanResult> {
     let outputs = pool.get_encrypted_outputs(from_ledger)?;
@@ -217,22 +215,27 @@ pub fn scan_for_notes(
             compute_commitment(&amount_le, keys.note_public_key_le, &decrypted.blinding)?;
         let computed_hex = field_to_hex(&computed);
         let expected_hex = utils::normalize_hex(&output.commitment).to_lowercase();
-        if computed_hex.to_lowercase() != expected_hex {
+        if computed_hex != expected_hex {
             continue;
         }
 
-        // Save the note
+        // Double-check before saving (guards against concurrent scanners).
+        if notes.get_by_commitment(&output.commitment)?.is_some() {
+            result.already_known = result.already_known.saturating_add(1);
+            continue;
+        }
+
         let blinding_hex = field_to_hex(&decrypted.blinding);
         let private_key_hex = field_to_hex(keys.note_private_key_le);
         notes.save_note(&NewNote {
             commitment: &output.commitment,
-            owner: keys.owner,
+            owner,
             private_key: &private_key_hex,
             blinding: &blinding_hex,
             amount: &decrypted.amount.to_string(),
             leaf_index: Some(output.leaf_index),
             ledger: output.ledger,
-            created_at: keys.created_at,
+            created_at,
             is_received: true,
         })?;
 
@@ -276,8 +279,8 @@ pub fn check_spent_notes(
         let nullifier_le = derive_nullifier_for_note(&private_key_le, &commitment_le, leaf_index)?;
         let nullifier_hex = bytes_to_hex(&nullifier_le);
 
-        if pool.is_nullifier_spent(&nullifier_hex)? {
-            notes.mark_spent(&note.id, 0)?;
+        if let Some(nullifier_record) = pool.get_nullifier(&nullifier_hex)? {
+            notes.mark_spent(&note.id, nullifier_record.ledger)?;
             result.marked_spent = result.marked_spent.saturating_add(1);
         }
     }

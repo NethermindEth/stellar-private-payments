@@ -227,9 +227,9 @@ impl PoolStore {
         self.tree.get_proof(leaf_index)
     }
 
-    /// Returns `true` if `nullifier` has been recorded as spent.
-    pub fn is_nullifier_spent(&self, nullifier: &str) -> anyhow::Result<bool> {
-        Ok(self.db.get_nullifier(nullifier)?.is_some())
+    /// Returns the nullifier record if it has been spent, or `None`.
+    pub fn get_nullifier(&self, nullifier: &str) -> anyhow::Result<Option<PoolNullifier>> {
+        self.db.get_nullifier(nullifier)
     }
 
     /// Returns encrypted outputs, optionally filtered to `ledger >=

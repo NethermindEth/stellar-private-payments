@@ -7,103 +7,65 @@ const COMMITMENT_A: &str = "0x11111111111111111111111111111111111111111111111111
 const COMMITMENT_B: &str = "0x2222222222222222222222222222222222222222222222222222222222222222";
 const NULLIFIER_A: &str = "0xdeadbeefcafebabedeadbeefcafebabedeadbeefcafebabedeadbeefcafebabe";
 const ENC_OUT: &str = "0xabcd";
-
-const LEDGER_A: u32 = 50_000_100;
-const LEDGER_B: u32 = 50_000_200;
+const LEDGER: u32 = 50_000_100;
 
 fn open() -> PoolStore {
-    let db = Storage::open_in_memory().expect("Failed to open storage");
-    PoolStore::open(db).expect("Failed to open pool store")
+    let db = Storage::open_in_memory().expect("open storage");
+    PoolStore::open(db).expect("open pool store")
 }
 
 #[test]
-fn empty_store_has_zero_next_index() {
-    let store = open();
-    assert_eq!(store.next_index(), 0);
-    assert_eq!(store.leaf_count().expect("leaf_count"), 0);
-}
-
-#[test]
-fn commitment_persists_and_advances_index() {
+fn commitment_lifecycle() {
     let mut store = open();
+    assert_eq!(store.next_index(), 0);
+
     store
-        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER_A)
-        .expect("Failed to process commitment");
-
+        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER)
+        .expect("commit A");
     assert_eq!(store.next_index(), 1);
-    assert_eq!(store.leaf_count().expect("leaf_count"), 1);
+    assert_eq!(store.leaf_count().expect("count"), 1);
 
-    // Proof must round-trip: recomputing root from path should equal tree root.
-    let proof = store.get_proof(0).expect("Failed to get proof");
+    let proof = store.get_proof(0).expect("proof");
     assert_eq!(proof.root, store.root());
 }
 
 #[test]
-fn nullifier_spent_tracking() {
+fn nullifier_tracking() {
     let mut store = open();
-    assert!(
-        !store
-            .is_nullifier_spent(NULLIFIER_A)
-            .expect("check unspent")
-    );
+    assert!(store.get_nullifier(NULLIFIER_A).expect("get").is_none());
     store
-        .process_new_nullifier(NULLIFIER_A, LEDGER_A)
-        .expect("Failed to process nullifier");
-    assert!(store.is_nullifier_spent(NULLIFIER_A).expect("check spent"));
+        .process_new_nullifier(NULLIFIER_A, LEDGER)
+        .expect("put");
+    assert!(store.get_nullifier(NULLIFIER_A).expect("get").is_some());
 }
 
 #[test]
-fn rebuild_tree_restores_state() {
-    let db = Storage::open_in_memory().expect("Failed to open storage");
-    let root_before;
-    {
-        let mut store = PoolStore::open(db).expect("Failed to open");
-        store
-            .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER_A)
-            .expect("Failed to process commitment A");
-        store
-            .process_new_commitment(COMMITMENT_B, 1, ENC_OUT, LEDGER_B)
-            .expect("Failed to process commitment B");
-        root_before = store.root();
-    }
-    // Reproduce the same leaf sequence in a fresh store and verify rebuild
-    // produces the same root.
-    let db2 = Storage::open_in_memory().expect("Failed to open storage 2");
-    let mut store2 = PoolStore::open(db2).expect("Failed to open store2");
-    store2
-        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER_A)
-        .expect("Failed to process commitment A");
-    store2
-        .process_new_commitment(COMMITMENT_B, 1, ENC_OUT, LEDGER_B)
-        .expect("Failed to process commitment B");
-    // Explicit rebuild must yield the same root.
-    store2.rebuild_tree().expect("Failed to rebuild tree");
-    assert_eq!(store2.root(), root_before);
+fn rebuild_tree_restores_root() {
+    let mut store = open();
+    store
+        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER)
+        .expect("A");
+    store
+        .process_new_commitment(COMMITMENT_B, 1, ENC_OUT, LEDGER)
+        .expect("B");
+    let root_before = store.root();
+
+    store.rebuild_tree().expect("rebuild");
+    assert_eq!(store.root(), root_before);
 }
 
 #[test]
-fn clear_resets_all_state() {
+fn clear_resets_all() {
     let mut store = open();
     store
-        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER_A)
-        .expect("Failed to process commitment");
+        .process_new_commitment(COMMITMENT_A, 0, ENC_OUT, LEDGER)
+        .expect("commit");
     store
-        .process_new_nullifier(NULLIFIER_A, LEDGER_A)
-        .expect("Failed to process nullifier");
+        .process_new_nullifier(NULLIFIER_A, LEDGER)
+        .expect("null");
 
-    store.clear().expect("Failed to clear");
-
+    store.clear().expect("clear");
     assert_eq!(store.next_index(), 0);
-    assert_eq!(store.leaf_count().expect("leaf_count after clear"), 0);
-    assert!(
-        !store
-            .is_nullifier_spent(NULLIFIER_A)
-            .expect("nullifier after clear")
-    );
-    assert!(
-        store
-            .get_encrypted_outputs(None)
-            .expect("outputs after clear")
-            .is_empty()
-    );
+    assert!(store.get_nullifier(NULLIFIER_A).expect("get").is_none());
+    assert!(store.get_encrypted_outputs(None).expect("enc").is_empty());
 }

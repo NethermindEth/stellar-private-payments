@@ -40,18 +40,6 @@ impl PublicKeyStore {
         })
     }
 
-    /// Stores a legacy single-key registration (same key for both encryption
-    /// and note).
-    pub fn store_legacy_registration(
-        &self,
-        address: &str,
-        key: &str,
-        ledger: u32,
-        registered_at: &str,
-    ) -> anyhow::Result<()> {
-        self.store_registration(address, key, key, ledger, registered_at)
-    }
-
     /// Returns the registration for `address`, or `None`.
     pub fn get_by_address(&self, address: &str) -> anyhow::Result<Option<PublicKeyEntry>> {
         self.db.get_public_key(address)
