@@ -1,7 +1,10 @@
 [workspace]
 members = [
     "app/crates/asp-store",
+    "app/crates/note-scanner",
+    "app/crates/notes-store",
     "app/crates/pool-store",
+    "app/crates/public-key-store",
     "app/crates/prover",
     "app/crates/storage",
     "app/crates/utils",
@@ -36,6 +39,7 @@ asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
+crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 getrandom = { version = "0.2", features = ["js"] }
 hex = { version = "0.4", default-features = false, features = ["std"] }
 num-bigint = { version = "0.4.6", default-features = false }
@@ -48,6 +52,7 @@ soroban-utils = { path = "contracts/soroban-utils" }
 storage = { path = "app/crates/storage" }
 utils = { path = "app/crates/utils" }
 wasm-bindgen = { version = "0.2.108", default-features = false }
+x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 wasm-bindgen-test = { version = "0.3" }
 wasmer = { version = "6.1", default-features = false }
 zkhash = { path = "poseidon2" }

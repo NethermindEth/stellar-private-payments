@@ -66,6 +66,14 @@ pub fn hex_to_bytes_for_tree(s: &str) -> Result<Vec<u8>, hex::FromHexError> {
     Ok(bytes)
 }
 
+/// Encodes little-endian field element bytes as a `0x`-prefixed big-endian hex
+/// string. Inverse of [`hex_to_bytes_for_tree`].
+pub fn field_to_hex(le_bytes: &[u8]) -> String {
+    let mut be = le_bytes.to_vec();
+    be.reverse();
+    bytes_to_hex(&be)
+}
+
 // ---------------------------------------------------------------------------
 // Duration formatting (from retention-verifier.js: `ledgersToDuration`).
 // ---------------------------------------------------------------------------

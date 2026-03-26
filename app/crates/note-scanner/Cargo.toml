@@ -1,0 +1,32 @@
+[package]
+name = "note-scanner"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Note discovery via encrypted output scanning and nullifier checking"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+ark-ff = { workspace = true }
+notes-store = { path = "../notes-store" }
+pool-store = { path = "../pool-store" }
+storage = { workspace = true }
+utils = { workspace = true }
+zkhash = { workspace = true }
+
+# Encryption (X25519 + XSalsa20-Poly1305) — same deps as prover
+crypto_secretbox = { workspace = true }
+x25519-dalek = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = { workspace = true }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+
+[lints]
+workspace = true

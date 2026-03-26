@@ -2478,6 +2478,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "note-scanner"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-ff 0.5.0",
+ "crypto_secretbox",
+ "getrandom",
+ "notes-store",
+ "pool-store",
+ "storage",
+ "utils",
+ "x25519-dalek",
+ "zkhash",
+]
+
+[[package]]
+name = "notes-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "storage",
+ "utils",
+]
+
+[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2986,6 +3011,14 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.114",
+]
+
+[[package]]
+name = "public-key-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "storage",
 ]
 
 [[package]]

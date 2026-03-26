@@ -42,7 +42,7 @@ fn out_of_order_insertion_is_rejected() {
     // index 1 before index 0 — must fail
     let err = store
         .process_leaf_added(LEAF_A, 1, ROOT, LEDGER_A)
-        .unwrap_err();
+        .expect_err("out-of-order insertion should fail");
     assert!(err.to_string().contains("out-of-order"));
 }
 
