@@ -74,6 +74,7 @@ impl PoolStore {
             self.tree.next_index,
         );
         let scalar = hex_to_scalar(commitment)?;
+        self.tree.insert(scalar)?;
         self.db.put_pool_leaf(&PoolLeaf {
             index,
             commitment: commitment.to_owned(),
@@ -85,7 +86,6 @@ impl PoolStore {
             encrypted_output: encrypted_output.to_owned(),
             ledger,
         })?;
-        self.tree.insert(scalar)?;
         Ok(())
     }
 

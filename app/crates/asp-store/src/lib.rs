@@ -73,13 +73,13 @@ impl AspStore {
             self.tree.next_index,
         );
         let scalar = hex_to_scalar(leaf)?;
+        self.tree.insert(scalar)?;
         self.db.put_asp_membership_leaf(&AspMembershipLeaf {
             index,
             leaf: leaf.to_owned(),
             root: root.to_owned(),
             ledger,
         })?;
-        self.tree.insert(scalar)?;
         Ok(())
     }
 
