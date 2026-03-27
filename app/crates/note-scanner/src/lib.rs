@@ -194,9 +194,10 @@ pub fn scan_for_notes(
             continue;
         }
 
-        // Decode encrypted output
-        let enc_bytes = hex_to_bytes(&output.encrypted_output)
-            .map_err(|e| anyhow::anyhow!("bad encrypted output hex: {e}"))?;
+        // Decode encrypted output & skip malformed payloads
+        let Ok(enc_bytes) = hex_to_bytes(&output.encrypted_output) else {
+            continue;
+        };
 
         // Try decryption
         let Some(decrypted) = try_decrypt_note(keys.encryption_private_key, &enc_bytes) else {
