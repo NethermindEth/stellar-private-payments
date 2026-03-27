@@ -169,6 +169,29 @@ pub struct ScanKeys<'a> {
     pub note_public_key_le: &'a [u8],
 }
 
+/// Decodes, decrypts, and verifies a single encrypted output.
+/// Returns `None` if the output is malformed, not for this user, a dummy
+/// zero-value note, or fails commitment verification.
+fn try_decrypt_and_verify(
+    encrypted_output_hex: &str,
+    commitment_hex: &str,
+    keys: &ScanKeys<'_>,
+) -> Option<DecryptedNote> {
+    let enc_bytes = hex_to_bytes(encrypted_output_hex).ok()?;
+    let decrypted = try_decrypt_note(keys.encryption_private_key, &enc_bytes)?;
+    if decrypted.amount == 0 {
+        return None;
+    }
+    let amount_le = scalar_to_array(&Scalar::from(decrypted.amount));
+    let computed =
+        compute_commitment(&amount_le, keys.note_public_key_le, &decrypted.blinding).ok()?;
+    let expected = utils::normalize_hex(commitment_hex).to_lowercase();
+    if field_to_hex(&computed) != expected {
+        return None;
+    }
+    Some(decrypted)
+}
+
 /// Scans pool encrypted outputs to discover notes addressed to this user.
 pub fn scan_for_notes(
     pool: &PoolStore,
@@ -188,50 +211,28 @@ pub fn scan_for_notes(
     for output in &outputs {
         result.scanned = result.scanned.saturating_add(1);
 
-        // Skip if note already exists
         if notes.get_by_commitment(&output.commitment)?.is_some() {
             result.already_known = result.already_known.saturating_add(1);
             continue;
         }
 
-        // Decode encrypted output & skip malformed payloads
-        let Ok(enc_bytes) = hex_to_bytes(&output.encrypted_output) else {
+        let Some(decrypted) =
+            try_decrypt_and_verify(&output.encrypted_output, &output.commitment, keys)
+        else {
             continue;
         };
 
-        // Try decryption
-        let Some(decrypted) = try_decrypt_note(keys.encryption_private_key, &enc_bytes) else {
-            continue;
-        };
-
-        // Skip dummy 0-value notes
-        if decrypted.amount == 0 {
-            continue;
-        }
-
-        // Verify commitment: Poseidon2(amount, notePublicKey, blinding, domain=1)
-        let amount_le = scalar_to_array(&Scalar::from(decrypted.amount));
-        let computed =
-            compute_commitment(&amount_le, keys.note_public_key_le, &decrypted.blinding)?;
-        let computed_hex = field_to_hex(&computed);
-        let expected_hex = utils::normalize_hex(&output.commitment).to_lowercase();
-        if computed_hex != expected_hex {
-            continue;
-        }
-
-        // Double-check before saving (guards against concurrent scanners).
+        // Re-check before saving (guards against concurrent scanners).
         if notes.get_by_commitment(&output.commitment)?.is_some() {
             result.already_known = result.already_known.saturating_add(1);
             continue;
         }
 
-        let blinding_hex = field_to_hex(&decrypted.blinding);
-        let private_key_hex = field_to_hex(keys.note_private_key_le);
         notes.save_note(&NewNote {
             commitment: &output.commitment,
             owner,
-            private_key: &private_key_hex,
-            blinding: &blinding_hex,
+            private_key: &field_to_hex(keys.note_private_key_le),
+            blinding: &field_to_hex(&decrypted.blinding),
             amount: &decrypted.amount.to_string(),
             leaf_index: Some(output.leaf_index),
             ledger: output.ledger,
