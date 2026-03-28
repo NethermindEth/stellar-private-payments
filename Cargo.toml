@@ -50,6 +50,8 @@ serde_json = { version = "1.0", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
+notes-store = { path = "app/crates/notes-store" }
+pool-store = { path = "app/crates/pool-store" }
 storage = { path = "app/crates/storage" }
 utils = { path = "app/crates/utils" }
 wasm-bindgen = { version = "0.2.108", default-features = false }

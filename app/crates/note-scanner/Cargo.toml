@@ -12,8 +12,8 @@ crate-type = ["rlib"]
 
 [dependencies]
 anyhow = { workspace = true, features = ["std"] }
-notes-store = { path = "../notes-store" }
-pool-store = { path = "../pool-store" }
+notes-store = { workspace = true }
+pool-store = { workspace = true }
 utils = { workspace = true }
 zkhash = { workspace = true }
 
