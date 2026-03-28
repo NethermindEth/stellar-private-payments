@@ -67,8 +67,9 @@ impl MerkleTree {
 
     /// Inserts a leaf at `next_index` and rehashes up to root.
     pub fn insert(&mut self, leaf: Scalar) -> anyhow::Result<u32> {
-        let max = u32::try_from(1usize << self.depth)
-            .map_err(|_| anyhow::anyhow!("tree depth {d} overflows u32 capacity", d = self.depth))?;
+        let max = u32::try_from(1usize << self.depth).map_err(|_| {
+            anyhow::anyhow!("tree depth {d} overflows u32 capacity", d = self.depth)
+        })?;
         anyhow::ensure!(self.next_index < max, "Merkle tree is full");
 
         let idx = usize::try_from(self.next_index).expect("index fits usize");

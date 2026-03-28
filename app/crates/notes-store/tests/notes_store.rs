@@ -1,6 +1,7 @@
 //! Integration tests for the `notes-store` crate.
 
 use notes_store::{NewNote, NotesStore};
+use std::rc::Rc;
 use storage::Storage;
 
 const OWNER: &str = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQ";
@@ -12,7 +13,7 @@ const TS: &str = "2026-03-26T12:00:00Z";
 const LEDGER: u32 = 50_000_100;
 
 fn open() -> NotesStore {
-    let db = Storage::open_in_memory().expect("open storage");
+    let db = Rc::new(Storage::open_in_memory().expect("open storage"));
     NotesStore::open(db)
 }
 

@@ -4,6 +4,7 @@
 //! Key derivation from Freighter signatures stays in JS. Rust handles:
 //! save, get, mark spent, delete, clear, balance computation.
 
+use std::rc::Rc;
 use storage::{Storage, types::UserNote};
 use utils::normalize_hex;
 
@@ -31,12 +32,12 @@ pub struct NewNote<'a> {
 
 /// User note store backed by SQLite.
 pub struct NotesStore {
-    db: Storage,
+    db: Rc<Storage>,
 }
 
 impl NotesStore {
     /// Opens the notes store.
-    pub fn open(db: Storage) -> Self {
+    pub fn open(db: Rc<Storage>) -> Self {
         Self { db }
     }
 

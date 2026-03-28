@@ -6,6 +6,7 @@ members = [
     "app/crates/pool-store",
     "app/crates/public-key-store",
     "app/crates/prover",
+    "app/crates/state",
     "app/crates/storage",
     "app/crates/utils",
     "app/crates/witness",

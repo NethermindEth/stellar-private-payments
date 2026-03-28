@@ -6,7 +6,7 @@ use note_scanner::{
     compute_commitment, compute_nullifier, compute_signature, derive_nullifier_for_note,
     try_decrypt_note,
 };
-use utils::merkle::{scalar_to_array, FIELD_SIZE};
+use utils::merkle::{FIELD_SIZE, scalar_to_array};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 #[test]

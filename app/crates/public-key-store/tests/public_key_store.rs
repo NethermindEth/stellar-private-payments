@@ -1,6 +1,7 @@
 //! Integration tests for the `public-key-store` crate.
 
 use public_key_store::PublicKeyStore;
+use std::rc::Rc;
 use storage::Storage;
 
 const ADDR_A: &str = "GABCDEFGHIJKLMNOPQRSTUVWXYZ234567ABCDEFGHIJKLMNOPQ";
@@ -12,7 +13,7 @@ const LEDGER_A: u32 = 50_000_100;
 const LEDGER_B: u32 = 50_000_200;
 
 fn open() -> PublicKeyStore {
-    let db = Storage::open_in_memory().expect("open storage");
+    let db = Rc::new(Storage::open_in_memory().expect("open storage"));
     PublicKeyStore::open(db)
 }
 

@@ -3,16 +3,17 @@
 //!
 //! Stellar RPC search (`searchByAddress`) deferred to PR-8 (sync-controller).
 
+use std::rc::Rc;
 use storage::{Storage, types::PublicKeyEntry};
 
 /// Public key registration store backed by SQLite.
 pub struct PublicKeyStore {
-    db: Storage,
+    db: Rc<Storage>,
 }
 
 impl PublicKeyStore {
     /// Opens the public key store.
-    pub fn open(db: Storage) -> Self {
+    pub fn open(db: Rc<Storage>) -> Self {
         Self { db }
     }
 

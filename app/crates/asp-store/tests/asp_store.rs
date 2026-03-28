@@ -1,6 +1,7 @@
 //! Integration tests for the `asp-store` crate.
 
 use asp_store::AspStore;
+use std::rc::Rc;
 use storage::Storage;
 
 const LEAF_A: &str = "0x1111111111111111111111111111111111111111111111111111111111111111";
@@ -9,7 +10,7 @@ const ROOT: &str = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const LEDGER: u32 = 50_000_100;
 
 fn open() -> AspStore {
-    let db = Storage::open_in_memory().expect("open storage");
+    let db = Rc::new(Storage::open_in_memory().expect("open storage"));
     AspStore::open(db).expect("open asp store")
 }
 

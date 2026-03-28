@@ -2,6 +2,7 @@
 //! Port of `app/js/state/asp-membership-store.js`.
 //! Leaves must arrive in strict ascending index order.
 
+use std::rc::Rc;
 use storage::{Storage, types::AspMembershipLeaf};
 use utils::{
     bytes_to_hex,
@@ -11,13 +12,13 @@ use utils::{
 /// ASP membership state: in-memory Poseidon2 Merkle tree with SQLite-backed
 /// persistence. Leaves must arrive in strict ascending index order.
 pub struct AspStore {
-    db: Storage,
+    db: Rc<Storage>,
     tree: MerkleTree,
 }
 
 impl AspStore {
     /// Opens the ASP store and rebuilds the in-memory tree from `db`.
-    pub fn open(db: Storage) -> anyhow::Result<Self> {
+    pub fn open(db: Rc<Storage>) -> anyhow::Result<Self> {
         let tree = MerkleTree::new_for_depth(utils::TREE_DEPTH)?;
         let mut store = Self { db, tree };
         store.rebuild_tree()?;

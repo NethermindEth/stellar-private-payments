@@ -15,9 +15,20 @@ serve: build
 	unset NO_COLOR && trunk serve --dist $(DIST_DIR)
 
 .PHONY: build
-build: install circuits-build wasm-witness
+build: install circuits-build wasm-witness wasm-state
 	@echo "Building frontend with trunk..."
 	unset NO_COLOR && trunk build --dist $(DIST_DIR) $(if $(RELEASE),--release)
+
+.PHONY: wasm-state
+wasm-state: install
+	@echo "Building state WASM module..."
+	@mkdir -p target/wasm-state
+	wasm-pack build app/crates/state \
+		--target web \
+		--out-name state \
+		--out-dir ../../../target/wasm-state \
+		--release
+	@rm -f target/wasm-state/.gitignore target/wasm-state/package.json 2>/dev/null || true
 
 .PHONY: wasm-witness
 wasm-witness: install
