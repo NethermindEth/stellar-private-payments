@@ -38,6 +38,11 @@ cp scripts/testdata/*_vk.json $TRUNK_STAGING_DIR/keys/ 2>/dev/null || true
 cp target/wasm-witness/witness.js $TRUNK_STAGING_DIR/js/witness/ 2>/dev/null || true
 cp target/wasm-witness/witness_bg.wasm $TRUNK_STAGING_DIR/js/witness/ 2>/dev/null || true
 
+# State WASM module (Rust store bridge)
+mkdir -p $TRUNK_STAGING_DIR/js/wasm-state
+cp target/wasm-state/state.js $TRUNK_STAGING_DIR/js/wasm-state/ 2>/dev/null || true
+cp target/wasm-state/state_bg.wasm $TRUNK_STAGING_DIR/js/wasm-state/ 2>/dev/null || true
+
 # Static files
 cp app/js/bridge.js $TRUNK_STAGING_DIR/js/
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
@@ -49,7 +54,7 @@ cp scripts/deployments.json $TRUNK_STAGING_DIR/ 2>/dev/null || true
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
+./app/node_modules/.bin/esbuild app/js/ui.js --external:./prover.js --external:./witness/* --external:./wasm-state/* --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/worker.js --external:./prover.js --external:./witness/* --bundle --outfile=$TRUNK_STAGING_DIR/js/worker.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/admin.js --external:./bridge.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
 """]
