@@ -1,19 +1,19 @@
 /**
  * Sync Controller - orchestrates event synchronization for Pool and ASP Membership.
- * 
+ *
  * Handles:
  * - Incremental sync of contract events
  * - Gap detection
  * - Progress reporting
  * - Note discovery
- * 
- * Note scanning uses the user's keypairs derived from Freighter signatures.
- * No private keys need to be passed or stored - they're derived on-demand.
- * 
+ *
+ * Sync metadata is stored via the Rust WASM StateManager.
+ * Event fetching from Stellar RPC stays in JS.
+ *
  * @module state/sync-controller
  */
 
-import * as db from './db.js';
+import { get as wasm } from './wasm.js';
 import * as poolStore from './pool-store.js';
 import * as aspMembershipStore from './asp-membership-store.js';
 import * as publicKeyStore from './public-key-store.js';
@@ -30,8 +30,8 @@ import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNe
  * @property {number} aspMembershipLeavesCount
  * @property {number} lastSyncedLedger
  * @property {number} latestLedger
- * @property {number} gap - Ledger gap since last sync
- * @property {boolean} syncBroken - True if gap exceeds retention window
+ * @property {number} gap
+ * @property {boolean} syncBroken
  */
 
 /**
@@ -52,21 +52,21 @@ let isSyncing = false;
 let syncListeners = [];
 
 /**
- * Gets the current sync metadata from IndexedDB.
+ * Gets the current sync metadata from WASM storage.
  * @returns {Promise<SyncMetadata|null>}
  */
 export async function getSyncMetadata() {
     const network = getNetwork().name;
-    return await db.get('sync_metadata', network);
+    return JSON.parse(wasm().get_sync_metadata(network));
 }
 
 /**
- * Saves sync metadata to IndexedDB.
+ * Saves sync metadata via WASM.
  * @param {SyncMetadata} metadata
  * @returns {Promise<void>}
  */
 async function saveSyncMetadata(metadata) {
-    await db.put('sync_metadata', metadata);
+    wasm().put_sync_metadata(JSON.stringify(metadata));
 }
 
 /**
@@ -98,14 +98,14 @@ export async function checkSyncGap() {
     const metadata = await getSyncMetadata();
     const retentionConfig = await getRetentionConfig();
     const latestLedger = await getLatestLedger();
-    
+
     const lastSyncedLedger = Math.max(
         metadata?.poolSync?.lastLedger || 0,
         metadata?.aspMembershipSync?.lastLedger || 0
     );
-    
+
     const gap = latestLedger - lastSyncedLedger;
-    
+
     if (lastSyncedLedger === 0) {
         return {
             status: 'ok',
@@ -113,7 +113,7 @@ export async function checkSyncGap() {
             gap,
         };
     }
-    
+
     if (gap > retentionConfig.window) {
         return {
             status: 'broken',
@@ -122,7 +122,7 @@ export async function checkSyncGap() {
             gap,
         };
     }
-    
+
     if (gap > retentionConfig.warningThreshold) {
         const remaining = retentionConfig.window - gap;
         return {
@@ -132,7 +132,7 @@ export async function checkSyncGap() {
             gap,
         };
     }
-    
+
     return {
         status: 'ok',
         message: `Last sync: ${ledgersToDuration(gap)} ago`,
@@ -142,32 +142,26 @@ export async function checkSyncGap() {
 
 /**
  * Starts a full synchronization of Pool and ASP Membership events.
- * Optionally scans for user notes and checks spent status.
- * 
- * Note scanning uses the user's deterministic keypairs derived from Freighter.
- * If the user hasn't authenticated (signed the required messages), note scanning
- * will be skipped.
- * 
  * @param {Object} [options]
- * @param {function} [options.onProgress] - Progress callback: (progress) => void
- * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes
- * @param {boolean} [options.checkSpent=true] - Whether to check spent status
- * @param {boolean} [options.forceRefresh=false] - Ignore cached cursor and sync from recent ledger
+ * @param {function} [options.onProgress] - Progress callback
+ * @param {boolean} [options.scanNotes=true] - Scan for new notes
+ * @param {boolean} [options.checkSpent=true] - Check spent status
+ * @param {boolean} [options.forceRefresh=false] - Ignore cached cursor
  * @returns {Promise<SyncStatus>}
  */
 export async function startSync(options = {}) {
     if (isSyncing) {
         return { status: 'syncing', message: 'Sync already in progress' };
     }
-    
+
     isSyncing = true;
     const { onProgress, scanNotes = true, checkSpent = true, forceRefresh = false } = options;
-    
+
     try {
         let metadata = await getSyncMetadata() || createDefaultMetadata();
         const latestLedger = await getLatestLedger();
         const retentionConfig = await getRetentionConfig(forceRefresh);
-        
+
         // Check for sync gap
         const gapCheck = await checkSyncGap();
         if (gapCheck.status === 'broken') {
@@ -189,17 +183,14 @@ export async function startSync(options = {}) {
                 aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
             };
         }
-        
-        // Determine start ledger for each contract
-        // Always calculate from retention window - cursor takes precedence if available
-        // Retention window is inclusive of both ends: [latest - window + 1, latest]
+
         const retentionStartLedger = Math.max(1, latestLedger - retentionConfig.window + 1);
         const poolStartLedger = retentionStartLedger;
         const aspStartLedger = retentionStartLedger;
-        
+
         emit('syncProgress', { phase: 'pool', progress: 0 });
-        
-        // Sync Pool events (streaming mode - events processed in onPage callback)
+
+        // Sync Pool events
         let poolEventCount = 0;
         let publicKeyCount = 0;
         const poolCursor = forceRefresh ? null : metadata.poolSync.lastCursor;
@@ -209,7 +200,6 @@ export async function startSync(options = {}) {
             cursor: poolCursor,
             onPage: async (events, cursor) => {
                 await poolStore.processEvents(events);
-                // Also process PublicKeyEvent for address book
                 const pkResult = await publicKeyStore.processEvents(events);
                 publicKeyCount += pkResult.registrations;
                 poolEventCount += events.length;
@@ -218,23 +208,22 @@ export async function startSync(options = {}) {
                 }
             },
         });
-        
+
         if (poolResult.success) {
             metadata.poolSync.lastLedger = poolResult.latestLedger;
             metadata.poolSync.lastCursor = poolResult.cursor;
             metadata.poolSync.syncBroken = false;
-            
-            // Always rebuild tree after sync to ensure consistency
+
             await poolStore.rebuildTree();
         }
-        
+
         emit('syncProgress', { phase: 'asp_membership', progress: 50 });
-        
-        // Sync ASP Membership events (streaming mode)
+
+        // Sync ASP Membership events
         let aspEventCount = 0;
         let aspLeafAddedCount = 0;
         const aspCursor = forceRefresh ? null : metadata.aspMembershipSync.lastCursor;
-        
+
         console.log('[SyncController] Starting ASP Membership sync:', {
             startLedger: aspStartLedger,
             latestLedger,
@@ -242,7 +231,7 @@ export async function startSync(options = {}) {
             cursor: aspCursor ? aspCursor.slice(0, 20) + '...' : null,
             retentionWindow: retentionConfig.window,
         });
-        
+
         const aspResult = await fetchAllASPMembershipEvents({
             startLedger: aspStartLedger,
             endLedger: latestLedger,
@@ -256,49 +245,47 @@ export async function startSync(options = {}) {
                 }
             },
         });
-        
+
         console.log('[SyncController] ASP Membership sync complete:', {
             totalEvents: aspEventCount,
             leafAddedEvents: aspLeafAddedCount,
             success: aspResult.success,
         });
-        
+
         if (aspResult.success) {
             metadata.aspMembershipSync.lastLedger = aspResult.latestLedger;
             metadata.aspMembershipSync.lastCursor = aspResult.cursor;
             metadata.aspMembershipSync.syncBroken = false;
-            
-            // Check if local tree matches on-chain state
+
             const localLeafCount = await aspMembershipStore.getLeafCount();
             const { readASPMembershipState } = await import('../stellar.js');
             const onChainState = await readASPMembershipState();
-            
+
             if (onChainState.success) {
                 const onChainLeafCount = onChainState.nextIndex || 0;
                 if (localLeafCount < onChainLeafCount) {
                     console.warn('[SyncController] ASP Membership sync incomplete:');
                     console.warn(`  On-chain has ${onChainLeafCount} leaves, local has ${localLeafCount}`);
                     console.warn('  Some events may be outside RPC retention window (24h-7d)');
-                    console.warn('  Admin may need to re-add missing membership leaves');
                     metadata.aspMembershipSync.syncBroken = true;
                 } else {
                     console.log(`[SyncController] ASP Membership in sync: ${localLeafCount}/${onChainLeafCount} leaves`);
                 }
             }
         }
-        
+
         // Update metadata
         metadata.lastSuccessfulSync = new Date().toISOString();
         await saveSyncMetadata(metadata);
-        
-        // Note scanning (only if user has authenticated with Freighter)
+
+        // Note scanning
         let scanResult = null;
         let spentResult = null;
         const hasKeys = notesStore.hasAuthenticatedKeys();
-        
+
         if (hasKeys && scanNotes) {
             emit('syncProgress', { phase: 'note_scanning', progress: 75 });
-            
+
             scanResult = await noteScanner.scanForNotes({
                 onProgress: (scanned, total) => {
                     if (onProgress) {
@@ -306,7 +293,7 @@ export async function startSync(options = {}) {
                     }
                 },
             });
-            
+
             if (scanResult.found > 0) {
                 emit('notesDiscovered', {
                     found: scanResult.found,
@@ -314,19 +301,19 @@ export async function startSync(options = {}) {
                 });
             }
         }
-        
+
         if (hasKeys && checkSpent) {
             emit('syncProgress', { phase: 'checking_spent', progress: 90 });
-            
+
             spentResult = await noteScanner.checkSpentNotes();
-            
+
             if (spentResult.markedSpent > 0) {
                 emit('notesMarkedSpent', {
                     count: spentResult.markedSpent,
                 });
             }
         }
-        
+
         const status = {
             status: 'complete',
             message: `Synced ${poolEventCount} pool events, ${aspEventCount} ASP membership events`,
@@ -340,14 +327,13 @@ export async function startSync(options = {}) {
             latestLedger,
             gap: 0,
             syncBroken: false,
-            // Note scanning results (if performed)
             notesFound: scanResult?.found || 0,
             notesMarkedSpent: spentResult?.markedSpent || 0,
         };
-        
+
         emit('syncComplete', status);
         emit('syncProgress', { phase: 'complete', progress: 100 });
-        
+
         return status;
     } catch (error) {
         console.error('[SyncController] Sync failed:', error);
@@ -362,8 +348,7 @@ export async function startSync(options = {}) {
 }
 
 /**
- * Checks if the user has authenticated their keys for note scanning.
- * Keys are derived from Freighter signatures and cached in memory.
+ * Checks if the user has authenticated their keys.
  * @returns {boolean}
  */
 export function hasAuthenticatedKeys() {
@@ -372,15 +357,14 @@ export function hasAuthenticatedKeys() {
 
 /**
  * Initialize user's keypairs by prompting for Freighter signatures.
- * Call this when the user "logs in" to enable note scanning.
- * @returns {Promise<boolean>} True if keypairs were successfully derived
+ * @returns {Promise<boolean>}
  */
 export async function initializeUserKeys() {
     return notesStore.initializeKeypairs();
 }
 
 /**
- * Clear cached keypairs (call on logout).
+ * Clear cached keypairs.
  */
 export function clearUserKeys() {
     notesStore.clearKeypairCaches();
@@ -393,24 +377,24 @@ export function clearUserKeys() {
 export async function getSyncStatus() {
     const metadata = await getSyncMetadata();
     const latestLedger = await getLatestLedger();
-    
+
     const lastSyncedLedger = Math.max(
         metadata?.poolSync?.lastLedger || 0,
         metadata?.aspMembershipSync?.lastLedger || 0
     );
-    
+
     const gap = latestLedger - lastSyncedLedger;
-    const syncBroken = metadata?.poolSync?.syncBroken || 
-                       metadata?.aspMembershipSync?.syncBroken || 
+    const syncBroken = metadata?.poolSync?.syncBroken ||
+                       metadata?.aspMembershipSync?.syncBroken ||
                        false;
-    
+
     let status = 'idle';
     if (isSyncing) {
         status = 'syncing';
     } else if (syncBroken) {
         status = 'broken';
     }
-    
+
     return {
         status,
         poolLeavesCount: await poolStore.getLeafCount(),
@@ -439,14 +423,14 @@ export async function clearAndReset() {
     await poolStore.clear();
     await aspMembershipStore.clear();
     await publicKeyStore.clear();
-    await db.del('sync_metadata', getNetwork().name);
+    wasm().delete_sync_metadata(getNetwork().name);
     console.log('[SyncController] Cleared all data and reset sync state');
 }
 
 /**
  * Adds an event listener.
- * @param {string} event - Event name
- * @param {function} handler - Event handler
+ * @param {string} event
+ * @param {function} handler
  */
 export function on(event, handler) {
     syncListeners.push({ event, handler });
@@ -454,8 +438,8 @@ export function on(event, handler) {
 
 /**
  * Removes an event listener.
- * @param {string} event - Event name
- * @param {function} handler - Event handler
+ * @param {string} event
+ * @param {function} handler
  */
 export function off(event, handler) {
     syncListeners = syncListeners.filter(
@@ -463,11 +447,6 @@ export function off(event, handler) {
     );
 }
 
-/**
- * Emits an event to all listeners.
- * @param {string} event - Event name
- * @param {any} data - Event data
- */
 function emit(event, data) {
     for (const listener of syncListeners) {
         if (listener.event === event) {

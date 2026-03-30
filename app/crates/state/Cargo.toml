@@ -1,0 +1,36 @@
+[package]
+name = "state"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "WASM state bridge — exposes all Rust stores to the frontend via wasm-bindgen"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+asp-store = { path = "../asp-store" }
+console_error_panic_hook = { workspace = true }
+note-scanner = { path = "../note-scanner" }
+notes-store = { workspace = true }
+pool-store = { workspace = true }
+public-key-store = { path = "../public-key-store" }
+serde = { workspace = true, features = ["std", "derive"] }
+serde_json = { workspace = true, features = ["std"] }
+storage = { workspace = true }
+utils = { workspace = true }
+wasm-bindgen = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+getrandom = { workspace = true }
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+getrandom = { workspace = true, features = ["js"] }
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = false
+
+[lints]
+workspace = true

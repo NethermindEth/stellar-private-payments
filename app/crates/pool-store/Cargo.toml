@@ -1,0 +1,19 @@
+[package]
+name = "pool-store"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "In-memory Poseidon2 Merkle tree with SQLite-backed pool state"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+storage = { workspace = true }
+utils = { workspace = true }
+
+[lints]
+workspace = true

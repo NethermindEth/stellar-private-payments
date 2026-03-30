@@ -1,0 +1,21 @@
+[package]
+name = "utils"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Shared utilities for shielded pool state modules"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+ark-ff = { workspace = true }
+circuits = { path = "../../../circuits", default-features = false }
+hex = { workspace = true }
+zkhash = { workspace = true }
+
+[lints]
+workspace = true

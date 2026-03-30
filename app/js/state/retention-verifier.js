@@ -1,16 +1,20 @@
 /**
  * RPC retention window detection.
  * Detects whether the connected Soroban RPC has 24h or 7-day event retention.
+ *
+ * Cache read/write is delegated to the Rust WASM StateManager.
+ * RPC probing stays in JS (uses Stellar SDK).
+ *
  * @module state/retention-verifier
  */
 
 import { getSorobanServer, getNetwork, getDeployedContracts } from '../stellar.js';
-import * as db from './db.js';
+import { get as wasm } from './wasm.js';
 
 const LEDGER_RATE_SECONDS = 5;
 const LEDGERS_24H = 17280;   // ~24 hours (24 * 60 * 60 / 5)
 const LEDGERS_7D = 120960;   // ~7 days (7 * 24 * 60 * 60 / 5)
-const RETENTION_PROBE_SPAN = 32; // Probe a narrow ledger range to avoid RPC scan limits
+const RETENTION_PROBE_SPAN = 32;
 
 /**
  * @typedef {Object} RetentionConfig
@@ -23,7 +27,6 @@ const RETENTION_PROBE_SPAN = 32; // Probe a narrow ledger range to avoid RPC sca
 
 /**
  * Probes the RPC to detect the actual event retention window.
- * Tries 7 days first, then falls back to 24 hours (depends on the RPC configuration)
  * @returns {Promise<RetentionConfig>}
  */
 export async function detectRetentionWindow() {
@@ -66,21 +69,18 @@ export async function detectRetentionWindow() {
         };
     }
 
-    // Fallback
     console.warn('[Retention] Could not detect retention window, assuming 24 hours');
     return createFallbackConfig(rpcEndpoint);
 }
 
 /**
  * Tests if events can be fetched from a given start ledger.
- * @param {import('@stellar/stellar-sdk').rpc.Server} server - Soroban RPC server
- * @param {number} startLedger - Ledger to start from
+ * @param {import('@stellar/stellar-sdk').rpc.Server} server
+ * @param {number} startLedger
  * @returns {Promise<boolean>}
  */
 async function canFetchEventsFrom(server, startLedger) {
     try {
-        // Use a narrow [start, end] probe window so this checks retention,
-        // not broad-range scan limits on some RPC providers.
         const endLedger = startLedger + RETENTION_PROBE_SPAN;
         const contracts = getDeployedContracts();
         const contractId = contracts?.pool || contracts?.aspMembership || contracts?.aspNonMembership;
@@ -96,14 +96,12 @@ async function canFetchEventsFrom(server, startLedger) {
         });
         return true;
     } catch (e) {
-        // Check if error indicates ledger is out of retention
         const errorMsg = e.message || String(e);
         if (errorMsg.includes('start is before oldest ledger') ||
             errorMsg.includes('start ledger') ||
             errorMsg.includes('out of range')) {
             return false;
         }
-        // Other errors might be temporary, log and assume available
         console.warn('[Retention] Event fetch error:', errorMsg);
         return false;
     }
@@ -111,7 +109,7 @@ async function canFetchEventsFrom(server, startLedger) {
 
 /**
  * Creates a fallback config when detection fails.
- * @param {string} rpcEndpoint - RPC URL
+ * @param {string} rpcEndpoint
  * @returns {RetentionConfig}
  */
 function createFallbackConfig(rpcEndpoint) {
@@ -125,28 +123,27 @@ function createFallbackConfig(rpcEndpoint) {
 }
 
 /**
- * Gets the cached retention config from IndexedDB.
- * @param {string} rpcEndpoint - RPC URL to look up
+ * Gets the cached retention config from WASM storage.
+ * @param {string} rpcEndpoint
  * @returns {Promise<RetentionConfig|null>}
  */
 export async function getCachedRetentionConfig(rpcEndpoint) {
-    const cached = await db.get('retention_config', rpcEndpoint);
-    return cached || null;
+    return JSON.parse(wasm().get_retention_config(rpcEndpoint));
 }
 
 /**
- * Saves retention config to IndexedDB.
- * @param {RetentionConfig} config - Config to save
+ * Saves retention config to WASM storage.
+ * @param {RetentionConfig} config
  * @returns {Promise<void>}
  */
 export async function saveRetentionConfig(config) {
-    await db.put('retention_config', config);
+    wasm().put_retention_config(JSON.stringify(config));
 }
 
 /**
  * Gets or detects the retention config for the current RPC.
  * Uses cached value if available and fresh (less than 1 hour old).
- * @param {boolean} forceRefresh - Force re-detection even if cached
+ * @param {boolean} forceRefresh
  * @returns {Promise<RetentionConfig>}
  */
 export async function getRetentionConfig(forceRefresh = false) {
@@ -172,7 +169,7 @@ export async function getRetentionConfig(forceRefresh = false) {
 
 /**
  * Converts ledger count to human-readable duration.
- * @param {number} ledgers - Number of ledgers
+ * @param {number} ledgers
  * @returns {string}
  */
 export function ledgersToDuration(ledgers) {

@@ -1,0 +1,19 @@
+[package]
+name = "notes-store"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "User note (UTXO) storage with SQLite-backed persistence"
+
+[lib]
+crate-type = ["rlib"]
+
+[dependencies]
+anyhow = { workspace = true, features = ["std"] }
+storage = { workspace = true }
+utils = { workspace = true }
+
+[lints]
+workspace = true

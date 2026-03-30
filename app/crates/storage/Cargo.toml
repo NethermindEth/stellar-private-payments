@@ -18,13 +18,23 @@ serde_json = { workspace = true, features = ["std"] }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 rusqlite = { version = "0.32", features = ["bundled"] }
 
-# TODO: Replace the in-memory WASM backend with sqlite-wasm-rs + SyncAccessHandlePoolVFS
-# (OPFS) for persistent storage in a browser Worker context.
-# [target.'cfg(target_arch = "wasm32")'.dependencies]
-# sqlite-wasm-rs = "0.5"
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = "0.5"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = { workspace = true }
 
-[lints]
-workspace = true
+[lints.rust]
+missing_docs = "deny"
+unsafe_code = "allow"
+
+[lints.clippy]
+arithmetic_side_effects = "deny"
+cast_lossless = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_precision_loss = "deny"
+cast_sign_loss = "deny"
+needless_return = "deny"
+panicking_overflow_checks = "deny"
+unwrap_used = "deny"

@@ -1,27 +1,22 @@
 /**
  * Pool Store - manages local pool state including merkle tree, nullifiers, and commitments.
  * Syncs from Pool contract events (NewCommitment, NewNullifier).
- * 
- * Init uses cursor iteration to avoid memory issues with large datasets.
- * 
+ *
+ * Storage and Merkle tree operations are delegated to the Rust WASM StateManager.
+ *
  * @module state/pool-store
  */
 
-import * as db from './db.js';
-import {createMerkleTreeWithZeroLeaf, getZeroLeaf} from '../bridge.js';
-import { 
-    bytesToHex, 
-    normalizeU256ToHex, 
-    normalizeHex, 
-    hexToBytesForTree,
+import { get as wasm } from './wasm.js';
+import {
+    bytesToHex,
+    normalizeU256ToHex,
+    normalizeHex,
     TREE_DEPTH,
 } from './utils.js';
 
 // Alias for backwards compatibility
 const POOL_TREE_DEPTH = TREE_DEPTH;
-const ZERO_LEAF_HEX = getZeroLeaf();
-
-let merkleTree = null;
 
 /**
  * @typedef {Object} PoolLeaf
@@ -45,41 +40,24 @@ let merkleTree = null;
  */
 
 /**
- * Initializes the pool store and merkle tree.
- * Uses cursor-based iteration to avoid loading entire table into memory.
+ * Initializes the pool store.
+ * Tree is already built by the WASM StateManager constructor.
  * @returns {Promise<void>}
  */
 export async function init() {
-    await rebuildTree();
+    // No-op: WASM StateManager rebuilds the tree on construction.
+    const leafCount = wasm().get_pool_leaf_count();
+    console.log(`[PoolStore] Initialized with ${leafCount} leaves (WASM)`);
 }
 
 /**
  * Rebuilds the merkle tree from the database.
- * Call this after sync to ensure tree is up-to-date with stored leaves.
  * @returns {Promise<number>} Number of leaves in the rebuilt tree
  */
 export async function rebuildTree() {
-    // Initialize tree with contract's zero leaf value (poseidon2("XLM"))
-    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
-    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
-    
-    // Use cursor to iterate leaves in index order without loading all into memory
-    let leafCount = 0;
-    let expectedIndex = 0;
-    
-    await db.iterate('pool_leaves', (leaf) => {
-        // Verify sequential ordering (merkle tree requires ordered insertion)
-        if (leaf.index !== expectedIndex) {
-            console.warn(`[PoolStore] Gap in leaf indices: expected ${expectedIndex}, got ${leaf.index}`);
-        }
-        
-        const commitmentBytes = hexToBytesForTree(leaf.commitment);
-        merkleTree.insert(commitmentBytes);
-        leafCount++;
-        expectedIndex = leaf.index + 1;
-    }, { direction: 'next' }); // 'next' ensures ascending order by keyPath (index)
-    
-    return leafCount;
+    const count = wasm().rebuild_pool_tree();
+    console.log(`[PoolStore] Rebuilt tree with ${count} leaves`);
+    return count;
 }
 
 /**
@@ -93,32 +71,14 @@ export async function rebuildTree() {
  */
 export async function processNewCommitment(event, ledger) {
     const commitment = normalizeU256ToHex(event.commitment);
-    // Ensure index is a Number (events may have BigInt or Number)
     const index = typeof event.index === 'bigint' ? Number(event.index) : Number(event.index);
     const encryptedOutput = event.encryptedOutput;
-    
-    // Store leaf
-    await db.put('pool_leaves', {
-        index,
-        commitment,
-        ledger,
-    });
-    
-    // Store encrypted output for note detection
-    await db.put('pool_encrypted_outputs', {
-        commitment,
-        index,
-        encryptedOutput: typeof encryptedOutput === 'string' 
-            ? encryptedOutput 
-            : bytesToHex(encryptedOutput),
-        ledger,
-    });
-    
-    // Update merkle tree
-    if (merkleTree) {
-        const commitmentBytes = hexToBytesForTree(commitment);
-        merkleTree.insert(commitmentBytes);
-    }
+
+    const encHex = typeof encryptedOutput === 'string'
+        ? encryptedOutput
+        : bytesToHex(encryptedOutput);
+
+    wasm().process_new_commitment(commitment, index, encHex, ledger);
 }
 
 /**
@@ -130,11 +90,7 @@ export async function processNewCommitment(event, ledger) {
  */
 export async function processNewNullifier(event, ledger) {
     const nullifier = normalizeU256ToHex(event.nullifier);
-    
-    await db.put('pool_nullifiers', {
-        nullifier,
-        ledger,
-    });
+    wasm().process_new_nullifier(nullifier, ledger);
 }
 
 /**
@@ -146,16 +102,15 @@ export async function processNewNullifier(event, ledger) {
 export async function processEvents(events, ledger) {
     let commitments = 0;
     let nullifiers = 0;
-    
+
     for (const event of events) {
         const eventType = event.topic?.[0];
-        
-        // Match various event name formats (Soroban converts struct names to snake_case symbols)
+
         if (eventType === 'NewCommitmentEvent' || eventType === 'new_commitment_event' || eventType === 'new_commitment') {
             const commitment = event.topic?.[1];
             const index = event.value?.index;
             const encryptedOutput = event.value?.encrypted_output;
-            
+
             await processNewCommitment({
                 commitment,
                 index,
@@ -170,48 +125,40 @@ export async function processEvents(events, ledger) {
             nullifiers++;
         }
     }
-    
+
     return { commitments, nullifiers };
 }
 
 /**
- * Gets the current merkle root.
+ * Gets the current merkle root as LE bytes.
  * @returns {Uint8Array|null}
  */
 export function getRoot() {
-    if (!merkleTree) return null;
-    return merkleTree.root();
+    return new Uint8Array(wasm().get_pool_root());
 }
 
 /**
  * Gets a merkle proof for a leaf at the given index.
- * Uses the live tree which is initialized with the correct zero leaf value.
  * @param {number} leafIndex - Index of the leaf
  * @returns {Object|null} Merkle proof with path_elements, path_indices, root
  */
 export async function getMerkleProof(leafIndex) {
     try {
-        if (!merkleTree) {
-            console.warn('[PoolStore] Merkle tree not initialized');
-            return null;
-        }
-        
-        const maxIndex = Number(merkleTree.next_index);
+        const maxIndex = wasm().get_pool_next_index();
         console.log(`[PoolStore] getMerkleProof: tree has ${maxIndex} leaves, requesting index ${leafIndex}`);
-        
+
         if (leafIndex >= maxIndex) {
             console.error(`[PoolStore] Leaf index ${leafIndex} out of range (max: ${maxIndex - 1})`);
             return null;
         }
-        
-        const proof = merkleTree.get_proof(leafIndex);
-        
-        // Tree returns LE bytes, convert to BE hex for logging
-        const rootBytesLE = merkleTree.root();
+
+        const proof = wasm().get_pool_merkle_proof(leafIndex);
+
+        const rootBytesLE = new Uint8Array(wasm().get_pool_root());
         const rootBytesBE = Uint8Array.from(rootBytesLE).reverse();
         console.log(`[PoolStore] Built proof for index ${leafIndex}`);
         console.log(`[PoolStore] Tree root (BE): ${bytesToHex(rootBytesBE)}`);
-        
+
         return proof;
     } catch (e) {
         console.error('[PoolStore] Failed to get merkle proof:', e);
@@ -226,8 +173,7 @@ export async function getMerkleProof(leafIndex) {
  */
 export async function isNullifierSpent(nullifier) {
     const hex = typeof nullifier === 'string' ? normalizeHex(nullifier) : bytesToHex(nullifier);
-    const result = await db.get('pool_nullifiers', hex);
-    return result !== undefined;
+    return wasm().is_nullifier_spent(hex);
 }
 
 /**
@@ -236,13 +182,8 @@ export async function isNullifierSpent(nullifier) {
  * @returns {Promise<PoolEncryptedOutput[]>}
  */
 export async function getEncryptedOutputs(fromLedger) {
-    const outputs = await db.getAll('pool_encrypted_outputs');
-    
-    if (fromLedger === undefined) {
-        return outputs;
-    }
-    
-    return outputs.filter(o => o.ledger >= fromLedger);
+    const json = wasm().get_encrypted_outputs(fromLedger ?? null);
+    return JSON.parse(json);
 }
 
 /**
@@ -250,7 +191,7 @@ export async function getEncryptedOutputs(fromLedger) {
  * @returns {Promise<number>}
  */
 export async function getLeafCount() {
-    return db.count('pool_leaves');
+    return wasm().get_pool_leaf_count();
 }
 
 /**
@@ -258,8 +199,7 @@ export async function getLeafCount() {
  * @returns {number}
  */
 export function getNextIndex() {
-    if (!merkleTree) return 0;
-    return merkleTree.next_index;
+    return wasm().get_pool_next_index();
 }
 
 /**
@@ -267,11 +207,7 @@ export function getNextIndex() {
  * @returns {Promise<void>}
  */
 export async function clear() {
-    await db.clear('pool_leaves');
-    await db.clear('pool_nullifiers');
-    await db.clear('pool_encrypted_outputs');
-    const zeroLeaf = hexToBytesForTree(ZERO_LEAF_HEX);
-    merkleTree = createMerkleTreeWithZeroLeaf(POOL_TREE_DEPTH, zeroLeaf);
+    wasm().clear_pool();
     console.log('[PoolStore] Cleared all data');
 }
 
