@@ -73,7 +73,7 @@ fn value_to_hex_string(v: &serde_json::Value) -> Option<String> {
         serde_json::Value::Array(arr) => {
             let bytes: Vec<u8> = arr
                 .iter()
-                .filter_map(|n| n.as_u64().map(|i| i as u8))
+                .filter_map(|n| n.as_u64().and_then(|i| u8::try_from(i).ok()))
                 .collect();
             if bytes.is_empty() {
                 None
@@ -254,7 +254,7 @@ impl StateManager {
                         .as_ref()
                         .and_then(|v| v.get("index"))
                         .and_then(|v| v.as_u64())
-                        .map(|i| i as u32);
+                        .and_then(|i| u32::try_from(i).ok());
                     let enc = event
                         .value
                         .as_ref()
@@ -330,7 +330,7 @@ impl StateManager {
                 .as_ref()
                 .and_then(|v| v.get("index"))
                 .and_then(|v| v.as_u64())
-                .map(|i| i as u32);
+                .and_then(|i| u32::try_from(i).ok());
             let root = event
                 .value
                 .as_ref()
