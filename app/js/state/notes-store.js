@@ -38,7 +38,7 @@ import {
  * @property {number} createdAtLedger - Ledger when created
  * @property {boolean} spent - Whether the note has been spent
  * @property {number} [spentAtLedger] - Ledger when spent
- * @property {boolean} [isReceived] - True if note was received via transfer
+ * @property {boolean} [isReceived] - True if note was received via transfer (vs created by user)
  */
 
 // Current owner address for filtering notes
@@ -46,6 +46,7 @@ let currentOwner = null;
 
 /**
  * Sets the current owner address for note filtering.
+ * Call this when wallet connects or changes.
  * @param {string|null} address - Stellar address or null to clear
  */
 export function setCurrentOwner(address) {
@@ -74,8 +75,8 @@ export function getCurrentOwner() {
  * @param {bigint|string|number} params.amount - Note amount
  * @param {number} params.leafIndex - Leaf index in pool tree
  * @param {number} params.ledger - Ledger when created
- * @param {string} [params.owner] - Stellar address (defaults to currentOwner)
- * @param {boolean} [params.isReceived=false] - True if received via transfer
+ * @param {string} [params.owner] - Stellar address that owns this note (defaults to currentOwner)
+ * @param {boolean} [params.isReceived=false] - True if note was received via transfer (discovered by scanning)
  * @returns {Promise<UserNote>}
  */
 export async function saveNote(params) {
@@ -134,7 +135,7 @@ export async function markNoteSpent(commitment, ledger) {
  * Gets all user notes for the current owner.
  * @param {Object} [options] - Filter options
  * @param {boolean} [options.unspentOnly] - Only return unspent notes
- * @param {string} [options.owner] - Specific owner (defaults to currentOwner)
+ * @param {string} [options.owner] - Specific owner to filter by (defaults to currentOwner)
  * @param {boolean} [options.allOwners] - If true, returns notes from all owners
  * @returns {Promise<UserNote[]>}
  */
@@ -166,7 +167,7 @@ export async function getNotes(options = {}) {
 }
 
 /**
- * Gets a note by commitment.
+ * Gets a note by commitment (case-insensitive hex comparison).
  * @param {string} commitment - Note commitment
  * @returns {Promise<UserNote|null>}
  */
@@ -267,7 +268,7 @@ export async function deleteNote(commitment) {
 }
 
 /**
- * Clears all notes.
+ * Clears all notes (use with caution).
  * @returns {Promise<void>}
  */
 export async function clear() {
@@ -285,6 +286,10 @@ let cachedNoteKeypair = null;
 
 /**
  * Get user X25519 encryption keypair, deriving from Freighter signature if needed.
+ *
+ * This keypair is used with XSalsa20-Poly1305 to encrypt note data so that
+ * only the recipient can see the amount and blinding factor.
+ *
  * @returns {Promise<{publicKey: Uint8Array, privateKey: Uint8Array}|null>}
  */
 export async function getUserEncryptionKeypair() {
@@ -305,7 +310,7 @@ export async function getUserEncryptionKeypair() {
 }
 
 /**
- * Get encryption public key as hex string.
+ * Get encryption public key as hex string (for sharing with senders).
  * @returns {Promise<string|null>}
  */
 export async function getEncryptionPublicKeyHex() {
@@ -316,6 +321,13 @@ export async function getEncryptionPublicKeyHex() {
 
 /**
  * Get user note identity keypair, deriving from Freighter signature if needed.
+ *
+ * This keypair is used inside ZK circuits:
+ * - privateKey: Proves you own the note (used in nullifier derivation)
+ * - publicKey: Identifies you as recipient (included in commitment)
+ *
+ * The public key is derived via Poseidon2(privateKey, 0, domain=0x03).
+ *
  * @returns {Promise<{publicKey: Uint8Array, privateKey: Uint8Array}|null>}
  */
 export async function getUserNoteKeypair() {
@@ -338,7 +350,8 @@ export async function getUserNoteKeypair() {
 }
 
 /**
- * Get note public key as hex string.
+ * Get note public key as hex string (for sharing with senders).
+ * This is the key others use to send notes to you.
  * @returns {Promise<string|null>}
  */
 export async function getNotePublicKeyHex() {
@@ -349,6 +362,7 @@ export async function getNotePublicKeyHex() {
 
 /**
  * Get note private key as Uint8Array.
+ * Used when constructing ZK proofs to spend notes.
  * @returns {Promise<Uint8Array|null>}
  */
 export async function getNotePrivateKey() {
@@ -358,7 +372,7 @@ export async function getNotePrivateKey() {
 }
 
 /**
- * Clear all cached keypairs.
+ * Clear all cached keypairs (call on logout, wallet disconnect, or account change).
  */
 export function clearKeypairCaches() {
     cachedEncryptionKeypair = null;
@@ -367,9 +381,9 @@ export function clearKeypairCaches() {
 }
 
 /**
- * Handle account change.
- * @param {string|null} newAddress
- * @returns {boolean} True if account actually changed
+ * Handle account change - clears caches and updates owner.
+ * @param {string|null} newAddress - New Stellar address or null if disconnecting
+ * @returns {boolean} True if the account actually changed
  */
 export function handleAccountChange(newAddress) {
     const changed = setCurrentOwner(newAddress);
@@ -390,9 +404,12 @@ export function hasAuthenticatedKeys() {
 /**
  * Set authenticated keys directly (used when keys are derived elsewhere).
  * @param {Object} keys
- * @param {Object} keys.encryptionKeypair
- * @param {Uint8Array} keys.notePrivateKey
- * @param {Uint8Array} keys.notePublicKey
+ * @param {Object} keys.encryptionKeypair - X25519 keypair { publicKey, secretKey }
+ * @param {Uint8Array} keys.notePrivateKey - BN254 private key
+ * @param {Uint8Array} keys.notePublicKey - BN254 public key
+ *
+ * This allows note scanning to work after deposits/withdraws/transfers
+ * without prompting for additional signatures.
  */
 export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePublicKey }) {
     if (encryptionKeypair) {
@@ -406,7 +423,8 @@ export function setAuthenticatedKeys({ encryptionKeypair, notePrivateKey, notePu
 
 /**
  * Initialize both keypairs (prompts user for two signatures).
- * @returns {Promise<boolean>}
+ * Call this during login/setup flow.
+ * @returns {Promise<boolean>} True if both keypairs were derived successfully
  */
 export async function initializeKeypairs() {
     const encryption = await getUserEncryptionKeypair();
@@ -427,10 +445,11 @@ export async function initializeKeypairs() {
 }
 
 /**
- * Request a signature from Freighter.
- * @param {string} message
- * @param {string} purpose
- * @returns {Promise<Uint8Array|null>}
+ * Request a signature from Freighter and decode it.
+ * Includes retry logic for transient Freighter failures.
+ * @param {string} message - Message to sign
+ * @param {string} purpose - Purpose for logging
+ * @returns {Promise<Uint8Array|null>} 64-byte Ed25519 signature or null
  */
 async function requestSignature(message, purpose) {
     const MAX_RETRIES = 2;

@@ -7,6 +7,8 @@
  * - Progress reporting
  * - Note discovery
  *
+ * Note scanning uses the user's keypairs derived from Freighter signatures.
+ * No private keys need to be passed or stored - they're derived on-demand.
  *
  * @module state/sync-controller
  */
@@ -39,6 +41,8 @@ function serializeEvents(events) {
  * @property {number} aspMembershipLeavesCount
  * @property {number} lastSyncedLedger
  * @property {number} latestLedger
+ * @property {number} gap - Ledger gap since last sync
+ * @property {boolean} syncBroken - True if gap exceeds retention window
  * @property {number} gap
  * @property {boolean} syncBroken
  */
@@ -160,11 +164,17 @@ export async function checkSyncGap() {
 
 /**
  * Starts a full synchronization of Pool and ASP Membership events.
+ * Optionally scans for user notes and checks spent status.
+ *
+ * Note scanning uses the user's deterministic keypairs derived from Freighter.
+ * If the user hasn't authenticated (signed the required messages), note scanning
+ * will be skipped.
+ *
  * @param {Object} [options]
- * @param {function} [options.onProgress] - Progress callback
- * @param {boolean} [options.scanNotes=true] - Scan for new notes
- * @param {boolean} [options.checkSpent=true] - Check spent status
- * @param {boolean} [options.forceRefresh=false] - Ignore cached cursor
+ * @param {function} [options.onProgress] - Progress callback: (progress) => void
+ * @param {boolean} [options.scanNotes=true] - Whether to scan for new notes
+ * @param {boolean} [options.checkSpent=true] - Whether to check spent status
+ * @param {boolean} [options.forceRefresh=false] - Ignore cached cursor and sync from recent ledger
  * @returns {Promise<SyncStatus>}
  */
 export async function startSync(options = {}) {
@@ -368,7 +378,8 @@ export async function startSync(options = {}) {
 }
 
 /**
- * Checks if the user has authenticated their keys.
+ * Checks if the user has authenticated their keys for note scanning.
+ * Keys are derived from Freighter signatures and cached in memory.
  * @returns {boolean}
  */
 export function hasAuthenticatedKeys() {
@@ -377,14 +388,15 @@ export function hasAuthenticatedKeys() {
 
 /**
  * Initialize user's keypairs by prompting for Freighter signatures.
- * @returns {Promise<boolean>}
+ * Call this when the user "logs in" to enable note scanning.
+ * @returns {Promise<boolean>} True if keypairs were successfully derived
  */
 export async function initializeUserKeys() {
     return notesStore.initializeKeypairs();
 }
 
 /**
- * Clear cached keypairs.
+ * Clear cached keypairs (call on logout).
  */
 export function clearUserKeys() {
     notesStore.clearKeypairCaches();
@@ -453,8 +465,8 @@ export async function clearAndReset() {
 
 /**
  * Adds an event listener.
- * @param {string} event
- * @param {function} handler
+ * @param {string} event - Event name
+ * @param {function} handler - Event handler
  */
 export function on(event, handler) {
     syncListeners.push({ event, handler });
@@ -462,8 +474,8 @@ export function on(event, handler) {
 
 /**
  * Removes an event listener.
- * @param {string} event
- * @param {function} handler
+ * @param {string} event - Event name
+ * @param {function} handler - Event handler
  */
 export function off(event, handler) {
     syncListeners = syncListeners.filter(
@@ -471,6 +483,11 @@ export function off(event, handler) {
     );
 }
 
+/**
+ * Emits an event to all listeners.
+ * @param {string} event - Event name
+ * @param {any} data - Event data
+ */
 function emit(event, data) {
     for (const listener of syncListeners) {
         if (listener.event === event) {

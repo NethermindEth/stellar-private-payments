@@ -48,9 +48,7 @@ fn normalize_value_to_hex(v: &serde_json::Value) -> Option<String> {
             }
         }
         serde_json::Value::Number(n) => n.as_u64().map(|i| format!("0x{i:064x}")),
-        serde_json::Value::Object(obj)
-            if obj.contains_key("hi") && obj.contains_key("lo") =>
-        {
+        serde_json::Value::Object(obj) if obj.contains_key("hi") && obj.contains_key("lo") => {
             let hi = parse_u128(&obj["hi"]).unwrap_or(0);
             let lo = parse_u128(&obj["lo"]).unwrap_or(0);
             Some(format!("0x{hi:032x}{lo:032x}"))
@@ -73,7 +71,10 @@ fn value_to_hex_string(v: &serde_json::Value) -> Option<String> {
     match v {
         serde_json::Value::String(s) => Some(s.clone()),
         serde_json::Value::Array(arr) => {
-            let bytes: Vec<u8> = arr.iter().filter_map(|n| n.as_u64().map(|i| i as u8)).collect();
+            let bytes: Vec<u8> = arr
+                .iter()
+                .filter_map(|n| n.as_u64().map(|i| i as u8))
+                .collect();
             if bytes.is_empty() {
                 None
             } else {
@@ -242,9 +243,7 @@ impl StateManager {
             let ledger = event.ledger.unwrap_or(default_ledger);
 
             match topic0 {
-                Some(
-                    "NewCommitmentEvent" | "new_commitment_event" | "new_commitment",
-                ) => {
+                Some("NewCommitmentEvent" | "new_commitment_event" | "new_commitment") => {
                     let commitment = event
                         .topic
                         .as_ref()
@@ -269,18 +268,14 @@ impl StateManager {
                         commitments = commitments.saturating_add(1);
                     }
                 }
-                Some(
-                    "NewNullifierEvent" | "new_nullifier_event" | "new_nullifier",
-                ) => {
+                Some("NewNullifierEvent" | "new_nullifier_event" | "new_nullifier") => {
                     if let Some(nul) = event
                         .topic
                         .as_ref()
                         .and_then(|t| t.get(1))
                         .and_then(normalize_value_to_hex)
                     {
-                        self.pool
-                            .process_new_nullifier(&nul, ledger)
-                            .map_err(err)?;
+                        self.pool.process_new_nullifier(&nul, ledger).map_err(err)?;
                         nullifiers = nullifiers.saturating_add(1);
                     }
                 }
@@ -318,9 +313,8 @@ impl StateManager {
                 .and_then(|v| v.as_str())
                 .unwrap_or("");
 
-            let is_leaf_added = topic0 == "LeafAdded"
-                || topic0 == "leaf_added"
-                || topic0.contains("LeafAdded");
+            let is_leaf_added =
+                topic0 == "LeafAdded" || topic0 == "leaf_added" || topic0.contains("LeafAdded");
 
             if !is_leaf_added {
                 continue;

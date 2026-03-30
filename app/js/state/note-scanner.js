@@ -1,6 +1,17 @@
 /**
  * Note Scanner - discovers notes addressed to the user by scanning encrypted outputs.
  *
+ * When someone sends a private transfer:
+ * 1. They encrypt (amount, blinding) with the recipient's X25519 encryption public key
+ * 2. The encrypted output is emitted as an event on-chain
+ * 3. The recipient scans all outputs, trying to decrypt each one
+ * 4. Successful decryption means the note is addressed to them
+ * 5. They verify the commitment matches and save the note
+ *
+ * This module uses the deterministic keys from notes-store.js:
+ * - Encryption keypair: For decrypting note data
+ * - Note identity keypair: For verifying commitments and deriving nullifiers
+ *
  * @module state/note-scanner
  */
 
@@ -16,6 +27,9 @@ import { hexToBytes } from './utils.js';
  * @property {number} alreadyKnown - Notes already in store
  */
 
+/**
+ * Scanning state for tracking progress.
+ */
 let lastScannedLedger = 0;
 let scanListeners = [];
 
@@ -28,7 +42,7 @@ let scanListeners = [];
  *
  * @param {Object} [options] - Scan options
  * @param {number} [options.fromLedger] - Start scanning from this ledger
- * @param {boolean} [options.fullRescan] - Scan everything from the start
+ * @param {boolean} [options.fullRescan] - Ignore lastScannedLedger, scan everything
  * @param {function} [options.onProgress] - Progress callback (scanned, total)
  * @returns {Promise<ScanResult>}
  */
@@ -105,7 +119,12 @@ export async function scanForNotes(options = {}) {
 }
 
 /**
- * Checks if any user notes have been spent and updates their status.
+ * Checks if any user notes have been spent by matching nullifiers.
+ * Call this after syncing new nullifiers from the pool.
+ *
+ * The note's privateKey is stored with each note, so we don't need
+ * to re-derive it from Freighter for this operation.
+ *
  * @returns {Promise<{checked: number, markedSpent: number}>}
  */
 export async function checkSpentNotes() {
@@ -134,8 +153,13 @@ export async function checkSpentNotes() {
 
 /**
  * Derives the nullifier for a note.
- * @param {Uint8Array} privateKey - Note's private key (LE bytes)
- * @param {Uint8Array} commitment - Note commitment (LE bytes)
+ * Nullifier = hash(commitment, pathIndices, signature)
+ *
+ * The path indices are encoded as a single field element: sum(bit[i] * 2^i)
+ * where bit[i] = (leafIndex >> i) & 1
+ *
+ * @param {Uint8Array} privateKey - Note's private key
+ * @param {Uint8Array} commitment - Note commitment
  * @param {number} leafIndex - Leaf index in merkle tree
  * @returns {Uint8Array} Nullifier hash
  */
@@ -158,7 +182,7 @@ export function getLastScannedLedger() {
 }
 
 /**
- * Sets the last scanned ledger.
+ * Sets the last scanned ledger (for resuming scans).
  * @param {number} ledger
  */
 export function setLastScannedLedger(ledger) {
@@ -186,6 +210,11 @@ export function off(event, handler) {
     );
 }
 
+/**
+ * Emits an event to listeners.
+ * @param {string} event
+ * @param {any} data
+ */
 function emit(event, data) {
     for (const listener of scanListeners) {
         if (listener.event === event) {

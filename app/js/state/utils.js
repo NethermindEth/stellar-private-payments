@@ -107,11 +107,14 @@ export function reverseBytes(bytes) {
 }
 
 /**
- * Converts BE hex string to LE bytes for Merkle tree insertion.
- * Soroban stores U256 as BE; the Merkle tree uses LE byte order.
+ * Converts hex string to LE bytes for Rust Merkle tree insertion.
+ *
+ * The Rust Merkle tree uses from_le_bytes_mod_order (LE).
+ * Soroban stores U256 as BE and converts via BigUint::from_bytes_be.
+ * We reverse BE to LE to ensure the same numeric value.
  *
  * @param {string} hex - Hex string (BE representation of U256)
- * @returns {Uint8Array} LE bytes
+ * @returns {Uint8Array} LE bytes for Rust tree insertion
  */
 export function hexToBytesForTree(hex) {
     const beBytes = hexToBytes(hex);

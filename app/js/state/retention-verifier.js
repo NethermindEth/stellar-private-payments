@@ -24,6 +24,7 @@ const RETENTION_PROBE_SPAN = 32;
 
 /**
  * Probes the RPC to detect the actual event retention window.
+ * Tries 7 days first, then falls back to 24 hours (depends on the RPC configuration)
  * @returns {Promise<RetentionConfig>}
  */
 export async function detectRetentionWindow() {
@@ -72,8 +73,8 @@ export async function detectRetentionWindow() {
 
 /**
  * Tests if events can be fetched from a given start ledger.
- * @param {import('@stellar/stellar-sdk').rpc.Server} server
- * @param {number} startLedger
+ * @param {import('@stellar/stellar-sdk').rpc.Server} server - Soroban RPC server
+ * @param {number} startLedger - Ledger to start from
  * @returns {Promise<boolean>}
  */
 async function canFetchEventsFrom(server, startLedger) {
@@ -106,7 +107,7 @@ async function canFetchEventsFrom(server, startLedger) {
 
 /**
  * Creates a fallback config when detection fails.
- * @param {string} rpcEndpoint
+ * @param {string} rpcEndpoint - RPC URL
  * @returns {RetentionConfig}
  */
 function createFallbackConfig(rpcEndpoint) {
@@ -121,7 +122,7 @@ function createFallbackConfig(rpcEndpoint) {
 
 /**
  * Gets the cached retention config.
- * @param {string} rpcEndpoint
+ * @param {string} rpcEndpoint - RPC URL to look up
  * @returns {Promise<RetentionConfig|null>}
  */
 export async function getCachedRetentionConfig(rpcEndpoint) {
@@ -135,7 +136,7 @@ export async function getCachedRetentionConfig(rpcEndpoint) {
 
 /**
  * Saves retention config.
- * @param {RetentionConfig} config
+ * @param {RetentionConfig} config - Config to save
  * @returns {Promise<void>}
  */
 export async function saveRetentionConfig(config) {
@@ -149,7 +150,7 @@ export async function saveRetentionConfig(config) {
 /**
  * Gets or detects the retention config for the current RPC.
  * Uses cached value if available and fresh (less than 1 hour old).
- * @param {boolean} forceRefresh
+ * @param {boolean} forceRefresh - Force re-detection even if cached
  * @returns {Promise<RetentionConfig>}
  */
 export async function getRetentionConfig(forceRefresh = false) {
@@ -175,7 +176,7 @@ export async function getRetentionConfig(forceRefresh = false) {
 
 /**
  * Converts ledger count to human-readable duration.
- * @param {number} ledgers
+ * @param {number} ledgers - Number of ledgers
  * @returns {string}
  */
 export function ledgersToDuration(ledgers) {

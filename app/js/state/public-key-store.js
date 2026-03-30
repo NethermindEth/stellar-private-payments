@@ -36,10 +36,12 @@ export async function init() {
 
 /**
  * Processes a PublicKeyEvent from the Pool contract.
+ * Handles both new format (encryption_key + note_key) and legacy format (key only).
+ *
  * @param {Object} event - Parsed event
  * @param {string} event.owner - Stellar address
- * @param {string|Uint8Array} [event.encryption_key] - X25519 encryption key
- * @param {string|Uint8Array} [event.note_key] - BN254 note key
+ * @param {string|Uint8Array} [event.encryption_key] - X25519 encryption key (new format)
+ * @param {string|Uint8Array} [event.note_key] - BN254 note key (new format)
  * @param {string|Uint8Array} [event.key] - Legacy public key field
  * @param {number} ledger - Ledger sequence
  * @returns {Promise<void>}
@@ -82,6 +84,8 @@ export async function processPublicKeyEvent(event, ledger) {
 
 /**
  * Processes a batch of Pool events for public key registrations.
+ * Handles both new format (encryption_key + note_key) and legacy format (key).
+ *
  * @param {Array} events - Parsed events with topic and value
  * @returns {Promise<{registrations: number}>}
  */
@@ -214,7 +218,7 @@ export async function searchByAddress(address) {
 
 /**
  * Gets recent public key registrations ordered by ledger (descending).
- * @param {number} [limit=20]
+ * @param {number} [limit=20] - Maximum records to return
  * @returns {Promise<PublicKeyRecord[]>}
  */
 export async function getRecentRegistrations(limit = 20) {
@@ -247,8 +251,8 @@ export async function clear() {
 
 /**
  * Adds an event listener.
- * @param {string} event
- * @param {function} handler
+ * @param {string} event - Event name ('publicKeyRegistered')
+ * @param {function} handler - Event handler
  */
 export function on(event, handler) {
     eventListeners.push({ event, handler });
@@ -256,8 +260,8 @@ export function on(event, handler) {
 
 /**
  * Removes an event listener.
- * @param {string} event
- * @param {function} handler
+ * @param {string} event - Event name
+ * @param {function} handler - Event handler
  */
 export function off(event, handler) {
     eventListeners = eventListeners.filter(
@@ -265,6 +269,11 @@ export function off(event, handler) {
     );
 }
 
+/**
+ * Emits an event to all listeners.
+ * @param {string} event - Event name
+ * @param {any} data - Event data
+ */
 function emit(event, data) {
     for (const listener of eventListeners) {
         if (listener.event === event) {
