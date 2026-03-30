@@ -72,7 +72,12 @@ export async function processPublicKeyEvent(event, ledger) {
     }
 
     const registeredAt = new Date().toISOString();
-    wasm().store_public_key(address, encryptionKey, noteKey, ledger, registeredAt);
+    try {
+        wasm().store_public_key(address, encryptionKey, noteKey, ledger, registeredAt);
+    } catch (e) {
+        console.error(`[PublicKeyStore] Failed to store keys for ${address.slice(0, 8)}...:`, e);
+        return;
+    }
 
     console.log(`[PublicKeyStore] Stored keys for ${address.slice(0, 8)}...`);
     emit('publicKeyRegistered', { address, encryptionKey, noteKey, ledger });
@@ -116,7 +121,12 @@ export async function processEvents(events) {
  * @returns {Promise<PublicKeyRecord|null>}
  */
 export async function getByAddress(address) {
-    return JSON.parse(wasm().get_public_key_by_address(address));
+    try {
+        return JSON.parse(wasm().get_public_key_by_address(address));
+    } catch (e) {
+        console.error('[PublicKeyStore] Failed to get by address:', e);
+        return null;
+    }
 }
 
 /**
@@ -211,9 +221,14 @@ export async function searchByAddress(address) {
  * @returns {Promise<PublicKeyRecord[]>}
  */
 export async function getRecentRegistrations(limit = 20) {
-    const all = JSON.parse(wasm().get_all_public_keys());
-    all.sort((a, b) => b.ledger - a.ledger);
-    return all.slice(0, limit);
+    try {
+        const all = JSON.parse(wasm().get_all_public_keys());
+        all.sort((a, b) => b.ledger - a.ledger);
+        return all.slice(0, limit);
+    } catch (e) {
+        console.error('[PublicKeyStore] Failed to get recent registrations:', e);
+        return [];
+    }
 }
 
 /**

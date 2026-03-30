@@ -5,6 +5,9 @@ jest.mock('../witness/witness.js', () => require('../__mocks__/witness.js'), { v
 // Mock prover-client.js to avoid import.meta.url issues in test environment
 jest.mock('../prover-client.js', () => require('../__mocks__/prover-client.js'), { virtual: true });
 
+// Mock state WASM module (Rust StateManager)
+jest.mock('../state/wasm-state/state.js', () => require('../__mocks__/wasm-state.js'), { virtual: true });
+
 jest.mock('../wallet.js', () => ({
   __esModule: true,
   connectWallet: jest.fn(),

@@ -97,8 +97,14 @@ export async function saveNote(params) {
         isReceived: params.isReceived || false,
     });
 
-    const savedJson = wasm().save_note(noteJson);
-    const note = JSON.parse(savedJson);
+    let note;
+    try {
+        const savedJson = wasm().save_note(noteJson);
+        note = JSON.parse(savedJson);
+    } catch (e) {
+        console.error('[NotesStore] Failed to save note:', e);
+        throw e;
+    }
 
     const noteType = note.isReceived ? 'received' : 'created';
     console.log(`[NotesStore] Saved ${noteType} note ${note.id.slice(0, 10)}... at index ${note.leafIndex} for ${owner ? owner.slice(0, 8) + '...' : 'unknown'}`);
@@ -113,11 +119,16 @@ export async function saveNote(params) {
  */
 export async function markNoteSpent(commitment, ledger) {
     const id = normalizeHex(commitment).toLowerCase();
-    const found = wasm().mark_note_spent(id, ledger);
-    if (found) {
-        console.log(`[NotesStore] Marked note ${id.slice(0, 10)}... as spent`);
+    try {
+        const found = wasm().mark_note_spent(id, ledger);
+        if (found) {
+            console.log(`[NotesStore] Marked note ${id.slice(0, 10)}... as spent`);
+        }
+        return found;
+    } catch (e) {
+        console.error(`[NotesStore] Failed to mark note spent:`, e);
+        return false;
     }
-    return found;
 }
 
 /**
@@ -129,15 +140,22 @@ export async function markNoteSpent(commitment, ledger) {
  * @returns {Promise<UserNote[]>}
  */
 export async function getNotes(options = {}) {
-    let notes;
     const owner = options.owner ?? currentOwner;
 
-    if (options.allOwners) {
-        notes = JSON.parse(wasm().get_all_notes());
-    } else if (owner) {
-        notes = JSON.parse(wasm().get_notes_by_owner(owner));
-    } else {
+    if (!options.allOwners && !owner) {
         console.warn('[NotesStore] getNotes called without owner, returning empty');
+        return [];
+    }
+
+    let notes;
+    try {
+        if (options.allOwners) {
+            notes = JSON.parse(wasm().get_all_notes());
+        } else {
+            notes = JSON.parse(wasm().get_notes_by_owner(owner));
+        }
+    } catch (e) {
+        console.error('[NotesStore] Failed to get notes:', e);
         return [];
     }
 
@@ -154,8 +172,13 @@ export async function getNotes(options = {}) {
  * @returns {Promise<UserNote|null>}
  */
 export async function getNoteByCommitment(commitment) {
-    const id = normalizeHex(commitment).toLowerCase();
-    return JSON.parse(wasm().get_note_by_commitment(id));
+    try {
+        const id = normalizeHex(commitment).toLowerCase();
+        return JSON.parse(wasm().get_note_by_commitment(id));
+    } catch (e) {
+        console.error('[NotesStore] Failed to get note by commitment:', e);
+        return null;
+    }
 }
 
 /**
@@ -172,8 +195,13 @@ export async function getUnspentNotes() {
  */
 export async function getBalance() {
     if (!currentOwner) return 0n;
-    const balanceStr = wasm().get_balance(currentOwner);
-    return BigInt(balanceStr);
+    try {
+        const balanceStr = wasm().get_balance(currentOwner);
+        return BigInt(balanceStr);
+    } catch (e) {
+        console.error('[NotesStore] Failed to get balance:', e);
+        return 0n;
+    }
 }
 
 /**
@@ -181,7 +209,13 @@ export async function getBalance() {
  * @returns {Promise<Blob>}
  */
 export async function exportNotes() {
-    const notes = JSON.parse(wasm().get_all_notes());
+    let notes;
+    try {
+        notes = JSON.parse(wasm().get_all_notes());
+    } catch (e) {
+        console.error('[NotesStore] Failed to export notes:', e);
+        notes = [];
+    }
     const data = JSON.stringify({
         version: 1,
         exportedAt: new Date().toISOString(),
@@ -206,12 +240,16 @@ export async function importNotes(file) {
 
     let imported = 0;
     for (const note of json.notes) {
-        const existing = JSON.parse(wasm().get_note_by_commitment(note.id));
-        if (!existing) {
-            wasm().save_note(JSON.stringify(note));
-            imported++;
-        } else if (!existing.spent && note.spent) {
-            wasm().mark_note_spent(note.id, note.spentAtLedger || 0);
+        try {
+            const existing = JSON.parse(wasm().get_note_by_commitment(note.id));
+            if (!existing) {
+                wasm().save_note(JSON.stringify(note));
+                imported++;
+            } else if (!existing.spent && note.spent) {
+                wasm().mark_note_spent(note.id, note.spentAtLedger || 0);
+            }
+        } catch (e) {
+            console.error(`[NotesStore] Failed to import note ${note.id?.slice(0, 10)}:`, e);
         }
     }
 

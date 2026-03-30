@@ -56,16 +56,21 @@ export async function scanForNotes(options = {}) {
     const startLedger = fullRescan ? null : (fromLedger ?? (lastScannedLedger > 0 ? lastScannedLedger : null));
 
     // Delegate to Rust WASM scanner
-    const resultJson = wasm().scan_for_notes(
-        encKeypair.privateKey,
-        noteKeypair.privateKey,
-        noteKeypair.publicKey,
-        owner,
-        createdAt,
-        startLedger ?? undefined,
-    );
-
-    const result = JSON.parse(resultJson);
+    let result;
+    try {
+        const resultJson = wasm().scan_for_notes(
+            encKeypair.privateKey,
+            noteKeypair.privateKey,
+            noteKeypair.publicKey,
+            owner,
+            createdAt,
+            startLedger ?? undefined,
+        );
+        result = JSON.parse(resultJson);
+    } catch (e) {
+        console.error('[NoteScanner] WASM scan failed:', e);
+        return { scanned: 0, found: 0, notes: [], alreadyKnown: 0 };
+    }
     console.log(`[NoteScanner] Scanned ${result.scanned} outputs, found ${result.found} new notes`);
 
     // Emit events for discovered notes (fetch newly saved notes if any were found)
@@ -110,8 +115,14 @@ export async function scanForNotes(options = {}) {
 export async function checkSpentNotes() {
     const owner = notesStore.getCurrentOwner() || '';
 
-    const resultJson = wasm().check_spent_notes(owner);
-    const result = JSON.parse(resultJson);
+    let result;
+    try {
+        const resultJson = wasm().check_spent_notes(owner);
+        result = JSON.parse(resultJson);
+    } catch (e) {
+        console.error('[NoteScanner] WASM check_spent_notes failed:', e);
+        return { checked: 0, markedSpent: 0 };
+    }
 
     if (result.markedSpent > 0) {
         console.log(`[NoteScanner] ${result.markedSpent} notes marked as spent`);
@@ -133,8 +144,13 @@ export async function checkSpentNotes() {
  * @returns {Uint8Array} Nullifier hash
  */
 export function deriveNullifierForNote(privateKey, commitment, leafIndex) {
-    const hexResult = wasm().derive_nullifier(privateKey, commitment, leafIndex);
-    return hexToBytes(hexResult);
+    try {
+        const hexResult = wasm().derive_nullifier(privateKey, commitment, leafIndex);
+        return hexToBytes(hexResult);
+    } catch (e) {
+        console.error('[NoteScanner] Failed to derive nullifier:', e);
+        throw e;
+    }
 }
 
 /**

@@ -128,7 +128,12 @@ function createFallbackConfig(rpcEndpoint) {
  * @returns {Promise<RetentionConfig|null>}
  */
 export async function getCachedRetentionConfig(rpcEndpoint) {
-    return JSON.parse(wasm().get_retention_config(rpcEndpoint));
+    try {
+        return JSON.parse(wasm().get_retention_config(rpcEndpoint));
+    } catch (e) {
+        console.error('[Retention] Failed to get cached config:', e);
+        return null;
+    }
 }
 
 /**
@@ -137,7 +142,11 @@ export async function getCachedRetentionConfig(rpcEndpoint) {
  * @returns {Promise<void>}
  */
 export async function saveRetentionConfig(config) {
-    wasm().put_retention_config(JSON.stringify(config));
+    try {
+        wasm().put_retention_config(JSON.stringify(config));
+    } catch (e) {
+        console.error('[Retention] Failed to save config:', e);
+    }
 }
 
 /**

@@ -46,8 +46,12 @@ const POOL_TREE_DEPTH = TREE_DEPTH;
  */
 export async function init() {
     // No-op: WASM StateManager rebuilds the tree on construction.
-    const leafCount = wasm().get_pool_leaf_count();
-    console.log(`[PoolStore] Initialized with ${leafCount} leaves (WASM)`);
+    try {
+        const leafCount = wasm().get_pool_leaf_count();
+        console.log(`[PoolStore] Initialized with ${leafCount} leaves (WASM)`);
+    } catch (e) {
+        console.error('[PoolStore] Failed to read leaf count during init:', e);
+    }
 }
 
 /**
@@ -55,9 +59,14 @@ export async function init() {
  * @returns {Promise<number>} Number of leaves in the rebuilt tree
  */
 export async function rebuildTree() {
-    const count = wasm().rebuild_pool_tree();
-    console.log(`[PoolStore] Rebuilt tree with ${count} leaves`);
-    return count;
+    try {
+        const count = wasm().rebuild_pool_tree();
+        console.log(`[PoolStore] Rebuilt tree with ${count} leaves`);
+        return count;
+    } catch (e) {
+        console.error('[PoolStore] Failed to rebuild tree:', e);
+        throw e;
+    }
 }
 
 /**
@@ -78,7 +87,12 @@ export async function processNewCommitment(event, ledger) {
         ? encryptedOutput
         : bytesToHex(encryptedOutput);
 
-    wasm().process_new_commitment(commitment, index, encHex, ledger);
+    try {
+        wasm().process_new_commitment(commitment, index, encHex, ledger);
+    } catch (e) {
+        console.error(`[PoolStore] Failed to process commitment at index ${index}:`, e);
+        throw e;
+    }
 }
 
 /**
@@ -90,7 +104,12 @@ export async function processNewCommitment(event, ledger) {
  */
 export async function processNewNullifier(event, ledger) {
     const nullifier = normalizeU256ToHex(event.nullifier);
-    wasm().process_new_nullifier(nullifier, ledger);
+    try {
+        wasm().process_new_nullifier(nullifier, ledger);
+    } catch (e) {
+        console.error('[PoolStore] Failed to process nullifier:', e);
+        throw e;
+    }
 }
 
 /**
@@ -144,6 +163,10 @@ export function getRoot() {
  */
 export async function getMerkleProof(leafIndex) {
     try {
+        if (!Number.isInteger(leafIndex) || leafIndex < 0) {
+            console.error(`[PoolStore] Invalid leaf index: ${leafIndex}`);
+            return null;
+        }
         const maxIndex = wasm().get_pool_next_index();
         console.log(`[PoolStore] getMerkleProof: tree has ${maxIndex} leaves, requesting index ${leafIndex}`);
 
@@ -182,8 +205,13 @@ export async function isNullifierSpent(nullifier) {
  * @returns {Promise<PoolEncryptedOutput[]>}
  */
 export async function getEncryptedOutputs(fromLedger) {
-    const json = wasm().get_encrypted_outputs(fromLedger ?? null);
-    return JSON.parse(json);
+    try {
+        const json = wasm().get_encrypted_outputs(fromLedger ?? null);
+        return JSON.parse(json);
+    } catch (e) {
+        console.error('[PoolStore] Failed to get encrypted outputs:', e);
+        return [];
+    }
 }
 
 /**

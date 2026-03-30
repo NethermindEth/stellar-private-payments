@@ -56,8 +56,13 @@ let syncListeners = [];
  * @returns {Promise<SyncMetadata|null>}
  */
 export async function getSyncMetadata() {
-    const network = getNetwork().name;
-    return JSON.parse(wasm().get_sync_metadata(network));
+    try {
+        const network = getNetwork().name;
+        return JSON.parse(wasm().get_sync_metadata(network));
+    } catch (e) {
+        console.error('[SyncController] Failed to get sync metadata:', e);
+        return null;
+    }
 }
 
 /**
@@ -66,7 +71,11 @@ export async function getSyncMetadata() {
  * @returns {Promise<void>}
  */
 async function saveSyncMetadata(metadata) {
-    wasm().put_sync_metadata(JSON.stringify(metadata));
+    try {
+        wasm().put_sync_metadata(JSON.stringify(metadata));
+    } catch (e) {
+        console.error('[SyncController] Failed to save sync metadata:', e);
+    }
 }
 
 /**
@@ -423,7 +432,11 @@ export async function clearAndReset() {
     await poolStore.clear();
     await aspMembershipStore.clear();
     await publicKeyStore.clear();
-    wasm().delete_sync_metadata(getNetwork().name);
+    try {
+        wasm().delete_sync_metadata(getNetwork().name);
+    } catch (e) {
+        console.error('[SyncController] Failed to delete sync metadata:', e);
+    }
     console.log('[SyncController] Cleared all data and reset sync state');
 }
 

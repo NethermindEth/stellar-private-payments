@@ -31,8 +31,12 @@ const ASP_MEMBERSHIP_TREE_DEPTH = TREE_DEPTH;
  * @returns {Promise<void>}
  */
 export async function init() {
-    const leafCount = wasm().get_asp_membership_leaf_count();
-    console.log(`[ASPMembershipStore] Initialized with ${leafCount} leaves (WASM)`);
+    try {
+        const leafCount = wasm().get_asp_membership_leaf_count();
+        console.log(`[ASPMembershipStore] Initialized with ${leafCount} leaves (WASM)`);
+    } catch (e) {
+        console.error('[ASPMembershipStore] Failed to read leaf count during init:', e);
+    }
 }
 
 /**
@@ -49,7 +53,12 @@ export async function processLeafAdded(event, ledger) {
     const index = Number(event.index);
     const root = normalizeU256ToHex(event.root);
 
-    wasm().process_asp_leaf_added(leaf, index, root, ledger);
+    try {
+        wasm().process_asp_leaf_added(leaf, index, root, ledger);
+    } catch (e) {
+        console.error(`[ASPMembershipStore] Failed to process leaf at index ${index}:`, e);
+        throw e;
+    }
     console.log(`[ASPMembershipStore] Stored leaf at index ${index}`);
 }
 
@@ -124,6 +133,10 @@ export function getRoot() {
  */
 export function getMerkleProof(leafIndex) {
     try {
+        if (!Number.isInteger(leafIndex) || leafIndex < 0) {
+            console.error(`[ASPMembershipStore] Invalid leaf index: ${leafIndex}`);
+            return null;
+        }
         const maxIndex = wasm().get_asp_membership_next_index();
         if (leafIndex >= maxIndex) {
             console.error(`[ASPMembershipStore] Leaf index ${leafIndex} out of range (max: ${maxIndex - 1})`);
@@ -159,9 +172,14 @@ export function getNextIndex() {
  * @returns {Promise<ASPMembershipLeaf|null>}
  */
 export async function findLeafByHash(leafHash) {
-    const hex = typeof leafHash === 'string' ? leafHash : bytesToHex(leafHash);
-    const json = wasm().find_asp_membership_leaf(hex);
-    return JSON.parse(json);
+    try {
+        const hex = typeof leafHash === 'string' ? leafHash : bytesToHex(leafHash);
+        const json = wasm().find_asp_membership_leaf(hex);
+        return JSON.parse(json);
+    } catch (e) {
+        console.error('[ASPMembershipStore] Failed to find leaf by hash:', e);
+        return null;
+    }
 }
 
 /**

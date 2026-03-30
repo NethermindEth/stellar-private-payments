@@ -8,5 +8,6 @@ module.exports = {
   moduleNameMapper: {
     "^\\./prover\\.js$": "<rootDir>/js/__mocks__/prover.js",
     "^\\./prover-client\\.js$": "<rootDir>/js/__mocks__/prover-client.js",
+    "^\\./wasm-state/state\\.js$": "<rootDir>/js/__mocks__/wasm-state.js",
   },
 };
