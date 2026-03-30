@@ -2,9 +2,6 @@
  * RPC retention window detection.
  * Detects whether the connected Soroban RPC has 24h or 7-day event retention.
  *
- * Cache read/write is delegated to the Rust WASM StateManager.
- * RPC probing stays in JS (uses Stellar SDK).
- *
  * @module state/retention-verifier
  */
 
@@ -123,7 +120,7 @@ function createFallbackConfig(rpcEndpoint) {
 }
 
 /**
- * Gets the cached retention config from WASM storage.
+ * Gets the cached retention config.
  * @param {string} rpcEndpoint
  * @returns {Promise<RetentionConfig|null>}
  */
@@ -137,7 +134,7 @@ export async function getCachedRetentionConfig(rpcEndpoint) {
 }
 
 /**
- * Saves retention config to WASM storage.
+ * Saves retention config.
  * @param {RetentionConfig} config
  * @returns {Promise<void>}
  */

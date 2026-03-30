@@ -6,9 +6,6 @@
  * - encryptionKey: X25519 key for encrypting note data (amount, blinding)
  * - noteKey: BN254 key for creating commitments in the ZK circuit
  *
- * Storage is delegated to the Rust WASM StateManager.
- * On-chain search stays in JS (uses Stellar SDK).
- *
  * @module state/public-key-store
  */
 
@@ -141,7 +138,7 @@ export async function searchByAddress(address) {
         return { found: true, record: localRecord, source: 'local' };
     }
 
-    // Query on-chain (stays in JS — uses Stellar SDK)
+    // Query on-chain
     try {
         const contracts = getDeployedContracts();
         if (!contracts?.pool) {
@@ -197,7 +194,7 @@ export async function searchByAddress(address) {
                         ledger: event.ledger,
                     };
 
-                    // Cache locally via WASM
+                    // Cache locally
                     wasm().store_public_key(
                         address, encryptionKey, noteKey,
                         event.ledger, new Date().toISOString()

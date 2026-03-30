@@ -7,20 +7,29 @@
  * - Progress reporting
  * - Note discovery
  *
- * Sync metadata is stored via the Rust WASM StateManager.
- * Event fetching from Stellar RPC stays in JS.
  *
  * @module state/sync-controller
  */
 
 import { get as wasm } from './wasm.js';
-import * as poolStore from './pool-store.js';
-import * as aspMembershipStore from './asp-membership-store.js';
 import * as publicKeyStore from './public-key-store.js';
 import * as noteScanner from './note-scanner.js';
 import * as notesStore from './notes-store.js';
 import { getRetentionConfig, ledgersToDuration } from './retention-verifier.js';
 import { fetchAllPoolEvents, fetchAllASPMembershipEvents, getLatestLedger, getNetwork } from '../stellar.js';
+
+/**
+ * JSON-serialises Stellar events, handling BigInt and Uint8Array values.
+ * @param {Array} events
+ * @returns {string}
+ */
+function serializeEvents(events) {
+    return JSON.stringify(events, (_, v) => {
+        if (typeof v === 'bigint') return v.toString();
+        if (v instanceof Uint8Array) return '0x' + Array.from(v).map(b => b.toString(16).padStart(2, '0')).join('');
+        return v;
+    });
+}
 
 /**
  * @typedef {Object} SyncStatus
@@ -52,7 +61,7 @@ let isSyncing = false;
 let syncListeners = [];
 
 /**
- * Gets the current sync metadata from WASM storage.
+ * Gets the current sync metadata.
  * @returns {Promise<SyncMetadata|null>}
  */
 export async function getSyncMetadata() {
@@ -66,7 +75,7 @@ export async function getSyncMetadata() {
 }
 
 /**
- * Saves sync metadata via WASM.
+ * Saves sync metadata.
  * @param {SyncMetadata} metadata
  * @returns {Promise<void>}
  */
@@ -188,8 +197,8 @@ export async function startSync(options = {}) {
                     metadata.aspMembershipSync.lastLedger
                 ),
                 latestLedger,
-                poolLeavesCount: await poolStore.getLeafCount(),
-                aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
+                poolLeavesCount: wasm().get_pool_leaf_count(),
+                aspMembershipLeavesCount: wasm().get_asp_membership_leaf_count(),
             };
         }
 
@@ -208,7 +217,8 @@ export async function startSync(options = {}) {
             endLedger: latestLedger,
             cursor: poolCursor,
             onPage: async (events, cursor) => {
-                await poolStore.processEvents(events);
+                const json = serializeEvents(events);
+                wasm().process_pool_events(json, 0);
                 const pkResult = await publicKeyStore.processEvents(events);
                 publicKeyCount += pkResult.registrations;
                 poolEventCount += events.length;
@@ -223,7 +233,7 @@ export async function startSync(options = {}) {
             metadata.poolSync.lastCursor = poolResult.cursor;
             metadata.poolSync.syncBroken = false;
 
-            await poolStore.rebuildTree();
+            wasm().rebuild_pool_tree();
         }
 
         emit('syncProgress', { phase: 'asp_membership', progress: 50 });
@@ -246,9 +256,10 @@ export async function startSync(options = {}) {
             endLedger: latestLedger,
             cursor: aspCursor,
             onPage: async (events, cursor) => {
-                const leafEvents = await aspMembershipStore.processEvents(events);
+                const json = serializeEvents(events);
+                const leafCount = wasm().process_asp_membership_events(json, 0);
                 aspEventCount += events.length;
-                aspLeafAddedCount += leafEvents;
+                aspLeafAddedCount += leafCount;
                 if (onProgress) {
                     onProgress({ phase: 'asp_membership', events: events.length, cursor });
                 }
@@ -266,7 +277,7 @@ export async function startSync(options = {}) {
             metadata.aspMembershipSync.lastCursor = aspResult.cursor;
             metadata.aspMembershipSync.syncBroken = false;
 
-            const localLeafCount = await aspMembershipStore.getLeafCount();
+            const localLeafCount = wasm().get_asp_membership_leaf_count();
             const { readASPMembershipState } = await import('../stellar.js');
             const onChainState = await readASPMembershipState();
 
@@ -326,8 +337,8 @@ export async function startSync(options = {}) {
         const status = {
             status: 'complete',
             message: `Synced ${poolEventCount} pool events, ${aspEventCount} ASP membership events`,
-            poolLeavesCount: await poolStore.getLeafCount(),
-            aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
+            poolLeavesCount: wasm().get_pool_leaf_count(),
+            aspMembershipLeavesCount: wasm().get_asp_membership_leaf_count(),
             registeredPublicKeys: publicKeyCount,
             lastSyncedLedger: Math.max(
                 metadata.poolSync.lastLedger,
@@ -406,8 +417,8 @@ export async function getSyncStatus() {
 
     return {
         status,
-        poolLeavesCount: await poolStore.getLeafCount(),
-        aspMembershipLeavesCount: await aspMembershipStore.getLeafCount(),
+        poolLeavesCount: wasm().get_pool_leaf_count(),
+        aspMembershipLeavesCount: wasm().get_asp_membership_leaf_count(),
         lastSyncedLedger,
         latestLedger,
         gap,
@@ -429,8 +440,8 @@ export function isSyncInProgress() {
  * @returns {Promise<void>}
  */
 export async function clearAndReset() {
-    await poolStore.clear();
-    await aspMembershipStore.clear();
+    wasm().clear_pool();
+    wasm().clear_asp_membership();
     await publicKeyStore.clear();
     try {
         wasm().delete_sync_metadata(getNetwork().name);

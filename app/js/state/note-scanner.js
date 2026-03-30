@@ -1,9 +1,6 @@
 /**
  * Note Scanner - discovers notes addressed to the user by scanning encrypted outputs.
  *
- * Scanning, decryption, and nullifier derivation are delegated to the Rust WASM
- * StateManager. Key derivation and event emission stay in JS.
- *
  * @module state/note-scanner
  */
 
@@ -55,7 +52,6 @@ export async function scanForNotes(options = {}) {
     const createdAt = new Date().toISOString();
     const startLedger = fullRescan ? null : (fromLedger ?? (lastScannedLedger > 0 ? lastScannedLedger : null));
 
-    // Delegate to Rust WASM scanner
     let result;
     try {
         const resultJson = wasm().scan_for_notes(
@@ -76,7 +72,7 @@ export async function scanForNotes(options = {}) {
     // Emit events for discovered notes (fetch newly saved notes if any were found)
     const notes = [];
     if (result.found > 0) {
-        // Retrieve notes saved by the Rust scanner to emit events
+        // Retrieve newly saved notes to emit events
         const allNotes = JSON.parse(wasm().get_notes_by_owner(owner));
         const recentNotes = allNotes
             .filter(n => n.isReceived)

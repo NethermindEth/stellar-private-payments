@@ -5,6 +5,7 @@ const initStateWasm = async () => {};
 
 class StateManager {
     // Pool
+    process_pool_events() { return '{"commitments":0,"nullifiers":0}'; }
     process_new_commitment() {}
     process_new_nullifier() {}
     get_pool_root() { return new Uint8Array(32); }
@@ -18,6 +19,7 @@ class StateManager {
     clear_pool() {}
 
     // ASP Membership
+    process_asp_membership_events() { return 0; }
     process_asp_leaf_added() {}
     get_asp_membership_root() { return new Uint8Array(32); }
     get_asp_membership_root_hex() { return '0x' + '00'.repeat(32); }

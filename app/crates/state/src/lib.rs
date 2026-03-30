@@ -23,6 +23,67 @@ fn err(e: anyhow::Error) -> JsValue {
     JsValue::from_str(&format!("{e:#}"))
 }
 
+// ── Stellar event helpers ──────────────────────────────────────────────
+
+/// A Stellar contract event as serialised from the JS SDK.
+#[derive(serde::Deserialize)]
+struct StellarEvent {
+    topic: Option<Vec<serde_json::Value>>,
+    value: Option<serde_json::Value>,
+    ledger: Option<u32>,
+}
+
+/// Normalises a Stellar U256 / hex JSON value to `0x`-prefixed lowercase hex.
+fn normalize_value_to_hex(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => {
+            let s = s.trim();
+            if s.is_empty() {
+                return None;
+            }
+            if s.starts_with("0x") || s.starts_with("0X") {
+                Some(s.to_lowercase())
+            } else {
+                Some(format!("0x{}", s.to_lowercase()))
+            }
+        }
+        serde_json::Value::Number(n) => n.as_u64().map(|i| format!("0x{i:064x}")),
+        serde_json::Value::Object(obj)
+            if obj.contains_key("hi") && obj.contains_key("lo") =>
+        {
+            let hi = parse_u128(&obj["hi"]).unwrap_or(0);
+            let lo = parse_u128(&obj["lo"]).unwrap_or(0);
+            Some(format!("0x{hi:032x}{lo:032x}"))
+        }
+        _ => None,
+    }
+}
+
+/// Parses a JSON number or string into `u128`.
+fn parse_u128(v: &serde_json::Value) -> Option<u128> {
+    match v {
+        serde_json::Value::Number(n) => n.as_u64().map(u128::from),
+        serde_json::Value::String(s) => s.parse::<u128>().ok(),
+        _ => None,
+    }
+}
+
+/// Converts a JSON value (string or byte-array) to a hex string.
+fn value_to_hex_string(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(arr) => {
+            let bytes: Vec<u8> = arr.iter().filter_map(|n| n.as_u64().map(|i| i as u8)).collect();
+            if bytes.is_empty() {
+                None
+            } else {
+                Some(utils::bytes_to_hex(&bytes))
+            }
+        }
+        _ => None,
+    }
+}
+
 /// Initialize the WASM module (panic hook for browser console).
 #[wasm_bindgen(start)]
 pub fn init() {
@@ -154,6 +215,157 @@ impl StateManager {
     pub fn get_encrypted_outputs(&self, from_ledger: Option<u32>) -> Result<String, JsValue> {
         let outputs = self.pool.get_encrypted_outputs(from_ledger).map_err(err)?;
         serde_json::to_string(&outputs).map_err(|e| JsValue::from_str(&e.to_string()))
+    }
+
+    // ── Batch event processing (replaces JS pool-store / asp-membership-store) ─
+
+    /// Processes a batch of Pool contract events (JSON array from the Stellar
+    /// SDK).  Handles `NewCommitment*` and `NewNullifier*` topics.
+    /// Returns JSON `{ "commitments": N, "nullifiers": N }`.
+    pub fn process_pool_events(
+        &mut self,
+        events_json: &str,
+        default_ledger: u32,
+    ) -> Result<String, JsValue> {
+        let events: Vec<StellarEvent> = serde_json::from_str(events_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid pool events JSON: {e}")))?;
+
+        let mut commitments = 0u32;
+        let mut nullifiers = 0u32;
+
+        for event in &events {
+            let topic0 = event
+                .topic
+                .as_ref()
+                .and_then(|t| t.first())
+                .and_then(|v| v.as_str());
+            let ledger = event.ledger.unwrap_or(default_ledger);
+
+            match topic0 {
+                Some(
+                    "NewCommitmentEvent" | "new_commitment_event" | "new_commitment",
+                ) => {
+                    let commitment = event
+                        .topic
+                        .as_ref()
+                        .and_then(|t| t.get(1))
+                        .and_then(normalize_value_to_hex);
+                    let index = event
+                        .value
+                        .as_ref()
+                        .and_then(|v| v.get("index"))
+                        .and_then(|v| v.as_u64())
+                        .map(|i| i as u32);
+                    let enc = event
+                        .value
+                        .as_ref()
+                        .and_then(|v| v.get("encrypted_output"))
+                        .and_then(value_to_hex_string);
+
+                    if let (Some(c), Some(i), Some(e)) = (commitment, index, enc) {
+                        self.pool
+                            .process_new_commitment(&c, i, &e, ledger)
+                            .map_err(err)?;
+                        commitments = commitments.saturating_add(1);
+                    }
+                }
+                Some(
+                    "NewNullifierEvent" | "new_nullifier_event" | "new_nullifier",
+                ) => {
+                    if let Some(nul) = event
+                        .topic
+                        .as_ref()
+                        .and_then(|t| t.get(1))
+                        .and_then(normalize_value_to_hex)
+                    {
+                        self.pool
+                            .process_new_nullifier(&nul, ledger)
+                            .map_err(err)?;
+                        nullifiers = nullifiers.saturating_add(1);
+                    }
+                }
+                _ => {} // skip unknown topics
+            }
+        }
+
+        Ok(serde_json::json!({
+            "commitments": commitments,
+            "nullifiers": nullifiers,
+        })
+        .to_string())
+    }
+
+    /// Processes a batch of ASP Membership contract events (JSON array).
+    /// Handles `LeafAdded` / `leaf_added` topics.  Events are sorted by
+    /// index and already-processed indices are skipped.
+    /// Returns the number of new leaves inserted.
+    pub fn process_asp_membership_events(
+        &mut self,
+        events_json: &str,
+        default_ledger: u32,
+    ) -> Result<u32, JsValue> {
+        let events: Vec<StellarEvent> = serde_json::from_str(events_json)
+            .map_err(|e| JsValue::from_str(&format!("invalid ASP events JSON: {e}")))?;
+
+        // Collect and sort LeafAdded events by index.
+        let mut leaf_events: Vec<(String, u32, String, u32)> = Vec::new();
+
+        for event in &events {
+            let topic0 = event
+                .topic
+                .as_ref()
+                .and_then(|t| t.first())
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            let is_leaf_added = topic0 == "LeafAdded"
+                || topic0 == "leaf_added"
+                || topic0.contains("LeafAdded");
+
+            if !is_leaf_added {
+                continue;
+            }
+
+            let leaf = event
+                .value
+                .as_ref()
+                .and_then(|v| v.get("leaf"))
+                .and_then(normalize_value_to_hex);
+            let index = event
+                .value
+                .as_ref()
+                .and_then(|v| v.get("index"))
+                .and_then(|v| v.as_u64())
+                .map(|i| i as u32);
+            let root = event
+                .value
+                .as_ref()
+                .and_then(|v| v.get("root"))
+                .and_then(normalize_value_to_hex);
+            let ledger = event.ledger.unwrap_or(default_ledger);
+
+            if let (Some(l), Some(i), Some(r)) = (leaf, index, root) {
+                leaf_events.push((l, i, r, ledger));
+            }
+        }
+
+        leaf_events.sort_by_key(|e| e.1);
+
+        // Skip already-processed leaves.
+        let next_idx = self.asp.next_index();
+        let mut count = 0u32;
+
+        for (leaf, index, root, ledger) in &leaf_events {
+            if *index < next_idx {
+                continue;
+            }
+            self.asp
+                .process_leaf_added(leaf, *index, root, *ledger)
+                .map_err(err)?;
+            count = count.saturating_add(1);
+        }
+
+        Ok(count)
     }
 
     // ── ASP Membership ──────────────────────────────────────────────────

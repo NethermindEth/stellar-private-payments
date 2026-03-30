@@ -13,7 +13,6 @@
  *    - Public key derived via Poseidon2(privateKey, 0, domain=0x03)
  *
  * Both key types are recoverable using only the user's Freighter wallet.
- * Storage is delegated to the Rust WASM StateManager.
  *
  * @module state/notes-store
  */
@@ -276,7 +275,7 @@ export async function clear() {
     console.log('[NotesStore] Cleared all notes');
 }
 
-// ── Key derivation (stays in JS — requires Freighter wallet) ────────
+// ── Key derivation (Freighter wallet) ───────────────────────────────
 
 const ENCRYPTION_MESSAGE = "Sign to access Privacy Pool [v1]";
 const SPENDING_KEY_MESSAGE = "Privacy Pool Spending Key [v1]";

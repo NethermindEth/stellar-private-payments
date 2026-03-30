@@ -1,16 +1,12 @@
 /**
  * StateManager - unified API for client-side state management.
- * Coordinates WASM storage, event sync, and merkle tree operations.
- *
- * The Rust WASM StateManager handles all persistent storage and Merkle trees.
- * JS manages events, key derivation (Freighter), RPC calls (Stellar SDK), and UI.
+ * Coordinates storage, event sync, and merkle tree operations.
  *
  * @module state
  */
 
 import * as wasmBridge from './wasm.js';
-import * as poolStore from './pool-store.js';
-import * as aspMembershipStore from './asp-membership-store.js';
+import { get as wasm } from './wasm.js';
 import * as aspNonMembershipFetcher from './asp-non-membership-fetcher.js';
 import * as notesStore from './notes-store.js';
 import * as publicKeyStore from './public-key-store.js';
@@ -29,7 +25,7 @@ let forwardedSyncListeners = [];
 export const StateManager = {
     /**
      * Initializes the state management system.
-     * Loads the WASM module, opens SQLite, detects RPC retention, and wires up events.
+     * Opens the database, detects RPC retention, and wires up events.
      * @returns {Promise<void>}
      */
     async initialize() {
@@ -40,7 +36,6 @@ export const StateManager = {
 
         console.log('[StateManager] Initializing...');
 
-        // Initialize WASM state module (opens SQLite, rebuilds Merkle trees)
         await wasmBridge.init();
 
         // Detect retention window
@@ -48,9 +43,6 @@ export const StateManager = {
         console.log(`[StateManager] RPC retention: ${retentionConfig.description}`);
         emit('retentionDetected', retentionConfig);
 
-        // Sub-store init() are now lightweight (tree already built by WASM constructor)
-        await poolStore.init();
-        await aspMembershipStore.init();
         await publicKeyStore.init();
 
         // Forward sync events
@@ -136,41 +128,62 @@ export const StateManager = {
     // Pool
 
     getPoolRoot() {
-        return poolStore.getRoot();
+        return new Uint8Array(wasm().get_pool_root());
     },
 
     getPoolMerkleProof(leafIndex) {
-        return poolStore.getMerkleProof(leafIndex);
+        try {
+            if (!Number.isInteger(leafIndex) || leafIndex < 0) return null;
+            if (leafIndex >= wasm().get_pool_next_index()) return null;
+            return wasm().get_pool_merkle_proof(leafIndex);
+        } catch (e) {
+            console.error('[StateManager] Failed to get pool merkle proof:', e);
+            return null;
+        }
     },
 
     async isNullifierSpent(nullifier) {
-        return poolStore.isNullifierSpent(nullifier);
+        const hex = typeof nullifier === 'string' ? nullifier : ('0x' + Array.from(nullifier).map(b => b.toString(16).padStart(2, '0')).join(''));
+        return wasm().is_nullifier_spent(hex);
     },
 
     getPoolNextIndex() {
-        return poolStore.getNextIndex();
+        return wasm().get_pool_next_index();
     },
 
     async rebuildPoolTree() {
-        return poolStore.rebuildTree();
+        return wasm().rebuild_pool_tree();
     },
 
     // ASP Membership
 
     getASPMembershipRoot() {
-        return aspMembershipStore.getRoot();
+        return new Uint8Array(wasm().get_asp_membership_root());
     },
 
     async getASPMembershipProof(leafIndex) {
-        return aspMembershipStore.getMerkleProof(leafIndex);
+        try {
+            if (!Number.isInteger(leafIndex) || leafIndex < 0) return null;
+            if (leafIndex >= wasm().get_asp_membership_next_index()) return null;
+            return wasm().get_asp_membership_proof(leafIndex);
+        } catch (e) {
+            console.error('[StateManager] Failed to get ASP membership proof:', e);
+            return null;
+        }
     },
 
     async findASPMembershipLeaf(leafHash) {
-        return aspMembershipStore.findLeafByHash(leafHash);
+        try {
+            const hex = typeof leafHash === 'string' ? leafHash : ('0x' + Array.from(leafHash).map(b => b.toString(16).padStart(2, '0')).join(''));
+            return JSON.parse(wasm().find_asp_membership_leaf(hex));
+        } catch (e) {
+            console.error('[StateManager] Failed to find ASP membership leaf:', e);
+            return null;
+        }
     },
 
     async getASPMembershipLeafCount() {
-        return aspMembershipStore.getLeafCount();
+        return wasm().get_asp_membership_leaf_count();
     },
 
     // ASP Non-Membership (on-demand, pure RPC)
@@ -285,11 +298,7 @@ export const StateManager = {
 
     async forceResetDatabase() {
         console.log('[StateManager] Force resetting database...');
-        const w = wasmBridge.get();
-        w.clear_all();
-        // Sub-store init after reset
-        await poolStore.init();
-        await aspMembershipStore.init();
+        wasm().clear_all();
         await publicKeyStore.init();
         console.log('[StateManager] Database force reset complete - sync required');
     },
@@ -322,4 +331,4 @@ function emit(event, data) {
 export default StateManager;
 
 // Re-export sub-modules for direct access if needed
-export { poolStore, aspMembershipStore, aspNonMembershipFetcher, notesStore, publicKeyStore, syncController, noteScanner };
+export { aspNonMembershipFetcher, notesStore, publicKeyStore, syncController, noteScanner };
