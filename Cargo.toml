@@ -1,6 +1,8 @@
 [workspace]
 members = [
+    "app/crates/wasm_facade",
     "app/crates/prover",
+    "app/crates/state",
     "app/crates/witness",
     "circuits",
     "contracts/*",

@@ -15,12 +15,6 @@ use wasmer::{Module, Store};
 const BN254_FIELD_MODULUS: &str =
     "21888242871839275222246405745257275088548364400416034343698204186575808495617";
 
-/// Initialize the WASM module
-#[wasm_bindgen(start)]
-pub fn init() {
-    console_error_panic_hook::set_once();
-}
-
 /// Get module version
 #[wasm_bindgen]
 pub fn version() -> String {

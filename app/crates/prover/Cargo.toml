@@ -7,9 +7,6 @@ license.workspace = true
 publish.workspace = true
 description = "Browser WASM module for ZK proof generation using Groth16"
 
-[lib]
-crate-type = ["cdylib", "rlib"]
-
 [dependencies]
 # Arkworks ZK proving
 ark-bn254 = { workspace = true }
