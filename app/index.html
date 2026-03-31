@@ -7,30 +7,30 @@
     <meta name="keywords" content="Stellar, privacy, blockchain, zero-knowledge proofs, payments, ZK, cryptocurrency, membership policy">
     <meta name="author" content="PoolStellar">
     <meta name="robots" content="index, follow">
-    
+
     <!-- Open Graph / Social Media -->
     <meta property="og:type" content="website">
     <meta property="og:title" content="PoolStellar - Private Payment System">
     <meta property="og:description" content="Privacy-preserving payments on Stellar with zero-knowledge proofs.">
     <meta property="og:image" content="/assets/og-image.png">
     <meta name="twitter:card" content="summary_large_image">
-    
+
     <!-- Favicon -->
     <link rel="icon" type="image/svg+xml" href="assets/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
-    
+
     <title>PoolStellar - Private Payment System</title>
-    
+
     <!-- Tailwind CSS -->
     <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
-    
+
     <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 
-    <link data-trunk rel="rust" href="crates/app-wasm" data-target-path="js" data-wasm-opt="0" />
+    <link data-trunk rel="rust" href="crates/wasm_facade" data-target-path="js" data-wasm-opt="0" />
     <link data-trunk rel="copy-dir" href="assets/" />
 </head>
 <body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
@@ -40,7 +40,7 @@
     </a>
 
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-6 flex flex-col gap-4 sm:gap-6 min-h-screen">
-        
+
         <!-- Header -->
         <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-visible relative z-50" role="banner">
             <div class="flex items-center gap-3">
@@ -61,7 +61,7 @@
                     <span id="network-name">Network</span>
                 </div>
                 <div class="relative overflow-visible" id="wallet-container">
-                    <button 
+                    <button
                         type="button"
                         id="wallet-btn"
                         class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
@@ -80,9 +80,9 @@
                             <path d="M6 9l6 6 6-6"/>
                         </svg>
                     </button>
-                    
+
                     <!-- Wallet Dropdown Menu -->
-                    <div 
+                    <div
                         id="wallet-dropdown"
                         class="absolute top-full right-0 mt-2 w-56 bg-dark-800 border border-dark-700 rounded-lg shadow-xl z-[100] hidden"
                         role="menu"
@@ -93,7 +93,7 @@
                             <p id="wallet-dropdown-address" class="font-mono text-xs text-dark-300 px-2 truncate"></p>
                         </div>
                         <div class="p-1">
-                            <button 
+                            <button
                                 type="button"
                                 id="wallet-register-btn"
                                 class="w-full flex items-center gap-2 px-3 py-2 text-sm text-dark-300 hover:bg-dark-700 hover:text-brand-400 rounded transition-colors"
@@ -106,7 +106,7 @@
                                 </svg>
                                 Register Public Key
                             </button>
-                            <button 
+                            <button
                                 type="button"
                                 id="wallet-disconnect-btn"
                                 class="w-full flex items-center gap-2 px-3 py-2 text-sm text-dark-300 hover:bg-dark-700 hover:text-red-400 rounded transition-colors"
@@ -127,14 +127,14 @@
 
         <!-- Main Content -->
         <main id="main-content" class="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-4 sm:gap-6">
-            
+
             <!-- Transaction Panel -->
             <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="transaction-heading">
                 <h2 id="transaction-heading" class="sr-only">Transaction Controls</h2>
-                
+
                 <!-- Tab Navigation -->
                 <nav class="flex p-1.5 gap-1 bg-dark-900 border-b border-dark-800" role="tablist" aria-label="Transaction type">
-                    <button 
+                    <button
                         type="button"
                         role="tab"
                         id="tab-deposit"
@@ -148,7 +148,7 @@
                         </svg>
                         Deposit
                     </button>
-                    <button 
+                    <button
                         type="button"
                         role="tab"
                         id="tab-withdraw"
@@ -162,7 +162,7 @@
                         </svg>
                         Withdraw
                     </button>
-                    <button 
+                    <button
                         type="button"
                         role="tab"
                         id="tab-transfer"
@@ -176,7 +176,7 @@
                         </svg>
                         Transfer
                     </button>
-                    <button 
+                    <button
                         type="button"
                         role="tab"
                         id="tab-transact"
@@ -196,9 +196,9 @@
 
                 <!-- Tab Panels -->
                 <div class="p-4 sm:p-6">
-                    
+
                     <!-- Deposit Panel -->
-                    <article 
+                    <article
                         role="tabpanel"
                         id="panel-deposit"
                         aria-labelledby="tab-deposit"
@@ -210,7 +210,7 @@
                                 XLM Amount to Deposit
                             </label>
                             <div class="flex items-center gap-4">
-                                <input 
+                                <input
                                     type="range"
                                     id="deposit-slider"
                                     min="0"
@@ -221,7 +221,7 @@
                                     aria-label="Deposit amount slider"
                                 >
                                 <div class="relative">
-                                    <input 
+                                    <input
                                         type="number"
                                         id="deposit-amount"
                                         value="10"
@@ -272,7 +272,7 @@
                                 <label for="deposit-membership-blinding" class="block text-xs text-dark-400 mb-1">
                                     Membership Blinding <span class="text-dark-500">(used when your key was registered)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="deposit-membership-blinding"
                                     value="0"
@@ -285,7 +285,7 @@
                         </fieldset>
 
                         <!-- Submit Button -->
-                        <button 
+                        <button
                             type="button"
                             id="btn-deposit"
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -299,7 +299,7 @@
                     </article>
 
                     <!-- Withdraw Panel -->
-                    <article 
+                    <article
                         role="tabpanel"
                         id="panel-withdraw"
                         aria-labelledby="tab-withdraw"
@@ -328,7 +328,7 @@
                             <label for="withdraw-recipient" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
                                 Recipient Address
                             </label>
-                            <input 
+                            <input
                                 type="text"
                                 id="withdraw-recipient"
                                 placeholder="G..."
@@ -347,7 +347,7 @@
                                 <label for="withdraw-membership-blinding" class="block text-xs text-dark-400 mb-1">
                                     Membership Blinding <span class="text-dark-500">(used when your key was registered)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="withdraw-membership-blinding"
                                     value="0"
@@ -360,7 +360,7 @@
                         </fieldset>
 
                         <!-- Submit Button -->
-                        <button 
+                        <button
                             type="button"
                             id="btn-withdraw"
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -374,7 +374,7 @@
                     </article>
 
                     <!-- Transfer Panel -->
-                    <article 
+                    <article
                         role="tabpanel"
                         id="panel-transfer"
                         aria-labelledby="tab-transfer"
@@ -384,7 +384,7 @@
                         <div class="space-y-4">
                             <div class="flex items-center justify-between">
                                 <h4 class="text-xs font-medium text-dark-400 uppercase tracking-wide">Recipient Keys</h4>
-                                <button 
+                                <button
                                     type="button"
                                     id="transfer-addressbook-btn"
                                     class="p-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-dark-400 hover:text-brand-500 transition-colors"
@@ -394,13 +394,13 @@
                                     <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
                                 </button>
                             </div>
-                            
+
                             <!-- Note Key (BN254) - used for commitment -->
                             <div>
                                 <label for="transfer-recipient-key" class="block text-xs font-medium text-dark-400 mb-1.5">
                                     Note Key <span class="text-dark-500">(BN254)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="transfer-recipient-key"
                                     placeholder="0x... (64 hex characters)"
@@ -410,13 +410,13 @@
                                 >
                                 <p class="text-[10px] text-dark-500 mt-1">Used to create the note commitment (recipient proves ownership)</p>
                             </div>
-                            
+
                             <!-- Encryption Key (X25519) - used for encrypting note data -->
                             <div>
                                 <label for="transfer-recipient-enc-key" class="block text-xs font-medium text-dark-400 mb-1.5">
                                     Encryption Key <span class="text-dark-500">(X25519)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="transfer-recipient-enc-key"
                                     placeholder="0x... (64 hex characters)"
@@ -471,7 +471,7 @@
                                 <label for="transfer-membership-blinding" class="block text-xs text-dark-400 mb-1">
                                     Membership Blinding <span class="text-dark-500">(used when your key was registered)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="transfer-membership-blinding"
                                     value="0"
@@ -484,7 +484,7 @@
                         </fieldset>
 
                         <!-- Submit Button -->
-                        <button 
+                        <button
                             type="button"
                             id="btn-transfer"
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -498,7 +498,7 @@
                     </article>
 
                     <!-- Transact Panel -->
-                    <article 
+                    <article
                         role="tabpanel"
                         id="panel-transact"
                         aria-labelledby="tab-transact"
@@ -510,7 +510,7 @@
                                 Public Amount <span class="normal-case text-dark-500">(+ deposit, − withdraw)</span>
                             </label>
                             <div class="flex items-center gap-4">
-                                <input 
+                                <input
                                     type="range"
                                     id="transact-slider"
                                     min="-500"
@@ -522,7 +522,7 @@
                                 >
                                 <div class="flex items-center gap-2">
                                     <div class="relative">
-                                        <input 
+                                        <input
                                             type="number"
                                             id="transact-amount"
                                             value="0"
@@ -584,7 +584,7 @@
                             <label for="transact-recipient" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
                                 Withdrawal Recipient <span class="normal-case text-dark-500">(for public amount if negative)</span>
                             </label>
-                            <input 
+                            <input
                                 type="text"
                                 id="transact-recipient"
                                 placeholder="G..."
@@ -603,7 +603,7 @@
                                 <label for="transact-membership-blinding" class="block text-xs text-dark-400 mb-1">
                                     Membership Blinding <span class="text-dark-500">(used when your key was registered)</span>
                                 </label>
-                                <input 
+                                <input
                                     type="text"
                                     id="transact-membership-blinding"
                                     value="0"
@@ -616,7 +616,7 @@
                         </fieldset>
 
                         <!-- Submit Button -->
-                        <button 
+                        <button
                             type="button"
                             id="btn-transact"
                             class="w-full flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-brand-500 to-brand-600 hover:from-brand-400 hover:to-brand-500 text-dark-950 font-semibold rounded-lg shadow-lg shadow-brand-500/25 transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950 disabled:opacity-50 disabled:cursor-not-allowed"
@@ -633,7 +633,7 @@
 
             <!-- Sidebar -->
             <aside class="flex flex-col gap-4 sm:gap-6 lg:sticky lg:top-6 lg:self-start">
-                
+
                 <!-- Contract State Panel -->
                 <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="contract-state-heading">
                     <header class="flex items-center justify-between px-4 py-3 bg-dark-900 border-b border-dark-800">
@@ -649,7 +649,7 @@
                             On-Chain State
                         </h3>
                         <div class="flex items-center gap-1">
-                            <button 
+                            <button
                                 type="button"
                                 id="btn-refresh-state"
                                 class="p-1.5 text-dark-400 hover:text-brand-500 transition-colors"
@@ -662,7 +662,7 @@
                                     <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                                 </svg>
                             </button>
-                            <button 
+                            <button
                                 type="button"
                                 id="btn-scan-notes"
                                 class="p-1.5 text-dark-400 hover:text-purple-500 transition-colors"
@@ -675,7 +675,7 @@
                                     <path d="M11 8v6M8 11h6"/>
                                 </svg>
                             </button>
-                            <button 
+                            <button
                                 type="button"
                                 id="btn-force-resync"
                                 class="p-1.5 text-dark-500 hover:text-orange-500 transition-colors"
@@ -827,10 +827,10 @@
         <!-- Notes & Address Book Section -->
         <section class="flex-1 flex flex-col bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-hidden" aria-labelledby="notes-section-heading">
             <h2 id="notes-section-heading" class="sr-only">Notes and Address Book</h2>
-            
+
             <!-- Section Tab Navigation -->
             <nav class="flex p-1.5 gap-1 bg-dark-900 border-b border-dark-800" role="tablist" aria-label="Notes section">
-                <button 
+                <button
                     type="button"
                     role="tab"
                     id="section-tab-notes"
@@ -847,7 +847,7 @@
                     </svg>
                     Your Notes
                 </button>
-                <button 
+                <button
                     type="button"
                     role="tab"
                     id="section-tab-addressbook"
@@ -867,7 +867,7 @@
             </nav>
 
             <!-- Notes Panel -->
-            <article 
+            <article
                 role="tabpanel"
                 id="section-panel-notes"
                 aria-labelledby="section-tab-notes"
@@ -909,7 +909,7 @@
             </article>
 
             <!-- Address Book Panel -->
-            <article 
+            <article
                 role="tabpanel"
                 id="section-panel-addressbook"
                 aria-labelledby="section-tab-addressbook"
@@ -921,7 +921,7 @@
                     </h3>
                     <div class="flex items-center gap-2">
                         <div class="relative">
-                            <input 
+                            <input
                                 type="text"
                                 id="addressbook-search"
                                 placeholder="Search by address (G...)"
@@ -930,8 +930,8 @@
                                 spellcheck="false"
                                 title="Type a full address or partial prefix to filter"
                             >
-                            <button 
-                                type="button" 
+                            <button
+                                type="button"
                                 id="addressbook-search-btn"
                                 class="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 text-dark-500 hover:text-brand-500 transition-colors"
                                 title="Search"
@@ -943,8 +943,8 @@
                                 </svg>
                             </button>
                         </div>
-                        <button 
-                            type="button" 
+                        <button
+                            type="button"
                             id="addressbook-refresh-btn"
                             class="p-1.5 text-dark-400 hover:text-brand-500 transition-colors"
                             title="Refresh"
@@ -955,11 +955,11 @@
                                 <path d="M1 20v-6h6"/>
                                 <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
                             </svg>
-                            
+
                         </button>
                     </div>
                 </header>
-                
+
                 <!-- Registration hint -->
                 <div class="px-4 py-2 bg-dark-800/50 border-b border-dark-800">
                     <p class="text-xs text-dark-400">
@@ -971,7 +971,7 @@
                         Want others to find your public key? <span class="text-brand-400">Register your key</span> from the wallet menu to appear in address books.
                     </p>
                 </div>
-                
+
                 <div class="flex-1 overflow-auto min-h-[200px]">
                     <table class="w-full min-w-[700px]" aria-describedby="section-tab-addressbook">
                         <thead class="bg-dark-800 sticky top-0">
@@ -1019,12 +1019,12 @@
     </div>
 
     <!-- Templates -->
-    
+
     <!-- Deposit/Transact Output Row Template -->
     <template id="tpl-output-row">
         <div class="output-row flex flex-wrap items-center gap-2 p-2 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
             <div class="relative flex-shrink-0">
-                <input 
+                <input
                     type="number"
                     class="output-amount w-20 px-2 py-1.5 pr-6 bg-dark-700 border border-dark-600 rounded text-right font-mono text-sm focus:outline-none focus:border-brand-500"
                     value="0"
@@ -1042,7 +1042,7 @@
                 </div>
             </div>
             <span class="dummy-badge hidden text-[10px] font-semibold px-2 py-1 bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded uppercase tracking-wide">Dummy</span>
-            <input 
+            <input
                 type="text"
                 class="output-note-id flex-1 min-w-[120px] px-2 py-1.5 bg-dark-900 border border-dark-700 rounded font-mono text-xs text-brand-400 focus:outline-none"
                 placeholder="Note ID..."
@@ -1062,7 +1062,7 @@
     <template id="tpl-input-row">
         <div class="input-row flex flex-wrap items-center gap-2 p-2 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
             <div class="flex-1 min-w-[200px] relative">
-                <input 
+                <input
                     type="text"
                     class="note-input w-full px-3 py-2 pr-10 bg-dark-700 border border-dark-600 rounded font-mono text-sm focus:outline-none focus:border-brand-500 placeholder:font-sans placeholder:text-dark-500"
                     placeholder="Paste or upload Note ID"
@@ -1164,7 +1164,7 @@
         <div class="advanced-output-row space-y-2 p-3 bg-dark-800 border border-dark-700 rounded-lg" data-index="">
             <div class="flex flex-wrap items-center gap-2">
                 <div class="relative flex-shrink-0">
-                    <input 
+                    <input
                         type="number"
                         class="output-amount w-20 px-2 py-1.5 pr-6 bg-dark-700 border border-dark-600 rounded text-right font-mono text-sm focus:outline-none focus:border-brand-500"
                         value="0"
@@ -1182,7 +1182,7 @@
                     </div>
                 </div>
                 <span class="dummy-badge hidden text-[10px] font-semibold px-2 py-1 bg-brand-500/20 text-brand-400 border border-brand-500/30 rounded uppercase tracking-wide">Dummy</span>
-                <input 
+                <input
                     type="text"
                     class="output-note-id flex-1 min-w-[100px] px-2 py-1.5 bg-dark-900 border border-dark-700 rounded font-mono text-xs text-brand-400 focus:outline-none"
                     placeholder="Note ID..."
@@ -1199,7 +1199,7 @@
             <div class="space-y-1.5">
                 <div class="flex items-center gap-2">
                     <label class="text-xs text-dark-500 flex-shrink-0 w-16">Note key:</label>
-                    <input 
+                    <input
                         type="text"
                         class="output-note-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
                         placeholder="BN254 key (leave empty for self)"
@@ -1212,7 +1212,7 @@
                 </div>
                 <div class="flex items-center gap-2">
                     <label class="text-xs text-dark-500 flex-shrink-0 w-16">Enc key:</label>
-                    <input 
+                    <input
                         type="text"
                         class="output-enc-key flex-1 px-2 py-1 bg-dark-700 border border-dark-600 rounded font-mono text-xs focus:outline-none focus:border-brand-500 placeholder:text-dark-500 placeholder:font-sans"
                         placeholder="X25519 key (leave empty for self)"
