@@ -1,6 +1,5 @@
 //! Unified WASM facade for the app crates.
 use log::{info, error, debug};
-use env_logger::Env;
 use stellar::Client;
 use types::ContractConfig;
 use anyhow::Result;
@@ -13,15 +12,15 @@ const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy
 
 /// Install a panic hook for clearer browser-side failures.
 #[wasm_bindgen]
-pub fn init_facade() {
+pub async fn init_facade() {
     console_error_panic_hook::set_once();
-    env_logger::Builder::from_env(Env::default().default_filter_or("debug")).init();
+    wasm_log::init(wasm_log::Config::default());
 
     let client = Client::new("https://soroban-testnet.stellar.org");
     let config: ContractConfig = serde_json::from_str(DEPLOYMENT)
             .expect("JSON was not well-formatted or did not match struct");
 
-    debug!("init wasm facade");
+    info!("init wasm facade");
 
 }
 
