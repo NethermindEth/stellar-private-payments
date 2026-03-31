@@ -12,6 +12,8 @@ anyhow = { workspace = true }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 rusqlite_migration = { version = "2.5.0", default-features = false }
 serde = { workspace = true }
+stellar = { path = "../stellar" }
+types = { path = "../types" }
 
 #[lints]
 #workspace = true
