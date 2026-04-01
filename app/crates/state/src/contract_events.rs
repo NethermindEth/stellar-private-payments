@@ -1,9 +1,5 @@
 
 
-
-//pub async fn all_contracts_data(client: &stellar::Client, config: &types::ContractConfig) -> Result<ContractsData> {
-
-
 // ASP membership
 // Event emitted when a new leaf is added to the Merkle tree
 // #[contractevent(topics = ["LeafAdded"])]
@@ -88,3 +84,12 @@
 //     topic: event.topic.map(t => scValToNative(xdr.ScVal.fromXDR(t, 'base64'))),
 //     value: scValToNative(xdr.ScVal.fromXDR(event.value, 'base64')),
 // }));
+//
+pub struct EventData {
+    pub id: String,
+    pub ledger: u32,
+    pub typ: String,
+    pub contract_id: String,
+    pub topic: String,
+    pub value: String,
+}

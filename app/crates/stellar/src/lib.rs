@@ -19,5 +19,7 @@
 //     }
 // };
 mod rpc;
+mod conversions;
 
-pub use rpc::{Client, scval_to_address_string, scval_to_u256, scval_to_u32, scval_to_u64, scval_to_bool};
+pub use rpc::{Client, Error, Event};
+pub use conversions::{scval_to_address_string, scval_to_u256, scval_to_u32, scval_to_u64, scval_to_bool};

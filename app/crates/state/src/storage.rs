@@ -22,6 +22,59 @@ impl Storage {
         Ok(Self { conn })
     }
 
+    pub fn save_events_batch(&self, cursor: Option<String>, events: &[stellar::Event]) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO events (id, ledger, type, contract_id, topic, value)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(id) DO NOTHING"
+            )?;
+
+            for event in events {
+                if let Some(topic) = event.topic.first() {
+                    stmt.execute(params![
+                        event.id,
+                        event.ledger,
+                        event.event_type,
+                        event.contract_id,
+                        topic,
+                        event.value
+                    ])?;
+                } else {
+                    log::warn!("Event {} emitted by contract {} contains no topics", event.id, event.contract_id);
+                }
+            }
+
+            if let Some(cursor) = cursor {
+                tx.execute(
+                    "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor) VALUES (1, ?1)",
+                    params![cursor],
+                )?;
+            }
+        }
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    pub fn get_synced_ledger_and_cursor(conn: &Connection) -> Result<(Option<u32>, Option<String>)> {
+        let mut stmt = conn.prepare(
+            "SELECT MAX(e.ledger), m.last_cursor
+             FROM events e
+             CROSS JOIN indexing_metadata m
+             WHERE m.id = 1"
+        )?;
+
+        let status = stmt.query_row([], |row| {
+            let ledger: Option<u32> = row.get(0)?;
+            let cursor: Option<String> = row.get(1)?;
+            Ok((ledger, cursor))
+        })?;
+
+        Ok(status)
+    }
+
     // -----------------------------------------------------------------------
     // pool_leaves
     // -----------------------------------------------------------------------
