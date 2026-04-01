@@ -3,6 +3,8 @@ use log::{info, error, debug};
 use stellar::Client;
 use types::ContractConfig;
 use anyhow::Result;
+use state::Storage;
+use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 
 use wasm_bindgen::prelude::*;
 
@@ -15,6 +17,14 @@ const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy
 pub async fn init_facade() {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
+    install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
+            .await
+            .unwrap();
+
+    let mut storage = Storage::connect().unwrap();
+    let leaf = types::PoolLeaf{index: 1, commitment: "ss".to_string(), ledger: 3};
+    //storage.put_pool_leaf(&leaf).unwrap();
+    info!("== pool leaves {}", storage.count_pool_leaves().unwrap());
 
     let client = Client::new("https://soroban-testnet.stellar.org").unwrap();
     let config: ContractConfig = serde_json::from_str(DEPLOYMENT)

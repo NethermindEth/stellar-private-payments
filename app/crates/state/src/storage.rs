@@ -69,14 +69,14 @@ impl Storage {
     //     Ok(())
     // }
 
-    // /// Returns the total number of pool leaves.
-    // pub fn count_pool_leaves(&self) -> Result<u32> {
-    //     let n: i64 = self
-    //         .conn
-    //         .query_row("SELECT COUNT(*) FROM pool_leaves", [], |row| row.get(0))
-    //         .context("count_pool_leaves")?;
-    //     u32::try_from(n).context("count overflow")
-    // }
+    /// Returns the total number of pool leaves.
+    pub fn count_pool_leaves(&self) -> Result<u32> {
+        let n: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM pool_leaves", [], |row| row.get(0))
+            .context("count_pool_leaves")?;
+        u32::try_from(n).context("count overflow")
+    }
 
     // /// Inserts or replaces a batch of pool leaves in a single transaction.
     // pub fn put_pool_leaves_batch(&self, leaves: &[PoolLeaf]) -> anyhow::Result<()> {
