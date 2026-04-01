@@ -9,6 +9,7 @@ publish.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+num-bigint = { workspace = true }
 stellar-strkey = "0.0.15"
 stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
 thiserror = "1.0.46"

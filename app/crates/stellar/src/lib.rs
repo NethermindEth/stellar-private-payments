@@ -20,4 +20,4 @@
 // };
 mod rpc;
 
-pub use rpc::Client;
+pub use rpc::{Client, scval_to_address_string, scval_to_u256, scval_to_u32, scval_to_u64, scval_to_bool};
