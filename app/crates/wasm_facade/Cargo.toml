@@ -15,6 +15,8 @@ anyhow = { workspace = true }
 log = "0.4"
 wasm-log = "0.3"
 console_error_panic_hook = { workspace = true }
+sqlite-wasm-rs = { version = "0.5.2", default-features = false }
+sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 prover = { path = "../prover" }
 state = { path = "../state" }
