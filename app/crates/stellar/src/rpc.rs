@@ -6,12 +6,10 @@ use http::{uri::Authority, Uri};
 use serde_aux::prelude::{
     deserialize_default_from_null,
 };
-use stellar_strkey::ed25519;
 use stellar_xdr::curr::{
     self as xdr, Error as XdrError, LedgerEntryData,
     LedgerKey, Limits, ReadXdr, WriteXdr, ContractId
 };
-use num_bigint::BigUint;
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -37,6 +35,8 @@ pub enum Error {
     DuplicateContractKey(String),
     #[error("Unexpected ScVal: {0:?}")]
     UnexpectedScVal(String),
+    #[error("RPC sync gap - the oldest ledger is: {0:?}")]
+    RpcSyncGap(u32),
 }
 
 // JSON-RPC Plumbing
@@ -235,6 +235,44 @@ impl Client {
         resp.result.ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
     }
 
+    pub async fn get_contract_events(
+        &self,
+        contract_ids: &[String],
+        start_ledger: u32,
+        page_size: usize,
+        cursor: Option<String>
+    ) -> Result<(Option<String>, Vec<Event>, u32), Error> {
+
+        let start = cursor
+            .as_ref()
+            .map(|c| EventStart::Cursor(c.clone()))
+            .unwrap_or(EventStart::Ledger(start_ledger));
+
+        let mut resp = match self.get_events(
+                start,
+                Some(EventType::Contract),
+                contract_ids,
+                &[vec!["**".to_string()]],
+                Some(page_size),
+            )
+            .await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                if let Error::JsonRpcError { message, .. } = &e {
+                    if let Some(range) = parse_ledger_range(message) {
+                        if start_ledger < range.0 {
+                            return Err(Error::RpcSyncGap(range.0));
+                        }
+                    }
+                }
+                return Err(e);
+            }
+        };
+
+        Ok((Some(resp.cursor), std::mem::take(&mut resp.events), resp.latest_ledger))
+    }
+
     pub async fn get_events(
         &self,
         start: EventStart,
@@ -369,6 +407,22 @@ impl Client {
     }
 }
 
+// Handle retention-window drift: if start is just below current oldest,
+// clamp to RPC-reported oldest and continue instead of failing sync.
+// helper to parse "ledger range: 123 - 456" from the RPC message
+fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
+    let parts: Vec<&str> = message.split("c").collect();
+    if parts.len() != 2 {
+        return None;
+    }
+    let range = parts[1].trim();
+    if let Some((start, end)) = range.split_once('-') {
+        let start = start.trim().parse().ok()?;
+        let end = end.trim().parse().ok()?;
+        return Some((start, end));
+    }
+    None
+}
 
 fn extract_symbol_from_val(key: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::Vec(Some(sc_vec)) = key {
@@ -381,66 +435,4 @@ fn extract_symbol_from_val(key: &xdr::ScVal) -> Result<String, Error> {
     }
 
     Err(Error::UnexpectedScVal("Structure {key:?} did not match ScVal::Vec(ScVal::Symbol)".to_string()))
-}
-
-/// Helper to convert ScVal Address to G... or C... string
-pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
-    if let xdr::ScVal::Address(addr) = val {
-        match addr {
-            xdr::ScAddress::Account(account_id) => {
-                // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant -> Uint256
-                let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(bytes)) = &account_id.0;
-                Ok(ed25519::PublicKey(*bytes).to_string())
-            }
-            xdr::ScAddress::Contract(contract_id) => {
-                let bytes = contract_id.0.0;
-                Ok(stellar_strkey::Contract(bytes).to_string())
-            }
-            // Handling MuxedAccount, ClaimableBalance, and LiquidityPool
-            _ => Err(Error::UnexpectedScVal(format!("Unsupported Address type: {addr:?}"))),
-        }
-    } else {
-        Err(Error::UnexpectedScVal(format!("{val:?}")))
-    }
-}
-
-/// Helper to convert U256Parts to BigUint
-pub fn scval_to_u256(val: &xdr::ScVal) -> Result<BigUint, Error> {
-    if let xdr::ScVal::U256(parts) = val {
-        let hi_hi = BigUint::from(parts.hi_hi);
-        let hi_lo = BigUint::from(parts.hi_lo);
-        let lo_hi = BigUint::from(parts.lo_hi);
-        let lo_lo = BigUint::from(parts.lo_lo);
-
-        let total: BigUint = (hi_hi << 192) + (hi_lo << 128) + (lo_hi << 64) + lo_lo;
-
-        Ok(total)
-    } else {
-        Err(Error::UnexpectedScVal(format!("{val:?}")))
-    }
-}
-
-pub fn scval_to_u32(val: &xdr::ScVal) -> Result<u32, Error> {
-    if let xdr::ScVal::U32(n) = val {
-        Ok(*n)
-    } else {
-        Err(Error::UnexpectedScVal(format!("{val:?}")))
-    }
-}
-
-pub fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
-    if let xdr::ScVal::U64(n) = val {
-        Ok(*n)
-    } else {
-        Err(Error::UnexpectedScVal(format!("{val:?}")))
-    }
-}
-
-
-pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
-    if let xdr::ScVal::Bool(n) = val {
-        Ok(*n)
-    } else {
-        Err(Error::UnexpectedScVal(format!("{val:?}")))
-    }
 }
