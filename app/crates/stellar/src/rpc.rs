@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;
+use std::collections::HashMap;
 use http::{uri::Authority, Uri};
 use serde_aux::prelude::{
     deserialize_default_from_null, deserialize_number_from_string,
@@ -13,6 +14,8 @@ use stellar_xdr::curr::{
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error(transparent)]
+    InvalidAddress(#[from] stellar_strkey::DecodeError),
     #[error("network error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
@@ -29,6 +32,8 @@ pub enum Error {
     NotFound(String, String),
     #[error("unexpected contract code data type: {0:?}")]
     UnexpectedContractCodeDataType(LedgerEntryData),
+    #[error("Duplicate key found in contract data: {0}")]
+    DuplicateContractKey(String),
 }
 
 // JSON-RPC Plumbing
@@ -295,10 +300,14 @@ impl Client {
 
     pub async fn get_contract_data(
         &self,
-        contract_id: &[u8; 32],
-        enum_keys: &[String],
-    ) -> Result<ContractDataEntry, Error> {
-        let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(*contract_id)));
+        contract_id: &str,
+        enum_keys: &[&str],
+        valued_keys: &[(&str, u32)]
+    ) -> Result<HashMap<String, xdr::ScVal>, Error> {
+        let contract = stellar_strkey::Contract::from_str(contract_id)
+                .map_err(|e| Error::InvalidAddress(e))?;
+
+        let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
 
         let contract_key = LedgerKey::ContractData(xdr::LedgerKeyContractData {
             contract: contract_address.clone(),
@@ -306,11 +315,23 @@ impl Client {
             durability: xdr::ContractDataDurability::Persistent,
         });
 
-        let mut keys = vec![contract_key];
+        let mut keys = Vec::with_capacity(1 + enum_keys.len() + valued_keys.len());
+        keys.push(contract_key);
 
         for variant in enum_keys {
-            let symbol = xdr::ScSymbol::try_from(variant.as_str()).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let symbol = xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
             let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
+
+            keys.push(LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                contract: contract_address.clone(),
+                key: xdr::ScVal::Vec(Some(sc_vec)),
+                durability: xdr::ContractDataDurability::Persistent,
+            }));
+        }
+
+        for (variant, value) in valued_keys {
+            let symbol = xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
 
             keys.push(LedgerKey::ContractData(xdr::LedgerKeyContractData {
                 contract: contract_address.clone(),
@@ -323,14 +344,23 @@ impl Client {
         let entries = response.entries.unwrap_or_default();
 
         if entries.is_empty() {
-            let addr_str = stellar_strkey::Contract(*contract_id).to_string();
+            let addr_str = stellar_strkey::Contract(contract.0).to_string();
             return Err(Error::NotFound("Contract/Keys".to_string(), addr_str));
         }
 
-        let entry_xdr = &entries[0].xdr;
-        match LedgerEntryData::from_xdr_base64(entry_xdr, Limits::none())? {
-            LedgerEntryData::ContractData(contract_data) => Ok(contract_data),
-            scval => Err(Error::UnexpectedContractCodeDataType(scval)),
+        let mut results_map = HashMap::new();
+
+        for entry in entries {
+            match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())? {
+                LedgerEntryData::ContractData(data) => {
+                    let key_name = format!("{:?}", data.key);
+                    if results_map.insert(key_name.clone(), data.val).is_some() {
+                        return Err(Error::DuplicateContractKey(key_name));
+                    }
+                }
+                _ => continue,
+            }
         }
+        Ok(results_map)
     }
 }
