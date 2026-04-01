@@ -4,12 +4,11 @@ use std::str::FromStr;
 use std::collections::HashMap;
 use http::{uri::Authority, Uri};
 use serde_aux::prelude::{
-    deserialize_default_from_null, deserialize_number_from_string,
-    deserialize_option_number_from_string,
+    deserialize_default_from_null,
 };
 use stellar_strkey::ed25519;
 use stellar_xdr::curr::{
-    self as xdr, ContractDataEntry, Error as XdrError, LedgerEntryData,
+    self as xdr, Error as XdrError, LedgerEntryData,
     LedgerKey, Limits, ReadXdr, WriteXdr, ContractId
 };
 use num_bigint::BigUint;
@@ -248,7 +247,7 @@ impl Client {
 
         event_type
             .and_then(|t| match t {
-                EventType::All => None, // all is the default, so avoid incl. the param
+                EventType::All => None,
                 EventType::Contract => Some("contract"),
                 EventType::System => Some("system"),
             })
