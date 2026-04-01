@@ -13,6 +13,41 @@ pub struct ContractConfig {
     pub initialized: bool,
 }
 
+// const dataKeys = ['Admin', 'Token', 'Verifier', 'ASPMembership', 'ASPNonMembership'];
+// const merkleKeys = ['Levels', 'CurrentRootIndex', 'NextIndex'];
+// maximumDepositAmount
+//     results.merkleRoot = formatU256(rootResult.value);
+//     results.merkleRootRaw = rootResult.value;
+
+//     if (results.merkleLevels !== undefined) {
+//         results.merkleCapacity = Math.pow(2, results.merkleLevels);
+//         results.totalCommitments = results.merkleNextIndex || 0;
+//     }
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct PoolContractState {
+
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ASPMembershipContractState {
+//     root
+//     root_raw
+//     levels
+//     next_index
+//     admin
+//     admin_insert_only // todo safe default to suppose to true if not present
+//     capacity:
+//     used_slots
+// }
+//
+// #[derive(Debug, Clone, Serialize, Deserialize)]
+// pub struct ASPNonMembershipContractState {
+//     root
+//     root_raw
+//     is_empty: bool
+//     admin
+// }
+
 /// Pool merkle tree leaf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PoolLeaf {

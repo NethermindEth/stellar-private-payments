@@ -16,9 +16,11 @@ pub async fn init_facade() {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
 
-    let client = Client::new("https://soroban-testnet.stellar.org");
+    let client = Client::new("https://soroban-testnet.stellar.org").unwrap();
     let config: ContractConfig = serde_json::from_str(DEPLOYMENT)
             .expect("JSON was not well-formatted or did not match struct");
+
+    state::all_contracts_data(&client, &config).await.unwrap();
 
     info!("init wasm facade");
 
