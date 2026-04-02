@@ -14,7 +14,7 @@ template Keypair() {
 
     component hasher = Poseidon2(2);
     hasher.inputs[0] <== privateKey;
-    hasher.inputs[1] <== 0;
+    hasher.inputs[1] <== 0; // Padding to widen the permutation state to t=3, providing better security margin than t=2 (Poseidon2(1))
     hasher.domainSeparation <== 0x03; // Domain separation for Keypair
     publicKey <== hasher.out;
 }
