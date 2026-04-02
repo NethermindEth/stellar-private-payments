@@ -8,8 +8,12 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 reqwest = { version = "0.12", default-features = false, features = ["json"] }
+log = { workspace = true }
 num-bigint = { workspace = true }
+num-traits = { workspace = true }
 stellar-strkey = "0.0.15"
 stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
 thiserror = "1.0.46"
@@ -17,6 +21,7 @@ serde = { workspace = true }
 http = "1.0.0"
 serde-aux = "4.1.2"
 serde_json = { workspace = true }
+types = { path = "../types" }
 
 #[lints]
 #workspace = true

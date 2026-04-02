@@ -85,11 +85,3 @@
 //     value: scValToNative(xdr.ScVal.fromXDR(event.value, 'base64')),
 // }));
 //
-pub struct EventData {
-    pub id: String,
-    pub ledger: u32,
-    pub typ: String,
-    pub contract_id: String,
-    pub topic: String,
-    pub value: String,
-}

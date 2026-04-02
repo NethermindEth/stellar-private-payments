@@ -1,5 +1,5 @@
 [package]
-name = "wasm_facade"
+name = "worker"
 version.workspace = true
 edition.workspace = true
 repository.workspace = true
@@ -12,19 +12,18 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 anyhow = { workspace = true }
-log = "0.4"
-wasm-log = "0.3"
+log = { workspace = true }
+wasm-log = { workspace = true }
 console_error_panic_hook = { workspace = true }
 sqlite-wasm-rs = { version = "0.5.2", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
-prover = { path = "../prover" }
-state = { path = "../state" }
-stellar = { path = "../stellar" }
+prover = { path = "../../prover" }
+state = { path = "../../state" }
 wasm-bindgen = { workspace = true }
-witness = { path = "../witness" }
+witness = { path = "../../witness" }
 serde_json = { workspace = true }
-types = { path = "../types" }
+types = { path = "../../types" }
 
-[lints]
-workspace = true
+#[lints]
+#workspace = true

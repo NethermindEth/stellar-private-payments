@@ -1,39 +1,47 @@
 //! Unified WASM facade for the app crates.
 use log::{info, error, debug};
-use stellar::Client;
-use types::ContractConfig;
 use anyhow::Result;
 use state::Storage;
 use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 
 use wasm_bindgen::prelude::*;
+use serde::{Deserialize, Serialize};
 
-const DEPLOYMENT: &str = include_str!("../../../../scripts/deployments.json");
 const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
 const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy_tx_2_2_vk.json");
 
-/// Install a panic hook for clearer browser-side failures.
-#[wasm_bindgen]
-pub async fn init_facade() {
+// Runs automatically on module initialization
+#[wasm_bindgen(start)]
+pub async fn init_worker() -> Result<()> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
-    install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
-            .await
-            .unwrap();
+    // To make Sqlite use OPFS persistent VFS
+    install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true).await?;
 
-    let mut storage = Storage::connect().unwrap();
+    let mut storage = Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
     let leaf = types::PoolLeaf{index: 1, commitment: "ss".to_string(), ledger: 3};
     //storage.put_pool_leaf(&leaf).unwrap();
-    info!("== pool leaves {}", storage.count_pool_leaves().unwrap());
-
-    let client = Client::new("https://soroban-testnet.stellar.org").unwrap();
-    let config: ContractConfig = serde_json::from_str(DEPLOYMENT)
-            .expect("JSON was not well-formatted or did not match struct");
-
-    state::all_contracts_data(&client, &config).await.unwrap();
-
+    info!("== pool leaves {}", storage.count_pool_leaves().map_err(|e| JsError::new(&e.to_string()))?);
     info!("init wasm facade");
 
+    Ok(())
+}
+
+#[wasm_bindgen]
+pub fn handle_message(msg_type: &str, payload: JsValue) -> Result<JsValue, JsError> {
+    match msg_type {
+        "SAVE_EVENTS" => {
+            let events: Vec<StellarEvent> = serde_wasm_bindgen::from_value(payload)?;
+            save_to_sqlite(events)?;
+            Ok(JsValue::NULL)
+        }
+        "GENERATE_PROOF" => {
+            let params: ProverParams = serde_wasm_bindgen::from_value(payload)?;
+            let proof = run_prover(params)?; // Heavy synchronous computation
+            Ok(serde_wasm_bindgen::to_value(&proof)?)
+        }
+        _ => Err(JsError::new("Unknown message type")),
+    }
 }
 
 // #[wasm_bindgen]
