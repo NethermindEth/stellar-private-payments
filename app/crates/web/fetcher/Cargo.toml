@@ -1,0 +1,25 @@
+[package]
+name = "fetcher"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+log = { workspace = true }
+wasm-log = { workspace = true }
+console_error_panic_hook = { workspace = true }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+serde-wasm-bindgen = { workspace = true }
+stellar = { path = "../../stellar" }
+wasm-bindgen = { workspace = true }
+types = { path = "../../types" }
+
+#[lints]
+#workspace = true

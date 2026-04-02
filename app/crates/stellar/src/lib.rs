@@ -1,25 +1,10 @@
-// const NETWORKS = {
-//     testnet: {
-//         name: 'Testnet',
-//         horizonUrl: 'https://horizon-testnet.stellar.org',
-//         rpcUrl: 'https://soroban-testnet.stellar.org',
-//         passphrase: Networks.TESTNET,
-//     },
-//     futurenet: {
-//         name: 'Futurenet',
-//         horizonUrl: 'https://horizon-futurenet.stellar.org',
-//         rpcUrl: 'https://rpc-futurenet.stellar.org',
-//         passphrase: Networks.FUTURENET,
-//     },
-//     mainnet: {
-//         name: 'Mainnet',
-//         horizonUrl: 'https://horizon.stellar.org',
-//         rpcUrl: 'https://soroban.stellar.org',
-//         passphrase: Networks.PUBLIC,
-//     }
-// };
 mod rpc;
 mod conversions;
+mod indexer;
+mod contract_state;
+mod contract_events;
 
-pub use rpc::{Client, Error, Event};
-pub use conversions::{scval_to_address_string, scval_to_u256, scval_to_u32, scval_to_u64, scval_to_bool};
+pub use indexer::{ContractDataStorage, Indexer};
+pub use contract_state::StateFetcher;
+
+const DEPLOYMENT: &str = include_str!("../../../../scripts/deployments.json");

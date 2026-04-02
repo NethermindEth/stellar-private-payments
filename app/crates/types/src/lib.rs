@@ -1,3 +1,6 @@
+mod chain_data;
+pub use chain_data::*;
+
 use serde::{Deserialize, Serialize};
 
 // scripts/deployments.json
@@ -6,9 +9,12 @@ pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
     pub admin: String,
+    // Address of ASP membership deployed contract
     pub asp_membership: String,
+    // Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
     pub verifier: String,
+    // Address of Pool deployed contract
     pub pool: String,
     pub initialized: bool,
 }
@@ -156,30 +162,4 @@ pub struct RetentionConfig {
     pub warning_threshold: u32,
     /// ISO-8601 timestamp when detected.
     pub detected_at: String,
-}
-
-/// Sync cursor for a single contract.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncCursor {
-    /// Last synced ledger.
-    pub last_ledger: u32,
-    /// Stellar RPC pagination cursor.
-    pub last_cursor: Option<String>,
-    /// `true` when gap exceeds retention window.
-    pub sync_broken: bool,
-}
-
-/// Per-network sync state.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SyncMetadata {
-    /// Network name (primary key).
-    pub network: String,
-    /// Pool contract sync cursor.
-    pub pool_sync: SyncCursor,
-    /// ASP Membership contract sync cursor.
-    pub asp_membership_sync: SyncCursor,
-    /// ISO-8601 timestamp of last successful sync.
-    pub last_successful_sync: Option<String>,
 }
