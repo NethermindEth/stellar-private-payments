@@ -22,44 +22,38 @@ impl Storage {
         Ok(Self { conn })
     }
 
-    pub fn save_events_batch(&self, cursor: Option<String>, events: &[stellar::Event]) -> Result<()> {
+    pub fn save_events_batch(&mut self, data: &types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO events (id, ledger, type, contract_id, topic, value)
+                "INSERT INTO contract_events (id, ledger, contract_id, topics, value)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(id) DO NOTHING"
             )?;
 
-            for event in events {
-                if let Some(topic) = event.topic.first() {
+            for event in &data.events {
                     stmt.execute(params![
                         event.id,
                         event.ledger,
-                        event.event_type,
                         event.contract_id,
-                        topic,
+                        event.topics.join(","),
                         event.value
                     ])?;
-                } else {
-                    log::warn!("Event {} emitted by contract {} contains no topics", event.id, event.contract_id);
-                }
             }
 
-            if let Some(cursor) = cursor {
-                tx.execute(
-                    "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor) VALUES (1, ?1)",
-                    params![cursor],
-                )?;
-            }
+            tx.execute(
+                "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor) VALUES (1, ?1)",
+                params![data.cursor],
+            )?;
+
         }
         tx.commit()?;
 
         Ok(())
     }
 
-    pub fn get_synced_ledger_and_cursor(conn: &Connection) -> Result<(Option<u32>, Option<String>)> {
-        let mut stmt = conn.prepare(
+    pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
+        let mut stmt = self.conn.prepare(
             "SELECT MAX(e.ledger), m.last_cursor
              FROM events e
              CROSS JOIN indexing_metadata m
@@ -69,7 +63,10 @@ impl Storage {
         let status = stmt.query_row([], |row| {
             let ledger: Option<u32> = row.get(0)?;
             let cursor: Option<String> = row.get(1)?;
-            Ok((ledger, cursor))
+            match (ledger, cursor) {
+                (Some(last_ledger), Some(cursor)) => Ok(Some(types::SyncMetadata{last_ledger, cursor})),
+                _ => Ok(None),
+            }
         })?;
 
         Ok(status)
@@ -511,24 +508,23 @@ impl Storage {
     // -----------------------------------------------------------------------
 
     /// Inserts or replaces a public-key registration.
-    pub fn put_public_key(&self, entry: &types::PublicKeyEntry) -> Result<()> {
-        self.conn
-            .execute(
-                "INSERT OR REPLACE INTO registered_public_keys
-                     (address, encryption_key, note_key, public_key, ledger, registered_at)
-                     VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-                params![
-                    &entry.address,
-                    &entry.encryption_key,
-                    &entry.note_key,
-                    &entry.public_key,
-                    i64::from(entry.ledger),
-                    &entry.registered_at,
-                ],
-            )
-            .context("put_public_key")?;
-        Ok(())
-    }
+    // pub fn put_public_key(&self, entry: &types::PublicKeyEntry) -> Result<()> {
+    //     self.conn
+    //         .execute(
+    //             "INSERT OR REPLACE INTO registered_public_keys
+    //                  (address, encryption_key, note_key, public_key, ledger, registered_at)
+    //                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    //             params![
+    //                 &entry.address,
+    //                 &entry.encryption_key,
+    //                 &entry.note_key,
+    //                 i64::from(entry.ledger),
+    //                 &entry.registered_at,
+    //             ],
+    //         )
+    //         .context("put_public_key")?;
+    //     Ok(())
+    // }
 
     /// Returns the public-key record for `address`, or `None`.
     pub fn get_public_key(&self, address: &str) -> Result<Option<types::PublicKeyEntry>> {
@@ -724,7 +720,6 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry
         address: row.get(0)?,
         encryption_key: row.get(1)?,
         note_key: row.get(2)?,
-        public_key: row.get(3)?,
         ledger: col_u32(row.get::<_, i64>(4)?, 4)?,
         registered_at: row.get(5)?,
     })

@@ -1,9 +1,11 @@
 use stellar_strkey::ed25519;
 use stellar_xdr::curr::{
-    self as xdr
+    self as xdr, ReadXdr, UInt256Parts
 };
 use num_bigint::BigUint;
 use crate::rpc::Error;
+use types::ContractEvent;
+use std::collections::HashMap;
 
 /// Helper to convert ScVal Address to G... or C... string
 pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
@@ -64,5 +66,82 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
         Ok(*n)
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
+    }
+}
+
+#[derive(Debug)]
+pub struct ParsedContractEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
+    // Sequence number of the ledger in which this event was emitted
+    pub ledger: u32,
+    // StrKey representation of the contract address that emitted this event.
+    pub contract_id: String,
+    // The name of the event, snake_case. It is topic[0].
+    pub name: String,
+    pub topics: Vec<xdr::ScVal>,
+    // Mapping field name - value
+    pub values: HashMap<String, xdr::ScVal>,
+}
+
+pub fn parse_event(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
+    let ContractEvent{id, ledger, contract_id, topics, value} = event;
+
+    let mut iter = topics.iter();
+    let first = iter.next().ok_or_else(|| xdr::Error::Invalid)?;
+
+    let topics: Vec<xdr::ScVal> = iter
+        .map(|s| xdr::ScVal::from_xdr_base64(s, xdr::Limits::none()))
+        .collect::<Result<_, _>>()?;
+
+    let name = match xdr::ScVal::from_xdr_base64(first, xdr::Limits::none())? {
+        xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+        _ => return Err(Error::UnexpectedScVal("the first topic of an event should be a symbol".into())),
+    };
+
+    let data = xdr::ScVal::from_xdr_base64(value, xdr::Limits::none())?;
+
+    // https://docs.rs/soroban-sdk/latest/soroban_sdk/attr.contractevent.html
+    let map = match data {
+        xdr::ScVal::Map(Some(m)) => m,
+        _ => return Err(Error::UnexpectedScVal("an event data format should be a map".into())),
+    };
+
+    let mut values = HashMap::new();
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let field_name = match key {
+            xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+            _ => return Err(Error::UnexpectedScVal(format!("event data field name should be a symbol: {key:?}"))),
+        };
+        values.insert(field_name, val.clone());
+    }
+    Ok(ParsedContractEvent{
+        id, ledger, contract_id, name, topics, values
+    })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parsing_event() {
+        // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
+        let event = ContractEvent {
+            id: "0164090849041387521-0000000003".into(),
+            ledger: 43601284,
+            contract_id: "CDR6QKTWZQYW6YUJ7UP7XXZRLWQPFRV6SWBLQS4ZQOSAF4BOUD77OO5Z".into(),
+            topics: vec![
+                      "AAAADwAAAANmZWUA".into(),
+                      "AAAAEgAAAAAAAAAA74s7miz/LYTmVydP8OHbL0RoCId57u7guXXIkRudXK8=".into(),
+                    ],
+
+            value: "AAAACgAAAAAAAAAAAAAAAF2UTIA=".into()
+        };
+
+        let parsed = parse_event(event).unwrap();
+        println!("{parsed:?}");
     }
 }

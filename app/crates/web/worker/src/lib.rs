@@ -1,44 +1,65 @@
-//! Unified WASM facade for the app crates.
-use log::{info, error, debug};
-use anyhow::Result;
 use state::Storage;
 use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 
 use wasm_bindgen::prelude::*;
 use serde::{Deserialize, Serialize};
 
-const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
-const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy_tx_2_2_vk.json");
+use std::cell::RefCell;
+
+thread_local! {
+    // RefCell allows us to borrow the client as mutable
+    static STORAGE: RefCell<Option<Storage>> = RefCell::new(None);
+}
+
+// TODO make it dependent on the network during the compilation
+const PROVING_KEY: &[u8] = include_bytes!("../../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
+const VERIFICATION_KEY: &str = include_str!("../../../../../scripts/testdata/policy_tx_2_2_vk.json");
 
 // Runs automatically on module initialization
 #[wasm_bindgen(start)]
-pub async fn init_worker() -> Result<()> {
+pub async fn init_worker() -> Result<(), JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
     // To make Sqlite use OPFS persistent VFS
     install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true).await?;
 
-    let mut storage = Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
-    let leaf = types::PoolLeaf{index: 1, commitment: "ss".to_string(), ledger: 3};
-    //storage.put_pool_leaf(&leaf).unwrap();
-    info!("== pool leaves {}", storage.count_pool_leaves().map_err(|e| JsError::new(&e.to_string()))?);
-    info!("init wasm facade");
+    let storage = Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
+
+    STORAGE.with(|s| {
+        *s.borrow_mut() = Some(storage);
+    });
+
+    log::debug!("[WORKER] initialized");
 
     Ok(())
 }
 
 #[wasm_bindgen]
 pub fn handle_message(msg_type: &str, payload: JsValue) -> Result<JsValue, JsError> {
+    log::debug!("[WORKER] received message {msg_type}");
     match msg_type {
         "SAVE_EVENTS" => {
-            let events: Vec<StellarEvent> = serde_wasm_bindgen::from_value(payload)?;
-            save_to_sqlite(events)?;
+            let events_data: types::ContractsEventData = serde_wasm_bindgen::from_value(payload)?;
+            log::debug!("[WORKER] saving {} raw contract events", events_data.events.len());
+            STORAGE.with(|s| -> Result<(), JsError> {
+                let mut storage_borrow = s.borrow_mut();
+                if let Some(ref mut storage) = *storage_borrow {
+                    storage.save_events_batch(&events_data).map_err(|e| JsError::new(&e.to_string()))?;
+                }
+                Ok(())
+            })?;
+            log::debug!("[WORKER] sending {} raw contract events to process", events_data.events.len());
+            // save raw events to sqlite
+            // run processors
+            // check if notes are addressed to a user
+            // check if
             Ok(JsValue::NULL)
         }
         "GENERATE_PROOF" => {
-            let params: ProverParams = serde_wasm_bindgen::from_value(payload)?;
-            let proof = run_prover(params)?; // Heavy synchronous computation
-            Ok(serde_wasm_bindgen::to_value(&proof)?)
+            // let params: ProverParams = serde_wasm_bindgen::from_value(payload)?;
+            // let proof = run_prover(params)?; // Heavy synchronous computation
+            //Ok(serde_wasm_bindgen::to_value(&proof)?)
+            Ok(JsValue::NULL)
         }
         _ => Err(JsError::new("Unknown message type")),
     }

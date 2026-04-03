@@ -3,12 +3,12 @@ CREATE TABLE indexing_metadata (
     last_cursor TEXT
 );
 
-CREATE TABLE events (
+CREATE TABLE contract_events (
     id TEXT PRIMARY KEY,
     ledger INTEGER NOT NULL,
-    type TEXT NOT NULL,
     contract_id TEXT NOT NULL,
-    topic TEXT NOT NULL,
+    name TEXT NOT NULL,
+    topics TEXT NOT NULL,
     value TEXT NOT NULL
 );
 
@@ -46,6 +46,7 @@ CREATE INDEX idx_asp_membership_leaves_leaf
 CREATE TABLE user_notes (
     id TEXT PRIMARY KEY,
     owner TEXT NOT NULL,
+    commitment TEXT NOT NULL,
     private_key TEXT NOT NULL,
     blinding TEXT NOT NULL,
     amount TEXT NOT NULL,
@@ -67,7 +68,6 @@ CREATE TABLE registered_public_keys (
     address TEXT PRIMARY KEY,
     encryption_key TEXT NOT NULL,
     note_key TEXT NOT NULL,
-    public_key TEXT,
     ledger INTEGER NOT NULL,
     registered_at TEXT
 );
