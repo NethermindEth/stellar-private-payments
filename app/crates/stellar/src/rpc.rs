@@ -1,3 +1,6 @@
+// many parts are taken from https://github.com/stellar/rs-stellar-rpc-client/blob/main/src/lib.rs
+// to make it wasm-compatible
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use std::str::FromStr;

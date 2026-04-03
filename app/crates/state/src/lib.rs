@@ -1,4 +1,3 @@
 mod storage;
-
-pub use contract_state::all_contracts_data;
+mod processors;
 pub use storage::Storage;

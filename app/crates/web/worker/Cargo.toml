@@ -22,7 +22,10 @@ prover = { path = "../../prover" }
 state = { path = "../../state" }
 wasm-bindgen = { workspace = true }
 witness = { path = "../../witness" }
+serde = { workspace = true }
 serde_json = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+stellar = { path = "../../stellar" }
 types = { path = "../../types" }
 
 #[lints]

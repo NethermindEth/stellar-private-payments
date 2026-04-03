@@ -140,8 +140,6 @@ pub struct PublicKeyEntry {
     pub encryption_key: String,
     /// BN254 note public key (hex).
     pub note_key: String,
-    /// Legacy alias for `encryption_key`.
-    pub public_key: String,
     /// Ledger sequence when registered.
     pub ledger: u32,
     /// ISO-8601 timestamp when stored locally.

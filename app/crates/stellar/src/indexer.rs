@@ -48,7 +48,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                 // TODO check they ordered by time
                 current_ledger = last_event.ledger;
                 self.storage.save_events_batch(ContractsEventData{cursor: new_cursor.clone().ok_or_else(|| anyhow!("cursor is not found in the events response"))?,
-                    events: events.into_iter().map(|e| e.try_into()).flatten().collect()} ).await?;
+                    events: events.into_iter().map(|e| e.into()).collect()} ).await?;
             } else {
                 current_ledger += 1;
             }
@@ -71,26 +71,23 @@ pub trait ContractDataStorage {
     ) -> anyhow::Result<()>;
 }
 
-impl TryInto<ContractEvent> for crate::rpc::Event {
-    type Error = anyhow::Error;
+impl Into<ContractEvent> for crate::rpc::Event {
 
-    fn try_into(self) -> Result<ContractEvent> {
+    fn into(self) -> ContractEvent {
         let crate::rpc::Event {
             id,
             ledger,
-            event_type,
             contract_id,
             topic,
             value,
             ..
         } = self;
-        Ok(ContractEvent {
+        ContractEvent {
             id,
             ledger,
-            typ: event_type,
             contract_id,
-            topic: topic.first().ok_or_else(|| anyhow!("only events with at least one topic are supported"))?.to_string(),
+            topics: topic,
             value,
-            })
+            }
     }
 }

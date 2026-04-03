@@ -59,11 +59,16 @@ pub struct AspNonMembership {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
+    // Sequence number of the ledger in which this event was emitted
     pub ledger: u32,
-    pub typ: String,
+    // StrKey representation of the contract address that emitted this event.
     pub contract_id: String,
-    pub topic: String,
+    // The ScVals containing the topics this event was emitted with (as a base64 string).
+    pub topics: Vec<String>,
+    // The data emitted by the event (an ScVal, serialized as a base64 string).
     pub value: String,
 }
 
