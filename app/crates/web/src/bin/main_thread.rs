@@ -1,29 +1,21 @@
-use gloo_worker::{WorkerBridge, Spawnable};
-use web::sync_worker::{WorkerRequest, WorkerResponse};
-use web::chain::{Indexer};
+use web::{Worker, WorkerRequest, WorkerResponse};
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
 use stellar::Indexer;
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::spawn_local;
 use std::rc::Rc;
-use std::cell::RefCell;
 use wasm_bindgen::JsError;
 
-fn main()  -> Result<(), JsError> {
+fn main() {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
-
-    // TODO make compile time feature gate for testnet/mainnet
-
     spawn_local(async {
-        if let Err(e) = init(bridge).await {
-            log::error!("[MAIN THREAD] init failed: {e:?}");
+        if let Err(e) = init().await {
+            log::error!("[WORKER] init failed: {e:?}");
         }
     });
 }
-
-
 
 struct StorageBridge {
     bridge: OneshotBridge<Worker>,
@@ -32,15 +24,20 @@ struct StorageBridge {
 impl StorageBridge {
     fn new() -> Self {
         Self {
-            bridge: StorageWorker::spawner().spawn("./worker.js"),
+            bridge: Worker::spawner().as_module(true).spawn("./js/worker.js"),
         }
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl stellar::ContractDataStorage for StorageBridge {
-    async fn get_sync_state(&self) -> anyhow::Result<Option<SyncMetadata>> {
-        match self.bridge.run(WorkerRequest::SyncState).await {
+    async fn get_sync_state(&self) -> anyhow::Result<Option<types::SyncMetadata>> {
+        log::debug!("before bridge fork");
+        let mut bridge = self.bridge.fork();
+        log::debug!("before bridge run");
+        let resp = bridge.run(WorkerRequest::SyncState).await;
+        log::debug!("after bridge run");
+        match resp {
             WorkerResponse::SyncState(state) => Ok(state),
             WorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
             other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
@@ -48,7 +45,9 @@ impl stellar::ContractDataStorage for StorageBridge {
     }
 
     async fn save_events_batch(&self, data: types::ContractsEventData) -> anyhow::Result<()> {
-        match self.bridge.run(WorkerRequest::SaveEvents(data)).await {
+        let mut bridge = self.bridge.fork();
+        let resp = bridge.run(WorkerRequest::SaveEvents(data)).await;
+        match resp {
             WorkerResponse::Saved => Ok(()),
             WorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
             other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
@@ -56,7 +55,7 @@ impl stellar::ContractDataStorage for StorageBridge {
     }
 }
 
-async fn init(bridge: WorkerBridge<Worker>) -> Result<(), JsError> {
+async fn init() -> Result<(), JsError> {
     let storage = StorageBridge::new();
     // TODO make it dependent on the network during the compilation
     let indexer = Indexer::new(
@@ -71,15 +70,13 @@ async fn init(bridge: WorkerBridge<Worker>) -> Result<(), JsError> {
 
 fn start_indexer_loop(indexer: Indexer<StorageBridge>, interval_ms: u32) {
     let indexer = Rc::new(indexer);
-    let running = Rc::new(RefCell::new(true));
 
     let indexer_cloned = Rc::clone(&indexer);
-    let running_cloned = Rc::clone(&running);
-
     spawn_local(async move {
-        while *running_cloned.borrow() {
+        log::debug!("[INDEXER] looping");
+        loop {
             if let Err(e) = indexer_cloned.fetch_contract_events().await {
-                log::error!("[MAIN THREAD] fetch_contract_events failed: {e}");
+                log::error!("[INDEXER] round failed: {e}");
             }
 
             TimeoutFuture::new(interval_ms).await;

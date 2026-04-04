@@ -1,6 +1,6 @@
 use stellar_strkey::ed25519;
 use stellar_xdr::curr::{
-    self as xdr, ReadXdr, UInt256Parts
+    self as xdr, ReadXdr
 };
 use num_bigint::BigUint;
 use crate::rpc::Error;

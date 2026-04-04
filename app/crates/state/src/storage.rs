@@ -55,7 +55,7 @@ impl Storage {
     pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT MAX(e.ledger), m.last_cursor
-             FROM events e
+             FROM contract_events e
              CROSS JOIN indexing_metadata m
              WHERE m.id = 1"
         )?;

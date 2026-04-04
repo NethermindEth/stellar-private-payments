@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "app/crates/wasm_facade",
     "app/crates/prover",
     "app/crates/stellar",
     "app/crates/state",
@@ -10,7 +9,7 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
-    "tools/ceremony-cli",
+    "tools/ceremony-cli", "app/crates/web", "app/crates/web/chain",
 ]
 resolver = "3"
 
@@ -33,21 +32,26 @@ ark-snark = { version = "0.5.1", default-features = false }
 ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
+async-trait = { version = "0.1.89", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
 getrandom = { version = "0.2", features = ["js"] }
 hex = { version = "0.4", default-features = false }
-num-bigint = { version = "0.4.6", default-features = false }
+log = { version = "0.4", default-features = false }
+num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
+num-traits = { version = "0.2", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false }
+serde-wasm-bindgen = { version = "0.4", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-wasm-bindgen = { version = "0.2.108", default-features = false }
+wasm-bindgen = { version = "0.2.108", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-test = { version = "0.3" }
 wasmer = { version = "6.1", default-features = false }
+wasm-log = { version = "0.3", default-features = false }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]

@@ -22,7 +22,7 @@ console_error_panic_hook = { workspace = true }
 log = { workspace = true }
 wasm-log = { workspace = true }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
-gloo-worker = { version = "0.5", default-features = false, features = ["futures"]  }
+gloo-worker = { version = "0.6", default-features = false, features = ["futures"]  }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 sqlite-wasm-rs = { version = "0.5.2", default-features = false }
