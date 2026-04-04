@@ -9,7 +9,7 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
-    "tools/ceremony-cli", "app/crates/web", "app/crates/web/chain",
+    "tools/ceremony-cli", "app/crates/web",
 ]
 resolver = "3"
 

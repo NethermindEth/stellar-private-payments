@@ -28,11 +28,12 @@ impl<S: ContractDataStorage> Indexer<S> {
     ) -> Result<()> {
         let contract_ids = [self.config.pool.to_string(), self.config.asp_membership.to_string(), self.config.asp_non_membership.to_string()];
         let network_tip = self.client.get_latest_ledger().await?.sequence;
-        log::debug!("[INDEXER] starting for network_tip {network_tip}, contract ids {contract_ids:?}");
+        log::debug!("[INDEXER] starting new round for network tip {network_tip}, contract ids {contract_ids:?}");
         let (mut cursor, mut current_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
             (Some(cursor), last_ledger)
         } else {
-            let start_seven_days_ago = 1.max(network_tip - LEDGERS_7DAYS + 1);
+            log::debug!("[INDEXER] no saved sync metadata - the current round starts at the current network tip {network_tip}");
+            let start_seven_days_ago = network_tip;
             (None, start_seven_days_ago)
         };
         while current_ledger < network_tip {
@@ -46,6 +47,7 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             if let Some(last_event) = events.last() {
                 // TODO check they ordered by time
+                log::debug!("[INDEXER] fetched {} events", events.len());
                 current_ledger = last_event.ledger;
                 self.storage.save_events_batch(ContractsEventData{cursor: new_cursor.clone().ok_or_else(|| anyhow!("cursor is not found in the events response"))?,
                     events: events.into_iter().map(|e| e.into()).collect()} ).await?;

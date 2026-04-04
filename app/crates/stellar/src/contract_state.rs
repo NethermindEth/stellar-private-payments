@@ -1,7 +1,6 @@
 use futures::try_join;
 use anyhow::{Result, Context};
 use num_traits::Zero;
-use serde::{Deserialize, Serialize};
 use crate::rpc::Client;
 use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
 use crate::DEPLOYMENT;

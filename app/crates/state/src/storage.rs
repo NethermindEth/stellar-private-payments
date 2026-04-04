@@ -48,7 +48,7 @@ impl Storage {
 
         }
         tx.commit()?;
-
+        log::debug!("[STORAGE] saved {} events and cursor {}", data.events.len(), data.cursor);
         Ok(())
     }
 

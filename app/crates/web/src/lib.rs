@@ -1,86 +1,51 @@
-use serde::{Deserialize, Serialize};
+pub mod worker;
+mod contract_state_fetcher;
+mod indexer;
+mod protocol;
+mod config;
+
+use indexer::StorageBridge;
+use contract_state_fetcher::StateFetcher;
+use config::Config;
+use stellar::Indexer;
+use gloo_timers::future::TimeoutFuture;
+use wasm_bindgen_futures::spawn_local;
+use std::rc::Rc;
 use wasm_bindgen::JsError;
-use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
-use gloo_worker::oneshot::oneshot;
-use state::Storage;
-use std::cell::RefCell;
+use wasm_bindgen::prelude::wasm_bindgen;
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum WorkerRequest {
-    SyncState,
-    SaveEvents(types::ContractsEventData),
+#[wasm_bindgen]
+pub fn main_thread(config: Config) -> Result<StateFetcher, JsError> {
+    console_error_panic_hook::set_once();
+    wasm_log::init(wasm_log::Config::default());
+    let storage = StorageBridge::new();
+    // TODO allow a user to specify?
+    let indexer = Indexer::new(
+            config.rpc_url(),
+            storage,
+        )
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    start_indexer_loop(indexer, 5_000);
+    let fetcher = StateFetcher::new(config.rpc_url())?;
+    log::debug!("[MAIN THREAD] initialized");
+    Ok(fetcher)
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub enum WorkerResponse {
-    SyncState(Option<types::SyncMetadata>),
-    Saved,
-    Error(String),
-}
+fn start_indexer_loop(indexer: Indexer<StorageBridge>, interval_ms: u32) {
+    let indexer = Rc::new(indexer);
 
-// TODO make it dependent on the network during the compilation
-const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
-const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy_tx_2_2_vk.json");
+    let indexer_cloned = Rc::clone(&indexer);
+    spawn_local(async move {
+        log::debug!("[INDEXER] looping");
 
-thread_local! {
-    // RefCell allows us to borrow the client as mutable
-    static STORAGE: RefCell<Option<Storage>> = RefCell::new(None);
-}
+        // Fetch events in rounds (internal indexer loop with termination conditions)
+        // or at least 5s (ledger time)
+        loop {
+            if let Err(e) = indexer_cloned.fetch_contract_events().await {
+                log::error!("[INDEXER] round failed: {e}");
+            }
 
-pub async fn init() -> Result<(), JsError> {
-    install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(
-        &OpfsSAHPoolCfg::default(),
-        true,
-    )
-    .await.map_err(|e| {
-        log::debug!("[WORKER] error installing OPFS Sqlite pool: {e:?}");
-        e
-    })?;
-
-    let storage = state::Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
-
-    STORAGE.with(|s| {
-        *s.borrow_mut() = Some(storage);
+            TimeoutFuture::new(interval_ms).await;
+        }
     });
-
-    log::debug!("[WORKER] initialized");
-
-    Ok(())
-}
-
-#[oneshot]
-pub async fn Worker(req: WorkerRequest) -> WorkerResponse {
-    match req {
-        WorkerRequest::SyncState => {
-            log::debug!("[WORKER] get current sync");
-            let resp = STORAGE.with(|s| {
-                let storage_borrow = s.borrow();
-
-                match storage_borrow.as_ref() {
-                    Some(storage) => match storage.get_sync_metadata() {
-                        Ok(v) => WorkerResponse::SyncState(v),
-                        Err(e) => WorkerResponse::Error(e.to_string()),
-                    },
-                    None => WorkerResponse::Error("storage is not initialized".into()),
-                }
-            });
-            log::debug!("[WORKER] sending current sync");
-            resp
-        }
-        WorkerRequest::SaveEvents(events_data) => {
-            log::debug!("[WORKER] saving {} raw contract events", events_data.events.len());
-            let resp = STORAGE.with(|s| {
-                let mut storage_borrow = s.borrow_mut();
-                match storage_borrow.as_mut() {
-                    Some(storage) => match storage.save_events_batch(&events_data) {
-                        Ok(()) => WorkerResponse::Saved,
-                        Err(e) => WorkerResponse::Error(e.to_string()),
-                    },
-                    None => WorkerResponse::Error("storage is not initialized".into()),
-                }
-            });
-            log::debug!("[WORKER] sending {} raw contract events to process", events_data.events.len());
-            resp
-        }
-    }
 }

@@ -410,11 +410,12 @@ impl Client {
     }
 }
 
+// TODO(Maks) - add test
 // Handle retention-window drift: if start is just below current oldest,
 // clamp to RPC-reported oldest and continue instead of failing sync.
 // helper to parse "ledger range: 123 - 456" from the RPC message
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
-    let parts: Vec<&str> = message.split("c").collect();
+    let parts: Vec<&str> = message.split(":").collect();
     if parts.len() != 2 {
         return None;
     }

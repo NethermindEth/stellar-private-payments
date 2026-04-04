@@ -7,9 +7,8 @@ license.workspace = true
 publish.workspace = true
 description = "Unified WASM facade for app crates"
 
-[[bin]]
-name = "main_thread"
-path = "src/bin/main_thread.rs"
+[lib]
+crate-type = ["cdylib", "rlib"]
 
 [[bin]]
 name = "worker"
