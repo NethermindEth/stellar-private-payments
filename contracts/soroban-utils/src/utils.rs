@@ -20,7 +20,7 @@ where
     K: IntoVal<Env, Val> + TryFromVal<Env, Val> + Clone,
 {
     let store = env.storage().persistent();
-    let admin: Address = store.get(admin_key).unwrap();
+    let admin: Address = store.get(admin_key).expect("admin not initialized");
     admin.require_auth();
 
     // Update admin address
@@ -50,8 +50,16 @@ impl MockToken {
 
 pub fn g1_bytes_from_ark(p: ArkG1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
-    let x_bytes: [u8; 32] = p.x.into_bigint().to_bytes_be().try_into().unwrap();
-    let y_bytes: [u8; 32] = p.y.into_bigint().to_bytes_be().try_into().unwrap();
+    let x_bytes: [u8; 32] =
+        p.x.into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
+    let y_bytes: [u8; 32] =
+        p.y.into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
     out[..32].copy_from_slice(&x_bytes);
     out[32..].copy_from_slice(&y_bytes);
     out
@@ -59,10 +67,30 @@ pub fn g1_bytes_from_ark(p: ArkG1Affine) -> [u8; 64] {
 
 pub fn g2_bytes_from_ark(p: ArkG2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
-    let x0: [u8; 32] = p.x.c0.into_bigint().to_bytes_be().try_into().unwrap();
-    let x1: [u8; 32] = p.x.c1.into_bigint().to_bytes_be().try_into().unwrap();
-    let y0: [u8; 32] = p.y.c0.into_bigint().to_bytes_be().try_into().unwrap();
-    let y1: [u8; 32] = p.y.c1.into_bigint().to_bytes_be().try_into().unwrap();
+    let x0: [u8; 32] =
+        p.x.c0
+            .into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
+    let x1: [u8; 32] =
+        p.x.c1
+            .into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
+    let y0: [u8; 32] =
+        p.y.c0
+            .into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
+    let y1: [u8; 32] =
+        p.y.c1
+            .into_bigint()
+            .to_bytes_be()
+            .try_into()
+            .expect("length mismatch");
 
     // Imaginary component first, real component second
     // According to Soroban G2Affine documentation

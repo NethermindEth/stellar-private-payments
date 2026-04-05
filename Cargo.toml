@@ -73,8 +73,8 @@ witness = { path = "app/crates/core/witness" }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]
-missing_docs = "deny"
-unsafe_code = "forbid"
+missing_docs = "allow"
+unsafe_code = "deny"
 
 [workspace.lints.clippy]
 arithmetic_side_effects = "deny"

@@ -16,8 +16,12 @@ use soroban_sdk::{Bytes, Env, U256, Vec, symbol_short, vec};
 /// # Returns
 /// The compressed hash result as U256
 ///
+///
 /// # Panics
 /// Panics if either input is >= BN256 modulus
+// SAFETY: The Soroban SDK's poseidon2_permutation function is guaranteed to return exactly 't' elements.
+// Therefore, out.get(0) is statically guaranteed to succeed.
+#[allow(clippy::unwrap_used)]
 pub fn poseidon2_compress(env: &Env, left: U256, right: U256) -> U256 {
     // Check inputs are within field range
     let bn256_mod = bn256_modulus(env);
@@ -65,8 +69,12 @@ pub fn poseidon2_compress(env: &Env, left: U256, right: U256) -> U256 {
 /// # Returns
 /// The hash result as U256
 ///
+///
 /// # Panics
 /// Panics if either input is >= BN256 modulus
+// SAFETY: The Soroban SDK's poseidon2_permutation function is guaranteed to return exactly 't' elements.
+// Therefore, out.get(0) is statically guaranteed to succeed.
+#[allow(clippy::unwrap_used)]
 pub fn poseidon2_hash2(env: &Env, a: U256, b: U256, sep: Option<U256>) -> U256 {
     // Check inputs are within field range
     let bn256_mod = bn256_modulus(env);

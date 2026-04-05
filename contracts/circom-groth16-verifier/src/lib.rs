@@ -80,21 +80,30 @@ impl CircomGroth16Verifier {
     ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
 
-        if pub_inputs.len() + 1 != vk.ic.len() {
+        if pub_inputs.len().checked_add(1) != Some(vk.ic.len()) {
             return Err(Groth16Error::MalformedPublicInputs);
         }
 
         let mut vk_x = vk.ic.get(0).ok_or(Groth16Error::MalformedPublicInputs)?;
 
         for i in 0..pub_inputs.len() {
-            let s = pub_inputs.get(i).unwrap();
-            let v = vk.ic.get(i + 1).unwrap();
+            let s = pub_inputs
+                .get(i)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
+            let ic_idx = i
+                .checked_add(1)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
+            let v = vk
+                .ic
+                .get(ic_idx)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
             let prod = bn.g1_mul(&v, &s);
             vk_x = bn.g1_add(&vk_x, &prod);
         }
 
         // Compute the pairing check:
         // e(-A, B) * e(alpha, beta) * e(vk_x, gamma) * e(C, delta) == 1
+        #[allow(clippy::arithmetic_side_effects)]
         let neg_a = -proof.a;
 
         let g1_points = vec![env, neg_a, vk.alpha.clone(), vk_x, proof.c];
