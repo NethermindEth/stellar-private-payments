@@ -20,18 +20,3 @@ pub mod r1cs;
 pub mod serialization;
 pub mod sparse_merkle;
 pub mod types;
-
-use wasm_bindgen::prelude::*;
-
-/// Initialize the WASM module
-/// Sets up panic hook for better error messages in browser console
-#[wasm_bindgen(start)]
-pub fn init() {
-    console_error_panic_hook::set_once();
-}
-
-/// Get the module version
-#[wasm_bindgen]
-pub fn version() -> alloc::string::String {
-    alloc::string::String::from(env!("CARGO_PKG_VERSION"))
-}

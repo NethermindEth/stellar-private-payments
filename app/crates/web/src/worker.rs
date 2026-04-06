@@ -1,6 +1,7 @@
 use wasm_bindgen::JsError;
 use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 use gloo_worker::oneshot::oneshot;
+use gloo_timers::future::TimeoutFuture;
 use state::Storage;
 use std::cell::RefCell;
 use crate::protocol::{WorkerRequest, WorkerResponse};
@@ -52,6 +53,19 @@ async fn init() -> Result<(), JsError> {
 #[oneshot]
 pub(crate) async fn Worker(req: WorkerRequest) -> WorkerResponse {
     match req {
+        WorkerRequest::Ping => {
+            log::debug!("[WORKER] ping");
+            loop {
+                let ready = STORAGE.with(|s| s.borrow().is_some());
+
+                if ready {
+                    log::debug!("[WORKER] pong");
+                    break WorkerResponse::Pong;
+                }
+
+                TimeoutFuture::new(50).await;
+            }
+        }
         WorkerRequest::SyncState => {
             log::debug!("[WORKER] get current sync");
             let resp = STORAGE.with(|s| {

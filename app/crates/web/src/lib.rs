@@ -1,10 +1,10 @@
 pub mod worker;
 mod contract_state_fetcher;
-mod indexer;
+mod worker_client;
 mod protocol;
 mod config;
 
-use indexer::StorageBridge;
+use worker_client::WorkerClient;
 use contract_state_fetcher::StateFetcher;
 use config::Config;
 use stellar::Indexer;
@@ -12,26 +12,48 @@ use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::spawn_local;
 use std::rc::Rc;
 use wasm_bindgen::JsError;
-use wasm_bindgen::prelude::wasm_bindgen;
+use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub fn main_thread(config: Config) -> Result<StateFetcher, JsError> {
+pub struct MainThreadHandle {
+    fetcher: StateFetcher,
+    worker_client: WorkerClient,
+}
+
+#[wasm_bindgen]
+impl MainThreadHandle {
+    #[wasm_bindgen(getter)]
+    pub fn fetcher(&self) -> StateFetcher {
+        self.fetcher.clone()
+    }
+
+    #[wasm_bindgen(getter, js_name = workerClient)]
+    pub fn worker_client(&self) -> WorkerClient {
+        self.worker_client.clone()
+    }
+}
+
+#[wasm_bindgen(js_name = mainThread)]
+pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
-    let storage = StorageBridge::new();
-    // TODO allow a user to specify?
+    let fetcher = StateFetcher::new(config.rpc_url())?;
+    let worker_client = WorkerClient::new();
+    worker_client.ping().await.map_err(|e| JsError::new(&e.to_string()))?;
     let indexer = Indexer::new(
             config.rpc_url(),
-            storage,
+            worker_client.clone(),
         )
         .map_err(|e| JsError::new(&e.to_string()))?;
     start_indexer_loop(indexer, 5_000);
-    let fetcher = StateFetcher::new(config.rpc_url())?;
     log::debug!("[MAIN THREAD] initialized");
-    Ok(fetcher)
+    Ok(MainThreadHandle {
+            fetcher,
+            worker_client,
+        })
 }
 
-fn start_indexer_loop(indexer: Indexer<StorageBridge>, interval_ms: u32) {
+fn start_indexer_loop(indexer: Indexer<WorkerClient>, interval_ms: u32) {
     let indexer = Rc::new(indexer);
 
     let indexer_cloned = Rc::clone(&indexer);

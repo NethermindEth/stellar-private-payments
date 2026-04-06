@@ -15,6 +15,7 @@ use crate::{
     types::{FIELD_SIZE, Groth16Proof},
 };
 use alloc::{format, vec::Vec};
+use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
@@ -26,7 +27,6 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
-use wasm_bindgen::prelude::*;
 
 // Soroban-compatible encoding helpers.
 // Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering, while arkworks
@@ -198,7 +198,6 @@ impl ConstraintSynthesizer<Fr> for R1CSCircuit {
 }
 
 /// Prover instance holding the loaded keys and R1CS
-#[wasm_bindgen]
 pub struct Prover {
     /// Groth16 proving key
     pk: ProvingKey<Bn254>,
@@ -208,7 +207,6 @@ pub struct Prover {
     r1cs: R1CS,
 }
 
-#[wasm_bindgen]
 impl Prover {
     /// Create a new Prover instance from serialized keys and R1CS
     ///
@@ -218,11 +216,10 @@ impl Prover {
     /// # Arguments
     /// * `pk_bytes` - Serialized proving key (compressed)
     /// * `r1cs_bytes` - R1CS binary file contents
-    #[wasm_bindgen(constructor)]
-    pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover, JsValue> {
+    pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
         // Deserialize proving key. Unchecked, proving key is trusted
         let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to load proving key: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to load proving key: {}", e))?;
 
         // Extract verifying key from proving key
         let vk = pk.vk.clone();
@@ -232,44 +229,38 @@ impl Prover {
 
         // Check correctness of the extracted verifying key
         if vk.gamma_abc_g1.len().saturating_sub(1) != r1cs.num_public as usize {
-            return Err(JsValue::from_str(
-                "VK public input count doesn't match R1CS",
-            ));
+            return Err(anyhow!("VK public input count doesn't match R1CS"));
         }
 
         // Process verifying key for faster verification
         let pvk = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::process_vk(&vk)
-            .map_err(|e| JsValue::from_str(&format!("Failed to process VK: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
 
         Ok(Prover { pk, pvk, r1cs })
     }
 
     /// Get the number of public inputs expected by this circuit
-    #[wasm_bindgen(getter)]
     pub fn num_public_inputs(&self) -> u32 {
         self.r1cs.num_public
     }
 
     /// Get the number of constraints in the circuit
-    #[wasm_bindgen(getter)]
     pub fn num_constraints(&self) -> usize {
         self.r1cs.num_constraints()
     }
 
     /// Get the number of wires (variables) in the circuit
-    #[wasm_bindgen(getter)]
     pub fn num_wires(&self) -> u32 {
         self.r1cs.num_wires
     }
 
     /// Get the serialized verifying key (for on-chain verification)
-    #[wasm_bindgen]
-    pub fn get_verifying_key(&self) -> Result<Vec<u8>, JsValue> {
+    pub fn get_verifying_key(&self) -> Result<Vec<u8>> {
         let mut vk_bytes = Vec::new();
         self.pk
             .vk
             .serialize_compressed(&mut vk_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize VK: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to serialize VK: {}", e))?;
         Ok(vk_bytes)
     }
 
@@ -281,25 +272,25 @@ impl Prover {
     ///
     /// # Returns
     /// * Groth16Proof struct with proof points
-    #[wasm_bindgen]
-    pub fn prove(&self, witness_bytes: &[u8]) -> Result<Groth16Proof, JsValue> {
+    pub fn prove(&self, witness_bytes: &[u8]) -> Result<Groth16Proof> {
         // Validate witness size
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Invalid witness size: {} bytes (not multiple of {})",
                 witness_bytes.len(),
                 FIELD_SIZE
-            )));
+            ));
         }
 
         let num_witness_elements = witness_bytes.len() / FIELD_SIZE;
 
         // Validate witness has enough elements
         if num_witness_elements < self.r1cs.num_wires as usize {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Witness too short: {} elements, circuit needs {} wires",
-                num_witness_elements, self.r1cs.num_wires
-            )));
+                num_witness_elements,
+                self.r1cs.num_wires
+            ));
         }
 
         // Parse witness elements
@@ -317,26 +308,26 @@ impl Prover {
         // Generate proof
         let mut rng = OsRng;
         let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
-            .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {}", e)))?;
+            .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         // Serialize proof points
         let mut a_bytes = Vec::new();
         proof
             .a
             .serialize_compressed(&mut a_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize A: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to serialize A: {}", e))?;
 
         let mut b_bytes = Vec::new();
         proof
             .b
             .serialize_compressed(&mut b_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize B: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to serialize B: {}", e))?;
 
         let mut c_bytes = Vec::new();
         proof
             .c
             .serialize_compressed(&mut c_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to serialize C: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to serialize C: {}", e))?;
 
         Ok(Groth16Proof {
             a: a_bytes,
@@ -348,8 +339,7 @@ impl Prover {
     /// Generate proof and return as concatenated bytes
     ///
     /// Format: [A (compressed G1) || B (compressed G2) || C (compressed G1)]
-    #[wasm_bindgen]
-    pub fn prove_bytes(&self, witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    pub fn prove_bytes(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
         let proof = self.prove(witness_bytes)?;
         Ok(proof.to_bytes())
     }
@@ -359,24 +349,24 @@ impl Prover {
     ///
     /// Format: [A (64 bytes) || B (128 bytes) || C (64 bytes)] = 256 bytes
     /// G2 points use Soroban-compatible c1||c0 (imaginary||real) ordering.
-    #[wasm_bindgen]
-    pub fn prove_bytes_uncompressed(&self, witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    pub fn prove_bytes_uncompressed(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
         // Validate witness size
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Invalid witness size: {} bytes (not multiple of {})",
                 witness_bytes.len(),
                 FIELD_SIZE
-            )));
+            ));
         }
 
         let num_witness_elements = witness_bytes.len() / FIELD_SIZE;
 
         if num_witness_elements < self.r1cs.num_wires as usize {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Witness too short: {} elements, circuit needs {} wires",
-                num_witness_elements, self.r1cs.num_wires
-            )));
+                num_witness_elements,
+                self.r1cs.num_wires
+            ));
         }
 
         let mut witness: Vec<Fr> = Vec::with_capacity(num_witness_elements);
@@ -391,7 +381,7 @@ impl Prover {
 
         let mut rng = OsRng;
         let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
-            .map_err(|e| JsValue::from_str(&format!("Proof generation failed: {}", e)))?;
+            .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         Ok(proof_to_uncompressed_bytes(&proof))
     }
@@ -400,20 +390,18 @@ impl Prover {
     ///
     /// Input: compressed proof [A || B || C]
     /// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
-    #[wasm_bindgen]
-    pub fn proof_bytes_to_uncompressed(&self, proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    pub fn proof_bytes_to_uncompressed(&self, proof_bytes: &[u8]) -> Result<Vec<u8>> {
         let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
         Ok(proof_to_uncompressed_bytes(&proof))
     }
 
     /// Get public inputs from witness
     ///
     /// Returns the public input portion of the witness as bytes
-    #[wasm_bindgen]
-    pub fn extract_public_inputs(&self, witness_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+    pub fn extract_public_inputs(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
-            return Err(JsValue::from_str("Invalid witness size"));
+            return Err(anyhow!("Invalid witness size"));
         }
 
         let num_public = self.r1cs.num_public as usize;
@@ -422,31 +410,31 @@ impl Prover {
         let start = FIELD_SIZE; // Skip element 0
         let public_size = num_public
             .checked_mul(FIELD_SIZE)
-            .ok_or_else(|| JsValue::from_str("Overflow calculating public inputs size"))?;
+            .ok_or_else(|| anyhow!("Overflow calculating public inputs size"))?;
         let end = start
             .checked_add(public_size)
-            .ok_or_else(|| JsValue::from_str("Overflow calculating end offset"))?;
+            .ok_or_else(|| anyhow!("Overflow calculating end offset"))?;
 
         if end > witness_bytes.len() {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Witness too short: expected at least {} bytes for {} public inputs",
-                end, num_public
-            )));
+                end,
+                num_public
+            ));
         }
 
         Ok(witness_bytes[start..end].to_vec())
     }
 
     /// Verify a proof (for testing purposes)
-    #[wasm_bindgen]
-    pub fn verify(&self, proof_bytes: &[u8], public_inputs_bytes: &[u8]) -> Result<bool, JsValue> {
+    pub fn verify(&self, proof_bytes: &[u8], public_inputs_bytes: &[u8]) -> Result<bool> {
         // Deserialize proof
         let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-            .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+            .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
 
         // Parse public inputs
         if !public_inputs_bytes.len().is_multiple_of(FIELD_SIZE) {
-            return Err(JsValue::from_str("Invalid public inputs size"));
+            return Err(anyhow!("Invalid public inputs size"));
         }
 
         let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
@@ -456,13 +444,14 @@ impl Prover {
             .gamma_abc_g1
             .len()
             .checked_sub(1)
-            .ok_or_else(|| JsValue::from_str("Invalid verifying key"))?;
+            .ok_or_else(|| anyhow!("Invalid verifying key"))?;
 
         if num_inputs != expected_inputs {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Public input count mismatch: got {}, expected {}",
-                num_inputs, expected_inputs
-            )));
+                num_inputs,
+                expected_inputs
+            ));
         }
 
         let mut public_inputs = Vec::with_capacity(num_inputs);
@@ -476,7 +465,7 @@ impl Prover {
             &public_inputs,
             &proof,
         )
-        .map_err(|e| JsValue::from_str(&format!("Verification error: {}", e)))?;
+        .map_err(|e| anyhow!("Verification error: {}", e))?;
 
         Ok(result)
     }
@@ -487,34 +476,32 @@ impl Prover {
 /// Input: compressed proof [A || B || C]
 /// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
 /// G2 points use Soroban-compatible c1||c0 ordering.
-#[wasm_bindgen]
-pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>, JsValue> {
+pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>> {
     let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to deserialize proof: {}", e)))?;
+        .map_err(|e| anyhow!("Failed to deserialize proof: {}", e))?;
     Ok(proof_to_uncompressed_bytes(&proof))
 }
 /// Standalone verification function
-#[wasm_bindgen]
 pub fn verify_proof(
     vk_bytes: &[u8],
     proof_bytes: &[u8],
     public_inputs_bytes: &[u8],
-) -> Result<bool, JsValue> {
+) -> Result<bool> {
     // Deserialize verifying key
     let vk = VerifyingKey::<Bn254>::deserialize_compressed(vk_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to load VK: {}", e)))?;
+        .map_err(|e| anyhow!("Failed to load VK: {}", e))?;
 
     // Process VK
     let pvk = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::process_vk(&vk)
-        .map_err(|e| JsValue::from_str(&format!("Failed to process VK: {}", e)))?;
+        .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
 
     // Deserialize proof
     let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Failed to load proof: {}", e)))?;
+        .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
 
     // Parse public inputs
     if !public_inputs_bytes.len().is_multiple_of(FIELD_SIZE) {
-        return Err(JsValue::from_str("Invalid public inputs size"));
+        return Err(anyhow!("Invalid public inputs size"));
     }
 
     let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
@@ -529,7 +516,7 @@ pub fn verify_proof(
         &public_inputs,
         &proof,
     )
-    .map_err(|e| JsValue::from_str(&format!("Verification error: {}", e)))?;
+    .map_err(|e| anyhow!("Verification error: {}", e))?;
 
     Ok(result)
 }

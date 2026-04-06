@@ -5,7 +5,7 @@
 
 use alloc::{format, vec, vec::Vec};
 
-use wasm_bindgen::prelude::*;
+use anyhow::{Result, anyhow};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::{
@@ -19,7 +19,6 @@ pub use circuits::core::merkle::{
 };
 
 /// Merkle proof data returned to JavaScript
-#[wasm_bindgen]
 pub struct MerkleProof {
     /// Path elements
     path_elements: Vec<u8>,
@@ -31,35 +30,29 @@ pub struct MerkleProof {
     levels: usize,
 }
 
-#[wasm_bindgen]
 impl MerkleProof {
     /// Get path elements as flat bytes (levels * 32 bytes)
-    #[wasm_bindgen(getter)]
     pub fn path_elements(&self) -> Vec<u8> {
         self.path_elements.clone()
     }
 
     /// Get path indices as bytes (32 bytes)
-    #[wasm_bindgen(getter)]
     pub fn path_indices(&self) -> Vec<u8> {
         self.path_indices.clone()
     }
 
     /// Get computed root as bytes (32 bytes)
-    #[wasm_bindgen(getter)]
     pub fn root(&self) -> Vec<u8> {
         self.root.clone()
     }
 
     /// Get number of levels
-    #[wasm_bindgen(getter)]
     pub fn levels(&self) -> usize {
         self.levels
     }
 }
 
 /// Simple Merkle tree for proof generation
-#[wasm_bindgen]
 pub struct MerkleTree {
     /// Tree levels
     levels_data: Vec<Vec<Scalar>>,
@@ -71,11 +64,9 @@ pub struct MerkleTree {
 
 // TODO: For now we implement a full merkle tree. We should study if a partial
 // merkle tree is enough. To minimize storage on user side
-#[wasm_bindgen]
 impl MerkleTree {
     /// Create a new Merkle tree with given depth and default zero leaf (0)
-    #[wasm_bindgen(constructor)]
-    pub fn new(depth: usize) -> Result<MerkleTree, JsValue> {
+    pub fn new(depth: usize) -> Result<MerkleTree> {
         Self::build_tree(depth, Scalar::from(0u64))
     }
 
@@ -86,28 +77,27 @@ impl MerkleTree {
     /// # Arguments
     /// * `depth` - Tree depth (1-32)
     /// * `zero_leaf_bytes` - Custom zero leaf value as 32 bytes (Little-Endian)
-    #[wasm_bindgen]
-    pub fn new_with_zero_leaf(depth: usize, zero_leaf_bytes: &[u8]) -> Result<MerkleTree, JsValue> {
+    pub fn new_with_zero_leaf(depth: usize, zero_leaf_bytes: &[u8]) -> Result<MerkleTree> {
         let zero = bytes_to_scalar(zero_leaf_bytes)?;
         Self::build_tree(depth, zero)
     }
 
     /// Internal helper to build the tree with a given zero value
-    fn build_tree(depth: usize, zero: Scalar) -> Result<MerkleTree, JsValue> {
+    fn build_tree(depth: usize, zero: Scalar) -> Result<MerkleTree> {
         if depth == 0 || depth > 32 {
-            return Err(JsValue::from_str("Depth must be between 1 and 32"));
+            return Err(anyhow!("Depth must be between 1 and 32"));
         }
 
         // Use checked shift to avoid overflow
         let depth_u32 = u32::try_from(depth).expect("Depth didn't fit in u32");
-        let num_leaves = 1usize.checked_shl(depth_u32).ok_or_else(|| {
-            JsValue::from_str("Depth too large for this platform, would overflow")
-        })?;
+        let num_leaves = 1usize
+            .checked_shl(depth_u32)
+            .ok_or_else(|| anyhow!("Depth too large for this platform, would overflow"))?;
 
         // Initialize all levels with zeros
         let capacity = depth
             .checked_add(1)
-            .ok_or_else(|| JsValue::from_str("Depth overflow"))?;
+            .ok_or_else(|| anyhow!("Depth overflow"))?;
         let mut levels_data = Vec::with_capacity(capacity);
 
         // Leaves at level 0
@@ -131,18 +121,16 @@ impl MerkleTree {
     }
 
     /// Insert a leaf and return its index
-    #[wasm_bindgen]
-    pub fn insert(&mut self, leaf_bytes: &[u8]) -> Result<u32, JsValue> {
+    pub fn insert(&mut self, leaf_bytes: &[u8]) -> Result<u32> {
         let leaf = bytes_to_scalar(leaf_bytes)?;
         let index = self.next_index;
 
         let max_leaves = 1u64 << self.depth;
         if index >= max_leaves {
-            return Err(JsValue::from_str("Merkle tree is full"));
+            return Err(anyhow!("Merkle tree is full"));
         }
 
-        let index_usize =
-            usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
+        let index_usize = usize::try_from(index).map_err(|_| anyhow!("Index too large"))?;
 
         // Insert leaf
         self.levels_data[0][index_usize] = leaf;
@@ -168,40 +156,38 @@ impl MerkleTree {
             // Update parent level
             let parent_level = level
                 .checked_add(1)
-                .ok_or_else(|| JsValue::from_str("Level overflow"))?;
+                .ok_or_else(|| anyhow!("Level overflow"))?;
             self.levels_data[parent_level][current_index] = current_hash;
         }
 
         self.next_index = self
             .next_index
             .checked_add(1)
-            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+            .ok_or_else(|| anyhow!("Index overflow"))?;
 
         // index is bounded by max_leaves (1 << depth where depth <= 32)
-        u32::try_from(index).map_err(|_| JsValue::from_str("Index too large for u32"))
+        u32::try_from(index).map_err(|_| anyhow!("Index too large for u32"))
     }
 
     /// Get the current root
-    #[wasm_bindgen]
     pub fn root(&self) -> Vec<u8> {
         let root = self.levels_data[self.depth][0];
         scalar_to_bytes(&root)
     }
 
     /// Get merkle proof for a leaf at given index
-    #[wasm_bindgen]
-    pub fn get_proof(&self, index: u32) -> Result<MerkleProof, JsValue> {
-        let index = usize::try_from(index).map_err(|_| JsValue::from_str("Index too large"))?;
+    pub fn get_proof(&self, index: u32) -> Result<MerkleProof> {
+        let index = usize::try_from(index).map_err(|_| anyhow!("Index too large"))?;
         let max_leaves = 1usize << self.depth;
 
         if index >= max_leaves {
-            return Err(JsValue::from_str("Index out of bounds"));
+            return Err(anyhow!("Index out of bounds"));
         }
 
         let capacity = self
             .depth
             .checked_mul(FIELD_SIZE)
-            .ok_or_else(|| JsValue::from_str("Overflow calculating path capacity"))?;
+            .ok_or_else(|| anyhow!("Overflow calculating path capacity"))?;
         let mut path_elements = Vec::with_capacity(capacity);
         let mut path_indices_bits: u64 = 0;
         let mut current_index = index;
@@ -233,33 +219,32 @@ impl MerkleTree {
     }
 
     /// Get the next available leaf index
-    #[wasm_bindgen(getter)]
     pub fn next_index(&self) -> u64 {
         self.next_index
     }
 
     /// Get tree depth
-    #[wasm_bindgen(getter)]
     pub fn depth(&self) -> usize {
         self.depth
     }
 }
 
 /// Compute merkle root from leaves
-#[wasm_bindgen]
-pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>, JsValue> {
+pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>> {
     if !leaves_bytes.len().is_multiple_of(FIELD_SIZE) {
-        return Err(JsValue::from_str("Leaves bytes must be multiple of 32"));
+        return Err(anyhow!("Leaves bytes must be multiple of 32"));
     }
 
     let num_leaves = leaves_bytes.len() / FIELD_SIZE;
     let expected_leaves = 1usize << depth;
 
     if num_leaves != expected_leaves {
-        return Err(JsValue::from_str(&format!(
+        return Err(anyhow!(
             "Expected {} leaves for depth {}, got {}",
-            expected_leaves, depth, num_leaves
-        )));
+            expected_leaves,
+            depth,
+            num_leaves
+        ));
     }
 
     // Parse leaves
@@ -267,11 +252,11 @@ pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>,
     for i in 0..num_leaves {
         let start = i
             .checked_mul(FIELD_SIZE)
-            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+            .ok_or_else(|| anyhow!("Index overflow"))?;
         let end = i
             .checked_add(1)
             .and_then(|n| n.checked_mul(FIELD_SIZE))
-            .ok_or_else(|| JsValue::from_str("Index overflow"))?;
+            .ok_or_else(|| anyhow!("Index overflow"))?;
         let chunk = &leaves_bytes[start..end];
         current_level.push(bytes_to_scalar(chunk)?);
     }

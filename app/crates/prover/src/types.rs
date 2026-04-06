@@ -3,48 +3,38 @@
 use alloc::{collections::BTreeMap, string::String, vec::Vec};
 
 use serde::{Deserialize, Serialize};
-use wasm_bindgen::prelude::*;
 
 /// Field element size in bytes (BN254 scalar field)
 pub const FIELD_SIZE: usize = 32;
 
 /// Groth16 proof structure for serialization to JS
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[wasm_bindgen]
 pub struct Groth16Proof {
     /// Proof point A (G1)
-    #[wasm_bindgen(skip)]
     pub a: Vec<u8>,
     /// Proof point B (G2)
-    #[wasm_bindgen(skip)]
     pub b: Vec<u8>,
     /// Proof point C (G1)
-    #[wasm_bindgen(skip)]
     pub c: Vec<u8>,
 }
 
-#[wasm_bindgen]
 impl Groth16Proof {
     /// Get proof point A as bytes
-    #[wasm_bindgen(getter)]
     pub fn a(&self) -> Vec<u8> {
         self.a.clone()
     }
 
     /// Get proof point B as bytes
-    #[wasm_bindgen(getter)]
     pub fn b(&self) -> Vec<u8> {
         self.b.clone()
     }
 
     /// Get proof point C as bytes
-    #[wasm_bindgen(getter)]
     pub fn c(&self) -> Vec<u8> {
         self.c.clone()
     }
 
     /// Get the full proof as concatenated bytes [A || B || C]
-    #[wasm_bindgen]
     pub fn to_bytes(&self) -> Vec<u8> {
         let capacity = self
             .a

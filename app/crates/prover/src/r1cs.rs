@@ -13,9 +13,9 @@
 
 use alloc::{format, vec::Vec};
 
+use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
-use wasm_bindgen::JsValue;
 
 /// A term in a linear combination: coefficient * wire
 #[derive(Clone, Debug)]
@@ -64,22 +64,19 @@ pub struct R1CS {
 
 impl R1CS {
     /// Parse R1CS from binary data
-    pub fn parse(data: &[u8]) -> Result<Self, JsValue> {
+    pub fn parse(data: &[u8]) -> Result<Self> {
         let mut cursor = Cursor::new(data);
 
         // Read and verify magic number "r1cs"
         let magic = cursor.read_bytes(4)?;
         if magic != b"r1cs" {
-            return Err(JsValue::from_str("Invalid R1CS magic number"));
+            return Err(anyhow!("Invalid R1CS magic number"));
         }
 
         // Version (should be 1)
         let version = cursor.read_u32_le()?;
         if version != 1 {
-            return Err(JsValue::from_str(&format!(
-                "Unsupported R1CS version: {}",
-                version
-            )));
+            return Err(anyhow!("Unsupported R1CS version: {}", version));
         }
 
         // Number of sections
@@ -94,8 +91,8 @@ impl R1CS {
             let section_size = cursor.read_u64_le()?;
             let section_start = cursor.position;
 
-            let section_size_usize = usize::try_from(section_size)
-                .map_err(|_| JsValue::from_str("Section size too large"))?;
+            let section_size_usize =
+                usize::try_from(section_size).map_err(|_| anyhow!("Section size too large"))?;
 
             match section_type {
                 1 => {
@@ -121,17 +118,17 @@ impl R1CS {
             let consumed = cursor
                 .position
                 .checked_sub(section_start)
-                .ok_or_else(|| JsValue::from_str("Invalid cursor position"))?;
+                .ok_or_else(|| anyhow!("Invalid cursor position"))?;
             if consumed < section_size_usize {
                 let remaining = section_size_usize
                     .checked_sub(consumed)
-                    .ok_or_else(|| JsValue::from_str("Invalid remaining bytes calculation"))?;
+                    .ok_or_else(|| anyhow!("Invalid remaining bytes calculation"))?;
                 cursor.skip(remaining)?;
             }
         }
 
         // Now parse constraints with header available
-        let header = header.ok_or_else(|| JsValue::from_str("Missing R1CS header section"))?;
+        let header = header.ok_or_else(|| anyhow!("Missing R1CS header section"))?;
 
         let constraints = if let Some((start, _size)) = constraints_data {
             cursor.position = start;
@@ -144,7 +141,7 @@ impl R1CS {
         let num_public = header
             .num_pub_out
             .checked_add(header.num_pub_in)
-            .ok_or_else(|| JsValue::from_str("Overflow calculating num_public"))?;
+            .ok_or_else(|| anyhow!("Overflow calculating num_public"))?;
 
         Ok(R1CS {
             num_wires: header.num_wires,
@@ -156,14 +153,14 @@ impl R1CS {
         })
     }
 
-    fn parse_header(cursor: &mut Cursor) -> Result<R1CSHeader, JsValue> {
+    fn parse_header(cursor: &mut Cursor) -> Result<R1CSHeader> {
         // Field size in bytes (should be 32 for BN254)
         let field_size = cursor.read_u32_le()?;
         if field_size != 32 {
-            return Err(JsValue::from_str(&format!(
+            return Err(anyhow!(
                 "Unsupported field size: {} (expected 32)",
                 field_size
-            )));
+            ));
         }
 
         // Prime (skip - we assume BN254)
@@ -186,10 +183,7 @@ impl R1CS {
         })
     }
 
-    fn parse_constraints(
-        cursor: &mut Cursor,
-        header: &R1CSHeader,
-    ) -> Result<Vec<Constraint>, JsValue> {
+    fn parse_constraints(cursor: &mut Cursor, header: &R1CSHeader) -> Result<Vec<Constraint>> {
         let mut constraints = Vec::with_capacity(header.num_constraints as usize);
 
         for _ in 0..header.num_constraints {
@@ -203,10 +197,7 @@ impl R1CS {
         Ok(constraints)
     }
 
-    fn parse_linear_combination(
-        cursor: &mut Cursor,
-        field_size: u32,
-    ) -> Result<LinearCombination, JsValue> {
+    fn parse_linear_combination(cursor: &mut Cursor, field_size: u32) -> Result<LinearCombination> {
         let num_terms = cursor.read_u32_le()?;
         let mut terms = Vec::with_capacity(num_terms as usize);
 
@@ -251,38 +242,38 @@ impl<'a> Cursor<'a> {
         Cursor { data, position: 0 }
     }
 
-    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8], JsValue> {
+    fn read_bytes(&mut self, n: usize) -> Result<&'a [u8]> {
         let end = self
             .position
             .checked_add(n)
-            .ok_or_else(|| JsValue::from_str("Overflow in cursor position"))?;
+            .ok_or_else(|| anyhow!("Overflow in cursor position"))?;
         if end > self.data.len() {
-            return Err(JsValue::from_str("Unexpected end of R1CS data"));
+            return Err(anyhow!("Unexpected end of R1CS data"));
         }
         let slice = &self.data[self.position..end];
         self.position = end;
         Ok(slice)
     }
 
-    fn read_u32_le(&mut self) -> Result<u32, JsValue> {
+    fn read_u32_le(&mut self) -> Result<u32> {
         let bytes = self.read_bytes(4)?;
         Ok(u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]))
     }
 
-    fn read_u64_le(&mut self) -> Result<u64, JsValue> {
+    fn read_u64_le(&mut self) -> Result<u64> {
         let bytes = self.read_bytes(8)?;
         Ok(u64::from_le_bytes([
             bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
         ]))
     }
 
-    fn skip(&mut self, n: usize) -> Result<(), JsValue> {
+    fn skip(&mut self, n: usize) -> Result<()> {
         let end = self
             .position
             .checked_add(n)
-            .ok_or_else(|| JsValue::from_str("Overflow in cursor skip"))?;
+            .ok_or_else(|| anyhow!("Overflow in cursor skip"))?;
         if end > self.data.len() {
-            return Err(JsValue::from_str("Unexpected end of R1CS data"));
+            return Err(anyhow!("Unexpected end of R1CS data"));
         }
         self.position = end;
         Ok(())

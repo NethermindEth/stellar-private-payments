@@ -33,15 +33,81 @@
 //!                                      │
 //!                                      └── Poseidon2 → Note Public Key
 //! ```
-
+use crate::crypto::derive_public_key;
 use alloc::{format, string::String, vec::Vec};
+use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use wasm_bindgen::prelude::*;
 use x25519_dalek::{PublicKey, StaticSecret};
+// Key derivation constants.
+// These MUST remain constant for backwards compatibility.
+
+/// Message signed to derive the X25519 encryption keypair
+pub const ENCRYPTION_MESSAGE: &str = "Sign to access Privacy Pool [v1]";
+
+/// Message signed to derive the BN254 note identity keypair
+pub const SPENDING_KEY_MESSAGE: &str = "Privacy Pool Spending Key [v1]";
+
+/// Spending key signature
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SpendingSignature(pub Vec<u8>);
+
+/// Encryption key signature
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncryptionSignature(pub Vec<u8>);
+
+/// Encryption private key
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncryptionPrivateKey(pub [u8; 32]);
+/// Encryption public key
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncryptionPublicKey(pub [u8; 32]);
+
+/// Encryption key pair
+#[derive(Debug, Serialize, Deserialize)]
+pub struct EncryptionKeyPair {
+    /// Encryption private key
+    pub private: EncryptionPrivateKey,
+    /// Encryption public key
+    pub public: EncryptionPublicKey,
+}
+
+/// Note ownership private key
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotePrivateKey(pub [u8; 32]);
+
+/// Note ownership public key
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NotePublicKey(pub [u8; 32]);
+
+/// Note ownership key pair
+#[derive(Debug, Serialize, Deserialize)]
+pub struct NoteKeyPair {
+    /// Note ownership private key
+    pub private: NotePrivateKey,
+    /// Note ownership public key
+    pub public: NotePublicKey,
+}
+
+/// Keypairs derivation
+pub fn derive_encryption_and_note_keypairs(
+    spending_signature: SpendingSignature,
+    encryption_signature: EncryptionSignature,
+) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
+    let note_private_key = derive_note_private_key(spending_signature)?;
+    let pubkey = derive_public_key(&note_private_key.0)?;
+    let note_public_key = NotePublicKey(pubkey.try_into().map_err(|e: Vec<u8>| anyhow::anyhow!("Expected 32 bytes, but got {}", e.len()))?);
+    let note_keypair = NoteKeyPair {
+        private: note_private_key,
+        public: note_public_key,
+    };
+    let encryption_keypair = derive_keypair_from_signature(encryption_signature)?;
+    Ok((note_keypair, encryption_keypair))
+}
 
 /// Encryption key derivation (X25519). Used for off-chain note
 /// encryption/decryption Derive X25519 encryption keypair deterministically
@@ -62,14 +128,10 @@ use x25519_dalek::{PublicKey, StaticSecret};
 ///
 /// # Returns
 /// 64 bytes: `[public_key (32), private_key (32)]`
-#[wasm_bindgen]
-pub fn derive_keypair_from_signature(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
-    derive_keypair_from_signature_internal(signature).map_err(|e| JsValue::from_str(&e))
-}
-
-fn derive_keypair_from_signature_internal(signature: &[u8]) -> Result<Vec<u8>, String> {
+fn derive_keypair_from_signature(signature: EncryptionSignature) -> Result<EncryptionKeyPair> {
+    let EncryptionSignature(signature) = signature;
     if signature.len() != 64 {
-        return Err("Signature must be 64 bytes (Ed25519)".into());
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
     // Hash signature to get a 32-byte seed
@@ -84,12 +146,12 @@ fn derive_keypair_from_signature_internal(signature: &[u8]) -> Result<Vec<u8>, S
     let secret = StaticSecret::from(secret_bytes);
     let public = PublicKey::from(&secret);
 
-    // Return [public_key (32), private_key (32)]
-    let mut result = Vec::with_capacity(64);
-    result.extend_from_slice(public.as_bytes());
-    result.extend_from_slice(&secret.to_bytes());
+    let keypair = EncryptionKeyPair {
+        private: EncryptionPrivateKey(secret.to_bytes().try_into()?),
+        public: EncryptionPublicKey(public.to_bytes().try_into()?),
+    };
 
-    Ok(result)
+    Ok(keypair)
 }
 
 /// Derive private key (BN254 scalar) deterministically from a Freighter
@@ -109,10 +171,10 @@ fn derive_keypair_from_signature_internal(signature: &[u8]) -> Result<Vec<u8>, S
 ///
 /// # Returns
 /// 32 bytes: Note private key (BN254 scalar, little-endian)
-#[wasm_bindgen]
-pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
+fn derive_note_private_key(signature: SpendingSignature) -> Result<NotePrivateKey> {
+    let SpendingSignature(signature) = signature;
     if signature.len() != 64 {
-        return Err(JsValue::from_str("Signature must be 64 bytes (Ed25519)"));
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
     // Hash signature to get 32-byte key
@@ -125,12 +187,12 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
     let field = Fr::from_le_bytes_mod_order(&key);
 
     // Serialize into bytes
-    let mut result: Vec<u8> = Vec::with_capacity(32);
+    let mut result = [0u8; 32];
     field
-        .serialize_compressed(&mut result)
+        .serialize_compressed(&mut result[..])
         .expect("Serialization failed");
 
-    Ok(result)
+    Ok(NotePrivateKey(result))
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -145,11 +207,10 @@ pub fn derive_note_private_key(signature: &[u8]) -> Result<Vec<u8>, JsValue> {
 /// Unlike the private keys above, blinding factors are NOT derived
 /// deterministically. They are random per-note and must be stored for later
 /// use.
-#[wasm_bindgen]
-pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
+pub fn generate_random_blinding() -> Result<Vec<u8>> {
     let mut random_bytes = [0u8; 32];
     getrandom::getrandom(&mut random_bytes)
-        .map_err(|e| JsValue::from_str(&format!("Random generation failed: {}", e)))?;
+        .map_err(|e| anyhow!("Random generation failed: {}", e))?;
 
     // Reduce to BN254 field
     let scalar = Fr::from_le_bytes_mod_order(&random_bytes);
@@ -158,7 +219,7 @@ pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
     let mut result = Vec::with_capacity(32);
     scalar
         .serialize_compressed(&mut result)
-        .map_err(|e| JsValue::from_str(&format!("Serialization failed: {}", e)))?;
+        .map_err(|e| anyhow!("Serialization failed: {}", e))?;
     Ok(result)
 }
 
@@ -181,29 +242,20 @@ pub fn generate_random_blinding() -> Result<Vec<u8>, JsValue> {
 ///
 /// # Returns
 /// Encrypted data (112 bytes)
-#[wasm_bindgen]
-pub fn encrypt_note_data(
-    recipient_pubkey_bytes: &[u8],
-    plaintext: &[u8],
-) -> Result<Vec<u8>, JsValue> {
-    encrypt_note_data_internal(recipient_pubkey_bytes, plaintext).map_err(|e| JsValue::from_str(&e))
-}
-
-fn encrypt_note_data_internal(
-    recipient_pubkey_bytes: &[u8],
-    plaintext: &[u8],
-) -> Result<Vec<u8>, String> {
+fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
     if recipient_pubkey_bytes.len() != 32 {
-        return Err("Recipient public key must be 32 bytes".into());
+        return Err(anyhow!("Recipient public key must be 32 bytes"));
     }
     if plaintext.len() != 40 {
-        return Err("Plaintext must be 40 bytes (8 amount + 32 blinding)".into());
+        return Err(anyhow!(
+            "Plaintext must be 40 bytes (8 amount + 32 blinding)"
+        ));
     }
 
     // Generate ephemeral secret key using getrandom directly
     let mut ephemeral_bytes = [0u8; 32];
     getrandom::getrandom(&mut ephemeral_bytes)
-        .map_err(|e| format!("Failed to generate ephemeral key: {}", e))?;
+        .map_err(|e| anyhow!("Failed to generate ephemeral key: {}", e))?;
 
     let ephemeral_secret = StaticSecret::from(ephemeral_bytes);
     let ephemeral_public = PublicKey::from(&ephemeral_secret);
@@ -211,7 +263,7 @@ fn encrypt_note_data_internal(
     // ECDH: derive shared secret
     let recipient_public = PublicKey::from(
         *<&[u8; 32]>::try_from(recipient_pubkey_bytes)
-            .map_err(|_| "Invalid recipient public key")?,
+            .map_err(|_| anyhow!("Invalid recipient public key"))?,
     );
     let shared_secret = ephemeral_secret.diffie_hellman(&recipient_public);
 
@@ -221,13 +273,13 @@ fn encrypt_note_data_internal(
     // Generate random nonce (24 bytes for XSalsa20) using getrandom
     let mut nonce_bytes = [0u8; 24];
     getrandom::getrandom(&mut nonce_bytes)
-        .map_err(|e| format!("Failed to generate nonce: {}", e))?;
+        .map_err(|e| anyhow!("Failed to generate nonce: {}", e))?;
     let nonce = Nonce::from(nonce_bytes);
 
     // Encrypt plaintext
     let ciphertext = cipher
         .encrypt(&nonce, plaintext)
-        .map_err(|e| format!("Encryption failed: {:?}", e))?;
+        .map_err(|e| anyhow!("Encryption failed: {:?}", e))?;
 
     // Pack: [ephemeral_pubkey (32)] [nonce (24)] [ciphertext + tag]
     // 32 (pubkey) + 24 (nonce) = 56 bytes overhead
@@ -255,26 +307,15 @@ fn encrypt_note_data_internal(
 /// # Returns
 /// - Success: `[amount (8 bytes LE)] [blinding (32 bytes)]` = 40 bytes
 /// - Failure: Empty vec (note was not addressed to us)
-#[wasm_bindgen]
-pub fn decrypt_note_data(
-    private_key_bytes: &[u8],
-    encrypted_data: &[u8],
-) -> Result<Vec<u8>, JsValue> {
-    decrypt_note_data_internal(private_key_bytes, encrypted_data).map_err(|e| JsValue::from_str(&e))
-}
-
-fn decrypt_note_data_internal(
-    private_key_bytes: &[u8],
-    encrypted_data: &[u8],
-) -> Result<Vec<u8>, String> {
+fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>> {
     if private_key_bytes.len() != 32 {
-        return Err("Private key must be 32 bytes".into());
+        return Err(anyhow!("Private key must be 32 bytes"));
     }
 
     // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (40) + tag
     // (16) = 112
     if encrypted_data.len() < 112 {
-        return Err("Encrypted data too short".into());
+        return Err(anyhow!("Encrypted data too short"));
     }
 
     // Extract components
@@ -284,12 +325,13 @@ fn decrypt_note_data_internal(
 
     // Setup our private key
     let our_secret = StaticSecret::from(
-        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| "Invalid private key")?,
+        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| anyhow!("Invalid private key"))?,
     );
 
     // ECDH: derive shared secret
     let ephemeral_public = PublicKey::from(
-        *<&[u8; 32]>::try_from(ephemeral_pubkey).map_err(|_| "Invalid ephemeral public key")?,
+        *<&[u8; 32]>::try_from(ephemeral_pubkey)
+            .map_err(|_| anyhow!("Invalid ephemeral public key"))?,
     );
     let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
 
@@ -318,8 +360,8 @@ mod tests {
     #[test]
     fn test_derive_keypair_determinism() {
         let signature = [1u8; 64];
-        let keys1 = derive_keypair_from_signature_internal(&signature).expect("Derivation failed");
-        let keys2 = derive_keypair_from_signature_internal(&signature).expect("Derivation failed");
+        let keys1 = derive_keypair_from_signature(&signature).expect("Derivation failed");
+        let keys2 = derive_keypair_from_signature(&signature).expect("Derivation failed");
         assert_eq!(keys1, keys2);
         assert_eq!(keys1.len(), 64);
     }

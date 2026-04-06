@@ -2,11 +2,10 @@
 //!
 //! Provides Poseidon2 hashing and key derivation functions matching
 //! the Circom circuit implementations.
-
 use crate::serialization::{bytes_to_scalar, scalar_to_bytes, scalar_to_hex};
 use alloc::{string::String, vec, vec::Vec};
+use anyhow::{Result, anyhow};
 use core::ops::Add;
-use wasm_bindgen::prelude::*;
 use zkhash::{
     fields::bn256::FpBN256 as Scalar,
     poseidon2::{
@@ -75,8 +74,7 @@ pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 
 /// Poseidon2 hash with 2 inputs as compression mode
 
-#[wasm_bindgen]
-pub fn poseidon2_compression_wasm(input0: &[u8], input1: &[u8]) -> Result<Vec<u8>, JsValue> {
+pub fn poseidon2_compression_wasm(input0: &[u8], input1: &[u8]) -> Result<Vec<u8>> {
     let a = bytes_to_scalar(input0)?;
     let b = bytes_to_scalar(input1)?;
 
@@ -87,12 +85,7 @@ pub fn poseidon2_compression_wasm(input0: &[u8], input1: &[u8]) -> Result<Vec<u8
 /// Poseidon2 hash with 2 inputs and domain separation
 ///
 /// Matches the Circom Poseidon2(2) template
-#[wasm_bindgen]
-pub fn poseidon2_hash2(
-    input0: &[u8],
-    input1: &[u8],
-    domain_separation: u8,
-) -> Result<Vec<u8>, JsValue> {
+pub fn poseidon2_hash2(input0: &[u8], input1: &[u8], domain_separation: u8) -> Result<Vec<u8>> {
     let a = bytes_to_scalar(input0)?;
     let b = bytes_to_scalar(input1)?;
     let domain = Scalar::from(domain_separation);
@@ -104,16 +97,14 @@ pub fn poseidon2_hash2(
 /// Derive public key from private key
 ///
 /// publicKey = Poseidon2(privateKey, 0, domain=0x03)
-#[wasm_bindgen]
-pub fn derive_public_key(private_key: &[u8]) -> Result<Vec<u8>, JsValue> {
+pub fn derive_public_key(private_key: &[u8]) -> Result<Vec<u8>> {
     let sk = bytes_to_scalar(private_key)?;
     let pk = derive_public_key_internal(sk);
     Ok(scalar_to_bytes(&pk))
 }
 
 /// Derive public key and return as hex string (for JS BigInt)
-#[wasm_bindgen]
-pub fn derive_public_key_hex(private_key: &[u8]) -> Result<String, JsValue> {
+pub fn derive_public_key_hex(private_key: &[u8]) -> Result<String> {
     let sk = bytes_to_scalar(private_key)?;
     let pk = derive_public_key_internal(sk);
     Ok(scalar_to_hex(&pk))
@@ -122,12 +113,7 @@ pub fn derive_public_key_hex(private_key: &[u8]) -> Result<String, JsValue> {
 /// Compute commitment: hash(amount, publicKey, blinding)
 ///
 /// Uses domain separation 0x01 for leaf commitments
-#[wasm_bindgen]
-pub fn compute_commitment(
-    amount: &[u8],
-    public_key: &[u8],
-    blinding: &[u8],
-) -> Result<Vec<u8>, JsValue> {
+pub fn compute_commitment(amount: &[u8], public_key: &[u8], blinding: &[u8]) -> Result<Vec<u8>> {
     let amt = bytes_to_scalar(amount)?;
     let pk = bytes_to_scalar(public_key)?;
     let blind = bytes_to_scalar(blinding)?;
@@ -138,12 +124,11 @@ pub fn compute_commitment(
 }
 
 /// Compute signature: hash(privateKey, commitment, merklePath)
-#[wasm_bindgen]
 pub fn compute_signature(
     private_key: &[u8],
     commitment: &[u8],
     merkle_path: &[u8],
-) -> Result<Vec<u8>, JsValue> {
+) -> Result<Vec<u8>> {
     let sk = bytes_to_scalar(private_key)?;
     let comm = bytes_to_scalar(commitment)?;
     let path = bytes_to_scalar(merkle_path)?;
@@ -155,12 +140,11 @@ pub fn compute_signature(
 /// Compute nullifier: hash(commitment, pathIndices, signature)
 ///
 /// Uses domain separation 0x02 for nullifiers
-#[wasm_bindgen]
 pub fn compute_nullifier(
     commitment: &[u8],
     path_indices: &[u8],
     signature: &[u8],
-) -> Result<Vec<u8>, JsValue> {
+) -> Result<Vec<u8>> {
     let comm = bytes_to_scalar(commitment)?;
     let indices = bytes_to_scalar(path_indices)?;
     let sig = bytes_to_scalar(signature)?;
@@ -171,13 +155,11 @@ pub fn compute_nullifier(
 }
 
 /// Returns BN256 modulus as Big Endian bytes
-#[wasm_bindgen]
 pub fn bn256_modulus() -> Vec<u8> {
     BN256_MOD_BYTES.to_vec()
 }
 
 /// Returns Zero leaf used in merkle trees as Big Endian bytes
-#[wasm_bindgen]
 pub fn zero_leaf() -> Vec<u8> {
     ZERO_LEAF_BYTES.to_vec()
 }
