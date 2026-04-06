@@ -1,8 +1,9 @@
 use crate::worker::Worker;
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
-use crate::protocol::{WorkerRequest, WorkerResponse, EncryptionKey, SpendingKey};
-use wasm_bindgen::prelude::wasm_bindgen;
+use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
+use prover::encryption::{SpendingSignature, EncryptionSignature, ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE, NoteKeyPair, EncryptionKeyPair};
+use wasm_bindgen::prelude::*;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use anyhow::anyhow;
@@ -51,20 +52,61 @@ impl WorkerClient {
             other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
         }
     }
+
+
 }
 
 #[wasm_bindgen]
 impl WorkerClient {
 
-    #[wasm_bindgen(js_name = saveUserKeys)]
-    pub async fn save_user_keys(&self, spending_key: Vec<u8>, encryption_key: Vec<u8>) -> anyhow::Result<()> {
+    async fn request(&self, req: WorkerRequest, timeout_ms: u32) -> Result<WorkerResponse, JsError> {
         let mut bridge = self.bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(WorkerRequest::SaveUserKeys(SpendingKey(spending_key), EncryptionKey(encryption_key)))).await?;
+
+        // Handle transport/timeout errors
+        let resp = with_timeout(timeout_ms, bridge.run(req))
+            .await
+            .map_err(|e| JsError::new(&format!("Worker Communication Error: {}", e)))?;
+
         match resp {
-            WorkerResponse::Pong => Ok(()),
-            WorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
+            WorkerResponse::Error(e) => Err(JsError::new(&e)),
+            _ => Ok(resp),
         }
+    }
+
+    #[wasm_bindgen(js_name = deriveAndSaveUserKeys)]
+    pub async fn derive_save_user_keys(&self, address: String, spending_sig: Vec<u8>, encryption_sig: Vec<u8>) -> Result<(), JsError> {
+        let req = WorkerRequest::DeriveSaveUserKeys(
+            address,
+            SpendingSignature(spending_sig),
+            EncryptionSignature(encryption_sig)
+        );
+
+        match self.request(req, 5_000).await? {
+            WorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getUserKeys)]
+    pub async fn get_user_keys(&self, address: String) -> Result<JsValue, JsError> {
+        let req = WorkerRequest::UserKeys(
+            address,
+        );
+
+        match self.request(req, 1_000).await? {
+            WorkerResponse::UserKeys(keys) => Ok(serde_wasm_bindgen::to_value(&keys)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(getter, js_name = encryptionDerivationMessage)]
+    pub fn encryption_derivation_message() -> String {
+        ENCRYPTION_MESSAGE.to_string()
+    }
+
+    #[wasm_bindgen(getter, js_name = spendingKeyMessage)]
+    pub fn spending_key_message() -> String {
+        SPENDING_KEY_MESSAGE.to_string()
     }
 }
 

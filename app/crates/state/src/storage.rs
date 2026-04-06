@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{Connection, params, Error as SqlError};
+use rusqlite::{Connection, params, Error as SqlError, Transaction};
 use rusqlite_migration::{M, Migrations};
+use prover::encryption::{EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "spp.sqlite";
@@ -70,6 +71,87 @@ impl Storage {
         })?;
 
         Ok(status)
+    }
+
+    pub fn get_user_keys(&self, address: &str) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
+        self.conn.query_row(
+            "SELECT
+                encryption_private_key,
+                encryption_public_key,
+                note_private_key,
+                note_public_key
+                FROM keypairs
+                JOIN accounts ON keypairs.account_id = accounts.id
+                WHERE accounts.address = ?1",
+            params![address],
+            |row| {
+                // Directly extract [u8; 32] from the BLOB columns
+                let enc_priv: [u8; 32] = row.get(0)?;
+                let enc_pub: [u8; 32] = row.get(1)?;
+                let note_priv: [u8; 32] = row.get(2)?;
+                let note_pub: [u8; 32] = row.get(3)?;
+
+                Ok((
+                    NoteKeyPair {
+                        private: NotePrivateKey(note_priv),
+                        public: NotePublicKey(note_pub),
+                    },
+                    EncryptionKeyPair {
+                        private: EncryptionPrivateKey(enc_priv),
+                        public: EncryptionPublicKey(enc_pub),
+                    },
+                ))
+            },
+        )
+        .context(format!("Failed to fetch keys for account: {}", address))
+    }
+
+    pub fn save_encryption_and_note_keypairs(
+        &mut self,
+        account_address: &str,
+        note_keypair: &NoteKeyPair,
+        encryption_keypair: &EncryptionKeyPair,
+    ) -> Result<()> {
+        let tx = self.conn.transaction().context("failed to start transaction")?;
+
+        let account_id = Self::get_or_create_account(&tx, account_address)?;
+
+        tx.execute(
+            "INSERT INTO keypairs (
+                encryption_private_key,
+                encryption_public_key,
+                note_private_key,
+                note_public_key,
+                account_id
+            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![
+                &encryption_keypair.private.0,
+                &encryption_keypair.public.0,
+                &note_keypair.private.0,
+                &note_keypair.public.0,
+                account_id,
+            ],
+        )
+        .context("failed to insert keypairs")?;
+        tx.commit().context("failed to commit transaction")?;
+        log::debug!("[STORAGE] saved new keypairs for the account {}", account_address);
+        Ok(())
+    }
+
+    /// Internal helper to handle the "Get or Create" logic for accounts
+    fn get_or_create_account(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
+        tx.execute(
+            "INSERT OR IGNORE INTO accounts (address) VALUES (?1)",
+            params![address],
+        ).context("failed to insert account")?;
+
+        let id: i64 = tx.query_row(
+            "SELECT id FROM accounts WHERE address = ?1",
+            params![address],
+            |row| row.get(0),
+        ).context("failed to fetch account id")?;
+
+        Ok(id)
     }
 
     // -----------------------------------------------------------------------

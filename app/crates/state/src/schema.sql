@@ -12,6 +12,21 @@ CREATE TABLE contract_events (
     value TEXT NOT NULL
 );
 
+CREATE TABLE accounts (
+    id INTEGER PRIMARY KEY,
+    address TEXT NOT NULL,
+);
+
+CREATE TABLE keypairs (
+    id INTEGER PRIMARY KEY,
+    encryption_private_key TEXT NOT NULL,
+    encryption_public_key TEXT NOT NULL,
+    note_private_key TEXT NOT NULL,
+    note_public_key TEXT NOT NULL,
+    account_id INTEGER,
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+
 CREATE TABLE pool_leaves (
     leaf_index INTEGER PRIMARY KEY,
     commitment TEXT NOT NULL UNIQUE,

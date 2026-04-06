@@ -11,6 +11,7 @@ description = "SQLite-backed application state"
 anyhow = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
+prover = { workspace = true }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 rusqlite_migration = { version = "2.5.0", default-features = false }
 serde = { workspace = true }
