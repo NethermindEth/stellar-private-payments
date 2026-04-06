@@ -439,6 +439,7 @@ impl PoolContract {
 
         Ok(is_valid)
     }
+
     /// Hash external data using Keccak256
     ///
     /// Serializes the external data to XDR, hashes it with Keccak256,
