@@ -4,8 +4,11 @@ use crate::events_parsers::parse_event;
 use types::ProcessedEvent;
 
 
-pub fn process_events(storage: &mut Storage, limit: u32) -> Result<()> {
-    let mut unprocessed = vec![]; //storage.get_unprocessed_events(limit)?;
+pub fn process_events(storage: &mut Storage, limit: u32) -> Result<bool> {
+    let mut unprocessed = storage.get_unprocessed_events(limit)?;
+    if unprocessed.is_empty() {
+        return Ok(false);
+    }
     let mut nullifiers = vec![];
     let mut commitments = vec![];
     let mut pubkeys = vec![];
@@ -33,5 +36,5 @@ pub fn process_events(storage: &mut Storage, limit: u32) -> Result<()> {
     storage.save_commitment_events_batch(&commitments)?;
     storage.save_public_key_events_batch(&pubkeys)?;
     storage.save_leaf_added_events_batch(&leaves)?;
-    Ok(())
+    Ok(true)
 }

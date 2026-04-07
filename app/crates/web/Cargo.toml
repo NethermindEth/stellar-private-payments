@@ -20,9 +20,11 @@ async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
 log = { workspace = true }
+js-sys = "0.3"
 wasm-log = { workspace = true }
-gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
-gloo-worker = { version = "0.6", default-features = false, features = ["futures"]  }
+# we have to use previous versions of gloo- crates because of wasmer and circom-compat
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
+gloo-worker = { version = "0.5", default-features = false, features = ["futures"]  }
 prover = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
@@ -31,7 +33,8 @@ sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 state = { path = "../state" }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen = { workspace = true }
-web-sys = { version = "0.3", features = ["console"] }
+web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode"] }
+witness = { workspace = true }
 stellar = { workspace = true }
 types = { path = "../types" }
 

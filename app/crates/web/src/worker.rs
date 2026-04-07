@@ -11,6 +11,11 @@ use gloo_worker::Registrable;
 use prover::encryption::derive_encryption_and_note_keypairs;
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
+use wasm_bindgen::JsCast;
+use wasm_bindgen_futures::JsFuture;
+use web_sys::{Request, RequestInit, RequestMode, Response, WorkerGlobalScope};
+use witness::WitnessCalculator;
+use wasm_bindgen::JsValue;
 
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
@@ -73,6 +78,13 @@ async fn init() -> Result<(), JsError> {
         e
     })?;
 
+    let wasm_bytes = fetch_circuit_file("/circuits/policy_tx_2_2.wasm").await?;
+    log::debug!("[WORKER] fetched policy_tx_2_2.wasm: {} bytes", wasm_bytes.len());
+    let r1cs_bytes = fetch_circuit_file("/circuits/policy_tx_2_2.r1cs").await?;
+    log::debug!("[WORKER] fetched policy_tx_2_2.r1cs: {} bytes", r1cs_bytes.len());
+
+    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes).expect("FAILED WitnessCalculator");
+
     let storage = state::Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
 
     STORAGE.with(|s| {
@@ -133,6 +145,7 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
             // for the sake of the sequential processing we drop it here
             // the storage is the single source of raw events for the processors
             log::debug!("[WORKER] sending {} raw contract events to process", events_data.events.len());
+            kick_processor();
             WorkerResponse::Saved
         }
         WorkerRequest::DeriveSaveUserKeys(address, spending_signature, encryption_signature) => {
@@ -183,10 +196,61 @@ async fn process_until_empty() -> anyhow::Result<()> {
     const FETCH_LIMIT: u32 = 50; // small chunks to stay responsive
 
     loop {
-        with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
+        let processed = with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
+        if !processed {
+            break;
+        }
         // Yield to avoid blocking the worker for a long time
         gloo_timers::future::TimeoutFuture::new(0).await;
     }
 
     Ok(())
+}
+
+async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
+    let global = js_sys::global();
+
+    let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
+        .map_err(|_| JsError::new("Accessing self.location failed"))?;
+
+    let origin = js_sys::Reflect::get(&location, &JsValue::from_str("origin"))
+        .map_err(|_| JsError::new("Accessing self.location.origin failed"))?
+        .as_string()
+        .ok_or_else(|| JsError::new("Origin is not a string"))?;
+
+
+    let url_string = if path.starts_with("http") {
+        path.to_string()
+    } else {
+        format!("{}{}", origin, path)
+    };
+
+    log::debug!(&format!("[WORKER] Fetching from: {}", url_string).into());
+
+    let mut opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+
+    let request = Request::new_with_str_and_init(&url_string, &opts)
+        .map_err(|e| JsError::new(&format!("Request failed for {}: {:?}", url_string, e)))?;
+
+    let global_scope = global.unchecked_into::<web_sys::WorkerGlobalScope>();
+    let resp_value = JsFuture::from(global_scope.fetch_with_request(&request))
+        .await
+        .map_err(|e| JsError::new(&format!("Network error: {:?}", e)))?;
+
+    let resp: web_sys::Response = resp_value.dyn_into().map_err(|_| {
+        JsError::new("Failed to cast response")
+    })?;
+
+    if !resp.ok() {
+        return Err(JsError::new(&format!("HTTP {} for {}", resp.status(), url_string)));
+    }
+
+    let array_buffer_promise = resp.array_buffer().map_err(|e| JsError::new(&format!("{:?}", e)))?;
+    let array_buffer_value = JsFuture::from(array_buffer_promise).await
+        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
+
+    let type_array = js_sys::Uint8Array::new(&array_buffer_value);
+    Ok(type_array.to_vec())
 }

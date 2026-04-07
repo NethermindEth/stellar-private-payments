@@ -40,7 +40,7 @@ async fn with_timeout<T>(
 impl WorkerClient {
     pub fn new() -> Self {
         Self {
-            bridge: Worker::spawner().as_module(true).spawn("./js/worker.js"),
+            bridge: Worker::spawner().spawn("./js/worker.js"),
         }
     }
 

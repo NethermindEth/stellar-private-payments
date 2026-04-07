@@ -36,22 +36,29 @@ async-trait = { version = "0.1.89", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
+futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", features = ["js"] }
 hex = { version = "0.4", default-features = false }
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
 num-traits = { version = "0.2", default-features = false }
+prover = { path = "app/crates/prover" }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde_bytes =  { version = "0.11", default-features = false }
 serde_json = { version = "1", default-features = false }
 serde-wasm-bindgen = { version = "0.4", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-wasm-bindgen = { version = "0.2.108", default-features = false, features = ["serde-serialize"] }
+stellar = { path = "app/crates/stellar" }
+types = { path = "app/crates/types" }
+# pin for wasmer
+wasm-bindgen = { version = "=0.2.108", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-test = { version = "0.3" }
 wasmer = { version = "6.1", default-features = false }
 wasm-log = { version = "0.3", default-features = false }
+witness = { path = "app/crates/witness" }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]
