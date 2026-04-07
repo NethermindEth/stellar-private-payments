@@ -99,13 +99,13 @@ impl WorkerClient {
         }
     }
 
-    #[wasm_bindgen(getter, js_name = encryptionDerivationMessage)]
-    pub fn encryption_derivation_message() -> String {
+    #[wasm_bindgen(js_name = encryptionDerivationMessage)]
+    pub fn encryption_derivation_message(&self) -> String {
         ENCRYPTION_MESSAGE.to_string()
     }
 
-    #[wasm_bindgen(getter, js_name = spendingKeyMessage)]
-    pub fn spending_key_message() -> String {
+    #[wasm_bindgen(js_name = spendingKeyMessage)]
+    pub fn spending_key_message(&self) -> String {
         SPENDING_KEY_MESSAGE.to_string()
     }
 }

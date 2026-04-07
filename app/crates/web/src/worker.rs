@@ -126,9 +126,13 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
         }
         WorkerRequest::UserKeys(address) => {
             log::debug!("[WORKER] fetch user keys for the account {address}");
-            let (note_keypair, encryption_keypair) = with_storage!(s => s.get_user_keys(&address)?)?;
-            log::debug!("[WORKER] fetched notes and encryption keys for the account {address}");
-            WorkerResponse::UserKeys(UserKeys{note_keypair, encryption_keypair})
+            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            if opt.is_some() {
+                log::debug!("[WORKER] fetched notes and encryption keys for the account {address}");
+            } else {
+                log::debug!("[WORKER] not found notes and encryption keys for the account {address}");
+            }
+            WorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| UserKeys{note_keypair, encryption_keypair}))
         }
     };
     Ok(resp)

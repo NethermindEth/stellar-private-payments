@@ -21,6 +21,7 @@ ark-std = { workspace = true }
 circuits = { path = "../../../circuits", default-features = false }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 serde = { workspace = true }
+serde_bytes = { workspace = true }
 sha2 = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 # Poseidon2 hash

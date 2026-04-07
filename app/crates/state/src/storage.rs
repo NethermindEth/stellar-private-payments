@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Context, Result};
-use rusqlite::{Connection, params, Error as SqlError, Transaction};
+use rusqlite::{Connection, params, Error as SqlError, Transaction, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
 use prover::encryption::{EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
 
@@ -73,7 +73,7 @@ impl Storage {
         Ok(status)
     }
 
-    pub fn get_user_keys(&self, address: &str) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
+    pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
         self.conn.query_row(
             "SELECT
                 encryption_private_key,
@@ -103,6 +103,7 @@ impl Storage {
                 ))
             },
         )
+        .optional()
         .context(format!("Failed to fetch keys for account: {}", address))
     }
 

@@ -62,10 +62,10 @@ pub struct EncryptionSignature(pub Vec<u8>);
 
 /// Encryption private key
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionPrivateKey(pub [u8; 32]);
+pub struct EncryptionPrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
 /// Encryption public key
 #[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionPublicKey(pub [u8; 32]);
+pub struct EncryptionPublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
 
 /// Encryption key pair
 #[derive(Debug, Serialize, Deserialize)]
@@ -78,11 +78,11 @@ pub struct EncryptionKeyPair {
 
 /// Note ownership private key
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NotePrivateKey(pub [u8; 32]);
+pub struct NotePrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
 
 /// Note ownership public key
 #[derive(Debug, Serialize, Deserialize)]
-pub struct NotePublicKey(pub [u8; 32]);
+pub struct NotePublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
 
 /// Note ownership key pair
 #[derive(Debug, Serialize, Deserialize)]

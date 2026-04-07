@@ -4,6 +4,7 @@ use prover::encryption::{SpendingSignature, EncryptionSignature, EncryptionKeyPa
 pub type Address = String;
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserKeys{
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair
@@ -24,5 +25,5 @@ pub enum WorkerResponse {
     SyncState(Option<types::SyncMetadata>),
     Saved,
     Error(String),
-    UserKeys(UserKeys)
+    UserKeys(Option<UserKeys>)
 }
