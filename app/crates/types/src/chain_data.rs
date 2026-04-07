@@ -106,6 +106,9 @@ pub struct NewNullifierEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NewCommitmentEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     /// The commitment hash added to the tree, hex
     pub commitment: String,
     /// Index position in the Merkle tree
@@ -118,6 +121,9 @@ pub struct NewCommitmentEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     /// Address of the account owner
     pub owner: String,
     /// X25519 encryption public key
@@ -130,10 +136,13 @@ pub struct PublicKeyEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeafAddedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     /// The leaf value that was inserted, hex
     pub leaf: String,
     /// Index position where the leaf was inserted
-    pub index: u64,
+    pub index: u32,
     /// New Merkle root after insertion, hex
     pub root: String,
 }
@@ -142,6 +151,9 @@ pub struct LeafAddedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeafInsertedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     pub key: String,
     pub value: String,
     /// SMT root
@@ -152,6 +164,9 @@ pub struct LeafInsertedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeafUpdatedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     pub key: String,
     pub old_value: String,
     pub new_value: String,
@@ -162,6 +177,9 @@ pub struct LeafUpdatedEvent {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LeafDeletedEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
     pub key: String,
     pub root: String,
 }

@@ -97,7 +97,7 @@ pub struct ParsedContractEvent {
     pub values: HashMap<String, xdr::ScVal>,
 }
 
-pub fn parse_event(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
+pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
     let ContractEvent{id, ledger, contract_id, topics, value} = event;
 
     let mut iter = topics.iter();
@@ -156,7 +156,7 @@ mod tests {
             value: "AAAACgAAAAAAAAAAAAAAAF2UTIA=".into()
         };
 
-        let parsed = parse_event(event).unwrap();
+        let parsed = parse_event_metadata(event).unwrap();
         println!("{parsed:?}");
     }
 }

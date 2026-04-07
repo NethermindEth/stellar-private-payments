@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{Connection, params, Error as SqlError, Transaction, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
-use types::{EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
+use types::{ContractEvent, ProcessedEvent, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, LeafInsertedEvent, LeafUpdatedEvent, LeafDeletedEvent, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "spp.sqlite";
@@ -56,7 +56,7 @@ impl Storage {
     pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT MAX(e.ledger), m.last_cursor
-             FROM contract_events e
+             FROM raw_contract_events e
              CROSS JOIN indexing_metadata m
              WHERE m.id = 1"
         )?;
@@ -169,6 +169,121 @@ impl Storage {
             .context("get_all_public_keys")?
             .collect::<Result<Vec<_>, _>>()
             .context("get_all_public_keys collect")
+    }
+
+    /// Batch upsert for spent nullifiers
+    pub fn save_nullifier_events_batch(&mut self, events: &Vec<NewNullifierEvent>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO pool_nullifiers (nullifier, event_id)
+                    VALUES (?1, ?2)
+                    ON CONFLICT(nullifier) DO NOTHING"
+            )?;
+
+            for event in events {
+                stmt.execute(params![event.nullifier, event.id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch upsert for Merkle tree commitments
+    pub fn save_commitment_events_batch(&mut self, events: &Vec<NewCommitmentEvent>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id)
+                    VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(commitment) DO NOTHING"
+            )?;
+
+            for event in events {
+                stmt.execute(params![event.commitment, event.index, event.encrypted_output, event.id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch upsert for Public Keys (Address owner and BLOB keys)
+    pub fn save_public_key_events_batch(&mut self, events: &Vec<PublicKeyEvent>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
+                    VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(owner) DO NOTHING"
+            )?;
+
+            for event in events {
+                // event.encryption_key.0 is the [u8; 32] array, which Rusqlite accepts as BLOB
+                stmt.execute(params![
+                    event.owner,
+                    event.encryption_key.0,
+                    event.note_key.0,
+                    event.id
+                ])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Batch upsert for ASP Membership Leaves
+    pub fn save_leaf_added_events_batch(&mut self, events: &Vec<LeafAddedEvent>) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        {
+            let mut stmt = tx.prepare(
+                "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
+                    VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(leaf_index) DO NOTHING"
+            )?;
+
+            for event in events {
+                stmt.execute(params![event.index, event.leaf, event.root, event.id])?;
+            }
+        }
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// Unprocessed raw events fetch
+    pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.id, r.ledger, r.contract_id, r.topics, r.value
+                FROM raw_contract_events r
+                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+                LEFT JOIN pool_commitments c ON r.id = c.event_id
+                LEFT JOIN public_keys p ON r.id = p.event_id
+                LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
+                WHERE n.event_id IS NULL
+                AND c.event_id IS NULL
+                AND p.event_id IS NULL
+                AND l.event_id IS NULL
+                ORDER BY r.ledger ASC, r.id ASC
+                LIMIT ?1"
+        )?;
+
+        let event_iter = stmt.query_map(params![limit], |row| {
+            let topics_str: String = row.get(3)?;
+            Ok(ContractEvent {
+                id: row.get(0)?,
+                ledger: row.get(1)?,
+                contract_id: row.get(2)?,
+                // Split the comma-separated topics back into a Vec
+                topics: topics_str.split(',').map(|s| s.to_string()).collect(),
+                value: row.get(4)?,
+            })
+        })?;
+
+        let mut events = Vec::new();
+        for event in event_iter {
+            events.push(event?);
+        }
+
+        Ok(events)
     }
 
     // -----------------------------------------------------------------------

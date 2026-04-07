@@ -26,45 +26,40 @@ CREATE TABLE keypairs (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-CREATE TABLE registered_public_keys (
-    address TEXT PRIMARY KEY,
-    encryption_key BLOB NOT NULL,
-    note_key BLOB NOT NULL,
-    ledger INTEGER NOT NULL
-);
-
-CREATE TABLE pool_leaves (
-    leaf_index INTEGER PRIMARY KEY,
-    commitment TEXT NOT NULL UNIQUE,
-    ledger INTEGER NOT NULL
-);
-
 CREATE TABLE pool_nullifiers (
     nullifier TEXT PRIMARY KEY,
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_nullifiers_event_id ON pool_nullifiers(event_id);
+CREATE INDEX idx_pool_nullifiers_event_id ON pool_nullifiers(event_id);
 
-CREATE TABLE pool_encrypted_outputs (
+CREATE TABLE pool_commitments (
     commitment TEXT PRIMARY KEY,
     leaf_index INTEGER NOT NULL,
-    encrypted_output TEXT NOT NULL,
-    ledger INTEGER NOT NULL
+    encrypted_output BLOB NOT NULL,
+    event_id  TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_pool_commitments_event_id ON pool_commitments(event_id);
 
-CREATE INDEX idx_pool_encrypted_outputs_ledger
-    ON pool_encrypted_outputs (ledger);
+CREATE TABLE public_keys (
+    owner TEXT PRIMARY KEY,
+    encryption_key BLOB NOT NULL,
+    note_key BLOB NOT NULL,
+    event_id  TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_public_keys_event_id ON public_keys(event_id);
 
 CREATE TABLE asp_membership_leaves (
     leaf_index INTEGER PRIMARY KEY,
     leaf TEXT NOT NULL,
     root TEXT NOT NULL,
-    ledger INTEGER NOT NULL
+    event_id  TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-
-CREATE INDEX idx_asp_membership_leaves_leaf
-    ON asp_membership_leaves (leaf);
+CREATE INDEX idx_asp_membership_leaves_event_id ON asp_membership_leaves(event_id);
+CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
 CREATE TABLE user_notes (
     id TEXT PRIMARY KEY,

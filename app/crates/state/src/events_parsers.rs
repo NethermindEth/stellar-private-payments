@@ -1,9 +1,9 @@
 use types::{ContractEvent, ProcessedEvent, NewNullifierEvent, NewCommitmentEvent, EncryptionPublicKey, NotePublicKey, PublicKeyEvent, LeafAddedEvent, LeafInsertedEvent, LeafUpdatedEvent, LeafDeletedEvent};
-use stellar::{parse_event, ParsedContractEvent, scval_to_u32, scval_to_u64, scval_to_u256, scval_to_bytes, scval_to_address_string};
+use stellar::{parse_event_metadata, ParsedContractEvent, scval_to_u32, scval_to_u64, scval_to_u256, scval_to_bytes, scval_to_address_string};
 use anyhow::{anyhow, Result};
 
-pub fn process_event(event: ContractEvent) -> Result<ProcessedEvent> {
-    let parsed = parse_event(event)?;
+pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
+    let parsed = parse_event_metadata(event)?;
     let ev = match parsed.name.as_str() {
         // Pool events contracts/pool/src/pool.rs
         "new_nullifier_event" => ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?),
@@ -57,6 +57,7 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
     let encrypted_output_scval = values.get("encrypted_output").ok_or_else(|| anyhow!("event `{name}` id {id} should have an encrypted_output value"))?;
     let encrypted_output = scval_to_bytes(encrypted_output_scval)?;
     Ok(NewCommitmentEvent{
+        id,
         commitment,
         index,
         encrypted_output
@@ -83,6 +84,7 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent>
     let note_key_scval = values.get("note_key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an note_key value"))?;
     let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
     Ok(PublicKeyEvent {
+        id,
         owner,
         encryption_key,
         note_key,
@@ -105,10 +107,13 @@ fn parse_leaf_added(parsed: ParsedContractEvent) -> Result<LeafAddedEvent> {
     let leaf_scval = values.get("leaf").ok_or_else(|| anyhow!("event `{name}` id {id} should have an leaf value"))?;
     let leaf = format!("0x{:064x}", scval_to_u256(leaf_scval)?);
     let index_scval = values.get("index").ok_or_else(|| anyhow!("event `{name}` id {id} should have an index value"))?;
-    let index = scval_to_u64(index_scval)?;
+    // TODO we try to fit into u32
+    // do we really need u64 here
+    let index = scval_to_u64(index_scval)?.try_into()?;
     let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
     let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
     Ok(LeafAddedEvent{
+        id,
         leaf,
         index,
         root
@@ -130,6 +135,7 @@ fn parse_leaf_inserted(parsed: ParsedContractEvent) -> Result<LeafInsertedEvent>
     let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
     let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
     Ok(LeafInsertedEvent{
+        id,
         key,
         value,
         root
@@ -154,6 +160,7 @@ fn parse_leaf_updated(parsed: ParsedContractEvent) -> Result<LeafUpdatedEvent> {
     let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
     let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
     Ok(LeafUpdatedEvent {
+        id,
         key,
         old_value,
         new_value,
@@ -173,6 +180,7 @@ fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
     let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
     let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
     Ok(LeafDeletedEvent {
+        id,
         key,
         root,
     })

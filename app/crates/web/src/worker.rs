@@ -3,20 +3,27 @@ use wasm_bindgen::JsError;
 use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 use gloo_worker::oneshot::oneshot;
 use gloo_timers::future::TimeoutFuture;
-use state::Storage;
+use state::{Storage, process_events};
 use std::cell::RefCell;
 use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
 use prover::encryption::derive_encryption_and_note_keypairs;
+use futures::channel::mpsc;
+use futures::stream::StreamExt;
 
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
 const VERIFICATION_KEY: &str = include_str!("../../../../scripts/testdata/policy_tx_2_2_vk.json");
 
+// TODO for now it is a mix of async (because we want an async bridge for the main thread) and sync (blocking) code
+// in the future we should refactor to use wasm threads?
+
+
 thread_local! {
-    // RefCell allows us to borrow the client as mutable
     static STORAGE: RefCell<Option<Storage>> = RefCell::new(None);
+    // signalling the events processor
+    static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = RefCell::new(None);
 }
 
 macro_rules! with_storage {
@@ -72,6 +79,16 @@ async fn init() -> Result<(), JsError> {
         *s.borrow_mut() = Some(storage);
     });
 
+    let (tx, rx) = mpsc::channel::<()>(1);
+
+    PROCESSOR_TX.with(|cell| {
+        *cell.borrow_mut() = Some(tx);
+    });
+
+    spawn_local(async move {
+        run_processor_loop(rx).await;
+    });
+
     log::debug!("[WORKER] initialized");
 
     Ok(())
@@ -95,6 +112,7 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
 
                 if ready {
                     log::debug!("[WORKER] pong");
+                    kick_processor();
                     return Ok(WorkerResponse::Pong);
                 }
 
@@ -122,6 +140,7 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
             let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
             log::debug!("[WORKER] saved notes and encryption keys for the account {address}");
+            kick_processor();
             WorkerResponse::Saved
         }
         WorkerRequest::UserKeys(address) => {
@@ -142,4 +161,32 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
         }
     };
     Ok(resp)
+}
+
+fn kick_processor() {
+    PROCESSOR_TX.with(|cell| {
+        if let Some(tx) = cell.borrow_mut().as_mut() {
+            let _ = tx.try_send(());
+        }
+    });
+}
+
+async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
+    while let Some(()) = rx.next().await {
+        if let Err(e) = process_until_empty().await {
+            log::error!("[WORKER] processing failed: {e:#}");
+        }
+    }
+}
+
+async fn process_until_empty() -> anyhow::Result<()> {
+    const FETCH_LIMIT: u32 = 50; // small chunks to stay responsive
+
+    loop {
+        with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
+        // Yield to avoid blocking the worker for a long time
+        gloo_timers::future::TimeoutFuture::new(0).await;
+    }
+
+    Ok(())
 }
