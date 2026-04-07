@@ -3,11 +3,10 @@ CREATE TABLE indexing_metadata (
     last_cursor TEXT
 );
 
-CREATE TABLE contract_events (
+CREATE TABLE raw_contract_events (
     id TEXT PRIMARY KEY,
     ledger INTEGER NOT NULL,
     contract_id TEXT NOT NULL,
-    name TEXT NOT NULL,
     topics TEXT NOT NULL,
     value TEXT NOT NULL
 );
@@ -29,10 +28,9 @@ CREATE TABLE keypairs (
 
 CREATE TABLE registered_public_keys (
     address TEXT PRIMARY KEY,
-    encryption_key TEXT NOT NULL,
-    note_key TEXT NOT NULL,
-    ledger INTEGER NOT NULL,
-    registered_at TEXT
+    encryption_key BLOB NOT NULL,
+    note_key BLOB NOT NULL,
+    ledger INTEGER NOT NULL
 );
 
 CREATE TABLE pool_leaves (
@@ -43,8 +41,10 @@ CREATE TABLE pool_leaves (
 
 CREATE TABLE pool_nullifiers (
     nullifier TEXT PRIMARY KEY,
-    ledger INTEGER NOT NULL
+    event_id  TEXT NOT NULL UNIQUE,
+    FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_nullifiers_event_id ON pool_nullifiers(event_id);
 
 CREATE TABLE pool_encrypted_outputs (
     commitment TEXT PRIMARY KEY,
@@ -86,13 +86,3 @@ CREATE INDEX idx_user_notes_spent
 
 CREATE INDEX idx_user_notes_owner
     ON user_notes (owner);
-
-CREATE TABLE registered_public_keys (
-    address TEXT PRIMARY KEY,
-    encryption_key BLOB NOT NULL,
-    note_key BLOB NOT NULL,
-    ledger INTEGER NOT NULL
-);
-
-CREATE INDEX idx_registered_public_keys_ledger
-    ON registered_public_keys (ledger);

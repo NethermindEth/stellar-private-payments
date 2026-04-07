@@ -1,16 +1,42 @@
-// * Note Scanner - discovers notes addressed to the user by scanning encrypted outputs.
-// *
-// * When someone sends a private transfer:
-// * 1. They encrypt (amount, blinding) with the recipient's X25519 encryption public key
-// * 2. The encrypted output is emitted as an event on-chain
-// * 3. The recipient scans all outputs, trying to decrypt each one
-// * 4. Successful decryption means the note is addressed to them
-// * 5. They verify the commitment matches and save the note
-// *
-// * This module uses the deterministic keys from notes-store.js:
-// * - Encryption keypair: For decrypting note data
-// * - Note identity keypair: For verifying commitments and deriving nullifiers
-// *
+use types::{ContractEvent, ProcessedEvent, NewNullifierEvent, NewCommitmentEvent, EncryptionPublicKey, NotePublicKey, PublicKeyEvent, LeafAddedEvent, LeafInsertedEvent, LeafUpdatedEvent, LeafDeletedEvent};
+use stellar::{parse_event, ParsedContractEvent, scval_to_u32, scval_to_u64, scval_to_u256, scval_to_bytes, scval_to_address_string};
+use anyhow::{anyhow, Result};
+
+pub fn process_event(event: ContractEvent) -> Result<ProcessedEvent> {
+    let parsed = parse_event(event)?;
+    let ev = match parsed.name.as_str() {
+        // Pool events contracts/pool/src/pool.rs
+        "new_nullifier_event" => ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?),
+        "public_key_event" => ProcessedEvent::PublicKey(parse_public_key_event(parsed)?),
+        "new_commitment_event" => ProcessedEvent::Commitment(parse_new_commitment_event(parsed)?),
+        // ASP membership events contracts/asp-membership
+        "leaf_added" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
+        // ASP non-membership events contracts/asp-non-membership
+        "leaf_inserted" => ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?),
+        "leaf_updated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
+        "leaf_deleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
+        _ => return Err(anyhow!("unhandled event {}", parsed.name))
+    };
+    Ok(ev)
+}
+
+// #[contractevent]
+// #[derive(Clone)]
+// pub struct NewNullifierEvent {
+//     /// The nullifier that was spent
+//     #[topic]
+//     pub nullifier: U256,
+// }
+fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let nullifier_scval = topics.first().ok_or_else(|| anyhow!("event `{name}` id {id} should have a nullifier topic value"))?;
+    let nullifier = format!("0x{:064x}", scval_to_u256(nullifier_scval)?);
+    Ok(NewNullifierEvent{
+        id,
+        nullifier
+    })
+}
+
 // #[contractevent]
 // #[derive(Clone)]
 // pub struct NewCommitmentEvent {
@@ -22,37 +48,21 @@
 //     /// Encrypted output data (decryptable by the recipient)
 //     pub encrypted_output: Bytes,
 // }
-//
-//// Get user's encryption keypair (derived from Freighter signature)
-// const encKeypair = await notesStore.getUserEncryptionKeypair();
-// if (!encKeypair) {
-//     console.warn('[NoteScanner] No encryption keypair available - user must sign message');
-//     return null;
-// }
-
-// // Attempt decryption
-// const decrypted = decryptNoteData(encKeypair.privateKey, encrypted);
-//
-use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
-
-fn process_commitment_event(event: ContractEvent) {
-
+fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitmentEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let commitment_scval = topics.first().ok_or_else(|| anyhow!("event `{name}` id {id} should have a commitment topic value"))?;
+    let commitment = format!("0x{:064x}", scval_to_u256(commitment_scval)?);
+    let index_scval = values.get("index").ok_or_else(|| anyhow!("event `{name}` id {id} should have an index value"))?;
+    let index = scval_to_u32(index_scval)?;
+    let encrypted_output_scval = values.get("encrypted_output").ok_or_else(|| anyhow!("event `{name}` id {id} should have an encrypted_output value"))?;
+    let encrypted_output = scval_to_bytes(encrypted_output_scval)?;
+    Ok(NewCommitmentEvent{
+        commitment,
+        index,
+        encrypted_output
+    })
 }
 
-
-// * Public Key Store - manages registered public keys for the address book.
-// * Syncs from Pool contract events (PublicKeyEvent).
-// *
-// * Stores two key types per user:
-// * - encryptionKey: X25519 key for encrypting note data (amount, blinding)
-// * - noteKey: BN254 key for creating commitments in the ZK circuit
-// *
-// // Event emitted when a user registers their public keys
-//
-// This event allows other users to discover keys for sending private
-// transfers. Two key types are required:
-// - encryption_key: X25519 key for encrypting note data (amount, blinding)
-// - note_key: BN254 key for creating commitments in the ZK circuit
 // #[contractevent]
 // #[derive(Clone)]
 // pub struct PublicKeyEvent {
@@ -64,8 +74,106 @@ fn process_commitment_event(event: ContractEvent) {
 //     /// BN254 note public key
 //     pub note_key: Bytes,
 // }
-//
-// event_type = "public_key_event"
-fn process_pubkey_event(event: ContractEvent) {
+fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let owner_scval = topics.first().ok_or_else(|| anyhow!("event `{name}` id {id} should have a owner topic value"))?;
+    let owner = scval_to_address_string(owner_scval)?;
+    let encryption_key_scval = values.get("encryption_key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an encryption_key value"))?;
+    let encryption_key = scval_to_bytes(encryption_key_scval)?.try_into()?;
+    let note_key_scval = values.get("note_key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an note_key value"))?;
+    let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
+    Ok(PublicKeyEvent {
+        owner,
+        encryption_key,
+        note_key,
+    })
+}
 
+
+// Event emitted when a new leaf is added to the Merkle tree
+// #[contractevent(topics = ["LeafAdded"])]
+// struct LeafAddedEvent {
+//     /// The leaf value that was inserted
+//     leaf: U256,
+//     /// Index position where the leaf was inserted
+//     index: u64,
+//     /// New Merkle root after insertion
+//     root: U256,
+// }
+fn parse_leaf_added(parsed: ParsedContractEvent) -> Result<LeafAddedEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let leaf_scval = values.get("leaf").ok_or_else(|| anyhow!("event `{name}` id {id} should have an leaf value"))?;
+    let leaf = format!("0x{:064x}", scval_to_u256(leaf_scval)?);
+    let index_scval = values.get("index").ok_or_else(|| anyhow!("event `{name}` id {id} should have an index value"))?;
+    let index = scval_to_u64(index_scval)?;
+    let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
+    let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
+    Ok(LeafAddedEvent{
+        leaf,
+        index,
+        root
+    })
+}
+
+// #[contractevent(topics = ["LeafInserted"])]
+// struct LeafInsertedEvent {
+//     key: U256,
+//     value: U256,
+//     root: U256,
+// }
+fn parse_leaf_inserted(parsed: ParsedContractEvent) -> Result<LeafInsertedEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
+    let key = format!("0x{:064x}", scval_to_u256(key_scval)?);
+    let value_scval = values.get("value").ok_or_else(|| anyhow!("event `{name}` id {id} should have an value value"))?;
+    let value = format!("0x{:064x}", scval_to_u256(value_scval)?);
+    let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
+    let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
+    Ok(LeafInsertedEvent{
+        key,
+        value,
+        root
+    })
+}
+
+// #[contractevent(topics = ["LeafUpdated"])]
+// struct LeafUpdatedEvent {
+//     key: U256,
+//     old_value: U256,
+//     new_value: U256,
+//     root: U256,
+// }
+fn parse_leaf_updated(parsed: ParsedContractEvent) -> Result<LeafUpdatedEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
+    let key = format!("0x{:064x}", scval_to_u256(key_scval)?);
+    let old_value_scval = values.get("old_value").ok_or_else(|| anyhow!("event `{name}` id {id} should have an old_value value"))?;
+    let old_value = format!("0x{:064x}", scval_to_u256(old_value_scval)?);
+    let new_value_scval = values.get("new_value").ok_or_else(|| anyhow!("event `{name}` id {id} should have an new_value value"))?;
+    let new_value = format!("0x{:064x}", scval_to_u256(new_value_scval)?);
+    let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
+    let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
+    Ok(LeafUpdatedEvent {
+        key,
+        old_value,
+        new_value,
+        root,
+    })
+}
+
+// #[contractevent(topics = ["LeafDeleted"])]
+// struct LeafDeletedEvent {
+//     key: U256,
+//     root: U256,
+// }
+fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
+    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
+    let key = format!("0x{:064x}", scval_to_u256(key_scval)?);
+    let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;
+    let root = format!("0x{:064x}", scval_to_u256(root_scval)?);
+    Ok(LeafDeletedEvent {
+        key,
+        root,
+    })
 }

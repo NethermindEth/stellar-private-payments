@@ -40,7 +40,6 @@ use ark_bn254::Fr;
 use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 use types::{SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, EncryptionPublicKey, EncryptionPrivateKey, NotePublicKey};

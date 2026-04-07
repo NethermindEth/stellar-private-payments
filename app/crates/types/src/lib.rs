@@ -1,5 +1,6 @@
 mod chain_data;
 pub use chain_data::*;
+use anyhow::{Result, anyhow};
 
 use serde::{Deserialize, Serialize};
 
@@ -18,41 +19,6 @@ pub struct ContractConfig {
     pub pool: String,
     pub initialized: bool,
 }
-
-// const dataKeys = ['Admin', 'Token', 'Verifier', 'ASPMembership', 'ASPNonMembership'];
-// const merkleKeys = ['Levels', 'CurrentRootIndex', 'NextIndex'];
-// maximumDepositAmount
-//     results.merkleRoot = formatU256(rootResult.value);
-//     results.merkleRootRaw = rootResult.value;
-
-//     if (results.merkleLevels !== undefined) {
-//         results.merkleCapacity = Math.pow(2, results.merkleLevels);
-//         results.totalCommitments = results.merkleNextIndex || 0;
-//     }
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct PoolContractState {
-
-// }
-//
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct ASPMembershipContractState {
-//     root
-//     root_raw
-//     levels
-//     next_index
-//     admin
-//     admin_insert_only // todo safe default to suppose to true if not present
-//     capacity:
-//     used_slots
-// }
-//
-// #[derive(Debug, Clone, Serialize, Deserialize)]
-// pub struct ASPNonMembershipContractState {
-//     root
-//     root_raw
-//     is_empty: bool
-//     admin
-// }
 
 /// Pool merkle tree leaf.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -184,3 +150,38 @@ pub struct NoteKeyPair {
     /// Note ownership public key
     pub public: NotePublicKey,
 }
+
+macro_rules! impl_byte_wrapper {
+    ($name:ident) => {
+        impl std::convert::TryFrom<Vec<u8>> for $name {
+            type Error = anyhow::Error;
+
+            fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
+                let len = value.len();
+                if len != 32 {
+                    return Err(anyhow!("{}: Invalid length. Expected 32, got {}", stringify!($name), len));
+                }
+                let array: [u8; 32] = value.try_into().map_err(|_| anyhow!("Conversion failed"))?;
+                Ok($name(array))
+            }
+        }
+
+        impl From<[u8; 32]> for $name {
+            fn from(bytes: [u8; 32]) -> Self {
+                $name(bytes)
+            }
+        }
+
+        impl AsRef<[u8; 32]> for $name {
+            fn as_ref(&self) -> &[u8; 32] {
+                &self.0
+            }
+        }
+    };
+}
+
+// Apply the macro to your types
+impl_byte_wrapper!(EncryptionPrivateKey);
+impl_byte_wrapper!(EncryptionPublicKey);
+impl_byte_wrapper!(NotePrivateKey);
+impl_byte_wrapper!(NotePublicKey);

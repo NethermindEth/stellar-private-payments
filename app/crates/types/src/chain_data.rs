@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use crate::{EncryptionPublicKey, NotePublicKey};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -87,4 +88,93 @@ pub struct SyncMetadata {
     pub cursor: String,
     /// Last synced ledger.
     pub last_ledger: u32,
+}
+
+
+/// This event allows off-chain observers to track which UTXOs have been spent.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewNullifierEvent {
+    // Unique identifier for this event, based on the TOID format.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    pub id: String,
+    /// The nullifier that was spent, hex
+    pub nullifier: String,
+}
+
+/// Event emitted when a new commitment is added to the Merkle tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewCommitmentEvent {
+    /// The commitment hash added to the tree, hex
+    pub commitment: String,
+    /// Index position in the Merkle tree
+    pub index: u32,
+    /// Encrypted output data (decryptable by the recipient)
+    pub encrypted_output: Vec<u8>,
+}
+
+/// New pubkey pairs in the pool
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicKeyEvent {
+    /// Address of the account owner
+    pub owner: String,
+    /// X25519 encryption public key
+    pub encryption_key: EncryptionPublicKey,
+    /// BN254 note public key
+    pub note_key: NotePublicKey,
+}
+
+/// Event emitted when a new leaf is added to the Merkle tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeafAddedEvent {
+    /// The leaf value that was inserted, hex
+    pub leaf: String,
+    /// Index position where the leaf was inserted
+    pub index: u64,
+    /// New Merkle root after insertion, hex
+    pub root: String,
+}
+
+/// Event emitted when a new leaf is inserted into the Sparse Merkle tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeafInsertedEvent {
+    pub key: String,
+    pub value: String,
+    /// SMT root
+    pub root: String,
+}
+
+/// Event emitted when a leaf is updated in the Sparse Merkle tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeafUpdatedEvent {
+    pub key: String,
+    pub old_value: String,
+    pub new_value: String,
+    pub root: String,
+}
+
+/// Event emitted when a leaf is deleted in the Sparse Merkle tree
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LeafDeletedEvent {
+    pub key: String,
+    pub root: String,
+}
+
+/// A contract event after full parsing
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ProcessedEvent {
+    Nullifier(NewNullifierEvent),
+    Commitment(NewCommitmentEvent),
+    PublicKey(PublicKeyEvent),
+    LeafAdded(LeafAddedEvent),
+    LeafInserted(LeafInsertedEvent),
+    LeafUpdated(LeafUpdatedEvent),
+    LeafDeleted(LeafDeletedEvent),
 }

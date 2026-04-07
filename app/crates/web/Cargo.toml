@@ -32,7 +32,7 @@ state = { path = "../state" }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen = { workspace = true }
 web-sys = { version = "0.3", features = ["console"] }
-stellar = { path = "../stellar" }
+stellar = { workspace = true }
 types = { path = "../types" }
 
 #[lints]

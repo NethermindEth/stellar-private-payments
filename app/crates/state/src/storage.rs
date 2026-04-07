@@ -27,7 +27,7 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO contract_events (id, ledger, contract_id, topics, value)
+                "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6)
                  ON CONFLICT(id) DO NOTHING"
             )?;

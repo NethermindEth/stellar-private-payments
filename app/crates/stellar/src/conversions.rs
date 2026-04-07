@@ -28,6 +28,18 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
     }
 }
 
+/// Helper to convert ScVal Bytes to a Vec<u8>
+pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
+    if let xdr::ScVal::Bytes(sc_bytes) = val {
+        Ok(sc_bytes.0.to_vec())
+    } else {
+        Err(Error::UnexpectedScVal(format!(
+            "Expected ScVal::Bytes for encrypted_output, found: {:?}",
+            val
+        )))
+    }
+}
+
 /// Helper to convert U256Parts to BigUint
 pub fn scval_to_u256(val: &xdr::ScVal) -> Result<BigUint, Error> {
     if let xdr::ScVal::U256(parts) = val {
@@ -102,20 +114,23 @@ pub fn parse_event(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
 
     let data = xdr::ScVal::from_xdr_base64(value, xdr::Limits::none())?;
 
+    let mut values = HashMap::new();
+
     // https://docs.rs/soroban-sdk/latest/soroban_sdk/attr.contractevent.html
-    let map = match data {
-        xdr::ScVal::Map(Some(m)) => m,
+    match data {
+        xdr::ScVal::Map(Some(map)) => {
+            for xdr::ScMapEntry { key, val } in map.iter() {
+                let field_name = match key {
+                    xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+                    _ => return Err(Error::UnexpectedScVal(format!("event data field name should be a symbol: {key:?}"))),
+                };
+                values.insert(field_name, val.clone());
+            }
+        },
+        xdr::ScVal::Void => {},
         _ => return Err(Error::UnexpectedScVal("an event data format should be a map".into())),
     };
 
-    let mut values = HashMap::new();
-    for xdr::ScMapEntry { key, val } in map.iter() {
-        let field_name = match key {
-            xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
-            _ => return Err(Error::UnexpectedScVal(format!("event data field name should be a symbol: {key:?}"))),
-        };
-        values.insert(field_name, val.clone());
-    }
     Ok(ParsedContractEvent{
         id, ledger, contract_id, name, topics, values
     })
