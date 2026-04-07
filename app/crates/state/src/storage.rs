@@ -1,7 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use rusqlite::{Connection, params, Error as SqlError, Transaction, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
-use prover::encryption::{EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
+use types::{EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "spp.sqlite";
@@ -153,6 +153,22 @@ impl Storage {
         ).context("failed to fetch account id")?;
 
         Ok(id)
+    }
+
+    /// Returns $limit public keys ordered by ledger descending.
+    /// for an address book
+    pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT address, encryption_key, note_key, public_key, ledger
+                     FROM registered_public_keys ORDER BY ledger DESC LIMIT ?1",
+            )
+            .context("prepare get_all_public_keys")?;
+        stmt.query_map([limit], map_public_key_entry)
+            .context("get_all_public_keys")?
+            .collect::<Result<Vec<_>, _>>()
+            .context("get_all_public_keys collect")
     }
 
     // -----------------------------------------------------------------------
@@ -624,20 +640,7 @@ impl Storage {
         }
     }
 
-    /// Returns all public keys ordered by ledger descending.
-    pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT address, encryption_key, note_key, public_key, ledger, registered_at
-                     FROM registered_public_keys ORDER BY ledger DESC LIMIT ?1",
-            )
-            .context("prepare get_all_public_keys")?;
-        stmt.query_map([limit], map_public_key_entry)
-            .context("get_all_public_keys")?
-            .collect::<Result<Vec<_>, _>>()
-            .context("get_all_public_keys collect")
-    }
+
 
     /// Returns the total number of registered public keys.
     pub fn count_public_keys(&self) -> Result<u32> {
@@ -801,9 +804,8 @@ fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
 fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry, SqlError> {
     Ok(types::PublicKeyEntry {
         address: row.get(0)?,
-        encryption_key: row.get(1)?,
-        note_key: row.get(2)?,
+        encryption_key: EncryptionPublicKey(row.get(1)?),
+        note_key: NotePublicKey(row.get(2)?),
         ledger: col_u32(row.get::<_, i64>(4)?, 4)?,
-        registered_at: row.get(5)?,
     })
 }

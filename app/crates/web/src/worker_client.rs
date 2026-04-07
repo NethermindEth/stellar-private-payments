@@ -2,7 +2,8 @@ use crate::worker::Worker;
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
 use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
-use prover::encryption::{SpendingSignature, EncryptionSignature, ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE, NoteKeyPair, EncryptionKeyPair};
+use prover::encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE};
+use types::{SpendingSignature, EncryptionSignature, NoteKeyPair, EncryptionKeyPair};
 use wasm_bindgen::prelude::*;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
@@ -73,6 +74,16 @@ impl WorkerClient {
         }
     }
 
+    #[wasm_bindgen(js_name = encryptionDerivationMessage)]
+    pub fn encryption_derivation_message(&self) -> String {
+        ENCRYPTION_MESSAGE.to_string()
+    }
+
+    #[wasm_bindgen(js_name = spendingKeyMessage)]
+    pub fn spending_key_message(&self) -> String {
+        SPENDING_KEY_MESSAGE.to_string()
+    }
+
     #[wasm_bindgen(js_name = deriveAndSaveUserKeys)]
     pub async fn derive_save_user_keys(&self, address: String, spending_sig: Vec<u8>, encryption_sig: Vec<u8>) -> Result<(), JsError> {
         let req = WorkerRequest::DeriveSaveUserKeys(
@@ -99,14 +110,16 @@ impl WorkerClient {
         }
     }
 
-    #[wasm_bindgen(js_name = encryptionDerivationMessage)]
-    pub fn encryption_derivation_message(&self) -> String {
-        ENCRYPTION_MESSAGE.to_string()
-    }
+    #[wasm_bindgen(js_name = getRecentPublicKeys)]
+    pub async fn get_recent_public_keys(&self, limit: u32) -> Result<JsValue, JsError> {
+        let req = WorkerRequest::RecentPubKeys(
+            limit,
+        );
 
-    #[wasm_bindgen(js_name = spendingKeyMessage)]
-    pub fn spending_key_message(&self) -> String {
-        SPENDING_KEY_MESSAGE.to_string()
+        match self.request(req, 1_000).await? {
+            WorkerResponse::UserKeys(keys) => Ok(serde_wasm_bindgen::to_value(&keys)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
     }
 }
 

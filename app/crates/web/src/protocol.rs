@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use prover::encryption::{SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair};
+use types::{PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair};
 
 pub type Address = String;
 
@@ -17,6 +17,7 @@ pub enum WorkerRequest {
     SaveEvents(types::ContractsEventData),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
     UserKeys(Address),
+    RecentPubKeys(u32)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -25,5 +26,6 @@ pub enum WorkerResponse {
     SyncState(Option<types::SyncMetadata>),
     Saved,
     Error(String),
-    UserKeys(Option<UserKeys>)
+    UserKeys(Option<UserKeys>),
+    PubKeys(Vec<PublicKeyEntry>)
 }

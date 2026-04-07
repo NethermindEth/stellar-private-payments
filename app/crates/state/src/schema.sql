@@ -27,6 +27,14 @@ CREATE TABLE keypairs (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
+CREATE TABLE registered_public_keys (
+    address TEXT PRIMARY KEY,
+    encryption_key TEXT NOT NULL,
+    note_key TEXT NOT NULL,
+    ledger INTEGER NOT NULL,
+    registered_at TEXT
+);
+
 CREATE TABLE pool_leaves (
     leaf_index INTEGER PRIMARY KEY,
     commitment TEXT NOT NULL UNIQUE,
@@ -81,10 +89,9 @@ CREATE INDEX idx_user_notes_owner
 
 CREATE TABLE registered_public_keys (
     address TEXT PRIMARY KEY,
-    encryption_key TEXT NOT NULL,
-    note_key TEXT NOT NULL,
-    ledger INTEGER NOT NULL,
-    registered_at TEXT
+    encryption_key BLOB NOT NULL,
+    note_key BLOB NOT NULL,
+    ledger INTEGER NOT NULL
 );
 
 CREATE INDEX idx_registered_public_keys_ledger

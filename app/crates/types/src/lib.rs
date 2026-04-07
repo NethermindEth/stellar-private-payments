@@ -137,27 +137,50 @@ pub struct PublicKeyEntry {
     /// Stellar address (primary key).
     pub address: String,
     /// X25519 encryption public key (hex).
-    pub encryption_key: String,
+    pub encryption_key: EncryptionPublicKey,
     /// BN254 note public key (hex).
-    pub note_key: String,
+    pub note_key: NotePublicKey,
     /// Ledger sequence when registered.
     pub ledger: u32,
-    /// ISO-8601 timestamp when stored locally.
-    pub registered_at: String,
 }
 
-/// RPC retention window configuration.
+/// Spending key signature
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct RetentionConfig {
-    /// RPC endpoint URL (primary key).
-    pub rpc_endpoint: String,
-    /// Retention window in ledgers.
-    pub window: u32,
-    /// Human-readable description.
-    pub description: String,
-    /// Warning threshold in ledgers (80% of `window`).
-    pub warning_threshold: u32,
-    /// ISO-8601 timestamp when detected.
-    pub detected_at: String,
+pub struct SpendingSignature(pub Vec<u8>);
+
+/// Encryption key signature
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionSignature(pub Vec<u8>);
+
+/// Encryption private key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionPrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+/// Encryption public key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionPublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+
+/// Encryption key pair
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EncryptionKeyPair {
+    /// Encryption private key
+    pub private: EncryptionPrivateKey,
+    /// Encryption public key
+    pub public: EncryptionPublicKey,
+}
+
+/// Note ownership private key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotePrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+
+/// Note ownership public key
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NotePublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+
+/// Note ownership key pair
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NoteKeyPair {
+    /// Note ownership private key
+    pub private: NotePrivateKey,
+    /// Note ownership public key
+    pub public: NotePublicKey,
 }

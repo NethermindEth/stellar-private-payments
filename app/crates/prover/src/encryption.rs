@@ -43,6 +43,8 @@ use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
+use types::{SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, EncryptionPublicKey, EncryptionPrivateKey, NotePublicKey};
+
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
 
@@ -51,47 +53,6 @@ pub const ENCRYPTION_MESSAGE: &str = "Sign to access Privacy Pool [v1]";
 
 /// Message signed to derive the BN254 note identity keypair
 pub const SPENDING_KEY_MESSAGE: &str = "Privacy Pool Spending Key [v1]";
-
-/// Spending key signature
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SpendingSignature(pub Vec<u8>);
-
-/// Encryption key signature
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionSignature(pub Vec<u8>);
-
-/// Encryption private key
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionPrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
-/// Encryption public key
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionPublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
-
-/// Encryption key pair
-#[derive(Debug, Serialize, Deserialize)]
-pub struct EncryptionKeyPair {
-    /// Encryption private key
-    pub private: EncryptionPrivateKey,
-    /// Encryption public key
-    pub public: EncryptionPublicKey,
-}
-
-/// Note ownership private key
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NotePrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
-
-/// Note ownership public key
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NotePublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
-
-/// Note ownership key pair
-#[derive(Debug, Serialize, Deserialize)]
-pub struct NoteKeyPair {
-    /// Note ownership private key
-    pub private: NotePrivateKey,
-    /// Note ownership public key
-    pub public: NotePublicKey,
-}
 
 /// Keypairs derivation
 pub fn derive_encryption_and_note_keypairs(

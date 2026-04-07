@@ -134,6 +134,12 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
             }
             WorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| UserKeys{note_keypair, encryption_keypair}))
         }
+        WorkerRequest::RecentPubKeys(limit) => {
+            log::debug!("[WORKER] fetch pub keys for the address book");
+            let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
+            log::debug!("[WORKER] fetched {} pub keys for the address book", list.len());
+            WorkerResponse::PubKeys(list)
+        }
     };
     Ok(resp)
 }
