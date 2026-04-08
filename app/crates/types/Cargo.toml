@@ -8,8 +8,18 @@ publish.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+uint = { workspace = true }
 serde = { workspace = true }
 serde_bytes = { workspace = true }
+rusqlite = { workspace = true, optional = true }
+
+[features]
+default = []
+rusqlite = ["dep:rusqlite"]
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["alloc"] }
+rusqlite = { workspace = true, features = ["buildtime_bindgen", "bundled"] }
 
 #[lints]
 #workspace = true
