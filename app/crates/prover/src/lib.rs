@@ -20,3 +20,4 @@ pub mod r1cs;
 pub mod serialization;
 pub mod sparse_merkle;
 pub mod types;
+pub mod flows;

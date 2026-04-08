@@ -106,7 +106,6 @@ async fn init() -> Result<(), JsError> {
     Ok(())
 }
 
-// Main router of worker requests
 #[oneshot]
 pub(crate) async fn Worker(req: WorkerRequest) -> WorkerResponse {
     match router(req).await {
@@ -115,6 +114,7 @@ pub(crate) async fn Worker(req: WorkerRequest) -> WorkerResponse {
     }
 }
 
+// Main router of worker requests
 pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
     let resp = match req {
         WorkerRequest::Ping => {
@@ -187,7 +187,7 @@ fn kick_processor() {
 async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
     while let Some(()) = rx.next().await {
         if let Err(e) = process_until_empty().await {
-            log::error!("[WORKER] processing failed: {e:#}");
+            log::error!("[WORKER] events processing failed: {e:#}");
         }
     }
 }
@@ -225,7 +225,7 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         format!("{}{}", origin, path)
     };
 
-    log::debug!(&format!("[WORKER] Fetching from: {}", url_string).into());
+    log::debug!("[WORKER] Fetching from: {}", url_string);
 
     let mut opts = RequestInit::new();
     opts.set_method("GET");

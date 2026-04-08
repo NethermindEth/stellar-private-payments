@@ -183,6 +183,20 @@ pub fn generate_random_blinding() -> Result<Vec<u8>> {
     Ok(result)
 }
 
+/// Encrypt output note data for on-chain storage.
+///
+/// Plaintext format: `amount (8 bytes LE) || blinding (32 bytes)`.
+pub fn encrypt_output_note(
+    recipient_pubkey: &EncryptionPublicKey,
+    amount_stroops: u64,
+    blinding: &[u8; 32],
+) -> Result<Vec<u8>> {
+    let mut plaintext = [0u8; 40];
+    plaintext[..8].copy_from_slice(&amount_stroops.to_le_bytes());
+    plaintext[8..].copy_from_slice(blinding);
+    encrypt_note_data(recipient_pubkey.as_ref(), &plaintext)
+}
+
 /// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
 ///
 /// When sending a note to someone, we encrypt the sensitive data (amount and
