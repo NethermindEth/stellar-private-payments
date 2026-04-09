@@ -25,7 +25,10 @@ impl<S: ContractDataStorage> Indexer<S> {
     pub async fn fetch_contract_events(
         &self
     ) -> Result<()> {
-        let contract_ids = [self.config.pool.to_string(), self.config.asp_membership.to_string(), self.config.asp_non_membership.to_string()];
+        // Note - we don't index ASP nonmembership events here
+        // self.config.asp_non_membership.to_string()
+        // as SMT is stored onchain and we don't need events to rebuild it locally
+        let contract_ids = [self.config.pool.to_string(), self.config.asp_membership.to_string()];
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         log::debug!("[INDEXER] starting new round for network tip {network_tip}, contract ids {contract_ids:?}");
         let (mut cursor, mut current_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
