@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 use anyhow::{Result, anyhow};
-use types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePrivateKey, NotePublicKey};
+use types::{EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NotePrivateKey, NotePublicKey};
 
 use crate::{
     crypto,
@@ -101,23 +101,6 @@ pub struct AspNonMembershipProof {
     pub root: [u8; 32],
 }
 
-/// External data associated with a transaction.
-// check also ExtData in contracts/pool/src/pool.rs
-#[derive(Clone, Debug)]
-pub struct ExtData {
-    /// Recipient Stellar address / contract id (opaque here).
-    pub recipient: String,
-    /// External amount in stroops.
-    /// - Deposit: `ext_amount > 0`
-    /// - Withdraw: `ext_amount < 0`
-    /// - Transfer: `ext_amount = 0`
-    pub ext_amount_stroops: ExtAmount,
-    /// Encrypted note data for output 0 (for recipient scanning/decryption).
-    pub encrypted_output0: Vec<u8>,
-    /// Encrypted note data for output 1 (for recipient scanning/decryption).
-    pub encrypted_output1: Vec<u8>,
-}
-
 /// Convenience bundle of values typically needed to submit a pool transaction.
 ///
 /// This is not a contract type; it's a helper output to reduce recomputation
@@ -132,8 +115,6 @@ pub struct PreparedTx {
     pub output_commitments: [[u8; 32]; N_OUTPUTS],
     /// Field element representation of ext_amount (LE bytes).
     pub public_amount_field: [u8; 32],
-    /// extDataHash (contract/XDR/keccak) in big-endian bytes (caller supplied for now).
-    pub ext_data_hash_be: [u8; 32],
     /// ASP membership root used for the circuit public inputs (little-endian field bytes).
     pub asp_membership_root: [u8; 32],
     /// ASP non-membership root used for the circuit public inputs (little-endian field bytes).
@@ -171,8 +152,8 @@ pub struct TransactParams {
 
     /// External recipient for extData (address/contract id as string, treated as opaque here).
     pub ext_recipient: String,
-    /// External amount in stroops. See `ExtData::ext_amount_stroops` for semantics.
-    pub ext_amount_stroops: ExtAmount,
+    /// External amount in stroops. See `types::ExtData::ext_amount` for semantics.
+    pub ext_amount: ExtAmount,
 
     /// Input notes to spend (0..=2). If empty, `transact()` uses dummy inputs (deposit-style).
     pub inputs: Vec<TransactInputNote>,
@@ -189,9 +170,6 @@ pub struct TransactParams {
     pub tree_depth: usize,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: usize,
-
-    /// extDataHash in big-endian bytes (caller supplied).
-    pub ext_data_hash_be: [u8; 32],
 }
 
 /// Parameters for a deposit transaction.
@@ -224,8 +202,6 @@ pub struct DepositParams {
     pub tree_depth: usize,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: usize,
-    /// extDataHash in big-endian bytes (caller supplied).
-    pub ext_data_hash_be: [u8; 32],
 }
 
 /// Parameters for a withdrawal transaction.
@@ -262,8 +238,6 @@ pub struct WithdrawParams {
     pub tree_depth: usize,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: usize,
-    /// extDataHash in big-endian bytes (caller supplied).
-    pub ext_data_hash_be: [u8; 32],
 }
 
 /// Parameters for a private transfer transaction.
@@ -296,13 +270,15 @@ pub struct TransferParams {
     pub tree_depth: usize,
     /// ASP sparse Merkle tree depth.
     pub smt_depth: usize,
-    /// extDataHash in big-endian bytes (caller supplied).
-    pub ext_data_hash_be: [u8; 32],
 }
 
-/// Stub for computing `extDataHash`.
-pub fn compute_ext_data_hash(_ext_data: &ExtData) -> [u8; 32] {
-    todo!("extDataHash computation (XDR + keccak + mod BN254) is not implemented in prover yet; pass it in as input for now")
+/// Inject `extDataHash` into circuit inputs (big-endian bytes).
+///
+/// The flows intentionally do not take `ext_data_hash_be` as an input: call sites can build
+/// `ExtData`, compute its hash in a higher-level crate, then inject it right before witness
+/// generation.
+pub fn inject_ext_data_hash(circuit_inputs: &mut CircuitInputs, ext_data_hash_be: [u8; 32]) {
+    circuit_inputs.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
 }
 
 /// Deposit flow
@@ -318,7 +294,6 @@ pub fn deposit(params: DepositParams) -> Result<TransactArtifacts> {
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     } = params;
 
     transact(TransactParams {
@@ -326,14 +301,13 @@ pub fn deposit(params: DepositParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: pool_address,
-        ext_amount_stroops: ExtAmount::from(amount_stroops),
+        ext_amount: ExtAmount::from(amount_stroops),
         inputs: Vec::new(),
         outputs,
         membership_proof,
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     })
 }
 
@@ -351,7 +325,6 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     } = params;
 
     let input_total = sum_amounts(&inputs)?;
@@ -397,14 +370,13 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: withdraw_recipient,
-        ext_amount_stroops: -ExtAmount::from(withdraw_amount_stroops),
+        ext_amount: -ExtAmount::from(withdraw_amount_stroops),
         inputs,
         outputs,
         membership_proof,
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     })
 }
 
@@ -421,7 +393,6 @@ pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     } = params;
 
     transact(TransactParams {
@@ -429,14 +400,13 @@ pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: pool_address,
-        ext_amount_stroops: ExtAmount::ZERO,
+        ext_amount: ExtAmount::ZERO,
         inputs,
         outputs,
         membership_proof,
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     })
 }
 
@@ -452,14 +422,13 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient,
-        ext_amount_stroops,
+        ext_amount,
         inputs,
         outputs,
         membership_proof,
         non_membership_proof,
         tree_depth,
         smt_depth,
-        ext_data_hash_be,
     } = params;
 
     if tree_depth == 0 {
@@ -497,14 +466,14 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     let inputs_sum = sum_amounts(&inputs)?;
     let outputs_sum = sum_amounts_outputs(&outputs)?;
     let lhs = ExtAmount::from(inputs_sum)
-        .checked_add(ext_amount_stroops)
+        .checked_add(ext_amount)
         .ok_or_else(|| anyhow!("overflow computing LHS"))?;
     let rhs = ExtAmount::from(outputs_sum);
     if lhs != rhs {
         return Err(anyhow!(
             "equation not balanced: inputs({}) + public({}) != outputs({})",
             inputs_sum,
-            ext_amount_stroops,
+            ext_amount,
             outputs_sum
         ));
     }
@@ -576,9 +545,9 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
 
     // Public inputs.
     circuit.set_single("root", &field_bytes_to_hex(&pool_root)?);
-    let public_amount_field_le = Field::try_from(ext_amount_stroops)?.to_le_bytes();
+    let public_amount_field_le = Field::try_from(ext_amount)?.to_le_bytes();
     circuit.set_single("publicAmount", &field_bytes_to_hex(&public_amount_field_le)?);
-    circuit.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
+    // `extDataHash` is injected later (after building `ExtData`) by the calling layer.
 
     // Input notes: compute commitments/signatures/nullifiers.
     let priv_key_hex = field_bytes_to_hex(&priv_key.0)?;
@@ -733,7 +702,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     // Build extData with per-output encrypted note data.
     let ext_data = ExtData {
         recipient: ext_recipient,
-        ext_amount_stroops,
+        ext_amount,
         encrypted_output0: encrypted_outputs[0].clone(),
         encrypted_output1: encrypted_outputs[1].clone(),
     };
@@ -746,7 +715,6 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             input_nullifiers: input_nullifiers_bytes,
             output_commitments: output_commitments_bytes,
             public_amount_field: public_amount_field_le,
-            ext_data_hash_be,
             asp_membership_root: membership_proof.root,
             asp_non_membership_root: non_membership_proof.root,
         },
@@ -850,13 +818,11 @@ mod tests {
             non_membership_proof: zero_non_membership(smt_depth),
             tree_depth,
             smt_depth,
-            ext_data_hash_be: [0u8; 32],
         })
         .expect("deposit builds");
 
         assert!(artifacts.circuit_inputs.signals.contains_key("root"));
         assert!(artifacts.circuit_inputs.signals.contains_key("publicAmount"));
-        assert!(artifacts.circuit_inputs.signals.contains_key("extDataHash"));
         assert!(artifacts.circuit_inputs.signals.contains_key("inputNullifier"));
         assert!(artifacts.circuit_inputs.signals.contains_key("outputCommitment"));
 
@@ -892,7 +858,6 @@ mod tests {
             non_membership_proof: zero_non_membership(smt_depth),
             tree_depth,
             smt_depth,
-            ext_data_hash_be: [0u8; 32],
         })
         .expect("withdraw builds");
 
@@ -940,7 +905,6 @@ mod tests {
             non_membership_proof: zero_non_membership(smt_depth),
             tree_depth,
             smt_depth,
-            ext_data_hash_be: [0u8; 32],
         });
 
         assert!(res.is_err());

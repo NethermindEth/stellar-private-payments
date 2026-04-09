@@ -19,6 +19,7 @@ serde = { workspace = true }
 http = "1.0.0"
 serde-aux = "4.1.2"
 serde_json = { workspace = true }
+sha3 = { version = "0.10", default-features = false }
 types = { path = "../types" }
 
 #[lints]
