@@ -1,3 +1,4 @@
+use anyhow::Result;
 use sha3::{Digest, Keccak256};
 use stellar_xdr::curr::{
     Int256Parts, Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr,
@@ -6,7 +7,7 @@ use std::convert::TryInto;
 use types::{BN254_MODULUS_BE, ExtData, U256};
 
 // please refer to hash_ext_data in contracts/pool/src/pool.rs
-pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32], Box<dyn std::error::Error>> {
+pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     // 1. Prepare ScVal entries
     // Soroban structs serialize to XDR Maps sorted alphabetically by key
     let mut entries: Vec<(&str, ScVal)> = vec![

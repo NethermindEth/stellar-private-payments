@@ -4,7 +4,6 @@ use crate::DEPLOYMENT;
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
-const LEDGERS_7DAYS: u32 = 7 * 24 * 60 * 60 / 5;
 
 pub struct Indexer<S: ContractDataStorage> {
     client: Client,

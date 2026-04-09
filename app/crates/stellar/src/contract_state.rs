@@ -4,7 +4,7 @@ use crate::rpc::Client;
 use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
 use crate::DEPLOYMENT;
 use types::ContractConfig;
-use types::{PoolInfo, AspMembership, AspNonMembership, ContractsStateData, ExtAmount, Field, NoteAmount, U256};
+use types::{PoolInfo, AspMembership, AspNonMembership, ContractsStateData, ExtAmount, Field, U256};
 
 macro_rules! get_state {
     ($map:expr, $key:expr, $source:expr) => {
@@ -25,12 +25,24 @@ pub struct StateFetcher {
 
 impl StateFetcher {
 
-    fn u256_to_u64_checked(v: U256, what: &'static str) -> Result<u64> {
-        // U256 -> u64 only if the high 192 bits are zero.
-        if (v >> 64) != U256::from(0u64) {
-            return Err(anyhow!("{what} does not fit into u64"));
+    fn u256_to_i128_checked(v: U256, what: &'static str) -> Result<i128> {
+        let mut be = [0u8; 32];
+        v.to_big_endian(&mut be);
+
+        // Must fit into 128 bits to be representable as i128.
+        if be[..16].iter().any(|&b| b != 0) {
+            return Err(anyhow!("{what} does not fit into i128"));
         }
-        Ok(v.low_u64())
+
+        let mut low_bytes = [0u8; 16];
+        low_bytes.copy_from_slice(&be[16..]);
+        let low = u128::from_be_bytes(low_bytes);
+
+        if low > i128::MAX as u128 {
+            return Err(anyhow!("{what} does not fit into i128"));
+        }
+
+        Ok(low as i128)
     }
 
     pub fn new(rpc_url: &str) -> Result<Self> {
@@ -56,10 +68,10 @@ impl StateFetcher {
         let merkle_next_index = scval_to_u64(get_state!(pool_state, "NextIndex", self.config.pool)?)?;
         let maximum_deposit_amount_u256 =
             scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", self.config.pool)?)?;
-        let maximum_deposit_amount = ExtAmount::from(NoteAmount(Self::u256_to_u64_checked(
+        let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
             maximum_deposit_amount_u256,
             "maximum_deposit_amount",
-        )?));
+        )?);
         let merkle_root = merkle_root
             .map(Field::try_from_u256)
             .transpose()?;
