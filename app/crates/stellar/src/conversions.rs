@@ -2,9 +2,9 @@ use stellar_strkey::ed25519;
 use stellar_xdr::curr::{
     self as xdr, ReadXdr
 };
-use num_bigint::BigUint;
 use crate::rpc::Error;
 use types::ContractEvent;
+use types::U256;
 use std::collections::HashMap;
 
 /// Helper to convert ScVal Address to G... or C... string
@@ -40,17 +40,17 @@ pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
     }
 }
 
-/// Helper to convert U256Parts to BigUint
-pub fn scval_to_u256(val: &xdr::ScVal) -> Result<BigUint, Error> {
+/// Helper to convert Soroban `U256` parts into a `types::U256`.
+pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
     if let xdr::ScVal::U256(parts) = val {
-        let hi_hi = BigUint::from(parts.hi_hi);
-        let hi_lo = BigUint::from(parts.hi_lo);
-        let lo_hi = BigUint::from(parts.lo_hi);
-        let lo_lo = BigUint::from(parts.lo_lo);
+        // Soroban encodes U256 as 4x u64 limbs, big-endian by limb significance.
+        // Reconstruct as: hi_hi<<192 + hi_lo<<128 + lo_hi<<64 + lo_lo.
+        let hi_hi = U256::from(parts.hi_hi);
+        let hi_lo = U256::from(parts.hi_lo);
+        let lo_hi = U256::from(parts.lo_hi);
+        let lo_lo = U256::from(parts.lo_lo);
 
-        let total: BigUint = (hi_hi << 192) + (hi_lo << 128) + (lo_hi << 64) + lo_lo;
-
-        Ok(total)
+        Ok((hi_hi << 192) + (hi_lo << 128) + (lo_hi << 64) + lo_lo)
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
     }

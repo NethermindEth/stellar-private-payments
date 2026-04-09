@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use crate::{EncryptionPublicKey, NotePublicKey};
+use crate::{EncryptionPublicKey, NotePublicKey, ExtAmount, Field};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,8 +25,8 @@ pub struct PoolInfo {
     pub merkle_levels: u32,
     pub merkle_current_root_index: Option<u32>,
     pub merkle_next_index: String, //num_bigint::BigUint,
-    pub maximum_deposit_amount: String, //num_bigint::BigUint,
-    pub merkle_root: Option<String>,
+    pub maximum_deposit_amount: ExtAmount,
+    pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
 }
@@ -37,7 +37,7 @@ pub struct AspMembership {
     pub success: bool,
     pub contract_id: String,
     pub contract_type: String,
-    pub root: String,
+    pub root: Field,
     pub levels: u32,
     pub next_index: String,
     pub admin: String,
@@ -52,7 +52,7 @@ pub struct AspNonMembership {
     pub success: bool,
     pub contract_id: String,
     pub contract_type: String,
-    pub root: String,
+    pub root: Field,
     pub is_empty: bool,
     pub admin: String,
 }
@@ -98,8 +98,8 @@ pub struct NewNullifierEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    /// The nullifier that was spent, hex
-    pub nullifier: String,
+    /// The nullifier that was spent (BN254 field element).
+    pub nullifier: Field,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -109,8 +109,8 @@ pub struct NewCommitmentEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    /// The commitment hash added to the tree, hex
-    pub commitment: String,
+    /// The commitment hash added to the tree (BN254 field element).
+    pub commitment: Field,
     /// Index position in the Merkle tree
     pub index: u32,
     /// Encrypted output data (decryptable by the recipient)
@@ -139,12 +139,12 @@ pub struct LeafAddedEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    /// The leaf value that was inserted, hex
-    pub leaf: String,
+    /// The leaf value that was inserted (BN254 field element).
+    pub leaf: Field,
     /// Index position where the leaf was inserted
     pub index: u32,
-    /// New Merkle root after insertion, hex
-    pub root: String,
+    /// New Merkle root after insertion (BN254 field element).
+    pub root: Field,
 }
 
 /// Event emitted when a new leaf is inserted into the Sparse Merkle tree
@@ -154,10 +154,10 @@ pub struct LeafInsertedEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    pub key: String,
-    pub value: String,
+    pub key: Field,
+    pub value: Field,
     /// SMT root
-    pub root: String,
+    pub root: Field,
 }
 
 /// Event emitted when a leaf is updated in the Sparse Merkle tree
@@ -167,10 +167,10 @@ pub struct LeafUpdatedEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    pub key: String,
-    pub old_value: String,
-    pub new_value: String,
-    pub root: String,
+    pub key: Field,
+    pub old_value: Field,
+    pub new_value: Field,
+    pub root: Field,
 }
 
 /// Event emitted when a leaf is deleted in the Sparse Merkle tree
@@ -180,8 +180,8 @@ pub struct LeafDeletedEvent {
     // Unique identifier for this event, based on the TOID format.
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
     pub id: String,
-    pub key: String,
-    pub root: String,
+    pub key: Field,
+    pub root: Field,
 }
 
 /// A contract event after full parsing

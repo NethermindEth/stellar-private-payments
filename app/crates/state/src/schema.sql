@@ -27,14 +27,14 @@ CREATE TABLE keypairs (
 );
 
 CREATE TABLE pool_nullifiers (
-    nullifier TEXT PRIMARY KEY,
+    nullifier BLOB NOT NULL PRIMARY KEY CHECK (length(nullifier) = 32),
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_pool_nullifiers_event_id ON pool_nullifiers(event_id);
 
 CREATE TABLE pool_commitments (
-    commitment TEXT PRIMARY KEY,
+    commitment BLOB NOT NULL PRIMARY KEY CHECK (length(commitment) = 32),
     leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
     event_id  TEXT NOT NULL UNIQUE,
@@ -53,8 +53,8 @@ CREATE INDEX idx_public_keys_event_id ON public_keys(event_id);
 
 CREATE TABLE asp_membership_leaves (
     leaf_index INTEGER PRIMARY KEY,
-    leaf TEXT NOT NULL,
-    root TEXT NOT NULL,
+    leaf BLOB NOT NULL CHECK (length(leaf) = 32),
+    root BLOB NOT NULL CHECK (length(root) = 32),
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
@@ -62,12 +62,12 @@ CREATE INDEX idx_asp_membership_leaves_event_id ON asp_membership_leaves(event_i
 CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
 CREATE TABLE user_notes (
-    id TEXT PRIMARY KEY,
+    id BLOB NOT NULL PRIMARY KEY CHECK (length(id) = 32),
     owner TEXT NOT NULL,
-    commitment TEXT NOT NULL,
-    private_key TEXT NOT NULL,
-    blinding TEXT NOT NULL,
-    amount TEXT NOT NULL,
+    commitment BLOB NOT NULL CHECK (length(commitment) = 32),
+    private_key BLOB NOT NULL CHECK (length(private_key) = 32),
+    blinding BLOB NOT NULL CHECK (length(blinding) = 32),
+    amount INTEGER NOT NULL,
     leaf_index INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     created_at_ledger INTEGER NOT NULL,

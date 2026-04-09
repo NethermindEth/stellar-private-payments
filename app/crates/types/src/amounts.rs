@@ -43,9 +43,27 @@ fn bn254_modulus_u256() -> U256 {
 pub struct NoteAmount(pub u64);
 
 impl NoteAmount {
+    /// Zero amount.
+    pub const ZERO: NoteAmount = NoteAmount(0);
+    /// Unit amount.
+    pub const ONE: NoteAmount = NoteAmount(1);
+
     /// Returns the underlying stroops value.
     pub const fn as_u64(self) -> u64 {
         self.0
+    }
+
+    /// Returns true if this amount is zero.
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
+    }
+
+    /// Returns this amount as 8 little-endian bytes (stroops).
+    ///
+    /// This matches the current note encryption plaintext format:
+    /// `amount (8 bytes LE) || blinding (32 bytes)`.
+    pub const fn to_le_bytes(self) -> [u8; 8] {
+        self.0.to_le_bytes()
     }
 
     /// Checked addition.
@@ -168,9 +186,19 @@ impl<'de> Deserialize<'de> for NoteAmount {
 pub struct ExtAmount(pub i128);
 
 impl ExtAmount {
+    /// Zero amount.
+    pub const ZERO: ExtAmount = ExtAmount(0);
+    /// Unit amount.
+    pub const ONE: ExtAmount = ExtAmount(1);
+
     /// Returns the underlying signed stroops value.
     pub const fn as_i128(self) -> i128 {
         self.0
+    }
+
+    /// Returns true if this amount is zero.
+    pub const fn is_zero(self) -> bool {
+        self.0 == 0
     }
 
     /// Checked addition.
@@ -193,6 +221,12 @@ impl fmt::Display for ExtAmount {
 impl From<i128> for ExtAmount {
     fn from(value: i128) -> Self {
         ExtAmount(value)
+    }
+}
+
+impl From<NoteAmount> for ExtAmount {
+    fn from(value: NoteAmount) -> Self {
+        ExtAmount(i128::from(value.0))
     }
 }
 
@@ -297,9 +331,19 @@ impl<'de> Deserialize<'de> for ExtAmount {
 pub struct Field(pub U256);
 
 impl Field {
+    /// The additive identity in the field.
+    pub const ZERO: Field = Field(U256([0, 0, 0, 0]));
+    /// The multiplicative identity in the field.
+    pub const ONE: Field = Field(U256([1, 0, 0, 0]));
+
     /// Returns the field modulus `p` as a [`U256`].
     pub fn modulus() -> U256 {
         bn254_modulus_u256()
+    }
+
+    /// Returns true if this field element is zero.
+    pub fn is_zero(self) -> bool {
+        self == Field::ZERO
     }
 
     /// Returns the underlying integer representation.
@@ -321,15 +365,37 @@ impl Field {
         out
     }
 
-    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] (big-endian).
-    pub fn from_0x_hex_be(s: &str) -> Result<Self> {
-        let be = parse_0x_hex_32(s)?;
-        let v = U256::from_big_endian(&be);
+    /// Builds a field element from a 32-byte big-endian representation.
+    ///
+    /// Fails if the value is not `< p`.
+    pub fn try_from_be_bytes(bytes: [u8; 32]) -> Result<Self> {
+        let v = U256::from_big_endian(&bytes);
+        Field::try_from_u256(v)
+    }
+
+    /// Builds a field element from a 32-byte little-endian representation.
+    ///
+    /// Fails if the value is not `< p`.
+    pub fn try_from_le_bytes(bytes: [u8; 32]) -> Result<Self> {
+        let v = U256::from_little_endian(&bytes);
+        Field::try_from_u256(v)
+    }
+
+    /// Builds a field element from a `U256`.
+    ///
+    /// Fails if the value is not `< p`.
+    pub fn try_from_u256(v: U256) -> Result<Self> {
         let m = Self::modulus();
         if v >= m {
             return Err(anyhow!("field element out of range"));
         }
         Ok(Field(v))
+    }
+
+    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] (big-endian).
+    pub fn from_0x_hex_be(s: &str) -> Result<Self> {
+        let be = parse_0x_hex_32(s)?;
+        Field::try_from_be_bytes(be)
     }
 
     /// Returns this field element as a `0x`-prefixed 64-hex string (big-endian).
@@ -373,12 +439,10 @@ impl<'de> Deserialize<'de> for Field {
     }
 }
 
-impl TryFrom<NoteAmount> for Field {
-    type Error = anyhow::Error;
-
-    fn try_from(value: NoteAmount) -> Result<Self> {
-        // u64 is always < BN254 modulus.
-        Ok(Field(U256::from(value.0)))
+impl From<NoteAmount> for Field {
+    fn from(value: NoteAmount) -> Self {
+        // `u64` is always < BN254 modulus.
+        Field(U256::from(value.0))
     }
 }
 
@@ -519,6 +583,7 @@ mod tests {
         let z = NoteAmount(0);
         assert_eq!(z.as_u64(), 0);
         assert_eq!(z.to_string(), "0");
+        assert_eq!(z.to_le_bytes(), [0u8; 8]);
 
         let min = NoteAmount(u64::MIN);
         assert_eq!(min, z);
@@ -624,6 +689,15 @@ mod tests {
         Ok(())
     }
 
+    #[test]
+    fn field_try_from_le_bytes_roundtrip() -> Result<()> {
+        let f = Field::try_from(ExtAmount(-123))?;
+        let le = f.to_le_bytes();
+        let parsed = Field::try_from_le_bytes(le)?;
+        assert_eq!(parsed, f);
+        Ok(())
+    }
+
     #[cfg(feature = "rusqlite")]
     #[test]
     fn rusqlite_conversions_work() -> Result<()> {
@@ -668,13 +742,13 @@ mod tests {
     }
 }
 
-#[cfg(feature = "rusqlite")]
-mod rusqlite_impls {
+    #[cfg(feature = "rusqlite")]
+    mod rusqlite_impls {
     //! Rusqlite conversions for amount and field types.
     //!
     //! These are feature-gated to avoid pulling rusqlite into WASM builds.
 
-    use super::{ExtAmount, Field, NoteAmount, U256};
+    use super::{ExtAmount, Field, NoteAmount};
     use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value, ValueRef};
 
     impl ToSql for NoteAmount {
@@ -719,8 +793,8 @@ mod rusqlite_impls {
 
     impl ToSql for Field {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-            // Store as 32-byte big-endian blob.
-            Ok(ToSqlOutput::Owned(Value::Blob(self.to_be_bytes().to_vec())))
+            // Store as 32-byte little-endian blob (matches prover/circuit byte order).
+            Ok(ToSqlOutput::Owned(Value::Blob(self.to_le_bytes().to_vec())))
         }
     }
 
@@ -731,13 +805,9 @@ mod rusqlite_impls {
                     if b.len() != 32 {
                         return Err(FromSqlError::InvalidBlobSize { expected_size: 32, blob_size: b.len() });
                     }
-                    let mut be = [0u8; 32];
-                    be.copy_from_slice(b);
-                    let v = U256::from_big_endian(&be);
-                    if v >= Field::modulus() {
-                        return Err(FromSqlError::OutOfRange(0));
-                    }
-                    Ok(Field(v))
+                    let mut le = [0u8; 32];
+                    le.copy_from_slice(b);
+                    Field::try_from_le_bytes(le).map_err(|_| FromSqlError::OutOfRange(0))
                 }
                 ValueRef::Text(t) => {
                     let s = core::str::from_utf8(t).map_err(|_| FromSqlError::InvalidType)?;

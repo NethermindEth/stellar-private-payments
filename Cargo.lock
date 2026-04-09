@@ -4539,8 +4539,6 @@ dependencies = [
  "futures",
  "http",
  "log",
- "num-bigint",
- "num-traits",
  "reqwest",
  "serde",
  "serde-aux",

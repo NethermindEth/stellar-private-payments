@@ -42,7 +42,10 @@ use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
-use types::{SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, EncryptionPublicKey, EncryptionPrivateKey, NotePublicKey};
+use types::{
+    EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, EncryptionSignature, NoteAmount,
+    NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature,
+};
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
@@ -188,7 +191,7 @@ pub fn generate_random_blinding() -> Result<Vec<u8>> {
 /// Plaintext format: `amount (8 bytes LE) || blinding (32 bytes)`.
 pub fn encrypt_output_note(
     recipient_pubkey: &EncryptionPublicKey,
-    amount_stroops: u64,
+    amount_stroops: NoteAmount,
     blinding: &[u8; 32],
 ) -> Result<Vec<u8>> {
     let mut plaintext = [0u8; 40];
@@ -330,23 +333,25 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn test_derive_keypair_determinism() {
-        let signature = [1u8; 64];
-        let keys1 = derive_keypair_from_signature(&signature).expect("Derivation failed");
-        let keys2 = derive_keypair_from_signature(&signature).expect("Derivation failed");
-        assert_eq!(keys1, keys2);
-        assert_eq!(keys1.len(), 64);
+        let signature = EncryptionSignature(vec![1u8; 64]);
+        let keys1 = derive_keypair_from_signature(signature.clone()).expect("Derivation failed");
+        let keys2 = derive_keypair_from_signature(signature).expect("Derivation failed");
+        assert_eq!(keys1.private.0, keys2.private.0);
+        assert_eq!(keys1.public.0, keys2.public.0);
+        assert_eq!(keys1.private.0.len(), 32);
+        assert_eq!(keys1.public.0.len(), 32);
     }
 
     #[test]
     fn test_encryption_roundtrip() {
-        let recipient_sig = [2u8; 64];
-        let recip_keys =
-            derive_keypair_from_signature_internal(&recipient_sig).expect("Derivation failed");
-        let pub_key = &recip_keys[0..32];
-        let priv_key = &recip_keys[32..64];
+        let recipient_sig = EncryptionSignature(vec![2u8; 64]);
+        let recip_keys = derive_keypair_from_signature(recipient_sig).expect("Derivation failed");
+        let pub_key = recip_keys.public.as_ref();
+        let priv_key = recip_keys.private.as_ref();
 
         // 8 bytes amount + 32 bytes blinding = 40 bytes
         let amount = [10u8; 8];
@@ -355,32 +360,29 @@ mod tests {
         plaintext.extend_from_slice(&amount);
         plaintext.extend_from_slice(&blinding);
 
-        let encrypted = encrypt_note_data_internal(pub_key, &plaintext).expect("Encryption failed");
+        let encrypted = encrypt_note_data(pub_key, &plaintext).expect("Encryption failed");
         assert!(encrypted.len() >= 112);
 
-        let decrypted =
-            decrypt_note_data_internal(priv_key, &encrypted).expect("Decryption failed");
+        let decrypted = decrypt_note_data(priv_key, &encrypted).expect("Decryption failed");
         assert_eq!(decrypted, plaintext);
     }
 
     #[test]
     fn test_decrypt_failure_wrong_key() {
-        let alice_sig = [3u8; 64];
-        let bob_sig = [4u8; 64];
+        let alice_sig = EncryptionSignature(vec![3u8; 64]);
+        let bob_sig = EncryptionSignature(vec![4u8; 64]);
 
-        let alice_keys =
-            derive_keypair_from_signature_internal(&alice_sig).expect("Derivation failed");
-        let bob_keys = derive_keypair_from_signature_internal(&bob_sig).expect("Derivation failed");
+        let alice_keys = derive_keypair_from_signature(alice_sig).expect("Derivation failed");
+        let bob_keys = derive_keypair_from_signature(bob_sig).expect("Derivation failed");
 
-        // Encrypt for Alice
-        let alice_pub = &alice_keys[0..32];
+        // Encrypt for Alice.
+        let alice_pub = alice_keys.public.as_ref();
         let plaintext = [0u8; 40];
-        let encrypted =
-            encrypt_note_data_internal(alice_pub, &plaintext).expect("Encryption failed");
+        let encrypted = encrypt_note_data(alice_pub, &plaintext).expect("Encryption failed");
 
-        // Bob tries to decrypt
-        let bob_priv = &bob_keys[32..64];
-        let decrypted = decrypt_note_data_internal(bob_priv, &encrypted)
+        // Bob tries to decrypt.
+        let bob_priv = bob_keys.private.as_ref();
+        let decrypted = decrypt_note_data(bob_priv, &encrypted)
             .expect("Decryption should handle failure gracefully");
 
         // Should return empty vec on failure as per implementation
@@ -389,17 +391,17 @@ mod tests {
 
     #[test]
     fn test_invalid_input_lengths() {
-        let sig = [5u8; 64];
-        let keys = derive_keypair_from_signature_internal(&sig)
+        let sig = EncryptionSignature(vec![5u8; 64]);
+        let keys = derive_keypair_from_signature(sig)
             .expect("Derivation failed in test_invalid_input_lengths");
-        let pub_key = &keys[0..32];
+        let pub_key = keys.public.as_ref();
 
         // Invalid plaintext length
-        let res = encrypt_note_data_internal(pub_key, &[0u8; 39]);
+        let res = encrypt_note_data(pub_key, &[0u8; 39]);
         assert!(res.is_err());
 
         // Invalid pubkey length
-        let res = encrypt_note_data_internal(&[0u8; 31], &[0u8; 40]);
+        let res = encrypt_note_data(&[0u8; 31], &[0u8; 40]);
         assert!(res.is_err());
     }
 }

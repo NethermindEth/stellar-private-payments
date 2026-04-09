@@ -1,11 +1,10 @@
 use futures::try_join;
-use anyhow::{Result, Context};
-use num_traits::Zero;
+use anyhow::{Result, anyhow};
 use crate::rpc::Client;
 use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
 use crate::DEPLOYMENT;
 use types::ContractConfig;
-use types::{PoolInfo, AspMembership, AspNonMembership, ContractsStateData};
+use types::{PoolInfo, AspMembership, AspNonMembership, ContractsStateData, ExtAmount, Field, NoteAmount, U256};
 
 macro_rules! get_state {
     ($map:expr, $key:expr, $source:expr) => {
@@ -25,6 +24,14 @@ pub struct StateFetcher {
 }
 
 impl StateFetcher {
+
+    fn u256_to_u64_checked(v: U256, what: &'static str) -> Result<u64> {
+        // U256 -> u64 only if the high 192 bits are zero.
+        if (v >> 64) != U256::from(0u64) {
+            return Err(anyhow!("{what} does not fit into u64"));
+        }
+        Ok(v.low_u64())
+    }
 
     pub fn new(rpc_url: &str) -> Result<Self> {
         let config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
@@ -47,6 +54,15 @@ impl StateFetcher {
         let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", self.config.pool)?)?;
         let merkle_capacity = 2u64.pow(merkle_levels);
         let merkle_next_index = scval_to_u64(get_state!(pool_state, "NextIndex", self.config.pool)?)?;
+        let maximum_deposit_amount_u256 =
+            scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", self.config.pool)?)?;
+        let maximum_deposit_amount = ExtAmount::from(NoteAmount(Self::u256_to_u64_checked(
+            maximum_deposit_amount_u256,
+            "maximum_deposit_amount",
+        )?));
+        let merkle_root = merkle_root
+            .map(Field::try_from_u256)
+            .transpose()?;
 
         let pool = PoolInfo {
             success: true,
@@ -60,8 +76,8 @@ impl StateFetcher {
             merkle_levels,
             merkle_current_root_index,
             merkle_next_index: merkle_next_index.to_string(),
-            maximum_deposit_amount: scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", self.config.pool)?)?.to_string(),
-            merkle_root: merkle_root.map(|r| format!("0x{:064x}", r)),
+            maximum_deposit_amount,
+            merkle_root,
             merkle_capacity,
             total_commitments: merkle_next_index.to_string(),
         };
@@ -73,12 +89,14 @@ impl StateFetcher {
         let asp_mem_next_index = scval_to_u64(get_state!(asp_membership_state, "NextIndex", self.config.asp_membership)?)?;
         let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", self.config.asp_membership)?)?;
         let asp_mem_capacity = 2u64.pow(asp_mem_levels);
+        let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", self.config.asp_membership)?)?;
+        let root = Field::try_from_u256(root_u256)?;
 
         let asp_membership = AspMembership {
             success: true,
             contract_id: self.config.asp_membership.clone(),
             contract_type: "ASP Membership".to_string(),
-            root: format!("0x{:064x}", scval_to_u256(get_state!(asp_membership_state, "Root", self.config.asp_membership)?)?),
+            root,
             levels: asp_mem_levels,
             next_index: asp_mem_next_index.to_string(),
             admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", self.config.asp_membership)?)?,
@@ -91,13 +109,14 @@ impl StateFetcher {
 
     pub async fn asp_nonmembership_contract_state(&self) -> Result<AspNonMembership> {
         let asp_non_membership_state = self.client.get_contract_data(&self.config.asp_non_membership, &["Root", "Admin"], &[]).await?;
-            let asp_nonmem_root = scval_to_u256(get_state!(asp_non_membership_state, "Root", self.config.asp_non_membership)?)?;
+            let asp_nonmem_root_u256 = scval_to_u256(get_state!(asp_non_membership_state, "Root", self.config.asp_non_membership)?)?;
+            let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
             let asp_non_membership = AspNonMembership {
                 success: true,
                 contract_id: self.config.asp_non_membership.clone(),
                 contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
-                root: format!("0x{:064x}", asp_nonmem_root),
-                is_empty: asp_nonmem_root.is_zero(),
+                root: asp_nonmem_root,
+                is_empty: asp_nonmem_root.as_u256() == U256::from(0u64),
                 admin: scval_to_address_string(get_state!(asp_non_membership_state, "Admin", self.config.asp_non_membership)?)?,
             };
         Ok(asp_non_membership)

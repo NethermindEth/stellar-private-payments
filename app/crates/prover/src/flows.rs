@@ -7,13 +7,12 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 use anyhow::{Result, anyhow};
-use types::{EncryptionPublicKey, NotePrivateKey, NotePublicKey};
-use zkhash::fields::bn256::FpBN256 as Scalar;
+use types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePrivateKey, NotePublicKey};
 
 use crate::{
     crypto,
     encryption,
-    serialization::{field_bytes_to_hex, scalar_to_hex},
+    serialization::field_bytes_to_hex,
     types::CircuitInputs,
 };
 
@@ -29,7 +28,7 @@ const N_OUTPUTS: usize = 2;
 #[derive(Clone, Debug)]
 pub struct TransactInputNote {
     /// Note amount in stroops (1 XLM = 10_000_000 stroops).
-    pub amount_stroops: u64,
+    pub amount_stroops: NoteAmount,
     /// Note blinding factor as a BN254 scalar (little-endian field bytes).
     pub blinding: [u8; 32],
     /// Merkle proof sibling hashes as BN254 scalars (little-endian field bytes),
@@ -51,7 +50,7 @@ pub struct TransactInputNote {
 #[derive(Clone, Debug)]
 pub struct TransactOutput {
     /// Output amount in stroops.
-    pub amount_stroops: u64,
+    pub amount_stroops: NoteAmount,
     /// Output blinding factor as a BN254 scalar (little-endian field bytes).
     pub blinding: [u8; 32],
     /// Optional external recipient note public key (BN254 - used for commitment).
@@ -109,11 +108,10 @@ pub struct ExtData {
     /// Recipient Stellar address / contract id (opaque here).
     pub recipient: String,
     /// External amount in stroops.
-    /// TODO wrap in its own type?
     /// - Deposit: `ext_amount > 0`
     /// - Withdraw: `ext_amount < 0`
     /// - Transfer: `ext_amount = 0`
-    pub ext_amount_stroops: i128,
+    pub ext_amount_stroops: ExtAmount,
     /// Encrypted note data for output 0 (for recipient scanning/decryption).
     pub encrypted_output0: Vec<u8>,
     /// Encrypted note data for output 1 (for recipient scanning/decryption).
@@ -174,7 +172,7 @@ pub struct TransactParams {
     /// External recipient for extData (address/contract id as string, treated as opaque here).
     pub ext_recipient: String,
     /// External amount in stroops. See `ExtData::ext_amount_stroops` for semantics.
-    pub ext_amount_stroops: i128,
+    pub ext_amount_stroops: ExtAmount,
 
     /// Input notes to spend (0..=2). If empty, `transact()` uses dummy inputs (deposit-style).
     pub inputs: Vec<TransactInputNote>,
@@ -214,7 +212,7 @@ pub struct DepositParams {
     /// Pool contract address (recipient for extData).
     pub pool_address: String,
     /// Total amount to deposit (stroops). Passed as `ext_amount > 0`.
-    pub amount_stroops: u64,
+    pub amount_stroops: NoteAmount,
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
     pub outputs: Vec<TransactOutput>,
 
@@ -250,7 +248,7 @@ pub struct WithdrawParams {
     /// Address to receive withdrawn tokens (extData recipient).
     pub withdraw_recipient: String,
     /// Amount to withdraw in stroops. `withdraw()` sets `ext_amount = -withdraw_amount`.
-    pub withdraw_amount_stroops: u64,
+    pub withdraw_amount_stroops: NoteAmount,
     /// Notes to spend (1..=2). If one is provided, `transact()` pads the second input with a dummy.
     pub inputs: Vec<TransactInputNote>,
     /// Optional outputs override (must satisfy equation if provided).
@@ -328,7 +326,7 @@ pub fn deposit(params: DepositParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: pool_address,
-        ext_amount_stroops: i128::from(amount_stroops),
+        ext_amount_stroops: ExtAmount::from(amount_stroops),
         inputs: Vec::new(),
         outputs,
         membership_proof,
@@ -357,15 +355,16 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
     } = params;
 
     let input_total = sum_amounts(&inputs)?;
-    let withdraw_amount_i128 = i128::from(withdraw_amount_stroops);
-    if i128::from(input_total) < withdraw_amount_i128 {
+    if input_total < withdraw_amount_stroops {
         return Err(anyhow!(
             "insufficient input amount: have {}, need {}",
             input_total,
             withdraw_amount_stroops
         ));
     }
-    let change = input_total - withdraw_amount_stroops;
+    let change = input_total
+        .checked_sub(withdraw_amount_stroops)
+        .ok_or_else(|| anyhow!("insufficient input amount"))?;
 
     let outputs = match outputs {
         Some(v) => v,
@@ -384,7 +383,7 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
                     recipient_encryption_pubkey: None,
                 },
                 TransactOutput {
-                    amount_stroops: 0,
+                    amount_stroops: NoteAmount::ZERO,
                     blinding: dummy_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
@@ -398,7 +397,7 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: withdraw_recipient,
-        ext_amount_stroops: -i128::from(withdraw_amount_stroops),
+        ext_amount_stroops: -ExtAmount::from(withdraw_amount_stroops),
         inputs,
         outputs,
         membership_proof,
@@ -430,7 +429,7 @@ pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: pool_address,
-        ext_amount_stroops: 0,
+        ext_amount_stroops: ExtAmount::ZERO,
         inputs,
         outputs,
         membership_proof,
@@ -495,17 +494,18 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     }
 
     // Enforce the conservation equation: inputs + ext_amount == outputs.
-    let inputs_sum_i128 = i128::from(sum_amounts(&inputs)?);
-    let outputs_sum_i128 = i128::from(sum_amounts_outputs(&outputs)?);
-    let lhs = inputs_sum_i128
+    let inputs_sum = sum_amounts(&inputs)?;
+    let outputs_sum = sum_amounts_outputs(&outputs)?;
+    let lhs = ExtAmount::from(inputs_sum)
         .checked_add(ext_amount_stroops)
         .ok_or_else(|| anyhow!("overflow computing LHS"))?;
-    if lhs != outputs_sum_i128 {
+    let rhs = ExtAmount::from(outputs_sum);
+    if lhs != rhs {
         return Err(anyhow!(
             "equation not balanced: inputs({}) + public({}) != outputs({})",
-            inputs_sum_i128,
+            inputs_sum,
             ext_amount_stroops,
-            outputs_sum_i128
+            outputs_sum
         ));
     }
 
@@ -552,7 +552,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             .try_into()
             .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
         output_slots.push(TransactOutput {
-            amount_stroops: 0,
+            amount_stroops: NoteAmount::ZERO,
             blinding,
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
@@ -576,7 +576,8 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
 
     // Public inputs.
     circuit.set_single("root", &field_bytes_to_hex(&pool_root)?);
-    circuit.set_single("publicAmount", &scalar_to_hex(&signed_amount_to_field(ext_amount_stroops)?) );
+    let public_amount_field_le = Field::try_from(ext_amount_stroops)?.to_le_bytes();
+    circuit.set_single("publicAmount", &field_bytes_to_hex(&public_amount_field_le)?);
     circuit.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
 
     // Input notes: compute commitments/signatures/nullifiers.
@@ -592,7 +593,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     let mut input_nullifiers_bytes: [[u8; 32]; N_INPUTS] = [[0u8; 32]; N_INPUTS];
 
     for (idx, inp) in input_slots.iter().enumerate() {
-        let amount_field = u64_to_field_le(inp.amount_stroops);
+        let amount_field = note_amount_to_field_le(inp.amount_stroops);
         let commitment = crypto::compute_commitment(&amount_field, &sender_note_pubkey, &inp.blinding)?;
         let signature = crypto::compute_signature(&priv_key.0, &commitment, &inp.merkle_path_indices)?;
         let nullifier = crypto::compute_nullifier(&commitment, &inp.merkle_path_indices, &signature)?;
@@ -632,7 +633,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             .clone()
             .unwrap_or_else(|| encryption_pubkey.clone());
 
-        let amount_field = u64_to_field_le(out.amount_stroops);
+        let amount_field = note_amount_to_field_le(out.amount_stroops);
         let commitment = crypto::compute_commitment(&amount_field, &recipient_note_pubkey, &out.blinding)?;
         let commitment_arr: [u8; 32] = commitment
             .try_into()
@@ -710,7 +711,13 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         );
         circuit.set_single(
             &(prefix_n.clone() + "isOld0"),
-            &scalar_to_hex(&Scalar::from(if non_membership_proof.is_old0 { 1u64 } else { 0u64 })),
+            &field_bytes_to_hex(
+                &if non_membership_proof.is_old0 {
+                    Field::from(NoteAmount::ONE).to_le_bytes()
+                } else {
+                    Field::ZERO.to_le_bytes()
+                },
+            )?,
         );
         circuit.set_array(
             &(prefix_n.clone() + "siblings"),
@@ -730,11 +737,6 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         encrypted_output0: encrypted_outputs[0].clone(),
         encrypted_output1: encrypted_outputs[1].clone(),
     };
-
-    let public_amount_scalar = signed_amount_to_field(ext_amount_stroops)?;
-    let public_amount_field_le: [u8; 32] = crate::serialization::scalar_to_bytes(&public_amount_scalar)
-        .try_into()
-        .expect("scalar_to_bytes always returns 32 bytes");
 
     Ok(TransactArtifacts {
         circuit_inputs: circuit,
@@ -756,37 +758,19 @@ fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
         .try_into()
         .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
     Ok(TransactInputNote {
-        amount_stroops: 0,
+        amount_stroops: NoteAmount::ZERO,
         blinding,
         merkle_path_elements: vec![[0u8; 32]; tree_depth],
         merkle_path_indices: [0u8; 32],
     })
 }
 
-fn signed_amount_to_field(amount: i128) -> Result<Scalar> {
-    if amount == 0 {
-        return Ok(Scalar::from(0u64));
-    }
-    if amount > 0 {
-        let v = u64::try_from(amount).map_err(|_| anyhow!("ext_amount out of range for u64"))?;
-        Ok(Scalar::from(v))
-    } else {
-        let abs = amount
-            .checked_abs()
-            .ok_or_else(|| anyhow!("ext_amount abs overflow"))?;
-        let v = u64::try_from(abs).map_err(|_| anyhow!("ext_amount out of range for u64"))?;
-        Ok(-Scalar::from(v))
-    }
+fn note_amount_to_field_le(amount: NoteAmount) -> [u8; 32] {
+    Field::from(amount).to_le_bytes()
 }
 
-fn u64_to_field_le(value: u64) -> [u8; 32] {
-    // `Scalar::from(u64)` is exact and small; serialize to LE bytes.
-    let s = Scalar::from(value);
-    let bytes = crate::serialization::scalar_to_bytes(&s);
-    bytes
-        .try_into()
-        .expect("scalar_to_bytes always returns 32 bytes")
-}
+// Note: `ExtAmount -> Field` conversion happens via `types::Field::try_from(ExtAmount)`,
+// and is serialized into the circuit as a normal field element (Little-Endian bytes).
 
 fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     let mut out = String::from("0x");
@@ -796,8 +780,8 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
-fn sum_amounts(inputs: &[TransactInputNote]) -> Result<u64> {
-    let mut sum: u64 = 0;
+fn sum_amounts(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
+    let mut sum = NoteAmount::ZERO;
     for n in inputs {
         sum = sum
             .checked_add(n.amount_stroops)
@@ -806,8 +790,8 @@ fn sum_amounts(inputs: &[TransactInputNote]) -> Result<u64> {
     Ok(sum)
 }
 
-fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<u64> {
-    let mut sum: u64 = 0;
+fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
+    let mut sum = NoteAmount::ZERO;
     for o in outputs {
         sum = sum
             .checked_add(o.amount_stroops)
@@ -855,9 +839,9 @@ mod tests {
             encryption_pubkey,
             pool_root: [9u8; 32],
             pool_address: "POOL".into(),
-            amount_stroops: 10,
+            amount_stroops: NoteAmount(10),
             outputs: vec![TransactOutput {
-                amount_stroops: 10,
+                amount_stroops: NoteAmount(10),
                 blinding: out_blinding,
                 recipient_note_pubkey: None,
                 recipient_encryption_pubkey: None,
@@ -890,7 +874,7 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: 10,
+            amount_stroops: NoteAmount(10),
             blinding: [4u8; 32],
             merkle_path_elements: vec![[0u8; 32]; tree_depth],
             merkle_path_indices: [0u8; 32],
@@ -901,7 +885,7 @@ mod tests {
             encryption_pubkey,
             pool_root: [9u8; 32],
             withdraw_recipient: "G...".into(),
-            withdraw_amount_stroops: 7,
+            withdraw_amount_stroops: NoteAmount(7),
             inputs: vec![input],
             outputs: None,
             membership_proof: zero_membership(tree_depth),
@@ -933,13 +917,13 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: 10,
+            amount_stroops: NoteAmount(10),
             blinding: [4u8; 32],
             merkle_path_elements: vec![[0u8; 32]; tree_depth],
             merkle_path_indices: [0u8; 32],
         };
         let out = TransactOutput {
-            amount_stroops: 9, // unbalanced
+            amount_stroops: NoteAmount(9), // unbalanced
             blinding: [7u8; 32],
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
