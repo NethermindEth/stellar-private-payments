@@ -2,17 +2,16 @@
 //!
 //! Handles conversion between JavaScript types and Arkworks field elements.
 //! All byte arrays use Little-Endian format (as expected by Arkworks).
-use alloc::{format, string::String, vec::Vec};
+use alloc::{format, string::String, vec, vec::Vec};
 use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
-use ark_ff::{Field, PrimeField};
+use ark_ff::{BigInteger, Field, PrimeField};
 use core::ops::{Add, Mul};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::types::FIELD_SIZE;
 
-/// Convert Little-Endian bytes to Arkworks Fr field element
-pub fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
+fn bytes_to_prime_field<F: PrimeField>(bytes: &[u8]) -> Result<F> {
     if bytes.len() != FIELD_SIZE {
         return Err(anyhow!(
             "Expected {} bytes, got {}",
@@ -20,42 +19,42 @@ pub fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
             bytes.len()
         ));
     }
-    Ok(Fr::from_le_bytes_mod_order(bytes))
+    Ok(F::from_le_bytes_mod_order(bytes))
+}
+
+fn prime_field_to_bytes<F: PrimeField>(f: &F) -> Vec<u8> {
+    let src = f.into_bigint().to_bytes_le();
+    if src.len() > FIELD_SIZE {
+        panic!(
+            "PrimeField element serialized to {} bytes, expected <= {}",
+            src.len(),
+            FIELD_SIZE
+        );
+    }
+
+    let mut out = vec![0u8; FIELD_SIZE];
+    out[..src.len()].copy_from_slice(&src);
+    out
+}
+
+/// Convert Little-Endian bytes to Arkworks Fr field element
+pub fn bytes_to_fr(bytes: &[u8]) -> Result<Fr> {
+    bytes_to_prime_field(bytes)
 }
 
 /// Convert Arkworks Fr field element to Little-Endian bytes
 pub fn fr_to_bytes(fr: &Fr) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(FIELD_SIZE);
-    // Arkworks BigInt is stored as limbs, we need to convert to LE bytes
-    let bigint = fr.into_bigint();
-    for limb in bigint.0.iter() {
-        bytes.extend_from_slice(&limb.to_le_bytes());
-    }
-    bytes.truncate(FIELD_SIZE);
-    bytes
+    prime_field_to_bytes(fr)
 }
 
 /// Convert Little-Endian bytes to zkhash Scalar
 pub fn bytes_to_scalar(bytes: &[u8]) -> Result<Scalar> {
-    if bytes.len() != FIELD_SIZE {
-        return Err(anyhow!(
-            "Expected {} bytes, got {}",
-            FIELD_SIZE,
-            bytes.len()
-        ));
-    }
-    Ok(Scalar::from_le_bytes_mod_order(bytes))
+    bytes_to_prime_field(bytes)
 }
 
 /// Convert zkhash Scalar to Little-Endian bytes
 pub fn scalar_to_bytes(scalar: &Scalar) -> Vec<u8> {
-    let mut bytes = Vec::with_capacity(FIELD_SIZE);
-    let bigint = scalar.into_bigint();
-    for limb in bigint.0.iter() {
-        bytes.extend_from_slice(&limb.to_le_bytes());
-    }
-    bytes.truncate(FIELD_SIZE);
-    bytes
+    prime_field_to_bytes(scalar)
 }
 
 /// Convert zkhash Scalar to hex string (for JS BigInt)
@@ -153,4 +152,54 @@ pub fn field_bytes_to_hex(bytes: &[u8]) -> Result<String> {
 pub fn hex_to_field_bytes(hex: &str) -> Result<Vec<u8>> {
     let scalar = hex_to_scalar(hex)?;
     Ok(scalar_to_bytes(&scalar))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloc::string::String;
+    use alloc::vec;
+
+    #[test]
+    fn fr_roundtrip_bytes() {
+        let original = Fr::from(123u64);
+        let bytes = fr_to_bytes(&original);
+        let parsed = bytes_to_fr(&bytes).expect("bytes_to_fr failed");
+        assert_eq!(parsed, original);
+    }
+
+    #[test]
+    fn scalar_roundtrip_bytes() {
+        let original = Scalar::from(123u64);
+        let bytes = scalar_to_bytes(&original);
+        let parsed = bytes_to_scalar(&bytes).expect("bytes_to_scalar failed");
+        assert_eq!(scalar_to_bytes(&parsed), bytes);
+    }
+
+    #[test]
+    fn scalar_roundtrip_hex() {
+        let original = Scalar::from(123u64);
+        let hex = scalar_to_hex(&original);
+        let parsed = hex_to_scalar(&hex).expect("hex_to_scalar failed");
+        assert_eq!(scalar_to_bytes(&parsed), scalar_to_bytes(&original));
+    }
+
+    #[test]
+    fn bytes_to_fr_rejects_wrong_len() {
+        assert!(bytes_to_fr(&vec![0u8; 31]).is_err());
+        assert!(bytes_to_fr(&vec![0u8; 33]).is_err());
+    }
+
+    #[test]
+    fn bytes_to_scalar_rejects_wrong_len() {
+        assert!(bytes_to_scalar(&vec![0u8; 31]).is_err());
+        assert!(bytes_to_scalar(&vec![0u8; 33]).is_err());
+    }
+
+    #[test]
+    fn hex_to_scalar_rejects_too_long() {
+        let mut too_long = String::from("0x");
+        too_long.push_str(&"aa".repeat(33));
+        assert!(hex_to_scalar(&too_long).is_err());
+    }
 }
