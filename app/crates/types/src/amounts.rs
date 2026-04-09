@@ -38,7 +38,7 @@ fn bn254_modulus_u256() -> U256 {
 /// Amount that appears inside encrypted notes.
 ///
 /// This is always non-negative and is currently constrained to what fits in the encrypted
-/// note plaintext format (u64, stored as 8 little-endian bytes in the JS/Rust encryption code).
+/// note plaintext format (u64, stored as 8 little-endian bytes).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NoteAmount(pub u64);
 
@@ -176,9 +176,9 @@ impl<'de> Deserialize<'de> for NoteAmount {
     }
 }
 
-/// Signed external/public amount (Soroban `I256` conceptually).
+/// Signed external/public amount
 ///
-/// This is the value referred to in the JS code as `ext_amount` / "Public amount":
+/// Soroban token transfer function allows only i128 amount
 /// - Deposit: `ext_amount > 0`
 /// - Withdraw: `ext_amount < 0`
 /// - Transfer: `ext_amount = 0`

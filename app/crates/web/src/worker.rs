@@ -8,7 +8,8 @@ use std::cell::RefCell;
 use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
-use prover::encryption::derive_encryption_and_note_keypairs;
+use prover::{flows::{DepositParams, WithdrawParams, TransferParams, TransactParams, TransactOutput, TransactInputNote,
+    deposit, withdraw, transfer, transact, TransactArtifacts},  encryption::derive_encryption_and_note_keypairs};
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
 use wasm_bindgen::JsCast;
@@ -16,6 +17,8 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response, WorkerGlobalScope};
 use witness::WitnessCalculator;
 use wasm_bindgen::JsValue;
+use types::{PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, ExtData};
+use stellar::hash_ext_data_offchain;
 
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] = include_bytes!("../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
@@ -172,6 +175,36 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
             log::debug!("[WORKER] fetched {} pub keys for the address book", list.len());
             WorkerResponse::PubKeys(list)
         }
+        // WorkerRequest::Deposit(address, amount_stroops, pool_root, pool_address, non_membership_proof) => {
+        //     log::debug!("[WORKER] deposit");
+        //     let (priv_key, encryption_pubkey) = match with_storage!(s => s.get_user_keys(&address)?)? {
+        //         Some((NoteKeyPair{private, ..}, EncryptionKeyPair{public,..})) => (private, public),
+        //         None => return Ok(WorkerResponse::Error(format!("address {} should generate note and encryption keys first"))),
+        //     };
+
+        //     let membership_proof =
+
+        //     let params = DepositParams {
+        //         priv_key,
+        //         encryption_pubkey,
+        //         pool_root,
+        //         pool_address,
+        //         amount_stroops
+        //         outputs: Vec<TransactOutput>,
+
+        //         /// ASP membership proof data required by the circuit (provided by caller).
+        //         pub membership_proof: AspMembershipProof,
+        //         /// ASP non-membership proof data required by the circuit (provided by caller).
+        //         pub non_membership_proof: AspNonMembershipProof,
+        //         /// Pool Merkle tree depth.
+        //         pub tree_depth: usize,
+        //         /// ASP sparse Merkle tree depth.
+        //         pub smt_depth: usize,
+        //     }
+        //     let transact_artifacts = flows::deposit(params, hash_ext_data_offchain)?;
+
+        //     WorkerResponse::PubKeys(list)
+        // }
     };
     Ok(resp)
 }

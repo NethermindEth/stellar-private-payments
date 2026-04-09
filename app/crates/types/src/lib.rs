@@ -24,54 +24,6 @@ pub struct ContractConfig {
     pub initialized: bool,
 }
 
-/// Pool merkle tree leaf.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolLeaf {
-    /// Leaf index (primary key).
-    pub index: u32,
-    /// Commitment hash (hex).
-    pub commitment: String,
-    /// Ledger sequence when added.
-    pub ledger: u32,
-}
-
-/// Spent nullifier record.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolNullifier {
-    /// Nullifier hash (hex, primary key).
-    pub nullifier: String,
-    /// Ledger sequence when spent.
-    pub ledger: u32,
-}
-
-/// Encrypted note output from a pool transaction.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PoolEncryptedOutput {
-    /// Commitment hash (hex, primary key).
-    pub commitment: String,
-    /// Leaf index in the pool tree.
-    #[serde(rename = "index")]
-    pub leaf_index: u32,
-    /// Encrypted note bytes (hex).
-    #[serde(rename = "encryptedOutput")]
-    pub encrypted_output: String,
-    /// Ledger sequence when created.
-    pub ledger: u32,
-}
-
-/// ASP membership tree leaf.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AspMembershipLeaf {
-    /// Leaf index (primary key).
-    pub index: u32,
-    /// Leaf hash (hex).
-    pub leaf: String,
-    /// Tree root after this insertion (hex).
-    pub root: String,
-    /// Ledger sequence when added.
-    pub ledger: u32,
-}
-
 /// User note (UTXO).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

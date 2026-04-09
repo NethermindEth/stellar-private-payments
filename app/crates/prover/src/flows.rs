@@ -7,7 +7,7 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 use anyhow::{Result, anyhow};
-use types::{EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NotePrivateKey, NotePublicKey};
+use types::{AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NotePrivateKey, NotePublicKey};
 
 use crate::{
     crypto,
@@ -78,26 +78,6 @@ pub struct AspMembershipProof {
     /// Membership Merkle path indices (little-endian field bytes).
     pub path_indices: [u8; 32],
     /// Membership tree root (little-endian field bytes).
-    pub root: [u8; 32],
-}
-
-/// ASP non-membership (sanctions) proof data needed by the circuit.
-///
-/// The prover crate does not fetch or build these proofs. Treat them as external
-/// inputs provided by a higher-level "state/chain" component.
-#[derive(Clone, Debug)]
-pub struct AspNonMembershipProof {
-    /// Lookup key (BN254 scalar, little-endian field bytes).
-    pub key: [u8; 32],
-    /// Old key (BN254 scalar, little-endian field bytes).
-    pub old_key: [u8; 32],
-    /// Old value (BN254 scalar, little-endian field bytes).
-    pub old_value: [u8; 32],
-    /// Whether the "old" branch is empty (circuit expects 0/1).
-    pub is_old0: bool,
-    /// Sibling hashes (SMT proof) as BN254 scalars (little-endian field bytes).
-    pub siblings: Vec<[u8; 32]>,
-    /// SMT root (little-endian field bytes).
     pub root: [u8; 32],
 }
 
@@ -636,7 +616,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
 
     // ASP roots arrays (flattened).
     let membership_root_hex = field_bytes_to_hex(&membership_proof.root)?;
-    let non_membership_root_hex = field_bytes_to_hex(&non_membership_proof.root)?;
+    let non_membership_root_hex = field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?;
     circuit.set_array(
         "membershipRoots",
         vec![membership_root_hex.clone(), membership_root_hex.clone()],
@@ -669,14 +649,17 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         circuit.set_single(&(prefix_m.clone() + "root"), &field_bytes_to_hex(&membership_proof.root)?);
 
         let prefix_n = format!("nonMembershipProofs[{}][0].", slot);
-        circuit.set_single(&(prefix_n.clone() + "key"), &field_bytes_to_hex(&non_membership_proof.key)?);
+        circuit.set_single(
+            &(prefix_n.clone() + "key"),
+            &field_bytes_to_hex(&non_membership_proof.key.to_le_bytes())?,
+        );
         circuit.set_single(
             &(prefix_n.clone() + "oldKey"),
-            &field_bytes_to_hex(&non_membership_proof.old_key)?,
+            &field_bytes_to_hex(&non_membership_proof.old_key.to_le_bytes())?,
         );
         circuit.set_single(
             &(prefix_n.clone() + "oldValue"),
-            &field_bytes_to_hex(&non_membership_proof.old_value)?,
+            &field_bytes_to_hex(&non_membership_proof.old_value.to_le_bytes())?,
         );
         circuit.set_single(
             &(prefix_n.clone() + "isOld0"),
@@ -693,10 +676,13 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             non_membership_proof
                 .siblings
                 .iter()
-                .map(|s| field_bytes_to_hex(s))
+                .map(|s| field_bytes_to_hex(&s.to_le_bytes()))
                 .collect::<Result<Vec<_>>>()?,
         );
-        circuit.set_single(&(prefix_n.clone() + "root"), &field_bytes_to_hex(&non_membership_proof.root)?);
+        circuit.set_single(
+            &(prefix_n.clone() + "root"),
+            &field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?,
+        );
     }
 
     // Build extData with per-output encrypted note data.
@@ -716,7 +702,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             output_commitments: output_commitments_bytes,
             public_amount_field: public_amount_field_le,
             asp_membership_root: membership_proof.root,
-            asp_non_membership_root: non_membership_proof.root,
+            asp_non_membership_root: non_membership_proof.root.to_le_bytes(),
         },
     })
 }
@@ -784,12 +770,12 @@ mod tests {
 
     fn zero_non_membership(smt_depth: usize) -> AspNonMembershipProof {
         AspNonMembershipProof {
-            key: [0u8; 32],
-            old_key: [0u8; 32],
-            old_value: [0u8; 32],
+            key: Field::ZERO,
+            old_key: Field::ZERO,
+            old_value: Field::ZERO,
             is_old0: true,
-            siblings: vec![[0u8; 32]; smt_depth],
-            root: [0u8; 32],
+            siblings: vec![Field::ZERO; smt_depth],
+            root: Field::ZERO,
         }
     }
 

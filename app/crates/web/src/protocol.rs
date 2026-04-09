@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
-use types::{PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair};
-
+use types::{AspNonMembershipProof, PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, NoteAmount};
 pub type Address = String;
+pub type MerkleRootBE = [u8; 32];
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -17,7 +17,8 @@ pub enum WorkerRequest {
     SaveEvents(types::ContractsEventData),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
     UserKeys(Address),
-    RecentPubKeys(u32)
+    RecentPubKeys(u32),
+    //Deposit(Deposit)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -28,4 +29,16 @@ pub enum WorkerResponse {
     Error(String),
     UserKeys(Option<UserKeys>),
     PubKeys(Vec<PublicKeyEntry>)
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Deposit{
+    pub user_address: Address,
+    pub amount_stroops: NoteAmount,
+    pub pool_root: [u8; 32],
+    pub pool_address: String,
+    pub output_amounts: [NoteAmount; 2],
+    pub tree_depth: u32,
+    pub non_membership_proof: AspNonMembershipProof,
 }

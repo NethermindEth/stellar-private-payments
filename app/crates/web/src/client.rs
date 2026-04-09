@@ -1,4 +1,5 @@
 use crate::worker::Worker;
+use stellar::{StateFetcher as CoreStateFetcher};
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
 use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
@@ -8,16 +9,19 @@ use wasm_bindgen::prelude::*;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use anyhow::anyhow;
+use std::rc::Rc;
 
 #[wasm_bindgen]
-pub struct WorkerClient {
+pub struct WebClient {
     bridge: OneshotBridge<Worker>,
+    fetcher: Rc<CoreStateFetcher>,
 }
 
-impl Clone for WorkerClient {
+impl Clone for WebClient {
     fn clone(&self) -> Self {
         Self {
-            bridge: self.bridge.fork()
+            bridge: self.bridge.fork(),
+            fetcher: self.fetcher.clone(),
         }
     }
 }
@@ -37,11 +41,12 @@ async fn with_timeout<T>(
     }
 }
 
-impl WorkerClient {
-    pub fn new() -> Self {
-        Self {
+impl WebClient {
+    pub fn new(rpc_url: &str) -> anyhow::Result<Self> {
+        Ok(Self {
             bridge: Worker::spawner().spawn("./js/worker.js"),
-        }
+            fetcher: Rc::new(CoreStateFetcher::new(rpc_url)?),
+        })
     }
 
     pub async fn ping(&self) -> anyhow::Result<()> {
@@ -58,7 +63,31 @@ impl WorkerClient {
 }
 
 #[wasm_bindgen]
-impl WorkerClient {
+impl WebClient {
+
+    #[wasm_bindgen(js_name = poolContractState)]
+    pub async fn pool_contract_state(&self) -> Result<JsValue, JsError> {
+        let pool_info = self.fetcher.pool_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&pool_info)?)
+    }
+
+    #[wasm_bindgen(js_name = aspMembershipContractState)]
+    pub async fn asp_membership_contract_state(&self) -> Result<JsValue, JsError> {
+        let asp_membership = self.fetcher.asp_membership_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&asp_membership)?)
+    }
+
+    #[wasm_bindgen(js_name = aspNonmembershipContractState)]
+    pub async fn asp_nonmembership_contract_state(&self) -> Result<JsValue, JsError> {
+        let asp_nonmembership = self.fetcher.asp_nonmembership_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&asp_nonmembership)?)
+    }
+
+    #[wasm_bindgen(js_name = allContractsData)]
+    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
+        let data = self.fetcher.all_contracts_data().await.map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&data)?)
+    }
 
     async fn request(&self, req: WorkerRequest, timeout_ms: u32) -> Result<WorkerResponse, JsError> {
         let mut bridge = self.bridge.fork();
@@ -121,10 +150,50 @@ impl WorkerClient {
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
+
+    // #[wasm_bindgen(js_name = proveDepositPrepareTx)]
+    // pub async fn prove_deposit_prepare_tx(&self, user_address: String, amount_stroops: u64, output_amounts: [u64; 2]) -> Result<JsValue, JsError> {
+    //     let data = self.fetcher.all_contracts_data().await.map_err(|e| JsError::new(&e.to_string()))?;
+    //     let non_membership_proof = self.fetcher.get_nonmembership_proof().await.map_err(|e| JsError::new(&e.to_string()))?;
+
+    //     Deposit{
+    //         user_address,
+    //         amount_stroops: NoteAmount::from(amount_stroops),
+    //         pool_root: data.pool.merkle_root,
+    //         pool_address: data.pool.contract_id,
+    //         output_amounts,
+    //         tree_depth: data.pool.merkle_levels,
+    //         smt_depth:
+    //         non_membership_proof
+    //     }
+
+    //     #[derive(Clone, Debug)]
+    //     pub struct Deposit {
+
+    //         /// ASP membership proof data required by the circuit (provided by caller).
+    //         pub membership_proof: AspMembershipProof,
+    //     }
+    //     todo!()
+    // }
+
+    #[wasm_bindgen(js_name = proveWithdrawPrepareTx)]
+    pub async fn prove_withdraw_prepare_tx(&self, limit: u32) -> Result<JsValue, JsError> {
+        todo!()
+    }
+
+    #[wasm_bindgen(js_name = proveTransferPrepareTx)]
+    pub async fn prove_transfer_prepare_tx(&self, limit: u32) -> Result<JsValue, JsError> {
+        todo!()
+    }
+
+    #[wasm_bindgen(js_name = proveTransactPrepareTx)]
+    pub async fn prove_transact_prepare_tx(&self, limit: u32) -> Result<JsValue, JsError> {
+        todo!()
+    }
 }
 
 #[async_trait::async_trait(?Send)]
-impl stellar::ContractDataStorage for WorkerClient {
+impl stellar::ContractDataStorage for WebClient {
     async fn get_sync_state(&self) -> anyhow::Result<Option<types::SyncMetadata>> {
         let mut bridge = self.bridge.fork();
         let resp = with_timeout(5_000, bridge.run(WorkerRequest::SyncState)).await?;

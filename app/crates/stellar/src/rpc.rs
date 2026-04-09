@@ -168,6 +168,29 @@ pub struct GetLedgerEntriesResponse {
     pub latest_ledger: i64,
 }
 
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct SimulateHostFunctionResult {
+    #[serde(deserialize_with = "deserialize_default_from_null", default)]
+    pub auth: Vec<String>,
+    #[serde(default)]
+    pub retval: Option<String>,
+}
+
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct SimulateTransactionResponse {
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: i64,
+    /// Some RPC clients normalize `results[0]` into `result`. Accept both.
+    #[serde(default)]
+    pub result: Option<SimulateHostFunctionResult>,
+    #[serde(deserialize_with = "deserialize_default_from_null", default)]
+    pub results: Vec<SimulateHostFunctionResult>,
+    #[serde(rename = "transactionData", default)]
+    pub transaction_data: Option<String>,
+    #[serde(rename = "minResourceFee", default)]
+    pub min_resource_fee: Option<String>,
+}
+
 #[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
@@ -407,6 +430,15 @@ impl Client {
             }
         }
         Ok(results_map)
+    }
+
+    pub async fn simulate_transaction(
+        &self,
+        tx: &xdr::TransactionEnvelope,
+    ) -> Result<SimulateTransactionResponse, Error> {
+        let transaction = tx.to_xdr_base64(Limits::none())?;
+        let params = json!({ "transaction": transaction });
+        self.rpc_call("simulateTransaction", params).await
     }
 }
 

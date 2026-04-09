@@ -57,6 +57,29 @@ pub struct AspNonMembership {
     pub admin: String,
 }
 
+/// ASP non-membership (sanctions) proof data needed by the circuit.
+///
+/// The prover crate does not fetch or build these proofs. Treat them as external
+/// inputs provided by a higher-level "state/chain" component.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AspNonMembershipProof {
+    /// Lookup key (BN254 scalar field element).
+    ///
+    /// For circuit inputs, convert to little-endian bytes via `Field::to_le_bytes()`.
+    pub key: Field,
+    /// Old key (BN254 scalar field element).
+    pub old_key: Field,
+    /// Old value (BN254 scalar field element).
+    pub old_value: Field,
+    /// Whether the "old" branch is empty (circuit expects 0/1).
+    pub is_old0: bool,
+    /// Sibling hashes (SMT proof) as BN254 scalar field elements.
+    pub siblings: Vec<Field>,
+    /// SMT root (BN254 scalar field element).
+    pub root: Field,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractEvent {

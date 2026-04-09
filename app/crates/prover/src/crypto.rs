@@ -15,6 +15,7 @@ use zkhash::{
         },
     },
 };
+use types::{Field as AppField, NotePublicKey};
 
 // Useful constants
 /// BN256 modulus as Big Endian bytes
@@ -164,8 +165,42 @@ pub fn zero_leaf() -> Vec<u8> {
     ZERO_LEAF_BYTES.to_vec()
 }
 
+/// Computes the ASP membership leaf used by the circuit and contract.
+///
+/// `leaf = poseidon2_hash2(note_pubkey, membership_blinding, domain=1)`
+pub fn asp_membership_leaf(
+    note_pubkey: &NotePublicKey,
+    membership_blinding: &AppField,
+) -> Result<AppField> {
+    let leaf_le = poseidon2_hash2(note_pubkey.as_ref(), &membership_blinding.to_le_bytes(), 1)?;
+    let leaf_le: [u8; 32] = leaf_le
+        .try_into()
+        .map_err(|_| anyhow!("asp_membership_leaf: expected 32 bytes"))?;
+    AppField::try_from_le_bytes(leaf_le)
+}
+
 /// Internal public key derivation
 /// Uses domain separation 0x03 (matching Keypair template in circom)
 pub(crate) fn derive_public_key_internal(private_key: Scalar) -> Scalar {
     poseidon2_hash2_internal(private_key, Scalar::from(0u64), Some(Scalar::from(3u64)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asp_membership_leaf_matches_poseidon2_hash2() {
+        let pk = NotePublicKey([7u8; 32]);
+        let blinding = AppField::try_from_le_bytes([9u8; 32]).expect("valid field bytes");
+
+        let got = asp_membership_leaf(&pk, &blinding).expect("asp_membership_leaf failed");
+
+        let leaf_le = poseidon2_hash2(pk.as_ref(), &blinding.to_le_bytes(), 1)
+            .expect("poseidon2_hash2 failed");
+        let leaf_le: [u8; 32] = leaf_le.try_into().expect("expected 32 bytes");
+        let expected = AppField::try_from_le_bytes(leaf_le).expect("valid field bytes");
+
+        assert_eq!(got, expected);
+    }
 }

@@ -4,7 +4,11 @@ use crate::rpc::Client;
 use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
 use crate::DEPLOYMENT;
 use types::ContractConfig;
-use types::{PoolInfo, AspMembership, AspNonMembership, ContractsStateData, ExtAmount, Field, U256};
+use types::{PoolInfo, AspMembership, AspNonMembership, AspNonMembershipProof, ContractsStateData, ExtAmount, Field, NotePublicKey, U256};
+use stellar_xdr::curr as xdr;
+use stellar_xdr::curr::ReadXdr;
+use std::str::FromStr;
+use stellar_strkey::ed25519;
 
 macro_rules! get_state {
     ($map:expr, $key:expr, $source:expr) => {
@@ -21,6 +25,15 @@ macro_rules! get_state {
 pub struct StateFetcher {
     client: Client,
     config: ContractConfig
+}
+
+#[derive(Clone, Debug)]
+struct ParsedFindResult {
+    found: bool,
+    siblings: Vec<Field>,
+    not_found_key: Field,
+    not_found_value: Field,
+    is_old0: bool,
 }
 
 impl StateFetcher {
@@ -132,6 +145,212 @@ impl StateFetcher {
                 admin: scval_to_address_string(get_state!(asp_non_membership_state, "Admin", self.config.asp_non_membership)?)?,
             };
         Ok(asp_non_membership)
+    }
+
+    /// Builds ASP SMT non-membership proof data by querying the on-chain SMT via `simulateTransaction`.
+    ///
+    /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof padded to `smt_depth`
+    /// - otherwise calls `asp_non_membership.find_key(key)` and pads/trims siblings to `smt_depth`
+    pub async fn asp_nonmembership_proof_from_chain(
+        &self,
+        note_pubkey: &NotePublicKey,
+        non_membership_root: Field,
+        smt_depth: usize,
+    ) -> Result<AspNonMembershipProof> {
+        if smt_depth == 0 {
+            return Err(anyhow!("smt_depth must be > 0"));
+        }
+
+        // NotePublicKey bytes are little-endian field bytes (see prover::serialization).
+        let key = Field::try_from_le_bytes(*note_pubkey.as_ref())?;
+
+        // Empty tree case (root = 0): non-membership is trivially provable.
+        if non_membership_root.is_zero() {
+            return Ok(AspNonMembershipProof {
+                key,
+                old_key: Field::ZERO,
+                old_value: Field::ZERO,
+                is_old0: true,
+                siblings: vec![Field::ZERO; smt_depth],
+                root: Field::ZERO,
+            });
+        }
+
+        let tx = Self::build_find_key_simulation_tx(&self.config.asp_non_membership, key)?;
+        let sim = self.client.simulate_transaction(&tx).await?;
+
+        let op_result = sim
+            .result
+            .or_else(|| sim.results.into_iter().next())
+            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
+
+        let retval_b64 = op_result
+            .retval
+            .ok_or_else(|| anyhow!("simulateTransaction missing retval"))?;
+
+        let retval = xdr::ScVal::from_xdr_base64(&retval_b64, xdr::Limits::none())?;
+        let parsed = Self::parse_find_result(&retval)?;
+
+        if parsed.found {
+            return Err(anyhow!(
+                "Key exists in non-membership tree (user is sanctioned)"
+            ));
+        }
+
+        // Pad/trim siblings to circuit SMT depth.
+        let mut siblings = parsed.siblings;
+        if siblings.len() < smt_depth {
+            siblings.extend(core::iter::repeat(Field::ZERO).take(smt_depth - siblings.len()));
+        } else if siblings.len() > smt_depth {
+            siblings.truncate(smt_depth);
+        }
+
+        Ok(AspNonMembershipProof {
+            key,
+            old_key: parsed.not_found_key,
+            old_value: parsed.not_found_value,
+            is_old0: parsed.is_old0,
+            siblings,
+            root: non_membership_root,
+        })
+    }
+
+    fn build_find_key_simulation_tx(
+        contract_id: &str,
+        key: Field,
+    ) -> Result<xdr::TransactionEnvelope> {
+        // Matches the JS dummy used in `app/js/state/asp-non-membership-fetcher.js`.
+        const DUMMY_ACCOUNT: &str = "GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC";
+
+        let pk = ed25519::PublicKey::from_string(DUMMY_ACCOUNT)?;
+        let source = xdr::MuxedAccount::Ed25519(xdr::Uint256(pk.0));
+
+        let contract = stellar_strkey::Contract::from_str(contract_id)?;
+        let contract_address = xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(contract.0)));
+
+        let function_name = xdr::ScSymbol::try_from("find_key")
+            .map_err(|_| anyhow!("invalid function name"))?;
+
+        let args = xdr::VecM::try_from(vec![Self::field_to_scval_u256(key)])?;
+
+        let invoke_args = xdr::InvokeContractArgs {
+            contract_address,
+            function_name,
+            args,
+        };
+
+        let host_function = xdr::HostFunction::InvokeContract(invoke_args);
+        let invoke_op = xdr::InvokeHostFunctionOp {
+            host_function,
+            auth: xdr::VecM::default(),
+        };
+
+        let op = xdr::Operation {
+            source_account: None,
+            body: xdr::OperationBody::InvokeHostFunction(invoke_op),
+        };
+
+        let operations = xdr::VecM::try_from(vec![op])?;
+
+        let tx = xdr::Transaction {
+            source_account: source,
+            fee: 100,
+            seq_num: xdr::SequenceNumber(0),
+            cond: xdr::Preconditions::None,
+            memo: xdr::Memo::None,
+            operations,
+            ext: xdr::TransactionExt::V0,
+        };
+
+        Ok(xdr::TransactionEnvelope::Tx(xdr::TransactionV1Envelope {
+            tx,
+            signatures: xdr::VecM::default(),
+        }))
+    }
+
+    fn field_to_scval_u256(v: Field) -> xdr::ScVal {
+        let mut be = [0u8; 32];
+        v.as_u256().to_big_endian(&mut be);
+
+        let hi_hi = u64::from_be_bytes(be[0..8].try_into().unwrap());
+        let hi_lo = u64::from_be_bytes(be[8..16].try_into().unwrap());
+        let lo_hi = u64::from_be_bytes(be[16..24].try_into().unwrap());
+        let lo_lo = u64::from_be_bytes(be[24..32].try_into().unwrap());
+
+        xdr::ScVal::U256(xdr::UInt256Parts {
+            hi_hi,
+            hi_lo,
+            lo_hi,
+            lo_lo,
+        })
+    }
+
+    fn parse_find_result(val: &xdr::ScVal) -> Result<ParsedFindResult> {
+        let xdr::ScVal::Map(Some(map)) = val else {
+            return Err(anyhow!("FindResult: expected ScVal::Map, got {val:?}"));
+        };
+
+        let mut fields = std::collections::HashMap::<String, xdr::ScVal>::new();
+        for xdr::ScMapEntry { key, val } in map.iter() {
+            let name = match key {
+                xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
+                _ => return Err(anyhow!("FindResult: field name should be a symbol: {key:?}")),
+            };
+            fields.insert(name, val.clone());
+        }
+
+        let found = scval_to_bool(
+            fields
+                .get("found")
+                .ok_or_else(|| anyhow!("FindResult missing field: found"))?,
+        )?;
+
+        let mut siblings = Vec::new();
+        if let Some(v) = fields.get("siblings") {
+            match v {
+                xdr::ScVal::Vec(Some(sc_vec)) => {
+                    for inner in sc_vec.0.iter() {
+                        let u = scval_to_u256(inner)?;
+                        siblings.push(Field::try_from_u256(u)?);
+                    }
+                }
+                xdr::ScVal::Vec(None) => {}
+                other => return Err(anyhow!("FindResult.siblings: unexpected ScVal: {other:?}")),
+            }
+        }
+
+        let not_found_key = fields
+            .get("not_found_key")
+            .or_else(|| fields.get("notFoundKey"))
+            .map(scval_to_u256)
+            .transpose()?
+            .map(Field::try_from_u256)
+            .transpose()?
+            .unwrap_or(Field::ZERO);
+
+        let not_found_value = fields
+            .get("not_found_value")
+            .or_else(|| fields.get("notFoundValue"))
+            .map(scval_to_u256)
+            .transpose()?
+            .map(Field::try_from_u256)
+            .transpose()?
+            .unwrap_or(Field::ZERO);
+
+        let is_old0 = fields
+            .get("is_old0")
+            .or_else(|| fields.get("isOld0"))
+            .map(scval_to_bool)
+            .transpose()?
+            .unwrap_or(false);
+
+        Ok(ParsedFindResult {
+            found,
+            siblings,
+            not_found_key,
+            not_found_value,
+            is_old0,
+        })
     }
 
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {

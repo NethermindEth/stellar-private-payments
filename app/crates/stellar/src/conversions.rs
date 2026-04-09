@@ -135,28 +135,3 @@ pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent,
         id, ledger, contract_id, name, topics, values
     })
 }
-
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parsing_event() {
-        // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
-        let event = ContractEvent {
-            id: "0164090849041387521-0000000003".into(),
-            ledger: 43601284,
-            contract_id: "CDR6QKTWZQYW6YUJ7UP7XXZRLWQPFRV6SWBLQS4ZQOSAF4BOUD77OO5Z".into(),
-            topics: vec![
-                      "AAAADwAAAANmZWUA".into(),
-                      "AAAAEgAAAAAAAAAA74s7miz/LYTmVydP8OHbL0RoCId57u7guXXIkRudXK8=".into(),
-                    ],
-
-            value: "AAAACgAAAAAAAAAAAAAAAF2UTIA=".into()
-        };
-
-        let parsed = parse_event_metadata(event).unwrap();
-        println!("{parsed:?}");
-    }
-}

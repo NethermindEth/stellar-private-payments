@@ -12,6 +12,8 @@ use crate::{
     serialization::{bytes_to_scalar, scalar_to_bytes},
     types::FIELD_SIZE,
 };
+use crate::crypto;
+use types::Field as AppField;
 
 // Re-export core merkle functions from circuits
 pub use circuits::core::merkle::{
@@ -226,6 +228,53 @@ impl MerkleTree {
     /// Get tree depth
     pub fn depth(&self) -> usize {
         self.depth
+    }
+}
+
+/// Build an ASP membership Merkle tree (poseidon2("XLM") zero leaf) from ordered leaves.
+///
+/// Leaves must be provided in `leaf_index` order with no gaps: index 0, 1, 2, ...
+pub fn asp_membership_tree_from_leaves(
+    depth: usize,
+    leaves: impl IntoIterator<Item = AppField>,
+) -> Result<MerkleTree> {
+    let mut zero_leaf_be = crypto::zero_leaf();
+    zero_leaf_be.reverse();
+    let mut tree = MerkleTree::new_with_zero_leaf(depth, &zero_leaf_be)?;
+
+    for leaf in leaves {
+        let leaf_le = leaf.to_le_bytes();
+        tree.insert(&leaf_le)?;
+    }
+
+    Ok(tree)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn asp_membership_tree_from_leaves_matches_manual_inserts() {
+        let depth = 4;
+        let leaves = [
+            AppField::try_from_le_bytes([1u8; 32]).expect("field"),
+            AppField::try_from_le_bytes([2u8; 32]).expect("field"),
+            AppField::try_from_le_bytes([3u8; 32]).expect("field"),
+        ];
+
+        let tree = asp_membership_tree_from_leaves(depth, leaves.into_iter())
+            .expect("build tree");
+
+        let mut zero_leaf_be = crypto::zero_leaf();
+        zero_leaf_be.reverse();
+        let mut manual = MerkleTree::new_with_zero_leaf(depth, &zero_leaf_be).expect("new tree");
+        for leaf in leaves {
+            let leaf_le = leaf.to_le_bytes();
+            manual.insert(&leaf_le).expect("insert");
+        }
+
+        assert_eq!(tree.root(), manual.root());
     }
 }
 
