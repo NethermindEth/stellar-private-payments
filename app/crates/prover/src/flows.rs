@@ -7,7 +7,10 @@ extern crate alloc;
 use alloc::{format, string::String, vec, vec::Vec};
 
 use anyhow::{Result, anyhow};
-use types::{AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NotePrivateKey, NotePublicKey};
+use types::{
+    AspMembershipProof, AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field,
+    NoteAmount, NotePrivateKey, NotePublicKey,
+};
 
 use crate::{
     crypto,
@@ -16,8 +19,10 @@ use crate::{
     types::CircuitInputs,
 };
 
-const N_INPUTS: usize = 2;
-const N_OUTPUTS: usize = 2;
+/// Number of input note slots supported by the current circuit.
+pub const N_INPUTS: usize = 2;
+/// Number of output note slots supported by the current circuit.
+pub const N_OUTPUTS: usize = 2;
 
 /// Input note data for a pool transaction.
 ///
@@ -29,8 +34,8 @@ const N_OUTPUTS: usize = 2;
 pub struct TransactInputNote {
     /// Note amount in stroops (1 XLM = 10_000_000 stroops).
     pub amount_stroops: NoteAmount,
-    /// Note blinding factor as a BN254 scalar (little-endian field bytes).
-    pub blinding: [u8; 32],
+    /// Note blinding factor as a BN254 scalar field element.
+    pub blinding: Field,
     /// Merkle proof sibling hashes as BN254 scalars (little-endian field bytes),
     /// one element per tree level.
     pub merkle_path_elements: Vec<[u8; 32]>,
@@ -51,8 +56,8 @@ pub struct TransactInputNote {
 pub struct TransactOutput {
     /// Output amount in stroops.
     pub amount_stroops: NoteAmount,
-    /// Output blinding factor as a BN254 scalar (little-endian field bytes).
-    pub blinding: [u8; 32],
+    /// Output blinding factor as a BN254 scalar field element.
+    pub blinding: Field,
     /// Optional external recipient note public key (BN254 - used for commitment).
     ///
     /// If set, `recipient_encryption_pubkey` must also be set.
@@ -63,38 +68,24 @@ pub struct TransactOutput {
     pub recipient_encryption_pubkey: Option<EncryptionPublicKey>,
 }
 
-/// ASP membership proof data needed by the circuit.
-///
-/// The prover crate does not fetch or build these proofs. Treat them as external
-/// inputs provided by a higher-level "state/chain" component.
-#[derive(Clone, Debug)]
-pub struct AspMembershipProof {
-    /// Membership leaf (BN254 scalar, little-endian field bytes).
-    pub leaf: [u8; 32],
-    /// Membership blinding used when the leaf was added (BN254 scalar, little-endian field bytes).
-    pub blinding: [u8; 32],
-    /// Membership Merkle path sibling hashes (little-endian field bytes).
-    pub path_elements: Vec<[u8; 32]>,
-    /// Membership Merkle path indices (little-endian field bytes).
-    pub path_indices: [u8; 32],
-    /// Membership tree root (little-endian field bytes).
-    pub root: [u8; 32],
-}
-
 /// Convenience bundle of values typically needed to submit a pool transaction.
 ///
 /// This is not a contract type; it's a helper output to reduce recomputation
 /// at call sites (e.g., when constructing Soroban arguments).
 #[derive(Clone, Debug)]
 pub struct PreparedTx {
-    /// Pool Merkle root used as the circuit public input (little-endian field bytes).
-    pub pool_root: [u8; 32],
+    /// Pool Merkle root used as the circuit public input.
+    ///
+    /// For witness/public-input encoding, use `pool_root.to_le_bytes()`.
+    pub pool_root: Field,
     /// Computed nullifiers for both input slots (little-endian field bytes).
     pub input_nullifiers: [[u8; 32]; N_INPUTS],
     /// Computed commitments for both output slots (little-endian field bytes).
     pub output_commitments: [[u8; 32]; N_OUTPUTS],
     /// Field element representation of ext_amount (LE bytes).
     pub public_amount_field: [u8; 32],
+    /// Hash of extData used by both circuit and contract checks (32-byte big-endian).
+    pub ext_data_hash_be: [u8; 32],
     /// ASP membership root used for the circuit public inputs (little-endian field bytes).
     pub asp_membership_root: [u8; 32],
     /// ASP non-membership root used for the circuit public inputs (little-endian field bytes).
@@ -127,8 +118,8 @@ pub struct TransactParams {
     /// User's X25519 encryption public key used for encrypting self-addressed outputs (32 bytes).
     pub encryption_pubkey: EncryptionPublicKey,
 
-    /// Pool Merkle root as LE field element bytes.
-    pub pool_root: [u8; 32],
+    /// Pool Merkle root as a field element.
+    pub pool_root: Field,
 
     /// External recipient for extData (address/contract id as string, treated as opaque here).
     pub ext_recipient: String,
@@ -147,9 +138,9 @@ pub struct TransactParams {
     pub non_membership_proof: AspNonMembershipProof,
 
     /// Pool Merkle tree depth.
-    pub tree_depth: usize,
+    pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
-    pub smt_depth: usize,
+    pub smt_depth: u32,
 }
 
 /// Parameters for a deposit transaction.
@@ -164,13 +155,13 @@ pub struct DepositParams {
     pub priv_key: NotePrivateKey,
     /// User's X25519 encryption public key (32 bytes).
     pub encryption_pubkey: EncryptionPublicKey,
-    /// Pool Merkle root (little-endian field bytes).
-    pub pool_root: [u8; 32],
+    /// Pool Merkle root as a field element.
+    pub pool_root: Field,
 
     /// Pool contract address (recipient for extData).
     pub pool_address: String,
     /// Total amount to deposit (stroops). Passed as `ext_amount > 0`.
-    pub amount_stroops: NoteAmount,
+    pub amount_stroops: ExtAmount,
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
     pub outputs: Vec<TransactOutput>,
 
@@ -179,9 +170,9 @@ pub struct DepositParams {
     /// ASP non-membership proof data required by the circuit (provided by caller).
     pub non_membership_proof: AspNonMembershipProof,
     /// Pool Merkle tree depth.
-    pub tree_depth: usize,
+    pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
-    pub smt_depth: usize,
+    pub smt_depth: u32,
 }
 
 /// Parameters for a withdrawal transaction.
@@ -199,12 +190,12 @@ pub struct WithdrawParams {
     /// User's X25519 encryption public key (32 bytes).
     pub encryption_pubkey: EncryptionPublicKey,
     /// Pool Merkle root (little-endian field bytes).
-    pub pool_root: [u8; 32],
+    pub pool_root: Field,
 
     /// Address to receive withdrawn tokens (extData recipient).
     pub withdraw_recipient: String,
     /// Amount to withdraw in stroops. `withdraw()` sets `ext_amount = -withdraw_amount`.
-    pub withdraw_amount_stroops: NoteAmount,
+    pub withdraw_amount_stroops: ExtAmount,
     /// Notes to spend (1..=2). If one is provided, `transact()` pads the second input with a dummy.
     pub inputs: Vec<TransactInputNote>,
     /// Optional outputs override (must satisfy equation if provided).
@@ -215,9 +206,9 @@ pub struct WithdrawParams {
     /// ASP non-membership proof data required by the circuit (provided by caller).
     pub non_membership_proof: AspNonMembershipProof,
     /// Pool Merkle tree depth.
-    pub tree_depth: usize,
+    pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
-    pub smt_depth: usize,
+    pub smt_depth: u32,
 }
 
 /// Parameters for a private transfer transaction.
@@ -233,7 +224,7 @@ pub struct TransferParams {
     /// Sender's X25519 encryption public key (32 bytes).
     pub encryption_pubkey: EncryptionPublicKey,
     /// Pool Merkle root (little-endian field bytes).
-    pub pool_root: [u8; 32],
+    pub pool_root: Field,
 
     /// Pool contract address (extData recipient for transfers).
     pub pool_address: String,
@@ -247,22 +238,16 @@ pub struct TransferParams {
     /// ASP non-membership proof data required by the circuit (provided by caller).
     pub non_membership_proof: AspNonMembershipProof,
     /// Pool Merkle tree depth.
-    pub tree_depth: usize,
+    pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
-    pub smt_depth: usize,
-}
-
-/// Inject `extDataHash` into circuit inputs (big-endian bytes).
-///
-/// The flows intentionally do not take `ext_data_hash_be` as an input: call sites can build
-/// `ExtData`, compute its hash in a higher-level crate, then inject it right before witness
-/// generation.
-pub fn inject_ext_data_hash(circuit_inputs: &mut CircuitInputs, ext_data_hash_be: [u8; 32]) {
-    circuit_inputs.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
+    pub smt_depth: u32,
 }
 
 /// Deposit flow
-pub fn deposit(params: DepositParams) -> Result<TransactArtifacts> {
+pub fn deposit<H>(params: DepositParams, hash_ext_data: H) -> Result<TransactArtifacts>
+where
+    H: Fn(&ExtData) -> Result<[u8; 32]>,
+{
     let DepositParams {
         priv_key,
         encryption_pubkey,
@@ -281,18 +266,21 @@ pub fn deposit(params: DepositParams) -> Result<TransactArtifacts> {
         encryption_pubkey,
         pool_root,
         ext_recipient: pool_address,
-        ext_amount: ExtAmount::from(amount_stroops),
+        ext_amount: amount_stroops,
         inputs: Vec::new(),
         outputs,
         membership_proof,
         non_membership_proof,
         tree_depth,
         smt_depth,
-    })
+    }, hash_ext_data)
 }
 
 /// Withdraw flow
-pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
+pub fn withdraw<H>(params: WithdrawParams, hash_ext_data: H) -> Result<TransactArtifacts>
+where
+    H: Fn(&ExtData) -> Result<[u8; 32]>,
+{
     let WithdrawParams {
         priv_key,
         encryption_pubkey,
@@ -322,21 +310,27 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
     let outputs = match outputs {
         Some(v) => v,
         None => {
-            let change_blinding: [u8; 32] = encryption::generate_random_blinding()?
-                .try_into()
-                .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
-            let dummy_blinding: [u8; 32] = encryption::generate_random_blinding()?
-                .try_into()
-                .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
+            let (out0_amount, out1_amount) = match NoteAmount::try_from(change) {
+                Ok(v) => (v, NoteAmount::ZERO),
+                Err(_) => {
+                    let max_ext = ExtAmount::from(NoteAmount::MAX);
+                    let remainder = change
+                        .checked_sub(max_ext)
+                        .ok_or_else(|| anyhow!("negative withdrawal change remainder"))?;
+                    (NoteAmount::MAX, NoteAmount::try_from(remainder)?)
+                }
+            };
+            let change_blinding = encryption::generate_random_blinding()?;
+            let dummy_blinding = encryption::generate_random_blinding()?;
             vec![
                 TransactOutput {
-                    amount_stroops: change,
+                    amount_stroops: out0_amount,
                     blinding: change_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 },
                 TransactOutput {
-                    amount_stroops: NoteAmount::ZERO,
+                    amount_stroops: out1_amount,
                     blinding: dummy_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
@@ -357,11 +351,14 @@ pub fn withdraw(params: WithdrawParams) -> Result<TransactArtifacts> {
         non_membership_proof,
         tree_depth,
         smt_depth,
-    })
+    }, hash_ext_data)
 }
 
 /// Transfer flow
-pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
+pub fn transfer<H>(params: TransferParams, hash_ext_data: H) -> Result<TransactArtifacts>
+where
+    H: Fn(&ExtData) -> Result<[u8; 32]>,
+{
     let TransferParams {
         priv_key,
         encryption_pubkey,
@@ -387,7 +384,7 @@ pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
         non_membership_proof,
         tree_depth,
         smt_depth,
-    })
+    }, hash_ext_data)
 }
 
 /// Generic pool transaction builder used by all flows.
@@ -396,7 +393,10 @@ pub fn transfer(params: TransferParams) -> Result<TransactArtifacts> {
 /// - circuit inputs suitable for the witness calculator,
 /// - per-output encrypted note data, and
 /// - convenience derived values (nullifiers/commitments).
-pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
+pub fn transact<H>(params: TransactParams, hash_ext_data: H) -> Result<TransactArtifacts>
+where
+    H: Fn(&ExtData) -> Result<[u8; 32]>,
+{
     let TransactParams {
         priv_key,
         encryption_pubkey,
@@ -418,15 +418,19 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         return Err(anyhow!("smt_depth must be > 0"));
     }
 
+    let tree_depth_usize =
+        usize::try_from(tree_depth).map_err(|_| anyhow!("tree_depth too large"))?;
+    let smt_depth_usize = usize::try_from(smt_depth).map_err(|_| anyhow!("smt_depth too large"))?;
+
     // Validate ASP proof shapes early.
-    if membership_proof.path_elements.len() != tree_depth {
+    if membership_proof.path_elements.len() != tree_depth_usize {
         return Err(anyhow!(
             "membership_proof.path_elements length mismatch: expected {}, got {}",
             tree_depth,
             membership_proof.path_elements.len()
         ));
     }
-    if non_membership_proof.siblings.len() != smt_depth {
+    if non_membership_proof.siblings.len() != smt_depth_usize {
         return Err(anyhow!(
             "non_membership_proof.siblings length mismatch: expected {}, got {}",
             smt_depth,
@@ -445,10 +449,10 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     // Enforce the conservation equation: inputs + ext_amount == outputs.
     let inputs_sum = sum_amounts(&inputs)?;
     let outputs_sum = sum_amounts_outputs(&outputs)?;
-    let lhs = ExtAmount::from(inputs_sum)
+    let lhs = inputs_sum
         .checked_add(ext_amount)
         .ok_or_else(|| anyhow!("overflow computing LHS"))?;
-    let rhs = ExtAmount::from(outputs_sum);
+    let rhs = outputs_sum;
     if lhs != rhs {
         return Err(anyhow!(
             "equation not balanced: inputs({}) + public({}) != outputs({})",
@@ -467,8 +471,8 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     let mut input_slots: Vec<TransactInputNote> = inputs;
     if input_slots.is_empty() {
         // Deposit-style: 2 dummy inputs with independent random blindings.
-        input_slots.push(dummy_input(tree_depth)?);
-        input_slots.push(dummy_input(tree_depth)?);
+        input_slots.push(dummy_input(tree_depth_usize)?);
+        input_slots.push(dummy_input(tree_depth_usize)?);
     } else {
         if input_slots.len() > N_INPUTS {
             return Err(anyhow!(
@@ -478,13 +482,13 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             ));
         }
         while input_slots.len() < N_INPUTS {
-            input_slots.push(dummy_input(tree_depth)?);
+            input_slots.push(dummy_input(tree_depth_usize)?);
         }
     }
 
     // Validate all real/dummy inputs have the right proof shape.
     for (i, inp) in input_slots.iter().enumerate() {
-        if inp.merkle_path_elements.len() != tree_depth {
+        if inp.merkle_path_elements.len() != tree_depth_usize {
             return Err(anyhow!(
                 "input[{}].merkle_path_elements length mismatch: expected {}, got {}",
                 i,
@@ -497,9 +501,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     // Prepare outputs (pad to 2).
     let mut output_slots: Vec<TransactOutput> = outputs;
     while output_slots.len() < N_OUTPUTS {
-        let blinding: [u8; 32] = encryption::generate_random_blinding()?
-            .try_into()
-            .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
+        let blinding = encryption::generate_random_blinding()?;
         output_slots.push(TransactOutput {
             amount_stroops: NoteAmount::ZERO,
             blinding,
@@ -524,7 +526,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     let mut circuit = CircuitInputs::new();
 
     // Public inputs.
-    circuit.set_single("root", &field_bytes_to_hex(&pool_root)?);
+    circuit.set_single("root", &field_bytes_to_hex(&pool_root.to_le_bytes())?);
     let public_amount_field_le = Field::try_from(ext_amount)?.to_le_bytes();
     circuit.set_single("publicAmount", &field_bytes_to_hex(&public_amount_field_le)?);
     // `extDataHash` is injected later (after building `ExtData`) by the calling layer.
@@ -537,13 +539,15 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     let mut in_priv_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
     let mut in_blinding_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
     let mut in_path_indices_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
-    let mut in_path_elements_hex: Vec<String> = Vec::with_capacity(N_INPUTS * tree_depth);
+    let mut in_path_elements_hex: Vec<String> = Vec::with_capacity(N_INPUTS * tree_depth_usize);
 
     let mut input_nullifiers_bytes: [[u8; 32]; N_INPUTS] = [[0u8; 32]; N_INPUTS];
 
     for (idx, inp) in input_slots.iter().enumerate() {
         let amount_field = note_amount_to_field_le(inp.amount_stroops);
-        let commitment = crypto::compute_commitment(&amount_field, &sender_note_pubkey, &inp.blinding)?;
+        let inp_blinding_le = inp.blinding.to_le_bytes();
+        let commitment =
+            crypto::compute_commitment(&amount_field, &sender_note_pubkey, &inp_blinding_le)?;
         let signature = crypto::compute_signature(&priv_key.0, &commitment, &inp.merkle_path_indices)?;
         let nullifier = crypto::compute_nullifier(&commitment, &inp.merkle_path_indices, &signature)?;
 
@@ -555,7 +559,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         input_nullifiers_hex.push(field_bytes_to_hex(&nullifier_arr)?);
         in_amount_hex.push(field_bytes_to_hex(&amount_field)?);
         in_priv_hex.push(priv_key_hex.clone());
-        in_blinding_hex.push(field_bytes_to_hex(&inp.blinding)?);
+        in_blinding_hex.push(field_bytes_to_hex(&inp_blinding_le)?);
         in_path_indices_hex.push(field_bytes_to_hex(&inp.merkle_path_indices)?);
         for pe in &inp.merkle_path_elements {
             in_path_elements_hex.push(field_bytes_to_hex(pe)?);
@@ -583,7 +587,9 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             .unwrap_or_else(|| encryption_pubkey.clone());
 
         let amount_field = note_amount_to_field_le(out.amount_stroops);
-        let commitment = crypto::compute_commitment(&amount_field, &recipient_note_pubkey, &out.blinding)?;
+        let out_blinding_le = out.blinding.to_le_bytes();
+        let commitment =
+            crypto::compute_commitment(&amount_field, &recipient_note_pubkey, &out_blinding_le)?;
         let commitment_arr: [u8; 32] = commitment
             .try_into()
             .map_err(|v: Vec<u8>| anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
@@ -594,7 +600,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
 
         out_amount_hex.push(field_bytes_to_hex(&amount_field)?);
         out_pubkey_hex.push(field_bytes_to_hex(&recipient_note_pubkey)?);
-        out_blinding_hex.push(field_bytes_to_hex(&out.blinding)?);
+        out_blinding_hex.push(field_bytes_to_hex(&out_blinding_le)?);
         output_commitments_hex.push(field_bytes_to_hex(&commitment_arr)?);
     }
 
@@ -615,7 +621,7 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     circuit.set_array("outBlinding", out_blinding_hex);
 
     // ASP roots arrays (flattened).
-    let membership_root_hex = field_bytes_to_hex(&membership_proof.root)?;
+    let membership_root_hex = field_bytes_to_hex(&membership_proof.root.to_le_bytes())?;
     let non_membership_root_hex = field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?;
     circuit.set_array(
         "membershipRoots",
@@ -629,24 +635,30 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
     // ASP proofs objects, duplicated across input slots, with a single [0] entry per slot.
     for slot in 0..N_INPUTS {
         let prefix_m = format!("membershipProofs[{}][0].", slot);
-        circuit.set_single(&(prefix_m.clone() + "leaf"), &field_bytes_to_hex(&membership_proof.leaf)?);
+        circuit.set_single(
+            &(prefix_m.clone() + "leaf"),
+            &field_bytes_to_hex(&membership_proof.leaf.to_le_bytes())?,
+        );
         circuit.set_single(
             &(prefix_m.clone() + "blinding"),
-            &field_bytes_to_hex(&membership_proof.blinding)?,
+            &field_bytes_to_hex(&membership_proof.blinding.to_le_bytes())?,
         );
         circuit.set_single(
             &(prefix_m.clone() + "pathIndices"),
-            &field_bytes_to_hex(&membership_proof.path_indices)?,
+            &field_bytes_to_hex(&membership_proof.path_indices.to_le_bytes())?,
         );
         circuit.set_array(
             &(prefix_m.clone() + "pathElements"),
             membership_proof
                 .path_elements
                 .iter()
-                .map(|e| field_bytes_to_hex(e))
+                .map(|e| field_bytes_to_hex(&e.to_le_bytes()))
                 .collect::<Result<Vec<_>>>()?,
         );
-        circuit.set_single(&(prefix_m.clone() + "root"), &field_bytes_to_hex(&membership_proof.root)?);
+        circuit.set_single(
+            &(prefix_m.clone() + "root"),
+            &field_bytes_to_hex(&membership_proof.root.to_le_bytes())?,
+        );
 
         let prefix_n = format!("nonMembershipProofs[{}][0].", slot);
         circuit.set_single(
@@ -693,6 +705,9 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
         encrypted_output1: encrypted_outputs[1].clone(),
     };
 
+    let ext_data_hash_be = hash_ext_data(&ext_data)?;
+    circuit.set_single("extDataHash", &be32_to_0x_hex(&ext_data_hash_be));
+
     Ok(TransactArtifacts {
         circuit_inputs: circuit,
         ext_data,
@@ -701,16 +716,15 @@ pub fn transact(params: TransactParams) -> Result<TransactArtifacts> {
             input_nullifiers: input_nullifiers_bytes,
             output_commitments: output_commitments_bytes,
             public_amount_field: public_amount_field_le,
-            asp_membership_root: membership_proof.root,
+            ext_data_hash_be,
+            asp_membership_root: membership_proof.root.to_le_bytes(),
             asp_non_membership_root: non_membership_proof.root.to_le_bytes(),
         },
     })
 }
 
 fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
-    let blinding: [u8; 32] = encryption::generate_random_blinding()?
-        .try_into()
-        .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
+    let blinding = encryption::generate_random_blinding()?;
     Ok(TransactInputNote {
         amount_stroops: NoteAmount::ZERO,
         blinding,
@@ -734,21 +748,21 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
-fn sum_amounts(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
-    let mut sum = NoteAmount::ZERO;
+fn sum_amounts(inputs: &[TransactInputNote]) -> Result<ExtAmount> {
+    let mut sum = ExtAmount::ZERO;
     for n in inputs {
         sum = sum
-            .checked_add(n.amount_stroops)
+            .checked_add(ExtAmount::from(n.amount_stroops))
             .ok_or_else(|| anyhow!("overflow summing input amounts"))?;
     }
     Ok(sum)
 }
 
-fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
-    let mut sum = NoteAmount::ZERO;
+fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<ExtAmount> {
+    let mut sum = ExtAmount::ZERO;
     for o in outputs {
         sum = sum
-            .checked_add(o.amount_stroops)
+            .checked_add(ExtAmount::from(o.amount_stroops))
             .ok_or_else(|| anyhow!("overflow summing output amounts"))?;
     }
     Ok(sum)
@@ -760,11 +774,11 @@ mod tests {
 
     fn zero_membership(tree_depth: usize) -> AspMembershipProof {
         AspMembershipProof {
-            leaf: [0u8; 32],
-            blinding: [0u8; 32],
-            path_elements: vec![[0u8; 32]; tree_depth],
-            path_indices: [0u8; 32],
-            root: [0u8; 32],
+            leaf: Field::ZERO,
+            blinding: Field::ZERO,
+            path_elements: vec![Field::ZERO; tree_depth],
+            path_indices: Field::ZERO,
+            root: Field::ZERO,
         }
     }
 
@@ -781,34 +795,40 @@ mod tests {
 
     #[test]
     fn deposit_pads_inputs_and_outputs() {
-        let tree_depth = 10;
-        let smt_depth = 10;
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
-        let out_blinding = [3u8; 32];
-        let artifacts = deposit(DepositParams {
-            priv_key,
-            encryption_pubkey,
-            pool_root: [9u8; 32],
-            pool_address: "POOL".into(),
-            amount_stroops: NoteAmount(10),
-            outputs: vec![TransactOutput {
-                amount_stroops: NoteAmount(10),
+        let out_blinding = Field::try_from_le_bytes([3u8; 32]).expect("field");
+        let artifacts = deposit(
+            DepositParams {
+                priv_key,
+                encryption_pubkey,
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                amount_stroops: ExtAmount::from(NoteAmount(10)),
+                outputs: vec![TransactOutput {
+                    amount_stroops: NoteAmount(10),
                 blinding: out_blinding,
                 recipient_note_pubkey: None,
                 recipient_encryption_pubkey: None,
             }],
-            membership_proof: zero_membership(tree_depth),
-            non_membership_proof: zero_non_membership(smt_depth),
-            tree_depth,
-            smt_depth,
-        })
+                membership_proof: zero_membership(tree_depth_usize),
+                non_membership_proof: zero_non_membership(smt_depth_usize),
+                tree_depth,
+                smt_depth,
+            },
+            |_| Ok([0u8; 32]),
+        )
         .expect("deposit builds");
 
         assert!(artifacts.circuit_inputs.signals.contains_key("root"));
         assert!(artifacts.circuit_inputs.signals.contains_key("publicAmount"));
+        assert!(artifacts.circuit_inputs.signals.contains_key("extDataHash"));
         assert!(artifacts.circuit_inputs.signals.contains_key("inputNullifier"));
         assert!(artifacts.circuit_inputs.signals.contains_key("outputCommitment"));
 
@@ -819,32 +839,37 @@ mod tests {
 
     #[test]
     fn withdraw_auto_builds_change_outputs() {
-        let tree_depth = 10;
-        let smt_depth = 10;
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
             amount_stroops: NoteAmount(10),
-            blinding: [4u8; 32],
-            merkle_path_elements: vec![[0u8; 32]; tree_depth],
+            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
             merkle_path_indices: [0u8; 32],
         };
 
-        let artifacts = withdraw(WithdrawParams {
-            priv_key,
-            encryption_pubkey,
-            pool_root: [9u8; 32],
-            withdraw_recipient: "G...".into(),
-            withdraw_amount_stroops: NoteAmount(7),
-            inputs: vec![input],
-            outputs: None,
-            membership_proof: zero_membership(tree_depth),
-            non_membership_proof: zero_non_membership(smt_depth),
-            tree_depth,
-            smt_depth,
-        })
+        let artifacts = withdraw(
+            WithdrawParams {
+                priv_key,
+                encryption_pubkey,
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                withdraw_recipient: "G...".into(),
+                withdraw_amount_stroops: ExtAmount::from(NoteAmount(7)),
+                inputs: vec![input],
+                outputs: None,
+                membership_proof: zero_membership(tree_depth_usize),
+                non_membership_proof: zero_non_membership(smt_depth_usize),
+                tree_depth,
+                smt_depth,
+            },
+            |_| Ok([0u8; 32]),
+        )
         .expect("withdraw builds");
 
         // public amount should be encoded as field element (non-zero).
@@ -861,38 +886,87 @@ mod tests {
 
     #[test]
     fn transfer_requires_balanced_equation() {
-        let tree_depth = 10;
-        let smt_depth = 10;
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
 
         let priv_key = NotePrivateKey([1u8; 32]);
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
             amount_stroops: NoteAmount(10),
-            blinding: [4u8; 32],
-            merkle_path_elements: vec![[0u8; 32]; tree_depth],
+            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
             merkle_path_indices: [0u8; 32],
         };
         let out = TransactOutput {
             amount_stroops: NoteAmount(9), // unbalanced
-            blinding: [7u8; 32],
+            blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
         };
 
-        let res = transfer(TransferParams {
-            priv_key,
-            encryption_pubkey,
-            pool_root: [9u8; 32],
-            pool_address: "POOL".into(),
-            inputs: vec![input],
-            outputs: vec![out],
-            membership_proof: zero_membership(tree_depth),
-            non_membership_proof: zero_non_membership(smt_depth),
-            tree_depth,
-            smt_depth,
-        });
+        let res = transfer(
+            TransferParams {
+                priv_key,
+                encryption_pubkey,
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                pool_address: "POOL".into(),
+                inputs: vec![input],
+                outputs: vec![out],
+                membership_proof: zero_membership(tree_depth_usize),
+                non_membership_proof: zero_non_membership(smt_depth_usize),
+                tree_depth,
+                smt_depth,
+            },
+            |_| Ok([0u8; 32]),
+        );
 
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn withdraw_splits_change_when_exceeds_note_amount_max() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+        let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
+
+        let priv_key = NotePrivateKey([1u8; 32]);
+        let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
+
+        let input0 = TransactInputNote {
+            amount_stroops: NoteAmount::MAX,
+            blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
+            merkle_path_indices: [0u8; 32],
+        };
+        let input1 = TransactInputNote {
+            amount_stroops: NoteAmount::MAX,
+            blinding: Field::try_from_le_bytes([5u8; 32]).expect("field"),
+            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
+            merkle_path_indices: [0u8; 32],
+        };
+
+        // Withdraw a small amount so `change` is > NoteAmount::MAX.
+        let res = withdraw(
+            WithdrawParams {
+                priv_key,
+                encryption_pubkey,
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                withdraw_recipient: "G...".into(),
+                withdraw_amount_stroops: ExtAmount::from(NoteAmount(1)),
+                inputs: vec![input0, input1],
+                outputs: None,
+                membership_proof: zero_membership(tree_depth_usize),
+                non_membership_proof: zero_non_membership(smt_depth_usize),
+                tree_depth,
+                smt_depth,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        assert!(res.is_ok());
     }
 }

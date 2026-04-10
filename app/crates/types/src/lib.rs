@@ -8,6 +8,8 @@ use anyhow::{Result, anyhow};
 
 use serde::{Deserialize, Serialize};
 
+pub const SMT_DEPTH: u32 = 10;
+
 // scripts/deployments.json
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ContractConfig {
@@ -22,6 +24,22 @@ pub struct ContractConfig {
     // Address of Pool deployed contract
     pub pool: String,
     pub initialized: bool,
+}
+
+/// ASP membership proof data needed by the circuit.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AspMembershipProof {
+    /// Membership leaf (BN254 scalar field element).
+    pub leaf: Field,
+    /// Membership blinding used when the leaf was added (BN254 scalar field element).
+    pub blinding: Field,
+    /// Membership Merkle path sibling hashes (BN254 scalar field elements).
+    pub path_elements: Vec<Field>,
+    /// Membership Merkle path indices packed into a field element.
+    pub path_indices: Field,
+    /// Membership tree root (BN254 scalar field element).
+    pub root: Field,
 }
 
 /// User note (UTXO).

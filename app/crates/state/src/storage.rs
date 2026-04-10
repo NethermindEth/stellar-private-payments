@@ -250,11 +250,11 @@ impl Storage {
     /// Checks whether ASP membership data is usable for proving at the current network tip.
     ///
     /// Returns:
-    /// - `Ok(true)`  if:
+    /// - `Ok(Some(user_leaf_index))`  if:
     ///   1) `user_leaf` is present in `asp_membership_leaves`, and
     ///   2) `current_root` equals the last stored root in `asp_membership_leaves`, and
     ///   3) `current_ledger` equals the last stored ledger in the DB.
-    /// - `Ok(false)` if the DB is behind the chain tip (`current_ledger` is ahead of the
+    /// - `Ok(None)` if the DB is behind the chain tip (`current_ledger` is ahead of the
     ///   last stored ledger), meaning the caller should sync more events.
     /// - `Err(_)` if `current_ledger == last_db_ledger` but the user leaf is missing, or if
     ///   roots/ledgers are inconsistent (indicates corruption or mismatched networks).
@@ -263,7 +263,7 @@ impl Storage {
         user_leaf: &Field,
         current_root: &Field,
         current_ledger: u32,
-    ) -> Result<bool> {
+    ) -> Result<Option<u32>> {
         // Get the last stored root and its ledger by joining through the raw events table.
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
@@ -285,11 +285,11 @@ impl Storage {
 
         let Some((last_root, last_ledger)) = last else {
             // No local membership data: treat as "need sync".
-            return Ok(false);
+            return Ok(None);
         };
 
         if current_ledger > last_ledger {
-            return Ok(false);
+            return Ok(None);
         }
 
         if current_ledger < last_ledger {
@@ -306,19 +306,19 @@ impl Storage {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT 1
+            "SELECT leaf_index
              FROM asp_membership_leaves
              WHERE leaf = ?1
              LIMIT 1",
         )?;
 
-        let user_present: Option<i64> = stmt
+        let user_leaf_index: Option<u32> = stmt
             .query_row(params![user_leaf], |row| row.get(0))
             .optional()
             .context("Failed to query asp_membership_leaves user leaf existence")?;
 
-        if user_present.is_some() {
-            return Ok(true);
+        if user_leaf_index.is_some() {
+            return Ok(user_leaf_index);
         }
 
         anyhow::bail!(
@@ -327,14 +327,15 @@ impl Storage {
         );
     }
 
+    // TODO ideally we should return an iterator here
     /// Fetch all ASP membership leaves ordered by index (0..N-1), returning the leaf list
     /// plus the last stored root (root after the last insertion).
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle reconstruction would
     /// be ambiguous/incorrect.
-    pub fn get_all_asp_membership_leaves_ordered(&self) -> Result<(Vec<Field>, Option<Field>)> {
+    pub fn get_all_asp_membership_leaves_ordered(&self) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index, leaf, root
+            "SELECT leaf_index, leaf
              FROM asp_membership_leaves
              ORDER BY leaf_index ASC",
         )?;
@@ -343,16 +344,14 @@ impl Storage {
             let idx: i64 = row.get(0)?;
             let idx = col_u32(idx, 0)?;
             let leaf: Field = row.get(1)?;
-            let root: Field = row.get(2)?;
-            Ok((idx, leaf, root))
+            Ok((idx, leaf))
         })?;
 
         let mut leaves: Vec<Field> = Vec::new();
         let mut expected_index: u32 = 0;
-        let mut last_root: Option<Field> = None;
 
         for row in rows {
-            let (idx, leaf, root) = row?;
+            let (idx, leaf) = row?;
             if idx != expected_index {
                 anyhow::bail!(
                     "asp_membership_leaves gap/out-of-order: expected index {}, got {}",
@@ -361,13 +360,12 @@ impl Storage {
                 );
             }
             leaves.push(leaf);
-            last_root = Some(root);
             expected_index = expected_index
                 .checked_add(1)
                 .context("asp_membership_leaves index overflow")?;
         }
 
-        Ok((leaves, last_root))
+        Ok(leaves)
     }
 
     /// Unprocessed raw events fetch

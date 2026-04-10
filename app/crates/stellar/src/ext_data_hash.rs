@@ -43,7 +43,7 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     // 5. Modular arithmetic in the BN254 scalar field.
     //
     // Soroban's on-chain logic reduces a 256-bit hash modulo the field order. We mirror
-    // that behavior off-chain using `types::U256` to avoid `num-bigint`.
+    // that behavior off-chain using `types::U256`.
     let mut digest_be = [0u8; 32];
     digest_be.copy_from_slice(digest.as_slice());
     let digest_u256 = U256::from_big_endian(&digest_be);

@@ -23,29 +23,29 @@ pub use circuits::core::merkle::{
 /// Merkle proof data returned to JavaScript
 pub struct MerkleProof {
     /// Path elements
-    path_elements: Vec<u8>,
+    pub path_elements: Vec<AppField>,
     /// Path indices as a single scalar
-    path_indices: Vec<u8>,
+    pub path_indices: AppField,
     /// Computed root
-    root: Vec<u8>,
+    pub root: AppField,
     /// Number of levels
-    levels: usize,
+    pub levels: usize,
 }
 
 impl MerkleProof {
-    /// Get path elements as flat bytes (levels * 32 bytes)
-    pub fn path_elements(&self) -> Vec<u8> {
+    /// Get path elements, one field element per level.
+    pub fn path_elements(&self) -> Vec<AppField> {
         self.path_elements.clone()
     }
 
-    /// Get path indices as bytes (32 bytes)
-    pub fn path_indices(&self) -> Vec<u8> {
-        self.path_indices.clone()
+    /// Get path indices packed into a field element.
+    pub fn path_indices(&self) -> AppField {
+        self.path_indices
     }
 
-    /// Get computed root as bytes (32 bytes)
-    pub fn root(&self) -> Vec<u8> {
-        self.root.clone()
+    /// Get computed root as a field element.
+    pub fn root(&self) -> AppField {
+        self.root
     }
 
     /// Get number of levels
@@ -186,11 +186,7 @@ impl MerkleTree {
             return Err(anyhow!("Index out of bounds"));
         }
 
-        let capacity = self
-            .depth
-            .checked_mul(FIELD_SIZE)
-            .ok_or_else(|| anyhow!("Overflow calculating path capacity"))?;
-        let mut path_elements = Vec::with_capacity(capacity);
+        let mut path_elements: Vec<AppField> = Vec::with_capacity(self.depth);
         let mut path_indices_bits: u64 = 0;
         let mut current_index = index;
 
@@ -199,7 +195,11 @@ impl MerkleTree {
             let sibling = self.levels_data[level][sibling_index];
 
             // Add sibling to path
-            path_elements.extend_from_slice(&scalar_to_bytes(&sibling));
+            let sibling_le = scalar_to_bytes(&sibling);
+            let sibling_le: [u8; 32] = sibling_le
+                .try_into()
+                .map_err(|_| anyhow!("Merkle sibling: expected 32 bytes"))?;
+            path_elements.push(AppField::try_from_le_bytes(sibling_le)?);
 
             // Record direction (0 = left, 1 = right)
             if !current_index.is_multiple_of(2) {
@@ -209,8 +209,15 @@ impl MerkleTree {
             current_index /= 2;
         }
 
-        let path_indices = scalar_to_bytes(&Scalar::from(path_indices_bits));
-        let root = scalar_to_bytes(&self.levels_data[self.depth][0]);
+        let mut path_indices_le = [0u8; 32];
+        path_indices_le[..8].copy_from_slice(&path_indices_bits.to_le_bytes());
+        let path_indices = AppField::try_from_le_bytes(path_indices_le)?;
+
+        let root_le = scalar_to_bytes(&self.levels_data[self.depth][0]);
+        let root_le: [u8; 32] = root_le
+            .try_into()
+            .map_err(|_| anyhow!("Merkle root: expected 32 bytes"))?;
+        let root = AppField::try_from_le_bytes(root_le)?;
 
         Ok(MerkleProof {
             path_elements,
@@ -234,7 +241,7 @@ impl MerkleTree {
 /// Build an ASP membership Merkle tree (poseidon2("XLM") zero leaf) from ordered leaves.
 ///
 /// Leaves must be provided in `leaf_index` order with no gaps: index 0, 1, 2, ...
-pub fn asp_membership_tree_from_leaves(
+pub fn from_leaves(
     depth: usize,
     leaves: impl IntoIterator<Item = AppField>,
 ) -> Result<MerkleTree> {
@@ -263,7 +270,7 @@ mod tests {
             AppField::try_from_le_bytes([3u8; 32]).expect("field"),
         ];
 
-        let tree = asp_membership_tree_from_leaves(depth, leaves.into_iter())
+        let tree = from_leaves(depth, leaves.into_iter())
             .expect("build tree");
 
         let mut zero_leaf_be = crypto::zero_leaf();

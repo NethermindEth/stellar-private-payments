@@ -69,6 +69,7 @@ impl WitnessCalculator {
         })
     }
 
+    // TODO it should be simplified
     /// Compute witness from JSON inputs
     ///
     /// # Arguments

@@ -44,7 +44,7 @@ use sha2::{Digest, Sha256};
 use x25519_dalek::{PublicKey, StaticSecret};
 use types::{
     EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, EncryptionSignature, NoteAmount,
-    NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature,
+    NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature, Field,
 };
 
 // Key derivation constants.
@@ -164,13 +164,13 @@ fn derive_note_private_key(signature: SpendingSignature) -> Result<NotePrivateKe
 /// even when amount and recipient are the same.
 ///
 /// # Returns
-/// 32 bytes: Random BN254 scalar (little-endian), reduced to field modulus
+/// Random BN254 scalar field element, reduced to the field modulus.
 ///
 /// # Note
 /// Unlike the private keys above, blinding factors are NOT derived
 /// deterministically. They are random per-note and must be stored for later
 /// use.
-pub fn generate_random_blinding() -> Result<Vec<u8>> {
+pub fn generate_random_blinding() -> Result<Field> {
     let mut random_bytes = [0u8; 32];
     getrandom::getrandom(&mut random_bytes)
         .map_err(|e| anyhow!("Random generation failed: {}", e))?;
@@ -183,7 +183,10 @@ pub fn generate_random_blinding() -> Result<Vec<u8>> {
     scalar
         .serialize_compressed(&mut result)
         .map_err(|e| anyhow!("Serialization failed: {}", e))?;
-    Ok(result)
+    let le: [u8; 32] = result
+        .try_into()
+        .map_err(|v: Vec<u8>| anyhow!("random blinding: expected 32 bytes, got {}", v.len()))?;
+    Field::try_from_le_bytes(le)
 }
 
 /// Encrypt output note data for on-chain storage.
@@ -192,11 +195,11 @@ pub fn generate_random_blinding() -> Result<Vec<u8>> {
 pub fn encrypt_output_note(
     recipient_pubkey: &EncryptionPublicKey,
     amount_stroops: NoteAmount,
-    blinding: &[u8; 32],
+    blinding: &Field,
 ) -> Result<Vec<u8>> {
     let mut plaintext = [0u8; 40];
     plaintext[..8].copy_from_slice(&amount_stroops.to_le_bytes());
-    plaintext[8..].copy_from_slice(blinding);
+    plaintext[8..].copy_from_slice(&blinding.to_le_bytes());
     encrypt_note_data(recipient_pubkey.as_ref(), &plaintext)
 }
 

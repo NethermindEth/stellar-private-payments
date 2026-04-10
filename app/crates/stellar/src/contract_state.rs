@@ -184,7 +184,7 @@ impl StateFetcher {
     ///
     /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof padded to `smt_depth`
     /// - otherwise calls `asp_non_membership.find_key(key)` and pads/trims siblings to `smt_depth`
-    pub async fn asp_nonmembership_proof_from_chain(
+    pub async fn get_nonmembership_proof(
         &self,
         note_pubkey: &NotePublicKey,
         non_membership_root: Field,

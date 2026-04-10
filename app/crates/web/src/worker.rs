@@ -9,7 +9,9 @@ use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
 use prover::{flows::{DepositParams, WithdrawParams, TransferParams, TransactParams, TransactOutput, TransactInputNote,
-    deposit, withdraw, transfer, transact, TransactArtifacts},  encryption::derive_encryption_and_note_keypairs};
+    deposit, withdraw, transfer, transact, TransactArtifacts},  encryption::{generate_random_blinding, derive_encryption_and_note_keypairs},
+    crypto::asp_membership_leaf, merkle::{MerleProof, from_leaves}
+};
 use futures::channel::mpsc;
 use futures::stream::StreamExt;
 use wasm_bindgen::JsCast;
@@ -17,7 +19,7 @@ use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode, Response, WorkerGlobalScope};
 use witness::WitnessCalculator;
 use wasm_bindgen::JsValue;
-use types::{PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, ExtData};
+use types::{PublicKeyEntry, SpendingSignature, EncryptionSignature, EncryptionKeyPair, NoteKeyPair, ExtData, AspMembershipProof};
 use stellar::hash_ext_data_offchain;
 
 // TODO make it dependent on the network during the compilation
@@ -175,36 +177,51 @@ pub(crate) async fn router(req: WorkerRequest) -> Result<WorkerResponse> {
             log::debug!("[WORKER] fetched {} pub keys for the address book", list.len());
             WorkerResponse::PubKeys(list)
         }
-        // WorkerRequest::Deposit(address, amount_stroops, pool_root, pool_address, non_membership_proof) => {
-        //     log::debug!("[WORKER] deposit");
-        //     let (priv_key, encryption_pubkey) = match with_storage!(s => s.get_user_keys(&address)?)? {
-        //         Some((NoteKeyPair{private, ..}, EncryptionKeyPair{public,..})) => (private, public),
-        //         None => return Ok(WorkerResponse::Error(format!("address {} should generate note and encryption keys first"))),
-        //     };
+        WorkerRequest::Deposit(Depost{address, membership_blinding, amount_stroops, pool_root, pool_address, non_membership_proof, aspmem_root, aspmem_ledger, tree_depth, smt_depth, outputs}) => {
+            log::debug!("[WORKER] deposit");
+            let (note_privkey, note_pubkey, encryption_pubkey) = match with_storage!(s => s.get_user_keys(&address)?)? {
+                Some((NoteKeyPair{private, public: note_pub}, EncryptionKeyPair{public: enc_pub,..})) => (private, note_pub, enc_pub),
+                None => return Ok(WorkerResponse::Error(format!("address {} should generate note and encryption keys first"))),
+            };
 
-        //     let membership_proof =
+            let user_leaf = asp_membership_leaf(&note_pubkey, &membership_blinding)?;
+            let Some(user_leaf_index) = with_storage!(s => s.check_asp_membership_precondition(&user_leaf, &aspmem_root, aspmem_ledger)?)? else {
+                log::debug!("asp membership check is not fully synced");
+                return Ok(WorkerResponse::SyncIsNeeded);
+            };
+            let asp_membership_merkle_tree_leaves = with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
+            let aspmembership_tree = from_leaves(tree_depth, asp_membership_merkle_tree_leaves.into_iter())?;
+            let MerkleProof{path_indices, path_elements, root, ..} = aspmembership_tree.get_proof(user_leaf_index)?;
 
-        //     let params = DepositParams {
-        //         priv_key,
-        //         encryption_pubkey,
-        //         pool_root,
-        //         pool_address,
-        //         amount_stroops
-        //         outputs: Vec<TransactOutput>,
+            let params = DepositParams {
+                priv_key,
+                encryption_pubkey: encryption_pubkey.clone(),
+                pool_root,
+                pool_address,
+                amount_stroops,
+                outputs: vec![TransactOutput{
+                    amount_stroops,
+                    blinding: generate_random_blinding()?,
+                    recipient_note_pubkey: Some(note_pubkey),
+                    recipient_encryption_pubkey: Some(encryption_pubkey)
+                }],
+                membership_proof: AspMembershipProof{
+                    leaf: user_leaf,
+                    blinding: membership_blinding,
+                    path_elements,
+                    path_indices,
+                    root,
+                },
+                non_membership_proof,
+                tree_depth,
+                smt_depth,
+            };
+            let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
+            // TODO add proving step here
+            //
 
-        //         /// ASP membership proof data required by the circuit (provided by caller).
-        //         pub membership_proof: AspMembershipProof,
-        //         /// ASP non-membership proof data required by the circuit (provided by caller).
-        //         pub non_membership_proof: AspNonMembershipProof,
-        //         /// Pool Merkle tree depth.
-        //         pub tree_depth: usize,
-        //         /// ASP sparse Merkle tree depth.
-        //         pub smt_depth: usize,
-        //     }
-        //     let transact_artifacts = flows::deposit(params, hash_ext_data_offchain)?;
-
-        //     WorkerResponse::PubKeys(list)
-        // }
+            WorkerResponse::Proof
+        }
     };
     Ok(resp)
 }

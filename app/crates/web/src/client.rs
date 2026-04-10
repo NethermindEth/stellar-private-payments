@@ -2,9 +2,10 @@ use crate::worker::Worker;
 use stellar::{StateFetcher as CoreStateFetcher};
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
-use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys};
+use crate::protocol::{WorkerRequest, WorkerResponse, UserKeys, Deposit};
 use prover::encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE};
-use types::{SpendingSignature, EncryptionSignature, NoteKeyPair, EncryptionKeyPair};
+use prover::flows::N_OUTPUTS;
+use types::{SMT_DEPTH, EncryptionKeyPair, EncryptionSignature, NoteAmount, NoteKeyPair, SpendingSignature};
 use wasm_bindgen::prelude::*;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
@@ -151,30 +152,28 @@ impl WebClient {
         }
     }
 
-    // #[wasm_bindgen(js_name = proveDepositPrepareTx)]
-    // pub async fn prove_deposit_prepare_tx(&self, user_address: String, amount_stroops: u64, output_amounts: [u64; 2]) -> Result<JsValue, JsError> {
-    //     let data = self.fetcher.all_contracts_data().await.map_err(|e| JsError::new(&e.to_string()))?;
-    //     let non_membership_proof = self.fetcher.get_nonmembership_proof().await.map_err(|e| JsError::new(&e.to_string()))?;
+    #[wasm_bindgen(js_name = proveDepositPrepareTx)]
+    pub async fn prove_deposit_prepare_tx(&self, user_address: String, membership_blinding: Field, amount_stroops: ExtAmount, output_amounts: [NoteAmount; N_OUTPUTS]) -> Result<JsValue, JsError> {
+        let data = self.fetcher.all_contracts_data().await.map_err(|e| JsError::new(&e.to_string()))?;
+        // for non membership fetches proofs on-demand from the contract rather than syncing locally
+        let non_membership_proof = self.fetcher.get_nonmembership_proof().await.map_err(|e| JsError::new(&e.to_string()))?;
 
-    //     Deposit{
-    //         user_address,
-    //         amount_stroops: NoteAmount::from(amount_stroops),
-    //         pool_root: data.pool.merkle_root,
-    //         pool_address: data.pool.contract_id,
-    //         output_amounts,
-    //         tree_depth: data.pool.merkle_levels,
-    //         smt_depth:
-    //         non_membership_proof
-    //     }
+        let req = Deposit{
+            user_address,
+            membership_blinding,
+            amount_stroops: NoteAmount::from(amount_stroops),
+            pool_root: data.pool.merkle_root,
+            pool_address: data.pool.contract_id,
+            aspmem_root: data.asp_membership.root,
+            aspmem_ledger: data.asp_membership.ledger,
+            output_amounts,
+            tree_depth: data.pool.merkle_levels,
+            smt_depth: SMT_DEPTH,
+            non_membership_proof,
+        };
 
-    //     #[derive(Clone, Debug)]
-    //     pub struct Deposit {
-
-    //         /// ASP membership proof data required by the circuit (provided by caller).
-    //         pub membership_proof: AspMembershipProof,
-    //     }
-    //     todo!()
-    // }
+        todo!()
+    }
 
     #[wasm_bindgen(js_name = proveWithdrawPrepareTx)]
     pub async fn prove_withdraw_prepare_tx(&self, limit: u32) -> Result<JsValue, JsError> {

@@ -47,6 +47,8 @@ impl NoteAmount {
     pub const ZERO: NoteAmount = NoteAmount(0);
     /// Unit amount.
     pub const ONE: NoteAmount = NoteAmount(1);
+    /// Maximum representable note amount (stored as `u64` stroops internally).
+    pub const MAX: NoteAmount = NoteAmount(u64::MAX);
 
     /// Returns the underlying stroops value.
     pub const fn as_u64(self) -> u64 {
@@ -100,6 +102,16 @@ impl FromStr for NoteAmount {
 
     fn from_str(s: &str) -> Result<Self> {
         Ok(NoteAmount(s.parse::<u64>().map_err(|e| anyhow!(e))?))
+    }
+}
+
+impl TryFrom<ExtAmount> for NoteAmount {
+    type Error = anyhow::Error;
+
+    fn try_from(value: ExtAmount) -> Result<Self> {
+        let v = u64::try_from(value.0)
+            .map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
+        Ok(NoteAmount(v))
     }
 }
 
@@ -327,6 +339,8 @@ impl<'de> Deserialize<'de> for ExtAmount {
 /// This is primarily used for "public input" style values where the circuit expects
 /// a field element, but the application wants to handle signed values (`ExtAmount`)
 /// and map them into the field (see `TryFrom<ExtAmount> for Field`).
+/// It is a lightweight app wrapper (to avoid pulling and locking into specific implementations
+/// from ark crates etc.)
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Field(pub U256);
 
@@ -588,12 +602,29 @@ mod tests {
         let min = NoteAmount(u64::MIN);
         assert_eq!(min, z);
 
-        let max = NoteAmount(u64::MAX);
-        assert_eq!(max.as_u64(), u64::MAX);
+        let max = NoteAmount::MAX;
 
         // checked arithmetic corner cases
         assert_eq!(max.checked_add(NoteAmount(1)), None);
         assert_eq!(z.checked_sub(NoteAmount(1)), None);
+        Ok(())
+    }
+
+    #[test]
+    fn note_amount_try_from_ext_amount_range() -> Result<()> {
+        assert_eq!(NoteAmount::try_from(ExtAmount(0))?, NoteAmount::ZERO);
+        assert_eq!(
+            NoteAmount::try_from(ExtAmount::from(NoteAmount::MAX))?,
+            NoteAmount::MAX
+        );
+
+        assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
+
+        let max_ext = ExtAmount::from(NoteAmount::MAX);
+        let too_big = max_ext
+            .checked_add(ExtAmount::ONE)
+            .expect("i128 add");
+        assert!(NoteAmount::try_from(too_big).is_err());
         Ok(())
     }
 
