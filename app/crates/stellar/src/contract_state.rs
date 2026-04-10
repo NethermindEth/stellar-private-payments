@@ -67,10 +67,30 @@ impl StateFetcher {
     }
 
     pub async fn pool_contract_state(&self) -> Result<PoolInfo> {
-        let pool_state = self.client.get_contract_data(&self.config.pool, &["Admin", "Token", "Verifier", "ASPMembership", "ASPNonMembership", "Levels", "CurrentRootIndex", "NextIndex", "MaximumDepositAmount"], &[]).await?;
+        let (pool_state, latest_ledger) = self
+            .client
+            .get_contract_data(
+                &self.config.pool,
+                &[
+                    "Admin",
+                    "Token",
+                    "Verifier",
+                    "ASPMembership",
+                    "ASPNonMembership",
+                    "Levels",
+                    "CurrentRootIndex",
+                    "NextIndex",
+                    "MaximumDepositAmount",
+                ],
+                &[],
+            )
+            .await?;
         let (merkle_current_root_index, merkle_root) = if let Some(current_roout_index) = pool_state.get("CurrentRootIndex") {
             let merkle_current_root_index = scval_to_u32(current_roout_index)?;
-            let state = self.client.get_contract_data(&self.config.pool, &[], &[("Root", merkle_current_root_index)]).await?;
+            let (state, _root_ledger) = self
+                .client
+                .get_contract_data(&self.config.pool, &[], &[("Root", merkle_current_root_index)])
+                .await?;
             (Some(merkle_current_root_index), Some(scval_to_u256(get_state!(state, "Root", self.config.pool)?)?))
         } else {
             (None, None)
@@ -91,6 +111,7 @@ impl StateFetcher {
 
         let pool = PoolInfo {
             success: true,
+            ledger: latest_ledger,
             contract_id: self.config.pool.clone(),
             contract_type: "Privacy Pool".to_string(),
             admin: scval_to_address_string(get_state!(pool_state, "Admin", self.config.pool)?)?,
@@ -110,7 +131,14 @@ impl StateFetcher {
     }
 
     pub async fn asp_membership_contract_state(&self) -> Result<AspMembership> {
-        let asp_membership_state = self.client.get_contract_data(&self.config.asp_membership, &["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"], &[]).await?;
+        let (asp_membership_state, latest_ledger) = self
+            .client
+            .get_contract_data(
+                &self.config.asp_membership,
+                &["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+                &[],
+            )
+            .await?;
         let asp_mem_next_index = scval_to_u64(get_state!(asp_membership_state, "NextIndex", self.config.asp_membership)?)?;
         let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", self.config.asp_membership)?)?;
         let asp_mem_capacity = 2u64.pow(asp_mem_levels);
@@ -119,6 +147,7 @@ impl StateFetcher {
 
         let asp_membership = AspMembership {
             success: true,
+            ledger: latest_ledger,
             contract_id: self.config.asp_membership.clone(),
             contract_type: "ASP Membership".to_string(),
             root,
@@ -133,11 +162,15 @@ impl StateFetcher {
     }
 
     pub async fn asp_nonmembership_contract_state(&self) -> Result<AspNonMembership> {
-        let asp_non_membership_state = self.client.get_contract_data(&self.config.asp_non_membership, &["Root", "Admin"], &[]).await?;
+        let (asp_non_membership_state, latest_ledger) = self
+            .client
+            .get_contract_data(&self.config.asp_non_membership, &["Root", "Admin"], &[])
+            .await?;
             let asp_nonmem_root_u256 = scval_to_u256(get_state!(asp_non_membership_state, "Root", self.config.asp_non_membership)?)?;
             let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
             let asp_non_membership = AspNonMembership {
                 success: true,
+                ledger: latest_ledger,
                 contract_id: self.config.asp_non_membership.clone(),
                 contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
                 root: asp_nonmem_root,

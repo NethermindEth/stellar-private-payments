@@ -71,13 +71,8 @@ CREATE TABLE user_notes (
     leaf_index INTEGER NOT NULL,
     created_at TEXT NOT NULL,
     created_at_ledger INTEGER NOT NULL,
-    spent INTEGER NOT NULL DEFAULT 0,
-    spent_at_ledger INTEGER,
     is_received INTEGER NOT NULL DEFAULT 0
 );
-
-CREATE INDEX idx_user_notes_spent
-    ON user_notes (spent);
 
 CREATE INDEX idx_user_notes_owner
     ON user_notes (owner);

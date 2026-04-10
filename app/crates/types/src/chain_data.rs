@@ -15,6 +15,8 @@ pub struct ContractsStateData {
 #[serde(rename_all = "camelCase")]
 pub struct PoolInfo {
     pub success: bool,
+    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
     pub admin: String,
@@ -35,6 +37,8 @@ pub struct PoolInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AspMembership {
     pub success: bool,
+    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
     pub root: Field,
@@ -50,6 +54,8 @@ pub struct AspMembership {
 #[serde(rename_all = "camelCase")]
 pub struct AspNonMembership {
     pub success: bool,
+    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
     pub root: Field,

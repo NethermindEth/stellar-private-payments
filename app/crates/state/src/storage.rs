@@ -4,7 +4,7 @@ use rusqlite_migration::{M, Migrations};
 use types::{ContractEvent, Field, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
-const DB_NAME: &str = "spp.sqlite";
+const DB_NAME: &str = "poolstellar.sqlite";
 
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
@@ -247,25 +247,84 @@ impl Storage {
         Ok(())
     }
 
-    /// Returns the first index at which `leaf` appears in the ASP membership tree.
+    /// Checks whether ASP membership data is usable for proving at the current network tip.
     ///
-    /// This uses the `idx_asp_membership_leaves_leaf` index and is intended as a fast
-    /// existence check before rebuilding the whole tree.
-    pub fn asp_membership_leaf_index(&self, leaf: &Field) -> Result<Option<u32>> {
+    /// Returns:
+    /// - `Ok(true)`  if:
+    ///   1) `user_leaf` is present in `asp_membership_leaves`, and
+    ///   2) `current_root` equals the last stored root in `asp_membership_leaves`, and
+    ///   3) `current_ledger` equals the last stored ledger in the DB.
+    /// - `Ok(false)` if the DB is behind the chain tip (`current_ledger` is ahead of the
+    ///   last stored ledger), meaning the caller should sync more events.
+    /// - `Err(_)` if `current_ledger == last_db_ledger` but the user leaf is missing, or if
+    ///   roots/ledgers are inconsistent (indicates corruption or mismatched networks).
+    pub fn check_asp_membership_precondition(
+        &self,
+        user_leaf: &Field,
+        current_root: &Field,
+        current_ledger: u32,
+    ) -> Result<bool> {
+        // Get the last stored root and its ledger by joining through the raw events table.
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index
-             FROM asp_membership_leaves
-             WHERE leaf = ?1
-             ORDER BY leaf_index ASC
+            "SELECT l.root, r.ledger
+             FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
+             ORDER BY l.leaf_index DESC
              LIMIT 1",
         )?;
 
-        stmt.query_row(params![leaf], |row| {
-            let idx: i64 = row.get(0)?;
-            col_u32(idx, 0)
-        })
-        .optional()
-        .context("Failed to query asp_membership_leaves leaf index")
+        let last: Option<(Field, u32)> = stmt
+            .query_row([], |row| {
+                let root: Field = row.get(0)?;
+                let ledger_i64: i64 = row.get(1)?;
+                let ledger = col_u32(ledger_i64, 1)?;
+                Ok((root, ledger))
+            })
+            .optional()
+            .context("Failed to query asp_membership_leaves last root/ledger")?;
+
+        let Some((last_root, last_ledger)) = last else {
+            // No local membership data: treat as "need sync".
+            return Ok(false);
+        };
+
+        if current_ledger > last_ledger {
+            return Ok(false);
+        }
+
+        if current_ledger < last_ledger {
+            anyhow::bail!(
+                "asp membership storage is ahead of chain tip: local={}, chain={}",
+                last_ledger,
+                current_ledger
+            );
+        }
+
+        // current_ledger == last_ledger: require root match and leaf existence.
+        if *current_root != last_root {
+            anyhow::bail!("asp membership root mismatch at ledger {}", current_ledger);
+        }
+
+        let mut stmt = self.conn.prepare(
+            "SELECT 1
+             FROM asp_membership_leaves
+             WHERE leaf = ?1
+             LIMIT 1",
+        )?;
+
+        let user_present: Option<i64> = stmt
+            .query_row(params![user_leaf], |row| row.get(0))
+            .optional()
+            .context("Failed to query asp_membership_leaves user leaf existence")?;
+
+        if user_present.is_some() {
+            return Ok(true);
+        }
+
+        anyhow::bail!(
+            "asp membership precondition failed at ledger {}: local state is out of sync with the chain",
+            current_ledger
+        );
     }
 
     /// Fetch all ASP membership leaves ordered by index (0..N-1), returning the leaf list

@@ -40,6 +40,8 @@ pub enum Error {
     UnexpectedScVal(String),
     #[error("RPC sync gap - the oldest ledger is: {0:?}")]
     RpcSyncGap(u32),
+    #[error("invalid latestLedger value: {0}")]
+    InvalidLatestLedger(i64),
 }
 
 // JSON-RPC Plumbing
@@ -370,7 +372,7 @@ impl Client {
         contract_id: &str,
         enum_keys: &[&str],
         valued_keys: &[(&str, u32)]
-    ) -> Result<HashMap<String, xdr::ScVal>, Error> {
+    ) -> Result<(HashMap<String, xdr::ScVal>, u32), Error> {
         let contract = stellar_strkey::Contract::from_str(contract_id)
                 .map_err(|e| Error::InvalidAddress(e))?;
 
@@ -408,6 +410,10 @@ impl Client {
         }
 
         let response = self.get_ledger_entries(&keys).await?;
+        let latest_ledger: u32 = response
+            .latest_ledger
+            .try_into()
+            .map_err(|_| Error::InvalidLatestLedger(response.latest_ledger))?;
         let entries = response.entries.unwrap_or_default();
 
         if entries.is_empty() {
@@ -429,7 +435,7 @@ impl Client {
                 _ => continue,
             }
         }
-        Ok(results_map)
+        Ok((results_map, latest_ledger))
     }
 
     pub async fn simulate_transaction(
