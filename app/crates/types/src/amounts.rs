@@ -156,6 +156,18 @@ impl Serialize for NoteAmount {
     }
 }
 
+// `serde_wasm_bindgen` does not support `deserialize_any`. For wasm workers we only
+// need string decoding (we serialize as a string).
+#[cfg(target_arch = "wasm32")]
+impl<'de> Deserialize<'de> for NoteAmount {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
+        let s = String::deserialize(deserializer)?;
+        let v = s.parse::<u64>().map_err(serde::de::Error::custom)?;
+        Ok(NoteAmount(v))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl<'de> Deserialize<'de> for NoteAmount {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
         struct V;
@@ -307,30 +319,9 @@ impl Serialize for ExtAmount {
 
 impl<'de> Deserialize<'de> for ExtAmount {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
-        struct V;
-
-        impl<'de> serde::de::Visitor<'de> for V {
-            type Value = ExtAmount;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a decimal string or integer representing a signed stroops amount")
-            }
-
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> core::result::Result<Self::Value, E> {
-                Ok(ExtAmount(i128::from(v)))
-            }
-
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> core::result::Result<Self::Value, E> {
-                Ok(ExtAmount(i128::from(v)))
-            }
-
-            fn visit_str<E: serde::de::Error>(self, s: &str) -> core::result::Result<Self::Value, E> {
-                let v = s.parse::<i128>().map_err(E::custom)?;
-                Ok(ExtAmount(v))
-            }
-        }
-
-        deserializer.deserialize_any(V)
+        let s = String::deserialize(deserializer)?;
+        let v = s.parse::<i128>().map_err(serde::de::Error::custom)?;
+        Ok(ExtAmount(v))
     }
 }
 

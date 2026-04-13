@@ -119,6 +119,14 @@ pub struct SyncMetadata {
     pub last_ledger: u32,
 }
 
+/// ASP membership sync state.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum AspMembershipSync {
+    SyncRequired,
+    RegisterAtASP,
+    UserIndex(u32),
+}
 
 /// This event allows off-chain observers to track which UTXOs have been spent.
 #[derive(Debug, Clone, Serialize, Deserialize)]

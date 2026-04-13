@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use prover::flows::N_OUTPUTS;
+use prover::flows::{DepositParams, N_OUTPUTS};
 pub type Address = String;
 use types::{
     AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, EncryptionSignature, ExtAmount,
-    ExtData, Field, NoteAmount, NoteKeyPair, PublicKeyEntry, SpendingSignature, SyncMetadata,
+    ExtData, Field, NoteAmount, NoteKeyPair, PublicKeyEntry, SpendingSignature, SyncMetadata, AspMembershipSync
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -15,7 +15,7 @@ pub struct UserKeys{
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum WorkerRequest {
+pub enum StorageWorkerRequest {
     Ping,
     SyncState,
     SaveEvents(ContractsEventData),
@@ -26,14 +26,27 @@ pub enum WorkerRequest {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum WorkerResponse {
+pub enum StorageWorkerResponse {
     Pong,
     SyncState(Option<SyncMetadata>),
     Saved,
     Error(String),
     UserKeys(Option<UserKeys>),
     PubKeys(Vec<PublicKeyEntry>),
-    SyncIsNeeded,
+    AspMembershipSync(AspMembershipSync),
+    DepositParams(DepositParams),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ProverWorkerRequest {
+    Ping,
+    Deposit(DepositParams),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum ProverWorkerResponse {
+    Pong,
+    Error(String),
     DepositPrepared(DepositPrepared),
 }
 

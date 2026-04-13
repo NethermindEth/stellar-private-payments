@@ -11,6 +11,7 @@ use types::{
     AspMembershipProof, AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field,
     NoteAmount, NotePrivateKey, NotePublicKey,
 };
+use serde::{Deserialize, Serialize};
 
 use crate::{
     crypto,
@@ -52,7 +53,7 @@ pub struct TransactInputNote {
 ///
 /// Circuit note: the current circuit expects exactly 2 outputs; callers may provide
 /// 0, 1, or 2, and `transact()` will pad with dummy outputs as needed.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactOutput {
     /// Output amount in stroops.
     pub amount_stroops: NoteAmount,
@@ -149,7 +150,7 @@ pub struct TransactParams {
 ///
 /// Deposit invariant:
 /// `Deposit amount must equal sum of outputs`.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DepositParams {
     /// User's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,

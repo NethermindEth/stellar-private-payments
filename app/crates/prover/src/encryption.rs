@@ -34,7 +34,7 @@
 //!                                      └── Poseidon2 → Note Public Key
 //! ```
 use crate::crypto::derive_public_key;
-use alloc::{format, string::String, vec::Vec};
+use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
 use ark_ff::PrimeField;

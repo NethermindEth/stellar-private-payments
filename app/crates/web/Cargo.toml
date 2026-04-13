@@ -11,8 +11,12 @@ description = "Unified WASM facade for app crates"
 crate-type = ["cdylib", "rlib"]
 
 [[bin]]
-name = "worker"
-path = "src/bin/worker.rs"
+name = "storage-worker"
+path = "src/bin/storage_worker.rs"
+
+[[bin]]
+name = "prover-worker"
+path = "src/bin/prover_worker.rs"
 
 [dependencies]
 anyhow = { workspace = true }
@@ -27,6 +31,7 @@ gloo-timers = { version = "0.3", default-features = false, features = ["futures"
 gloo-worker = { version = "0.5", default-features = false, features = ["futures"]  }
 prover = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 sqlite-wasm-rs = { version = "0.5.2", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }

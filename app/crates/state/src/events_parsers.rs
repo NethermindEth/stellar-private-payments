@@ -1,4 +1,4 @@
-use types::{ContractEvent, ProcessedEvent, NewNullifierEvent, NewCommitmentEvent, EncryptionPublicKey, NotePublicKey, PublicKeyEvent, LeafAddedEvent, LeafInsertedEvent, LeafUpdatedEvent, LeafDeletedEvent, Field};
+use types::{ContractEvent, ProcessedEvent, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, LeafInsertedEvent, LeafUpdatedEvent, LeafDeletedEvent, Field};
 use stellar::{parse_event_metadata, ParsedContractEvent, scval_to_u32, scval_to_u64, scval_to_u256, scval_to_bytes, scval_to_address_string};
 use anyhow::{anyhow, Result};
 
@@ -32,7 +32,7 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 //     pub nullifier: U256,
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
-    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let ParsedContractEvent{id, name, topics, ..} = parsed;
     let nullifier_scval = topics.first().ok_or_else(|| anyhow!("event `{name}` id {id} should have a nullifier topic value"))?;
     let nullifier = Field::try_from_u256(scval_to_u256(nullifier_scval)?)?;
     Ok(NewNullifierEvent{
@@ -107,7 +107,7 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent>
 //     root: U256,
 // }
 fn parse_leaf_added(parsed: ParsedContractEvent) -> Result<LeafAddedEvent> {
-    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let ParsedContractEvent{id, name, values, ..} = parsed;
     let leaf_scval = values.get("leaf").ok_or_else(|| anyhow!("event `{name}` id {id} should have an leaf value"))?;
     let leaf = Field::try_from_u256(scval_to_u256(leaf_scval)?)?;
     let index_scval = values.get("index").ok_or_else(|| anyhow!("event `{name}` id {id} should have an index value"))?;
@@ -131,7 +131,7 @@ fn parse_leaf_added(parsed: ParsedContractEvent) -> Result<LeafAddedEvent> {
 //     root: U256,
 // }
 fn parse_leaf_inserted(parsed: ParsedContractEvent) -> Result<LeafInsertedEvent> {
-    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let ParsedContractEvent{id, name, values, ..} = parsed;
     let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
     let key = Field::try_from_u256(scval_to_u256(key_scval)?)?;
     let value_scval = values.get("value").ok_or_else(|| anyhow!("event `{name}` id {id} should have an value value"))?;
@@ -154,7 +154,7 @@ fn parse_leaf_inserted(parsed: ParsedContractEvent) -> Result<LeafInsertedEvent>
 //     root: U256,
 // }
 fn parse_leaf_updated(parsed: ParsedContractEvent) -> Result<LeafUpdatedEvent> {
-    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let ParsedContractEvent{id, name, values, ..} = parsed;
     let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
     let key = Field::try_from_u256(scval_to_u256(key_scval)?)?;
     let old_value_scval = values.get("old_value").ok_or_else(|| anyhow!("event `{name}` id {id} should have an old_value value"))?;
@@ -178,7 +178,7 @@ fn parse_leaf_updated(parsed: ParsedContractEvent) -> Result<LeafUpdatedEvent> {
 //     root: U256,
 // }
 fn parse_leaf_deleted(parsed: ParsedContractEvent) -> Result<LeafDeletedEvent> {
-    let ParsedContractEvent{id, name, topics, values, ..} = parsed;
+    let ParsedContractEvent{id, name, values, ..} = parsed;
     let key_scval = values.get("key").ok_or_else(|| anyhow!("event `{name}` id {id} should have an key value"))?;
     let key = Field::try_from_u256(scval_to_u256(key_scval)?)?;
     let root_scval = values.get("root").ok_or_else(|| anyhow!("event `{name}` id {id} should have an root value"))?;

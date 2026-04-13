@@ -3,7 +3,7 @@
 //! Provides merkle tree operations matching the Circom circuit implementations.
 //! Core merkle functions are re-exported from `circuits::core::merkle`.
 
-use alloc::{format, vec, vec::Vec};
+use alloc::{vec, vec::Vec};
 
 use anyhow::{Result, anyhow};
 use zkhash::fields::bn256::FpBN256 as Scalar;

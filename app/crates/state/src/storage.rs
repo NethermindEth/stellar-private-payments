@@ -1,7 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params, Error as SqlError, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
-use types::{ContractEvent, Field, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey};
+use types::{ContractEvent, Field, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey, AspMembershipSync};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
@@ -263,7 +263,7 @@ impl Storage {
         user_leaf: &Field,
         current_root: &Field,
         current_ledger: u32,
-    ) -> Result<Option<u32>> {
+    ) -> Result<AspMembershipSync> {
         // Get the last stored root and its ledger by joining through the raw events table.
         let mut stmt = self.conn.prepare(
             "SELECT l.root, r.ledger
@@ -284,12 +284,11 @@ impl Storage {
             .context("Failed to query asp_membership_leaves last root/ledger")?;
 
         let Some((last_root, last_ledger)) = last else {
-            // No local membership data: treat as "need sync".
-            return Ok(None);
+            return Ok(AspMembershipSync::RegisterAtASP);
         };
 
         if current_ledger > last_ledger {
-            return Ok(None);
+            return Ok(AspMembershipSync::SyncRequired);
         }
 
         if current_ledger < last_ledger {
@@ -317,14 +316,11 @@ impl Storage {
             .optional()
             .context("Failed to query asp_membership_leaves user leaf existence")?;
 
-        if user_leaf_index.is_some() {
-            return Ok(user_leaf_index);
+        if let Some(user_leaf_index) = user_leaf_index {
+            return Ok(AspMembershipSync::UserIndex(user_leaf_index));
         }
 
-        anyhow::bail!(
-            "asp membership precondition failed at ledger {}: local state is out of sync with the chain",
-            current_ledger
-        );
+        Ok(AspMembershipSync::RegisterAtASP)
     }
 
     // TODO ideally we should return an iterator here

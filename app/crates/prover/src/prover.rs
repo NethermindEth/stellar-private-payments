@@ -14,7 +14,7 @@ use crate::{
     serialization::bytes_to_fr,
     types::{FIELD_SIZE, Groth16Proof},
 };
-use alloc::{format, vec::Vec};
+use alloc::{vec::Vec};
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};

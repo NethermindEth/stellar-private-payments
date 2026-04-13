@@ -4,6 +4,7 @@ use crate::DEPLOYMENT;
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
+pub const LEDGERS_BACK_ON_COLD_START: u32 = 2;
 
 pub struct Indexer<S: ContractDataStorage> {
     client: Client,
@@ -34,12 +35,11 @@ impl<S: ContractDataStorage> Indexer<S> {
         let (mut cursor, mut current_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
             (Some(cursor), last_ledger)
         } else {
-            log::debug!("[INDEXER] no saved sync metadata - the current round starts at the current network tip {network_tip}");
-            let start_seven_days_ago = network_tip;
-            (None, start_seven_days_ago)
+            log::debug!("[INDEXER] no saved sync metadata - the current round starts at the current network tip {network_tip} - {LEDGERS_BACK_ON_COLD_START} ledgers back");
+            (None, network_tip.checked_sub(LEDGERS_BACK_ON_COLD_START).expect("RPC network tip is more than LEDGERS_BACK_ON_COLD_START"))
         };
         while current_ledger < network_tip {
-            log::debug!("[INDEXER] current_ledger {current_ledger}, cursor {cursor:?}");
+            log::info!("[INDEXER] current ledger {current_ledger} vs network tip {network_tip}, cursor {cursor:?}");
             let (new_cursor, events, _) = self.client.get_contract_events(
                 &contract_ids,
                 current_ledger,
