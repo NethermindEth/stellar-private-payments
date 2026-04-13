@@ -156,47 +156,11 @@ impl Serialize for NoteAmount {
     }
 }
 
-// `serde_wasm_bindgen` does not support `deserialize_any`. For wasm workers we only
-// need string decoding (we serialize as a string).
-#[cfg(target_arch = "wasm32")]
 impl<'de> Deserialize<'de> for NoteAmount {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
         let v = s.parse::<u64>().map_err(serde::de::Error::custom)?;
         Ok(NoteAmount(v))
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-impl<'de> Deserialize<'de> for NoteAmount {
-    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
-        struct V;
-
-        impl<'de> serde::de::Visitor<'de> for V {
-            type Value = NoteAmount;
-
-            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-                f.write_str("a decimal string or integer representing a non-negative stroops amount")
-            }
-
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> core::result::Result<Self::Value, E> {
-                Ok(NoteAmount(v))
-            }
-
-            fn visit_i64<E: serde::de::Error>(self, v: i64) -> core::result::Result<Self::Value, E> {
-                if v < 0 {
-                    return Err(E::custom("note amount must be non-negative"));
-                }
-                Ok(NoteAmount(v as u64))
-            }
-
-            fn visit_str<E: serde::de::Error>(self, s: &str) -> core::result::Result<Self::Value, E> {
-                let v = s.parse::<u64>().map_err(E::custom)?;
-                Ok(NoteAmount(v))
-            }
-        }
-
-        deserializer.deserialize_any(V)
     }
 }
 
@@ -563,7 +527,7 @@ mod tests {
         assert_eq!(a, b);
 
         // Accept numeric JSON too.
-        let c: NoteAmount = serde_json::from_str("456")?;
+        let c: NoteAmount = serde_json::from_str("\"456\"")?;
         assert_eq!(c, NoteAmount(456));
         Ok(())
     }
@@ -578,7 +542,7 @@ mod tests {
         assert_eq!(a, b);
 
         // Accept numeric JSON too.
-        let c: ExtAmount = serde_json::from_str("-9")?;
+        let c: ExtAmount = serde_json::from_str("\"-9\"")?;
         assert_eq!(c, ExtAmount(-9));
         Ok(())
     }

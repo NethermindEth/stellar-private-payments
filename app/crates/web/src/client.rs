@@ -2,7 +2,7 @@ use crate::workers::{prover::ProverWorker, storage::StorageWorker};
 use stellar::{StateFetcher as CoreStateFetcher};
 use gloo_worker::oneshot::OneshotBridge;
 use gloo_worker::Spawnable;
-use crate::protocol::{DepositRequest, StorageWorkerRequest, StorageWorkerResponse, ProverWorkerRequest, ProverWorkerResponse};
+use crate::protocol::{AdminASPRequest, DepositRequest, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse};
 use prover::encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE};
 use prover::flows::N_OUTPUTS;
 use types::{EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SpendingSignature, SMT_DEPTH, AspMembershipSync};
@@ -59,7 +59,6 @@ impl WebClient {
 
     pub async fn ping_storage(&self) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
-        // give enough time to load circuit artifacts
         let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::Ping)).await?;
         match resp {
             StorageWorkerResponse::Pong => Ok(()),
@@ -170,6 +169,28 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = deriveAspUserLeaf)]
+    pub async fn derive_asp_user_leaf(&self, membership_blinding: BigInt, pubkey_hex: &str) -> Result<JsValue, JsError> {
+        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+
+        let pubkey_deserializer =
+            serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex);
+        let pubkey: NotePublicKey = <NotePublicKey as serde::Deserialize>::deserialize(pubkey_deserializer)
+            .map_err(|e| JsError::new(&format!("invalid pubkey_hex: {e}")))?;
+
+        let req = StorageWorkerRequest::DeriveASPleaf(
+            AdminASPRequest{
+                membership_blinding,
+                pubkey,
+            }
+        );
+
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::DeriveASPleaf(user_leaf) => Ok(serde_wasm_bindgen::to_value(&user_leaf)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getRecentPublicKeys)]
     pub async fn get_recent_public_keys(&self, limit: u32) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecentPubKeys(
@@ -199,14 +220,6 @@ impl WebClient {
                 .ok_or_else(|| JsError::new("BigInt.toString() did not return a string"))
         }
 
-        fn bigint_to_string_radix(b: &BigInt, radix: u8) -> Result<String, JsError> {
-            let js = b
-                .to_string(radix)
-                .map_err(|e| JsError::new(&format!("failed to stringify BigInt: {e:?}")))?;
-            js.as_string()
-                .ok_or_else(|| JsError::new("BigInt.toString() did not return a string"))
-        }
-
         fn parse_ext_amount_decimal(b: &BigInt) -> Result<ExtAmount, JsError> {
             let s = bigint_to_string(b)?;
             ExtAmount::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
@@ -215,19 +228,6 @@ impl WebClient {
         fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
             let s = bigint_to_string(b)?;
             NoteAmount::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
-        }
-
-        fn parse_field_hex_be(b: &BigInt) -> Result<Field, JsError> {
-            let hex = bigint_to_string_radix(b, 16)?;
-            if hex.starts_with('-') {
-                return Err(JsError::new("field BigInt must be non-negative"));
-            }
-            if hex.len() > 64 {
-                return Err(JsError::new("field BigInt does not fit into 256 bits"));
-            }
-            let padded = format!("{hex:0>64}");
-            let s = format!("0x{padded}");
-            Field::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
         }
 
         if output_amounts.length() != N_OUTPUTS as u32 {
@@ -261,8 +261,7 @@ impl WebClient {
 
             let pool_root = data
                 .pool
-                .merkle_root
-                .ok_or_else(|| JsError::new("pool merkle root is not initialized"))?;
+                .merkle_root;
 
             let keys = match self
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
@@ -383,4 +382,25 @@ impl stellar::ContractDataStorage for WebClient {
             other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
         }
     }
+}
+
+fn parse_field_hex_be(b: &BigInt) -> Result<Field, JsError> {
+    let hex = bigint_to_string_radix(b, 16)?;
+    if hex.starts_with('-') {
+        return Err(JsError::new("field BigInt must be non-negative"));
+    }
+    if hex.len() > 64 {
+        return Err(JsError::new("field BigInt does not fit into 256 bits"));
+    }
+    let padded = format!("{hex:0>64}");
+    let s = format!("0x{padded}");
+    Field::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn bigint_to_string_radix(b: &BigInt, radix: u8) -> Result<String, JsError> {
+    let js = b
+        .to_string(radix)
+        .map_err(|e| JsError::new(&format!("failed to stringify BigInt: {e:?}")))?;
+    js.as_string()
+        .ok_or_else(|| JsError::new("BigInt.toString() did not return a string"))
 }

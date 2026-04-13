@@ -1,7 +1,6 @@
 import { contract } from '@stellar/stellar-sdk';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
-import { loadDeployedContracts, readASPMembershipState, readASPNonMembershipState } from './stellar.js';
-import { initProverWasm, derivePublicKey, poseidon2Hash2, bigintToField, fieldToHex, deriveNotePrivateKeyFromSignature } from './bridge.js';
+import { initializeWasm, getHandle } from './wasm-facade.js';
+import { connectWallet, getWalletNetwork, deriveKeysFromWallet, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -109,9 +108,9 @@ function shortAddress(address) {
 function showToast(message, type = 'success', duration = 4000) {
   if (!toastContainer || !toastTemplate) return;
   const toast = toastTemplate.content.cloneNode(true).firstElementChild;
-  
+
   toast.querySelector('.toast-message').textContent = message;
-  
+
   const icon = toast.querySelector('.toast-icon');
   if (type === 'success') {
     icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
@@ -122,11 +121,11 @@ function showToast(message, type = 'success', duration = 4000) {
     toast.classList.add('border-red-500/50');
     icon.classList.add('text-red-500');
   }
-  
+
   toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
-  
+
   toastContainer.appendChild(toast);
-  
+
   setTimeout(() => {
     toast.style.opacity = '0';
     toast.style.transform = 'translateX(100%)';
@@ -235,7 +234,8 @@ async function getNonMembershipClient(contractId) {
 async function ensureCryptoReady() {
   if (!state.cryptoReady) {
     setStatus('Loading cryptography...', 'info');
-    await initProverWasm();
+    const { sorobanRpcUrl, ...network } = await getWalletNetwork();
+    await initializeWasm(sorobanRpcUrl);
     state.cryptoReady = true;
     setStatus('Cryptography ready', 'ok');
   }
@@ -251,29 +251,10 @@ async function deriveKeys() {
     deriveKeysBtnText.textContent = 'Signing...';
     deriveKeysBtn.disabled = true;
 
-    let spendingResult;
-    try {
-      spendingResult = await signWalletMessage('Privacy Pool Spending Key [v1]', {
-        networkPassphrase: state.networkPassphrase,
-        address: state.address,
-      });
-    } catch (e) {
-      if (e.code === 'USER_REJECTED') {
-        throw new Error('Please approve the message signature to derive your spending key');
-      }
-      throw e;
-    }
+    let { privKeyBytes, pubKeyBytes, ...rest} = deriveKeysFromWallet(state.address);
 
-    if (!spendingResult?.signedMessage) {
-      throw new Error('Spending key signature rejected');
-    }
-
-    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
-    const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-    const pubKeyBytes = derivePublicKey(privKeyBytes);
-    
-    const privateKeyHex = fieldToHex(privKeyBytes);
-    const publicKeyHex = fieldToHex(pubKeyBytes);
+    const privateKeyHex = privKeyBytes;
+    const publicKeyHex = pubKeyBytes;
 
     // Store in state (persists across account changes)
     state.derivedKeys = {
@@ -350,21 +331,21 @@ async function connect() {
     state.address = address;
     state.networkPassphrase = net.networkPassphrase;
     state.rpcUrl = net.sorobanRpcUrl || 'https://soroban-testnet.stellar.org';
-    
+
     // Update wallet button to show connected state
     walletChip.textContent = shortAddress(address);
     networkChip.textContent = net.network || 'Testnet';
     connectBtn.classList.remove('bg-dark-800', 'hover:bg-dark-700');
     connectBtn.classList.add('bg-brand-500/10', 'border-brand-500/30', 'text-brand-400');
-    
+
     // Invalidate contract clients (new account may have different auth)
     state.membershipClient = null;
     state.nonMembershipClient = null;
-    
+
     setStatus('Wallet connected', 'ok');
     log(`Wallet connected: ${address}`);
     showToast(`Connected: ${shortAddress(address)}`, 'success');
-    
+
     // If no keys derived yet, prompt to derive
     if (!state.derivedKeys.privateKeyHex) {
       log('Tip: Click "Derive Keys" to generate ZK keys for this account');
@@ -381,52 +362,32 @@ async function connect() {
   }
 }
 
-async function loadDeployments() {
-  try {
-    state.contracts = await loadDeployedContracts();
-    if (membershipContractInput && state.contracts?.aspMembership) {
-      membershipContractInput.value = state.contracts.aspMembership;
-    }
-    if (nonMembershipContractInput && state.contracts?.aspNonMembership) {
-      nonMembershipContractInput.value = state.contracts.aspNonMembership;
-    }
-    log('Loaded deployments.json');
-  } catch (err) {
-    log(`Failed to load deployments.json: ${err.message}`);
-  }
-}
-
 async function refreshState() {
   try {
     setStatus('Loading contract state...', 'info');
-    const membershipId = membershipContractInput.value.trim() || undefined;
-    const nonMembershipId = nonMembershipContractInput.value.trim() || undefined;
+    const client = getHandle().webClient;
 
     const [membershipState, nonMembershipState] = await Promise.all([
-      readASPMembershipState(membershipId),
-      readASPNonMembershipState(nonMembershipId),
+      client.aspMembershipContractState(),
+      client.aspNonmembershipContractState(),
     ]);
 
-    if (membershipState.success) {
-      membershipRootEl.textContent = membershipState.root || '--';
-      membershipLevelsEl.textContent = membershipState.levels ?? '--';
-      membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
-      updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
-      log('Loaded membership state');
-    } else {
-      log(`Membership state error: ${membershipState.error}`);
-      updateAdminInsertOnlyDisplay(undefined);
+    if (membershipContractInput) {
+      membershipContractInput.value = membershipState.contractId;
+    }
+    if (nonMembershipContractInput) {
+      nonMembershipContractInput.value = nonMembershipState.contractId;
     }
 
-    if (nonMembershipState.success) {
-      nonMembershipRootEl.textContent = nonMembershipState.root || '--';
-      log('Loaded non-membership state');
-    } else {
-      log(`Non-membership state error: ${nonMembershipState.error}`);
-    }
+    membershipRootEl.textContent = membershipState.root || '--';
+    membershipLevelsEl.textContent = membershipState.levels ?? '--';
+    membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
+    updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
+    nonMembershipRootEl.textContent = nonMembershipState.root || '--';
 
-    setStatus('State loaded', membershipState.success && nonMembershipState.success ? 'ok' : 'error');
+    setStatus('State loaded', 'ok');
   } catch (err) {
+    updateAdminInsertOnlyDisplay(undefined)
     setStatus('State load error', 'error');
     log(`State refresh failed: ${err.message}`);
   }
@@ -451,17 +412,13 @@ async function computeMembershipLeaf() {
     if (publicOverride !== null) {
       pubKeyBytes = bigintToField(publicOverride);
     } else if (privateValue !== null) {
-      const privateBytes = bigintToField(privateValue);
-      pubKeyBytes = derivePublicKey(privateBytes);
+      let { privKeyBytes, pubKeyBytes, ...rest} = deriveKeysFromWallet(state.derivedKeys.sourceAccount);
     } else {
       throw new Error('Provide a private key or a public key override');
     }
-
-    const blindingBytes = bigintToField(blindingValue);
-    const leafBytes = poseidon2Hash2(pubKeyBytes, blindingBytes, 1);
-
-    const pubKeyHex = fieldToHex(pubKeyBytes);
-    const leafHex = fieldToHex(leafBytes);
+    const client = getHandle().webClient;
+    const leafBytes = await client.deriveAspUserLeaf(blindingValue, pubKeyBytes);
+    const leafHex = leafBytes;
     const leafDec = bytesToBigIntLE(leafBytes).toString();
 
     derivedPubKeyEl.textContent = pubKeyHex;
@@ -540,7 +497,7 @@ async function toggleAdminInsertOnly() {
     if (!contractId) {
       throw new Error('Membership contract ID is required');
     }
-    
+
     if (state.adminInsertOnly === null || state.adminInsertOnly === undefined) {
       throw new Error('Cannot toggle: admin-only insert state is unknown. Refresh contract state first.');
     }
@@ -591,9 +548,9 @@ async function computeNonMembershipLeaf() {
       throw new Error('Value is required');
     }
     const keyBytes = bigintToField(keyValue);
-    const valueBytes = bigintToField(valueValue);
-    const leafBytes = poseidon2Hash2(keyBytes, valueBytes, 1);
-    computedNonMembershipLeafHexEl.textContent = fieldToHex(leafBytes);
+    const client = getHandle().webClient;
+    const leafBytes = await client.deriveAspUserLeaf(valueValue, keyBytes);
+    computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {
     log(`Non-membership leaf error: ${err.message}`);
@@ -680,7 +637,7 @@ document.querySelectorAll('#derivedKeysDisplay .copy-btn').forEach(btn => {
 async function init() {
   setStatus('Initializing...', 'info');
   await ensureCryptoReady();
-  await loadDeployments();
+  await refreshState();
   syncNonMembershipValue();
   setStatus('Ready', 'ok');
 }

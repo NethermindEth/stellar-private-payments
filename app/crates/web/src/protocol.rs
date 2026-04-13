@@ -4,7 +4,7 @@ use prover::flows::{DepositParams, N_OUTPUTS};
 pub type Address = String;
 use types::{
     AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, EncryptionSignature, ExtAmount,
-    ExtData, Field, NoteAmount, NoteKeyPair, PublicKeyEntry, SpendingSignature, SyncMetadata, AspMembershipSync
+    ExtData, Field, NoteAmount, NotePublicKey, NoteKeyPair, PublicKeyEntry, SpendingSignature, SyncMetadata, AspMembershipSync
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -23,6 +23,7 @@ pub enum StorageWorkerRequest {
     UserKeys(Address),
     RecentPubKeys(u32),
     Deposit(DepositRequest),
+    DeriveASPleaf(AdminASPRequest)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +36,7 @@ pub enum StorageWorkerResponse {
     PubKeys(Vec<PublicKeyEntry>),
     AspMembershipSync(AspMembershipSync),
     DepositParams(DepositParams),
+    DeriveASPleaf(Field)
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -56,7 +58,7 @@ pub struct DepositRequest{
     pub user_address: Address,
     pub membership_blinding: Field,
     pub amount_stroops: ExtAmount,
-    pub pool_root: Field,
+    pub pool_root: Option<Field>,
     pub pool_address: Address,
     pub aspmem_root: Field,
     pub aspmem_ledger: u32,
@@ -87,4 +89,11 @@ pub struct DepositPrepared {
     pub ext_data: ExtData,
     /// Public inputs and derived values used to build the on-chain `Proof` struct.
     pub prepared: PreparedTxPublic,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AdminASPRequest{
+    pub membership_blinding: Field,
+    pub pubkey: NotePublicKey,
 }

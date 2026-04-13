@@ -1,6 +1,43 @@
 use serde::{Deserialize, Serialize};
 use crate::{EncryptionPublicKey, NotePublicKey, ExtAmount, Field};
 
+/// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
+///
+/// Used by key wrapper types in `crate::lib` via `#[serde(with = "...")]`.
+pub(crate) mod serde_0x_hex_32 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(bytes: &[u8; 32], serializer: S) -> core::result::Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut out = String::with_capacity(2 + 64);
+        out.push_str("0x");
+        out.push_str(&hex::encode(bytes));
+        serializer.serialize_str(&out)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> core::result::Result<[u8; 32], D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let s = s
+            .strip_prefix("0x")
+            .ok_or_else(|| serde::de::Error::custom("expected 0x-prefixed hex"))?;
+        if s.len() != 64 {
+            return Err(serde::de::Error::custom(format!(
+                "expected 64 hex chars, got {}",
+                s.len()
+            )));
+        }
+
+        let mut out = [0u8; 32];
+        hex::decode_to_slice(s, &mut out).map_err(serde::de::Error::custom)?;
+        Ok(out)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractsStateData {

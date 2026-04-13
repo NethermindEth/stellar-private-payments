@@ -5,7 +5,7 @@ use gloo_worker::oneshot::oneshot;
 use gloo_timers::future::TimeoutFuture;
 use state::{Storage, process_events};
 use std::cell::RefCell;
-use crate::protocol::{StorageWorkerRequest, StorageWorkerResponse, UserKeys};
+use crate::protocol::{StorageWorkerRequest, StorageWorkerResponse, UserKeys, AdminASPRequest};
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
 use prover::{
@@ -165,6 +165,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             log::debug!("[{WORKER_NAME}] fetched {} pub keys for the address book", list.len());
             StorageWorkerResponse::PubKeys(list)
         }
+        StorageWorkerRequest::DeriveASPleaf(AdminASPRequest{membership_blinding, pubkey}) => {
+            log::debug!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
+            let user_leaf = asp_membership_leaf(&pubkey, &membership_blinding)?;
+            log::debug!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
+            StorageWorkerResponse::DeriveASPleaf(user_leaf)
+        }
         StorageWorkerRequest::Deposit(req) => {
             log::debug!("[{WORKER_NAME}] deposit");
 
@@ -231,7 +237,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let params = DepositParams {
                 priv_key: note_privkey,
                 encryption_pubkey: encryption_pubkey.clone(),
-                pool_root: req.pool_root,
+                pool_root: req.pool_root.expect("TODO - figure out on NOne"),
                 pool_address: req.pool_address,
                 amount_stroops: req.amount_stroops,
                 outputs,

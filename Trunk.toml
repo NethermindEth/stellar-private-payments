@@ -40,5 +40,5 @@ stage = "build"
 command = "sh"
 command_arguments = ["-c", """
 ./app/node_modules/.bin/esbuild app/js/ui.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
-#./app/node_modules/.bin/esbuild app/js/admin.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
 """]

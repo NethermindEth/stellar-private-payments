@@ -94,10 +94,10 @@ pub struct EncryptionSignature(pub Vec<u8>);
 
 /// Encryption private key
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionPrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+pub struct EncryptionPrivateKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
 /// Encryption public key
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionPublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+pub struct EncryptionPublicKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
 
 /// Encryption key pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -110,11 +110,89 @@ pub struct EncryptionKeyPair {
 
 /// Note ownership private key
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotePrivateKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+pub struct NotePrivateKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
 
 /// Note ownership public key
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotePublicKey(#[serde(with = "serde_bytes")] pub [u8; 32]);
+pub struct NotePublicKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
+
+#[cfg(test)]
+mod key_serde_tests {
+    use super::*;
+    use anyhow::Result;
+
+    fn pattern_bytes() -> Result<[u8; 32]> {
+        let mut out = [0u8; 32];
+        for (i, b) in out.iter_mut().enumerate() {
+            *b = u8::try_from(i).map_err(|_| anyhow::anyhow!("index out of range"))?;
+        }
+        Ok(out)
+    }
+
+    macro_rules! hex_key_tests {
+        ($ty:ident, $mod_name:ident) => {
+            mod $mod_name {
+                use super::*;
+
+                #[test]
+                fn serde_zero_is_0x_64hex() -> Result<()> {
+                    let k = $ty([0u8; 32]);
+                    let s = serde_json::to_string(&k)?;
+                    assert_eq!(
+                        s,
+                        "\"0x0000000000000000000000000000000000000000000000000000000000000000\""
+                    );
+                    let parsed: $ty = serde_json::from_str(&s)?;
+                    assert_eq!(parsed.0, k.0);
+                    Ok(())
+                }
+
+                #[test]
+                fn serde_roundtrip_pattern() -> Result<()> {
+                    let k = $ty(pattern_bytes()?);
+                    let s = serde_json::to_string(&k)?;
+                    let parsed: $ty = serde_json::from_str(&s)?;
+                    assert_eq!(parsed.0, k.0);
+                    Ok(())
+                }
+
+                #[test]
+                fn serde_rejects_missing_0x_prefix() -> Result<()> {
+                    let s =
+                        "\"0000000000000000000000000000000000000000000000000000000000000000\"";
+                    assert!(serde_json::from_str::<$ty>(s).is_err());
+                    Ok(())
+                }
+
+                #[test]
+                fn serde_rejects_wrong_length() -> Result<()> {
+                    let s = "\"0x00\"";
+                    assert!(serde_json::from_str::<$ty>(s).is_err());
+                    Ok(())
+                }
+
+                #[test]
+                fn serde_rejects_invalid_hex() -> Result<()> {
+                    let s = "\"0xgg00000000000000000000000000000000000000000000000000000000000000\"";
+                    assert!(serde_json::from_str::<$ty>(s).is_err());
+                    Ok(())
+                }
+
+                #[test]
+                fn serde_rejects_legacy_byte_array() -> Result<()> {
+                    let s = "[0,1,2,3]";
+                    assert!(serde_json::from_str::<$ty>(s).is_err());
+                    Ok(())
+                }
+            }
+        };
+    }
+
+    hex_key_tests!(EncryptionPrivateKey, encryption_private_key);
+    hex_key_tests!(EncryptionPublicKey, encryption_public_key);
+    hex_key_tests!(NotePrivateKey, note_private_key);
+    hex_key_tests!(NotePublicKey, note_public_key);
+}
 
 /// Note ownership key pair
 #[derive(Debug, Clone, Serialize, Deserialize)]

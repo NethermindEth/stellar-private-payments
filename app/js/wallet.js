@@ -9,6 +9,7 @@ import {
     signMessage
 } from '@stellar/freighter-api';
 
+import { getHandle } from './wasm-facade.js';
 /**
  * Request wallet access and return the active public key.
  *
@@ -171,12 +172,12 @@ export async function signWalletMessage(message, opts = {}) {
 
     console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
     const result = await signMessage(message, opts);
-    console.log('[Wallet] signMessage result:', { 
+    console.log('[Wallet] signMessage result:', {
         hasSignedMessage: !!result?.signedMessage,
         hasError: !!result?.error,
         error: result?.error,
     });
-    
+
     const { signedMessage, signerAddress, error } = result || {};
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
@@ -184,7 +185,77 @@ export async function signWalletMessage(message, opts = {}) {
     // If SignMessage returns null
     if (!signedMessage) {
         throw new Error('No signature returned. User may have rejected the request.');
-    }   
+    }
 
     return { signedMessage, signerAddress };
+}
+
+/**
+ * Derives spending and encryption keys from Freighter wallet signatures.
+ * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
+ *
+ * @param {account} string
+ * @param {Object} options
+ * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
+ * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
+ * @param {number} [options.signDelay=300] - Delay between signature requests (ms)
+ * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
+ * @throws {Error} If user rejects signature requests
+ */
+export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}, signDelay = 300 }) {
+    const client = getHandle().webClient;
+    let data = await client.getUserKeys(account);
+    if (data) {
+      return { privKeyBytes: data.noteKeypair.private, pubKeyBytes: data.noteKeypair.public, encryptionKeypair: {
+              publicKey: data.encryptionKeypair.public,
+              privateKey: data.encryptionKeypair.private,
+          } };
+    }
+
+    onStatus?.(`Sign message to derive keys (1/2)...`);
+
+    let spendingResult;
+    try {
+        spendingResult = await signWalletMessage(client.spendingKeyMessage(), signOptions);
+    } catch (e) {
+        if (e.code === 'USER_REJECTED') {
+            throw new Error('Please approve the message signature to derive your spending key');
+        }
+        throw e;
+    }
+
+    if (!spendingResult?.signedMessage) {
+        throw new Error('Spending key signature rejected');
+    }
+
+    if (signDelay > 0) {
+        await new Promise(r => setTimeout(r, signDelay));
+    }
+
+    onStatus?.('Sign message to derive keys (2/2)...');
+
+    let encryptionResult;
+    try {
+        encryptionResult = await signWalletMessage(client.encryptionDerivationMessage(), signOptions);
+    } catch (e) {
+        if (e.code === 'USER_REJECTED') {
+            throw new Error('Please approve the message signature to derive your encryption key');
+        }
+        throw e;
+    }
+
+    if (!encryptionResult?.signedMessage) {
+        throw new Error('Encryption key signature rejected');
+    }
+
+    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
+    const encryptionSigBytes = Uint8Array.from(atob(encryptionResult.signedMessage), c => c.charCodeAt(0));
+    await client.deriveAndSaveUserKeys(account, spendingSigBytes, encryptionSigBytes);
+
+    data = await client.getUserKeys(account);
+    return { privKeyBytes: data.noteKeypair.private, pubKeyBytes: data.noteKeypair.public, encryptionKeypair: {
+            publicKey: data.encryptionKeypair.public,
+            privateKey: data.encryptionKeypair.private,
+        } };
+
 }
