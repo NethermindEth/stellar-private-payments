@@ -195,8 +195,11 @@ impl Storage {
         let mut stmt = self
             .conn
             .prepare(
-                "SELECT address, encryption_key, note_key, public_key, ledger
-                     FROM registered_public_keys ORDER BY ledger DESC LIMIT ?1",
+                "SELECT p.owner, p.encryption_key, p.note_key, r.ledger
+                 FROM public_keys p
+                 JOIN raw_contract_events r ON r.id = p.event_id
+                 ORDER BY r.ledger DESC
+                 LIMIT ?1",
             )
             .context("prepare get_all_public_keys")?;
         stmt.query_map([limit], map_public_key_entry)
@@ -733,7 +736,7 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry
         address: row.get(0)?,
         encryption_key: row.get(1)?,
         note_key: row.get(2)?,
-        ledger: col_u32(row.get::<_, i64>(4)?, 4)?,
+        ledger: col_u32(row.get::<_, i64>(3)?, 3)?,
     })
 }
 
@@ -741,7 +744,10 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry
 mod tests {
     use super::*;
     use prover::{crypto, encryption};
-    use types::{ContractEvent, ContractsEventData, EncryptionSignature, NoteAmount, SpendingSignature};
+    use types::{
+        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature, NoteAmount,
+        NotePublicKey, PublicKeyEvent, SpendingSignature,
+    };
 
     fn dummy_event(id: &str) -> ContractEvent {
         ContractEvent {
@@ -751,6 +757,36 @@ mod tests {
             topics: vec!["dummy".to_string()],
             value: "dummy".to_string(),
         }
+    }
+
+    #[test]
+    fn get_recent_public_keys_reads_public_keys_with_ledger() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        let event_id = "pk_event_1";
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cursor".to_string(),
+            events: vec![ContractEvent {
+                id: event_id.to_string(),
+                ledger: 42,
+                contract_id: "CPOOL".to_string(),
+                topics: vec!["pk".to_string()],
+                value: "dummy".to_string(),
+            }],
+        })?;
+
+        storage.save_public_key_events_batch(&vec![PublicKeyEvent {
+            id: event_id.to_string(),
+            owner: "GTESTOWNER".to_string(),
+            encryption_key: EncryptionPublicKey([1u8; 32]),
+            note_key: NotePublicKey([2u8; 32]),
+        }])?;
+
+        let list = storage.get_recent_public_keys(1)?;
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].address, "GTESTOWNER");
+        assert_eq!(list[0].ledger, 42);
+        Ok(())
     }
 
     #[test]

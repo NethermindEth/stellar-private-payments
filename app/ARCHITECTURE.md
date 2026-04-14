@@ -13,7 +13,102 @@ Other directories in `app` directory mostly define interfaces for the `web` plat
 
 **Storage:**
 
-Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage accross different platforms allowing future syncs across platforms.
+Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage accross different platforms allowing future data syncs across platforms.
+
+## Web platform (WASM + Web Workers)
+
+The `web` platform runs Rust application logic in the browser via WASM, with heavy and/or blocking work offloaded to Web Workers.
+
+### Components
+
+**JS UI (main thread)**
+
+The UI is written in JavaScript and calls into the WASM bundle. It does not communicate with workers directly.
+
+**Main thread (WASM)**
+
+- Entry point is `mainThread(config)` (WASM export).
+- Initializes logging / panic hooks, constructs `WebClient`, and starts an indexer polling loop.
+
+**Indexer (core Rust)**
+
+- The indexer is generic over a storage backend (`Indexer<S: ContractDataStorage>`).
+- On web, the storage backend is `WebClient`, which implements the `ContractDataStorage` trait by forwarding calls to the Storage Worker.
+- The indexer polls Stellar RPC for contract events and persists them as raw events.
+
+**`WebClient` (WASM, wasm-bindgen API)**
+
+- `WebClient` is the only Rust API exposed to JS, via `#[wasm_bindgen]` methods.
+- Spawns both workers and performs request/response routing internally; JS never constructs or sends worker protocol messages.
+- Implements the worker communication protocol defined in `protocol.rs`.
+
+**Storage Worker (Web Worker)**
+
+- Owns local persistent state: SQLite via OPFS-backed VFS (browser storage).
+- Performs local “logic operations”: saving raw events, processing events, scanning/decrypting notes, and maintaining derived state.
+- Designed to stay responsive by processing in small chunks and yielding between batches.
+
+**Prover Worker (Web Worker)**
+
+- Runs long/blocking proving so it cannot block the Storage Worker’s background processing or other app requests from the main thread.
+- Does not persist any user state; it loads/caches proving artifacts in memory and returns proof results.
+
+### Worker protocol and isolation
+
+The Rust `web` platform crate owns worker spawning and communication. Worker messages are strongly typed and serialized using enums in `protocol.rs` (e.g. `StorageWorkerRequest/Response`, `ProverWorkerRequest/Response`). This protocol is intentionally not exposed to JS.
+
+### Data flow (high level)
+
+```mermaid
+flowchart LR
+  %% Main thread
+  subgraph JS["JS UI (main thread)"]
+    UI["UI code (JS)"]
+  end
+
+  subgraph WASM["Main thread (WASM)"]
+    MT["mainThread(config)"]
+    H["MainThreadHandle"]
+    WC["WebClient (wasm-bindgen API)"]
+    IDX["Indexer loop"]
+  end
+
+  %% Workers
+  subgraph SW["Storage Worker (Web Worker)"]
+    DB["SQLite (OPFS) + processors"]
+  end
+
+  subgraph PW["Prover Worker (Web Worker)"]
+    PR["Prover + witness calc"]
+  end
+
+  subgraph RPC["Stellar RPC"]
+    RPCAPI["Contracts state + events"]
+  end
+
+  UI -->|"calls WASM exports"| MT
+  MT -->|"constructs"| WC
+  MT -->|"returns"| H
+  UI -->|"gets handle"| H
+  UI -->|"webClient getter"| WC
+
+  WC -->|"spawns"| SW
+  WC -->|"spawns"| PW
+  MT -->|"ping_storage()"| SW
+
+  MT -->|"starts"| IDX
+  IDX -->|"fetch_contract_events()"| RPCAPI
+  IDX -->|"save_events_batch() via ContractDataStorage"| WC
+  WC -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
+
+  UI -->|"WebClient.* calls"| WC
+  WC -->|"reads contract state"| RPCAPI
+  WC -->|"StorageWorkerRequest::*"| DB
+  WC -->|"ProverWorkerRequest::*"| PR
+  PR -->|"ProverWorkerResponse::*"| WC
+  DB -->|"StorageWorkerResponse::*"| WC
+  WC -->|"returns prepared data"| UI
+```
 
 **Keypair Derivation:**
 

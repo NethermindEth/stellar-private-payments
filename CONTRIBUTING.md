@@ -11,16 +11,25 @@ git config commit.gpgsign true
 ## Project Structure
 
 ```
-stellar-private-transactions/
-├── app/                        # Browser-based frontend application (See app/README.md for more information)
-│   ├── crates/                 # Rust WASM modules
-│   │   ├── prover/             # Groth16 proof generation
-│   │   └── witness/            # Circom witness calculator
-│   ├── js/                     # JavaScript frontend code
-│   │   ├── state/              # State management (IndexedDB, sync) (see app/ARCHITECTURE.md for more information)
-│   │   ├── ui/                 # UI components 
-│   │   └── *.js                # Core modules (bridge, wallet, stellar)
-│   └── index.html              # Main application entry
+stellar-private-payments/
+├── app/                        # Application (see app/README.md, app/ARCHITECTURE.md)
+│   ├── crates/
+│   │   ├── core/               # Platform-agnostic Rust logic (storage, prover flows, indexer, types, witness)
+│   │   │   ├── prover/
+│   │   │   ├── state/
+│   │   │   ├── stellar/
+│   │   │   ├── types/
+│   │   │   └── witness/
+│   │   └── platforms/
+│   │       └── web/            # WASM entrypoint + WebClient (wasm-bindgen) + internal worker protocol/bridges
+│   ├── js/                     # JavaScript frontend code (web interface)
+│   │   ├── ui/                 # UI components
+│   │   ├── admin.js            # Admin UI entry
+│   │   ├── ui.js               # Main UI entry
+│   │   ├── wallet.js           # Freighter wallet integration
+│   │   └── wasm-facade.js      # Thin wrapper over WASM exports
+│   ├── index.html              # Main web application entry
+│   └── admin.html              # Admin entry
 ├── circuits/                   # Circom ZK circuits
 │   ├── src/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
@@ -41,6 +50,10 @@ stellar-private-transactions/
 ├── scripts/                    # Deployment and utility scripts
 │   ├── deploy.sh               # Contract deployment script
 │   └── deployments.json        # Deployment output
+├── dist/                       # Built static site output (generated)
+│   └── js/
+│       ├── storage-worker.js    # Generated Storage Worker entrypoint
+│       └── prover-worker.js     # Generated Prover Worker entrypoint
 └── Makefile                    # Build automation
 ```
 
