@@ -3,12 +3,12 @@
 //! Uses ark-circom to compute witnesses for Circom circuits in the browser.
 //! Outputs witness bytes compatible with the prover module.
 
+use anyhow::{Context as _, Result};
 use ark_bn254::Fr;
 use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
 use num_bigint::{BigInt, Sign};
 // These are part of the reduced STD that is browser compatible
 use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
-use wasm_bindgen::prelude::*;
 use wasmer::{Module, Store};
 
 /// BN254 scalar field modulus
@@ -16,13 +16,11 @@ const BN254_FIELD_MODULUS: &str =
     "21888242871839275222246405745257275088548364400416034343698204186575808495617";
 
 /// Get module version
-#[wasm_bindgen]
 pub fn version() -> String {
     String::from(env!("CARGO_PKG_VERSION"))
 }
 
 /// Witness calculator instance
-#[wasm_bindgen]
 pub struct WitnessCalculator {
     /// Wasmer store for the circuit WASM instance
     store: Store,
@@ -35,19 +33,17 @@ pub struct WitnessCalculator {
     num_public_inputs: u32,
 }
 
-#[wasm_bindgen]
 impl WitnessCalculator {
     /// Create a new WitnessCalculator from circuit WASM and R1CS bytes
     ///
     /// # Arguments
     /// * `circuit_wasm` - The compiled circuit WASM bytes
     /// * `r1cs_bytes` - The R1CS constraint system bytes
-    #[wasm_bindgen(constructor)]
-    pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator, JsValue> {
+    pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
         // Parse R1CS from bytes
         let cursor = Cursor::new(r1cs_bytes);
-        let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse R1CS: {}", e)))?;
+        let r1cs_file: R1CSFile<Fr> =
+            R1CSFile::new(cursor).context("Failed to parse R1CS")?;
 
         let witness_size = r1cs_file.header.n_wires;
         let num_public_inputs = r1cs_file.header.n_pub_in;
@@ -55,11 +51,11 @@ impl WitnessCalculator {
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
         let module = Module::new(&store, circuit_wasm)
-            .map_err(|e| JsValue::from_str(&format!("Failed to load circuit WASM: {}", e)))?;
+            .context("Failed to load circuit WASM")?;
 
         // Create witness calculator from module
         let calculator = ArkWitnessCalculator::from_module(&mut store, module)
-            .map_err(|e| JsValue::from_str(&format!("Failed to init witness calc: {}", e)))?;
+            .map_err(|e| anyhow::anyhow!("Failed to init witness calc: {e}"))?;
 
         Ok(WitnessCalculator {
             store,
@@ -77,17 +73,16 @@ impl WitnessCalculator {
     ///
     /// # Returns
     /// * Witness as Little-Endian bytes (32 bytes per field element)
-    #[wasm_bindgen]
-    pub fn compute_witness(&mut self, inputs_json: &str) -> Result<Vec<u8>, JsValue> {
+    pub fn compute_witness(&mut self, inputs_json: &str) -> Result<Vec<u8>> {
         use serde_json::Value;
 
         // Parse JSON inputs
-        let inputs: Value = serde_json::from_str(inputs_json)
-            .map_err(|e| JsValue::from_str(&format!("Invalid JSON: {}", e)))?;
+        let inputs: Value =
+            serde_json::from_str(inputs_json).context("Invalid JSON")?;
 
         let inputs_map = inputs
             .as_object()
-            .ok_or_else(|| JsValue::from_str("Inputs must be a JSON object"))?;
+            .context("Inputs must be a JSON object")?;
 
         // Convert to HashMap<String, Vec<BigInt>> by flattening nested structures
         let mut inputs_hashmap: HashMap<String, Vec<BigInt>> = HashMap::new();
@@ -100,20 +95,18 @@ impl WitnessCalculator {
         let witness = self
             .calculator
             .calculate_witness(&mut self.store, inputs_hashmap, false)
-            .map_err(|e| JsValue::from_str(&format!("Witness calculation failed: {}", e)))?;
+            .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
 
         // Convert to Little-Endian bytes
         Ok(witness_to_bytes(&witness))
     }
 
     /// Get the witness size (number of field elements)
-    #[wasm_bindgen(getter)]
     pub fn witness_size(&self) -> u32 {
         self.witness_size
     }
 
     /// Get the number of public inputs
-    #[wasm_bindgen(getter)]
     pub fn num_public_inputs(&self) -> u32 {
         self.num_public_inputs
     }
@@ -180,7 +173,7 @@ fn flatten_input(
     key: &str,
     value: &serde_json::Value,
     inputs: &mut HashMap<String, Vec<BigInt>>,
-) -> Result<(), JsValue> {
+) -> Result<()> {
     use serde_json::Value;
 
     // (key, value) pairs to iterate over.
@@ -194,10 +187,7 @@ fn flatten_input(
                 } else if let Some(i) = n.as_i64() {
                     BigInt::from(i)
                 } else {
-                    return Err(JsValue::from_str(&format!(
-                        "Invalid number for {}",
-                        current_key
-                    )));
+                    anyhow::bail!("Invalid number for {current_key}");
                 };
                 // Convert to field element (handles negative numbers)
                 inputs
@@ -211,9 +201,8 @@ fn flatten_input(
                 } else {
                     BigInt::parse_bytes(s.as_bytes(), 10)
                 };
-                let bi = bi.ok_or_else(|| {
-                    JsValue::from_str(&format!("Invalid bigint for {}: {}", current_key, s))
-                })?;
+                let bi =
+                    bi.context(format!("Invalid bigint for {current_key}: {s}"))?;
                 // Convert to field element (handles negative numbers)
                 inputs
                     .entry(current_key)
@@ -257,7 +246,7 @@ fn flatten_pure_array(
     key: &str,
     value: &serde_json::Value,
     inputs: &mut HashMap<String, Vec<BigInt>>,
-) -> Result<(), JsValue> {
+) -> Result<()> {
     use serde_json::Value;
 
     // We use indices to maintain row-major order:
@@ -279,7 +268,7 @@ fn flatten_pure_array(
                     } else if let Some(i) = n.as_i64() {
                         BigInt::from(i)
                     } else {
-                        return Err(JsValue::from_str(&format!("Invalid number for {}", key)));
+                        anyhow::bail!("Invalid number for {key}");
                     };
                     inputs
                         .entry(key.to_string())
@@ -292,9 +281,7 @@ fn flatten_pure_array(
                     } else {
                         BigInt::parse_bytes(s.as_bytes(), 10)
                     };
-                    let bi = bi.ok_or_else(|| {
-                        JsValue::from_str(&format!("Invalid bigint for {}: {}", key, s))
-                    })?;
+                    let bi = bi.context(format!("Invalid bigint for {key}: {s}"))?;
                     inputs
                         .entry(key.to_string())
                         .or_default()
@@ -316,10 +303,7 @@ fn flatten_pure_array(
                         .push(BigInt::from(0));
                 }
                 Value::Object(_) => {
-                    return Err(JsValue::from_str(&format!(
-                        "Unexpected object in pure array: {}",
-                        key
-                    )));
+                    anyhow::bail!("Unexpected object in pure array: {key}");
                 }
             },
             WorkItem::ArrayIter { arr, idx } => {

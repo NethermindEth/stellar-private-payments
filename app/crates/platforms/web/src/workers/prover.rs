@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context as _, Result};
 use wasm_bindgen::JsError;
 use gloo_worker::oneshot::oneshot;
 use gloo_timers::future::TimeoutFuture;
@@ -49,7 +49,8 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         }
     )?;
 
-    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes).expect("FAILED WitnessCalculator");
+    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
 
     WITNESS_CALC.with(|cell| {
@@ -115,7 +116,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     .as_mut()
                     .ok_or_else(|| anyhow::anyhow!("witness calculator is not initialized"))?;
                 calc.compute_witness(&circuit_inputs_json)
-                    .map_err(|e| anyhow::anyhow!("witness calculation failed: {e:?}"))
+                    .context("witness calculation failed")
             })?;
 
             let (proof_uncompressed, prepared_public) = PROVER.with(|cell| {
