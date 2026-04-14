@@ -18,7 +18,7 @@ ark-std = { workspace = true }
 cfg-if = "1.0"
 hex = "0.4"
 lazy_static = "1.4"
-rand = "0.8.5"
+rand = "0.9.3"
 sha2 = { workspace = true }
 
 [profile.release]
