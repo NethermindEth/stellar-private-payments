@@ -31,7 +31,8 @@ pub const N_OUTPUTS: usize = 2;
 ///
 /// Circuit note: the current circuit expects exactly 2 inputs; callers may provide
 /// 0, 1, or 2, and `transact()` will pad with dummy inputs as needed.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactInputNote {
     /// Note amount in stroops (1 XLM = 10_000_000 stroops).
     pub amount_stroops: NoteAmount,
@@ -112,7 +113,8 @@ pub struct TransactArtifacts {
 ///
 /// Invariant: the equation must balance:
 /// `Inputs + Public = Outputs`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransactParams {
     /// User's BN254 note private key used to authorize spends (32 bytes).
     pub priv_key: NotePrivateKey,
@@ -184,7 +186,8 @@ pub struct DepositParams {
 /// - spends existing notes (inputs),
 /// - sends tokens to an external recipient (extData recipient),
 /// - sets `ext_amount < 0`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WithdrawParams {
     /// User's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,
@@ -218,7 +221,8 @@ pub struct WithdrawParams {
 ///
 /// Transfer invariant:
 /// `Input notes must equal output notes`.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TransferParams {
     /// Sender's BN254 note private key (32 bytes).
     pub priv_key: NotePrivateKey,

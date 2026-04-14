@@ -64,6 +64,170 @@ pub struct MerkleTree {
     next_index: u64,
 }
 
+/// Memory-efficient Merkle helper for an append-only prefix of leaves.
+///
+/// Unlike [`MerkleTree`], this does **not** allocate the full `2^depth` leaf array.
+/// It treats all missing leaves as the contract's `zero_leaf` value and computes:
+/// - the full-depth Merkle root, and
+/// - Merkle proofs for any existing leaf index `< leaves.len()`.
+pub struct MerklePrefixTree {
+    depth: usize,
+    leaves: Vec<Scalar>,
+    /// `empty[level]` is the node value of a completely-empty subtree at `level`,
+    /// where level 0 is the leaf level and level `depth` is the root.
+    empty: Vec<Scalar>,
+}
+
+impl MerklePrefixTree {
+    /// Construct a prefix Merkle tree of the given `depth` from `leaves`.
+    ///
+    /// - `depth` is the full Merkle depth used by the contract/circuit.
+    /// - `leaves` must be ordered by `leaf_index` with no gaps: index `0..leaves.len()-1`.
+    ///
+    /// Missing leaves (i.e., indices `>= leaves.len()`) are treated as the contract's
+    /// `zero_leaf` value, and the computed root/proofs match the circuit's Poseidon2
+    /// merkle implementation.
+    pub fn new(depth: u32, leaves: &[AppField]) -> Result<Self> {
+        let depth =
+            usize::try_from(depth).map_err(|_| anyhow!("tree depth too large"))?;
+        if depth == 0 || depth > 32 {
+            return Err(anyhow!("Depth must be between 1 and 32"));
+        }
+
+        // Build the empty-subtree chain using the same zero leaf as the contract.
+        let mut zero_leaf_be = crypto::zero_leaf();
+        zero_leaf_be.reverse();
+        let zero = bytes_to_scalar(&zero_leaf_be)?;
+
+        let mut empty = Vec::with_capacity(depth + 1);
+        empty.push(zero);
+        for i in 0..depth {
+            empty.push(poseidon2_compression(empty[i], empty[i]));
+        }
+
+        let mut scalar_leaves = Vec::with_capacity(leaves.len());
+        for leaf in leaves {
+            scalar_leaves.push(bytes_to_scalar(&leaf.to_le_bytes())?);
+        }
+
+        Ok(Self {
+            depth,
+            leaves: scalar_leaves,
+            empty,
+        })
+    }
+
+    /// Return the number of provided leaves in this prefix.
+    pub fn leaf_count(&self) -> usize {
+        self.leaves.len()
+    }
+
+    /// Compute the full-depth Merkle root for this prefix.
+    ///
+    /// This hashes up to `depth` levels, using `zero_leaf`-derived empty subtree nodes for
+    /// all missing leaves.
+    pub fn root(&self) -> Result<AppField> {
+        let mut nodes = self.leaves.clone();
+
+        for level in 0..self.depth {
+            if nodes.is_empty() {
+                nodes.push(self.empty[level]);
+            }
+
+            let mut next = Vec::with_capacity((nodes.len() + 1) / 2);
+            for i in 0..((nodes.len() + 1) / 2) {
+                let left = nodes.get(2 * i).copied().unwrap_or(self.empty[level]);
+                let right = nodes.get(2 * i + 1).copied().unwrap_or(self.empty[level]);
+                next.push(poseidon2_compression(left, right));
+            }
+            nodes = next;
+        }
+
+        let root = nodes.get(0).copied().unwrap_or(self.empty[self.depth]);
+        let root_le = scalar_to_bytes(&root);
+        let root_le: [u8; 32] = root_le
+            .try_into()
+            .map_err(|_| anyhow!("Merkle root: expected 32 bytes"))?;
+        AppField::try_from_le_bytes(root_le)
+    }
+
+    /// Compute a Merkle proof for `index`, returning:
+    /// - `path_elements`: sibling node values as 32-byte little-endian field bytes
+    /// - `path_indices`: packed path bits as a 32-byte little-endian scalar
+    ///
+    /// `index` must be `< leaf_count()`.
+    pub fn proof_bytes(&self, index: u32) -> Result<(Vec<[u8; 32]>, [u8; 32])> {
+        let idx_usize = usize::try_from(index).map_err(|_| anyhow!("index too large"))?;
+        if idx_usize >= self.leaves.len() {
+            return Err(anyhow!(
+                "leaf index out of range: index={}, leaves={}",
+                idx_usize,
+                self.leaves.len()
+            ));
+        }
+
+        let mut level_nodes = self.leaves.clone();
+        let mut index = idx_usize;
+
+        let mut path_elements = Vec::with_capacity(self.depth);
+        let mut path_indices_bits_lsb = Vec::with_capacity(self.depth);
+
+        for level in 0..self.depth {
+            let sib_index = if index.is_multiple_of(2) {
+                index
+                    .checked_add(1)
+                    .ok_or_else(|| anyhow!("sibling index overflow"))?
+            } else {
+                index
+                    .checked_sub(1)
+                    .ok_or_else(|| anyhow!("sibling index underflow"))?
+            };
+
+            let sib = level_nodes
+                .get(sib_index)
+                .copied()
+                .unwrap_or(self.empty[level]);
+            let sib_le = scalar_to_bytes(&sib);
+            let sib_le: [u8; 32] = sib_le
+                .try_into()
+                .map_err(|_| anyhow!("path element: expected 32 bytes"))?;
+            path_elements.push(sib_le);
+            path_indices_bits_lsb.push((index & 1) as u64);
+
+            if level_nodes.is_empty() {
+                level_nodes.push(self.empty[level]);
+            }
+            let mut next = Vec::with_capacity((level_nodes.len() + 1) / 2);
+            for i in 0..((level_nodes.len() + 1) / 2) {
+                let left = level_nodes
+                    .get(2 * i)
+                    .copied()
+                    .unwrap_or(self.empty[level]);
+                let right = level_nodes
+                    .get(2 * i + 1)
+                    .copied()
+                    .unwrap_or(self.empty[level]);
+                next.push(poseidon2_compression(left, right));
+            }
+            level_nodes = next;
+            index /= 2;
+        }
+
+        let mut path_indices: u64 = 0;
+        for (i, b) in path_indices_bits_lsb.into_iter().enumerate() {
+            path_indices |= b << i;
+        }
+
+        let idx_scalar = Scalar::from(path_indices);
+        let idx_le = scalar_to_bytes(&idx_scalar);
+        let idx_le: [u8; 32] = idx_le
+            .try_into()
+            .map_err(|_| anyhow!("path indices: expected 32 bytes"))?;
+
+        Ok((path_elements, idx_le))
+    }
+}
+
 // TODO: For now we implement a full merkle tree. We should study if a partial
 // merkle tree is enough. To minimize storage on user side
 impl MerkleTree {

@@ -208,6 +208,84 @@ impl Storage {
             .context("get_all_public_keys collect")
     }
 
+    /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no gaps.
+    ///
+    /// Returns the commitment list as [`Field`] values (each stored as 32-byte LE blob).
+    ///
+    /// Errors if there are gaps/out-of-order indices, because Merkle reconstruction would
+    /// be ambiguous/incorrect.
+    pub fn get_pool_commitment_leaves_ordered(&self) -> Result<Vec<Field>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT leaf_index, commitment
+             FROM pool_commitments
+             ORDER BY leaf_index ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let idx: i64 = row.get(0)?;
+            let idx = col_u32(idx, 0)?;
+            let commitment: Field = row.get(1)?;
+            Ok((idx, commitment))
+        })?;
+
+        let mut leaves: Vec<Field> = Vec::new();
+        let mut expected_index: u32 = 0;
+
+        for row in rows {
+            let (idx, leaf) = row?;
+            if idx != expected_index {
+                anyhow::bail!(
+                    "pool_commitments gap/out-of-order: expected index {}, got {}",
+                    expected_index,
+                    idx
+                );
+            }
+            leaves.push(leaf);
+            expected_index = expected_index
+                .checked_add(1)
+                .context("pool_commitments index overflow")?;
+        }
+
+        Ok(leaves)
+    }
+
+    /// Lookup an unspent user note by pool commitment.
+    ///
+    /// Returns `(amount, blinding, leaf_index)` when found and unspent.
+    pub fn get_unspent_user_note_by_commitment(
+        &self,
+        account_address: &str,
+        commitment: &Field,
+    ) -> Result<Option<(NoteAmount, Field, u32)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT n.amount, n.blinding, c.leaf_index
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             WHERE a.address = ?1
+               AND c.commitment = ?2
+               AND n.nullifier_id IS NULL
+             LIMIT 1",
+        )?;
+
+        let row = stmt
+            .query_row(params![account_address, commitment], |row| {
+                let amount_i64: i64 = row.get(0)?;
+                let amount_u64: u64 = amount_i64
+                    .try_into()
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, amount_i64))?;
+                let amount = NoteAmount(amount_u64);
+                let blinding: Field = row.get(1)?;
+                let leaf_index_i64: i64 = row.get(2)?;
+                let leaf_index = col_u32(leaf_index_i64, 2)?;
+                Ok((amount, blinding, leaf_index))
+            })
+            .optional()
+            .context("Failed to query unspent user note by commitment")?;
+
+        Ok(row)
+    }
+
     /// Batch upsert for spent nullifiers
     pub fn save_nullifier_events_batch(&mut self, events: &Vec<NewNullifierEvent>) -> Result<()> {
         let tx = self.conn.transaction()?;

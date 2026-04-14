@@ -3,11 +3,13 @@ use wasm_bindgen::JsError;
 use gloo_worker::oneshot::oneshot;
 use gloo_timers::future::TimeoutFuture;
 use std::cell::RefCell;
-use crate::protocol::{DepositPrepared, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse};
+use crate::protocol::{
+    DepositPrepared, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
+};
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
 use prover::{
-    flows::{deposit},
+    flows::{deposit, transact, transfer, withdraw, TransactArtifacts},
     prover::Prover,
 };
 use futures::try_join;
@@ -108,75 +110,95 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             log::debug!("[{WORKER_NAME}] deposit");
 
             let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
-
-            let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
-            let witness_bytes = WITNESS_CALC.with(|cell| {
-                let mut borrow = cell.borrow_mut();
-                let calc = borrow
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("witness calculator is not initialized"))?;
-                calc.compute_witness(&circuit_inputs_json)
-                    .context("witness calculation failed")
-            })?;
-
-            let (proof_uncompressed, prepared_public) = PROVER.with(|cell| {
-                let borrow = cell.borrow();
-                let prover = borrow
-                    .as_ref()
-                    .ok_or_else(|| anyhow::anyhow!("prover is not initialized"))?;
-
-                let proof_compressed = prover.prove_bytes(&witness_bytes)?;
-                let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
-                let ok = prover.verify(&proof_compressed, &public_inputs)?;
-                if !ok {
-                    return Err(anyhow::anyhow!("proof verification failed"));
-                }
-
-                let proof_uncompressed = prover.proof_bytes_to_uncompressed(&proof_compressed)?;
-                if proof_uncompressed.len() != 256 {
-                    return Err(anyhow::anyhow!(
-                        "unexpected uncompressed proof length: {}",
-                        proof_uncompressed.len()
-                    ));
-                }
-
-                let p = transact_artifacts.prepared.clone();
-                let input_nullifiers = [
-                    types::Field::try_from_le_bytes(p.input_nullifiers[0])?,
-                    types::Field::try_from_le_bytes(p.input_nullifiers[1])?,
-                ];
-                let output_commitments = [
-                    types::Field::try_from_le_bytes(p.output_commitments[0])?,
-                    types::Field::try_from_le_bytes(p.output_commitments[1])?,
-                ];
-                let public_amount = types::Field::try_from_le_bytes(p.public_amount_field)?;
-                let asp_membership_root = types::Field::try_from_le_bytes(p.asp_membership_root)?;
-                let asp_non_membership_root =
-                    types::Field::try_from_le_bytes(p.asp_non_membership_root)?;
-
-                let prepared_public = PreparedTxPublic {
-                    pool_root: p.pool_root,
-                    input_nullifiers,
-                    output_commitments,
-                    public_amount,
-                    ext_data_hash_be: p.ext_data_hash_be,
-                    asp_membership_root,
-                    asp_non_membership_root,
-                };
-
-                Ok::<_, anyhow::Error>((proof_uncompressed, prepared_public))
-            })?;
-
-            let prepared = DepositPrepared {
-                proof_uncompressed,
-                ext_data: transact_artifacts.ext_data,
-                prepared: prepared_public,
-            };
-
-            ProverWorkerResponse::DepositPrepared(prepared)
+            let prepared = prove_from_artifacts(transact_artifacts)?;
+            ProverWorkerResponse::DepositPrepared(DepositPrepared {
+                proof_uncompressed: prepared.proof_uncompressed,
+                ext_data: prepared.ext_data,
+                prepared: prepared.prepared,
+            })
+        }
+        ProverWorkerRequest::Withdraw(params) => {
+            log::debug!("[{WORKER_NAME}] withdraw");
+            let artifacts = withdraw(params, hash_ext_data_offchain)?;
+            ProverWorkerResponse::WithdrawPrepared(prove_from_artifacts(artifacts)?)
+        }
+        ProverWorkerRequest::Transfer(params) => {
+            log::debug!("[{WORKER_NAME}] transfer");
+            let artifacts = transfer(params, hash_ext_data_offchain)?;
+            ProverWorkerResponse::TransferPrepared(prove_from_artifacts(artifacts)?)
+        }
+        ProverWorkerRequest::Transact(params) => {
+            log::debug!("[{WORKER_NAME}] transact");
+            let artifacts = transact(params, hash_ext_data_offchain)?;
+            ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
         }
     };
     Ok(resp)
+}
+
+fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
+    let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
+    let witness_bytes = WITNESS_CALC.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let calc = borrow
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("witness calculator is not initialized"))?;
+        calc.compute_witness(&circuit_inputs_json)
+            .context("witness calculation failed")
+    })?;
+
+    let (proof_uncompressed, prepared_public) = PROVER.with(|cell| {
+        let borrow = cell.borrow();
+        let prover = borrow
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("prover is not initialized"))?;
+
+        let proof_compressed = prover.prove_bytes(&witness_bytes)?;
+        let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
+        let ok = prover.verify(&proof_compressed, &public_inputs)?;
+        if !ok {
+            return Err(anyhow::anyhow!("proof verification failed"));
+        }
+
+        let proof_uncompressed = prover.proof_bytes_to_uncompressed(&proof_compressed)?;
+        if proof_uncompressed.len() != 256 {
+            return Err(anyhow::anyhow!(
+                "unexpected uncompressed proof length: {}",
+                proof_uncompressed.len()
+            ));
+        }
+
+        let p = transact_artifacts.prepared.clone();
+        let input_nullifiers = [
+            types::Field::try_from_le_bytes(p.input_nullifiers[0])?,
+            types::Field::try_from_le_bytes(p.input_nullifiers[1])?,
+        ];
+        let output_commitments = [
+            types::Field::try_from_le_bytes(p.output_commitments[0])?,
+            types::Field::try_from_le_bytes(p.output_commitments[1])?,
+        ];
+        let public_amount = types::Field::try_from_le_bytes(p.public_amount_field)?;
+        let asp_membership_root = types::Field::try_from_le_bytes(p.asp_membership_root)?;
+        let asp_non_membership_root = types::Field::try_from_le_bytes(p.asp_non_membership_root)?;
+
+        let prepared_public = PreparedTxPublic {
+            pool_root: p.pool_root,
+            input_nullifiers,
+            output_commitments,
+            public_amount,
+            ext_data_hash_be: p.ext_data_hash_be,
+            asp_membership_root,
+            asp_non_membership_root,
+        };
+
+        Ok::<_, anyhow::Error>((proof_uncompressed, prepared_public))
+    })?;
+
+    Ok(PreparedProverTx {
+        proof_uncompressed,
+        ext_data: transact_artifacts.ext_data,
+        prepared: prepared_public,
+    })
 }
 
 async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
@@ -199,7 +221,7 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
 
-    let mut opts = RequestInit::new();
+    let opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
 
