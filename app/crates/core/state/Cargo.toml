@@ -15,7 +15,7 @@ rusqlite = { version = "0.39.0", default-features = false, features = ["buildtim
 rusqlite_migration = { version = "2.5.0", default-features = false }
 serde = { workspace = true }
 stellar = { workspace = true }
-types = { path = "../types", features = ["rusqlite"] }
+types = { workspace = true, features = ["rusqlite"] }
 
 [dev-dependencies]
 prover = { workspace = true }

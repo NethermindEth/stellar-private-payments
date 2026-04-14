@@ -1,15 +1,16 @@
 [workspace]
 members = [
-    "app/crates/prover",
-    "app/crates/stellar",
-    "app/crates/state",
-    "app/crates/types",
-    "app/crates/witness",
+    "app/crates/core/prover",
+    "app/crates/core/stellar",
+    "app/crates/core/state",
+    "app/crates/core/types",
+    "app/crates/core/witness",
     "circuits",
     "contracts/*",
     "e2e-tests",
     "poseidon2",
-    "tools/ceremony-cli", "app/crates/web",
+    "tools/ceremony-cli",
+    "app/crates/platforms/web",
 ]
 resolver = "3"
 
@@ -33,6 +34,7 @@ ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.89", default-features = false }
+circuits = { path = "circuits", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
@@ -43,7 +45,7 @@ log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
 num-traits = { version = "0.2", default-features = false }
-prover = { path = "app/crates/prover" }
+prover = { path = "app/crates/core/prover" }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_bytes =  { version = "0.11", default-features = false }
@@ -52,15 +54,17 @@ serde-wasm-bindgen = { version = "0.4", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-stellar = { path = "app/crates/stellar" }
-types = { path = "app/crates/types" }
+state = { path = "app/crates/core/state" }
+stellar = { path = "app/crates/core/stellar" }
+types = { path = "app/crates/core/types" }
 uint = { version = "0.9", default-features = false }
 # pin for wasmer
 wasm-bindgen = { version = "=0.2.108", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-test = { version = "0.3" }
 wasmer = { version = "6.1", default-features = false }
 wasm-log = { version = "0.3", default-features = false }
-witness = { path = "app/crates/witness" }
+witness = { path = "app/crates/core/witness" }
+web = { path = "app/crates/platforms/web" }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]

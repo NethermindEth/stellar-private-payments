@@ -11,4 +11,4 @@ pub use conversions::*;
 pub use ext_data_hash::hash_ext_data_offchain;
 
 // TODO make it dependent on the network during the compilation
-const DEPLOYMENT: &str = include_str!("../../../../scripts/deployments.json");
+const DEPLOYMENT: &str = include_str!("../../../../../scripts/deployments.json");
