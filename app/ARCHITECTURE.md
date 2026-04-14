@@ -68,7 +68,6 @@ flowchart LR
 
   subgraph WASM["Main thread (WASM)"]
     MT["mainThread(config)"]
-    H["MainThreadHandle"]
     WC["WebClient (wasm-bindgen API)"]
     IDX["Indexer loop"]
   end
@@ -82,19 +81,16 @@ flowchart LR
     PR["Prover + witness calc"]
   end
 
-  subgraph RPC["Stellar RPC"]
+  %% Remote dependency (not local)
+  subgraph RPC["Stellar RPC (remote)"]
     RPCAPI["Contracts state + events"]
   end
 
   UI -->|"calls WASM exports"| MT
   MT -->|"constructs"| WC
-  MT -->|"returns"| H
-  UI -->|"gets handle"| H
-  UI -->|"webClient getter"| WC
 
   WC -->|"spawns"| SW
   WC -->|"spawns"| PW
-  MT -->|"ping_storage()"| SW
 
   MT -->|"starts"| IDX
   IDX -->|"fetch_contract_events()"| RPCAPI
@@ -108,6 +104,10 @@ flowchart LR
   PR -->|"ProverWorkerResponse::*"| WC
   DB -->|"StorageWorkerResponse::*"| WC
   WC -->|"returns prepared data"| UI
+
+  classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
+  style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;
+  class RPCAPI remote;
 ```
 
 **Keypair Derivation:**
