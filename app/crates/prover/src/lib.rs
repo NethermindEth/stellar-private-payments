@@ -15,6 +15,7 @@ extern crate alloc;
 pub mod crypto;
 pub mod encryption;
 pub mod merkle;
+pub mod notes;
 pub mod prover;
 pub mod r1cs;
 pub mod serialization;

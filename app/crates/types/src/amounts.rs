@@ -728,8 +728,8 @@ mod tests {
     }
 }
 
-    #[cfg(feature = "rusqlite")]
-    mod rusqlite_impls {
+#[cfg(feature = "rusqlite")]
+mod rusqlite_impls {
     //! Rusqlite conversions for amount and field types.
     //!
     //! These are feature-gated to avoid pulling rusqlite into WASM builds.

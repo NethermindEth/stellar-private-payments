@@ -3,7 +3,7 @@ use wasm_bindgen::JsError;
 use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
 use gloo_worker::oneshot::oneshot;
 use gloo_timers::future::TimeoutFuture;
-use state::{Storage, process_events};
+use state::{Storage, process_events, process_notes, AccountKeys, PoolCommitmentRow, DerivedUserNoteRow};
 use std::cell::RefCell;
 use crate::protocol::{StorageWorkerRequest, StorageWorkerResponse, UserKeys, AdminASPRequest};
 use wasm_bindgen_futures::spawn_local;
@@ -279,8 +279,25 @@ async fn process_until_empty() -> anyhow::Result<()> {
     const FETCH_LIMIT: u32 = 50; // small chunks to stay responsive
 
     loop {
-        let processed = with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
-        if !processed {
+        let did_raw = with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> anyhow::Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        let did_notes = with_storage_mut!(s => process_notes(s, FETCH_LIMIT, &mut derive)?)?;
+        if !did_raw && !did_notes {
             break;
         }
         // Yield to avoid blocking the worker for a long time

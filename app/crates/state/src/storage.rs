@@ -1,7 +1,11 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params, Error as SqlError, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
-use types::{ContractEvent, Field, NewNullifierEvent, NewCommitmentEvent, PublicKeyEvent, LeafAddedEvent, EncryptionKeyPair, NoteKeyPair, NotePrivateKey, NotePublicKey, EncryptionPrivateKey,EncryptionPublicKey, AspMembershipSync};
+use types::{
+    AspMembershipSync, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey,
+    Field, LeafAddedEvent, NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair,
+    NotePrivateKey, NotePublicKey, PublicKeyEvent,
+};
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
@@ -13,14 +17,45 @@ pub struct Storage {
     conn: Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct AccountKeys {
+    pub account_id: i64,
+    pub note_keypair: NoteKeyPair,
+    pub encryption_keypair: EncryptionKeyPair,
+}
+
+#[derive(Debug, Clone)]
+pub struct PoolCommitmentRow {
+    pub commitment_id: i64,
+    pub commitment: Field,
+    pub leaf_index: u32,
+    pub encrypted_output: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
+pub struct DerivedUserNoteRow {
+    pub amount: NoteAmount,
+    pub blinding: Field,
+    pub expected_nullifier: Field,
+}
+
+pub type DeriveNoteFn<'a> =
+    dyn FnMut(&AccountKeys, &PoolCommitmentRow) -> Result<Option<DerivedUserNoteRow>> + 'a;
+
 impl Storage {
     pub fn connect() -> Result<Self> {
-        let mut conn = Connection::open(DB_NAME)?;
+        Self::connect_with_connection(Connection::open(DB_NAME)?)
+    }
+
+    fn connect_with_connection(mut conn: Connection) -> Result<Self> {
         MIGRATIONS.to_latest(&mut conn)?;
-
         conn.pragma_update(None, "foreign_keys", "ON")?;
-
         Ok(Self { conn })
+    }
+
+    #[cfg(test)]
+    pub fn connect_in_memory() -> Result<Self> {
+        Self::connect_with_connection(Connection::open_in_memory()?)
     }
 
     pub fn save_events_batch(&mut self, data: &types::ContractsEventData) -> Result<()> {
@@ -28,7 +63,7 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(id) DO NOTHING"
             )?;
 
@@ -85,19 +120,19 @@ impl Storage {
                 WHERE accounts.address = ?1",
             params![address],
             |row| {
-                let enc_priv: [u8; 32] = row.get(0)?;
-                let enc_pub: [u8; 32] = row.get(1)?;
-                let note_priv: [u8; 32] = row.get(2)?;
-                let note_pub: [u8; 32] = row.get(3)?;
+                let enc_priv: EncryptionPrivateKey = row.get(0)?;
+                let enc_pub: EncryptionPublicKey = row.get(1)?;
+                let note_priv: NotePrivateKey = row.get(2)?;
+                let note_pub: NotePublicKey = row.get(3)?;
 
                 Ok((
                     NoteKeyPair {
-                        private: NotePrivateKey(note_priv),
-                        public: NotePublicKey(note_pub),
+                        private: note_priv,
+                        public: note_pub,
                     },
                     EncryptionKeyPair {
-                        private: EncryptionPrivateKey(enc_priv),
-                        public: EncryptionPublicKey(enc_pub),
+                        private: enc_priv,
+                        public: enc_pub,
                     },
                 ))
             },
@@ -125,10 +160,10 @@ impl Storage {
                 account_id
             ) VALUES (?1, ?2, ?3, ?4, ?5)",
             params![
-                &encryption_keypair.private.0,
-                &encryption_keypair.public.0,
-                &note_keypair.private.0,
-                &note_keypair.public.0,
+                &encryption_keypair.private,
+                &encryption_keypair.public,
+                &note_keypair.private,
+                &note_keypair.public,
                 account_id,
             ],
         )
@@ -219,8 +254,8 @@ impl Storage {
             for event in events {
                 stmt.execute(params![
                     event.owner,
-                    event.encryption_key.0,
-                    event.note_key.0,
+                    event.encryption_key,
+                    event.note_key,
                     event.id
                 ])?;
             }
@@ -400,6 +435,287 @@ impl Storage {
 
         Ok(events)
     }
+
+    fn get_accounts_with_latest_keypairs(&self) -> Result<Vec<AccountKeys>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                a.id,
+                k.encryption_private_key,
+                k.encryption_public_key,
+                k.note_private_key,
+                k.note_public_key
+             FROM accounts a
+             JOIN (
+                SELECT account_id, MAX(id) AS max_id
+                FROM keypairs
+                WHERE account_id IS NOT NULL
+                GROUP BY account_id
+             ) latest ON latest.account_id = a.id
+             JOIN keypairs k ON k.id = latest.max_id
+             ORDER BY a.id ASC",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let account_id: i64 = row.get(0)?;
+            let enc_priv: EncryptionPrivateKey = row.get(1)?;
+            let enc_pub: EncryptionPublicKey = row.get(2)?;
+            let note_priv: NotePrivateKey = row.get(3)?;
+            let note_pub: NotePublicKey = row.get(4)?;
+
+            Ok(AccountKeys {
+                account_id,
+                note_keypair: NoteKeyPair {
+                    private: note_priv,
+                    public: note_pub,
+                },
+                encryption_keypair: EncryptionKeyPair {
+                    private: enc_priv,
+                    public: enc_pub,
+                },
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Scan pool commitments and insert decryptable notes into `user_notes`.
+    ///
+    /// Progress is tracked per-account in `account_commitment_scan`.
+    pub fn scan_commitments_for_user_notes(
+        &mut self,
+        total_limit: u32,
+        derive: &mut DeriveNoteFn<'_>,
+    ) -> Result<bool> {
+        let accounts = self.get_accounts_with_latest_keypairs()?;
+        if accounts.is_empty() || total_limit == 0 {
+            return Ok(false);
+        }
+
+        let tx = self.conn.transaction()?;
+
+        // Ensure scheduler row exists.
+        tx.execute(
+            "INSERT OR IGNORE INTO notes_scan_scheduler (id, next_account_offset)
+             VALUES (1, 0)",
+            [],
+        )?;
+
+        let n = accounts.len();
+        let n_i64 = i64::try_from(n).expect("accounts len fits i64");
+        let mut offset: i64 = tx.query_row(
+            "SELECT next_account_offset FROM notes_scan_scheduler WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )?;
+        offset = offset.rem_euclid(n_i64);
+        let offset_usize = usize::try_from(offset).expect("offset fits usize");
+
+        // Histogram allocation: `total_limit` tokens distributed in RR order from `offset`.
+        let mut counts: Vec<u32> = vec![0; n];
+        for i in 0..total_limit {
+            let idx = (offset_usize + usize::try_from(i).expect("u32 fits usize")) % n;
+            counts[idx] = counts[idx].saturating_add(1);
+        }
+
+        // Ensure scan cursors exist for all accounts.
+        for a in &accounts {
+            tx.execute(
+                "INSERT OR IGNORE INTO account_commitment_scan (account_id, last_commitment_id)
+                 VALUES (?1, 0)",
+                params![a.account_id],
+            )?;
+        }
+
+        let mut did_progress = false;
+
+        for (idx, quota) in counts.into_iter().enumerate() {
+            if quota == 0 {
+                continue;
+            }
+            let account = &accounts[idx];
+
+            let last_commitment_id: i64 = tx.query_row(
+                "SELECT last_commitment_id
+                 FROM account_commitment_scan
+                 WHERE account_id = ?1",
+                params![account.account_id],
+                |row| row.get(0),
+            )?;
+
+            let commitments: Vec<PoolCommitmentRow> = {
+                let mut stmt = tx.prepare(
+                    "SELECT id, commitment, leaf_index, encrypted_output
+                     FROM pool_commitments
+                     WHERE id > ?1
+                     ORDER BY id ASC
+                     LIMIT ?2",
+                )?;
+
+                let rows = stmt.query_map(params![last_commitment_id, quota], |row| {
+                    let commitment_id: i64 = row.get(0)?;
+                    let commitment: Field = row.get(1)?;
+                    let leaf_index_i64: i64 = row.get(2)?;
+                    let leaf_index = col_u32(leaf_index_i64, 2)?;
+                    let encrypted_output: Vec<u8> = row.get(3)?;
+                    Ok(PoolCommitmentRow {
+                        commitment_id,
+                        commitment,
+                        leaf_index,
+                        encrypted_output,
+                    })
+                })?;
+
+                let mut out = Vec::new();
+                for r in rows {
+                    out.push(r?);
+                }
+                out
+            };
+
+            let mut max_scanned_id = last_commitment_id;
+            for row in commitments {
+                if row.commitment_id > max_scanned_id {
+                    max_scanned_id = row.commitment_id;
+                }
+
+                let Some(derived) = derive(account, &row)? else {
+                    continue;
+                };
+
+                let nullifier_id: Option<i64> = tx
+                    .query_row(
+                        "SELECT id FROM pool_nullifiers WHERE nullifier = ?1 LIMIT 1",
+                        params![derived.expected_nullifier],
+                        |r| r.get(0),
+                    )
+                    .optional()?;
+
+                tx.execute(
+                    "INSERT OR IGNORE INTO user_notes (
+                        id,
+                        account_id,
+                        commitment_id,
+                        nullifier_id,
+                        expected_nullifier,
+                        blinding,
+                        amount
+                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                    params![
+                        row.commitment,
+                        account.account_id,
+                        row.commitment_id,
+                        nullifier_id,
+                        derived.expected_nullifier,
+                        derived.blinding,
+                        derived.amount
+                    ],
+                )?;
+            }
+
+            if max_scanned_id > last_commitment_id {
+                tx.execute(
+                    "UPDATE account_commitment_scan
+                     SET last_commitment_id = ?1
+                     WHERE account_id = ?2",
+                    params![max_scanned_id, account.account_id],
+                )?;
+                did_progress = true;
+            }
+        }
+
+        // Advance scheduler offset to continue after the last assigned token.
+        let step = i64::from(total_limit).rem_euclid(n_i64);
+        let next_offset = (offset + step).rem_euclid(n_i64);
+        tx.execute(
+            "UPDATE notes_scan_scheduler
+             SET next_account_offset = ?1
+             WHERE id = 1",
+            params![next_offset],
+        )?;
+
+        // If there's remaining work for any account, keep the processing loop alive.
+        let has_pending: bool = tx
+            .query_row(
+                "SELECT 1
+                 FROM account_commitment_scan s
+                 WHERE EXISTS (SELECT 1 FROM keypairs k WHERE k.account_id = s.account_id)
+                   AND EXISTS (SELECT 1 FROM pool_commitments c WHERE c.id > s.last_commitment_id)
+                 LIMIT 1",
+                [],
+                |_| Ok(true),
+            )
+            .optional()?
+            .unwrap_or(false);
+
+        tx.commit()?;
+        Ok(did_progress || has_pending)
+    }
+
+    /// Reconcile new pool nullifiers against `user_notes.expected_nullifier`, updating
+    /// `user_notes.nullifier_id` for matching notes.
+    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
+        let tx = self.conn.transaction()?;
+
+        let last_nullifier_id: i64 = tx.query_row(
+            "SELECT last_nullifier_id FROM nullifier_scan_state WHERE id = 1",
+            [],
+            |row| row.get(0),
+        )?;
+
+        let nullifiers: Vec<(i64, Field)> = {
+            let mut stmt = tx.prepare(
+                "SELECT id, nullifier
+                 FROM pool_nullifiers
+                 WHERE id > ?1
+                 ORDER BY id ASC
+                 LIMIT ?2",
+            )?;
+
+            let rows = stmt.query_map(params![last_nullifier_id, limit], |row| {
+                let id: i64 = row.get(0)?;
+                let nullifier: Field = row.get(1)?;
+                Ok((id, nullifier))
+            })?;
+
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            out
+        };
+
+        let mut max_id = last_nullifier_id;
+        let mut did_any = false;
+
+        for (nullifier_id, nullifier) in nullifiers {
+            did_any = true;
+            if nullifier_id > max_id {
+                max_id = nullifier_id;
+            }
+
+            tx.execute(
+                "UPDATE user_notes
+                 SET nullifier_id = ?1
+                 WHERE nullifier_id IS NULL
+                   AND expected_nullifier = ?2",
+                params![nullifier_id, nullifier],
+            )?;
+        }
+
+        if max_id > last_nullifier_id {
+            tx.execute(
+                "UPDATE nullifier_scan_state SET last_nullifier_id = ?1 WHERE id = 1",
+                params![max_id],
+            )?;
+        }
+
+        tx.commit()?;
+        Ok(did_any)
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -415,8 +731,136 @@ fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
 fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry, SqlError> {
     Ok(types::PublicKeyEntry {
         address: row.get(0)?,
-        encryption_key: EncryptionPublicKey(row.get(1)?),
-        note_key: NotePublicKey(row.get(2)?),
+        encryption_key: row.get(1)?,
+        note_key: row.get(2)?,
         ledger: col_u32(row.get::<_, i64>(4)?, 4)?,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prover::{crypto, encryption};
+    use types::{ContractEvent, ContractsEventData, EncryptionSignature, NoteAmount, SpendingSignature};
+
+    fn dummy_event(id: &str) -> ContractEvent {
+        ContractEvent {
+            id: id.to_string(),
+            ledger: 1,
+            contract_id: "CPOOL".to_string(),
+            topics: vec!["dummy".to_string()],
+            value: "dummy".to_string(),
+        }
+    }
+
+    #[test]
+    fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        // Create an account with keypairs.
+        let spending_sig = SpendingSignature(vec![1u8; 64]);
+        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+
+        let account_id: i64 = storage.conn.query_row(
+            "SELECT id FROM accounts WHERE address = ?1",
+            params!["GTESTACCOUNT"],
+            |row| row.get(0),
+        )?;
+
+        // Build a commitment + encrypted output addressed to the account.
+        let amount = NoteAmount(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let amount_field_le = Field::from(amount).to_le_bytes();
+        let commitment_le = crypto::compute_commitment(
+            &amount_field_le,
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le
+            .try_into()
+            .map_err(|v: Vec<u8>| anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        let encrypted_output = encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        // Insert the raw event + the parsed pool commitment row.
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 3,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        // Scan commitments -> user_notes.
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+
+        let note_count: i64 = storage
+            .conn
+            .query_row("SELECT COUNT(*) FROM user_notes", [], |row| row.get(0))?;
+        assert_eq!(note_count, 1);
+
+        let scanned: i64 = storage.conn.query_row(
+            "SELECT last_commitment_id FROM account_commitment_scan WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )?;
+        assert!(scanned > 0);
+
+        // Insert a matching nullifier event.
+        let leaf_index: u32 = 3;
+        let mut path_indices_le = [0u8; 32];
+        path_indices_le[..8].copy_from_slice(&(u64::from(leaf_index)).to_le_bytes());
+        let signature = crypto::compute_signature(&note_keypair.private.0, &commitment.to_le_bytes(), &path_indices_le)?;
+        let nullifier_le = crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
+        let nullifier_le: [u8; 32] = nullifier_le
+            .try_into()
+            .map_err(|v: Vec<u8>| anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len()))?;
+        let nullifier = Field::try_from_le_bytes(nullifier_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-null")],
+            cursor: "cur2".to_string(),
+        })?;
+        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
+            id: "evt-null".to_string(),
+            nullifier,
+        }])?;
+
+        assert!(storage.reconcile_nullifiers(100)?);
+
+        let nullifier_id: Option<i64> = storage.conn.query_row(
+            "SELECT nullifier_id FROM user_notes WHERE account_id = ?1",
+            params![account_id],
+            |row| row.get(0),
+        )?;
+        assert!(nullifier_id.is_some());
+
+        Ok(())
+    }
 }

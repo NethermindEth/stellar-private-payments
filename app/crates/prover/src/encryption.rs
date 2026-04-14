@@ -203,6 +203,34 @@ pub fn encrypt_output_note(
     encrypt_note_data(recipient_pubkey.as_ref(), &plaintext)
 }
 
+/// Decrypt output note data from on-chain storage.
+///
+/// Returns `Ok(None)` if the ciphertext is not addressed to the given private key.
+///
+/// Expected plaintext format: `amount (8 bytes LE) || blinding (32 bytes LE)`.
+pub fn decrypt_output_note(
+    recipient_privkey: &EncryptionPrivateKey,
+    encrypted_output: &[u8],
+) -> Result<Option<(NoteAmount, Field)>> {
+    let plaintext = decrypt_note_data(recipient_privkey.as_ref(), encrypted_output)?;
+    if plaintext.is_empty() {
+        return Ok(None);
+    }
+    if plaintext.len() != 40 {
+        return Err(anyhow!("Decrypted plaintext must be 40 bytes, got {}", plaintext.len()));
+    }
+
+    let mut amount_le = [0u8; 8];
+    amount_le.copy_from_slice(&plaintext[..8]);
+    let amount = NoteAmount(u64::from_le_bytes(amount_le));
+
+    let mut blinding_le = [0u8; 32];
+    blinding_le.copy_from_slice(&plaintext[8..]);
+    let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+    Ok(Some((amount, blinding)))
+}
+
 /// Encrypt note data using X25519-XSalsa20-Poly1305 (NaCl crypto_box).
 ///
 /// When sending a note to someone, we encrypt the sensitive data (amount and
@@ -406,5 +434,24 @@ mod tests {
         // Invalid pubkey length
         let res = encrypt_note_data(&[0u8; 31], &[0u8; 40]);
         assert!(res.is_err());
+    }
+
+    #[test]
+    fn test_decrypt_output_note_roundtrip() -> Result<()> {
+        let recipient_sig = EncryptionSignature(vec![9u8; 64]);
+        let recip_keys = derive_keypair_from_signature(recipient_sig)?;
+
+        let amount = NoteAmount(42);
+        let mut blind_le = [0u8; 32];
+        blind_le[0] = 1;
+        let blinding = Field::try_from_le_bytes(blind_le)?;
+
+        let encrypted = encrypt_output_note(&recip_keys.public, amount, &blinding)?;
+        let got = decrypt_output_note(&recip_keys.private, &encrypted)?
+            .expect("should decrypt for recipient key");
+
+        assert_eq!(got.0.as_u64(), amount.as_u64());
+        assert_eq!(got.1.to_le_bytes(), blinding.to_le_bytes());
+        Ok(())
     }
 }

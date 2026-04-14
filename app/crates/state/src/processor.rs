@@ -38,3 +38,18 @@ pub fn process_events(storage: &mut Storage, limit: u32) -> Result<bool> {
     storage.save_leaf_added_events_batch(&leaves)?;
     Ok(true)
 }
+
+/// Process already-parsed events (commitments/nullifiers) into local user state.
+///
+/// This scans pool commitments for decryptable outputs (per account) and
+/// reconciles pool nullifiers against locally-computed expected nullifiers.
+pub fn process_notes(
+    storage: &mut Storage,
+    limit: u32,
+    derive: &mut crate::storage::DeriveNoteFn<'_>,
+) -> Result<bool> {
+    let mut did_work = false;
+    did_work |= storage.scan_commitments_for_user_notes(limit, derive)?;
+    did_work |= storage.reconcile_nullifiers(limit)?;
+    Ok(did_work)
+}

@@ -142,6 +142,48 @@ impl_key_serde_hex!(EncryptionPublicKey);
 impl_key_serde_hex!(NotePrivateKey);
 impl_key_serde_hex!(NotePublicKey);
 
+#[cfg(feature = "rusqlite")]
+mod rusqlite_key_impls {
+    use super::{EncryptionPrivateKey, EncryptionPublicKey, NotePrivateKey, NotePublicKey};
+    use rusqlite::types::{
+        FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value, ValueRef,
+    };
+
+    macro_rules! impl_key_rusqlite_blob_32 {
+        ($ty:ident) => {
+            impl ToSql for $ty {
+                fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
+                    Ok(ToSqlOutput::Owned(Value::Blob(self.0.to_vec())))
+                }
+            }
+
+            impl FromSql for $ty {
+                fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+                    match value {
+                        ValueRef::Blob(b) => {
+                            if b.len() != 32 {
+                                return Err(FromSqlError::InvalidBlobSize {
+                                    expected_size: 32,
+                                    blob_size: b.len(),
+                                });
+                            }
+                            let mut out = [0u8; 32];
+                            out.copy_from_slice(b);
+                            Ok($ty(out))
+                        }
+                        _ => Err(FromSqlError::InvalidType),
+                    }
+                }
+            }
+        };
+    }
+
+    impl_key_rusqlite_blob_32!(EncryptionPrivateKey);
+    impl_key_rusqlite_blob_32!(EncryptionPublicKey);
+    impl_key_rusqlite_blob_32!(NotePrivateKey);
+    impl_key_rusqlite_blob_32!(NotePublicKey);
+}
+
 #[cfg(test)]
 mod key_serde_tests {
     use super::*;
