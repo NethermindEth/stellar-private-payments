@@ -150,16 +150,6 @@ function parseBigIntInput(value, label) {
   }
 }
 
-// Convert byte array (little-endian) to BigInt
-// Used only for display / cached BigInt values
-function bytesToBigIntLE(bytes) {
-  let result = 0n;
-  for (let i = bytes.length - 1; i >= 0; i--) {
-    result = (result << 8n) | BigInt(bytes[i]);
-  }
-  return result;
-}
-
 // -----------------------------
 // Wallet & signer helpers
 // -----------------------------
@@ -419,8 +409,8 @@ async function computeMembershipLeaf() {
     } else {
       throw new Error('Provide a private key or a public key override');
     }
-      const client = getHandle().webClient;
-      const leafHex = await client.deriveAspUserLeaf(blindingValue.toString(16).padStart(64, '0'), pubKey);
+    const client = getHandle().webClient;
+    const leafHex = await client.deriveAspUserLeaf(blindingValue.toString(16).padStart(64, '0'), pubKey);
     const leafDec = BigInt(leafHex).toString();
 
     derivedPubKeyEl.textContent = pubKey;
