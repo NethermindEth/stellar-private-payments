@@ -170,11 +170,11 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = deriveAspUserLeaf)]
-    pub async fn derive_asp_user_leaf(&self, membership_blinding: BigInt, pubkey_hex: &str) -> Result<JsValue, JsError> {
-        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+    pub async fn derive_asp_user_leaf(&self, membership_blinding_hex_be: &str, pubkey_hex_le: &str) -> Result<JsValue, JsError> {
+        let membership_blinding = Field::from_str(membership_blinding_hex_be).map_err(|e| JsError::new(&e.to_string()))?;
 
         let pubkey_deserializer =
-            serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex);
+            serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex_le);
         let pubkey: NotePublicKey = <NotePublicKey as serde::Deserialize>::deserialize(pubkey_deserializer)
             .map_err(|e| JsError::new(&format!("invalid pubkey_hex: {e}")))?;
 

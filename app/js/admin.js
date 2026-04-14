@@ -70,8 +70,6 @@ const state = {
     sourceAccount: null,
     privateKeyHex: null,
     publicKeyHex: null,
-    privateKeyBytes: null,
-    publicKeyBytes: null,
   },
 };
 
@@ -251,18 +249,20 @@ async function deriveKeys() {
     deriveKeysBtnText.textContent = 'Signing...';
     deriveKeysBtn.disabled = true;
 
-    let { privKeyBytes, pubKeyBytes, ...rest} = deriveKeysFromWallet(state.address);
+    const { privKey, pubKey, ...rest } = await deriveKeysFromWallet(state.address, {
+          onStatus: log,
+          signDelay: 300
+        }
+    );
 
-    const privateKeyHex = privKeyBytes;
-    const publicKeyHex = pubKeyBytes;
+    const privateKeyHex = privKey;
+    const publicKeyHex = pubKey;
 
     // Store in state (persists across account changes)
     state.derivedKeys = {
       sourceAccount: state.address,
       privateKeyHex,
-      publicKeyHex,
-      privateKeyBytes: privKeyBytes,
-      publicKeyBytes: pubKeyBytes,
+      publicKeyHex
     };
 
     // Update UI
@@ -408,27 +408,29 @@ async function computeMembershipLeaf() {
     const publicOverride = parseBigIntInput(publicKeyInput.value, 'Public key');
     const privateValue = parseBigIntInput(privateKeyInput.value, 'Private key');
 
-    let pubKeyBytes = null;
+    let pubKey = null;
     if (publicOverride !== null) {
-      pubKeyBytes = bigintToField(publicOverride);
+      pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
     } else if (privateValue !== null) {
-      let { privKeyBytes, pubKeyBytes, ...rest} = deriveKeysFromWallet(state.derivedKeys.sourceAccount);
+      let { privKeyBytes, pubKey, ...rest} = await deriveKeysFromWallet(state.derivedKeys.sourceAccount, {
+          onStatus: log,
+          signDelay: 300
+      });
     } else {
       throw new Error('Provide a private key or a public key override');
     }
-    const client = getHandle().webClient;
-    const leafBytes = await client.deriveAspUserLeaf(blindingValue, pubKeyBytes);
-    const leafHex = leafBytes;
-    const leafDec = bytesToBigIntLE(leafBytes).toString();
+      const client = getHandle().webClient;
+      const leafHex = await client.deriveAspUserLeaf(blindingValue.toString(16).padStart(64, '0'), pubKey);
+    const leafDec = BigInt(leafHex).toString();
 
-    derivedPubKeyEl.textContent = pubKeyHex;
+    derivedPubKeyEl.textContent = pubKey;
     computedMembershipLeafHexEl.textContent = leafHex;
     computedMembershipLeafDecEl.textContent = leafDec;
 
     state.computedMembershipLeaf = {
       leafHex,
       leafDec,
-      leafBigInt: bytesToBigIntLE(leafBytes),
+      leafBigInt: BigInt(leafHex)
     };
     useMembershipLeafBtn.disabled = false;
     log('Computed membership leaf');
@@ -547,9 +549,8 @@ async function computeNonMembershipLeaf() {
     if (valueValue === null) {
       throw new Error('Value is required');
     }
-    const keyBytes = bigintToField(keyValue);
     const client = getHandle().webClient;
-    const leafBytes = await client.deriveAspUserLeaf(valueValue, keyBytes);
+    const leafBytes = await client.deriveAspUserLeaf(valueValue.toString(16).padStart(64, '0'), keyValue.toString(16).padStart(64, '0'));
     computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {

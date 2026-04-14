@@ -489,7 +489,7 @@ fn encode_0x_hex(bytes: &[u8; 32]) -> String {
 }
 
 fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
-    let s = s.strip_prefix("0x").ok_or_else(|| anyhow!("expected 0x-prefixed hex"))?;
+    let s = s.strip_prefix("0x").unwrap_or(s);
     if s.len() != 64 {
         return Err(anyhow!("expected 64 hex chars, got {}", s.len()));
     }

@@ -11,9 +11,13 @@ pub(crate) mod serde_0x_hex_32 {
     where
         S: Serializer,
     {
+        // reversed to be compatible with the previous
+        // frontend representation
+        let mut reversed = *bytes;
+        reversed.reverse();
         let mut out = String::with_capacity(2 + 64);
         out.push_str("0x");
-        out.push_str(&hex::encode(bytes));
+        out.push_str(&hex::encode(reversed));
         serializer.serialize_str(&out)
     }
 
@@ -23,8 +27,7 @@ pub(crate) mod serde_0x_hex_32 {
     {
         let s = String::deserialize(deserializer)?;
         let s = s
-            .strip_prefix("0x")
-            .ok_or_else(|| serde::de::Error::custom("expected 0x-prefixed hex"))?;
+            .strip_prefix("0x").unwrap_or(&s);
         if s.len() != 64 {
             return Err(serde::de::Error::custom(format!(
                 "expected 64 hex chars, got {}",
@@ -34,6 +37,7 @@ pub(crate) mod serde_0x_hex_32 {
 
         let mut out = [0u8; 32];
         hex::decode_to_slice(s, &mut out).map_err(serde::de::Error::custom)?;
+        out.reverse();
         Ok(out)
     }
 }

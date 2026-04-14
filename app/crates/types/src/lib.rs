@@ -93,11 +93,11 @@ pub struct SpendingSignature(pub Vec<u8>);
 pub struct EncryptionSignature(pub Vec<u8>);
 
 /// Encryption private key
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionPrivateKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
+#[derive(Debug, Clone)]
+pub struct EncryptionPrivateKey(pub [u8; 32]);
 /// Encryption public key
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionPublicKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
+#[derive(Debug, Clone)]
+pub struct EncryptionPublicKey(pub [u8; 32]);
 
 /// Encryption key pair
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -109,12 +109,38 @@ pub struct EncryptionKeyPair {
 }
 
 /// Note ownership private key
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotePrivateKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
+#[derive(Debug, Clone)]
+pub struct NotePrivateKey(pub [u8; 32]);
 
 /// Note ownership public key
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NotePublicKey(#[serde(with = "crate::chain_data::serde_0x_hex_32")] pub [u8; 32]);
+#[derive(Debug, Clone)]
+pub struct NotePublicKey(pub [u8; 32]);
+
+macro_rules! impl_key_serde_hex {
+    ($ty:ident) => {
+        impl Serialize for $ty {
+            fn serialize<S: serde::Serializer>(
+                &self,
+                serializer: S,
+            ) -> core::result::Result<S::Ok, S::Error> {
+                crate::chain_data::serde_0x_hex_32::serialize(&self.0, serializer)
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $ty {
+            fn deserialize<D: serde::Deserializer<'de>>(
+                deserializer: D,
+            ) -> core::result::Result<Self, D::Error> {
+                crate::chain_data::serde_0x_hex_32::deserialize(deserializer).map($ty)
+            }
+        }
+    };
+}
+
+impl_key_serde_hex!(EncryptionPrivateKey);
+impl_key_serde_hex!(EncryptionPublicKey);
+impl_key_serde_hex!(NotePrivateKey);
+impl_key_serde_hex!(NotePublicKey);
 
 #[cfg(test)]
 mod key_serde_tests {
@@ -157,10 +183,15 @@ mod key_serde_tests {
                 }
 
                 #[test]
-                fn serde_rejects_missing_0x_prefix() -> Result<()> {
+                fn serde_accepts_missing_0x_prefix() -> Result<()> {
                     let s =
                         "\"0000000000000000000000000000000000000000000000000000000000000000\"";
-                    assert!(serde_json::from_str::<$ty>(s).is_err());
+                    let parsed: $ty = serde_json::from_str(s)?;
+                    let roundtrip = serde_json::to_string(&parsed)?;
+                    assert_eq!(
+                        roundtrip,
+                        "\"0x0000000000000000000000000000000000000000000000000000000000000000\""
+                    );
                     Ok(())
                 }
 
@@ -192,6 +223,17 @@ mod key_serde_tests {
     hex_key_tests!(EncryptionPublicKey, encryption_public_key);
     hex_key_tests!(NotePrivateKey, note_private_key);
     hex_key_tests!(NotePublicKey, note_public_key);
+
+    #[test]
+    fn note_public_key_deserialize_from_plain_str_deserializer() -> Result<()> {
+        let raw = "18c7f3bd72cb3170d476aa09ef5e706c33e6b578369a95368bd0f09c82314321";
+        let d = serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(raw);
+        let parsed: NotePublicKey = <NotePublicKey as serde::Deserialize>::deserialize(d)
+            .map_err(|e| anyhow::anyhow!(e.to_string()))?;
+        let roundtrip = serde_json::to_string(&parsed)?;
+        assert_eq!(roundtrip, format!("\"0x{raw}\""));
+        Ok(())
+    }
 }
 
 /// Note ownership key pair

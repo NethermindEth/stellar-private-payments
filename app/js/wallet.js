@@ -206,7 +206,7 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
     const client = getHandle().webClient;
     let data = await client.getUserKeys(account);
     if (data) {
-      return { privKeyBytes: data.noteKeypair.private, pubKeyBytes: data.noteKeypair.public, encryptionKeypair: {
+      return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {
               publicKey: data.encryptionKeypair.public,
               privateKey: data.encryptionKeypair.private,
           } };
@@ -253,7 +253,7 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
     await client.deriveAndSaveUserKeys(account, spendingSigBytes, encryptionSigBytes);
 
     data = await client.getUserKeys(account);
-    return { privKeyBytes: data.noteKeypair.private, pubKeyBytes: data.noteKeypair.public, encryptionKeypair: {
+    return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {
             publicKey: data.encryptionKeypair.public,
             privateKey: data.encryptionKeypair.private,
         } };
