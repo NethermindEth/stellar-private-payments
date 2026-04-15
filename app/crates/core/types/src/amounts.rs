@@ -361,13 +361,29 @@ impl Field {
         Ok(Field(v))
     }
 
-    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] (big-endian).
+    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] as **raw little-endian bytes**.
+    ///
+    /// Repository convention: hex strings represent bytes "as-is" (no reversal).
+    pub fn from_0x_hex_le_bytes(s: &str) -> Result<Self> {
+        let le = parse_0x_hex_32(s)?;
+        Field::try_from_le_bytes(le)
+    }
+
+    /// Returns this field element as a `0x`-prefixed 64-hex string of its **little-endian bytes**.
+    ///
+    /// Repository convention: hex strings represent bytes "as-is" (no reversal).
+    pub fn to_0x_hex_le_bytes(self) -> String {
+        let le = self.to_le_bytes();
+        encode_0x_hex(&le)
+    }
+
+    /// Legacy: Parses a `0x`-prefixed 64-hex string into a [`Field`] (big-endian integer).
     pub fn from_0x_hex_be(s: &str) -> Result<Self> {
         let be = parse_0x_hex_32(s)?;
         Field::try_from_be_bytes(be)
     }
 
-    /// Returns this field element as a `0x`-prefixed 64-hex string (big-endian).
+    /// Legacy: Returns this field element as a `0x`-prefixed 64-hex string (big-endian integer).
     pub fn to_0x_hex_be(self) -> String {
         let be = self.to_be_bytes();
         encode_0x_hex(&be)
@@ -382,7 +398,7 @@ impl From<Field> for U256 {
 
 impl fmt::Display for Field {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_0x_hex_be())
+        f.write_str(&self.to_0x_hex_le_bytes())
     }
 }
 
@@ -390,21 +406,21 @@ impl FromStr for Field {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        Field::from_0x_hex_be(s)
+        Field::from_0x_hex_le_bytes(s)
     }
 }
 
 impl Serialize for Field {
-    /// Serialize as a `0x`-prefixed 64-hex big-endian string.
+    /// Serialize as a `0x`-prefixed 64-hex string of **little-endian bytes**.
     fn serialize<S: Serializer>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_0x_hex_be())
+        serializer.serialize_str(&self.to_0x_hex_le_bytes())
     }
 }
 
 impl<'de> Deserialize<'de> for Field {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Field::from_0x_hex_be(&s).map_err(serde::de::Error::custom)
+        Field::from_0x_hex_le_bytes(&s).map_err(serde::de::Error::custom)
     }
 }
 
@@ -797,7 +813,7 @@ mod rusqlite_impls {
                 }
                 ValueRef::Text(t) => {
                     let s = core::str::from_utf8(t).map_err(|_| FromSqlError::InvalidType)?;
-                    Field::from_0x_hex_be(s).map_err(|_| FromSqlError::InvalidType)
+                    Field::from_0x_hex_le_bytes(s).map_err(|_| FromSqlError::InvalidType)
                 }
                 _ => Err(FromSqlError::InvalidType),
             }
