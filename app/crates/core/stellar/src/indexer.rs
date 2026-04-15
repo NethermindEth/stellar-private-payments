@@ -5,6 +5,7 @@ use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
 pub const LEDGERS_BACK_ON_COLD_START: u32 = 2;
+const MAX_PAGES_PER_ROUND: usize = 10;
 
 pub struct Indexer<S: ContractDataStorage> {
     client: Client,
@@ -32,31 +33,39 @@ impl<S: ContractDataStorage> Indexer<S> {
         let contract_ids = [self.config.pool.to_string(), self.config.asp_membership.to_string()];
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         log::debug!("[INDEXER] starting new round for network tip {network_tip}, contract ids {contract_ids:?}");
-        let (mut cursor, mut current_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
+        let (mut cursor, start_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
             (Some(cursor), last_ledger)
         } else {
             log::debug!("[INDEXER] no saved sync metadata - the current round starts at the current network tip {network_tip} - {LEDGERS_BACK_ON_COLD_START} ledgers back");
             (None, network_tip.checked_sub(LEDGERS_BACK_ON_COLD_START).expect("RPC network tip is more than LEDGERS_BACK_ON_COLD_START"))
         };
-        while current_ledger < network_tip {
-            log::info!("[INDEXER] current ledger {current_ledger} vs network tip {network_tip}, cursor {cursor:?}");
-            let (new_cursor, events, _) = self.client.get_contract_events(
+
+        for page in 0..MAX_PAGES_PER_ROUND {
+            log::info!("[INDEXER] page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}");
+            let (new_cursor, events, latest_ledger) = self.client.get_contract_events(
                 &contract_ids,
-                current_ledger,
+                start_ledger,
                 PAGE_SIZE,
                 cursor
                 ).await?;
 
-            if let Some(last_event) = events.last() {
-                // TODO check they ordered by time
-                log::debug!("[INDEXER] fetched {} events", events.len());
-                current_ledger = last_event.ledger;
-                self.storage.save_events_batch(ContractsEventData{cursor: new_cursor.clone().ok_or_else(|| anyhow!("cursor is not found in the events response"))?,
-                    events: events.into_iter().map(|e| e.into()).collect()} ).await?;
-            } else {
-                current_ledger += 1;
+            let new_cursor = new_cursor.clone().ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
+            let is_empty = events.is_empty();
+            log::debug!("[INDEXER] fetched {} events (latest_ledger={})", events.len(), latest_ledger);
+            self.storage
+                .save_events_batch(ContractsEventData {
+                    cursor: new_cursor.clone(),
+                    latest_ledger,
+                    events: events.into_iter().map(|e| e.into()).collect(),
+                })
+                .await?;
+
+            cursor = Some(new_cursor);
+
+            // Prove "caught up" by observing an empty page for the current cursor.
+            if is_empty {
+                break;
             }
-            cursor = new_cursor;
         }
 
         Ok(())

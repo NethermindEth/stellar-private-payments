@@ -176,11 +176,11 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = deriveAspUserLeaf)]
-    pub async fn derive_asp_user_leaf(&self, membership_blinding_hex_be: &str, pubkey_hex_le: &str) -> Result<JsValue, JsError> {
+    pub async fn derive_asp_user_leaf(&self, membership_blinding_hex_be: &str, pubkey_hex: &str) -> Result<JsValue, JsError> {
         let membership_blinding = Field::from_str(membership_blinding_hex_be).map_err(|e| JsError::new(&e.to_string()))?;
 
         let pubkey_deserializer =
-            serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex_le);
+            serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex);
         let pubkey: NotePublicKey = <NotePublicKey as serde::Deserialize>::deserialize(pubkey_deserializer)
             .map_err(|e| JsError::new(&format!("invalid pubkey_hex: {e}")))?;
 
@@ -205,6 +205,24 @@ impl WebClient {
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::PubKeys(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getUserNotes)]
+    pub async fn get_user_notes(&self, address: String, limit: u32) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::UserNotes(address, limit);
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::UserNotes(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getRecentPoolActivity)]
+    pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::RecentPoolActivity(limit);
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::RecentPoolActivity(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
@@ -242,7 +260,7 @@ impl WebClient {
             )));
         }
 
-        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
 
         let amount_stroops = parse_ext_amount_decimal(&amount_stroops)?;
         if amount_stroops.as_i128() <= 0 {
@@ -363,7 +381,7 @@ impl WebClient {
             return Err(JsError::new("input_note_ids must have length 1..=2"));
         }
 
-        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
 
         let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
@@ -371,7 +389,7 @@ impl WebClient {
             let s = v
                 .as_string()
                 .ok_or_else(|| JsError::new("input_note_ids must be string[]"))?;
-            input_commitments.push(parse_field_hex_be_str(&s)?);
+            input_commitments.push(parse_field_hex_str(&s)?);
         }
 
         let params = loop {
@@ -487,7 +505,7 @@ impl WebClient {
         &self,
         user_address: String,
         membership_blinding: BigInt,
-        recipient_note_key_be_hex: String,
+        recipient_note_key_hex: String,
         recipient_enc_key_hex: String,
         input_note_ids: Array,
         output_amounts: Array,
@@ -501,12 +519,12 @@ impl WebClient {
             )));
         }
 
-        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
 
-        let recipient_note_field = parse_field_hex_be_str(&recipient_note_key_be_hex)?;
-        let recipient_note_pubkey = NotePublicKey(recipient_note_field.to_le_bytes());
-        let recipient_enc_bytes = parse_hex_32(&recipient_enc_key_hex)?;
-        let recipient_enc_pubkey = EncryptionPublicKey(recipient_enc_bytes);
+        let recipient_note_pubkey =
+            NotePublicKey::parse(&recipient_note_key_hex).map_err(|e| JsError::new(&e.to_string()))?;
+        let recipient_enc_pubkey =
+            EncryptionPublicKey::parse(&recipient_enc_key_hex).map_err(|e| JsError::new(&e.to_string()))?;
 
         let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
@@ -514,7 +532,7 @@ impl WebClient {
             let s = v
                 .as_string()
                 .ok_or_else(|| JsError::new("input_note_ids must be string[]"))?;
-            input_commitments.push(parse_field_hex_be_str(&s)?);
+            input_commitments.push(parse_field_hex_str(&s)?);
         }
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
@@ -646,7 +664,7 @@ impl WebClient {
         ext_amount_stroops: BigInt,
         input_note_ids: Array,
         output_amounts: Array,
-        out_recipient_note_keys_be_hex: Array,
+        out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
     ) -> Result<JsValue, JsError> {
         if input_note_ids.length() > 2 {
@@ -657,9 +675,9 @@ impl WebClient {
                 "output_amounts must have length {N_OUTPUTS}"
             )));
         }
-        if out_recipient_note_keys_be_hex.length() != N_OUTPUTS as u32 {
+        if out_recipient_note_keys_hex.length() != N_OUTPUTS as u32 {
             return Err(JsError::new(&format!(
-                "out_recipient_note_keys_be_hex must have length {N_OUTPUTS}"
+                "out_recipient_note_keys_hex must have length {N_OUTPUTS}"
             )));
         }
         if out_recipient_enc_keys_hex.length() != N_OUTPUTS as u32 {
@@ -668,7 +686,7 @@ impl WebClient {
             )));
         }
 
-        let membership_blinding = parse_field_hex_be(&membership_blinding)?;
+        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let ext_amount = parse_ext_amount_decimal(&ext_amount_stroops)?;
 
         let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
@@ -677,7 +695,7 @@ impl WebClient {
             let s = v
                 .as_string()
                 .ok_or_else(|| JsError::new("input_note_ids must be string[]"))?;
-            input_commitments.push(parse_field_hex_be_str(&s)?);
+            input_commitments.push(parse_field_hex_str(&s)?);
         }
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
@@ -692,7 +710,7 @@ impl WebClient {
         let mut out_note_pks: [Option<NotePublicKey>; N_OUTPUTS] = [None, None];
         let mut out_enc_pks: [Option<EncryptionPublicKey>; N_OUTPUTS] = [None, None];
         for i in 0..N_OUTPUTS {
-            let nk = out_recipient_note_keys_be_hex.get(i as u32);
+            let nk = out_recipient_note_keys_hex.get(i as u32);
             let ek = out_recipient_enc_keys_hex.get(i as u32);
 
             let note_pk = if nk.is_null() || nk.is_undefined() {
@@ -700,9 +718,8 @@ impl WebClient {
             } else {
                 let s = nk
                     .as_string()
-                    .ok_or_else(|| JsError::new("out_recipient_note_keys_be_hex must be (string|null)[]"))?;
-                let f = parse_field_hex_be_str(&s)?;
-                Some(NotePublicKey(f.to_le_bytes()))
+                    .ok_or_else(|| JsError::new("out_recipient_note_keys_hex must be (string|null)[]"))?;
+                Some(NotePublicKey::parse(&s).map_err(|e| JsError::new(&e.to_string()))?)
             };
 
             let enc_pk = if ek.is_null() || ek.is_undefined() {
@@ -711,8 +728,7 @@ impl WebClient {
                 let s = ek
                     .as_string()
                     .ok_or_else(|| JsError::new("out_recipient_enc_keys_hex must be (string|null)[]"))?;
-                let b = parse_hex_32(&s)?;
-                Some(EncryptionPublicKey(b))
+                Some(EncryptionPublicKey::parse(&s).map_err(|e| JsError::new(&e.to_string()))?)
             };
 
             out_note_pks[i] = note_pk;
@@ -856,7 +872,7 @@ impl stellar::ContractDataStorage for WebClient {
     }
 }
 
-fn parse_field_hex_be(b: &BigInt) -> Result<Field, JsError> {
+fn parse_field_bigint_numeric(b: &BigInt) -> Result<Field, JsError> {
     let hex = bigint_to_string_radix(b, 16)?;
     if hex.starts_with('-') {
         return Err(JsError::new("field BigInt must be non-negative"));
@@ -866,7 +882,7 @@ fn parse_field_hex_be(b: &BigInt) -> Result<Field, JsError> {
     }
     let padded = format!("{hex:0>64}");
     let s = format!("0x{padded}");
-    Field::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
+    Field::from_0x_hex_be(&s).map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn bigint_to_string_radix(b: &BigInt, radix: u8) -> Result<String, JsError> {
@@ -877,7 +893,7 @@ fn bigint_to_string_radix(b: &BigInt, radix: u8) -> Result<String, JsError> {
         .ok_or_else(|| JsError::new("BigInt.toString() did not return a string"))
 }
 
-fn parse_field_hex_be_str(s: &str) -> Result<Field, JsError> {
+fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
     let s = s.trim();
     let prefixed = if s.starts_with("0x") || s.starts_with("0X") {
         s.to_string()
@@ -906,30 +922,4 @@ fn parse_ext_amount_decimal(b: &BigInt) -> Result<ExtAmount, JsError> {
 fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
     let s = bigint_to_string_decimal(b)?;
     NoteAmount::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
-}
-
-fn parse_hex_32(s: &str) -> Result<[u8; 32], JsError> {
-    let s = s.trim();
-    let s = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")).unwrap_or(s);
-    if s.len() != 64 {
-        return Err(JsError::new("hex string must be 32 bytes (64 hex chars)"));
-    }
-
-    fn hex_val(b: u8) -> Result<u8, JsError> {
-        match b {
-            b'0'..=b'9' => Ok(b - b'0'),
-            b'a'..=b'f' => Ok(b - b'a' + 10),
-            b'A'..=b'F' => Ok(b - b'A' + 10),
-            _ => Err(JsError::new("invalid hex character")),
-        }
-    }
-
-    let bytes = s.as_bytes();
-    let mut out = [0u8; 32];
-    for i in 0..32 {
-        let hi = hex_val(bytes[2 * i])?;
-        let lo = hex_val(bytes[2 * i + 1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Ok(out)
 }

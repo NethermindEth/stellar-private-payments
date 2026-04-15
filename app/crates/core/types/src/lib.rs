@@ -84,6 +84,31 @@ pub struct PublicKeyEntry {
     pub ledger: u32,
 }
 
+/// A compact note view for UI rendering and spending selection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserNoteSummary {
+    /// Pool commitment (hex).
+    pub id: Field,
+    /// Amount in stroops.
+    pub amount: NoteAmount,
+    /// Commitment leaf index in the pool Merkle tree.
+    pub leaf_index: u32,
+    /// Ledger sequence when the commitment event was observed.
+    pub created_at_ledger: u32,
+    /// Whether the note has been spent (nullifier observed).
+    pub spent: bool,
+}
+
+/// Aggregated pool activity for a single ledger.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolLedgerActivity {
+    pub ledger: u32,
+    pub commitments: u32,
+    pub nullifiers: u32,
+}
+
 /// Spending key signature
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SpendingSignature(pub Vec<u8>);
@@ -115,6 +140,44 @@ pub struct NotePrivateKey(pub [u8; 32]);
 /// Note ownership public key
 #[derive(Debug, Clone)]
 pub struct NotePublicKey(pub [u8; 32]);
+
+fn parse_hex_32_bytes(s: &str) -> Result<[u8; 32]> {
+    let s = s.trim().strip_prefix("0x").unwrap_or(s.trim());
+    if s.len() != 64 {
+        return Err(anyhow!("expected 64 hex chars, got {}", s.len()));
+    }
+    let mut out = [0u8; 32];
+    hex::decode_to_slice(s, &mut out).map_err(|e| anyhow!(e))?;
+    Ok(out)
+}
+
+impl EncryptionPublicKey {
+    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(Self(parse_hex_32_bytes(s)?))
+    }
+}
+
+impl EncryptionPrivateKey {
+    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(Self(parse_hex_32_bytes(s)?))
+    }
+}
+
+impl NotePublicKey {
+    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(Self(parse_hex_32_bytes(s)?))
+    }
+}
+
+impl NotePrivateKey {
+    /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
+    pub fn parse(s: &str) -> Result<Self> {
+        Ok(Self(parse_hex_32_bytes(s)?))
+    }
+}
 
 macro_rules! impl_key_serde_hex {
     ($ty:ident) => {

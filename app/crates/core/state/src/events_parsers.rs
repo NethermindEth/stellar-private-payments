@@ -6,19 +6,19 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
     let parsed = parse_event_metadata(event)?;
     let ev = match parsed.name.as_str() {
         // Pool events contracts/pool/src/pool.rs
-        "new_nullifier_event" => ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?),
-        "public_key_event" => ProcessedEvent::PublicKey(parse_public_key_event(parsed)?),
-        "new_commitment_event" => ProcessedEvent::Commitment(parse_new_commitment_event(parsed)?),
+        "new_nullifier_event" | "NewNullifierEvent" => ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?),
+        "public_key_event" | "PublicKeyEvent" => ProcessedEvent::PublicKey(parse_public_key_event(parsed)?),
+        "new_commitment_event" | "NewCommitmentEvent" => ProcessedEvent::Commitment(parse_new_commitment_event(parsed)?),
         // ASP membership events contracts/asp-membership
-        "leaf_added" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
+        "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
         // ASP non-membership events contracts/asp-non-membership
         // for now they're not collected - check also app/crates/core/stellar/src/indexer.rs
         // if they should be collected then
         // app/crates/core/state/src/processor.rs should be extended
         // (to avoid looping over the unprocessed events)
-        "leaf_inserted" => ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?),
-        "leaf_updated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
-        "leaf_deleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
+        "leaf_inserted" | "LeafInserted" => ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?),
+        "leaf_updated" | "LeafUpdated" => ProcessedEvent::LeafUpdated(parse_leaf_updated(parsed)?),
+        "leaf_deleted" | "LeafDeleted" => ProcessedEvent::LeafDeleted(parse_leaf_deleted(parsed)?),
         _ => return Err(anyhow!("unhandled event {}", parsed.name))
     };
     Ok(ev)

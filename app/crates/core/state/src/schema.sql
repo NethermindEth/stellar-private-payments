@@ -13,8 +13,18 @@
 CREATE TABLE indexing_metadata (
     id INTEGER PRIMARY KEY CHECK (id = 1), -- Forces only one row
     -- RPC pagination cursor (opaque).
-    last_cursor TEXT
+    last_cursor TEXT,
+    -- Latest ledger that the indexer has fully caught up to.
+    --
+    -- This only advances when the indexer has proven catch-up by fetching an empty
+    -- events page for the current cursor. It is used for "are we synced?"
+    -- preconditions (e.g. proving membership at the current tip).
+    last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0
 );
+
+-- Ensure the singleton row exists on fresh DBs.
+INSERT OR IGNORE INTO indexing_metadata (id, last_cursor, last_fully_indexed_ledger)
+VALUES (1, NULL, 0);
 
 -- Append-only log of raw contract events fetched from RPC.
 --

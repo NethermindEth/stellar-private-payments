@@ -398,7 +398,7 @@ impl From<Field> for U256 {
 
 impl fmt::Display for Field {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.to_0x_hex_le_bytes())
+        f.write_str(&self.to_0x_hex_be())
     }
 }
 
@@ -406,21 +406,22 @@ impl FromStr for Field {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        Field::from_0x_hex_le_bytes(s)
+        let be = parse_0x_hex_32(s)?;
+        Field::try_from_be_bytes(be)
     }
 }
 
 impl Serialize for Field {
     /// Serialize as a `0x`-prefixed 64-hex string of **little-endian bytes**.
     fn serialize<S: Serializer>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error> {
-        serializer.serialize_str(&self.to_0x_hex_le_bytes())
+        serializer.serialize_str(&self.to_0x_hex_be())
     }
 }
 
 impl<'de> Deserialize<'de> for Field {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        Field::from_0x_hex_le_bytes(&s).map_err(serde::de::Error::custom)
+        Field::from_str(&s).map_err(serde::de::Error::custom)
     }
 }
 

@@ -142,7 +142,12 @@ pub struct ContractEvent {
 #[serde(rename_all = "camelCase")]
 pub struct ContractsEventData {
     pub events: Vec<ContractEvent>,
-    pub cursor: String
+    pub cursor: String,
+    /// Network tip (latest ledger observed by the RPC call that returned this batch).
+    ///
+    /// This advances even when there are no events, and is used as the authoritative
+    /// "indexed up to" ledger for precondition checks.
+    pub latest_ledger: u32,
 }
 
 /// Per-network sync state.

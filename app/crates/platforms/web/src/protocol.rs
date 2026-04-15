@@ -4,7 +4,8 @@ use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, Wi
 pub type Address = String;
 use types::{
     AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, EncryptionSignature, ExtAmount,
-    ExtData, Field, NoteAmount, NotePublicKey, NoteKeyPair, PublicKeyEntry, SpendingSignature, SyncMetadata, AspMembershipSync
+    ExtData, Field, NoteAmount, NotePublicKey, NoteKeyPair, PublicKeyEntry, SpendingSignature,
+    SyncMetadata, AspMembershipSync, UserNoteSummary, PoolLedgerActivity,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -21,6 +22,8 @@ pub enum StorageWorkerRequest {
     SaveEvents(ContractsEventData),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
     UserKeys(Address),
+    UserNotes(Address, u32),
+    RecentPoolActivity(u32),
     RecentPubKeys(u32),
     Deposit(DepositRequest),
     Withdraw(WithdrawRequest),
@@ -36,6 +39,8 @@ pub enum StorageWorkerResponse {
     Saved,
     Error(String),
     UserKeys(Option<UserKeys>),
+    UserNotes(Vec<UserNoteSummary>),
+    RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
     AspMembershipSync(AspMembershipSync),
     DepositParams(DepositParams),

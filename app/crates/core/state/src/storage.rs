@@ -4,7 +4,7 @@ use rusqlite_migration::{M, Migrations};
 use types::{
     AspMembershipSync, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey,
     Field, LeafAddedEvent, NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair,
-    NotePrivateKey, NotePublicKey, PublicKeyEvent,
+    NotePrivateKey, NotePublicKey, PoolLedgerActivity, PublicKeyEvent, UserNoteSummary,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -77,35 +77,53 @@ impl Storage {
                     ])?;
             }
 
-            tx.execute(
-                "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor) VALUES (1, ?1)",
-                params![data.cursor],
-            )?;
+            if data.events.is_empty() {
+                tx.execute(
+                    "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor, last_fully_indexed_ledger)
+                     VALUES (1, ?1, ?2)",
+                    params![data.cursor, data.latest_ledger],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE indexing_metadata
+                     SET last_cursor = ?1
+                     WHERE id = 1",
+                    params![data.cursor],
+                )?;
+            }
 
         }
         tx.commit()?;
-        log::debug!("[STORAGE] saved {} events and cursor {}", data.events.len(), data.cursor);
+        log::debug!(
+            "[STORAGE] saved {} events and cursor {} (latest_ledger={})",
+            data.events.len(),
+            data.cursor,
+            data.latest_ledger
+        );
         Ok(())
     }
 
     pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT MAX(e.ledger), m.last_cursor
-             FROM raw_contract_events e
-             CROSS JOIN indexing_metadata m
-             WHERE m.id = 1"
+            "SELECT last_fully_indexed_ledger, last_cursor
+             FROM indexing_metadata
+             WHERE id = 1"
         )?;
 
-        let status = stmt.query_row([], |row| {
-            let ledger: Option<u32> = row.get(0)?;
-            let cursor: Option<String> = row.get(1)?;
-            match (ledger, cursor) {
-                (Some(last_ledger), Some(cursor)) => Ok(Some(types::SyncMetadata{last_ledger, cursor})),
-                _ => Ok(None),
-            }
-        })?;
+        let status = stmt
+            .query_row([], |row| {
+                let ledger_i64: i64 = row.get(0)?;
+                let last_ledger = col_u32(ledger_i64, 0)?;
+                let cursor: Option<String> = row.get(1)?;
+                Ok(cursor.map(|cursor| types::SyncMetadata { last_ledger, cursor }))
+            })
+            .optional()
+            .context("Failed to query indexing_metadata")?;
 
-        Ok(status)
+        match status {
+            Some(v) => Ok(v),
+            None => anyhow::bail!("indexing_metadata singleton row (id=1) is missing"),
+        }
     }
 
     pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
@@ -206,6 +224,90 @@ impl Storage {
             .context("get_all_public_keys")?
             .collect::<Result<Vec<_>, _>>()
             .context("get_all_public_keys collect")
+    }
+
+    /// List notes derived for `address` (newest first).
+    pub fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                n.id,
+                n.amount,
+                c.leaf_index,
+                r.ledger,
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             WHERE a.address = ?1
+             ORDER BY r.ledger DESC
+             LIMIT ?2",
+        )?;
+
+        let rows = stmt.query_map(params![address, limit], |row| {
+            let id: Field = row.get(0)?;
+            let amount: NoteAmount = row.get(1)?;
+            let leaf_index_i64: i64 = row.get(2)?;
+            let leaf_index = col_u32(leaf_index_i64, 2)?;
+            let created_at_ledger_i64: i64 = row.get(3)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+            let spent_i64: i64 = row.get(4)?;
+
+            Ok(UserNoteSummary {
+                id,
+                amount,
+                leaf_index,
+                created_at_ledger,
+                spent: spent_i64 != 0,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// Returns recent pool activity grouped by ledger (newest first).
+    pub fn get_recent_pool_activity(&self, limit_ledgers: u32) -> Result<Vec<PoolLedgerActivity>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT ledger, SUM(commitments) AS commitments, SUM(nullifiers) AS nullifiers
+             FROM (
+                SELECT r.ledger AS ledger, COUNT(*) AS commitments, 0 AS nullifiers
+                FROM pool_commitments c
+                JOIN raw_contract_events r ON r.id = c.event_id
+                GROUP BY r.ledger
+                UNION ALL
+                SELECT r.ledger AS ledger, 0 AS commitments, COUNT(*) AS nullifiers
+                FROM pool_nullifiers n
+                JOIN raw_contract_events r ON r.id = n.event_id
+                GROUP BY r.ledger
+             )
+             GROUP BY ledger
+             ORDER BY ledger DESC
+             LIMIT ?1",
+        )?;
+
+        let rows = stmt.query_map(params![limit_ledgers], |row| {
+            let ledger_i64: i64 = row.get(0)?;
+            let ledger = col_u32(ledger_i64, 0)?;
+            let commitments_i64: i64 = row.get(1)?;
+            let commitments = col_u32(commitments_i64, 1)?;
+            let nullifiers_i64: i64 = row.get(2)?;
+            let nullifiers = col_u32(nullifiers_i64, 2)?;
+            Ok(PoolLedgerActivity {
+                ledger,
+                commitments,
+                nullifiers,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no gaps.
@@ -380,40 +482,40 @@ impl Storage {
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
-        // Get the last stored root and its ledger by joining through the raw events table.
+        // The indexer sync metadata is authoritative for "how far we've indexed", even if there
+        // were no ASP events in recent ledgers.
+        let Some(sync_meta) = self.get_sync_metadata()? else {
+            return Ok(AspMembershipSync::SyncRequired);
+        };
+
+        if current_ledger > sync_meta.last_ledger {
+            return Ok(AspMembershipSync::SyncRequired);
+        }
+
+        if current_ledger < sync_meta.last_ledger {
+            anyhow::bail!(
+                "indexer metadata is ahead of chain tip: local={}, chain={}",
+                sync_meta.last_ledger,
+                current_ledger
+            );
+        }
+
+        // Get the last stored root for the ASP membership tree.
         let mut stmt = self.conn.prepare(
-            "SELECT l.root, r.ledger
+            "SELECT l.root
              FROM asp_membership_leaves l
-             JOIN raw_contract_events r ON r.id = l.event_id
              ORDER BY l.leaf_index DESC
              LIMIT 1",
         )?;
 
-        let last: Option<(Field, u32)> = stmt
-            .query_row([], |row| {
-                let root: Field = row.get(0)?;
-                let ledger_i64: i64 = row.get(1)?;
-                let ledger = col_u32(ledger_i64, 1)?;
-                Ok((root, ledger))
-            })
+        let last: Option<Field> = stmt
+            .query_row([], |row| row.get(0))
             .optional()
-            .context("Failed to query asp_membership_leaves last root/ledger")?;
+            .context("Failed to query asp_membership_leaves last root")?;
 
-        let Some((last_root, last_ledger)) = last else {
+        let Some(last_root) = last else {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
-
-        if current_ledger > last_ledger {
-            return Ok(AspMembershipSync::SyncRequired);
-        }
-
-        if current_ledger < last_ledger {
-            anyhow::bail!(
-                "asp membership storage is ahead of chain tip: local={}, chain={}",
-                last_ledger,
-                current_ledger
-            );
-        }
 
         // current_ledger == last_ledger: require root match and leaf existence.
         if *current_root != last_root {
@@ -844,6 +946,7 @@ mod tests {
         let event_id = "pk_event_1";
         storage.save_events_batch(&ContractsEventData {
             cursor: "cursor".to_string(),
+            latest_ledger: 42,
             events: vec![ContractEvent {
                 id: event_id.to_string(),
                 ledger: 42,
@@ -907,6 +1010,7 @@ mod tests {
         storage.save_events_batch(&ContractsEventData {
             events: vec![dummy_event("evt-commit")],
             cursor: "cur".to_string(),
+            latest_ledger: 1,
         })?;
         storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
             id: "evt-commit".to_string(),
@@ -960,6 +1064,7 @@ mod tests {
         storage.save_events_batch(&ContractsEventData {
             events: vec![dummy_event("evt-null")],
             cursor: "cur2".to_string(),
+            latest_ledger: 1,
         })?;
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
             id: "evt-null".to_string(),
@@ -974,6 +1079,37 @@ mod tests {
             |row| row.get(0),
         )?;
         assert!(nullifier_id.is_some());
+
+        Ok(())
+    }
+
+    #[test]
+    fn sync_metadata_advances_only_on_empty_page() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        // Non-empty batch should update the cursor but not advance the "fully indexed" ledger.
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "c1".to_string(),
+            latest_ledger: 10,
+            events: vec![dummy_event("evt-1")],
+        })?;
+
+        let meta = storage.get_sync_metadata()?;
+        assert!(meta.is_some());
+        let meta = meta.unwrap();
+        assert_eq!(meta.cursor, "c1");
+        assert_eq!(meta.last_ledger, 0);
+
+        // Empty batch is the "caught up" proof and advances last_fully_indexed_ledger.
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "c2".to_string(),
+            latest_ledger: 123,
+            events: vec![],
+        })?;
+
+        let meta = storage.get_sync_metadata()?.unwrap();
+        assert_eq!(meta.cursor, "c2");
+        assert_eq!(meta.last_ledger, 123);
 
         Ok(())
     }

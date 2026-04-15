@@ -164,6 +164,18 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }
             StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| UserKeys{note_keypair, encryption_keypair}))
         }
+        StorageWorkerRequest::UserNotes(address, limit) => {
+            log::debug!("[{WORKER_NAME}] list user notes for the account {address}");
+            let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
+            log::debug!("[{WORKER_NAME}] fetched {} notes for the account {address}", list.len());
+            StorageWorkerResponse::UserNotes(list)
+        }
+        StorageWorkerRequest::RecentPoolActivity(limit) => {
+            log::debug!("[{WORKER_NAME}] fetch recent pool activity");
+            let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
+            log::debug!("[{WORKER_NAME}] fetched {} pool activity rows", list.len());
+            StorageWorkerResponse::RecentPoolActivity(list)
+        }
         StorageWorkerRequest::RecentPubKeys(limit) => {
             log::debug!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
