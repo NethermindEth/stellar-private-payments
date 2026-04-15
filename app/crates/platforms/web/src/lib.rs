@@ -5,7 +5,7 @@ mod config;
 
 use client::WebClient;
 use config::Config;
-use stellar::{Indexer, LEDGERS_BACK_ON_COLD_START};
+use stellar::Indexer;
 use gloo_timers::future::TimeoutFuture;
 use wasm_bindgen_futures::spawn_local;
 use std::rc::Rc;
@@ -31,12 +31,13 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     wasm_log::init(wasm_log::Config::default());
     let client = WebClient::new(config.rpc_url()).map_err(|e| JsError::new(&e.to_string()))?;
     client.ping_storage().await.map_err(|e| JsError::new(&e.to_string()))?;
-    let indexer = Indexer::new(
+    let indexer = Indexer::init(
             config.rpc_url(),
             client.clone(),
         )
+        .await
         .map_err(|e| JsError::new(&e.to_string()))?;
-    start_indexer_loop(indexer, 5_000 * (LEDGERS_BACK_ON_COLD_START - 1));
+    start_indexer_loop(indexer, 5_000);
     log::debug!("[MAIN THREAD] initialized");
     Ok(MainThreadHandle {
             client,

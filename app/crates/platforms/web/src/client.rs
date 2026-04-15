@@ -19,7 +19,42 @@ use anyhow::anyhow;
 use std::rc::Rc;
 use std::str::FromStr;
 use wasm_bindgen::JsCast;
-use js_sys::{Array, BigInt};
+use js_sys::{Array, BigInt, Function, Object, Reflect};
+
+fn emit_progress(
+    on_status: &Option<Function>,
+    flow: &'static str,
+    stage: &'static str,
+    message: &str,
+    current: Option<u32>,
+    total: Option<u32>,
+) {
+    let Some(cb) = on_status else { return };
+
+    let obj = Object::new();
+    let _ = Reflect::set(&obj, &JsValue::from_str("flow"), &JsValue::from_str(flow));
+    let _ = Reflect::set(&obj, &JsValue::from_str("stage"), &JsValue::from_str(stage));
+    let _ = Reflect::set(&obj, &JsValue::from_str("message"), &JsValue::from_str(message));
+    if let Some(current) = current {
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("current"),
+            &JsValue::from_f64(current as f64),
+        );
+    }
+    if let Some(total) = total {
+        let _ = Reflect::set(
+            &obj,
+            &JsValue::from_str("total"),
+            &JsValue::from_f64(total as f64),
+        );
+    }
+
+    // Best-effort progress: never fail the transaction flow due to UI callbacks.
+    if cb.call1(&JsValue::NULL, &obj.into()).is_err() {
+        log::debug!("[WEBCLIENT] progress callback threw (flow={flow}, stage={stage})");
+    }
+}
 
 
 #[wasm_bindgen]
@@ -234,6 +269,7 @@ impl WebClient {
         membership_blinding: BigInt,
         amount_stroops: BigInt,
         output_amounts: Array,
+        on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
 
         fn bigint_to_string(b: &BigInt) -> Result<String, JsError> {
@@ -267,6 +303,15 @@ impl WebClient {
             return Err(JsError::new("amount_stroops must be > 0 for deposit"));
         }
 
+        emit_progress(
+            &on_status,
+            "deposit",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
+
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
         for i in 0..N_OUTPUTS {
             let v = output_amounts.get(i as u32);
@@ -277,6 +322,14 @@ impl WebClient {
         }
 
         let params = loop {
+            emit_progress(
+                &on_status,
+                "deposit",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
             let data = self
                 .fetcher
                 .all_contracts_data()
@@ -287,6 +340,14 @@ impl WebClient {
                 .pool
                 .merkle_root;
 
+            emit_progress(
+                &on_status,
+                "deposit",
+                "load_state",
+                "Loading local keys…",
+                None,
+                None,
+            );
             let keys = match self
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
@@ -297,6 +358,14 @@ impl WebClient {
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
 
+            emit_progress(
+                &on_status,
+                "deposit",
+                "fetch_chain_state",
+                "Fetching ASP non-membership proof…",
+                None,
+                None,
+            );
             let non_membership_proof = self
                 .fetcher
                 .get_nonmembership_proof(
@@ -322,6 +391,14 @@ impl WebClient {
                 non_membership_proof,
             };
 
+            emit_progress(
+                &on_status,
+                "deposit",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
             match self.storage_request(StorageWorkerRequest::Deposit(req), 5_000).await? {
                 StorageWorkerResponse::DepositParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
@@ -330,6 +407,14 @@ impl WebClient {
                 }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired) => {
                     log::info!("[DEPOSIT] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "deposit",
+                        "sync_wait",
+                        "Waiting for indexer sync…",
+                        None,
+                        None,
+                    );
                     gloo_timers::future::TimeoutFuture::new(1_000).await;
                     continue;
                 },
@@ -337,6 +422,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "deposit",
+            "prove",
+            "Proving…",
+            None,
+            None,
+        );
         self.ping_prover().await.map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let prepared = match self.prover_request(ProverWorkerRequest::Deposit(params), 5_000).await? {
@@ -344,6 +437,14 @@ impl WebClient {
             other => return Err(JsError::new(&format!("Unexpected prover worker response: {:?}", other))),
         };
 
+        emit_progress(
+            &on_status,
+            "deposit",
+            "build_tx",
+            "Building transaction…",
+            None,
+            None,
+        );
         let public_inputs = stellar::OnchainProofPublicInputs {
             root: prepared.prepared.pool_root,
             input_nullifiers: prepared.prepared.input_nullifiers,
@@ -366,6 +467,14 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        emit_progress(
+            &on_status,
+            "deposit",
+            "ready_to_sign",
+            "Ready to sign…",
+            None,
+            None,
+        );
         Ok(serde_wasm_bindgen::to_value(&tx)?)
     }
 
@@ -376,12 +485,22 @@ impl WebClient {
         membership_blinding: BigInt,
         withdraw_recipient: String,
         input_note_ids: Array,
+        on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         if input_note_ids.length() == 0 || input_note_ids.length() > 2 {
             return Err(JsError::new("input_note_ids must have length 1..=2"));
         }
 
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
+
+        emit_progress(
+            &on_status,
+            "withdraw",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
 
         let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
@@ -393,6 +512,14 @@ impl WebClient {
         }
 
         let params = loop {
+            emit_progress(
+                &on_status,
+                "withdraw",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
             let data = self
                 .fetcher
                 .all_contracts_data()
@@ -403,6 +530,14 @@ impl WebClient {
             let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
                 .map_err(|e| JsError::new(&e))?;
 
+            emit_progress(
+                &on_status,
+                "withdraw",
+                "load_state",
+                "Loading local keys…",
+                None,
+                None,
+            );
             let keys = match self
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
@@ -413,6 +548,14 @@ impl WebClient {
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
 
+            emit_progress(
+                &on_status,
+                "withdraw",
+                "fetch_chain_state",
+                "Fetching ASP non-membership proof…",
+                None,
+                None,
+            );
             let non_membership_proof = self
                 .fetcher
                 .get_nonmembership_proof(
@@ -438,6 +581,14 @@ impl WebClient {
                 non_membership_proof,
             };
 
+            emit_progress(
+                &on_status,
+                "withdraw",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
             match self.storage_request(StorageWorkerRequest::Withdraw(req), 5_000).await? {
                 StorageWorkerResponse::WithdrawParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
@@ -446,6 +597,14 @@ impl WebClient {
                 }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired) => {
                     log::info!("[WITHDRAW] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "withdraw",
+                        "sync_wait",
+                        "Waiting for indexer sync…",
+                        None,
+                        None,
+                    );
                     gloo_timers::future::TimeoutFuture::new(1_000).await;
                     continue;
                 }
@@ -458,6 +617,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "withdraw",
+            "prove",
+            "Proving…",
+            None,
+            None,
+        );
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -475,6 +642,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "withdraw",
+            "build_tx",
+            "Building transaction…",
+            None,
+            None,
+        );
         let public_inputs = stellar::OnchainProofPublicInputs {
             root: prepared.prepared.pool_root,
             input_nullifiers: prepared.prepared.input_nullifiers,
@@ -497,6 +672,14 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        emit_progress(
+            &on_status,
+            "withdraw",
+            "ready_to_sign",
+            "Ready to sign…",
+            None,
+            None,
+        );
         Ok(serde_wasm_bindgen::to_value(&tx)?)
     }
 
@@ -509,6 +692,7 @@ impl WebClient {
         recipient_enc_key_hex: String,
         input_note_ids: Array,
         output_amounts: Array,
+        on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         if input_note_ids.length() == 0 || input_note_ids.length() > 2 {
             return Err(JsError::new("input_note_ids must have length 1..=2"));
@@ -520,6 +704,15 @@ impl WebClient {
         }
 
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
+
+        emit_progress(
+            &on_status,
+            "transfer",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
 
         let recipient_note_pubkey =
             NotePublicKey::parse(&recipient_note_key_hex).map_err(|e| JsError::new(&e.to_string()))?;
@@ -545,6 +738,14 @@ impl WebClient {
         }
 
         let params = loop {
+            emit_progress(
+                &on_status,
+                "transfer",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
             let data = self
                 .fetcher
                 .all_contracts_data()
@@ -555,6 +756,14 @@ impl WebClient {
             let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
                 .map_err(|e| JsError::new(&e))?;
 
+            emit_progress(
+                &on_status,
+                "transfer",
+                "load_state",
+                "Loading local keys…",
+                None,
+                None,
+            );
             let keys = match self
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
@@ -565,6 +774,14 @@ impl WebClient {
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
 
+            emit_progress(
+                &on_status,
+                "transfer",
+                "fetch_chain_state",
+                "Fetching ASP non-membership proof…",
+                None,
+                None,
+            );
             let non_membership_proof = self
                 .fetcher
                 .get_nonmembership_proof(
@@ -593,6 +810,14 @@ impl WebClient {
                 non_membership_proof,
             };
 
+            emit_progress(
+                &on_status,
+                "transfer",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
             match self.storage_request(StorageWorkerRequest::Transfer(req), 5_000).await? {
                 StorageWorkerResponse::TransferParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
@@ -601,6 +826,14 @@ impl WebClient {
                 }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired) => {
                     log::info!("[TRANSFER] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "transfer",
+                        "sync_wait",
+                        "Waiting for indexer sync…",
+                        None,
+                        None,
+                    );
                     gloo_timers::future::TimeoutFuture::new(1_000).await;
                     continue;
                 }
@@ -613,6 +846,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "transfer",
+            "prove",
+            "Proving…",
+            None,
+            None,
+        );
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -630,6 +871,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "transfer",
+            "build_tx",
+            "Building transaction…",
+            None,
+            None,
+        );
         let public_inputs = stellar::OnchainProofPublicInputs {
             root: prepared.prepared.pool_root,
             input_nullifiers: prepared.prepared.input_nullifiers,
@@ -652,6 +901,14 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        emit_progress(
+            &on_status,
+            "transfer",
+            "ready_to_sign",
+            "Ready to sign…",
+            None,
+            None,
+        );
         Ok(serde_wasm_bindgen::to_value(&tx)?)
     }
 
@@ -666,6 +923,7 @@ impl WebClient {
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
+        on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         if input_note_ids.length() > 2 {
             return Err(JsError::new("input_note_ids must have length 0..=2"));
@@ -688,6 +946,15 @@ impl WebClient {
 
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let ext_amount = parse_ext_amount_decimal(&ext_amount_stroops)?;
+
+        emit_progress(
+            &on_status,
+            "transact",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
 
         let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
@@ -736,6 +1003,14 @@ impl WebClient {
         }
 
         let params = loop {
+            emit_progress(
+                &on_status,
+                "transact",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
             let data = self
                 .fetcher
                 .all_contracts_data()
@@ -746,6 +1021,14 @@ impl WebClient {
             let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
                 .map_err(|e| JsError::new(&e))?;
 
+            emit_progress(
+                &on_status,
+                "transact",
+                "load_state",
+                "Loading local keys…",
+                None,
+                None,
+            );
             let keys = match self
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
@@ -756,6 +1039,14 @@ impl WebClient {
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
 
+            emit_progress(
+                &on_status,
+                "transact",
+                "fetch_chain_state",
+                "Fetching ASP non-membership proof…",
+                None,
+                None,
+            );
             let non_membership_proof = self
                 .fetcher
                 .get_nonmembership_proof(
@@ -786,6 +1077,14 @@ impl WebClient {
                 non_membership_proof,
             };
 
+            emit_progress(
+                &on_status,
+                "transact",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
             match self.storage_request(StorageWorkerRequest::Transact(req), 5_000).await? {
                 StorageWorkerResponse::TransactParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
@@ -794,6 +1093,14 @@ impl WebClient {
                 }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired) => {
                     log::info!("[TRANSACT] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "transact",
+                        "sync_wait",
+                        "Waiting for indexer sync…",
+                        None,
+                        None,
+                    );
                     gloo_timers::future::TimeoutFuture::new(1_000).await;
                     continue;
                 }
@@ -806,6 +1113,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "transact",
+            "prove",
+            "Proving…",
+            None,
+            None,
+        );
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -823,6 +1138,14 @@ impl WebClient {
             }
         };
 
+        emit_progress(
+            &on_status,
+            "transact",
+            "build_tx",
+            "Building transaction…",
+            None,
+            None,
+        );
         let public_inputs = stellar::OnchainProofPublicInputs {
             root: prepared.prepared.pool_root,
             input_nullifiers: prepared.prepared.input_nullifiers,
@@ -845,6 +1168,14 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 
+        emit_progress(
+            &on_status,
+            "transact",
+            "ready_to_sign",
+            "Ready to sign…",
+            None,
+            None,
+        );
         Ok(serde_wasm_bindgen::to_value(&tx)?)
     }
 }

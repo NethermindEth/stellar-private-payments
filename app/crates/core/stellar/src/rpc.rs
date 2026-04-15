@@ -288,10 +288,8 @@ impl Client {
             Ok(r) => r,
             Err(e) => {
                 if let Error::JsonRpcError { message, .. } = &e {
-                    if let Some(range) = parse_ledger_range(message) {
-                        if start_ledger < range.0 {
-                            return Err(Error::RpcSyncGap(range.0));
-                        }
+                    if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0) {
+                        return Err(Error::RpcSyncGap(range.0));
                     }
                 }
                 return Err(e);
@@ -448,10 +446,7 @@ impl Client {
     }
 }
 
-// TODO(Maks) - add test
-// Handle retention-window drift: if start is just below current oldest,
-// clamp to RPC-reported oldest and continue instead of failing sync.
-// helper to parse "ledger range: 123 - 456" from the RPC message
+// helper to parse "startLedger must be within the ledger range: 1936296 - 2057255" from the RPC message
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
     let parts: Vec<&str> = message.split(":").collect();
     if parts.len() != 2 {
@@ -477,4 +472,15 @@ fn extract_symbol_from_val(key: &xdr::ScVal) -> Result<String, Error> {
     }
 
     Err(Error::UnexpectedScVal("Structure {key:?} did not match ScVal::Vec(ScVal::Symbol)".to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parsing_range_error() {
+        let msg = "startLedger must be within the ledger range: 1936296 - 2057255";
+        assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
+    }
 }

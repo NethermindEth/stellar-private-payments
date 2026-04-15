@@ -16,6 +16,11 @@ pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
     pub admin: String,
+    /// Ledger sequence at (or immediately before) contract deployment.
+    ///
+    /// Used as a stable cold-start anchor for fresh local DBs so the indexer can
+    /// reconstruct the pool and ASP membership trees from events.
+    pub deployment_ledger: u32,
     // Address of ASP membership deployed contract
     pub asp_membership: String,
     // Address of ASP nonmembership deployed contract

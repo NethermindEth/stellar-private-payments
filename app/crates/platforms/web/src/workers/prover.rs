@@ -24,7 +24,6 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] = include_bytes!("../../../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
-const VERIFICATION_KEY: &str = include_str!("../../../../../../scripts/testdata/policy_tx_2_2_vk.json");
 
 // TODO for now it is a mix of async (because we want an async bridge for the main thread) and sync (blocking) code
 // in the future we should refactor to use wasm threads?
@@ -94,12 +93,12 @@ pub(crate) async fn ProverWorker(req: ProverWorkerRequest) -> ProverWorkerRespon
 pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerResponse> {
     let resp = match req {
         ProverWorkerRequest::Ping => {
-            log::debug!("[{WORKER_NAME}] ping");
+            log::trace!("[{WORKER_NAME}] ping");
             loop {
                 let ready = WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some());
 
                 if ready {
-                    log::debug!("[{WORKER_NAME}] pong");
+                    log::trace!("[{WORKER_NAME}] pong");
                     return Ok(ProverWorkerResponse::Pong);
                 }
 
@@ -107,7 +106,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             }
         }
         ProverWorkerRequest::Deposit(params) => {
-            log::debug!("[{WORKER_NAME}] deposit");
+            log::trace!("[{WORKER_NAME}] deposit");
 
             let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
             let prepared = prove_from_artifacts(transact_artifacts)?;
@@ -123,12 +122,12 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             ProverWorkerResponse::WithdrawPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Transfer(params) => {
-            log::debug!("[{WORKER_NAME}] transfer");
+            log::trace!("[{WORKER_NAME}] transfer");
             let artifacts = transfer(params, hash_ext_data_offchain)?;
             ProverWorkerResponse::TransferPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Transact(params) => {
-            log::debug!("[{WORKER_NAME}] transact");
+            log::trace!("[{WORKER_NAME}] transact");
             let artifacts = transact(params, hash_ext_data_offchain)?;
             ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
         }

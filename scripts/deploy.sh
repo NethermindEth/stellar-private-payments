@@ -159,6 +159,20 @@ else
   ADMIN_ADDR="$(resolve_address "$ADMIN")"
 fi
 
+get_latest_ledger_seq() {
+  local out seq
+  out="$(stellar ledger latest --network "$NETWORK" 2>&1)" || {
+    echo "$out" >&2
+    die "failed to query latest ledger via 'stellar ledger latest' (is your Stellar CLI up to date?)"
+  }
+  seq="$(grep -Eo '^Sequence:[[:space:]]*[0-9]+' <<<"$out" | grep -Eo '[0-9]+' | head -1 || true)"
+  [[ -n "$seq" ]] || { echo "$out" >&2; die "failed to parse ledger sequence from 'stellar ledger latest' output"; }
+  echo "$seq"
+}
+
+# Used as a stable cold-start anchor so fresh local DBs can index from contract deployment.
+DEPLOYMENT_LEDGER="$(get_latest_ledger_seq)"
+
 step "build contracts"
 mkdir -p "$WASM_DIR"
 for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
@@ -240,8 +254,8 @@ Deployment complete
   Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
 EOF
 
-DEPLOY_JSON="$(printf '{"network":"%s","deployer":"%s","admin":"%s","asp_membership":"%s","asp_non_membership":"%s","verifier":"%s","pool":"%s","initialized":%s}\n' \
-  "$NETWORK" "$DEPLOYER_ADDR" "$ADMIN_ADDR" "$ASP_MEMBERSHIP_ID" "$ASP_NON_MEMBERSHIP_ID" "$VERIFIER_ID" "$POOL_ID" \
+DEPLOY_JSON="$(printf '{"network":"%s","deployer":"%s","admin":"%s","deployment_ledger":%s,"asp_membership":"%s","asp_non_membership":"%s","verifier":"%s","pool":"%s","initialized":%s}\n' \
+  "$NETWORK" "$DEPLOYER_ADDR" "$ADMIN_ADDR" "$DEPLOYMENT_LEDGER" "$ASP_MEMBERSHIP_ID" "$ASP_NON_MEMBERSHIP_ID" "$VERIFIER_ID" "$POOL_ID" \
   "$([[ "$SKIP_INIT" == "true" ]] && echo false || echo true)")"
 
 # Write deployment summary to a file for easy reuse.

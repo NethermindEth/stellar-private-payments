@@ -206,13 +206,16 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
     const client = getHandle().webClient;
     let data = await client.getUserKeys(account);
     if (data) {
+      onStatus?.('Loaded privacy keys from local storage');
       return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {
               publicKey: data.encryptionKeypair.public,
               privateKey: data.encryptionKeypair.private,
           } };
     }
 
-    onStatus?.(`Sign message to derive keys (1/2)...`);
+    onStatus?.(
+        'Signature 1/2: derive spending key (proves note ownership; does not move funds)...'
+    );
 
     let spendingResult;
     try {
@@ -232,7 +235,9 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
         await new Promise(r => setTimeout(r, signDelay));
     }
 
-    onStatus?.('Sign message to derive keys (2/2)...');
+    onStatus?.(
+        'Signature 2/2: derive encryption key (decrypts incoming notes; does not move funds)...'
+    );
 
     let encryptionResult;
     try {

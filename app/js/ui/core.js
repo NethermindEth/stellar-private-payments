@@ -3,95 +3,33 @@
  * @module ui/core
  */
 
-import { signWalletMessage } from '../wallet.js';
-import { 
-    deriveNotePrivateKeyFromSignature, 
-    deriveEncryptionKeypairFromSignature,
-    derivePublicKey,
-} from '../bridge.js';
-import { notesStore } from '../state/index.js';
-
 // Application State - shared across all UI modules
 export const App = {
     state: {
-        wallet: { connected: false, address: null },
+        wallet: {
+            connected: false,
+            address: null,
+            sorobanRpcUrl: null,
+            network: null,
+            networkPassphrase: null,
+        },
+        keys: {
+            notePublicKey: null,
+            encryptionPublicKey: null,
+        },
         notes: [],
-        activeTab: 'deposit'
+        activeTab: 'deposit',
     },
-    
+
+    // Lightweight event bus for cross-module coordination
+    events: new EventTarget(),
+
     // Template references (cached on init)
     templates: {},
-    
-    // DOM element references
-    els: {}
-};
 
-/**
- * Derives spending and encryption keys from Freighter wallet signatures.
- * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
- * 
- * @param {Object} options
- * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
- * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
- * @param {number} [options.signDelay=300] - Delay between signature requests (ms)
- * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
- * @throws {Error} If user rejects signature requests
- */
-export async function deriveKeysFromWallet({ onStatus, signOptions = {}, signDelay = 300 }) {
-    onStatus?.('Sign message to derive keys (1/2)...');
-    
-    let spendingResult;
-    try {
-        spendingResult = await signWalletMessage('Privacy Pool Spending Key [v1]', signOptions);
-    } catch (e) {
-        if (e.code === 'USER_REJECTED') {
-            throw new Error('Please approve the message signature to derive your spending key');
-        }
-        throw e;
-    }
-    
-    if (!spendingResult?.signedMessage) {
-        throw new Error('Spending key signature rejected');
-    }
-    
-    if (signDelay > 0) {
-        await new Promise(r => setTimeout(r, signDelay));
-    }
-    
-    onStatus?.('Sign message to derive keys (2/2)...');
-    
-    let encryptionResult;
-    try {
-        encryptionResult = await signWalletMessage('Sign to access Privacy Pool [v1]', signOptions);
-    } catch (e) {
-        if (e.code === 'USER_REJECTED') {
-            throw new Error('Please approve the message signature to derive your encryption key');
-        }
-        throw e;
-    }
-    
-    if (!encryptionResult?.signedMessage) {
-        throw new Error('Encryption key signature rejected');
-    }
-    
-    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
-    const encryptionSigBytes = Uint8Array.from(atob(encryptionResult.signedMessage), c => c.charCodeAt(0));
-    
-    const privKeyBytes = deriveNotePrivateKeyFromSignature(spendingSigBytes);
-    const pubKeyBytes = derivePublicKey(privKeyBytes);
-    const encryptionKeypair = deriveEncryptionKeypairFromSignature(encryptionSigBytes);
-    
-    // Cache keys for note scanning (so sync can scan without prompting again)
-    notesStore.setAuthenticatedKeys({
-        encryptionKeypair,
-        notePrivateKey: privKeyBytes,
-        notePublicKey: pubKeyBytes,
-    });
-    
-    console.log('[KeyDerivation] Derived keys from wallet signatures');
-    
-    return { privKeyBytes, pubKeyBytes, encryptionKeypair };
-}
+    // DOM element references
+    els: {},
+};
 
 // Utilities
 export const Utils = {
@@ -147,58 +85,6 @@ export const Utils = {
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-    }
-};
-
-// Storage - loads notes from IndexedDB filtered by current owner
-export const Storage = {
-    KEY: 'poolstellar_notes',
-    
-    /**
-     * Saves a note to IndexedDB with the current owner.
-     * @param {Object} note - Note to save
-     */
-    async save(note) {
-        try {
-            await notesStore.saveNote(note);
-            // Reload the notes list to include the new one
-            await this.load();
-        } catch (e) {
-            console.error('Storage save failed:', e);
-        }
-    },
-    
-    /**
-     * Loads notes for the current owner from IndexedDB.
-     * Notes are filtered by the connected wallet address.
-     */
-    async load() {
-        try {
-            // Get notes from IndexedDB, filtered by the current owner
-            const notes = await notesStore.getNotes();
-            App.state.notes = notes;
-            console.log(`[Storage] Loaded ${notes.length} notes for current owner`);
-        } catch (e) {
-            console.error('Storage load failed:', e);
-            App.state.notes = [];
-        }
-    },
-    
-    /**
-     * Legacy method for backwards compatibility - just calls load()
-     */
-    loadFromLocalStorage() {
-        // Keep for backwards compatibility with any code that still uses localStorage
-        try {
-            const data = localStorage.getItem(this.KEY);
-            if (data) {
-                const legacyNotes = JSON.parse(data);
-                console.log(`[Storage] Found ${legacyNotes.length} legacy notes in localStorage`);
-                // Could migrate these to IndexedDB if needed
-            }
-        } catch (e) {
-            // Ignore
-        }
     }
 };
 

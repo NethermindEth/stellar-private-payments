@@ -1,0 +1,434 @@
+/**
+ * Transactions UI - Deposit / Withdraw / Transfer / Transact.
+ *
+ * WASM-first: all proving + tx preparation happens in WebClient.
+ * JS is responsible only for UI interactions and signing/submitting prepared XDR.
+ *
+ * @module ui/transactions
+ */
+
+import { getHandle } from '../wasm-facade.js';
+import { submitPreparedSorobanTx } from '../stellar.js';
+import { App, Toast } from './core.js';
+import { Templates } from './templates.js';
+
+const N_OUTPUTS = 2;
+
+function xlmToStroopsBigInt(xlm) {
+    const n = Number(xlm);
+    if (!Number.isFinite(n)) return 0n;
+    return BigInt(Math.trunc(n * 10_000_000));
+}
+
+function parseMembershipBlinding(inputId) {
+    const raw = document.getElementById(inputId)?.value?.trim() || '0';
+    try {
+        return BigInt(raw);
+    } catch {
+        throw new Error(`Invalid membership blinding: ${raw}`);
+    }
+}
+
+function setLoading(btn, loadingText) {
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    btn.disabled = true;
+    btnText?.classList.add('hidden');
+    if (btnLoading) {
+        btnLoading.classList.remove('hidden');
+        btnLoading.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-dark-950/30 border-t-dark-950 rounded-full animate-spin"></span><span class="btn-loading-text ml-2"></span>`;
+        const text = btnLoading.querySelector('.btn-loading-text');
+        if (text) text.textContent = loadingText;
+    }
+}
+
+function setLoadingText(btn, text) {
+    const btnLoading = btn.querySelector('.btn-loading');
+    const el = btnLoading?.querySelector('.btn-loading-text');
+    if (el) el.textContent = text;
+}
+
+function clearLoading(btn) {
+    const btnText = btn.querySelector('.btn-text');
+    const btnLoading = btn.querySelector('.btn-loading');
+    btn.disabled = false;
+    btnText?.classList.remove('hidden');
+    btnLoading?.classList.add('hidden');
+    if (btnLoading) btnLoading.textContent = '';
+}
+
+function requireWalletReady() {
+    if (!App.state.wallet.connected || !App.state.wallet.address) {
+        throw new Error('Please connect your wallet first');
+    }
+    if (!App.state.wallet.sorobanRpcUrl || !App.state.wallet.networkPassphrase) {
+        throw new Error('Wallet network details unavailable');
+    }
+}
+
+function collectNoteIds(containerId) {
+    const noteIds = [];
+    document.querySelectorAll(`#${containerId} .note-input`).forEach(input => {
+        const id = input.value.trim();
+        if (id) noteIds.push(id);
+    });
+    return noteIds;
+}
+
+function collectOutputAmounts(containerId) {
+    const out = [];
+    document.querySelectorAll(`#${containerId} .output-amount`).forEach(input => {
+        out.push(xlmToStroopsBigInt(input.value));
+    });
+    while (out.length < N_OUTPUTS) out.push(0n);
+    return out.slice(0, N_OUTPUTS);
+}
+
+function collectAdvancedRecipients(containerId) {
+    const noteKeys = [];
+    const encKeys = [];
+    document.querySelectorAll(`#${containerId} .advanced-output-row`).forEach(row => {
+        const nk = row.querySelector('.output-note-key')?.value?.trim();
+        const ek = row.querySelector('.output-enc-key')?.value?.trim();
+        noteKeys.push(nk ? nk : null);
+        encKeys.push(ek ? ek : null);
+    });
+    while (noteKeys.length < N_OUTPUTS) noteKeys.push(null);
+    while (encKeys.length < N_OUTPUTS) encKeys.push(null);
+    return { noteKeys: noteKeys.slice(0, N_OUTPUTS), encKeys: encKeys.slice(0, N_OUTPUTS) };
+}
+
+export const Transactions = {
+    init() {
+        // Deposit
+        const depositOutputs = document.getElementById('deposit-outputs');
+        depositOutputs?.replaceChildren();
+        depositOutputs?.appendChild(Templates.createOutputRow(0, 10));
+        depositOutputs?.appendChild(Templates.createOutputRow(1, 0));
+        this._wireDeposit();
+
+        // Withdraw
+        const withdrawInputs = document.getElementById('withdraw-inputs');
+        withdrawInputs?.replaceChildren();
+        withdrawInputs?.appendChild(Templates.createInputRow(0));
+        withdrawInputs?.appendChild(Templates.createInputRow(1));
+        this._wireWithdraw();
+
+        // Transfer
+        const transferInputs = document.getElementById('transfer-inputs');
+        const transferOutputs = document.getElementById('transfer-outputs');
+        transferInputs?.replaceChildren();
+        transferOutputs?.replaceChildren();
+        transferInputs?.appendChild(Templates.createInputRow(0));
+        transferInputs?.appendChild(Templates.createInputRow(1));
+        transferOutputs?.appendChild(Templates.createOutputRow(0, 0));
+        transferOutputs?.appendChild(Templates.createOutputRow(1, 0));
+        this._wireTransfer();
+
+        // Transact
+        const transactInputs = document.getElementById('transact-inputs');
+        const transactOutputs = document.getElementById('transact-outputs');
+        transactInputs?.replaceChildren();
+        transactOutputs?.replaceChildren();
+        transactInputs?.appendChild(Templates.createInputRow(0));
+        transactInputs?.appendChild(Templates.createInputRow(1));
+        transactOutputs?.appendChild(Templates.createAdvancedOutputRow(0, 0));
+        transactOutputs?.appendChild(Templates.createAdvancedOutputRow(1, 0));
+        this._wireTransact();
+
+        // Prefill withdraw recipient on connect
+        App.events.addEventListener('wallet:ready', () => {
+            const w = App.state.wallet.address;
+            const withdrawRecipient = document.getElementById('withdraw-recipient');
+            const transactRecipient = document.getElementById('transact-recipient');
+            if (withdrawRecipient && !withdrawRecipient.value.trim()) withdrawRecipient.value = w;
+            if (transactRecipient && !transactRecipient.value.trim()) transactRecipient.value = w;
+        });
+    },
+
+    _wireDeposit() {
+        const slider = document.getElementById('deposit-slider');
+        const amount = document.getElementById('deposit-amount');
+        const outputs = document.getElementById('deposit-outputs');
+        const btn = document.getElementById('btn-deposit');
+
+        const updateBalance = () => {
+            const depositVal = parseFloat(amount?.value || '0') || 0;
+            let outputsTotal = 0;
+            document.querySelectorAll('#deposit-outputs .output-amount').forEach(input => {
+                outputsTotal += parseFloat(input.value) || 0;
+            });
+            const eq = document.getElementById('deposit-balance');
+            if (!eq) return false;
+            eq.querySelector('[data-eq="input"]').textContent = `Deposit: ${depositVal}`;
+            eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
+
+            const isBalanced = Math.abs(depositVal - outputsTotal) < 0.0000001 && depositVal > 0;
+            const status = eq.querySelector('[data-eq="status"]');
+            if (depositVal > 0 || outputsTotal > 0) {
+                if (isBalanced) {
+                    status.innerHTML = '<svg class="w-5 h-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
+                    eq.classList.remove('border-red-500/50', 'bg-red-500/5');
+                    eq.classList.add('border-emerald-500/50', 'bg-emerald-500/5');
+                } else {
+                    status.innerHTML = '<svg class="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+                    eq.classList.add('border-red-500/50', 'bg-red-500/5');
+                    eq.classList.remove('border-emerald-500/50', 'bg-emerald-500/5');
+                }
+            } else {
+                status.innerHTML = '';
+                eq.classList.remove('border-red-500/50', 'bg-red-500/5', 'border-emerald-500/50', 'bg-emerald-500/5');
+            }
+            return isBalanced;
+        };
+
+        slider?.addEventListener('input', () => {
+            if (amount) amount.value = slider.value;
+            updateBalance();
+        });
+        amount?.addEventListener('input', () => {
+            if (slider) slider.value = String(Math.min(Math.max(0, Number(amount.value || 0)), 1000));
+            updateBalance();
+        });
+        outputs?.addEventListener('input', updateBalance);
+
+        document.querySelectorAll('[data-target="deposit-amount"]').forEach(spinnerBtn => {
+            spinnerBtn.addEventListener('click', () => {
+                const input = document.getElementById('deposit-amount');
+                const val = parseFloat(input.value) || 0;
+                input.value = spinnerBtn.classList.contains('spinner-up') ? String(val + 1) : String(Math.max(0, val - 1));
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        });
+
+        btn?.addEventListener('click', async () => {
+            try {
+                requireWalletReady();
+                if (!updateBalance()) throw new Error('Deposit amount must equal sum of outputs');
+
+                const userAddress = App.state.wallet.address;
+                const membershipBlinding = parseMembershipBlinding('deposit-membership-blinding');
+                const amountStroops = xlmToStroopsBigInt(amount.value);
+                const outputAmounts = collectOutputAmounts('deposit-outputs');
+
+                setLoading(btn, 'Validating…');
+                const onStatus = p => p?.message && setLoadingText(btn, p.message);
+                setLoadingText(btn, 'Proving & preparing…');
+                const prepared = await getHandle().webClient.proveDepositPrepareTx(
+                    userAddress,
+                    membershipBlinding,
+                    amountStroops,
+                    outputAmounts,
+                    onStatus,
+                );
+
+                if (prepared == null) {
+                    Toast.show('Cannot prepare deposit yet (ASP registration required or indexer sync pending).', 'error', 7000);
+                    return;
+                }
+
+                setLoadingText(btn, 'Ready to sign…');
+                const txHash = await submitPreparedSorobanTx(prepared, {
+                    address: userAddress,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                }, { onStatus });
+                Toast.show(`Submitted: ${txHash}`, 'success');
+                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+            } catch (e) {
+                Toast.show(e?.message || 'Deposit failed', 'error', 7000);
+            } finally {
+                clearLoading(btn);
+            }
+        });
+
+        updateBalance();
+    },
+
+    _wireWithdraw() {
+        const btn = document.getElementById('btn-withdraw');
+        btn?.addEventListener('click', async () => {
+            try {
+                requireWalletReady();
+                const userAddress = App.state.wallet.address;
+                const membershipBlinding = parseMembershipBlinding('withdraw-membership-blinding');
+                const recipient = document.getElementById('withdraw-recipient')?.value?.trim() || userAddress;
+                const inputNoteIds = collectNoteIds('withdraw-inputs');
+                if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+
+                setLoading(btn, 'Validating…');
+                const onStatus = p => p?.message && setLoadingText(btn, p.message);
+                setLoadingText(btn, 'Proving & preparing…');
+                const prepared = await getHandle().webClient.proveWithdrawPrepareTx(
+                    userAddress,
+                    membershipBlinding,
+                    recipient,
+                    inputNoteIds,
+                    onStatus,
+                );
+                if (prepared == null) {
+                    Toast.show('Cannot prepare withdraw yet (ASP registration required or indexer sync pending).', 'error', 7000);
+                    return;
+                }
+
+                setLoadingText(btn, 'Ready to sign…');
+                const txHash = await submitPreparedSorobanTx(prepared, {
+                    address: userAddress,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                }, { onStatus });
+                Toast.show(`Submitted: ${txHash}`, 'success');
+                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+            } catch (e) {
+                Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
+            } finally {
+                clearLoading(btn);
+            }
+        });
+    },
+
+    _wireTransfer() {
+        const btn = document.getElementById('btn-transfer');
+        const addressbookBtn = document.getElementById('transfer-addressbook-btn');
+        addressbookBtn?.addEventListener('click', () => {
+            document.getElementById('section-tab-addressbook')?.click();
+            document.getElementById('section-panel-addressbook')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+
+        btn?.addEventListener('click', async () => {
+            try {
+                requireWalletReady();
+                const userAddress = App.state.wallet.address;
+                const membershipBlinding = parseMembershipBlinding('transfer-membership-blinding');
+                const recipientNoteKey = document.getElementById('transfer-recipient-key')?.value?.trim();
+                const recipientEncKey = document.getElementById('transfer-recipient-enc-key')?.value?.trim();
+                if (!recipientNoteKey || !recipientEncKey) throw new Error('Recipient note key + encryption key are required');
+                const inputNoteIds = collectNoteIds('transfer-inputs');
+                if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                const outputAmounts = collectOutputAmounts('transfer-outputs');
+
+                setLoading(btn, 'Validating…');
+                const onStatus = p => p?.message && setLoadingText(btn, p.message);
+                setLoadingText(btn, 'Proving & preparing…');
+                const prepared = await getHandle().webClient.proveTransferPrepareTx(
+                    userAddress,
+                    membershipBlinding,
+                    recipientNoteKey,
+                    recipientEncKey,
+                    inputNoteIds,
+                    outputAmounts,
+                    onStatus,
+                );
+                if (prepared == null) {
+                    Toast.show('Cannot prepare transfer yet (ASP registration required or indexer sync pending).', 'error', 7000);
+                    return;
+                }
+
+                setLoadingText(btn, 'Ready to sign…');
+                const txHash = await submitPreparedSorobanTx(prepared, {
+                    address: userAddress,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                }, { onStatus });
+                Toast.show(`Submitted: ${txHash}`, 'success');
+                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+            } catch (e) {
+                Toast.show(e?.message || 'Transfer failed', 'error', 7000);
+            } finally {
+                clearLoading(btn);
+            }
+        });
+    },
+
+    _wireTransact() {
+        const slider = document.getElementById('transact-slider');
+        const amount = document.getElementById('transact-amount');
+        const outputs = document.getElementById('transact-outputs');
+        const btn = document.getElementById('btn-transact');
+
+        const updateBalance = () => {
+            const publicVal = parseFloat(amount?.value || '0') || 0;
+            let outputsTotal = 0;
+            document.querySelectorAll('#transact-outputs .output-amount').forEach(input => {
+                outputsTotal += parseFloat(input.value) || 0;
+            });
+            const eq = document.getElementById('transact-balance');
+            if (!eq) return;
+            eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicVal >= 0 ? '+' : ''}${publicVal}`;
+            eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
+        };
+
+        slider?.addEventListener('input', () => {
+            if (amount) amount.value = slider.value;
+            updateBalance();
+        });
+        amount?.addEventListener('input', () => {
+            if (slider) slider.value = String(Math.min(Math.max(-500, Number(amount.value || 0)), 500));
+            updateBalance();
+        });
+        outputs?.addEventListener('input', updateBalance);
+
+        document.querySelectorAll('[data-target="transact-amount"]').forEach(spinnerBtn => {
+            spinnerBtn.addEventListener('click', () => {
+                const input = document.getElementById('transact-amount');
+                const val = parseFloat(input.value) || 0;
+                input.value = spinnerBtn.classList.contains('spinner-up') ? String(val + 1) : String(val - 1);
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+        });
+
+        btn?.addEventListener('click', async () => {
+            try {
+                requireWalletReady();
+                const userAddress = App.state.wallet.address;
+                const membershipBlinding = parseMembershipBlinding('transact-membership-blinding');
+                const extAmountStroops = xlmToStroopsBigInt(amount.value);
+                const extRecipient = document.getElementById('transact-recipient')?.value?.trim() || userAddress;
+                if (extAmountStroops < 0n && !extRecipient) {
+                    throw new Error('Withdrawal recipient is required when public amount is negative');
+                }
+
+                const inputNoteIds = collectNoteIds('transact-inputs');
+                if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                const outputAmounts = collectOutputAmounts('transact-outputs');
+                const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
+
+                setLoading(btn, 'Validating…');
+                const onStatus = p => p?.message && setLoadingText(btn, p.message);
+                setLoadingText(btn, 'Proving & preparing…');
+                const prepared = await getHandle().webClient.proveTransactPrepareTx(
+                    userAddress,
+                    membershipBlinding,
+                    extRecipient,
+                    extAmountStroops,
+                    inputNoteIds,
+                    outputAmounts,
+                    noteKeys,
+                    encKeys,
+                    onStatus,
+                );
+                if (prepared == null) {
+                    Toast.show('Cannot prepare transaction yet (ASP registration required or indexer sync pending).', 'error', 7000);
+                    return;
+                }
+
+                setLoadingText(btn, 'Ready to sign…');
+                const txHash = await submitPreparedSorobanTx(prepared, {
+                    address: userAddress,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                }, { onStatus });
+                Toast.show(`Submitted: ${txHash}`, 'success');
+                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+            } catch (e) {
+                Toast.show(e?.message || 'Transact failed', 'error', 7000);
+            } finally {
+                clearLoading(btn);
+            }
+        });
+
+        updateBalance();
+    },
+};

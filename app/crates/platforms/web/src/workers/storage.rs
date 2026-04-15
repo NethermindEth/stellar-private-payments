@@ -116,12 +116,12 @@ pub(crate) async fn StorageWorker(req: StorageWorkerRequest) -> StorageWorkerRes
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
         StorageWorkerRequest::Ping => {
-            log::debug!("[{WORKER_NAME}] ping");
+            log::trace!("[{WORKER_NAME}] ping");
             loop {
                 let ready = STORAGE.with(|s| s.borrow().is_some());
 
                 if ready {
-                    log::debug!("[{WORKER_NAME}] pong");
+                    log::trace!("[{WORKER_NAME}] pong");
                     kick_processor();
                     return Ok(StorageWorkerResponse::Pong);
                 }
@@ -130,66 +130,66 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }
         }
         StorageWorkerRequest::SyncState => {
-            log::debug!("[{WORKER_NAME}] get current sync");
+            log::trace!("[{WORKER_NAME}] get current sync");
             let state = with_storage!(s => s.get_sync_metadata()?)?;
             let resp = StorageWorkerResponse::SyncState(state);
-            log::debug!("[{WORKER_NAME}] sending current sync");
+            log::trace!("[{WORKER_NAME}] sending current sync");
             resp
         }
         StorageWorkerRequest::SaveEvents(events_data) => {
-            log::debug!("[{WORKER_NAME}] saving {} raw contract events", events_data.events.len());
+            log::trace!("[{WORKER_NAME}] saving {} raw contract events", events_data.events.len());
             with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
             // We could pass the events_data here further for the processing but
             // for the sake of the sequential processing we drop it here
             // the storage is the single source of raw events for the processors
-            log::debug!("[{WORKER_NAME}] sending {} raw contract events to process", events_data.events.len());
+            log::trace!("[{WORKER_NAME}] sending {} raw contract events to process", events_data.events.len());
             kick_processor();
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, spending_signature, encryption_signature) => {
-            log::debug!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
+            log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
             let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
-            log::debug!("[{WORKER_NAME}] saved notes and encryption keys for the account {address}");
+            log::trace!("[{WORKER_NAME}] saved notes and encryption keys for the account {address}");
             kick_processor();
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {
-            log::debug!("[{WORKER_NAME}] fetch user keys for the account {address}");
+            log::trace!("[{WORKER_NAME}] fetch user keys for the account {address}");
             let opt = with_storage!(s => s.get_user_keys(&address)?)?;
             if opt.is_some() {
-                log::debug!("[{WORKER_NAME}] fetched notes and encryption keys for the account {address}");
+                log::trace!("[{WORKER_NAME}] fetched notes and encryption keys for the account {address}");
             } else {
-                log::debug!("[{WORKER_NAME}] not found notes and encryption keys for the account {address}");
+                log::trace!("[{WORKER_NAME}] not found notes and encryption keys for the account {address}");
             }
             StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| UserKeys{note_keypair, encryption_keypair}))
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
-            log::debug!("[{WORKER_NAME}] list user notes for the account {address}");
+            log::trace!("[{WORKER_NAME}] list user notes for the account {address}");
             let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
-            log::debug!("[{WORKER_NAME}] fetched {} notes for the account {address}", list.len());
+            log::trace!("[{WORKER_NAME}] fetched {} notes for the account {address}", list.len());
             StorageWorkerResponse::UserNotes(list)
         }
         StorageWorkerRequest::RecentPoolActivity(limit) => {
-            log::debug!("[{WORKER_NAME}] fetch recent pool activity");
+            log::trace!("[{WORKER_NAME}] fetch recent pool activity");
             let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
-            log::debug!("[{WORKER_NAME}] fetched {} pool activity rows", list.len());
+            log::trace!("[{WORKER_NAME}] fetched {} pool activity rows", list.len());
             StorageWorkerResponse::RecentPoolActivity(list)
         }
         StorageWorkerRequest::RecentPubKeys(limit) => {
-            log::debug!("[{WORKER_NAME}] fetch pub keys for the address book");
+            log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
-            log::debug!("[{WORKER_NAME}] fetched {} pub keys for the address book", list.len());
+            log::trace!("[{WORKER_NAME}] fetched {} pub keys for the address book", list.len());
             StorageWorkerResponse::PubKeys(list)
         }
         StorageWorkerRequest::DeriveASPleaf(AdminASPRequest{membership_blinding, pubkey}) => {
-            log::debug!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
+            log::trace!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
             let user_leaf = asp_membership_leaf(&pubkey, &membership_blinding)?;
-            log::debug!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
+            log::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
             StorageWorkerResponse::DeriveASPleaf(user_leaf)
         }
         StorageWorkerRequest::Deposit(req) => {
-            log::debug!("[{WORKER_NAME}] deposit");
+            log::trace!("[{WORKER_NAME}] deposit");
 
             let (note_privkey, note_pubkey, encryption_pubkey) =
                 match with_storage!(s => s.get_user_keys(&req.user_address)?)? {
@@ -273,7 +273,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::DepositParams(params)
         }
         StorageWorkerRequest::Withdraw(req) => {
-            log::debug!("[{WORKER_NAME}] withdraw");
+            log::trace!("[{WORKER_NAME}] withdraw");
 
             if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
                 return Ok(StorageWorkerResponse::Error(
@@ -334,7 +334,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::WithdrawParams(params)
         }
         StorageWorkerRequest::Transfer(req) => {
-            log::debug!("[{WORKER_NAME}] transfer");
+            log::trace!("[{WORKER_NAME}] transfer");
 
             if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
                 return Ok(StorageWorkerResponse::Error(
@@ -398,7 +398,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::TransferParams(params)
         }
         StorageWorkerRequest::Transact(req) => {
-            log::debug!("[{WORKER_NAME}] transact");
+            log::trace!("[{WORKER_NAME}] transact");
 
             if req.input_commitments.len() > 2 {
                 return Ok(StorageWorkerResponse::Error(
