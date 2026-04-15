@@ -332,6 +332,10 @@ async function connect() {
     state.membershipClient = null;
     state.nonMembershipClient = null;
 
+    // Re-evaluate UI gating now that we have an address.
+    // The toggle button is disabled when `state.address` is missing.
+    updateAdminInsertOnlyDisplay(state.adminInsertOnly);
+
     setStatus('Wallet connected', 'ok');
     log(`Wallet connected: ${address}`);
     showToast(`Connected: ${shortAddress(address)}`, 'success');

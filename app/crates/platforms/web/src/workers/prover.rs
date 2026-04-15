@@ -106,9 +106,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             }
         }
         ProverWorkerRequest::Deposit(params) => {
-            log::trace!("[{WORKER_NAME}] deposit");
-
+            log::debug!("[{WORKER_NAME}] deposit");
             let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
+            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
             let prepared = prove_from_artifacts(transact_artifacts)?;
             ProverWorkerResponse::DepositPrepared(DepositPrepared {
                 proof_uncompressed: prepared.proof_uncompressed,
@@ -122,13 +122,15 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             ProverWorkerResponse::WithdrawPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Transfer(params) => {
-            log::trace!("[{WORKER_NAME}] transfer");
+            log::debug!("[{WORKER_NAME}] transfer");
             let artifacts = transfer(params, hash_ext_data_offchain)?;
+            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
             ProverWorkerResponse::TransferPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Transact(params) => {
-            log::trace!("[{WORKER_NAME}] transact");
+            log::debug!("[{WORKER_NAME}] transact");
             let artifacts = transact(params, hash_ext_data_offchain)?;
+            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
             ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
         }
     };
@@ -137,6 +139,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
 fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
     let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
+    log::debug!("[{WORKER_NAME}] compute witness");
     let witness_bytes = WITNESS_CALC.with(|cell| {
         let mut borrow = cell.borrow_mut();
         let calc = borrow
@@ -152,8 +155,10 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
             .as_ref()
             .ok_or_else(|| anyhow::anyhow!("prover is not initialized"))?;
 
+        log::debug!("[{WORKER_NAME}] prove");
         let proof_compressed = prover.prove_bytes(&witness_bytes)?;
         let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
+        log::debug!("[{WORKER_NAME}] verify");
         let ok = prover.verify(&proof_compressed, &public_inputs)?;
         if !ok {
             return Err(anyhow::anyhow!("proof verification failed"));
