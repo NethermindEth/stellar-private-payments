@@ -30,10 +30,24 @@ use types::{
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
 
+#[derive(Clone, Debug)]
+enum InitState {
+    Pending,
+    Ready,
+    Failed(String),
+}
+
+fn is_opfs_locked_error(message: &str) -> bool {
+    message.contains("NoModificationAllowedError")
+        && (message.contains("createSyncAccessHandle")
+            || message.contains("Access Handles cannot be created"))
+}
+
 thread_local! {
     static STORAGE: RefCell<Option<Storage>> = RefCell::new(None);
     // signalling the events processor
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = RefCell::new(None);
+    static INIT_STATE: RefCell<InitState> = RefCell::new(InitState::Pending);
 }
 
 macro_rules! with_storage {
@@ -74,16 +88,41 @@ pub fn worker_main() {
 }
 
 async fn init() -> Result<(), JsError> {
-    install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(
+    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
+
+    if let Err(e) = install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(
         &OpfsSAHPoolCfg::default(),
         true,
     )
-    .await.map_err(|e| {
-        log::error!("[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS: {e:?}");
-        e
-    })?;
+    .await
+    {
+        let debug = format!("{e:?}");
+        let text = e.to_string();
+        let combined = if text.is_empty() {
+            debug.clone()
+        } else {
+            format!("{text} {debug}")
+        };
 
-    let storage = state::Storage::connect().map_err(|e| JsError::new(&e.to_string()))?;
+        let msg = if is_opfs_locked_error(&combined) {
+            "Another tab or window is using this app's local database. Please close other tabs/windows running this app, then reload this page.".to_string()
+        } else {
+            "Failed to initialize local database storage.".to_string()
+        };
+
+        log::error!("[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS: {debug}");
+        INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+        return Err(JsError::new(&msg));
+    }
+
+    let storage = match state::Storage::connect() {
+        Ok(storage) => storage,
+        Err(e) => {
+            let msg = format!("Failed to open local database: {e}");
+            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+            return Err(JsError::new(&msg));
+        }
+    };
 
     STORAGE.with(|s| {
         *s.borrow_mut() = Some(storage);
@@ -99,6 +138,7 @@ async fn init() -> Result<(), JsError> {
         run_processor_loop(rx).await;
     });
 
+    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
     log::debug!("[{WORKER_NAME}] initialized");
 
     Ok(())
@@ -118,12 +158,18 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::Ping => {
             log::trace!("[{WORKER_NAME}] ping");
             loop {
-                let ready = STORAGE.with(|s| s.borrow().is_some());
-
-                if ready {
-                    log::trace!("[{WORKER_NAME}] pong");
-                    kick_processor();
-                    return Ok(StorageWorkerResponse::Pong);
+                let state = INIT_STATE.with(|s| s.borrow().clone());
+                match state {
+                    InitState::Ready => {
+                        log::trace!("[{WORKER_NAME}] pong");
+                        kick_processor();
+                        return Ok(StorageWorkerResponse::Pong);
+                    }
+                    InitState::Failed(msg) => {
+                        log::debug!("[{WORKER_NAME}] ping -> init failed");
+                        return Ok(StorageWorkerResponse::Error(msg));
+                    }
+                    InitState::Pending => {}
                 }
 
                 TimeoutFuture::new(50).await;
