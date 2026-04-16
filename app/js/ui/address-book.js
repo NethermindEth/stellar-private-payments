@@ -38,6 +38,10 @@ export const AddressBook = {
             this._cached = null;
             this.render().catch(() => {});
         });
+
+        App.events.addEventListener('addressbook:refresh', () => {
+            this.refresh().catch(() => {});
+        });
     },
 
     switchSection(section) {
@@ -104,15 +108,30 @@ export const AddressBook = {
 
         loading?.classList.add('hidden');
 
-        // Always show self entry (even if not registered) for easy copy/share.
-        if (App.state.wallet.connected && App.state.wallet.address && App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey) {
-            tbody.appendChild(this._createRow({
-                address: App.state.wallet.address,
-                noteKey: App.state.keys.notePublicKey,
-                encryptionKey: App.state.keys.encryptionPublicKey,
-                ledger: 0,
-                _self: true,
-            }));
+        const selfAddress = App.state.wallet.connected ? App.state.wallet.address : null;
+        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+        const onchainSelf = selfAddress
+            ? registrations.find(r => String(r.address || '') === String(selfAddress))
+            : null;
+
+        // Always show self entry first (even if not registered on-chain) for easy copy/share.
+        if (selfAddress && haveLocalKeys) {
+            if (onchainSelf) {
+                tbody.appendChild(this._createRow({
+                    ...onchainSelf,
+                    _self: true,
+                    registeredOnchain: true,
+                }));
+            } else {
+                tbody.appendChild(this._createRow({
+                    address: selfAddress,
+                    noteKey: App.state.keys.notePublicKey,
+                    encryptionKey: App.state.keys.encryptionPublicKey,
+                    ledger: 0,
+                    _self: true,
+                    registeredOnchain: false,
+                }));
+            }
         }
 
         if (filtered.length === 0 && tbody.children.length === 0) {
@@ -125,6 +144,7 @@ export const AddressBook = {
         empty?.classList.remove('flex');
 
         filtered.forEach(record => {
+            if (selfAddress && String(record.address || '') === String(selfAddress)) return;
             tbody.appendChild(this._createRow(record));
         });
     },
@@ -143,10 +163,33 @@ export const AddressBook = {
             ? registrations.filter(r => String(r.address || '').toUpperCase().startsWith(term))
             : registrations;
 
-        // Preserve self row if it exists as the first row.
-        const existingSelfRow = tbody.querySelector('tr[data-self="true"]');
+        const selfAddress = App.state.wallet.connected ? App.state.wallet.address : null;
+        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+        const onchainSelf = selfAddress
+            ? registrations.find(r => String(r.address || '') === String(selfAddress))
+            : null;
+
         tbody.replaceChildren();
-        if (existingSelfRow) tbody.appendChild(existingSelfRow);
+
+        // Always keep self row first, even when filtering.
+        if (selfAddress && haveLocalKeys) {
+            if (onchainSelf) {
+                tbody.appendChild(this._createRow({
+                    ...onchainSelf,
+                    _self: true,
+                    registeredOnchain: true,
+                }));
+            } else {
+                tbody.appendChild(this._createRow({
+                    address: selfAddress,
+                    noteKey: App.state.keys.notePublicKey,
+                    encryptionKey: App.state.keys.encryptionPublicKey,
+                    ledger: 0,
+                    _self: true,
+                    registeredOnchain: false,
+                }));
+            }
+        }
 
         if (matches.length === 0 && tbody.children.length === 0) {
             empty?.classList.remove('hidden');
@@ -157,7 +200,10 @@ export const AddressBook = {
         empty?.classList.add('hidden');
         empty?.classList.remove('flex');
 
-        matches.forEach(record => tbody.appendChild(this._createRow(record)));
+        matches.forEach(record => {
+            if (selfAddress && String(record.address || '') === String(selfAddress)) return;
+            tbody.appendChild(this._createRow(record));
+        });
     },
 
     _createRow(record) {
@@ -179,7 +225,9 @@ export const AddressBook = {
         row.querySelector('.ab-notekey').title = String(noteKey);
         row.querySelector('.ab-enckey').textContent = Utils.truncateHex(String(encryptionKey), 10, 8);
         row.querySelector('.ab-enckey').title = String(encryptionKey);
-        row.querySelector('.ab-date').textContent = record._self ? 'You' : (ledger ? `Ledger ${ledger}` : '');
+        row.querySelector('.ab-date').textContent = record._self
+            ? (record.registeredOnchain === false ? 'You, not registered onchain' : (ledger ? `You, ledger ${ledger}` : 'You'))
+            : (ledger ? `Ledger ${ledger}` : '');
 
         row.querySelector('.copy-address-btn')?.addEventListener('click', () => Utils.copyToClipboard(address));
         row.querySelector('.copy-notekey-btn')?.addEventListener('click', () => Utils.copyToClipboard(String(noteKey)));
@@ -197,4 +245,3 @@ export const AddressBook = {
         return row;
     },
 };
-

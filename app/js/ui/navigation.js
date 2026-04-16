@@ -5,6 +5,7 @@
 
 import { connectWallet, deriveKeysFromWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
+import { submitPublicKeyRegistration } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 
@@ -256,7 +257,9 @@ export const Wallet = {
 
         registerBtn?.addEventListener('click', () => {
             this.closeDropdown();
-            Toast.show('Public key registration is not implemented in this UI yet.', 'info');
+            this.registerPublicKey().catch(e => {
+                Toast.show(e?.message || 'Public key registration failed', 'error', 8000);
+            });
         });
 
         document.addEventListener('click', (e) => {
@@ -532,5 +535,64 @@ export const Wallet = {
         App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
 
         Toast.show('Freighter account changed. Privacy keys ready.', 'info');
+    },
+
+    async registerPublicKey() {
+        if (!App.state.wallet.connected || !App.state.wallet.address) {
+            Toast.show('Please connect your wallet first', 'error');
+            return;
+        }
+        if (!App.state.wallet.sorobanRpcUrl || !App.state.wallet.networkPassphrase) {
+            Toast.show('Wallet network details unavailable', 'error');
+            return;
+        }
+        if (!App.state.keys.notePublicKey || !App.state.keys.encryptionPublicKey) {
+            Toast.show('Privacy keys not ready yet. Please reconnect your wallet.', 'error', 8000);
+            return;
+        }
+
+        const registerBtn = document.getElementById('wallet-register-btn');
+        const originalText = registerBtn?.textContent || 'Register Public Key';
+        const setBtnText = (t) => {
+            if (registerBtn) registerBtn.textContent = t;
+        };
+
+        try {
+            if (registerBtn) registerBtn.disabled = true;
+            setBtnText('Registering…');
+
+            const config = await getHandle().webClient.contractConfig();
+            const poolContractId = config?.pool;
+            if (!poolContractId) throw new Error('Pool contract ID not available');
+
+            const hash = await submitPublicKeyRegistration(
+                {
+                    address: App.state.wallet.address,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                    poolContractId,
+                    notePublicKeyHex: App.state.keys.notePublicKey,
+                    encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
+                },
+                {
+                    onStatus: (p) => {
+                        const msg = p?.message || '';
+                        if (msg) setBtnText(msg);
+                    },
+                }
+            );
+
+            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 8, 6)}`, 'success', 6000);
+            App.events.dispatchEvent(new CustomEvent('addressbook:refresh'));
+        } catch (e) {
+            if (e?.code === 'USER_REJECTED') {
+                Toast.show('Registration cancelled in Freighter', 'error', 6000);
+                return;
+            }
+            throw e;
+        } finally {
+            setBtnText(originalText);
+            if (registerBtn) registerBtn.disabled = false;
+        }
     }
 };
