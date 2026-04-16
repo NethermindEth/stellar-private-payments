@@ -4,10 +4,9 @@ use crate::rpc::Client;
 use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
 use crate::DEPLOYMENT;
 use types::ContractConfig;
-use types::{PoolInfo, AspMembership, AspNonMembership, AspNonMembershipProof, ContractsStateData, ExtAmount, ExtData, Field, NotePublicKey, U256};
+use types::{PoolInfo, AspMembership, AspNonMembership, AspNonMembershipProof, ContractsStateData, ExtAmount, Field, NotePublicKey, U256};
 use stellar_xdr::curr as xdr;
 use stellar_xdr::curr::ReadXdr;
-use stellar_xdr::curr::WriteXdr;
 use std::str::FromStr;
 use stellar_strkey::ed25519;
 use serde::{Deserialize, Serialize};
@@ -87,6 +86,10 @@ impl StateFetcher {
             client: Client::new(rpc_url)?,
             config
         })
+    }
+
+    pub fn contract_config(&self) -> &ContractConfig {
+        &self.config
     }
 
     pub async fn pool_contract_state(&self) -> Result<PoolInfo> {
@@ -276,101 +279,6 @@ impl StateFetcher {
         })
     }
 
-    /// Build and simulate an unsigned `pool.transact(proof, ext_data, sender)` transaction,
-    /// apply `transactionData` + `minResourceFee`, and return base64 XDR for wallet signing.
-    pub async fn prepare_pool_transact_tx(
-        &self,
-        sender_account: &str,
-        proof_uncompressed: &[u8],
-        ext_data: &ExtData,
-        public_inputs: &OnchainProofPublicInputs,
-    ) -> Result<PreparedSorobanTx> {
-        if proof_uncompressed.len() != 256 {
-            return Err(anyhow!(
-                "proof_uncompressed must be 256 bytes, got {}",
-                proof_uncompressed.len()
-            ));
-        }
-
-        let seq = self.fetch_account_sequence(sender_account).await?;
-        let seq_next = seq
-            .checked_add(1)
-            .ok_or_else(|| anyhow!("account sequence overflow"))?;
-
-        let proof_scval = Self::encode_pool_proof_scval(public_inputs, proof_uncompressed)?;
-        let ext_scval = Self::encode_ext_data_scval(ext_data)?;
-        let sender_scval = xdr::ScVal::Address(Self::account_scaddress_from_g(sender_account)?);
-
-        let tx_env = Self::build_invoke_contract_tx_envelope(
-            sender_account,
-            xdr::SequenceNumber(seq_next),
-            100,
-            &self.config.pool,
-            "transact",
-            vec![proof_scval, ext_scval, sender_scval],
-            Vec::new(),
-        )?;
-
-        let sim = self.client.simulate_transaction(&tx_env).await?;
-        let op_result = sim
-            .result
-            .or_else(|| sim.results.into_iter().next())
-            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
-
-        let auth_entries_b64 = op_result.auth.clone();
-        let auth_entries = auth_entries_b64
-            .iter()
-            .map(|b64| xdr::SorobanAuthorizationEntry::from_xdr_base64(b64, xdr::Limits::none()))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        let tx_data_b64 = sim
-            .transaction_data
-            .ok_or_else(|| anyhow!("simulateTransaction missing transactionData"))?;
-        let tx_data = xdr::SorobanTransactionData::from_xdr_base64(&tx_data_b64, xdr::Limits::none())?;
-
-        let min_fee_str = sim
-            .min_resource_fee
-            .ok_or_else(|| anyhow!("simulateTransaction missing minResourceFee"))?;
-        let min_fee: u32 = min_fee_str
-            .parse::<u64>()
-            .map_err(|_| anyhow!("minResourceFee is not a number: {min_fee_str}"))?
-            .try_into()
-            .map_err(|_| anyhow!("minResourceFee out of range: {min_fee_str}"))?;
-
-        let mut final_env = tx_env.clone();
-        let xdr::TransactionEnvelope::Tx(ref mut v1) = final_env else {
-            return Err(anyhow!("unexpected TransactionEnvelope variant"));
-        };
-
-        // Apply Soroban footprint/resources.
-        v1.tx.ext = xdr::TransactionExt::V1(tx_data);
-
-        // Apply auth entries (unsigned; wallet signs via signAuthEntry).
-        if v1.tx.operations.len() != 1 {
-            return Err(anyhow!("expected exactly 1 operation"));
-        }
-        let mut ops: Vec<xdr::Operation> = v1.tx.operations.iter().cloned().collect();
-        let op = ops
-            .get_mut(0)
-            .ok_or_else(|| anyhow!("missing operation"))?;
-        let xdr::OperationBody::InvokeHostFunction(ref mut invoke) = op.body else {
-            return Err(anyhow!("expected InvokeHostFunction operation"));
-        };
-        invoke.auth = xdr::VecM::try_from(auth_entries)?;
-        v1.tx.operations = xdr::VecM::try_from(ops)?;
-
-        // Apply fee: base fee + minResourceFee.
-        v1.tx.fee = 100u32
-            .checked_add(min_fee)
-            .ok_or_else(|| anyhow!("fee overflow"))?;
-
-        let tx_xdr = final_env.to_xdr_base64(xdr::Limits::none())?;
-        Ok(PreparedSorobanTx {
-            tx_xdr,
-            auth_entries: auth_entries_b64,
-        })
-    }
-
     fn build_find_key_simulation_tx(
         contract_id: &str,
         source_account: &str,
@@ -432,22 +340,6 @@ impl StateFetcher {
             tx,
             signatures: xdr::VecM::default(),
         }))
-    }
-
-    async fn fetch_account_sequence(&self, account_g: &str) -> Result<i64> {
-        let account_id = Self::account_id_from_g(account_g)?;
-        let key = xdr::LedgerKey::Account(xdr::LedgerKeyAccount { account_id });
-        let resp = self.client.get_ledger_entries(&[key]).await?;
-        let entries = resp.entries.unwrap_or_default();
-        let entry = entries
-            .into_iter()
-            .next()
-            .ok_or_else(|| anyhow!("account not found in getLedgerEntries"))?;
-
-        match xdr::LedgerEntryData::from_xdr_base64(&entry.xdr, xdr::Limits::none())? {
-            xdr::LedgerEntryData::Account(acct) => Ok(acct.seq_num.0),
-            other => Err(anyhow!("expected Account ledger entry, got {other:?}")),
-        }
     }
 
     fn field_to_scval_u256(v: Field) -> xdr::ScVal {
@@ -558,124 +450,11 @@ impl StateFetcher {
         Ok(xdr::MuxedAccount::Ed25519(xdr::Uint256(pk.0)))
     }
 
-    fn account_id_from_g(account: &str) -> Result<xdr::AccountId> {
-        let pk = ed25519::PublicKey::from_string(account)?;
-        Ok(xdr::AccountId(xdr::PublicKey::PublicKeyTypeEd25519(
-            xdr::Uint256(pk.0),
-        )))
-    }
-
-    fn account_scaddress_from_g(account: &str) -> Result<xdr::ScAddress> {
-        Ok(xdr::ScAddress::Account(Self::account_id_from_g(account)?))
-    }
-
     fn contract_scaddress_from_str(contract_id: &str) -> Result<xdr::ScAddress> {
         let contract = stellar_strkey::Contract::from_str(contract_id)?;
         Ok(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
             contract.0,
         ))))
-    }
-
-    fn encode_scval_map(mut entries: Vec<(&'static str, xdr::ScVal)>) -> Result<xdr::ScVal> {
-        entries.sort_by(|a, b| a.0.cmp(b.0));
-        let mut map_entries = Vec::with_capacity(entries.len());
-        for (k, v) in entries {
-            let sym: xdr::StringM<32> = k.try_into()?;
-            map_entries.push(xdr::ScMapEntry {
-                key: xdr::ScVal::Symbol(xdr::ScSymbol(sym)),
-                val: v,
-            });
-        }
-        let sc_map = xdr::ScMap(xdr::VecM::try_from(map_entries)?);
-        Ok(xdr::ScVal::Map(Some(sc_map)))
-    }
-
-    fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
-        let hi = if n < 0 { -1i64 } else { 0i64 };
-        xdr::ScVal::I256(xdr::Int256Parts {
-            hi_hi: hi,
-            hi_lo: hi as u64,
-            lo_hi: (n >> 64) as u64,
-            lo_lo: n as u64,
-        })
-    }
-
-    fn encode_ext_data_scval(ext: &ExtData) -> Result<xdr::ScVal> {
-        Self::encode_scval_map(vec![
-            (
-                "encrypted_output0",
-                xdr::ScVal::Bytes(ext.encrypted_output0.clone().try_into()?),
-            ),
-            (
-                "encrypted_output1",
-                xdr::ScVal::Bytes(ext.encrypted_output1.clone().try_into()?),
-            ),
-            (
-                "ext_amount",
-                Self::i128_to_i256_scval(ext.ext_amount.as_i128()),
-            ),
-            (
-                "recipient",
-                xdr::ScVal::Address(ext.recipient.parse::<xdr::ScAddress>()?),
-            ),
-        ])
-    }
-
-    fn encode_groth16_proof_uncompressed_scval(proof_uncompressed: &[u8]) -> Result<xdr::ScVal> {
-        if proof_uncompressed.len() != 256 {
-            return Err(anyhow!(
-                "expected 256-byte Soroban proof, got {}",
-                proof_uncompressed.len()
-            ));
-        }
-        let a = proof_uncompressed[0..64].to_vec();
-        let b = proof_uncompressed[64..192].to_vec();
-        let c = proof_uncompressed[192..256].to_vec();
-
-        Self::encode_scval_map(vec![
-            ("a", xdr::ScVal::Bytes(a.try_into()?)),
-            ("b", xdr::ScVal::Bytes(b.try_into()?)),
-            ("c", xdr::ScVal::Bytes(c.try_into()?)),
-        ])
-    }
-
-    fn encode_pool_proof_scval(
-        public_inputs: &OnchainProofPublicInputs,
-        proof_uncompressed: &[u8],
-    ) -> Result<xdr::ScVal> {
-        let proof = Self::encode_groth16_proof_uncompressed_scval(proof_uncompressed)?;
-
-        let input_nullifiers_vec = xdr::ScVec::try_from(vec![
-            Self::field_to_scval_u256(public_inputs.input_nullifiers[0]),
-            Self::field_to_scval_u256(public_inputs.input_nullifiers[1]),
-        ])?;
-
-        Self::encode_scval_map(vec![
-            ("asp_membership_root", Self::field_to_scval_u256(public_inputs.asp_membership_root)),
-            (
-                "asp_non_membership_root",
-                Self::field_to_scval_u256(public_inputs.asp_non_membership_root),
-            ),
-            (
-                "ext_data_hash",
-                xdr::ScVal::Bytes(public_inputs.ext_data_hash_be.to_vec().try_into()?),
-            ),
-            (
-                "input_nullifiers",
-                xdr::ScVal::Vec(Some(input_nullifiers_vec)),
-            ),
-            (
-                "output_commitment0",
-                Self::field_to_scval_u256(public_inputs.output_commitment0),
-            ),
-            (
-                "output_commitment1",
-                Self::field_to_scval_u256(public_inputs.output_commitment1),
-            ),
-            ("proof", proof),
-            ("public_amount", Self::field_to_scval_u256(public_inputs.public_amount)),
-            ("root", Self::field_to_scval_u256(public_inputs.root)),
-        ])
     }
 }
 

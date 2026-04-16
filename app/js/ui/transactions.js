@@ -8,11 +8,18 @@
  */
 
 import { getHandle } from '../wasm-facade.js';
-import { submitPreparedSorobanTx } from '../stellar.js';
+import { submitProvedPoolTransact } from '../stellar.js';
 import { App, Toast } from './core.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
+let cachedContractConfig = null;
+
+async function getContractConfig() {
+    if (cachedContractConfig) return cachedContractConfig;
+    cachedContractConfig = await getHandle().webClient.contractConfig();
+    return cachedContractConfig;
+}
 
 function xlmToStroopsBigInt(xlm) {
     const n = Number(xlm);
@@ -213,26 +220,28 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
-                setLoadingText(btn, 'Proving & preparing…');
-                const prepared = await getHandle().webClient.proveDepositPrepareTx(
-                    userAddress,
-                    membershipBlinding,
-                    amountStroops,
-                    outputAmounts,
-                    onStatus,
-                );
+	                setLoadingText(btn, 'Proving…');
+	                const proved = await getHandle().webClient.proveDeposit(
+	                    userAddress,
+	                    membershipBlinding,
+	                    amountStroops,
+	                    outputAmounts,
+	                    onStatus,
+	                );
 
-                if (prepared == null) {
-                    Toast.show('Cannot prepare deposit yet (ASP registration required or indexer sync pending).', 'error', 7000);
-                    return;
-                }
+	                if (proved == null) {
+	                    Toast.show('Cannot prepare deposit yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
+	                    return;
+	                }
 
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(prepared, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
+	                const config = await getContractConfig();
+	                setLoadingText(btn, 'Ready to sign…');
+	                const txHash = await submitProvedPoolTransact(proved, {
+	                    address: userAddress,
+	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+	                    networkPassphrase: App.state.wallet.networkPassphrase,
+	                    poolContractId: config?.pool,
+	                }, { onStatus });
                 Toast.show(`Submitted: ${txHash}`, 'success');
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
@@ -259,25 +268,27 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
-                setLoadingText(btn, 'Proving & preparing…');
-                const prepared = await getHandle().webClient.proveWithdrawPrepareTx(
-                    userAddress,
-                    membershipBlinding,
-                    recipient,
-                    inputNoteIds,
-                    onStatus,
-                );
-                if (prepared == null) {
-                    Toast.show('Cannot prepare withdraw yet (ASP registration required or indexer sync pending).', 'error', 7000);
-                    return;
-                }
+	                setLoadingText(btn, 'Proving…');
+	                const proved = await getHandle().webClient.proveWithdraw(
+	                    userAddress,
+	                    membershipBlinding,
+	                    recipient,
+	                    inputNoteIds,
+	                    onStatus,
+	                );
+	                if (proved == null) {
+	                    Toast.show('Cannot prepare withdraw yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
+	                    return;
+	                }
 
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(prepared, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
+	                const config = await getContractConfig();
+	                setLoadingText(btn, 'Ready to sign…');
+	                const txHash = await submitProvedPoolTransact(proved, {
+	                    address: userAddress,
+	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+	                    networkPassphrase: App.state.wallet.networkPassphrase,
+	                    poolContractId: config?.pool,
+	                }, { onStatus });
                 Toast.show(`Submitted: ${txHash}`, 'success');
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
@@ -311,27 +322,29 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
-                setLoadingText(btn, 'Proving & preparing…');
-                const prepared = await getHandle().webClient.proveTransferPrepareTx(
-                    userAddress,
-                    membershipBlinding,
-                    recipientNoteKey,
-                    recipientEncKey,
-                    inputNoteIds,
-                    outputAmounts,
-                    onStatus,
-                );
-                if (prepared == null) {
-                    Toast.show('Cannot prepare transfer yet (ASP registration required or indexer sync pending).', 'error', 7000);
-                    return;
-                }
+	                setLoadingText(btn, 'Proving…');
+	                const proved = await getHandle().webClient.proveTransfer(
+	                    userAddress,
+	                    membershipBlinding,
+	                    recipientNoteKey,
+	                    recipientEncKey,
+	                    inputNoteIds,
+	                    outputAmounts,
+	                    onStatus,
+	                );
+	                if (proved == null) {
+	                    Toast.show('Cannot prepare transfer yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
+	                    return;
+	                }
 
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(prepared, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
+	                const config = await getContractConfig();
+	                setLoadingText(btn, 'Ready to sign…');
+	                const txHash = await submitProvedPoolTransact(proved, {
+	                    address: userAddress,
+	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+	                    networkPassphrase: App.state.wallet.networkPassphrase,
+	                    poolContractId: config?.pool,
+	                }, { onStatus });
                 Toast.show(`Submitted: ${txHash}`, 'success');
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
@@ -397,29 +410,31 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
-                setLoadingText(btn, 'Proving & preparing…');
-                const prepared = await getHandle().webClient.proveTransactPrepareTx(
-                    userAddress,
-                    membershipBlinding,
-                    extRecipient,
-                    extAmountStroops,
-                    inputNoteIds,
-                    outputAmounts,
-                    noteKeys,
-                    encKeys,
-                    onStatus,
-                );
-                if (prepared == null) {
-                    Toast.show('Cannot prepare transaction yet (ASP registration required or indexer sync pending).', 'error', 7000);
-                    return;
-                }
+	                setLoadingText(btn, 'Proving…');
+	                const proved = await getHandle().webClient.proveTransact(
+	                    userAddress,
+	                    membershipBlinding,
+	                    extRecipient,
+	                    extAmountStroops,
+	                    inputNoteIds,
+	                    outputAmounts,
+	                    noteKeys,
+	                    encKeys,
+	                    onStatus,
+	                );
+	                if (proved == null) {
+	                    Toast.show('Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
+	                    return;
+	                }
 
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(prepared, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
+	                const config = await getContractConfig();
+	                setLoadingText(btn, 'Ready to sign…');
+	                const txHash = await submitProvedPoolTransact(proved, {
+	                    address: userAddress,
+	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+	                    networkPassphrase: App.state.wallet.networkPassphrase,
+	                    poolContractId: config?.pool,
+	                }, { onStatus });
                 Toast.show(`Submitted: ${txHash}`, 'success');
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {

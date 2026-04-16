@@ -558,7 +558,7 @@ fn build_pool_inputs(
             leaves.len(),
             pool_next_index
         );
-        return Ok(Err(AspMembershipSync::SyncRequired));
+        return Ok(Err(AspMembershipSync::SyncRequired(None)));
     }
 
     let tree = MerklePrefixTree::new(tree_depth, &leaves)?;

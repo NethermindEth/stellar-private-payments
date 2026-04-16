@@ -164,7 +164,7 @@ pub struct SyncMetadata {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum AspMembershipSync {
-    SyncRequired,
+    SyncRequired(Option<u32>), // number of ledgers to sync - the gap
     RegisterAtASP,
     UserIndex(u32),
 }

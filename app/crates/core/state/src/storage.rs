@@ -53,11 +53,6 @@ impl Storage {
         Ok(Self { conn })
     }
 
-    #[cfg(test)]
-    pub fn connect_in_memory() -> Result<Self> {
-        Self::connect_with_connection(Connection::open_in_memory()?)
-    }
-
     pub fn save_events_batch(&mut self, data: &types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
         {
@@ -485,11 +480,11 @@ impl Storage {
         // The indexer sync metadata is authoritative for "how far we've indexed", even if there
         // were no ASP events in recent ledgers.
         let Some(sync_meta) = self.get_sync_metadata()? else {
-            return Ok(AspMembershipSync::SyncRequired);
+            return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
         if current_ledger > sync_meta.last_ledger {
-            return Ok(AspMembershipSync::SyncRequired);
+            return Ok(AspMembershipSync::SyncRequired(Some(current_ledger-sync_meta.last_ledger)));
         }
 
         if current_ledger < sync_meta.last_ledger {
@@ -941,7 +936,7 @@ mod tests {
 
     #[test]
     fn get_recent_public_keys_reads_public_keys_with_ledger() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         let event_id = "pk_event_1";
         storage.save_events_batch(&ContractsEventData {
@@ -972,7 +967,7 @@ mod tests {
 
     #[test]
     fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Create an account with keypairs.
         let spending_sig = SpendingSignature(vec![1u8; 64]);
@@ -1085,7 +1080,7 @@ mod tests {
 
     #[test]
     fn sync_metadata_advances_only_on_empty_page() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Non-empty batch should update the cursor but not advance the "fully indexed" ledger.
         storage.save_events_batch(&ContractsEventData {
