@@ -104,7 +104,10 @@ impl MerklePrefixTree {
         zero_leaf_be.reverse();
         let zero = bytes_to_scalar(&zero_leaf_be)?;
 
-        let mut empty = Vec::with_capacity(depth + 1);
+        let empty_cap = depth
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("depth overflow"))?;
+        let mut empty = Vec::with_capacity(empty_cap);
         empty.push(zero);
         for i in 0..depth {
             empty.push(poseidon2_compression(empty[i], empty[i]));
@@ -146,7 +149,8 @@ impl MerklePrefixTree {
         leaves: Vec<Scalar>,
         empty: Vec<Scalar>,
     ) -> MerklePrefixTreeBuilt {
-        let mut levels = Vec::with_capacity(depth + 1);
+        let levels_cap = depth.checked_add(1).expect("depth overflow");
+        let mut levels = Vec::with_capacity(levels_cap);
         levels.push(leaves);
 
         for level in 0..depth {
@@ -154,11 +158,15 @@ impl MerklePrefixTree {
                 levels[level].push(empty[level]);
             }
 
-            let mut next = Vec::with_capacity((levels[level].len() + 1) / 2);
-            for i in 0..((levels[level].len() + 1) / 2) {
-                let left = levels[level].get(2 * i).copied().unwrap_or(empty[level]);
+            let level_len = levels[level].len();
+            let next_len = level_len.div_ceil(2);
+            let mut next = Vec::with_capacity(next_len);
+            for i in 0..next_len {
+                let left_idx = i.checked_mul(2).expect("index overflow");
+                let right_idx = left_idx.checked_add(1).expect("index overflow");
+                let left = levels[level].get(left_idx).copied().unwrap_or(empty[level]);
                 let right = levels[level]
-                    .get(2 * i + 1)
+                    .get(right_idx)
                     .copied()
                     .unwrap_or(empty[level]);
                 next.push(poseidon2_compression(left, right));
@@ -185,16 +193,20 @@ impl MerklePrefixTree {
                 nodes.push(self.empty[level]);
             }
 
-            let mut next = Vec::with_capacity((nodes.len() + 1) / 2);
-            for i in 0..((nodes.len() + 1) / 2) {
-                let left = nodes.get(2 * i).copied().unwrap_or(self.empty[level]);
-                let right = nodes.get(2 * i + 1).copied().unwrap_or(self.empty[level]);
+            let nodes_len = nodes.len();
+            let next_len = nodes_len.div_ceil(2);
+            let mut next = Vec::with_capacity(next_len);
+            for i in 0..next_len {
+                let left_idx = i.checked_mul(2).expect("index overflow");
+                let right_idx = left_idx.checked_add(1).expect("index overflow");
+                let left = nodes.get(left_idx).copied().unwrap_or(self.empty[level]);
+                let right = nodes.get(right_idx).copied().unwrap_or(self.empty[level]);
                 next.push(poseidon2_compression(left, right));
             }
             nodes = next;
         }
 
-        let root = nodes.get(0).copied().unwrap_or(self.empty[self.depth]);
+        let root = nodes.first().copied().unwrap_or(self.empty[self.depth]);
         let root_le = scalar_to_bytes(&root);
         let root_le: [u8; 32] = root_le
             .try_into()
@@ -249,11 +261,18 @@ impl MerklePrefixTree {
             if level_nodes.is_empty() {
                 level_nodes.push(self.empty[level]);
             }
-            let mut next = Vec::with_capacity((level_nodes.len() + 1) / 2);
-            for i in 0..((level_nodes.len() + 1) / 2) {
-                let left = level_nodes.get(2 * i).copied().unwrap_or(self.empty[level]);
+            let level_len = level_nodes.len();
+            let next_len = level_len.div_ceil(2);
+            let mut next = Vec::with_capacity(next_len);
+            for i in 0..next_len {
+                let left_idx = i.checked_mul(2).expect("index overflow");
+                let right_idx = left_idx.checked_add(1).expect("index overflow");
+                let left = level_nodes
+                    .get(left_idx)
+                    .copied()
+                    .unwrap_or(self.empty[level]);
                 let right = level_nodes
-                    .get(2 * i + 1)
+                    .get(right_idx)
                     .copied()
                     .unwrap_or(self.empty[level]);
                 next.push(poseidon2_compression(left, right));
@@ -280,7 +299,7 @@ impl MerklePrefixTree {
 impl MerklePrefixTreeBuilt {
     /// Return the number of provided leaves in this prefix.
     pub fn leaf_count(&self) -> usize {
-        self.levels.get(0).map(|v| v.len()).unwrap_or(0)
+        self.levels.first().map(|v| v.len()).unwrap_or(0)
     }
 
     /// Compute the full-depth Merkle root for this built prefix.
@@ -288,7 +307,7 @@ impl MerklePrefixTreeBuilt {
         let root = self
             .levels
             .get(self.depth)
-            .and_then(|v| v.get(0))
+            .and_then(|v| v.first())
             .copied()
             .unwrap_or(self.empty[self.depth]);
         let root_le = scalar_to_bytes(&root);
@@ -366,6 +385,7 @@ impl MerklePrefixTreeBuilt {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloc::vec;
 
     #[test]
     fn prefix_built_root_matches_prefix_root() {
@@ -434,7 +454,9 @@ mod tests {
             let (path, indices, levels) = circuits::core::merkle::merkle_proof(&full, idx);
             assert_eq!(levels, depth_usize);
 
-            let proof = tree.proof(u32::try_from(idx).unwrap()).expect("proof");
+            let proof = tree
+                .proof(u32::try_from(idx).expect("idx fits in u32"))
+                .expect("proof");
             assert_eq!(proof.levels, depth_usize);
             assert_eq!(proof.root, root_field);
 

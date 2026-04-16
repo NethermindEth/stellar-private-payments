@@ -202,6 +202,11 @@ impl ExtAmount {
     pub fn checked_sub(self, rhs: Self) -> Option<Self> {
         self.0.checked_sub(rhs.0).map(ExtAmount)
     }
+
+    /// Checked negation.
+    pub fn checked_neg(self) -> Option<Self> {
+        self.0.checked_neg().map(ExtAmount)
+    }
 }
 
 impl fmt::Display for ExtAmount {

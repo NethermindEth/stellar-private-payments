@@ -349,7 +349,7 @@ impl Client {
             }
         }
 
-        Ok(self.rpc_call("getEvents", params).await?)
+        self.rpc_call("getEvents", params).await
     }
 
     pub async fn get_latest_ledger(&self) -> Result<GetLatestLedgerResponse, Error> {

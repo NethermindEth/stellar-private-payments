@@ -27,8 +27,8 @@ const PROVING_KEY: &[u8] =
 // wasm threads?
 
 thread_local! {
-    static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = RefCell::new(None);
-    static PROVER: RefCell<Option<Prover>> = RefCell::new(None);
+    static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {

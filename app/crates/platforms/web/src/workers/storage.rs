@@ -14,7 +14,6 @@ use prover::{
     },
     merkle::{MerklePrefixTree, MerkleProof},
 };
-use sqlite_wasm_vfs::sahpool::{OpfsSAHPoolCfg, install as install_opfs_sahpool};
 use state::{
     AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
 };
@@ -38,6 +37,7 @@ enum InitState {
     Failed(String),
 }
 
+#[cfg(target_arch = "wasm32")]
 fn is_opfs_locked_error(message: &str) -> bool {
     message.contains("NoModificationAllowedError")
         && (message.contains("createSyncAccessHandle")
@@ -45,10 +45,10 @@ fn is_opfs_locked_error(message: &str) -> bool {
 }
 
 thread_local! {
-    static STORAGE: RefCell<Option<Storage>> = RefCell::new(None);
+    static STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
     // signalling the events processor
-    static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = RefCell::new(None);
-    static INIT_STATE: RefCell<InitState> = RefCell::new(InitState::Pending);
+    static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
+    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
 
 macro_rules! with_storage {
@@ -93,9 +93,12 @@ pub fn worker_main() {
 async fn init() -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
-    if let Err(e) =
-        install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
-            .await
+    #[cfg(target_arch = "wasm32")]
+    if let Err(e) = sqlite_wasm_vfs::sahpool::install::<sqlite_wasm_rs::WasmOsCallback>(
+        &sqlite_wasm_vfs::sahpool::OpfsSAHPoolCfg::default(),
+        true,
+    )
+    .await
     {
         let debug = format!("{e:?}");
         let text = e.to_string();

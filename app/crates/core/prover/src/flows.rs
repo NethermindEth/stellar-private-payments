@@ -367,7 +367,9 @@ where
             encryption_pubkey,
             pool_root,
             ext_recipient: withdraw_recipient,
-            ext_amount: -withdraw_amount_stroops,
+            ext_amount: withdraw_amount_stroops
+                .checked_neg()
+                .ok_or_else(|| anyhow!("withdraw amount overflow"))?,
             inputs,
             outputs,
             membership_proof,
@@ -571,7 +573,10 @@ where
     let mut in_priv_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
     let mut in_blinding_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
     let mut in_path_indices_hex: Vec<String> = Vec::with_capacity(N_INPUTS);
-    let mut in_path_elements_hex: Vec<String> = Vec::with_capacity(N_INPUTS * tree_depth_usize);
+    let in_path_elements_capacity = N_INPUTS
+        .checked_mul(tree_depth_usize)
+        .ok_or_else(|| anyhow!("path elements capacity overflow"))?;
+    let mut in_path_elements_hex: Vec<String> = Vec::with_capacity(in_path_elements_capacity);
 
     let mut input_nullifiers_bytes: [[u8; 32]; N_INPUTS] = [[0u8; 32]; N_INPUTS];
 
@@ -678,19 +683,19 @@ where
     for slot in 0..N_INPUTS {
         let prefix_m = format!("membershipProofs[{}][0].", slot);
         circuit.set_single(
-            &(prefix_m.clone() + "leaf"),
+            &format!("{prefix_m}leaf"),
             &field_bytes_to_hex(&membership_proof.leaf.to_le_bytes())?,
         );
         circuit.set_single(
-            &(prefix_m.clone() + "blinding"),
+            &format!("{prefix_m}blinding"),
             &field_bytes_to_hex(&membership_proof.blinding.to_le_bytes())?,
         );
         circuit.set_single(
-            &(prefix_m.clone() + "pathIndices"),
+            &format!("{prefix_m}pathIndices"),
             &field_bytes_to_hex(&membership_proof.path_indices.to_le_bytes())?,
         );
         circuit.set_array(
-            &(prefix_m.clone() + "pathElements"),
+            &format!("{prefix_m}pathElements"),
             membership_proof
                 .path_elements
                 .iter()
@@ -698,25 +703,25 @@ where
                 .collect::<Result<Vec<_>>>()?,
         );
         circuit.set_single(
-            &(prefix_m.clone() + "root"),
+            &format!("{prefix_m}root"),
             &field_bytes_to_hex(&membership_proof.root.to_le_bytes())?,
         );
 
         let prefix_n = format!("nonMembershipProofs[{}][0].", slot);
         circuit.set_single(
-            &(prefix_n.clone() + "key"),
+            &format!("{prefix_n}key"),
             &field_bytes_to_hex(&non_membership_proof.key.to_le_bytes())?,
         );
         circuit.set_single(
-            &(prefix_n.clone() + "oldKey"),
+            &format!("{prefix_n}oldKey"),
             &field_bytes_to_hex(&non_membership_proof.old_key.to_le_bytes())?,
         );
         circuit.set_single(
-            &(prefix_n.clone() + "oldValue"),
+            &format!("{prefix_n}oldValue"),
             &field_bytes_to_hex(&non_membership_proof.old_value.to_le_bytes())?,
         );
         circuit.set_single(
-            &(prefix_n.clone() + "isOld0"),
+            &format!("{prefix_n}isOld0"),
             &field_bytes_to_hex(&if non_membership_proof.is_old0 {
                 Field::from(NoteAmount::ONE).to_le_bytes()
             } else {
@@ -724,7 +729,7 @@ where
             })?,
         );
         circuit.set_array(
-            &(prefix_n.clone() + "siblings"),
+            &format!("{prefix_n}siblings"),
             non_membership_proof
                 .siblings
                 .iter()
@@ -732,7 +737,7 @@ where
                 .collect::<Result<Vec<_>>>()?,
         );
         circuit.set_single(
-            &(prefix_n.clone() + "root"),
+            &format!("{prefix_n}root"),
             &field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?,
         );
     }

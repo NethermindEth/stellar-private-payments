@@ -193,12 +193,12 @@ impl WebClient {
         );
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for i in 0..N_OUTPUTS {
+        for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
             let v = output_amounts.get(i as u32);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
-            out_amounts[i] = parse_note_amount_decimal(&bi)?;
+            *out = parse_note_amount_decimal(&bi)?;
         }
 
         let params = loop {
@@ -502,6 +502,7 @@ impl WebClient {
         Ok(Some(prepared))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn prove_transfer_inner(
         &self,
         user_address: String,
@@ -548,12 +549,12 @@ impl WebClient {
         }
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for i in 0..N_OUTPUTS {
+        for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
             let v = output_amounts.get(i as u32);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
-            out_amounts[i] = parse_note_amount_decimal(&bi)?;
+            *out = parse_note_amount_decimal(&bi)?;
         }
 
         let params = loop {
@@ -694,6 +695,7 @@ impl WebClient {
         Ok(Some(prepared))
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn prove_transact_inner(
         &self,
         user_address: String,
@@ -748,12 +750,12 @@ impl WebClient {
         }
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for i in 0..N_OUTPUTS {
+        for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
             let v = output_amounts.get(i as u32);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
-            out_amounts[i] = parse_note_amount_decimal(&bi)?;
+            *out = parse_note_amount_decimal(&bi)?;
         }
 
         let mut out_note_pks: [Option<NotePublicKey>; N_OUTPUTS] = [None, None];
@@ -1144,6 +1146,7 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = proveTransfer)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn prove_transfer(
         &self,
         user_address: String,
@@ -1172,6 +1175,7 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = proveTransact)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn prove_transact(
         &self,
         user_address: String,
