@@ -59,16 +59,7 @@ make clean
 
 ## Development
 
-### Running Tests
-
-```bash
-# Run JavaScript tests
-npm test
-```
-
 ### Project Configuration
 
 - `Trunk.toml` - Trunk bundler configuration (at repository root)
 - `package.json` - npm dependencies and scripts
-- `babel.config.cjs` - Babel configuration for Jest
-- `jest.config.cjs` - Jest test configuration

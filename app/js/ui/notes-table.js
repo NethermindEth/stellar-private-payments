@@ -86,6 +86,7 @@ export const NotesTable = {
             }));
 
             this.render();
+            App.events.dispatchEvent(new CustomEvent('notes:updated'));
         } catch (e) {
             console.warn('[NotesTable] refresh failed:', e);
             // Keep it quiet; indexer/retention can be flaky.

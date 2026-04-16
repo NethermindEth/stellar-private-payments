@@ -21,10 +21,42 @@ async function getContractConfig() {
     return cachedContractConfig;
 }
 
+function noteAmountToStroopsBigInt(amount) {
+    if (amount == null) return 0n;
+    if (typeof amount === 'bigint') return amount;
+    if (typeof amount === 'number') {
+        if (!Number.isFinite(amount)) return 0n;
+        return BigInt(Math.trunc(amount));
+    }
+    if (typeof amount === 'string') {
+        const s = amount.trim();
+        if (!s) return 0n;
+        try {
+            return BigInt(s);
+        } catch {
+            return 0n;
+        }
+    }
+    return 0n;
+}
+
 function xlmToStroopsBigInt(xlm) {
     const n = Number(xlm);
     if (!Number.isFinite(n)) return 0n;
     return BigInt(Math.trunc(n * 10_000_000));
+}
+
+function stroopsBigIntToXlmText(stroops) {
+    let v = typeof stroops === 'bigint' ? stroops : 0n;
+    const isNeg = v < 0n;
+    if (isNeg) v = -v;
+
+    const absStr = v.toString().padStart(8, '0');
+    const intPart = absStr.slice(0, -7);
+    const fracRaw = absStr.slice(-7);
+    const frac = fracRaw.replace(/0+$/, '');
+    const out = frac ? `${intPart}.${frac}` : intPart;
+    return isNeg ? `-${out}` : out;
 }
 
 function parseMembershipBlinding(inputId) {
@@ -109,6 +141,92 @@ function txLink(hash) {
     return `https://stellar.expert/explorer/testnet/tx/${hash}`;
 }
 
+function sumInputNotesStroops(containerId) {
+    const ids = collectNoteIds(containerId);
+    let total = 0n;
+    for (const id of ids) {
+        const note = App.state.notes.find(n => n.id === id && !n.spent);
+        if (!note) continue;
+        total += noteAmountToStroopsBigInt(note.amount);
+    }
+    return total;
+}
+
+function setEqValidity(eq, isValid, shouldShow) {
+    const validIcon = eq?.querySelector('[data-icon="valid"]');
+    const invalidIcon = eq?.querySelector('[data-icon="invalid"]');
+    if (!eq || !validIcon || !invalidIcon) return;
+
+    if (!shouldShow) {
+        validIcon.classList.add('hidden');
+        invalidIcon.classList.add('hidden');
+        eq.classList.remove('border-red-500/50', 'bg-red-500/5', 'border-emerald-500/50', 'bg-emerald-500/5');
+        return;
+    }
+
+    validIcon.classList.toggle('hidden', !isValid);
+    invalidIcon.classList.toggle('hidden', isValid);
+    if (isValid) {
+        eq.classList.remove('border-red-500/50', 'bg-red-500/5');
+        eq.classList.add('border-emerald-500/50', 'bg-emerald-500/5');
+    } else {
+        eq.classList.add('border-red-500/50', 'bg-red-500/5');
+        eq.classList.remove('border-emerald-500/50', 'bg-emerald-500/5');
+    }
+}
+
+function updateWithdrawTotal() {
+    const totalEl = document.getElementById('withdraw-total');
+    const inputs = document.getElementById('withdraw-inputs');
+    if (!totalEl || !inputs) return;
+    const totalStroops = sumInputNotesStroops('withdraw-inputs');
+    totalEl.textContent = `${stroopsBigIntToXlmText(totalStroops)} XLM`;
+}
+
+function updateTransferBalance() {
+    const eq = document.getElementById('transfer-balance');
+    const inputsEl = document.getElementById('transfer-inputs');
+    const outputsEl = document.getElementById('transfer-outputs');
+    if (!eq || !inputsEl || !outputsEl) return;
+
+    const inputsTotalStroops = sumInputNotesStroops('transfer-inputs');
+    let outputsTotalStroops = 0n;
+    document.querySelectorAll('#transfer-outputs .output-amount').forEach(input => {
+        outputsTotalStroops += xlmToStroopsBigInt(input.value);
+    });
+
+    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
+    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
+
+    const shouldShow = inputsTotalStroops !== 0n || outputsTotalStroops !== 0n;
+    const isBalanced = inputsTotalStroops !== 0n && inputsTotalStroops === outputsTotalStroops;
+    setEqValidity(eq, isBalanced, shouldShow);
+}
+
+function updateTransactBalance() {
+    const eq = document.getElementById('transact-balance');
+    const inputsEl = document.getElementById('transact-inputs');
+    const outputsEl = document.getElementById('transact-outputs');
+    const amountEl = document.getElementById('transact-amount');
+    if (!eq || !inputsEl || !outputsEl || !amountEl) return;
+
+    const inputsTotalStroops = sumInputNotesStroops('transact-inputs');
+    const publicStroops = xlmToStroopsBigInt(amountEl.value);
+    let outputsTotalStroops = 0n;
+    document.querySelectorAll('#transact-outputs .output-amount').forEach(input => {
+        outputsTotalStroops += xlmToStroopsBigInt(input.value);
+    });
+
+    const publicText = `${publicStroops >= 0n ? '+' : ''}${stroopsBigIntToXlmText(publicStroops)}`;
+    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
+    eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicText}`;
+    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
+
+    const shouldShow = inputsTotalStroops !== 0n || publicStroops !== 0n || outputsTotalStroops !== 0n;
+    const isBalanced = inputsTotalStroops + publicStroops === outputsTotalStroops && shouldShow;
+    setEqValidity(eq, isBalanced, shouldShow);
+}
+
 export const Transactions = {
     init() {
         // Deposit
@@ -155,6 +273,19 @@ export const Transactions = {
             if (withdrawRecipient && !withdrawRecipient.value.trim()) withdrawRecipient.value = w;
             if (transactRecipient && !transactRecipient.value.trim()) transactRecipient.value = w;
         });
+
+        App.events.addEventListener('notes:updated', () => {
+            document.querySelectorAll('.note-input').forEach(input => {
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            });
+            updateWithdrawTotal();
+            updateTransferBalance();
+            updateTransactBalance();
+        });
+
+        updateWithdrawTotal();
+        updateTransferBalance();
+        updateTransactBalance();
     },
 
     _wireDeposit() {
@@ -264,7 +395,11 @@ export const Transactions = {
     },
 
     _wireWithdraw() {
+        const inputs = document.getElementById('withdraw-inputs');
         const btn = document.getElementById('btn-withdraw');
+        inputs?.addEventListener('input', updateWithdrawTotal);
+        updateWithdrawTotal();
+
         btn?.addEventListener('click', async () => {
             try {
                 requireWalletReady();
@@ -315,11 +450,17 @@ export const Transactions = {
 
     _wireTransfer() {
         const btn = document.getElementById('btn-transfer');
+        const inputs = document.getElementById('transfer-inputs');
+        const outputs = document.getElementById('transfer-outputs');
         const addressbookBtn = document.getElementById('transfer-addressbook-btn');
         addressbookBtn?.addEventListener('click', () => {
             document.getElementById('section-tab-addressbook')?.click();
             document.getElementById('section-panel-addressbook')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
+
+        inputs?.addEventListener('input', updateTransferBalance);
+        outputs?.addEventListener('input', updateTransferBalance);
+        updateTransferBalance();
 
         btn?.addEventListener('click', async () => {
             try {
@@ -377,30 +518,20 @@ export const Transactions = {
     _wireTransact() {
         const slider = document.getElementById('transact-slider');
         const amount = document.getElementById('transact-amount');
+        const inputs = document.getElementById('transact-inputs');
         const outputs = document.getElementById('transact-outputs');
         const btn = document.getElementById('btn-transact');
 
-        const updateBalance = () => {
-            const publicVal = parseFloat(amount?.value || '0') || 0;
-            let outputsTotal = 0;
-            document.querySelectorAll('#transact-outputs .output-amount').forEach(input => {
-                outputsTotal += parseFloat(input.value) || 0;
-            });
-            const eq = document.getElementById('transact-balance');
-            if (!eq) return;
-            eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicVal >= 0 ? '+' : ''}${publicVal}`;
-            eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
-        };
-
         slider?.addEventListener('input', () => {
             if (amount) amount.value = slider.value;
-            updateBalance();
+            updateTransactBalance();
         });
         amount?.addEventListener('input', () => {
             if (slider) slider.value = String(Math.min(Math.max(-500, Number(amount.value || 0)), 500));
-            updateBalance();
+            updateTransactBalance();
         });
-        outputs?.addEventListener('input', updateBalance);
+        inputs?.addEventListener('input', updateTransactBalance);
+        outputs?.addEventListener('input', updateTransactBalance);
 
         document.querySelectorAll('[data-target="transact-amount"]').forEach(spinnerBtn => {
             spinnerBtn.addEventListener('click', () => {
@@ -468,6 +599,6 @@ export const Transactions = {
             }
         });
 
-        updateBalance();
+        updateTransactBalance();
     },
 };
