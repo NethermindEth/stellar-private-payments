@@ -51,10 +51,6 @@ stellar-private-payments/
 │   ├── deploy.sh               # Contract deployment script
 │   └── deployments.json        # Deployment output
 ├── dist/                       # Built static site output (generated)
-│   └── js/
-│       ├── storage-worker.js    # Generated Storage Worker entrypoint
-│       └── prover-worker.js     # Generated Prover Worker entrypoint
-├── patches/                     # Patches (git submodules) for some dependencies
 └── Makefile                    # Build automation
 ```
 
@@ -74,10 +70,11 @@ stellar-private-payments/
 
 ### Patches
 
-`ark-circom` is patched (`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
+`ark-circom` is [patched](https://github.com/NethermindEth/circom-compat/commits/wasm-no-parallel/) 
+(`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
-Also we delete `ethereum.rs` module to get rid off many irrelevant dependencies.
+Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
 
 
 ### Building Circuits

@@ -1,3 +1,0 @@
-[submodule "patches/ark-circom"]
-	path = patches/ark-circom
-	url = https://github.com/arkworks-rs/circom-compat.git

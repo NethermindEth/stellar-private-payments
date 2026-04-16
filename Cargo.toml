@@ -24,7 +24,7 @@ publish = false
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
-ark-circom = { path = "patches/ark-circom", default-features = false }
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
 ark-crypto-primitives = { version = "0.5.0", default-features = false }
 ark-ec = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
@@ -103,6 +103,7 @@ inherits = "release"
 debug-assertions = true
 
 [patch.crates-io]
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", branch = "wasm-no-parallel" }
 ark-relations = { git = "https://github.com/arkworks-rs/snark.git" }
 ark-snark = { git = "https://github.com/arkworks-rs/snark.git" }
 ark-crypto-primitives = { git = "https://github.com/arkworks-rs/crypto-primitives.git" }
@@ -115,4 +116,4 @@ ark-r1cs-std = { git = "https://github.com/arkworks-rs/r1cs-std.git" }
 ark-groth16 = { git = "https://github.com/arkworks-rs/groth16.git" }
 
 [patch."https://github.com/arkworks-rs/circom-compat.git"]
-ark-circom = { path = "patches/ark-circom" }
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", branch = "wasm-no-parallel" }

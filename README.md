@@ -117,6 +117,7 @@ As a proof of concept, this implementation has several limitations:
 - **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts. But this has not been tested in the UI.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
+- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them. In future versions cloud sync maybe introduced. Also clearing the app site data permanently deletes the app database with app-derived keys and notes.
 
 
 ## AI tools disclosure
