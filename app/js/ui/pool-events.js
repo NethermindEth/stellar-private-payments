@@ -44,22 +44,13 @@ function hideLoading() {
 function inferType(row) {
     const c = Number(row.commitments || 0);
     const n = Number(row.nullifiers || 0);
-    if (n === 0 && c > 0) return { label: 'Deposit', color: 'text-emerald-400' };
-    if (n > 0 && c === 0) return { label: 'Withdraw', color: 'text-orange-400' };
-    if (n > 0 && c > 0) return { label: 'Transfer', color: 'text-brand-400' };
-    return { label: 'Pool Activity', color: 'text-dark-300' };
+    return {
+        label: 'Pool activity',
+        color: (c > 0 || n > 0) ? 'text-dark-200' : 'text-dark-300',
+    };
 }
 
 function iconSvg(type) {
-    if (type === 'Deposit') {
-        return '<svg class="w-3.5 h-3.5 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m0 0l-4-4m4 4l4-4"/></svg>';
-    }
-    if (type === 'Withdraw') {
-        return '<svg class="w-3.5 h-3.5 text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 20V4m0 0l-4 4m4-4l4 4"/></svg>';
-    }
-    if (type === 'Transfer') {
-        return '<svg class="w-3.5 h-3.5 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 7h12m-12 6h12m-12 6h12M4 7h.01M4 13h.01M4 19h.01"/></svg>';
-    }
     return '<svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 17h.01"/></svg>';
 }
 
@@ -164,4 +155,3 @@ export const PoolEvents = {
         }
     },
 };
-
