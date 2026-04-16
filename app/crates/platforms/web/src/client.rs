@@ -294,9 +294,9 @@ impl WebClient {
                         "deposit",
                         "sync_wait",
                         if let Some(gap) = gap {
-                            format!("Waiting for sync {gap} ledgers from the chain...")
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
                         } else {
-                            "Waiting for sync ledgers from the chain...".to_string()
+                            "Waiting to sync ledgers from the chain...".to_string()
                         },
                         None,
                         None,
@@ -462,9 +462,9 @@ impl WebClient {
                         "withdraw",
                         "sync_wait",
                         if let Some(gap) = gap {
-                            format!("Waiting for sync {gap} ledgers from the chain...")
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
                         } else {
-                            "Waiting for sync ledgers from the chain...".to_string()
+                            "Waiting to sync ledgers from the chain...".to_string()
                         },
                         None,
                         None,
@@ -655,9 +655,9 @@ impl WebClient {
                         "transfer",
                         "sync_wait",
                         if let Some(gap) = gap {
-                            format!("Waiting for sync {gap} ledgers from the chain...")
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
                         } else {
-                            "Waiting for sync ledgers from the chain...".to_string()
+                            "Waiting to sync ledgers from the chain...".to_string()
                         },
                         None,
                         None,
@@ -886,9 +886,9 @@ impl WebClient {
                         "transact",
                         "sync_wait",
                         if let Some(gap) = gap {
-                            format!("Waiting for sync {gap} ledgers from the chain...")
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
                         } else {
-                            "Waiting for sync ledgers from the chain...".to_string()
+                            "Waiting to sync ledgers from the chain...".to_string()
                         },
                         None,
                         None,

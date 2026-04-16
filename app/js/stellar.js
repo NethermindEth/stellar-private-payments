@@ -182,7 +182,7 @@ export async function submitPreparedSorobanTx(prepared, ctx, opts = {}) {
 
     // Wait for a terminal state (keep it short; UI can refresh).
     for (let i = 0; i < 30; i++) {
-        emit('confirm', `Confirming… (${i + 1}/30)`, i + 1, 30);
+        emit('confirm', `Confirming…`, i + 1, 30);
         await sleep(1_000);
         const res = await server.getTransaction(hash);
         if (res?.status === 'SUCCESS') return hash;
@@ -316,7 +316,7 @@ export async function submitProvedPoolTransact(proved, ctx, opts = {}) {
     // Wait for a terminal state (keep it short; UI can refresh).
     const server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
     for (let i = 0; i < 30; i++) {
-        emit('confirm', `Confirming… (${i + 1}/30)`, i + 1, 30);
+        emit('confirm', `Confirming…`, i + 1, 30);
         await sleep(1_000);
         const res = await server.getTransaction(hash);
         if (res?.status === 'SUCCESS') return hash;
