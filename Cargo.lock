@@ -437,7 +437,7 @@ dependencies = [
 [[package]]
 name = "ark-r1cs-std"
 version = "0.5.0"
-source = "git+https://github.com/arkworks-rs/r1cs-std.git#3b12258dcb485f15bc7ad1312db0e64063bef9cc"
+source = "git+https://github.com/arkworks-rs/r1cs-std.git#45e4e2697626a9f9481fe57e70ed29c687194102"
 dependencies = [
  "ark-ec 0.5.0",
  "ark-ff 0.5.0",
@@ -4095,7 +4095,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
