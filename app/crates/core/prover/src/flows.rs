@@ -485,7 +485,7 @@ where
     let rhs = outputs_sum;
     if lhs != rhs {
         return Err(anyhow!(
-            "equation not balanced: inputs({}) + public({}) != outputs({})",
+            "not balanced: inputs({}) + public({}) != outputs({})",
             inputs_sum,
             ext_amount,
             outputs_sum

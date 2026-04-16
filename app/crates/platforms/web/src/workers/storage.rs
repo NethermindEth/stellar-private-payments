@@ -286,79 +286,43 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::Deposit(req) => {
             log::trace!("[{WORKER_NAME}] deposit");
 
-            let (note_privkey, note_pubkey, encryption_pubkey) = match with_storage!(s => s.get_user_keys(&req.user_address)?)?
-            {
-                Some((
-                    NoteKeyPair {
-                        private,
-                        public: note_pub,
-                    },
-                    EncryptionKeyPair {
-                        public: enc_pub, ..
-                    },
-                )) => (private, note_pub, enc_pub),
-                None => {
-                    return Ok(StorageWorkerResponse::Error(format!(
-                        "address {} should generate note and encryption keys first",
-                        req.user_address
-                    )));
-                }
+            let (note_privkey, note_pubkey, encryption_pubkey) =
+                load_user_key_material(&req.user_address)?;
+
+            let membership_proof = match build_membership_proof(
+                &note_pubkey,
+                req.membership_blinding,
+                req.aspmem_root,
+                req.aspmem_ledger,
+                req.tree_depth,
+            )? {
+                Ok(p) => p,
+                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
             };
 
-            let user_leaf = asp_membership_leaf(&note_pubkey, &req.membership_blinding)?;
-            let user_leaf_index = match with_storage!(s => s.check_asp_membership_precondition(
-                &user_leaf,
-                &req.aspmem_root,
-                req.aspmem_ledger
-            )?)? {
-                AspMembershipSync::UserIndex(user_leaf_index) => user_leaf_index,
-                status => {
-                    log::debug!("[{WORKER_NAME}] asp membership check is not fully synced");
-                    return Ok(StorageWorkerResponse::AspMembershipSync(status));
-                }
-            };
+            let pool_root = req
+                .pool_root
+                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
 
-            let asp_membership_merkle_tree_leaves =
-                with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
-            let aspmembership_tree =
-                MerklePrefixTree::new(req.tree_depth, &asp_membership_merkle_tree_leaves)?
-                    .into_built();
-            let MerkleProof {
-                path_indices,
-                path_elements,
-                root,
-                ..
-            } = aspmembership_tree.proof(user_leaf_index)?;
-
-            let note_pubkey_for_outputs = note_pubkey.clone();
-            let encryption_pubkey_for_outputs = encryption_pubkey.clone();
-            let outputs = req
-                .output_amounts
-                .into_iter()
-                .map(|amount_stroops| {
+            let outputs = (0..N_OUTPUTS)
+                .map(|i| {
                     Ok(TransactOutput {
-                        amount_stroops,
+                        amount_stroops: req.output_amounts[i],
                         blinding: generate_random_blinding()?,
-                        recipient_note_pubkey: Some(note_pubkey_for_outputs.clone()),
-                        recipient_encryption_pubkey: Some(encryption_pubkey_for_outputs.clone()),
+                        recipient_note_pubkey: Some(note_pubkey.clone()),
+                        recipient_encryption_pubkey: Some(encryption_pubkey.clone()),
                     })
                 })
                 .collect::<Result<Vec<_>>>()?;
 
             let params = DepositParams {
                 priv_key: note_privkey,
-                encryption_pubkey: encryption_pubkey.clone(),
-                pool_root: req.pool_root.expect("pool root is not defined"),
+                encryption_pubkey,
+                pool_root,
                 pool_address: req.pool_address,
                 amount_stroops: req.amount_stroops,
                 outputs,
-                membership_proof: AspMembershipProof {
-                    leaf: user_leaf,
-                    blinding: req.membership_blinding,
-                    path_elements,
-                    path_indices,
-                    root,
-                },
+                membership_proof,
                 non_membership_proof: req.non_membership_proof,
                 tree_depth: req.tree_depth,
                 smt_depth: req.smt_depth,
