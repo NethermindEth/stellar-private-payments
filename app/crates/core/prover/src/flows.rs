@@ -367,7 +367,7 @@ where
             encryption_pubkey,
             pool_root,
             ext_recipient: withdraw_recipient,
-            ext_amount: -ExtAmount::from(withdraw_amount_stroops),
+            ext_amount: -withdraw_amount_stroops,
             inputs,
             outputs,
             membership_proof,

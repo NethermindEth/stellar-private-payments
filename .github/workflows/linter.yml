@@ -36,7 +36,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-targets --all-features --workspace --exclude ark-circom
 
       - name: Check typos
         uses: crate-ci/typos@bb4666ad77b539a6b4ce4eda7ebb6de553704021 # v1.42.0

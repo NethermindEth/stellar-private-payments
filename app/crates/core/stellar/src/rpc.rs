@@ -18,7 +18,7 @@ pub enum Error {
     #[error("network error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
-    JsonRpcError { code: i64, message: String },
+    JsonRpc { code: i64, message: String },
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -29,8 +29,6 @@ pub enum Error {
     Serde(#[from] serde_json::Error),
     #[error("{0} not found: {1}")]
     NotFound(String, String),
-    #[error("unexpected contract code data type: {0:?}")]
-    UnexpectedContractCodeDataType(LedgerEntryData),
     #[error("Duplicate key found in contract data: {0}")]
     DuplicateContractKey(String),
     #[error("Unexpected ScVal: {0:?}")]
@@ -73,6 +71,7 @@ pub struct GetLatestLedgerResponse {
 pub type SegmentFilter = String;
 pub type TopicFilter = Vec<SegmentFilter>;
 
+#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EventType {
     All,
@@ -87,6 +86,7 @@ pub struct LedgerRange {
     end: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum EventStart {
     Ledger(u32),
@@ -254,7 +254,7 @@ impl Client {
             .await?;
 
         if let Some(err) = resp.error {
-            return Err(Error::JsonRpcError {
+            return Err(Error::JsonRpc {
                 code: err.code,
                 message: err.message,
             });
@@ -289,7 +289,7 @@ impl Client {
         {
             Ok(r) => r,
             Err(e) => {
-                if let Error::JsonRpcError { message, .. } = &e {
+                if let Error::JsonRpc { message, .. } = &e {
                     if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
                     {
                         return Err(Error::RpcSyncGap(range.0));

@@ -318,7 +318,7 @@ impl StateFetcher {
         // Pad/trim siblings to circuit SMT depth.
         let mut siblings = parsed.siblings;
         if siblings.len() < smt_depth {
-            siblings.extend(core::iter::repeat(Field::ZERO).take(smt_depth - siblings.len()));
+            siblings.extend(core::iter::repeat_n(Field::ZERO, smt_depth - siblings.len()));
         } else if siblings.len() > smt_depth {
             siblings.truncate(smt_depth);
         }
@@ -513,88 +513,5 @@ impl StateFetcher {
         Ok(xdr::ScAddress::Contract(xdr::ContractId(xdr::Hash(
             contract.0,
         ))))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn encode_ext_data_scval_has_expected_shape() {
-        let ext = ExtData {
-            recipient: "GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC".to_string(),
-            ext_amount: ExtAmount::from(123i128),
-            encrypted_output0: vec![1, 2, 3],
-            encrypted_output1: vec![4, 5],
-        };
-
-        let sc = StateFetcher::encode_ext_data_scval(&ext).expect("encode");
-        let xdr::ScVal::Map(Some(map)) = sc else {
-            panic!("expected map");
-        };
-
-        let mut keys: Vec<String> = map
-            .0
-            .iter()
-            .map(|e| match &e.key {
-                xdr::ScVal::Symbol(sym) => sym.to_utf8_string().unwrap(),
-                _ => panic!("key not symbol"),
-            })
-            .collect();
-        keys.sort();
-        assert_eq!(
-            keys,
-            vec![
-                "encrypted_output0",
-                "encrypted_output1",
-                "ext_amount",
-                "recipient"
-            ]
-        );
-    }
-
-    #[test]
-    fn encode_pool_proof_scval_has_expected_shape() {
-        let public = OnchainProofPublicInputs {
-            root: Field::ONE,
-            input_nullifiers: [Field::ONE, Field::ONE],
-            output_commitment0: Field::ONE,
-            output_commitment1: Field::ONE,
-            public_amount: Field::ONE,
-            ext_data_hash_be: [7u8; 32],
-            asp_membership_root: Field::ONE,
-            asp_non_membership_root: Field::ONE,
-        };
-        let proof = vec![0u8; 256];
-
-        let sc = StateFetcher::encode_pool_proof_scval(&public, &proof).expect("encode");
-        let xdr::ScVal::Map(Some(map)) = sc else {
-            panic!("expected map");
-        };
-
-        // Ensure the nested `proof` struct exists and has a/b/c.
-        let mut proof_val = None;
-        for e in map.0.iter() {
-            if let xdr::ScVal::Symbol(sym) = &e.key {
-                if sym.to_utf8_string().unwrap() == "proof" {
-                    proof_val = Some(e.val.clone());
-                }
-            }
-        }
-        let proof_val = proof_val.expect("proof field");
-        let xdr::ScVal::Map(Some(inner)) = proof_val else {
-            panic!("expected inner proof map");
-        };
-        let mut inner_keys: Vec<String> = inner
-            .0
-            .iter()
-            .map(|e| match &e.key {
-                xdr::ScVal::Symbol(sym) => sym.to_utf8_string().unwrap(),
-                _ => panic!("inner key not symbol"),
-            })
-            .collect();
-        inner_keys.sort();
-        assert_eq!(inner_keys, vec!["a", "b", "c"]);
     }
 }

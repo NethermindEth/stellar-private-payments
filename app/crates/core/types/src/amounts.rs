@@ -13,12 +13,17 @@ use core::{
 
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use uint::construct_uint;
 
-construct_uint! {
-    /// Unsigned 256-bit integer used as the backing type for [`Field`].
-    pub struct U256(4);
+
+#[allow(clippy::assign_op_pattern, clippy::manual_div_ceil)]
+mod biguint {
+    use uint::construct_uint;
+    construct_uint! {
+        /// Unsigned 256-bit integer used as the backing type for [`Field`].
+        pub struct U256(4);
+    }
 }
+pub use crate::amounts::biguint::U256;
 
 /// The BN254 scalar field modulus, as big-endian bytes.
 ///
@@ -675,9 +680,9 @@ mod tests {
     #[test]
     fn try_from_amounts_to_field_corners() -> Result<()> {
         // NoteAmount always maps directly.
-        let n0 = Field::try_from(NoteAmount(0))?;
+        let n0 = Field::from(NoteAmount(0));
         assert_eq!(U256::from(n0), U256::from(0u64));
-        let nmax = Field::try_from(NoteAmount(u64::MAX))?;
+        let nmax = Field::from(NoteAmount(u64::MAX));
         assert_eq!(U256::from(nmax), U256::from(u64::MAX));
 
         // ExtAmount maps signed values into the field.

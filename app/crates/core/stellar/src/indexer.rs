@@ -120,8 +120,8 @@ pub trait ContractDataStorage {
     async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()>;
 }
 
-impl Into<ContractEvent> for crate::rpc::Event {
-    fn into(self) -> ContractEvent {
+impl From<crate::rpc::Event> for ContractEvent {
+    fn from(val: crate::rpc::Event) -> Self {
         let crate::rpc::Event {
             id,
             ledger,
@@ -129,7 +129,7 @@ impl Into<ContractEvent> for crate::rpc::Event {
             topic,
             value,
             ..
-        } = self;
+        } = val;
         ContractEvent {
             id,
             ledger,

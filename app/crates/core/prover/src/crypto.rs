@@ -74,7 +74,6 @@ pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 }
 
 /// Poseidon2 hash with 2 inputs as compression mode
-
 pub fn poseidon2_compression_wasm(input0: &[u8], input1: &[u8]) -> Result<Vec<u8>> {
     let a = bytes_to_scalar(input0)?;
     let b = bytes_to_scalar(input1)?;

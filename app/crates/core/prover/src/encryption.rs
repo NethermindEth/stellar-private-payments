@@ -114,8 +114,8 @@ fn derive_keypair_from_signature(signature: EncryptionSignature) -> Result<Encry
     let public = PublicKey::from(&secret);
 
     let keypair = EncryptionKeyPair {
-        private: EncryptionPrivateKey(secret.to_bytes().try_into()?),
-        public: EncryptionPublicKey(public.to_bytes().try_into()?),
+        private: EncryptionPrivateKey(secret.to_bytes()),
+        public: EncryptionPublicKey(public.to_bytes()),
     };
 
     Ok(keypair)

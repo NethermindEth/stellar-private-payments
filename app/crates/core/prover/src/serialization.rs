@@ -157,7 +157,7 @@ pub fn hex_to_field_bytes(hex: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::{string::String, vec};
+    use alloc::string::String;
 
     #[test]
     fn fr_roundtrip_bytes() {
@@ -185,14 +185,14 @@ mod tests {
 
     #[test]
     fn bytes_to_fr_rejects_wrong_len() {
-        assert!(bytes_to_fr(&vec![0u8; 31]).is_err());
-        assert!(bytes_to_fr(&vec![0u8; 33]).is_err());
+        assert!(bytes_to_fr(&[0u8; 31]).is_err());
+        assert!(bytes_to_fr(&[0u8; 33]).is_err());
     }
 
     #[test]
     fn bytes_to_scalar_rejects_wrong_len() {
-        assert!(bytes_to_scalar(&vec![0u8; 31]).is_err());
-        assert!(bytes_to_scalar(&vec![0u8; 33]).is_err());
+        assert!(bytes_to_scalar(&[0u8; 31]).is_err());
+        assert!(bytes_to_scalar(&[0u8; 33]).is_err());
     }
 
     #[test]

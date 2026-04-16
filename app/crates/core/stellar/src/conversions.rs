@@ -106,7 +106,7 @@ pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent,
     } = event;
 
     let mut iter = topics.iter();
-    let first = iter.next().ok_or_else(|| xdr::Error::Invalid)?;
+    let first = iter.next().ok_or(xdr::Error::Invalid)?;
 
     let topics: Vec<xdr::ScVal> = iter
         .map(|s| xdr::ScVal::from_xdr_base64(s, xdr::Limits::none()))
