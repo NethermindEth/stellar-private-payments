@@ -12,7 +12,7 @@ use prover::{
         DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
         TransferParams, WithdrawParams,
     },
-    merkle::{MerklePrefixTree, MerkleProof, from_leaves},
+    merkle::{MerklePrefixTree, MerkleProof},
 };
 use sqlite_wasm_vfs::sahpool::{OpfsSAHPoolCfg, install as install_opfs_sahpool};
 use state::{
@@ -317,18 +317,15 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
             let asp_membership_merkle_tree_leaves =
                 with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
-            let tree_depth_usize = usize::try_from(req.tree_depth)
-                .map_err(|_| anyhow::anyhow!("tree_depth too large"))?;
-            let aspmembership_tree = from_leaves(
-                tree_depth_usize,
-                asp_membership_merkle_tree_leaves.into_iter(),
-            )?;
+            let aspmembership_tree =
+                MerklePrefixTree::new(req.tree_depth, &asp_membership_merkle_tree_leaves)?
+                    .into_built();
             let MerkleProof {
                 path_indices,
                 path_elements,
                 root,
                 ..
-            } = aspmembership_tree.get_proof(user_leaf_index)?;
+            } = aspmembership_tree.proof(user_leaf_index)?;
 
             let note_pubkey_for_outputs = note_pubkey.clone();
             let encryption_pubkey_for_outputs = encryption_pubkey.clone();
@@ -617,18 +614,14 @@ fn build_membership_proof(
 
     let asp_membership_merkle_tree_leaves =
         with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
-    let tree_depth_usize =
-        usize::try_from(tree_depth).map_err(|_| anyhow::anyhow!("tree_depth too large"))?;
-    let aspmembership_tree = from_leaves(
-        tree_depth_usize,
-        asp_membership_merkle_tree_leaves.into_iter(),
-    )?;
+    let aspmembership_tree =
+        MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
     let MerkleProof {
         path_indices,
         path_elements,
         root,
         ..
-    } = aspmembership_tree.get_proof(user_leaf_index)?;
+    } = aspmembership_tree.proof(user_leaf_index)?;
 
     Ok(Ok(AspMembershipProof {
         leaf: user_leaf,
@@ -661,7 +654,7 @@ fn build_pool_inputs(
         return Ok(Err(AspMembershipSync::SyncRequired(None)));
     }
 
-    let tree = MerklePrefixTree::new(tree_depth, &leaves)?;
+    let tree = MerklePrefixTree::new(tree_depth, &leaves)?.into_built();
     let computed_root = tree.root()?;
     if computed_root != expected_pool_root {
         anyhow::bail!("pool root mismatch: local computed root does not match on-chain root");

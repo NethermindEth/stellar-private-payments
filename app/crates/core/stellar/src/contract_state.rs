@@ -318,7 +318,10 @@ impl StateFetcher {
         // Pad/trim siblings to circuit SMT depth.
         let mut siblings = parsed.siblings;
         if siblings.len() < smt_depth {
-            siblings.extend(core::iter::repeat_n(Field::ZERO, smt_depth - siblings.len()));
+            siblings.extend(core::iter::repeat_n(
+                Field::ZERO,
+                smt_depth - siblings.len(),
+            ));
         } else if siblings.len() > smt_depth {
             siblings.truncate(smt_depth);
         }

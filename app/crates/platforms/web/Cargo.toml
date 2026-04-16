@@ -31,7 +31,7 @@ log = { workspace = true }
 prover = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
-serde_json = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
 state = { workspace = true }
 stellar = { workspace = true }
 types = { workspace = true }

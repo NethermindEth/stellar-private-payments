@@ -3,7 +3,7 @@
 //! Provides merkle tree operations matching the Circom circuit implementations.
 //! Core merkle functions are re-exported from `circuits::core::merkle`.
 
-use alloc::{vec, vec::Vec};
+use alloc::vec::Vec;
 
 use anyhow::{Result, anyhow};
 use zkhash::fields::bn256::FpBN256 as Scalar;
@@ -11,7 +11,6 @@ use zkhash::fields::bn256::FpBN256 as Scalar;
 use crate::{
     crypto,
     serialization::{bytes_to_scalar, scalar_to_bytes},
-    types::FIELD_SIZE,
 };
 use types::Field as AppField;
 
@@ -20,7 +19,7 @@ pub use circuits::core::merkle::{
     merkle_proof as merkle_proof_internal, merkle_root, poseidon2_compression,
 };
 
-/// Merkle proof data returned to JavaScript
+/// Merkle proof data
 pub struct MerkleProof {
     /// Path elements
     pub path_elements: Vec<AppField>,
@@ -54,255 +53,9 @@ impl MerkleProof {
     }
 }
 
-/// Simple Merkle tree for proof generation
-pub struct MerkleTree {
-    /// Tree levels
-    levels_data: Vec<Vec<Scalar>>,
-    /// Number of levels
-    depth: usize,
-    /// Next leaf index to insert
-    next_index: u64,
-}
-
-// TODO: For now we implement a full merkle tree. We should study if a partial
-// merkle tree is enough. To minimize storage on user side
-impl MerkleTree {
-    /// Create a new Merkle tree with given depth and default zero leaf (0)
-    pub fn new(depth: usize) -> Result<MerkleTree> {
-        Self::build_tree(depth, Scalar::from(0u64))
-    }
-
-    /// Create a new Merkle tree with a custom zero leaf value.
-    /// This allows matching contract implementations that use non-zero empty
-    /// leaves (e.g., poseidon2("XLM") as the zero value).
-    ///
-    /// # Arguments
-    /// * `depth` - Tree depth (1-32)
-    /// * `zero_leaf_bytes` - Custom zero leaf value as 32 bytes (Little-Endian)
-    pub fn new_with_zero_leaf(depth: usize, zero_leaf_bytes: &[u8]) -> Result<MerkleTree> {
-        let zero = bytes_to_scalar(zero_leaf_bytes)?;
-        Self::build_tree(depth, zero)
-    }
-
-    /// Internal helper to build the tree with a given zero value
-    fn build_tree(depth: usize, zero: Scalar) -> Result<MerkleTree> {
-        if depth == 0 || depth > 32 {
-            return Err(anyhow!("Depth must be between 1 and 32"));
-        }
-
-        // Use checked shift to avoid overflow
-        let depth_u32 = u32::try_from(depth).expect("Depth didn't fit in u32");
-        let num_leaves = 1usize
-            .checked_shl(depth_u32)
-            .ok_or_else(|| anyhow!("Depth too large for this platform, would overflow"))?;
-
-        // Initialize all levels with zeros
-        let capacity = depth
-            .checked_add(1)
-            .ok_or_else(|| anyhow!("Depth overflow"))?;
-        let mut levels_data = Vec::with_capacity(capacity);
-
-        // Leaves at level 0
-        levels_data.push(vec![zero; num_leaves]);
-
-        // Build empty tree by hashing up
-        let mut current_level_size = num_leaves;
-        let mut prev_hash = zero;
-
-        for _ in 0..depth {
-            current_level_size /= 2;
-            prev_hash = poseidon2_compression(prev_hash, prev_hash);
-            levels_data.push(vec![prev_hash; current_level_size]);
-        }
-
-        Ok(MerkleTree {
-            levels_data,
-            depth,
-            next_index: 0,
-        })
-    }
-
-    /// Insert a leaf and return its index
-    pub fn insert(&mut self, leaf_bytes: &[u8]) -> Result<u32> {
-        let leaf = bytes_to_scalar(leaf_bytes)?;
-        let index = self.next_index;
-
-        let max_leaves = 1u64 << self.depth;
-        if index >= max_leaves {
-            return Err(anyhow!("Merkle tree is full"));
-        }
-
-        let index_usize = usize::try_from(index).map_err(|_| anyhow!("Index too large"))?;
-
-        // Insert leaf
-        self.levels_data[0][index_usize] = leaf;
-
-        // Update path to root
-        let mut current_index = index_usize;
-        let mut current_hash = leaf;
-
-        for level in 0..self.depth {
-            let sibling_index = current_index ^ 1; // Toggle last bit to get sibling
-            let sibling = self.levels_data[level][sibling_index];
-
-            // Compute parent hash
-            let (left, right) = if current_index.is_multiple_of(2) {
-                (current_hash, sibling)
-            } else {
-                (sibling, current_hash)
-            };
-
-            current_hash = poseidon2_compression(left, right);
-            current_index /= 2;
-
-            // Update parent level
-            let parent_level = level
-                .checked_add(1)
-                .ok_or_else(|| anyhow!("Level overflow"))?;
-            self.levels_data[parent_level][current_index] = current_hash;
-        }
-
-        self.next_index = self
-            .next_index
-            .checked_add(1)
-            .ok_or_else(|| anyhow!("Index overflow"))?;
-
-        // index is bounded by max_leaves (1 << depth where depth <= 32)
-        u32::try_from(index).map_err(|_| anyhow!("Index too large for u32"))
-    }
-
-    /// Get the current root
-    pub fn root(&self) -> Vec<u8> {
-        let root = self.levels_data[self.depth][0];
-        scalar_to_bytes(&root)
-    }
-
-    /// Get merkle proof for a leaf at given index
-    pub fn get_proof(&self, index: u32) -> Result<MerkleProof> {
-        let index = usize::try_from(index).map_err(|_| anyhow!("Index too large"))?;
-        let max_leaves = 1usize << self.depth;
-
-        if index >= max_leaves {
-            return Err(anyhow!("Index out of bounds"));
-        }
-
-        let mut path_elements: Vec<AppField> = Vec::with_capacity(self.depth);
-        let mut path_indices_bits: u64 = 0;
-        let mut current_index = index;
-
-        for level in 0..self.depth {
-            let sibling_index = current_index ^ 1;
-            let sibling = self.levels_data[level][sibling_index];
-
-            // Add sibling to path
-            let sibling_le = scalar_to_bytes(&sibling);
-            let sibling_le: [u8; 32] = sibling_le
-                .try_into()
-                .map_err(|_| anyhow!("Merkle sibling: expected 32 bytes"))?;
-            path_elements.push(AppField::try_from_le_bytes(sibling_le)?);
-
-            // Record direction (0 = left, 1 = right)
-            if !current_index.is_multiple_of(2) {
-                path_indices_bits |= 1u64 << level;
-            }
-
-            current_index /= 2;
-        }
-
-        let mut path_indices_le = [0u8; 32];
-        path_indices_le[..8].copy_from_slice(&path_indices_bits.to_le_bytes());
-        let path_indices = AppField::try_from_le_bytes(path_indices_le)?;
-
-        let root_le = scalar_to_bytes(&self.levels_data[self.depth][0]);
-        let root_le: [u8; 32] = root_le
-            .try_into()
-            .map_err(|_| anyhow!("Merkle root: expected 32 bytes"))?;
-        let root = AppField::try_from_le_bytes(root_le)?;
-
-        Ok(MerkleProof {
-            path_elements,
-            path_indices,
-            root,
-            levels: self.depth,
-        })
-    }
-
-    /// Get the next available leaf index
-    pub fn next_index(&self) -> u64 {
-        self.next_index
-    }
-
-    /// Get tree depth
-    pub fn depth(&self) -> usize {
-        self.depth
-    }
-}
-
-/// Build an ASP membership Merkle tree (poseidon2("XLM") zero leaf) from
-/// ordered leaves.
-///
-/// Leaves must be provided in `leaf_index` order with no gaps: index 0, 1, 2,
-/// ...
-pub fn from_leaves(depth: usize, leaves: impl IntoIterator<Item = AppField>) -> Result<MerkleTree> {
-    let mut zero_leaf_be = crypto::zero_leaf();
-    zero_leaf_be.reverse();
-    let mut tree = MerkleTree::new_with_zero_leaf(depth, &zero_leaf_be)?;
-
-    for leaf in leaves {
-        let leaf_le = leaf.to_le_bytes();
-        tree.insert(&leaf_le)?;
-    }
-
-    Ok(tree)
-}
-
-/// Compute merkle root from leaves
-pub fn compute_merkle_root(leaves_bytes: &[u8], depth: usize) -> Result<Vec<u8>> {
-    if !leaves_bytes.len().is_multiple_of(FIELD_SIZE) {
-        return Err(anyhow!("Leaves bytes must be multiple of 32"));
-    }
-
-    let num_leaves = leaves_bytes.len() / FIELD_SIZE;
-    let expected_leaves = 1usize << depth;
-
-    if num_leaves != expected_leaves {
-        return Err(anyhow!(
-            "Expected {} leaves for depth {}, got {}",
-            expected_leaves,
-            depth,
-            num_leaves
-        ));
-    }
-
-    // Parse leaves
-    let mut current_level: Vec<Scalar> = Vec::with_capacity(num_leaves);
-    for i in 0..num_leaves {
-        let start = i
-            .checked_mul(FIELD_SIZE)
-            .ok_or_else(|| anyhow!("Index overflow"))?;
-        let end = i
-            .checked_add(1)
-            .and_then(|n| n.checked_mul(FIELD_SIZE))
-            .ok_or_else(|| anyhow!("Index overflow"))?;
-        let chunk = &leaves_bytes[start..end];
-        current_level.push(bytes_to_scalar(chunk)?);
-    }
-
-    // Hash up the tree
-    for _ in 0..depth {
-        let mut next_level = Vec::with_capacity(current_level.len() / 2);
-        for pair in current_level.chunks(2) {
-            next_level.push(poseidon2_compression(pair[0], pair[1]));
-        }
-        current_level = next_level;
-    }
-
-    Ok(scalar_to_bytes(&current_level[0]))
-}
-
 /// Memory-efficient Merkle helper for an append-only prefix of leaves.
 ///
-/// Unlike [`MerkleTree`], this does **not** allocate the full `2^depth` leaf
+/// Does **not** allocate the full `2^depth` leaf
 /// array. It treats all missing leaves as the contract's `zero_leaf` value and
 /// computes:
 /// - the full-depth Merkle root, and
@@ -314,6 +67,20 @@ pub struct MerklePrefixTree {
     /// `level`, where level 0 is the leaf level and level `depth` is the
     /// root.
     empty: Vec<Scalar>,
+}
+
+/// Built/cached prefix Merkle tree for efficiently computing multiple proofs.
+///
+/// Stores the computed node values for each level, but only for the provided
+/// prefix width (missing nodes are still treated as `empty[level]`).
+pub struct MerklePrefixTreeBuilt {
+    depth: usize,
+    /// See [`MerklePrefixTree::empty`].
+    empty: Vec<Scalar>,
+    /// `levels[level]` contains the computed nodes for that level for the
+    /// provided prefix. `levels[0]` are the leaves; `levels[depth][0]` is the
+    /// root (after padding with `empty` as needed).
+    levels: Vec<Vec<Scalar>>,
 }
 
 impl MerklePrefixTree {
@@ -358,6 +125,52 @@ impl MerklePrefixTree {
     /// Return the number of provided leaves in this prefix.
     pub fn leaf_count(&self) -> usize {
         self.leaves.len()
+    }
+
+    /// Build and cache all internal levels for this prefix tree.
+    ///
+    /// This is intended for per-operation use: build once, then compute a root
+    /// and multiple membership proofs without re-hashing the entire prefix for
+    /// each proof.
+    pub fn build(&self) -> MerklePrefixTreeBuilt {
+        Self::build_from_parts(self.depth, self.leaves.clone(), self.empty.clone())
+    }
+
+    /// Consume this tree and build the cached variant without cloning leaves.
+    pub fn into_built(self) -> MerklePrefixTreeBuilt {
+        Self::build_from_parts(self.depth, self.leaves, self.empty)
+    }
+
+    fn build_from_parts(
+        depth: usize,
+        leaves: Vec<Scalar>,
+        empty: Vec<Scalar>,
+    ) -> MerklePrefixTreeBuilt {
+        let mut levels = Vec::with_capacity(depth + 1);
+        levels.push(leaves);
+
+        for level in 0..depth {
+            if levels[level].is_empty() {
+                levels[level].push(empty[level]);
+            }
+
+            let mut next = Vec::with_capacity((levels[level].len() + 1) / 2);
+            for i in 0..((levels[level].len() + 1) / 2) {
+                let left = levels[level].get(2 * i).copied().unwrap_or(empty[level]);
+                let right = levels[level]
+                    .get(2 * i + 1)
+                    .copied()
+                    .unwrap_or(empty[level]);
+                next.push(poseidon2_compression(left, right));
+            }
+            levels.push(next);
+        }
+
+        MerklePrefixTreeBuilt {
+            depth,
+            empty,
+            levels,
+        }
     }
 
     /// Compute the full-depth Merkle root for this prefix.
@@ -464,30 +277,184 @@ impl MerklePrefixTree {
     }
 }
 
+impl MerklePrefixTreeBuilt {
+    /// Return the number of provided leaves in this prefix.
+    pub fn leaf_count(&self) -> usize {
+        self.levels.get(0).map(|v| v.len()).unwrap_or(0)
+    }
+
+    /// Compute the full-depth Merkle root for this built prefix.
+    pub fn root(&self) -> Result<AppField> {
+        let root = self
+            .levels
+            .get(self.depth)
+            .and_then(|v| v.get(0))
+            .copied()
+            .unwrap_or(self.empty[self.depth]);
+        let root_le = scalar_to_bytes(&root);
+        let root_le: [u8; 32] = root_le
+            .try_into()
+            .map_err(|_| anyhow!("Merkle root: expected 32 bytes"))?;
+        AppField::try_from_le_bytes(root_le)
+    }
+
+    /// Compute a Merkle proof for `index` for the provided prefix.
+    ///
+    /// `index` must be `< leaf_count()`.
+    pub fn proof(&self, index: u32) -> Result<MerkleProof> {
+        let idx_usize = usize::try_from(index).map_err(|_| anyhow!("index too large"))?;
+        if idx_usize >= self.leaf_count() {
+            return Err(anyhow!(
+                "leaf index out of range: index={}, leaves={}",
+                idx_usize,
+                self.leaf_count()
+            ));
+        }
+
+        let mut path_elements: Vec<AppField> = Vec::with_capacity(self.depth);
+        let mut path_indices_bits: u64 = 0;
+        let mut current_index = idx_usize;
+
+        for level in 0..self.depth {
+            let sib_index = current_index ^ 1;
+            let sib = self.levels[level]
+                .get(sib_index)
+                .copied()
+                .unwrap_or(self.empty[level]);
+
+            let sib_le = scalar_to_bytes(&sib);
+            let sib_le: [u8; 32] = sib_le
+                .try_into()
+                .map_err(|_| anyhow!("path element: expected 32 bytes"))?;
+            path_elements.push(AppField::try_from_le_bytes(sib_le)?);
+
+            if !current_index.is_multiple_of(2) {
+                path_indices_bits |= 1u64 << level;
+            }
+            current_index /= 2;
+        }
+
+        let mut path_indices_le = [0u8; 32];
+        path_indices_le[..8].copy_from_slice(&path_indices_bits.to_le_bytes());
+        let path_indices = AppField::try_from_le_bytes(path_indices_le)?;
+
+        let root = self.root()?;
+
+        Ok(MerkleProof {
+            path_elements,
+            path_indices,
+            root,
+            levels: self.depth,
+        })
+    }
+
+    /// Compute a pool-witness compatible Merkle proof for `index`.
+    ///
+    /// `index` must be `< leaf_count()`.
+    pub fn proof_bytes(&self, index: u32) -> Result<(Vec<[u8; 32]>, [u8; 32])> {
+        let proof = self.proof(index)?;
+
+        let mut out_elems = Vec::with_capacity(proof.path_elements.len());
+        for elem in proof.path_elements {
+            out_elems.push(elem.to_le_bytes());
+        }
+
+        Ok((out_elems, proof.path_indices.to_le_bytes()))
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn asp_membership_tree_from_leaves_matches_manual_inserts() {
-        let depth = 4;
+    fn prefix_built_root_matches_prefix_root() {
+        let depth = 8u32;
+        let leaves = [
+            AppField::try_from_le_bytes([7u8; 32]).expect("field"),
+            AppField::try_from_le_bytes([9u8; 32]).expect("field"),
+            AppField::try_from_le_bytes([11u8; 32]).expect("field"),
+        ];
+
+        let tree = MerklePrefixTree::new(depth, &leaves).expect("new");
+        let built = tree.build();
+
+        assert_eq!(tree.root().expect("root"), built.root().expect("root"));
+    }
+
+    #[test]
+    fn prefix_built_proof_bytes_matches_prefix_proof_bytes() {
+        let depth = 6u32;
+        let leaves: Vec<AppField> = (0u8..15u8)
+            .map(|v| AppField::try_from_le_bytes([v; 32]).expect("field"))
+            .collect();
+
+        let tree = MerklePrefixTree::new(depth, &leaves).expect("new");
+        let built = tree.build();
+
+        for idx in [0u32, 1u32, 2u32, 7u32, 14u32] {
+            let (a_elems, a_idx) = tree.proof_bytes(idx).expect("proof");
+            let (b_elems, b_idx) = built.proof_bytes(idx).expect("proof");
+            assert_eq!(a_elems, b_elems, "path elems mismatch at idx={idx}");
+            assert_eq!(a_idx, b_idx, "path idx mismatch at idx={idx}");
+        }
+    }
+
+    #[test]
+    fn prefix_built_proof_matches_circuits_full_tree() {
+        let depth = 4u32;
         let leaves = [
             AppField::try_from_le_bytes([1u8; 32]).expect("field"),
             AppField::try_from_le_bytes([2u8; 32]).expect("field"),
             AppField::try_from_le_bytes([3u8; 32]).expect("field"),
         ];
 
-        let tree = from_leaves(depth, leaves).expect("build tree");
+        let tree = MerklePrefixTree::new(depth, &leaves)
+            .expect("new")
+            .into_built();
 
         let mut zero_leaf_be = crypto::zero_leaf();
         zero_leaf_be.reverse();
-        let mut manual = MerkleTree::new_with_zero_leaf(depth, &zero_leaf_be).expect("new tree");
-        for leaf in leaves {
-            let leaf_le = leaf.to_le_bytes();
-            manual.insert(&leaf_le).expect("insert");
+        let zero = bytes_to_scalar(&zero_leaf_be).expect("zero");
+
+        let depth_usize = usize::try_from(depth).expect("depth");
+        let expected_leaves = 1usize << depth_usize;
+        let mut full: Vec<Scalar> = vec![zero; expected_leaves];
+        for (i, leaf) in leaves.iter().enumerate() {
+            full[i] = bytes_to_scalar(&leaf.to_le_bytes()).expect("leaf scalar");
         }
 
-        assert_eq!(tree.root(), manual.root());
+        let root_scalar = circuits::core::merkle::merkle_root(full.clone());
+        let root_le = scalar_to_bytes(&root_scalar);
+        let root_le: [u8; 32] = root_le.try_into().expect("32");
+        let root_field = AppField::try_from_le_bytes(root_le).expect("field");
+        assert_eq!(tree.root().expect("root"), root_field);
+
+        for idx in 0..leaves.len() {
+            let (path, indices, levels) = circuits::core::merkle::merkle_proof(&full, idx);
+            assert_eq!(levels, depth_usize);
+
+            let proof = tree.proof(u32::try_from(idx).unwrap()).expect("proof");
+            assert_eq!(proof.levels, depth_usize);
+            assert_eq!(proof.root, root_field);
+
+            let mut proof_indices = [0u8; 8];
+            proof_indices.copy_from_slice(&proof.path_indices.to_le_bytes()[..8]);
+            let proof_indices = u64::from_le_bytes(proof_indices);
+            assert_eq!(proof_indices, indices, "indices mismatch at idx={idx}");
+
+            let expected_path: Vec<AppField> = path
+                .into_iter()
+                .map(|s| {
+                    let le = scalar_to_bytes(&s);
+                    let le: [u8; 32] = le.try_into().expect("32");
+                    AppField::try_from_le_bytes(le).expect("field")
+                })
+                .collect();
+            assert_eq!(
+                proof.path_elements, expected_path,
+                "path mismatch at idx={idx}"
+            );
+        }
     }
 }

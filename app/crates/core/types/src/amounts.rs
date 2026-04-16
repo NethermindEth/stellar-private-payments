@@ -14,7 +14,6 @@ use core::{
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
-
 #[allow(clippy::assign_op_pattern, clippy::manual_div_ceil)]
 mod biguint {
     use uint::construct_uint;

@@ -201,17 +201,17 @@ impl Client {
         let uri = base_url.parse::<Uri>()?;
         let mut parts = uri.into_parts();
 
-        if let (Some(scheme), Some(authority)) = (&parts.scheme, &parts.authority) {
-            if authority.port().is_none() {
-                let port = match scheme.as_str() {
-                    "http" => Some(80),
-                    "https" => Some(443),
-                    _ => None,
-                };
-                if let Some(port) = port {
-                    let host = authority.host();
-                    parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
-                }
+        if let (Some(scheme), Some(authority)) = (&parts.scheme, &parts.authority)
+            && authority.port().is_none()
+        {
+            let port = match scheme.as_str() {
+                "http" => Some(80),
+                "https" => Some(443),
+                _ => None,
+            };
+            if let Some(port) = port {
+                let host = authority.host();
+                parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
             }
         }
 
@@ -289,11 +289,10 @@ impl Client {
         {
             Ok(r) => r,
             Err(e) => {
-                if let Error::JsonRpc { message, .. } = &e {
-                    if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
-                    {
-                        return Err(Error::RpcSyncGap(range.0));
-                    }
+                if let Error::JsonRpc { message, .. } = &e
+                    && let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
+                {
+                    return Err(Error::RpcSyncGap(range.0));
                 }
                 return Err(e);
             }
@@ -354,7 +353,7 @@ impl Client {
     }
 
     pub async fn get_latest_ledger(&self) -> Result<GetLatestLedgerResponse, Error> {
-        Ok(self.rpc_call("getLatestLedger", json!({})).await?)
+        self.rpc_call("getLatestLedger", json!({})).await
     }
 
     pub async fn get_ledger_entries(
@@ -376,8 +375,8 @@ impl Client {
         enum_keys: &[&str],
         valued_keys: &[(&str, u32)],
     ) -> Result<(HashMap<String, xdr::ScVal>, u32), Error> {
-        let contract = stellar_strkey::Contract::from_str(contract_id)
-            .map_err(|e| Error::InvalidAddress(e))?;
+        let contract =
+            stellar_strkey::Contract::from_str(contract_id).map_err(Error::InvalidAddress)?;
 
         let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
 
@@ -475,7 +474,7 @@ fn extract_symbol_from_val(key: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::Vec(Some(sc_vec)) = key {
         let first_inner_val = sc_vec
             .0
-            .get(0)
+            .first()
             .ok_or_else(|| Error::UnexpectedScVal(format!("ScVal vec is empty {:?}", key)))?;
 
         if let xdr::ScVal::Symbol(symbol) = first_inner_val {
