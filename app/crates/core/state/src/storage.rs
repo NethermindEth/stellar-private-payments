@@ -130,7 +130,9 @@ impl Storage {
                 note_public_key
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
-                WHERE accounts.address = ?1",
+                WHERE accounts.address = ?1
+                ORDER BY keypairs.id DESC
+                LIMIT 1",
             params![address],
             |row| {
                 let enc_priv: EncryptionPrivateKey = row.get(0)?;
@@ -1105,6 +1107,31 @@ mod tests {
         let meta = storage.get_sync_metadata()?.unwrap();
         assert_eq!(meta.cursor, "c2");
         assert_eq!(meta.last_ledger, 123);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_user_keys_returns_latest_keypair() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let (note_keypair_1, enc_keypair_1) = encryption::derive_encryption_and_note_keypairs(
+            SpendingSignature(vec![1u8; 64]),
+            EncryptionSignature(vec![2u8; 64]),
+        )?;
+        let (note_keypair_2, enc_keypair_2) = encryption::derive_encryption_and_note_keypairs(
+            SpendingSignature(vec![3u8; 64]),
+            EncryptionSignature(vec![4u8; 64]),
+        )?;
+
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair_1, &enc_keypair_1)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair_2, &enc_keypair_2)?;
+
+        let (got_note, got_enc) = storage
+            .get_user_keys("GTESTACCOUNT")?
+            .expect("expected keypairs to exist");
+        assert_eq!(got_note.public.0, note_keypair_2.public.0);
+        assert_eq!(got_enc.public.0, enc_keypair_2.public.0);
 
         Ok(())
     }
