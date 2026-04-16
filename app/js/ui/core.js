@@ -75,13 +75,30 @@ export const Utils = {
 
 // Toast Notifications
 export const Toast = {
-    show(message, type = 'success', duration = 4000) {
+    show(message, type = 'success', duration = 4000, opts = {}) {
         const container = document.getElementById('toast-container');
         const template = App.templates.toast;
         const toast = template.content.cloneNode(true).firstElementChild;
         
-        // Set content
-        toast.querySelector('.toast-message').textContent = message;
+        // Set content (truncate long hex literals but preserve full message in tooltip)
+        const rawMessage = String(message ?? '');
+        const displayMessage = rawMessage
+            .replace(/0x[0-9a-fA-F]{64}\b/g, (m) => Utils.truncateHex(m, 10, 8))
+            .replace(/\b[0-9a-fA-F]{64}\b/g, (m) => Utils.truncateHex(m, 10, 8));
+
+        const msgEl = toast.querySelector('.toast-message');
+        if (msgEl) {
+            msgEl.textContent = displayMessage;
+            msgEl.title = rawMessage;
+        }
+
+        const open = toast.querySelector('.toast-open');
+        const linkUrl = opts && typeof opts === 'object' ? opts.linkUrl : null;
+        if (open && linkUrl) {
+            open.href = linkUrl;
+            if (opts?.linkAriaLabel) open.setAttribute('aria-label', opts.linkAriaLabel);
+            open.classList.remove('hidden');
+        }
         
         // Set icon and color based on type
         const icon = toast.querySelector('.toast-icon');

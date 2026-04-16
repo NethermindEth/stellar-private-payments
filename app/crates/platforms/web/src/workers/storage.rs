@@ -314,7 +314,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let params = DepositParams {
                 priv_key: note_privkey,
                 encryption_pubkey: encryption_pubkey.clone(),
-                pool_root: req.pool_root.expect("TODO - figure out on NOne"),
+                pool_root: req.pool_root.expect("pool root is not defined"),
                 pool_address: req.pool_address,
                 amount_stroops: req.amount_stroops,
                 outputs,

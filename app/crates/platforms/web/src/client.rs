@@ -461,7 +461,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let prepared = match self
-            .prover_request(ProverWorkerRequest::Withdraw(params), 5_000)
+            .prover_request(ProverWorkerRequest::Withdraw(params), 20_000)
             .await?
         {
             ProverWorkerResponse::WithdrawPrepared(p) => p,
@@ -651,7 +651,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let prepared = match self
-            .prover_request(ProverWorkerRequest::Transfer(params), 5_000)
+            .prover_request(ProverWorkerRequest::Transfer(params), 20_000)
             .await?
         {
             ProverWorkerResponse::TransferPrepared(p) => p,
@@ -879,7 +879,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let prepared = match self
-            .prover_request(ProverWorkerRequest::Transact(params), 5_000)
+            .prover_request(ProverWorkerRequest::Transact(params), 20_000)
             .await?
         {
             ProverWorkerResponse::TransactPrepared(p) => p,

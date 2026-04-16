@@ -9,7 +9,7 @@
 
 import { getHandle } from '../wasm-facade.js';
 import { submitProvedPoolTransact } from '../stellar.js';
-import { App, Toast } from './core.js';
+import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
@@ -103,6 +103,10 @@ function collectAdvancedRecipients(containerId) {
     while (noteKeys.length < N_OUTPUTS) noteKeys.push(null);
     while (encKeys.length < N_OUTPUTS) encKeys.push(null);
     return { noteKeys: noteKeys.slice(0, N_OUTPUTS), encKeys: encKeys.slice(0, N_OUTPUTS) };
+}
+
+function txLink(hash) {
+    return `https://stellar.expert/explorer/testnet/tx/${hash}`;
 }
 
 export const Transactions = {
@@ -242,7 +246,12 @@ export const Transactions = {
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
 	                    poolContractId: config?.pool,
 	                }, { onStatus });
-                Toast.show(`Submitted: ${txHash}`, 'success');
+                Toast.show(
+                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
+                    'success',
+                    7000,
+                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                );
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
                 Toast.show(e?.message || 'Deposit failed', 'error', 7000);
@@ -289,7 +298,12 @@ export const Transactions = {
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
 	                    poolContractId: config?.pool,
 	                }, { onStatus });
-                Toast.show(`Submitted: ${txHash}`, 'success');
+                Toast.show(
+                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
+                    'success',
+                    7000,
+                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                );
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
                 Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
@@ -345,7 +359,12 @@ export const Transactions = {
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
 	                    poolContractId: config?.pool,
 	                }, { onStatus });
-                Toast.show(`Submitted: ${txHash}`, 'success');
+                Toast.show(
+                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
+                    'success',
+                    7000,
+                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                );
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
                 Toast.show(e?.message || 'Transfer failed', 'error', 7000);
@@ -435,7 +454,12 @@ export const Transactions = {
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
 	                    poolContractId: config?.pool,
 	                }, { onStatus });
-                Toast.show(`Submitted: ${txHash}`, 'success');
+                Toast.show(
+                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
+                    'success',
+                    7000,
+                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                );
                 App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
