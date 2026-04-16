@@ -22,7 +22,6 @@ jobs:
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
-          submodules: recursive
           ref: ${{ github.event.pull_request.head.sha }}
 
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
@@ -80,7 +79,6 @@ jobs:
         if: ${{ steps.base_art.outputs.found == 'false' }}
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
         with:
-          submodules: recursive
           ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Setup Rust (fallback path)
