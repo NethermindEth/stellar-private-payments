@@ -30,6 +30,7 @@ jobs:
         with:
           # cargo-semver-checks needs the full git history to compare versions
           fetch-depth: 0
+          submodules: recursive
 
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
