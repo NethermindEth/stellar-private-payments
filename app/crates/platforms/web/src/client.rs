@@ -432,7 +432,7 @@ impl WebClient {
         );
         self.ping_prover().await.map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-        let prepared = match self.prover_request(ProverWorkerRequest::Deposit(params), 300_000).await? {
+        let prepared = match self.prover_request(ProverWorkerRequest::Deposit(params), 20_000).await? {
             ProverWorkerResponse::DepositPrepared(p) => p,
             other => return Err(JsError::new(&format!("Unexpected prover worker response: {:?}", other))),
         };

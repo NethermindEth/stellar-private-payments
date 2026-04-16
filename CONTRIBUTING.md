@@ -54,6 +54,7 @@ stellar-private-payments/
 │   └── js/
 │       ├── storage-worker.js    # Generated Storage Worker entrypoint
 │       └── prover-worker.js     # Generated Prover Worker entrypoint
+├── patches/                     # Patches (git submodules) for some dependencies
 └── Makefile                    # Build automation
 ```
 
