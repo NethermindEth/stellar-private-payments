@@ -72,6 +72,14 @@ stellar-private-payments/
 
 ## Building and testing crates
 
+### Patches
+
+`ark-circom` is patched (`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
+in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
+while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
+Also we delete `ethereum.rs` module to get rid off many irrelevant dependencies.
+
+
 ### Building Circuits
 To explicitly build them:
 
