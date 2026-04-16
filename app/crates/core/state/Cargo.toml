@@ -12,18 +12,18 @@ build = "build.rs"
 anyhow = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
-rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+rusqlite = { workspace = true }
 rusqlite_migration = { version = "2.5.0", default-features = false }
 serde = { workspace = true }
 stellar = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 
-[dev-dependencies]
-prover = { workspace = true }
-
 [build-dependencies]
 hex = { workspace = true }
 sha2 = { workspace = true }
+
+[dev-dependencies]
+prover = { workspace = true }
 
 #[lints]
 #workspace = true

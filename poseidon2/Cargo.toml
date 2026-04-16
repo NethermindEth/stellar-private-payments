@@ -7,6 +7,7 @@ authors = [
 ]
 description = "Rust implementations of Poseidon2 and similar arithmetization-oriented primitives"
 edition = "2018"
+license = "Apache-2.0"
 
 [features]
 default = []
@@ -15,7 +16,7 @@ asm = ["sha2/asm", "ark-ff/asm"]
 [dependencies]
 ark-ff = { workspace = true }
 ark-std = { workspace = true }
-cfg-if = "1.0"
+cfg-if = { workspace = true }
 hex = { workspace = true }
 lazy_static = "1.4"
 rand = "0.8.5"

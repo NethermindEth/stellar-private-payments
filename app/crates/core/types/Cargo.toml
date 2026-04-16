@@ -6,21 +6,21 @@ repository.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[dependencies]
-anyhow = { workspace = true }
-hex = { workspace = true }
-uint = { workspace = true }
-serde = { workspace = true }
-serde_bytes = { workspace = true }
-rusqlite = { workspace = true, optional = true }
-
 [features]
 default = []
 rusqlite = ["dep:rusqlite"]
 
+[dependencies]
+anyhow = { workspace = true }
+hex = { workspace = true }
+rusqlite = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+uint = { workspace = true }
+
 [dev-dependencies]
-serde_json = { workspace = true, features = ["alloc"] }
 rusqlite = { workspace = true, features = ["buildtime_bindgen", "bundled"] }
+serde_json = { workspace = true, features = ["alloc"] }
 
 #[lints]
 #workspace = true

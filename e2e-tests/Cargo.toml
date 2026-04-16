@@ -15,11 +15,11 @@ asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
-circuits = { path = "../circuits" }
+circuits = { workspace = true }
 num-bigint = { workspace = true }
 
 # Contract dependencies
-pool = { path = "../contracts/pool" }
+pool = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }
 
