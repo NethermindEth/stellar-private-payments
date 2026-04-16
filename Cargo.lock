@@ -185,6 +185,7 @@ dependencies = [
 [[package]]
 name = "ark-circom"
 version = "0.5.0"
+source = "git+https://github.com/NethermindEth/circom-compat.git?branch=wasm-no-parallel#302e7e2d510516db5d538ecaffa3daacc7bf2214"
 dependencies = [
  "ark-bn254 0.5.0",
  "ark-crypto-primitives",
@@ -200,7 +201,6 @@ dependencies = [
  "color-eyre",
  "fnv",
  "hex",
- "hex-literal 1.1.0",
  "num",
  "num-bigint",
  "num-traits",
@@ -2218,12 +2218,6 @@ name = "hex-literal"
 version = "0.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6fe2267d4ed49bc07b63801559be28c718ea06c4738b7a03c94df7386d2cde46"
-
-[[package]]
-name = "hex-literal"
-version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e712f64ec3850b98572bffac52e2c6f282b29fe6c5fa6d42334b30be438d95c1"
 
 [[package]]
 name = "hmac"
@@ -4249,7 +4243,7 @@ dependencies = [
  "elliptic-curve",
  "generic-array",
  "getrandom",
- "hex-literal 0.4.1",
+ "hex-literal",
  "hmac",
  "k256",
  "num-derive",

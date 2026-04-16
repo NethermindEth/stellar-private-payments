@@ -24,7 +24,3 @@ reorder_impl_items         = true          # Deterministic ordering inside impl 
 # --- Misc -------------------------------------------------------------------
 edition                    = "2024"        # Controls the edition of the Rust Style Guide
                                            # to use for formatting (RFC 3338)
-
-ignore = [
-    "patches"
-]
