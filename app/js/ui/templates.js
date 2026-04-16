@@ -63,11 +63,6 @@ export const Templates = {
             }
         });
         
-        // Download button
-        row.querySelector('.download-btn').addEventListener('click', () => {
-            Toast.show('Note file download is disabled. Notes are discovered from on-chain events.', 'info');
-        });
-        
         // Initial dummy state
         if (initialValue === 0) {
             row.querySelector('.dummy-badge').classList.remove('hidden');
@@ -134,11 +129,6 @@ export const Templates = {
             }
         });
         
-        // Download button
-        row.querySelector('.download-btn').addEventListener('click', () => {
-            Toast.show('Note file download is disabled. Notes are discovered from on-chain events.', 'info');
-        });
-        
         // Initial dummy state
         if (initialValue === 0) {
             row.querySelector('.dummy-badge').classList.remove('hidden');
@@ -153,8 +143,6 @@ export const Templates = {
         
         const noteInput = row.querySelector('.note-input');
         const valueDisplay = row.querySelector('.value-display');
-        const fileInput = row.querySelector('.file-input');
-        const uploadBtn = row.querySelector('.upload-btn');
         
         // Update value display when note ID changes
         noteInput.addEventListener('input', () => {
@@ -174,17 +162,6 @@ export const Templates = {
                 valueDisplay.title = '';
             }
         });
-
-        // Disable note file upload controls (notes are discovered from chain events).
-        if (uploadBtn) {
-            uploadBtn.addEventListener('click', () => {
-                Toast.show('Note file upload is disabled. Notes are discovered from on-chain events.', 'info');
-            });
-        }
-        if (fileInput) {
-            fileInput.disabled = true;
-            fileInput.classList.add('hidden');
-        }
         
         return row;
     },
@@ -259,14 +236,6 @@ export const Templates = {
                 targetInput.value = note.id;
                 targetInput.dispatchEvent(new Event('input', { bubbles: true }));
                 Toast.show('Note added to input', 'success');
-            });
-        }
-        
-        // Download button (disabled)
-        const downloadBtn = row.querySelector('.download-btn');
-        if (downloadBtn) {
-            downloadBtn.addEventListener('click', () => {
-                Toast.show('Note file download is disabled. Notes are discovered from on-chain events.', 'info');
             });
         }
         

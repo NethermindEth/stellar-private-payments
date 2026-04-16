@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params, Error as SqlError, OptionalExtension};
 use rusqlite_migration::{M, Migrations};
+use crate::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
 use types::{
     AspMembershipSync, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey,
     Field, LeafAddedEvent, NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair,
@@ -10,11 +11,20 @@ use types::{
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
 
-const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
+const MIGRATION_ARRAY: &[M] = &[
+    M::up(include_str!("schema.sql")),
+];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
     conn: Connection,
+}
+
+#[derive(Debug, Clone)]
+pub struct DisclaimerState {
+    pub disclaimer_text_md: String,
+    pub disclaimer_hash_hex: String,
+    pub accepted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -185,6 +195,50 @@ impl Storage {
         .context("failed to insert keypairs")?;
         tx.commit().context("failed to commit transaction")?;
         log::debug!("[STORAGE] saved new keypairs for the account {}", account_address);
+        Ok(())
+    }
+
+    pub fn get_disclaimer_state(&mut self, address: &str) -> Result<DisclaimerState> {
+        let tx = self.conn.transaction().context("failed to start transaction")?;
+        let account_id = Self::get_or_create_account(&tx, address)?;
+
+        let accepted: Option<i64> = tx
+            .query_row(
+                "SELECT 1
+                 FROM disclaimer_acceptances
+                 WHERE account_id = ?1 AND disclaimer_hash = ?2
+                 LIMIT 1",
+                params![account_id, CURRENT_DISCLAIMER_HASH_HEX],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("failed to query disclaimer acceptance")?;
+
+        tx.commit().context("failed to commit transaction")?;
+
+        Ok(DisclaimerState {
+            disclaimer_text_md: CURRENT_DISCLAIMER_TEXT_MD.to_string(),
+            disclaimer_hash_hex: CURRENT_DISCLAIMER_HASH_HEX.to_string(),
+            accepted: accepted.is_some(),
+        })
+    }
+
+    pub fn accept_current_disclaimer(&mut self, address: &str, disclaimer_hash_hex: &str) -> Result<()> {
+        if disclaimer_hash_hex != CURRENT_DISCLAIMER_HASH_HEX {
+            anyhow::bail!("Disclaimer hash mismatch. Please refresh and try again.");
+        }
+
+        let tx = self.conn.transaction().context("failed to start transaction")?;
+        let account_id = Self::get_or_create_account(&tx, address)?;
+
+        tx.execute(
+            "INSERT OR IGNORE INTO disclaimer_acceptances (account_id, disclaimer_hash)
+             VALUES (?1, ?2)",
+            params![account_id, disclaimer_hash_hex],
+        )
+        .context("failed to insert disclaimer acceptance")?;
+
+        tx.commit().context("failed to commit transaction")?;
         Ok(())
     }
 
@@ -1135,4 +1189,26 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+       fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let spending_sig = SpendingSignature(vec![1u8; 64]);
+      let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+let (note_keypair, enc_keypair) =
+encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+
+storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+
+let count: i64 = storage.conn.query_row(
+ "SELECT COUNT(*) FROM accounts WHERE address = ?1",
+      params!["GTESTACCOUNT"],
+       |row| row.get(0),
+ )?;
+    assert_eq!(count, 1);
+
+       Ok(())
+  }
 }

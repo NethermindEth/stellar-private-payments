@@ -953,6 +953,24 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = getDisclaimerState)]
+    pub async fn get_disclaimer_state(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::DisclaimerState(address);
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::DisclaimerState(state) => Ok(serde_wasm_bindgen::to_value(&state)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = acceptDisclaimer)]
+    pub async fn accept_disclaimer(&self, address: String, disclaimer_hash_hex: String) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex);
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getUserKeys)]
     pub async fn get_user_keys(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::UserKeys(

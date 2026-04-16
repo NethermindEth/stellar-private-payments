@@ -6172,6 +6172,7 @@ dependencies = [
  "rusqlite",
  "rusqlite_migration",
  "serde",
+ "sha2",
  "stellar",
  "types",
 ]

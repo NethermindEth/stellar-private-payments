@@ -6,7 +6,7 @@ use gloo_timers::future::TimeoutFuture;
 use state::{Storage, process_events, process_notes, AccountKeys, PoolCommitmentRow, DerivedUserNoteRow};
 use std::cell::RefCell;
 use crate::protocol::{
-    AdminASPRequest, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, DisclaimerStatePayload, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use wasm_bindgen_futures::spawn_local;
 use gloo_worker::Registrable;
@@ -152,6 +152,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
             log::trace!("[{WORKER_NAME}] saved notes and encryption keys for the account {address}");
             kick_processor();
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::DisclaimerState(address) => {
+            log::trace!("[{WORKER_NAME}] disclaimer state for account {address}");
+            let state = with_storage_mut!(s => s.get_disclaimer_state(&address)?)?;
+            StorageWorkerResponse::DisclaimerState(DisclaimerStatePayload {
+                disclaimer_text_md: state.disclaimer_text_md,
+                disclaimer_hash_hex: state.disclaimer_hash_hex,
+                accepted: state.accepted,
+            })
+        }
+        StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex) => {
+            log::trace!("[{WORKER_NAME}] accept disclaimer for account {address}");
+            with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {

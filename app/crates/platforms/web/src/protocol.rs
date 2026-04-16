@@ -16,11 +16,21 @@ pub struct UserKeys{
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclaimerStatePayload {
+    pub disclaimer_text_md: String,
+    pub disclaimer_hash_hex: String,
+    pub accepted: bool,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     Ping,
     SyncState,
     SaveEvents(ContractsEventData),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
+    DisclaimerState(Address),
+    AcceptDisclaimer(Address, String),
     UserKeys(Address),
     UserNotes(Address, u32),
     RecentPoolActivity(u32),
@@ -38,6 +48,7 @@ pub enum StorageWorkerResponse {
     SyncState(Option<SyncMetadata>),
     Saved,
     Error(String),
+    DisclaimerState(DisclaimerStatePayload),
     UserKeys(Option<UserKeys>),
     UserNotes(Vec<UserNoteSummary>),
     RecentPoolActivity(Vec<PoolLedgerActivity>),

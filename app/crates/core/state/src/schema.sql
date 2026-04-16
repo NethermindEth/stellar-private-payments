@@ -39,11 +39,12 @@ CREATE TABLE raw_contract_events (
     topics TEXT NOT NULL,
     value TEXT NOT NULL
 );
+CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id);
 
 -- User accounts known to this local database (one per Stellar address).
 CREATE TABLE accounts (
     id INTEGER PRIMARY KEY,
-    address TEXT NOT NULL
+    address TEXT NOT NULL UNIQUE
 );
 
 -- Derived key material for an account.
@@ -59,6 +60,7 @@ CREATE TABLE keypairs (
     account_id INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
+CREATE INDEX idx_keypairs_account_id_id ON keypairs(account_id, id);
 
 -- Spent nullifiers observed on-chain for the pool contract.
 --
@@ -70,7 +72,6 @@ CREATE TABLE pool_nullifiers (
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_pool_nullifiers_event_id ON pool_nullifiers(event_id);
 
 -- Pool Merkle tree commitments observed on-chain.
 --
@@ -80,13 +81,12 @@ CREATE INDEX idx_pool_nullifiers_event_id ON pool_nullifiers(event_id);
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
     commitment BLOB NOT NULL UNIQUE CHECK (length(commitment) = 32),
-    leaf_index INTEGER NOT NULL,
+    leaf_index INTEGER NOT NULL UNIQUE,
     encrypted_output BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this commitment.
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_pool_commitments_event_id ON pool_commitments(event_id);
 
 -- An address book of registered public keys in the pool contract for sending private transfers
 --
@@ -100,7 +100,6 @@ CREATE TABLE public_keys (
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_public_keys_event_id ON public_keys(event_id);
 
 -- Leaves of the ASP membership Merkle tree observed on-chain.
 --
@@ -113,7 +112,6 @@ CREATE TABLE asp_membership_leaves (
     event_id  TEXT NOT NULL UNIQUE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-CREATE INDEX idx_asp_membership_leaves_event_id ON asp_membership_leaves(event_id);
 CREATE INDEX idx_asp_membership_leaves_leaf ON asp_membership_leaves (leaf);
 
 -- Notes derived for a specific local account by scanning/decrypting pool commitments.
@@ -136,8 +134,9 @@ CREATE TABLE user_notes (
     FOREIGN KEY (commitment_id) REFERENCES pool_commitments(id) ON DELETE CASCADE,
     FOREIGN KEY (nullifier_id) REFERENCES pool_nullifiers(id) ON DELETE CASCADE
 );
-
-CREATE INDEX idx_user_notes_expected_nullifier ON user_notes (expected_nullifier);
+CREATE INDEX idx_user_notes_unspent_expected_nullifier
+    ON user_notes(expected_nullifier)
+    WHERE nullifier_id IS NULL;
 
 -- Per-account commitment scan high-water mark (pool_commitments.id).
 --
@@ -168,3 +167,15 @@ CREATE TABLE notes_scan_scheduler (
 );
 
 INSERT OR IGNORE INTO notes_scan_scheduler (id, next_account_offset) VALUES (1, 0);
+
+-- Terms & Conditions (disclaimer) acceptances per account and disclaimer hash.
+--
+-- When the disclaimer text changes, it yields a new hash and each account must accept again.
+CREATE TABLE disclaimer_acceptances (
+    account_id INTEGER NOT NULL,
+    disclaimer_hash TEXT NOT NULL,
+    accepted_at INTEGER NOT NULL DEFAULT (strftime('%s','now')),
+    PRIMARY KEY (account_id, disclaimer_hash),
+    FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
+);
+CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaimer_hash);
