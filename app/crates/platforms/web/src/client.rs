@@ -1,26 +1,27 @@
-use crate::workers::{prover::ProverWorker, storage::StorageWorker};
-use stellar::{StateFetcher as CoreStateFetcher};
-use gloo_worker::oneshot::OneshotBridge;
-use gloo_worker::Spawnable;
-use crate::protocol::{
-    AdminASPRequest, DepositRequest, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
-    StorageWorkerResponse, TransactRequest, TransferRequest, WithdrawRequest, DepositPrepared,
-    PreparedProverTx,
+use crate::{
+    protocol::{
+        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, ProverWorkerRequest,
+        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse, TransactRequest,
+        TransferRequest, WithdrawRequest,
+    },
+    workers::{prover::ProverWorker, storage::StorageWorker},
 };
-use prover::encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE};
-use prover::flows::N_OUTPUTS;
-use types::{
-    AspMembershipSync, EncryptionPublicKey, EncryptionSignature, ExtAmount, Field, NoteAmount,
-    NotePublicKey, SpendingSignature, SMT_DEPTH,
-};
-use wasm_bindgen::prelude::*;
+use anyhow::anyhow;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
-use anyhow::anyhow;
-use std::rc::Rc;
-use std::str::FromStr;
-use wasm_bindgen::JsCast;
+use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
+use prover::{
+    encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE},
+    flows::N_OUTPUTS,
+};
+use std::{rc::Rc, str::FromStr};
+use stellar::StateFetcher as CoreStateFetcher;
+use types::{
+    AspMembershipSync, EncryptionPublicKey, EncryptionSignature, ExtAmount, Field, NoteAmount,
+    NotePublicKey, SMT_DEPTH, SpendingSignature,
+};
+use wasm_bindgen::{JsCast, prelude::*};
 
 fn emit_progress(
     on_status: &Option<Function>,
@@ -35,7 +36,11 @@ fn emit_progress(
     let obj = Object::new();
     let _ = Reflect::set(&obj, &JsValue::from_str("flow"), &JsValue::from_str(flow));
     let _ = Reflect::set(&obj, &JsValue::from_str("stage"), &JsValue::from_str(stage));
-    let _ = Reflect::set(&obj, &JsValue::from_str("message"), &JsValue::from_str(message.as_ref()));
+    let _ = Reflect::set(
+        &obj,
+        &JsValue::from_str("message"),
+        &JsValue::from_str(message.as_ref()),
+    );
     if let Some(current) = current {
         let _ = Reflect::set(
             &obj,
@@ -57,7 +62,6 @@ fn emit_progress(
     }
 }
 
-
 #[wasm_bindgen]
 pub struct WebClient {
     storage_bridge: OneshotBridge<StorageWorker>,
@@ -75,10 +79,7 @@ impl Clone for WebClient {
     }
 }
 
-async fn with_timeout<T>(
-    ms: u32,
-    fut: impl std::future::Future<Output = T>,
-) -> anyhow::Result<T> {
+async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> anyhow::Result<T> {
     let fut = fut.fuse();
     let timeout = TimeoutFuture::new(ms).fuse();
 
@@ -105,7 +106,10 @@ impl WebClient {
         match resp {
             StorageWorkerResponse::Pong => Ok(()),
             StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response from Storage Worker: {:?}", other)),
+            other => Err(anyhow::anyhow!(
+                "unexpected response from Storage Worker: {:?}",
+                other
+            )),
         }
     }
 
@@ -115,11 +119,18 @@ impl WebClient {
         match resp {
             ProverWorkerResponse::Pong => Ok(()),
             ProverWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response from Prover Worker: {:?}", other)),
+            other => Err(anyhow::anyhow!(
+                "unexpected response from Prover Worker: {:?}",
+                other
+            )),
         }
     }
 
-    async fn storage_request(&self, req: StorageWorkerRequest, timeout_ms: u32) -> Result<StorageWorkerResponse, JsError> {
+    async fn storage_request(
+        &self,
+        req: StorageWorkerRequest,
+        timeout_ms: u32,
+    ) -> Result<StorageWorkerResponse, JsError> {
         let mut bridge = self.storage_bridge.fork();
 
         // Handle transport/timeout errors
@@ -133,7 +144,11 @@ impl WebClient {
         }
     }
 
-    async fn prover_request(&self, req: ProverWorkerRequest, timeout_ms: u32) -> Result<ProverWorkerResponse, JsError> {
+    async fn prover_request(
+        &self,
+        req: ProverWorkerRequest,
+        timeout_ms: u32,
+    ) -> Result<ProverWorkerResponse, JsError> {
         let mut bridge = self.prover_bridge.fork();
 
         // Handle transport/timeout errors
@@ -215,8 +230,9 @@ impl WebClient {
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
             {
-                StorageWorkerResponse::UserKeys(keys) => keys
-                    .ok_or_else(|| JsError::new("user keys not found in worker storage"))?,
+                StorageWorkerResponse::UserKeys(keys) => {
+                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
+                }
                 other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
@@ -262,7 +278,10 @@ impl WebClient {
                 None,
                 None,
             );
-            match self.storage_request(StorageWorkerRequest::Deposit(req), 5_000).await? {
+            match self
+                .storage_request(StorageWorkerRequest::Deposit(req), 5_000)
+                .await?
+            {
                 StorageWorkerResponse::DepositParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!("[DEPOSIT] the account {user_address} should register within ASP");
@@ -274,7 +293,11 @@ impl WebClient {
                         &on_status,
                         "deposit",
                         "sync_wait",
-                        if let Some(gap) = gap {format!("Waiting for sync {gap} ledgers from the chain...")} else {"Waiting for sync ledgers from the chain...".to_string()},
+                        if let Some(gap) = gap {
+                            format!("Waiting for sync {gap} ledgers from the chain...")
+                        } else {
+                            "Waiting for sync ledgers from the chain...".to_string()
+                        },
                         None,
                         None,
                     );
@@ -285,26 +308,27 @@ impl WebClient {
                     return Err(JsError::new(&format!(
                         "Unexpected storage worker response: {:?}",
                         other
-                    )))
+                    )));
                 }
             }
         };
 
-        emit_progress(
-            &on_status,
-            "deposit",
-            "prove",
-            "Proving…",
-            None,
-            None,
-        );
+        emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-        let prepared = match self.prover_request(ProverWorkerRequest::Deposit(params), 20_000).await? {
+        let prepared = match self
+            .prover_request(ProverWorkerRequest::Deposit(params), 20_000)
+            .await?
+        {
             ProverWorkerResponse::DepositPrepared(p) => p,
-            other => return Err(JsError::new(&format!("Unexpected prover worker response: {:?}", other))),
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
         };
 
         Ok(Some(prepared))
@@ -333,7 +357,8 @@ impl WebClient {
             None,
         );
 
-        let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
+        let mut input_commitments: Vec<Field> =
+            Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
             let v = input_note_ids.get(i);
             let s = v
@@ -358,8 +383,8 @@ impl WebClient {
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
             let pool_root = data.pool.merkle_root;
-            let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
-                .map_err(|e| JsError::new(&e))?;
+            let pool_next_index =
+                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -373,8 +398,9 @@ impl WebClient {
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
             {
-                StorageWorkerResponse::UserKeys(keys) => keys
-                    .ok_or_else(|| JsError::new("user keys not found in worker storage"))?,
+                StorageWorkerResponse::UserKeys(keys) => {
+                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
+                }
                 other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
@@ -420,7 +446,10 @@ impl WebClient {
                 None,
                 None,
             );
-            match self.storage_request(StorageWorkerRequest::Withdraw(req), 5_000).await? {
+            match self
+                .storage_request(StorageWorkerRequest::Withdraw(req), 5_000)
+                .await?
+            {
                 StorageWorkerResponse::WithdrawParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!("[WITHDRAW] the account {user_address} should register within ASP");
@@ -432,7 +461,11 @@ impl WebClient {
                         &on_status,
                         "withdraw",
                         "sync_wait",
-                        if let Some(gap) = gap {format!("Waiting for sync {gap} ledgers from the chain...")} else {"Waiting for sync ledgers from the chain...".to_string()},
+                        if let Some(gap) = gap {
+                            format!("Waiting for sync {gap} ledgers from the chain...")
+                        } else {
+                            "Waiting for sync ledgers from the chain...".to_string()
+                        },
                         None,
                         None,
                     );
@@ -443,19 +476,12 @@ impl WebClient {
                     return Err(JsError::new(&format!(
                         "Unexpected storage worker response: {:?}",
                         other
-                    )))
+                    )));
                 }
             }
         };
 
-        emit_progress(
-            &on_status,
-            "withdraw",
-            "prove",
-            "Proving…",
-            None,
-            None,
-        );
+        emit_progress(&on_status, "withdraw", "prove", "Proving…", None, None);
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -469,7 +495,7 @@ impl WebClient {
                 return Err(JsError::new(&format!(
                     "Unexpected prover worker response: {:?}",
                     other
-                )))
+                )));
             }
         };
 
@@ -506,12 +532,13 @@ impl WebClient {
             None,
         );
 
-        let recipient_note_pubkey =
-            NotePublicKey::parse(&recipient_note_key_hex).map_err(|e| JsError::new(&e.to_string()))?;
-        let recipient_enc_pubkey =
-            EncryptionPublicKey::parse(&recipient_enc_key_hex).map_err(|e| JsError::new(&e.to_string()))?;
+        let recipient_note_pubkey = NotePublicKey::parse(&recipient_note_key_hex)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let recipient_enc_pubkey = EncryptionPublicKey::parse(&recipient_enc_key_hex)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
-        let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
+        let mut input_commitments: Vec<Field> =
+            Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
             let v = input_note_ids.get(i);
             let s = v
@@ -545,8 +572,8 @@ impl WebClient {
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
             let pool_root = data.pool.merkle_root;
-            let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
-                .map_err(|e| JsError::new(&e))?;
+            let pool_next_index =
+                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -560,8 +587,9 @@ impl WebClient {
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
             {
-                StorageWorkerResponse::UserKeys(keys) => keys
-                    .ok_or_else(|| JsError::new("user keys not found in worker storage"))?,
+                StorageWorkerResponse::UserKeys(keys) => {
+                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
+                }
                 other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
@@ -610,7 +638,10 @@ impl WebClient {
                 None,
                 None,
             );
-            match self.storage_request(StorageWorkerRequest::Transfer(req), 5_000).await? {
+            match self
+                .storage_request(StorageWorkerRequest::Transfer(req), 5_000)
+                .await?
+            {
                 StorageWorkerResponse::TransferParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!("[TRANSFER] the account {user_address} should register within ASP");
@@ -622,7 +653,11 @@ impl WebClient {
                         &on_status,
                         "transfer",
                         "sync_wait",
-                        if let Some(gap) = gap {format!("Waiting for sync {gap} ledgers from the chain...")} else {"Waiting for sync ledgers from the chain...".to_string()},
+                        if let Some(gap) = gap {
+                            format!("Waiting for sync {gap} ledgers from the chain...")
+                        } else {
+                            "Waiting for sync ledgers from the chain...".to_string()
+                        },
                         None,
                         None,
                     );
@@ -633,19 +668,12 @@ impl WebClient {
                     return Err(JsError::new(&format!(
                         "Unexpected storage worker response: {:?}",
                         other
-                    )))
+                    )));
                 }
             }
         };
 
-        emit_progress(
-            &on_status,
-            "transfer",
-            "prove",
-            "Proving…",
-            None,
-            None,
-        );
+        emit_progress(&on_status, "transfer", "prove", "Proving…", None, None);
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -659,7 +687,7 @@ impl WebClient {
                 return Err(JsError::new(&format!(
                     "Unexpected prover worker response: {:?}",
                     other
-                )))
+                )));
             }
         };
 
@@ -709,7 +737,8 @@ impl WebClient {
             None,
         );
 
-        let mut input_commitments: Vec<Field> = Vec::with_capacity(input_note_ids.length() as usize);
+        let mut input_commitments: Vec<Field> =
+            Vec::with_capacity(input_note_ids.length() as usize);
         for i in 0..input_note_ids.length() {
             let v = input_note_ids.get(i);
             let s = v
@@ -736,18 +765,18 @@ impl WebClient {
             let note_pk = if nk.is_null() || nk.is_undefined() {
                 None
             } else {
-                let s = nk
-                    .as_string()
-                    .ok_or_else(|| JsError::new("out_recipient_note_keys_hex must be (string|null)[]"))?;
+                let s = nk.as_string().ok_or_else(|| {
+                    JsError::new("out_recipient_note_keys_hex must be (string|null)[]")
+                })?;
                 Some(NotePublicKey::parse(&s).map_err(|e| JsError::new(&e.to_string()))?)
             };
 
             let enc_pk = if ek.is_null() || ek.is_undefined() {
                 None
             } else {
-                let s = ek
-                    .as_string()
-                    .ok_or_else(|| JsError::new("out_recipient_enc_keys_hex must be (string|null)[]"))?;
+                let s = ek.as_string().ok_or_else(|| {
+                    JsError::new("out_recipient_enc_keys_hex must be (string|null)[]")
+                })?;
                 Some(EncryptionPublicKey::parse(&s).map_err(|e| JsError::new(&e.to_string()))?)
             };
 
@@ -771,8 +800,8 @@ impl WebClient {
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
             let pool_root = data.pool.merkle_root;
-            let pool_next_index = parse_u32_decimal(&data.pool.merkle_next_index)
-                .map_err(|e| JsError::new(&e))?;
+            let pool_next_index =
+                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -786,8 +815,9 @@ impl WebClient {
                 .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
                 .await?
             {
-                StorageWorkerResponse::UserKeys(keys) => keys
-                    .ok_or_else(|| JsError::new("user keys not found in worker storage"))?,
+                StorageWorkerResponse::UserKeys(keys) => {
+                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
+                }
                 other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
             };
             let note_pubkey: NotePublicKey = keys.note_keypair.public;
@@ -838,7 +868,10 @@ impl WebClient {
                 None,
                 None,
             );
-            match self.storage_request(StorageWorkerRequest::Transact(req), 5_000).await? {
+            match self
+                .storage_request(StorageWorkerRequest::Transact(req), 5_000)
+                .await?
+            {
                 StorageWorkerResponse::TransactParams(p) => break p,
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!("[TRANSACT] the account {user_address} should register within ASP");
@@ -850,7 +883,11 @@ impl WebClient {
                         &on_status,
                         "transact",
                         "sync_wait",
-                        if let Some(gap) = gap {format!("Waiting for sync {gap} ledgers from the chain...")} else {"Waiting for sync ledgers from the chain...".to_string()},
+                        if let Some(gap) = gap {
+                            format!("Waiting for sync {gap} ledgers from the chain...")
+                        } else {
+                            "Waiting for sync ledgers from the chain...".to_string()
+                        },
                         None,
                         None,
                     );
@@ -861,19 +898,12 @@ impl WebClient {
                     return Err(JsError::new(&format!(
                         "Unexpected storage worker response: {:?}",
                         other
-                    )))
+                    )));
                 }
             }
         };
 
-        emit_progress(
-            &on_status,
-            "transact",
-            "prove",
-            "Proving…",
-            None,
-            None,
-        );
+        emit_progress(&on_status, "transact", "prove", "Proving…", None, None);
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -887,7 +917,7 @@ impl WebClient {
                 return Err(JsError::new(&format!(
                     "Unexpected prover worker response: {:?}",
                     other
-                )))
+                )));
             }
         };
 
@@ -897,34 +927,51 @@ impl WebClient {
 
 #[wasm_bindgen]
 impl WebClient {
-
     #[wasm_bindgen(js_name = poolContractState)]
     pub async fn pool_contract_state(&self) -> Result<JsValue, JsError> {
-        let pool_info = self.fetcher.pool_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        let pool_info = self
+            .fetcher
+            .pool_contract_state()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&pool_info)?)
     }
 
     #[wasm_bindgen(js_name = aspMembershipContractState)]
     pub async fn asp_membership_contract_state(&self) -> Result<JsValue, JsError> {
-        let asp_membership = self.fetcher.asp_membership_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        let asp_membership = self
+            .fetcher
+            .asp_membership_contract_state()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&asp_membership)?)
     }
 
     #[wasm_bindgen(js_name = aspNonmembershipContractState)]
     pub async fn asp_nonmembership_contract_state(&self) -> Result<JsValue, JsError> {
-        let asp_nonmembership = self.fetcher.asp_nonmembership_contract_state().await.map_err(|e| JsError::new(&e.to_string()))?;
+        let asp_nonmembership = self
+            .fetcher
+            .asp_nonmembership_contract_state()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&asp_nonmembership)?)
     }
 
     #[wasm_bindgen(js_name = allContractsData)]
     pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        let data = self.fetcher.all_contracts_data().await.map_err(|e| JsError::new(&e.to_string()))?;
+        let data = self
+            .fetcher
+            .all_contracts_data()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
     #[wasm_bindgen(js_name = contractConfig)]
     pub fn contract_config(&self) -> Result<JsValue, JsError> {
-        Ok(serde_wasm_bindgen::to_value(self.fetcher.contract_config())?)
+        Ok(serde_wasm_bindgen::to_value(
+            self.fetcher.contract_config(),
+        )?)
     }
 
     #[wasm_bindgen(js_name = encryptionDerivationMessage)]
@@ -937,14 +984,17 @@ impl WebClient {
         SPENDING_KEY_MESSAGE.to_string()
     }
 
-
-
     #[wasm_bindgen(js_name = deriveAndSaveUserKeys)]
-    pub async fn derive_save_user_keys(&self, address: String, spending_sig: Vec<u8>, encryption_sig: Vec<u8>) -> Result<(), JsError> {
+    pub async fn derive_save_user_keys(
+        &self,
+        address: String,
+        spending_sig: Vec<u8>,
+        encryption_sig: Vec<u8>,
+    ) -> Result<(), JsError> {
         let req = StorageWorkerRequest::DeriveSaveUserKeys(
             address,
             SpendingSignature(spending_sig),
-            EncryptionSignature(encryption_sig)
+            EncryptionSignature(encryption_sig),
         );
 
         match self.storage_request(req, 5_000).await? {
@@ -957,13 +1007,19 @@ impl WebClient {
     pub async fn get_disclaimer_state(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::DisclaimerState(address);
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::DisclaimerState(state) => Ok(serde_wasm_bindgen::to_value(&state)?),
+            StorageWorkerResponse::DisclaimerState(state) => {
+                Ok(serde_wasm_bindgen::to_value(&state)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
 
     #[wasm_bindgen(js_name = acceptDisclaimer)]
-    pub async fn accept_disclaimer(&self, address: String, disclaimer_hash_hex: String) -> Result<(), JsError> {
+    pub async fn accept_disclaimer(
+        &self,
+        address: String,
+        disclaimer_hash_hex: String,
+    ) -> Result<(), JsError> {
         let req = StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex);
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
@@ -973,9 +1029,7 @@ impl WebClient {
 
     #[wasm_bindgen(js_name = getUserKeys)]
     pub async fn get_user_keys(&self, address: String) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::UserKeys(
-            address,
-        );
+        let req = StorageWorkerRequest::UserKeys(address);
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::UserKeys(keys) => Ok(serde_wasm_bindgen::to_value(&keys)?),
@@ -984,32 +1038,36 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = deriveAspUserLeaf)]
-    pub async fn derive_asp_user_leaf(&self, membership_blinding_hex_be: &str, pubkey_hex: &str) -> Result<JsValue, JsError> {
-        let membership_blinding = Field::from_str(membership_blinding_hex_be).map_err(|e| JsError::new(&e.to_string()))?;
+    pub async fn derive_asp_user_leaf(
+        &self,
+        membership_blinding_hex_be: &str,
+        pubkey_hex: &str,
+    ) -> Result<JsValue, JsError> {
+        let membership_blinding = Field::from_str(membership_blinding_hex_be)
+            .map_err(|e| JsError::new(&e.to_string()))?;
 
         let pubkey_deserializer =
             serde::de::value::BorrowedStrDeserializer::<serde::de::value::Error>::new(pubkey_hex);
-        let pubkey: NotePublicKey = <NotePublicKey as serde::Deserialize>::deserialize(pubkey_deserializer)
-            .map_err(|e| JsError::new(&format!("invalid pubkey_hex: {e}")))?;
+        let pubkey: NotePublicKey =
+            <NotePublicKey as serde::Deserialize>::deserialize(pubkey_deserializer)
+                .map_err(|e| JsError::new(&format!("invalid pubkey_hex: {e}")))?;
 
-        let req = StorageWorkerRequest::DeriveASPleaf(
-            AdminASPRequest{
-                membership_blinding,
-                pubkey,
-            }
-        );
+        let req = StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
+            membership_blinding,
+            pubkey,
+        });
 
         match self.storage_request(req, 1_000).await? {
-            StorageWorkerResponse::DeriveASPleaf(user_leaf) => Ok(serde_wasm_bindgen::to_value(&user_leaf)?),
+            StorageWorkerResponse::DeriveASPleaf(user_leaf) => {
+                Ok(serde_wasm_bindgen::to_value(&user_leaf)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
 
     #[wasm_bindgen(js_name = getRecentPublicKeys)]
     pub async fn get_recent_public_keys(&self, limit: u32) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::RecentPubKeys(
-            limit,
-        );
+        let req = StorageWorkerRequest::RecentPubKeys(limit);
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::PubKeys(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
@@ -1030,7 +1088,9 @@ impl WebClient {
     pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecentPoolActivity(limit);
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::RecentPoolActivity(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            StorageWorkerResponse::RecentPoolActivity(list) => {
+                Ok(serde_wasm_bindgen::to_value(&list)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }

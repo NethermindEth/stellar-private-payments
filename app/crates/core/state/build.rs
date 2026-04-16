@@ -1,6 +1,4 @@
-use std::env;
-use std::fs;
-use std::path::PathBuf;
+use std::{env, fs, path::PathBuf};
 
 use sha2::{Digest, Sha256};
 
@@ -26,4 +24,3 @@ fn main() {
     );
     fs::write(out, contents).expect("write generated disclaimer_hash.rs");
 }
-

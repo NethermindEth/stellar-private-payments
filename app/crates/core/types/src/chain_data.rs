@@ -1,5 +1,5 @@
+use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey};
 use serde::{Deserialize, Serialize};
-use crate::{EncryptionPublicKey, NotePublicKey, ExtAmount, Field};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
 ///
@@ -22,8 +22,7 @@ pub(crate) mod serde_0x_hex_32 {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let s = s
-            .strip_prefix("0x").unwrap_or(&s);
+        let s = s.strip_prefix("0x").unwrap_or(&s);
         if s.len() != 64 {
             return Err(serde::de::Error::custom(format!(
                 "expected 64 hex chars, got {}",
@@ -51,7 +50,8 @@ pub struct ContractsStateData {
 #[serde(rename_all = "camelCase")]
 pub struct PoolInfo {
     pub success: bool,
-    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    /// Network tip (latest ledger observed by the RPC call used to fetch this
+    /// state).
     pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
@@ -73,7 +73,8 @@ pub struct PoolInfo {
 #[serde(rename_all = "camelCase")]
 pub struct AspMembership {
     pub success: bool,
-    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    /// Network tip (latest ledger observed by the RPC call used to fetch this
+    /// state).
     pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
@@ -90,7 +91,8 @@ pub struct AspMembership {
 #[serde(rename_all = "camelCase")]
 pub struct AspNonMembership {
     pub success: bool,
-    /// Network tip (latest ledger observed by the RPC call used to fetch this state).
+    /// Network tip (latest ledger observed by the RPC call used to fetch this
+    /// state).
     pub ledger: u32,
     pub contract_id: String,
     pub contract_type: String,
@@ -101,14 +103,15 @@ pub struct AspNonMembership {
 
 /// ASP non-membership (sanctions) proof data needed by the circuit.
 ///
-/// The prover crate does not fetch or build these proofs. Treat them as external
-/// inputs provided by a higher-level "state/chain" component.
+/// The prover crate does not fetch or build these proofs. Treat them as
+/// external inputs provided by a higher-level "state/chain" component.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AspNonMembershipProof {
     /// Lookup key (BN254 scalar field element).
     ///
-    /// For circuit inputs, convert to little-endian bytes via `Field::to_le_bytes()`.
+    /// For circuit inputs, convert to little-endian bytes via
+    /// `Field::to_le_bytes()`.
     pub key: Field,
     /// Old key (BN254 scalar field element).
     pub old_key: Field,
@@ -126,7 +129,8 @@ pub struct AspNonMembershipProof {
 #[serde(rename_all = "camelCase")]
 pub struct ContractEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
     pub ledger: u32,
@@ -143,10 +147,11 @@ pub struct ContractEvent {
 pub struct ContractsEventData {
     pub events: Vec<ContractEvent>,
     pub cursor: String,
-    /// Network tip (latest ledger observed by the RPC call that returned this batch).
+    /// Network tip (latest ledger observed by the RPC call that returned this
+    /// batch).
     ///
-    /// This advances even when there are no events, and is used as the authoritative
-    /// "indexed up to" ledger for precondition checks.
+    /// This advances even when there are no events, and is used as the
+    /// authoritative "indexed up to" ledger for precondition checks.
     pub latest_ledger: u32,
 }
 
@@ -174,7 +179,8 @@ pub enum AspMembershipSync {
 #[serde(rename_all = "camelCase")]
 pub struct NewNullifierEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     /// The nullifier that was spent (BN254 field element).
     pub nullifier: Field,
@@ -185,7 +191,8 @@ pub struct NewNullifierEvent {
 #[serde(rename_all = "camelCase")]
 pub struct NewCommitmentEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     /// The commitment hash added to the tree (BN254 field element).
     pub commitment: Field,
@@ -200,7 +207,8 @@ pub struct NewCommitmentEvent {
 #[serde(rename_all = "camelCase")]
 pub struct PublicKeyEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     /// Address of the account owner
     pub owner: String,
@@ -215,7 +223,8 @@ pub struct PublicKeyEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafAddedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     /// The leaf value that was inserted (BN254 field element).
     pub leaf: Field,
@@ -230,7 +239,8 @@ pub struct LeafAddedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafInsertedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     pub key: Field,
     pub value: Field,
@@ -243,7 +253,8 @@ pub struct LeafInsertedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafUpdatedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     pub key: Field,
     pub old_value: Field,
@@ -256,7 +267,8 @@ pub struct LeafUpdatedEvent {
 #[serde(rename_all = "camelCase")]
 pub struct LeafDeletedEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     pub key: Field,
     pub root: Field,

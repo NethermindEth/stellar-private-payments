@@ -22,13 +22,13 @@ construct_uint! {
 
 /// The BN254 scalar field modulus, as big-endian bytes.
 ///
-/// This value is used to map signed `ext_amount` values into a field element for the circuit:
-/// `FE(x) = x` if `x >= 0`, otherwise `FE(x) = p - |x|`.
+/// This value is used to map signed `ext_amount` values into a field element
+/// for the circuit: `FE(x) = x` if `x >= 0`, otherwise `FE(x) = p - |x|`.
 ///
 /// Source: matches `BN256_MOD_BYTES` in `prover::crypto`.
 pub const BN254_MODULUS_BE: [u8; 32] = [
-    48, 100, 78, 114, 225, 49, 160, 41, 184, 80, 69, 182, 129, 129, 88, 93, 40, 51, 232, 72,
-    121, 185, 112, 145, 67, 225, 245, 147, 240, 0, 0, 1,
+    48, 100, 78, 114, 225, 49, 160, 41, 184, 80, 69, 182, 129, 129, 88, 93, 40, 51, 232, 72, 121,
+    185, 112, 145, 67, 225, 245, 147, 240, 0, 0, 1,
 ];
 
 fn bn254_modulus_u256() -> U256 {
@@ -37,18 +37,18 @@ fn bn254_modulus_u256() -> U256 {
 
 /// Amount that appears inside encrypted notes.
 ///
-/// This is always non-negative and is currently constrained to what fits in the encrypted
-/// note plaintext format (u64, stored as 8 little-endian bytes).
+/// This is always non-negative and is currently constrained to what fits in the
+/// encrypted note plaintext format (u64, stored as 8 little-endian bytes).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct NoteAmount(pub u64);
 
 impl NoteAmount {
-    /// Zero amount.
-    pub const ZERO: NoteAmount = NoteAmount(0);
-    /// Unit amount.
-    pub const ONE: NoteAmount = NoteAmount(1);
     /// Maximum representable note amount (stored as `u64` stroops internally).
     pub const MAX: NoteAmount = NoteAmount(u64::MAX);
+    /// Unit amount.
+    pub const ONE: NoteAmount = NoteAmount(1);
+    /// Zero amount.
+    pub const ZERO: NoteAmount = NoteAmount(0);
 
     /// Returns the underlying stroops value.
     pub const fn as_u64(self) -> u64 {
@@ -109,8 +109,8 @@ impl TryFrom<ExtAmount> for NoteAmount {
     type Error = anyhow::Error;
 
     fn try_from(value: ExtAmount) -> Result<Self> {
-        let v = u64::try_from(value.0)
-            .map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
+        let v =
+            u64::try_from(value.0).map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
         Ok(NoteAmount(v))
     }
 }
@@ -174,10 +174,10 @@ impl<'de> Deserialize<'de> for NoteAmount {
 pub struct ExtAmount(pub i128);
 
 impl ExtAmount {
-    /// Zero amount.
-    pub const ZERO: ExtAmount = ExtAmount(0);
     /// Unit amount.
     pub const ONE: ExtAmount = ExtAmount(1);
+    /// Zero amount.
+    pub const ZERO: ExtAmount = ExtAmount(0);
 
     /// Returns the underlying signed stroops value.
     pub const fn as_i128(self) -> i128 {
@@ -291,19 +291,19 @@ impl<'de> Deserialize<'de> for ExtAmount {
 
 /// BN254 scalar field element backed by a 256-bit unsigned integer.
 ///
-/// This is primarily used for "public input" style values where the circuit expects
-/// a field element, but the application wants to handle signed values (`ExtAmount`)
-/// and map them into the field (see `TryFrom<ExtAmount> for Field`).
-/// It is a lightweight app wrapper (to avoid pulling and locking into specific implementations
-/// from ark crates etc.)
+/// This is primarily used for "public input" style values where the circuit
+/// expects a field element, but the application wants to handle signed values
+/// (`ExtAmount`) and map them into the field (see `TryFrom<ExtAmount> for
+/// Field`). It is a lightweight app wrapper (to avoid pulling and locking into
+/// specific implementations from ark crates etc.)
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct Field(pub U256);
 
 impl Field {
-    /// The additive identity in the field.
-    pub const ZERO: Field = Field(U256([0, 0, 0, 0]));
     /// The multiplicative identity in the field.
     pub const ONE: Field = Field(U256([1, 0, 0, 0]));
+    /// The additive identity in the field.
+    pub const ZERO: Field = Field(U256([0, 0, 0, 0]));
 
     /// Returns the field modulus `p` as a [`U256`].
     pub fn modulus() -> U256 {
@@ -361,29 +361,35 @@ impl Field {
         Ok(Field(v))
     }
 
-    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] as **raw little-endian bytes**.
+    /// Parses a `0x`-prefixed 64-hex string into a [`Field`] as **raw
+    /// little-endian bytes**.
     ///
-    /// Repository convention: hex strings represent bytes "as-is" (no reversal).
+    /// Repository convention: hex strings represent bytes "as-is" (no
+    /// reversal).
     pub fn from_0x_hex_le_bytes(s: &str) -> Result<Self> {
         let le = parse_0x_hex_32(s)?;
         Field::try_from_le_bytes(le)
     }
 
-    /// Returns this field element as a `0x`-prefixed 64-hex string of its **little-endian bytes**.
+    /// Returns this field element as a `0x`-prefixed 64-hex string of its
+    /// **little-endian bytes**.
     ///
-    /// Repository convention: hex strings represent bytes "as-is" (no reversal).
+    /// Repository convention: hex strings represent bytes "as-is" (no
+    /// reversal).
     pub fn to_0x_hex_le_bytes(self) -> String {
         let le = self.to_le_bytes();
         encode_0x_hex(&le)
     }
 
-    /// Legacy: Parses a `0x`-prefixed 64-hex string into a [`Field`] (big-endian integer).
+    /// Legacy: Parses a `0x`-prefixed 64-hex string into a [`Field`]
+    /// (big-endian integer).
     pub fn from_0x_hex_be(s: &str) -> Result<Self> {
         let be = parse_0x_hex_32(s)?;
         Field::try_from_be_bytes(be)
     }
 
-    /// Legacy: Returns this field element as a `0x`-prefixed 64-hex string (big-endian integer).
+    /// Legacy: Returns this field element as a `0x`-prefixed 64-hex string
+    /// (big-endian integer).
     pub fn to_0x_hex_be(self) -> String {
         let be = self.to_be_bytes();
         encode_0x_hex(&be)
@@ -438,7 +444,9 @@ impl TryFrom<ExtAmount> for Field {
     fn try_from(value: ExtAmount) -> Result<Self> {
         let m = Field::modulus();
         if value.0 >= 0 {
-            let v = U256::from(u128::try_from(value.0).map_err(|_| anyhow!("ext amount out of range"))?);
+            let v = U256::from(
+                u128::try_from(value.0).map_err(|_| anyhow!("ext amount out of range"))?,
+            );
             // For i128, v is always < modulus in practice; keep a guard for completeness.
             if v >= m {
                 return Err(anyhow!("ext amount out of field range"));
@@ -593,9 +601,7 @@ mod tests {
         assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
 
         let max_ext = ExtAmount::from(NoteAmount::MAX);
-        let too_big = max_ext
-            .checked_add(ExtAmount::ONE)
-            .expect("i128 add");
+        let too_big = max_ext.checked_add(ExtAmount::ONE).expect("i128 add");
         assert!(NoteAmount::try_from(too_big).is_err());
         Ok(())
     }
@@ -752,13 +758,17 @@ mod rusqlite_impls {
     //! These are feature-gated to avoid pulling rusqlite into WASM builds.
 
     use super::{ExtAmount, Field, NoteAmount};
-    use rusqlite::types::{FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value, ValueRef};
+    use rusqlite::types::{
+        FromSql, FromSqlError, FromSqlResult, ToSql, ToSqlOutput, Value, ValueRef,
+    };
 
     impl ToSql for NoteAmount {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-            // SQLite INTEGER is signed i64; note amounts are expected to fit within i64 for XLM stroops.
-            let v: i64 = i64::try_from(self.0)
-                .map_err(|_| rusqlite::Error::ToSqlConversionFailure(Box::new(FromSqlError::OutOfRange(0))))?;
+            // SQLite INTEGER is signed i64; note amounts are expected to fit within i64 for
+            // XLM stroops.
+            let v: i64 = i64::try_from(self.0).map_err(|_| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(FromSqlError::OutOfRange(0)))
+            })?;
             Ok(ToSqlOutput::Owned(Value::Integer(v)))
         }
     }
@@ -780,7 +790,9 @@ mod rusqlite_impls {
     impl ToSql for ExtAmount {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
             // For current usage (stroops), ext amounts should fit in i64.
-            let v: i64 = i64::try_from(self.0).map_err(|_| rusqlite::Error::ToSqlConversionFailure(Box::new(FromSqlError::OutOfRange(0))))?;
+            let v: i64 = i64::try_from(self.0).map_err(|_| {
+                rusqlite::Error::ToSqlConversionFailure(Box::new(FromSqlError::OutOfRange(0)))
+            })?;
             Ok(ToSqlOutput::Owned(Value::Integer(v)))
         }
     }
@@ -806,7 +818,10 @@ mod rusqlite_impls {
             match value {
                 ValueRef::Blob(b) => {
                     if b.len() != 32 {
-                        return Err(FromSqlError::InvalidBlobSize { expected_size: 32, blob_size: b.len() });
+                        return Err(FromSqlError::InvalidBlobSize {
+                            expected_size: 32,
+                            blob_size: b.len(),
+                        });
                     }
                     let mut le = [0u8; 32];
                     le.copy_from_slice(b);

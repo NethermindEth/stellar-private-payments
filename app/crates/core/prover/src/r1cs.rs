@@ -11,7 +11,7 @@
 //! # Reference
 //! https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md
 
-use alloc::{vec::Vec};
+use alloc::vec::Vec;
 
 use anyhow::{Result, anyhow};
 use ark_bn254::Fr;

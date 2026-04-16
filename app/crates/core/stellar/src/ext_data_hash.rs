@@ -1,9 +1,9 @@
 use anyhow::Result;
 use sha3::{Digest, Keccak256};
+use std::convert::TryInto;
 use stellar_xdr::curr::{
     Int256Parts, Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr,
 };
-use std::convert::TryInto;
 use types::{BN254_MODULUS_BE, ExtData, U256};
 
 // please refer to hash_ext_data in contracts/pool/src/pool.rs
@@ -11,10 +11,19 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     // 1. Prepare ScVal entries
     // Soroban structs serialize to XDR Maps sorted alphabetically by key
     let mut entries: Vec<(&str, ScVal)> = vec![
-        ("encrypted_output0", ScVal::Bytes(ext.encrypted_output0.clone().try_into()?)),
-        ("encrypted_output1", ScVal::Bytes(ext.encrypted_output1.clone().try_into()?)),
+        (
+            "encrypted_output0",
+            ScVal::Bytes(ext.encrypted_output0.clone().try_into()?),
+        ),
+        (
+            "encrypted_output1",
+            ScVal::Bytes(ext.encrypted_output1.clone().try_into()?),
+        ),
         ("ext_amount", i128_to_i256_scval(ext.ext_amount.as_i128())),
-        ("recipient", ScVal::Address(ext.recipient.parse::<ScAddress>()?)),
+        (
+            "recipient",
+            ScVal::Address(ext.recipient.parse::<ScAddress>()?),
+        ),
     ];
 
     // 2. Sort by key alphabetically
@@ -42,8 +51,8 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
 
     // 5. Modular arithmetic in the BN254 scalar field.
     //
-    // Soroban's on-chain logic reduces a 256-bit hash modulo the field order. We mirror
-    // that behavior off-chain using `types::U256`.
+    // Soroban's on-chain logic reduces a 256-bit hash modulo the field order. We
+    // mirror that behavior off-chain using `types::U256`.
     let mut digest_be = [0u8; 32];
     digest_be.copy_from_slice(digest.as_slice());
     let digest_u256 = U256::from_big_endian(&digest_be);

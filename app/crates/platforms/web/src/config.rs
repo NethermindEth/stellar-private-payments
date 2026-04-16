@@ -14,7 +14,6 @@ impl Config {
     }
 }
 
-
 impl Config {
     pub fn rpc_url(&self) -> &str {
         &self.rpc_url

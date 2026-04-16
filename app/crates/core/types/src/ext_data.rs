@@ -8,7 +8,8 @@ use crate::ExtAmount;
 
 /// External data associated with a pool transaction.
 ///
-/// This mirrors the Soroban `ExtData` struct shape used on-chain for `extDataHash`.
+/// This mirrors the Soroban `ExtData` struct shape used on-chain for
+/// `extDataHash`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ExtData {
     /// Recipient Stellar address / contract id (opaque here).
@@ -23,4 +24,3 @@ pub struct ExtData {
     /// Encrypted note data for output 1 (for recipient scanning/decryption).
     pub encrypted_output1: Vec<u8>,
 }
-

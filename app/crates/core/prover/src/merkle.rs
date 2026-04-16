@@ -9,10 +9,10 @@ use anyhow::{Result, anyhow};
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::{
+    crypto,
     serialization::{bytes_to_scalar, scalar_to_bytes},
     types::FIELD_SIZE,
 };
-use crate::crypto;
 use types::Field as AppField;
 
 // Re-export core merkle functions from circuits
@@ -66,15 +66,17 @@ pub struct MerkleTree {
 
 /// Memory-efficient Merkle helper for an append-only prefix of leaves.
 ///
-/// Unlike [`MerkleTree`], this does **not** allocate the full `2^depth` leaf array.
-/// It treats all missing leaves as the contract's `zero_leaf` value and computes:
+/// Unlike [`MerkleTree`], this does **not** allocate the full `2^depth` leaf
+/// array. It treats all missing leaves as the contract's `zero_leaf` value and
+/// computes:
 /// - the full-depth Merkle root, and
 /// - Merkle proofs for any existing leaf index `< leaves.len()`.
 pub struct MerklePrefixTree {
     depth: usize,
     leaves: Vec<Scalar>,
-    /// `empty[level]` is the node value of a completely-empty subtree at `level`,
-    /// where level 0 is the leaf level and level `depth` is the root.
+    /// `empty[level]` is the node value of a completely-empty subtree at
+    /// `level`, where level 0 is the leaf level and level `depth` is the
+    /// root.
     empty: Vec<Scalar>,
 }
 
@@ -82,14 +84,14 @@ impl MerklePrefixTree {
     /// Construct a prefix Merkle tree of the given `depth` from `leaves`.
     ///
     /// - `depth` is the full Merkle depth used by the contract/circuit.
-    /// - `leaves` must be ordered by `leaf_index` with no gaps: index `0..leaves.len()-1`.
+    /// - `leaves` must be ordered by `leaf_index` with no gaps: index
+    ///   `0..leaves.len()-1`.
     ///
-    /// Missing leaves (i.e., indices `>= leaves.len()`) are treated as the contract's
-    /// `zero_leaf` value, and the computed root/proofs match the circuit's Poseidon2
-    /// merkle implementation.
+    /// Missing leaves (i.e., indices `>= leaves.len()`) are treated as the
+    /// contract's `zero_leaf` value, and the computed root/proofs match the
+    /// circuit's Poseidon2 merkle implementation.
     pub fn new(depth: u32, leaves: &[AppField]) -> Result<Self> {
-        let depth =
-            usize::try_from(depth).map_err(|_| anyhow!("tree depth too large"))?;
+        let depth = usize::try_from(depth).map_err(|_| anyhow!("tree depth too large"))?;
         if depth == 0 || depth > 32 {
             return Err(anyhow!("Depth must be between 1 and 32"));
         }
@@ -124,8 +126,8 @@ impl MerklePrefixTree {
 
     /// Compute the full-depth Merkle root for this prefix.
     ///
-    /// This hashes up to `depth` levels, using `zero_leaf`-derived empty subtree nodes for
-    /// all missing leaves.
+    /// This hashes up to `depth` levels, using `zero_leaf`-derived empty
+    /// subtree nodes for all missing leaves.
     pub fn root(&self) -> Result<AppField> {
         let mut nodes = self.leaves.clone();
 
@@ -152,7 +154,8 @@ impl MerklePrefixTree {
     }
 
     /// Compute a Merkle proof for `index`, returning:
-    /// - `path_elements`: sibling node values as 32-byte little-endian field bytes
+    /// - `path_elements`: sibling node values as 32-byte little-endian field
+    ///   bytes
     /// - `path_indices`: packed path bits as a 32-byte little-endian scalar
     ///
     /// `index` must be `< leaf_count()`.
@@ -199,10 +202,7 @@ impl MerklePrefixTree {
             }
             let mut next = Vec::with_capacity((level_nodes.len() + 1) / 2);
             for i in 0..((level_nodes.len() + 1) / 2) {
-                let left = level_nodes
-                    .get(2 * i)
-                    .copied()
-                    .unwrap_or(self.empty[level]);
+                let left = level_nodes.get(2 * i).copied().unwrap_or(self.empty[level]);
                 let right = level_nodes
                     .get(2 * i + 1)
                     .copied()
@@ -402,13 +402,12 @@ impl MerkleTree {
     }
 }
 
-/// Build an ASP membership Merkle tree (poseidon2("XLM") zero leaf) from ordered leaves.
+/// Build an ASP membership Merkle tree (poseidon2("XLM") zero leaf) from
+/// ordered leaves.
 ///
-/// Leaves must be provided in `leaf_index` order with no gaps: index 0, 1, 2, ...
-pub fn from_leaves(
-    depth: usize,
-    leaves: impl IntoIterator<Item = AppField>,
-) -> Result<MerkleTree> {
+/// Leaves must be provided in `leaf_index` order with no gaps: index 0, 1, 2,
+/// ...
+pub fn from_leaves(depth: usize, leaves: impl IntoIterator<Item = AppField>) -> Result<MerkleTree> {
     let mut zero_leaf_be = crypto::zero_leaf();
     zero_leaf_be.reverse();
     let mut tree = MerkleTree::new_with_zero_leaf(depth, &zero_leaf_be)?;
@@ -434,8 +433,7 @@ mod tests {
             AppField::try_from_le_bytes([3u8; 32]).expect("field"),
         ];
 
-        let tree = from_leaves(depth, leaves.into_iter())
-            .expect("build tree");
+        let tree = from_leaves(depth, leaves.into_iter()).expect("build tree");
 
         let mut zero_leaf_be = crypto::zero_leaf();
         zero_leaf_be.reverse();

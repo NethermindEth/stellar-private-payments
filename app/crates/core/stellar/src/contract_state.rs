@@ -1,31 +1,32 @@
-use futures::try_join;
+use crate::{
+    DEPLOYMENT,
+    conversions::{
+        scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64, scval_to_u256,
+    },
+    rpc::Client,
+};
 use anyhow::{Result, anyhow};
-use crate::rpc::Client;
-use crate::conversions::{scval_to_address_string, scval_to_u32, scval_to_u256, scval_to_u64, scval_to_bool};
-use crate::DEPLOYMENT;
-use types::ContractConfig;
-use types::{PoolInfo, AspMembership, AspNonMembership, AspNonMembershipProof, ContractsStateData, ExtAmount, Field, NotePublicKey, U256};
-use stellar_xdr::curr as xdr;
-use stellar_xdr::curr::ReadXdr;
+use futures::try_join;
+use serde::{Deserialize, Serialize};
 use std::str::FromStr;
 use stellar_strkey::ed25519;
-use serde::{Deserialize, Serialize};
+use stellar_xdr::{curr as xdr, curr::ReadXdr};
+use types::{
+    AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
+    ExtAmount, Field, NotePublicKey, PoolInfo, U256,
+};
 
 macro_rules! get_state {
     ($map:expr, $key:expr, $source:expr) => {
         $map.get($key).ok_or_else(|| {
-            anyhow::anyhow!(
-                "missing {} state key in the contract {:?}",
-                $key,
-                $source
-            )
+            anyhow::anyhow!("missing {} state key in the contract {:?}", $key, $source)
         })
     };
 }
 
 pub struct StateFetcher {
     client: Client,
-    config: ContractConfig
+    config: ContractConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -59,7 +60,6 @@ pub struct PreparedSorobanTx {
 }
 
 impl StateFetcher {
-
     fn u256_to_i128_checked(v: U256, what: &'static str) -> Result<i128> {
         let mut be = [0u8; 32];
         v.to_big_endian(&mut be);
@@ -84,7 +84,7 @@ impl StateFetcher {
         let config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
         Ok(Self {
             client: Client::new(rpc_url)?,
-            config
+            config,
         })
     }
 
@@ -111,29 +111,39 @@ impl StateFetcher {
                 &[],
             )
             .await?;
-        let (merkle_current_root_index, merkle_root) = if let Some(current_roout_index) = pool_state.get("CurrentRootIndex") {
-            let merkle_current_root_index = scval_to_u32(current_roout_index)?;
-            let (state, _root_ledger) = self
-                .client
-                .get_contract_data(&self.config.pool, &[], &[("Root", merkle_current_root_index)])
-                .await?;
-            (Some(merkle_current_root_index), Some(scval_to_u256(get_state!(state, "Root", self.config.pool)?)?))
-        } else {
-            (None, None)
-        };
+        let (merkle_current_root_index, merkle_root) =
+            if let Some(current_roout_index) = pool_state.get("CurrentRootIndex") {
+                let merkle_current_root_index = scval_to_u32(current_roout_index)?;
+                let (state, _root_ledger) = self
+                    .client
+                    .get_contract_data(
+                        &self.config.pool,
+                        &[],
+                        &[("Root", merkle_current_root_index)],
+                    )
+                    .await?;
+                (
+                    Some(merkle_current_root_index),
+                    Some(scval_to_u256(get_state!(state, "Root", self.config.pool)?)?),
+                )
+            } else {
+                (None, None)
+            };
 
         let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", self.config.pool)?)?;
         let merkle_capacity = 2u64.pow(merkle_levels);
-        let merkle_next_index = scval_to_u64(get_state!(pool_state, "NextIndex", self.config.pool)?)?;
-        let maximum_deposit_amount_u256 =
-            scval_to_u256(get_state!(pool_state, "MaximumDepositAmount", self.config.pool)?)?;
+        let merkle_next_index =
+            scval_to_u64(get_state!(pool_state, "NextIndex", self.config.pool)?)?;
+        let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
+            pool_state,
+            "MaximumDepositAmount",
+            self.config.pool
+        )?)?;
         let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
             maximum_deposit_amount_u256,
             "maximum_deposit_amount",
         )?);
-        let merkle_root = merkle_root
-            .map(Field::try_from_u256)
-            .transpose()?;
+        let merkle_root = merkle_root.map(Field::try_from_u256).transpose()?;
 
         let pool = PoolInfo {
             success: true,
@@ -142,9 +152,21 @@ impl StateFetcher {
             contract_type: "Privacy Pool".to_string(),
             admin: scval_to_address_string(get_state!(pool_state, "Admin", self.config.pool)?)?,
             token: scval_to_address_string(get_state!(pool_state, "Token", self.config.pool)?)?,
-            verifier: scval_to_address_string(get_state!(pool_state, "Verifier", self.config.pool)?)?,
-            aspmembership: scval_to_address_string(get_state!(pool_state, "ASPMembership", self.config.pool)?)?,
-            aspnonmembership: scval_to_address_string(get_state!(pool_state, "ASPNonMembership", self.config.pool)?)?,
+            verifier: scval_to_address_string(get_state!(
+                pool_state,
+                "Verifier",
+                self.config.pool
+            )?)?,
+            aspmembership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPMembership",
+                self.config.pool
+            )?)?,
+            aspnonmembership: scval_to_address_string(get_state!(
+                pool_state,
+                "ASPNonMembership",
+                self.config.pool
+            )?)?,
             merkle_levels,
             merkle_current_root_index,
             merkle_next_index: merkle_next_index.to_string(),
@@ -165,10 +187,22 @@ impl StateFetcher {
                 &[],
             )
             .await?;
-        let asp_mem_next_index = scval_to_u64(get_state!(asp_membership_state, "NextIndex", self.config.asp_membership)?)?;
-        let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", self.config.asp_membership)?)?;
+        let asp_mem_next_index = scval_to_u64(get_state!(
+            asp_membership_state,
+            "NextIndex",
+            self.config.asp_membership
+        )?)?;
+        let asp_mem_levels = scval_to_u32(get_state!(
+            asp_membership_state,
+            "Levels",
+            self.config.asp_membership
+        )?)?;
         let asp_mem_capacity = 2u64.pow(asp_mem_levels);
-        let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", self.config.asp_membership)?)?;
+        let root_u256 = scval_to_u256(get_state!(
+            asp_membership_state,
+            "Root",
+            self.config.asp_membership
+        )?)?;
         let root = Field::try_from_u256(root_u256)?;
 
         let asp_membership = AspMembership {
@@ -179,8 +213,16 @@ impl StateFetcher {
             root,
             levels: asp_mem_levels,
             next_index: asp_mem_next_index.to_string(),
-            admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", self.config.asp_membership)?)?,
-            admin_insert_only: scval_to_bool(get_state!(asp_membership_state, "AdminInsertOnly", self.config.asp_membership)?)?,
+            admin: scval_to_address_string(get_state!(
+                asp_membership_state,
+                "Admin",
+                self.config.asp_membership
+            )?)?,
+            admin_insert_only: scval_to_bool(get_state!(
+                asp_membership_state,
+                "AdminInsertOnly",
+                self.config.asp_membership
+            )?)?,
             capacity: asp_mem_capacity,
             used_slots: asp_mem_next_index.to_string(),
         };
@@ -192,24 +234,35 @@ impl StateFetcher {
             .client
             .get_contract_data(&self.config.asp_non_membership, &["Root", "Admin"], &[])
             .await?;
-            let asp_nonmem_root_u256 = scval_to_u256(get_state!(asp_non_membership_state, "Root", self.config.asp_non_membership)?)?;
-            let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
-            let asp_non_membership = AspNonMembership {
-                success: true,
-                ledger: latest_ledger,
-                contract_id: self.config.asp_non_membership.clone(),
-                contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
-                root: asp_nonmem_root,
-                is_empty: asp_nonmem_root.as_u256() == U256::from(0u64),
-                admin: scval_to_address_string(get_state!(asp_non_membership_state, "Admin", self.config.asp_non_membership)?)?,
-            };
+        let asp_nonmem_root_u256 = scval_to_u256(get_state!(
+            asp_non_membership_state,
+            "Root",
+            self.config.asp_non_membership
+        )?)?;
+        let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
+        let asp_non_membership = AspNonMembership {
+            success: true,
+            ledger: latest_ledger,
+            contract_id: self.config.asp_non_membership.clone(),
+            contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
+            root: asp_nonmem_root,
+            is_empty: asp_nonmem_root.as_u256() == U256::from(0u64),
+            admin: scval_to_address_string(get_state!(
+                asp_non_membership_state,
+                "Admin",
+                self.config.asp_non_membership
+            )?)?,
+        };
         Ok(asp_non_membership)
     }
 
-    /// Builds ASP SMT non-membership proof data by querying the on-chain SMT via `simulateTransaction`.
+    /// Builds ASP SMT non-membership proof data by querying the on-chain SMT
+    /// via `simulateTransaction`.
     ///
-    /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof padded to `smt_depth`
-    /// - otherwise calls `asp_non_membership.find_key(key)` and pads/trims siblings to `smt_depth`
+    /// - if `non_membership_root == 0`, returns a dummy "empty tree" proof
+    ///   padded to `smt_depth`
+    /// - otherwise calls `asp_non_membership.find_key(key)` and pads/trims
+    ///   siblings to `smt_depth`
     pub async fn get_nonmembership_proof(
         &self,
         note_pubkey: &NotePublicKey,
@@ -221,7 +274,8 @@ impl StateFetcher {
             return Err(anyhow!("smt_depth must be > 0"));
         }
 
-        // NotePublicKey bytes are little-endian field bytes (see prover::serialization).
+        // NotePublicKey bytes are little-endian field bytes (see
+        // prover::serialization).
         let key = Field::try_from_le_bytes(*note_pubkey.as_ref())?;
 
         // Empty tree case (root = 0): non-membership is trivially provable.
@@ -306,8 +360,8 @@ impl StateFetcher {
     ) -> Result<xdr::TransactionEnvelope> {
         let source = Self::muxed_account_from_g(source_account)?;
         let contract_address = Self::contract_scaddress_from_str(contract_id)?;
-        let function_name = xdr::ScSymbol::try_from(function)
-            .map_err(|_| anyhow!("invalid function name"))?;
+        let function_name =
+            xdr::ScSymbol::try_from(function).map_err(|_| anyhow!("invalid function name"))?;
         let args = xdr::VecM::try_from(args)?;
 
         let invoke_args = xdr::InvokeContractArgs {
@@ -368,7 +422,11 @@ impl StateFetcher {
         for xdr::ScMapEntry { key, val } in map.iter() {
             let name = match key {
                 xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
-                _ => return Err(anyhow!("FindResult: field name should be a symbol: {key:?}")),
+                _ => {
+                    return Err(anyhow!(
+                        "FindResult: field name should be a symbol: {key:?}"
+                    ));
+                }
             };
             fields.insert(name, val.clone());
         }

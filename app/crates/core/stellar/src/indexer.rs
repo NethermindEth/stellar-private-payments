@@ -1,7 +1,8 @@
-use anyhow::{anyhow, Result};
-use crate::rpc::Client;
-use crate::rpc::Error as RpcError;
-use crate::DEPLOYMENT;
+use crate::{
+    DEPLOYMENT,
+    rpc::{Client, Error as RpcError},
+};
+use anyhow::{Result, anyhow};
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
@@ -14,14 +15,14 @@ pub struct Indexer<S: ContractDataStorage> {
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-
     pub async fn init(rpc_url: &str, storage: S) -> Result<Self> {
         let config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
 
         let client = Client::new(rpc_url)?;
 
-        // Retention-window check: if the RPC cannot serve events back to the deployment ledger,
-        // onboarding on a fresh DB will fail to reconstruct Merkle trees.
+        // Retention-window check: if the RPC cannot serve events back to the deployment
+        // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
+        // trees.
         let contract_ids = [config.pool.to_string(), config.asp_membership.to_string()];
         match client
             .get_contract_events(&contract_ids, config.deployment_ledger, 1, None)
@@ -42,20 +43,27 @@ Please use a fresher contracts deployment / a different RPC which stores events 
         Ok(Self {
             client,
             config,
-            storage
+            storage,
         })
     }
 
-    pub async fn fetch_contract_events(
-        &self
-    ) -> Result<()> {
+    pub async fn fetch_contract_events(&self) -> Result<()> {
         // Note - we don't index ASP nonmembership events here
         // self.config.asp_non_membership.to_string()
         // as SMT is stored onchain and we don't need events to rebuild it locally
-        let contract_ids = [self.config.pool.to_string(), self.config.asp_membership.to_string()];
+        let contract_ids = [
+            self.config.pool.to_string(),
+            self.config.asp_membership.to_string(),
+        ];
         let network_tip = self.client.get_latest_ledger().await?.sequence;
-        log::debug!("[INDEXER] starting new round for network tip {network_tip}, contract ids {contract_ids:?}");
-        let (mut cursor, start_ledger) = if let Some(SyncMetadata {cursor, last_ledger}) = self.storage.get_sync_state().await? {
+        log::debug!(
+            "[INDEXER] starting new round for network tip {network_tip}, contract ids {contract_ids:?}"
+        );
+        let (mut cursor, start_ledger) = if let Some(SyncMetadata {
+            cursor,
+            last_ledger,
+        }) = self.storage.get_sync_state().await?
+        {
             (Some(cursor), last_ledger)
         } else {
             log::debug!(
@@ -66,17 +74,23 @@ Please use a fresher contracts deployment / a different RPC which stores events 
         };
 
         for page in 0..MAX_PAGES_PER_ROUND {
-            log::trace!("[INDEXER] page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}");
-            let (new_cursor, events, latest_ledger) = self.client.get_contract_events(
-                &contract_ids,
-                start_ledger,
-                PAGE_SIZE,
-                cursor
-                ).await?;
+            log::trace!(
+                "[INDEXER] page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
+            );
+            let (new_cursor, events, latest_ledger) = self
+                .client
+                .get_contract_events(&contract_ids, start_ledger, PAGE_SIZE, cursor)
+                .await?;
 
-            let new_cursor = new_cursor.clone().ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
+            let new_cursor = new_cursor
+                .clone()
+                .ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
             let is_empty = events.is_empty();
-            log::trace!("[INDEXER] fetched {} events (latest_ledger={})", events.len(), latest_ledger);
+            log::trace!(
+                "[INDEXER] fetched {} events (latest_ledger={})",
+                events.len(),
+                latest_ledger
+            );
             self.storage
                 .save_events_batch(ContractsEventData {
                     cursor: new_cursor.clone(),
@@ -103,14 +117,10 @@ pub trait ContractDataStorage {
     async fn get_sync_state(&self) -> anyhow::Result<Option<SyncMetadata>>;
 
     /// Sends a batch of events to be saved and waits for confirmation
-    async fn save_events_batch(
-        &self,
-        batch: ContractsEventData
-    ) -> anyhow::Result<()>;
+    async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()>;
 }
 
 impl Into<ContractEvent> for crate::rpc::Event {
-
     fn into(self) -> ContractEvent {
         let crate::rpc::Event {
             id,
@@ -126,6 +136,6 @@ impl Into<ContractEvent> for crate::rpc::Event {
             contract_id,
             topics: topic,
             value,
-            }
+        }
     }
 }

@@ -1,32 +1,33 @@
-use anyhow::Result;
-use wasm_bindgen::JsError;
-use sqlite_wasm_vfs::sahpool::{install as install_opfs_sahpool, OpfsSAHPoolCfg};
-use gloo_worker::oneshot::oneshot;
-use gloo_timers::future::TimeoutFuture;
-use state::{Storage, process_events, process_notes, AccountKeys, PoolCommitmentRow, DerivedUserNoteRow};
-use std::cell::RefCell;
 use crate::protocol::{
     AdminASPRequest, DisclaimerStatePayload, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
-use wasm_bindgen_futures::spawn_local;
-use gloo_worker::Registrable;
+use anyhow::Result;
+use futures::{channel::mpsc, stream::StreamExt};
+use gloo_timers::future::TimeoutFuture;
+use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
     crypto::asp_membership_leaf,
     encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
     flows::{
-        DepositParams, TransactInputNote, TransactOutput, TransactParams, TransferParams,
-        WithdrawParams, N_OUTPUTS,
+        DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
+        TransferParams, WithdrawParams,
     },
-    merkle::{from_leaves, MerklePrefixTree, MerkleProof},
+    merkle::{MerklePrefixTree, MerkleProof, from_leaves},
 };
-use futures::channel::mpsc;
-use futures::stream::StreamExt;
+use sqlite_wasm_vfs::sahpool::{OpfsSAHPoolCfg, install as install_opfs_sahpool};
+use state::{
+    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+};
+use std::cell::RefCell;
 use types::{
-    AspMembershipSync, AspMembershipProof, EncryptionKeyPair, Field, NoteKeyPair, NotePublicKey,
+    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteKeyPair, NotePublicKey,
 };
+use wasm_bindgen::JsError;
+use wasm_bindgen_futures::spawn_local;
 
-// TODO for now it is a mix of async (because we want an async bridge for the main thread) and sync (blocking) code
-// in the future we should refactor to use wasm threads?
+// TODO for now it is a mix of async (because we want an async bridge for the
+// main thread) and sync (blocking) code in the future we should refactor to use
+// wasm threads?
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
 
@@ -55,7 +56,8 @@ macro_rules! with_storage {
         STORAGE.with(|s| {
             let borrow = s.borrow();
             // We must return the Result from the closure
-            let $storage = borrow.as_ref()
+            let $storage = borrow
+                .as_ref()
                 .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
 
             // This ensures the body expression's Result is returned by the closure
@@ -68,7 +70,8 @@ macro_rules! with_storage_mut {
     ($storage:ident => $body:expr) => {
         STORAGE.with(|s| {
             let mut borrow = s.borrow_mut();
-            let $storage = borrow.as_mut()
+            let $storage = borrow
+                .as_mut()
                 .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
 
             Ok::<_, anyhow::Error>($body)
@@ -90,11 +93,9 @@ pub fn worker_main() {
 async fn init() -> Result<(), JsError> {
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
-    if let Err(e) = install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(
-        &OpfsSAHPoolCfg::default(),
-        true,
-    )
-    .await
+    if let Err(e) =
+        install_opfs_sahpool::<sqlite_wasm_rs::WasmOsCallback>(&OpfsSAHPoolCfg::default(), true)
+            .await
     {
         let debug = format!("{e:?}");
         let text = e.to_string();
@@ -148,7 +149,7 @@ async fn init() -> Result<(), JsError> {
 pub(crate) async fn StorageWorker(req: StorageWorkerRequest) -> StorageWorkerResponse {
     match router(req).await {
         Ok(r) => r,
-        Err(e) => StorageWorkerResponse::Error(e.to_string())
+        Err(e) => StorageWorkerResponse::Error(e.to_string()),
     }
 }
 
@@ -183,20 +184,33 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             resp
         }
         StorageWorkerRequest::SaveEvents(events_data) => {
-            log::trace!("[{WORKER_NAME}] saving {} raw contract events", events_data.events.len());
+            log::trace!(
+                "[{WORKER_NAME}] saving {} raw contract events",
+                events_data.events.len()
+            );
             with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
             // We could pass the events_data here further for the processing but
             // for the sake of the sequential processing we drop it here
             // the storage is the single source of raw events for the processors
-            log::trace!("[{WORKER_NAME}] sending {} raw contract events to process", events_data.events.len());
+            log::trace!(
+                "[{WORKER_NAME}] sending {} raw contract events to process",
+                events_data.events.len()
+            );
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(address, spending_signature, encryption_signature) => {
+        StorageWorkerRequest::DeriveSaveUserKeys(
+            address,
+            spending_signature,
+            encryption_signature,
+        ) => {
             log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
-            let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
+            let (note_keypair, encryption_keypair) =
+                derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
-            log::trace!("[{WORKER_NAME}] saved notes and encryption keys for the account {address}");
+            log::trace!(
+                "[{WORKER_NAME}] saved notes and encryption keys for the account {address}"
+            );
             kick_processor();
             StorageWorkerResponse::Saved
         }
@@ -218,16 +232,28 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             log::trace!("[{WORKER_NAME}] fetch user keys for the account {address}");
             let opt = with_storage!(s => s.get_user_keys(&address)?)?;
             if opt.is_some() {
-                log::trace!("[{WORKER_NAME}] fetched notes and encryption keys for the account {address}");
+                log::trace!(
+                    "[{WORKER_NAME}] fetched notes and encryption keys for the account {address}"
+                );
             } else {
-                log::trace!("[{WORKER_NAME}] not found notes and encryption keys for the account {address}");
+                log::trace!(
+                    "[{WORKER_NAME}] not found notes and encryption keys for the account {address}"
+                );
             }
-            StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| UserKeys{note_keypair, encryption_keypair}))
+            StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| {
+                UserKeys {
+                    note_keypair,
+                    encryption_keypair,
+                }
+            }))
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
             log::trace!("[{WORKER_NAME}] list user notes for the account {address}");
             let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
-            log::trace!("[{WORKER_NAME}] fetched {} notes for the account {address}", list.len());
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} notes for the account {address}",
+                list.len()
+            );
             StorageWorkerResponse::UserNotes(list)
         }
         StorageWorkerRequest::RecentPoolActivity(limit) => {
@@ -239,10 +265,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::RecentPubKeys(limit) => {
             log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
-            log::trace!("[{WORKER_NAME}] fetched {} pub keys for the address book", list.len());
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} pub keys for the address book",
+                list.len()
+            );
             StorageWorkerResponse::PubKeys(list)
         }
-        StorageWorkerRequest::DeriveASPleaf(AdminASPRequest{membership_blinding, pubkey}) => {
+        StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
+            membership_blinding,
+            pubkey,
+        }) => {
             log::trace!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
             let user_leaf = asp_membership_leaf(&pubkey, &membership_blinding)?;
             log::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
@@ -251,24 +283,24 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::Deposit(req) => {
             log::trace!("[{WORKER_NAME}] deposit");
 
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                match with_storage!(s => s.get_user_keys(&req.user_address)?)? {
-                    Some((
-                        NoteKeyPair {
-                            private,
-                            public: note_pub,
-                        },
-                        EncryptionKeyPair {
-                            public: enc_pub, ..
-                        },
-                    )) => (private, note_pub, enc_pub),
-                    None => {
-                        return Ok(StorageWorkerResponse::Error(format!(
-                            "address {} should generate note and encryption keys first",
-                            req.user_address
-                        )))
-                    }
-                };
+            let (note_privkey, note_pubkey, encryption_pubkey) = match with_storage!(s => s.get_user_keys(&req.user_address)?)?
+            {
+                Some((
+                    NoteKeyPair {
+                        private,
+                        public: note_pub,
+                    },
+                    EncryptionKeyPair {
+                        public: enc_pub, ..
+                    },
+                )) => (private, note_pub, enc_pub),
+                None => {
+                    return Ok(StorageWorkerResponse::Error(format!(
+                        "address {} should generate note and encryption keys first",
+                        req.user_address
+                    )));
+                }
+            };
 
             let user_leaf = asp_membership_leaf(&note_pubkey, &req.membership_blinding)?;
             let user_leaf_index = match with_storage!(s => s.check_asp_membership_precondition(
@@ -285,10 +317,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
             let asp_membership_merkle_tree_leaves =
                 with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
-            let tree_depth_usize =
-                usize::try_from(req.tree_depth).map_err(|_| anyhow::anyhow!("tree_depth too large"))?;
-            let aspmembership_tree =
-                from_leaves(tree_depth_usize, asp_membership_merkle_tree_leaves.into_iter())?;
+            let tree_depth_usize = usize::try_from(req.tree_depth)
+                .map_err(|_| anyhow::anyhow!("tree_depth too large"))?;
+            let aspmembership_tree = from_leaves(
+                tree_depth_usize,
+                asp_membership_merkle_tree_leaves.into_iter(),
+            )?;
             let MerkleProof {
                 path_indices,
                 path_elements,
@@ -534,7 +568,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
 fn load_user_key_material(
     user_address: &str,
-) -> Result<(types::NotePrivateKey, NotePublicKey, types::EncryptionPublicKey)> {
+) -> Result<(
+    types::NotePrivateKey,
+    NotePublicKey,
+    types::EncryptionPublicKey,
+)> {
     with_storage!(s => {
         let (note_privkey, note_pubkey, encryption_pubkey) =
             match s.get_user_keys(user_address)? {
@@ -581,8 +619,10 @@ fn build_membership_proof(
         with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
     let tree_depth_usize =
         usize::try_from(tree_depth).map_err(|_| anyhow::anyhow!("tree_depth too large"))?;
-    let aspmembership_tree =
-        from_leaves(tree_depth_usize, asp_membership_merkle_tree_leaves.into_iter())?;
+    let aspmembership_tree = from_leaves(
+        tree_depth_usize,
+        asp_membership_merkle_tree_leaves.into_iter(),
+    )?;
     let MerkleProof {
         path_indices,
         path_elements,
@@ -632,8 +672,8 @@ fn build_pool_inputs(
         let (amount, blinding, leaf_index) =
             with_storage!(s => s.get_unspent_user_note_by_commitment(user_address, commitment)?)?
                 .ok_or_else(|| {
-                    anyhow::anyhow!("unspent note not found for commitment {}", commitment)
-                })?;
+                anyhow::anyhow!("unspent note not found for commitment {}", commitment)
+            })?;
 
         let (path_elements, path_indices) = tree.proof_bytes(leaf_index)?;
 

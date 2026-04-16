@@ -3,16 +3,16 @@ use serde::{Deserialize, Serialize};
 use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams};
 pub type Address = String;
 use types::{
-    AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, EncryptionSignature, ExtAmount,
-    ExtData, Field, NoteAmount, NotePublicKey, NoteKeyPair, PublicKeyEntry, SpendingSignature,
-    SyncMetadata, AspMembershipSync, UserNoteSummary, PoolLedgerActivity,
+    AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair,
+    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePublicKey,
+    PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata, UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct UserKeys{
+pub struct UserKeys {
     pub note_keypair: NoteKeyPair,
-    pub encryption_keypair: EncryptionKeyPair
+    pub encryption_keypair: EncryptionKeyPair,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -39,7 +39,7 @@ pub enum StorageWorkerRequest {
     Withdraw(WithdrawRequest),
     Transfer(TransferRequest),
     Transact(TransactRequest),
-    DeriveASPleaf(AdminASPRequest)
+    DeriveASPleaf(AdminASPRequest),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,7 +58,7 @@ pub enum StorageWorkerResponse {
     WithdrawParams(WithdrawParams),
     TransferParams(TransferParams),
     TransactParams(TransactParams),
-    DeriveASPleaf(Field)
+    DeriveASPleaf(Field),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -82,7 +82,7 @@ pub enum ProverWorkerResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DepositRequest{
+pub struct DepositRequest {
     pub user_address: Address,
     pub membership_blinding: Field,
     pub amount_stroops: ExtAmount,
@@ -167,28 +167,32 @@ pub struct PreparedTxPublic {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DepositPrepared {
-    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256 bytes.
+    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256
+    /// bytes.
     pub proof_uncompressed: Vec<u8>,
     /// extData passed to the pool contract.
     pub ext_data: ExtData,
-    /// Public inputs and derived values used to build the on-chain `Proof` struct.
+    /// Public inputs and derived values used to build the on-chain `Proof`
+    /// struct.
     pub prepared: PreparedTxPublic,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedProverTx {
-    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256 bytes.
+    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256
+    /// bytes.
     pub proof_uncompressed: Vec<u8>,
     /// extData passed to the pool contract.
     pub ext_data: ExtData,
-    /// Public inputs and derived values used to build the on-chain `Proof` struct.
+    /// Public inputs and derived values used to build the on-chain `Proof`
+    /// struct.
     pub prepared: PreparedTxPublic,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct AdminASPRequest{
+pub struct AdminASPRequest {
     pub membership_blinding: Field,
     pub pubkey: NotePublicKey,
 }

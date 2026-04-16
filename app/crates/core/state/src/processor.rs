@@ -1,8 +1,6 @@
+use crate::{Storage, events_parsers::parse_event};
 use anyhow::Result;
-use crate::Storage;
-use crate::events_parsers::parse_event;
 use types::ProcessedEvent;
-
 
 pub fn process_events(storage: &mut Storage, limit: u32) -> Result<bool> {
     let mut unprocessed = storage.get_unprocessed_events(limit)?;
@@ -39,7 +37,8 @@ pub fn process_events(storage: &mut Storage, limit: u32) -> Result<bool> {
     Ok(true)
 }
 
-/// Process already-parsed events (commitments/nullifiers) into local user state.
+/// Process already-parsed events (commitments/nullifiers) into local user
+/// state.
 ///
 /// This scans pool commitments for decryptable outputs (per account) and
 /// reconciles pool nullifiers against locally-computed expected nullifiers.

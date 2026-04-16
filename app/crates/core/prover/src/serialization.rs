@@ -157,8 +157,7 @@ pub fn hex_to_field_bytes(hex: &str) -> Result<Vec<u8>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloc::string::String;
-    use alloc::vec;
+    use alloc::{string::String, vec};
 
     #[test]
     fn fr_roundtrip_bytes() {

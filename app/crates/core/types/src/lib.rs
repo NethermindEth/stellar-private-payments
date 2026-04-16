@@ -1,10 +1,10 @@
-mod chain_data;
 mod amounts;
+mod chain_data;
 mod ext_data;
-pub use chain_data::*;
 pub use amounts::*;
-pub use ext_data::*;
 use anyhow::{Result, anyhow};
+pub use chain_data::*;
+pub use ext_data::*;
 
 use serde::{Deserialize, Serialize};
 
@@ -18,8 +18,8 @@ pub struct ContractConfig {
     pub admin: String,
     /// Ledger sequence at (or immediately before) contract deployment.
     ///
-    /// Used as a stable cold-start anchor for fresh local DBs so the indexer can
-    /// reconstruct the pool and ASP membership trees from events.
+    /// Used as a stable cold-start anchor for fresh local DBs so the indexer
+    /// can reconstruct the pool and ASP membership trees from events.
     pub deployment_ledger: u32,
     // Address of ASP membership deployed contract
     pub asp_membership: String,
@@ -37,7 +37,8 @@ pub struct ContractConfig {
 pub struct AspMembershipProof {
     /// Membership leaf (BN254 scalar field element).
     pub leaf: Field,
-    /// Membership blinding used when the leaf was added (BN254 scalar field element).
+    /// Membership blinding used when the leaf was added (BN254 scalar field
+    /// element).
     pub blinding: Field,
     /// Membership Merkle path sibling hashes (BN254 scalar field elements).
     pub path_elements: Vec<Field>,
@@ -294,8 +295,7 @@ mod key_serde_tests {
 
                 #[test]
                 fn serde_accepts_missing_0x_prefix() -> Result<()> {
-                    let s =
-                        "\"0000000000000000000000000000000000000000000000000000000000000000\"";
+                    let s = "\"0000000000000000000000000000000000000000000000000000000000000000\"";
                     let parsed: $ty = serde_json::from_str(s)?;
                     let roundtrip = serde_json::to_string(&parsed)?;
                     assert_eq!(
@@ -314,7 +314,8 @@ mod key_serde_tests {
 
                 #[test]
                 fn serde_rejects_invalid_hex() -> Result<()> {
-                    let s = "\"0xgg00000000000000000000000000000000000000000000000000000000000000\"";
+                    let s =
+                        "\"0xgg00000000000000000000000000000000000000000000000000000000000000\"";
                     assert!(serde_json::from_str::<$ty>(s).is_err());
                     Ok(())
                 }
@@ -363,7 +364,11 @@ macro_rules! impl_byte_wrapper {
             fn try_from(value: Vec<u8>) -> Result<Self, Self::Error> {
                 let len = value.len();
                 if len != 32 {
-                    return Err(anyhow!("{}: Invalid length. Expected 32, got {}", stringify!($name), len));
+                    return Err(anyhow!(
+                        "{}: Invalid length. Expected 32, got {}",
+                        stringify!($name),
+                        len
+                    ));
                 }
                 let array: [u8; 32] = value.try_into().map_err(|_| anyhow!("Conversion failed"))?;
                 Ok($name(array))

@@ -42,16 +42,14 @@ impl WitnessCalculator {
     pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
         // Parse R1CS from bytes
         let cursor = Cursor::new(r1cs_bytes);
-        let r1cs_file: R1CSFile<Fr> =
-            R1CSFile::new(cursor).context("Failed to parse R1CS")?;
+        let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor).context("Failed to parse R1CS")?;
 
         let witness_size = r1cs_file.header.n_wires;
         let num_public_inputs = r1cs_file.header.n_pub_in;
 
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
-        let module = Module::new(&store, circuit_wasm)
-            .context("Failed to load circuit WASM")?;
+        let module = Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
 
         // Create witness calculator from module
         let calculator = ArkWitnessCalculator::from_module(&mut store, module)
@@ -77,12 +75,9 @@ impl WitnessCalculator {
         use serde_json::Value;
 
         // Parse JSON inputs
-        let inputs: Value =
-            serde_json::from_str(inputs_json).context("Invalid JSON")?;
+        let inputs: Value = serde_json::from_str(inputs_json).context("Invalid JSON")?;
 
-        let inputs_map = inputs
-            .as_object()
-            .context("Inputs must be a JSON object")?;
+        let inputs_map = inputs.as_object().context("Inputs must be a JSON object")?;
 
         // Convert to HashMap<String, Vec<BigInt>> by flattening nested structures
         let mut inputs_hashmap: HashMap<String, Vec<BigInt>> = HashMap::new();
@@ -201,8 +196,7 @@ fn flatten_input(
                 } else {
                     BigInt::parse_bytes(s.as_bytes(), 10)
                 };
-                let bi =
-                    bi.context(format!("Invalid bigint for {current_key}: {s}"))?;
+                let bi = bi.context(format!("Invalid bigint for {current_key}: {s}"))?;
                 // Convert to field element (handles negative numbers)
                 inputs
                     .entry(current_key)

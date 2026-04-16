@@ -1,17 +1,14 @@
 // many parts are taken from https://github.com/stellar/rs-stellar-rpc-client/blob/main/src/lib.rs
 // to make it wasm-compatible
 
+use http::{Uri, uri::Authority};
 use serde::{Deserialize, Serialize};
+use serde_aux::prelude::deserialize_default_from_null;
 use serde_json::json;
-use std::str::FromStr;
-use std::collections::HashMap;
-use http::{uri::Authority, Uri};
-use serde_aux::prelude::{
-    deserialize_default_from_null,
-};
+use std::{collections::HashMap, str::FromStr};
 use stellar_xdr::curr::{
-    self as xdr, Error as XdrError, LedgerEntryData,
-    LedgerKey, Limits, ReadXdr, WriteXdr, ContractId
+    self as xdr, ContractId, Error as XdrError, LedgerEntryData, LedgerKey, Limits, ReadXdr,
+    WriteXdr,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -247,7 +244,8 @@ impl Client {
             params,
         };
 
-        let resp: JsonRpcResponse<R> = self.http_client
+        let resp: JsonRpcResponse<R> = self
+            .http_client
             .post(&self.base_url)
             .json(&payload)
             .send()
@@ -256,11 +254,15 @@ impl Client {
             .await?;
 
         if let Some(err) = resp.error {
-            return Err(Error::JsonRpcError { code: err.code, message: err.message });
+            return Err(Error::JsonRpcError {
+                code: err.code,
+                message: err.message,
+            });
         }
 
         // Replaced custom ok_ok with standard ok_or_else
-        resp.result.ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
+        resp.result
+            .ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
     }
 
     pub async fn get_contract_events(
@@ -268,15 +270,15 @@ impl Client {
         contract_ids: &[String],
         start_ledger: u32,
         page_size: usize,
-        cursor: Option<String>
+        cursor: Option<String>,
     ) -> Result<(Option<String>, Vec<Event>, u32), Error> {
-
         let start = cursor
             .as_ref()
             .map(|c| EventStart::Cursor(c.clone()))
             .unwrap_or(EventStart::Ledger(start_ledger));
 
-        let mut resp = match self.get_events(
+        let mut resp = match self
+            .get_events(
                 start,
                 Some(EventType::Contract),
                 contract_ids,
@@ -288,7 +290,8 @@ impl Client {
             Ok(r) => r,
             Err(e) => {
                 if let Error::JsonRpcError { message, .. } = &e {
-                    if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0) {
+                    if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
+                    {
                         return Err(Error::RpcSyncGap(range.0));
                     }
                 }
@@ -296,7 +299,11 @@ impl Client {
             }
         };
 
-        Ok((Some(resp.cursor), std::mem::take(&mut resp.events), resp.latest_ledger))
+        Ok((
+            Some(resp.cursor),
+            std::mem::take(&mut resp.events),
+            resp.latest_ledger,
+        ))
     }
 
     pub async fn get_events(
@@ -347,10 +354,8 @@ impl Client {
     }
 
     pub async fn get_latest_ledger(&self) -> Result<GetLatestLedgerResponse, Error> {
-            Ok(self
-                .rpc_call("getLatestLedger", json!({}))
-                .await?)
-        }
+        Ok(self.rpc_call("getLatestLedger", json!({})).await?)
+    }
 
     pub async fn get_ledger_entries(
         &self,
@@ -369,10 +374,10 @@ impl Client {
         &self,
         contract_id: &str,
         enum_keys: &[&str],
-        valued_keys: &[(&str, u32)]
+        valued_keys: &[(&str, u32)],
     ) -> Result<(HashMap<String, xdr::ScVal>, u32), Error> {
         let contract = stellar_strkey::Contract::from_str(contract_id)
-                .map_err(|e| Error::InvalidAddress(e))?;
+            .map_err(|e| Error::InvalidAddress(e))?;
 
         let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
 
@@ -386,7 +391,8 @@ impl Client {
         keys.push(contract_key);
 
         for variant in enum_keys {
-            let symbol = xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
             let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
 
             keys.push(LedgerKey::ContractData(xdr::LedgerKeyContractData {
@@ -397,8 +403,10 @@ impl Client {
         }
 
         for (variant, value) in valued_keys {
-            let symbol = xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
-            let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec =
+                xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
 
             keys.push(LedgerKey::ContractData(xdr::LedgerKeyContractData {
                 contract: contract_address.clone(),
@@ -425,7 +433,8 @@ impl Client {
             match LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())? {
                 LedgerEntryData::ContractData(data) => {
                     // TODO - come up with more elegant parsing
-                    let key_name: String = extract_symbol_from_val(&data.key).unwrap_or_else(|_| format!("{:?}", data.key));
+                    let key_name: String = extract_symbol_from_val(&data.key)
+                        .unwrap_or_else(|_| format!("{:?}", data.key));
                     if results_map.insert(key_name.clone(), data.val).is_some() {
                         return Err(Error::DuplicateContractKey(key_name));
                     }
@@ -446,7 +455,8 @@ impl Client {
     }
 }
 
-// helper to parse "startLedger must be within the ledger range: 1936296 - 2057255" from the RPC message
+// helper to parse "startLedger must be within the ledger range: 1936296 -
+// 2057255" from the RPC message
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
     let parts: Vec<&str> = message.split(":").collect();
     if parts.len() != 2 {
@@ -463,15 +473,19 @@ fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
 
 fn extract_symbol_from_val(key: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::Vec(Some(sc_vec)) = key {
-        let first_inner_val = sc_vec.0.get(0).ok_or_else(|| Error::UnexpectedScVal(format!("ScVal vec is empty {:?}", key)))?;
+        let first_inner_val = sc_vec
+            .0
+            .get(0)
+            .ok_or_else(|| Error::UnexpectedScVal(format!("ScVal vec is empty {:?}", key)))?;
 
         if let xdr::ScVal::Symbol(symbol) = first_inner_val {
-
             return Ok(symbol.0.to_string());
         }
     }
 
-    Err(Error::UnexpectedScVal("Structure {key:?} did not match ScVal::Vec(ScVal::Symbol)".to_string()))
+    Err(Error::UnexpectedScVal(
+        "Structure {key:?} did not match ScVal::Vec(ScVal::Symbol)".to_string(),
+    ))
 }
 
 #[cfg(test)]

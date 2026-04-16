@@ -1,7 +1,7 @@
-use anyhow::{Context, Result};
-use rusqlite::{Connection, params, Error as SqlError, OptionalExtension};
-use rusqlite_migration::{M, Migrations};
 use crate::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
+use anyhow::{Context, Result};
+use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
+use rusqlite_migration::{M, Migrations};
 use types::{
     AspMembershipSync, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey,
     Field, LeafAddedEvent, NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair,
@@ -11,9 +11,7 @@ use types::{
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
 
-const MIGRATION_ARRAY: &[M] = &[
-    M::up(include_str!("schema.sql")),
-];
+const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
@@ -69,17 +67,17 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
                  VALUES (?1, ?2, ?3, ?4, ?5)
-                 ON CONFLICT(id) DO NOTHING"
+                 ON CONFLICT(id) DO NOTHING",
             )?;
 
             for event in &data.events {
-                    stmt.execute(params![
-                        event.id,
-                        event.ledger,
-                        event.contract_id,
-                        event.topics.join(","),
-                        event.value
-                    ])?;
+                stmt.execute(params![
+                    event.id,
+                    event.ledger,
+                    event.contract_id,
+                    event.topics.join(","),
+                    event.value
+                ])?;
             }
 
             if data.events.is_empty() {
@@ -96,7 +94,6 @@ impl Storage {
                     params![data.cursor],
                 )?;
             }
-
         }
         tx.commit()?;
         log::debug!(
@@ -112,7 +109,7 @@ impl Storage {
         let mut stmt = self.conn.prepare(
             "SELECT last_fully_indexed_ledger, last_cursor
              FROM indexing_metadata
-             WHERE id = 1"
+             WHERE id = 1",
         )?;
 
         let status = stmt
@@ -120,7 +117,10 @@ impl Storage {
                 let ledger_i64: i64 = row.get(0)?;
                 let last_ledger = col_u32(ledger_i64, 0)?;
                 let cursor: Option<String> = row.get(1)?;
-                Ok(cursor.map(|cursor| types::SyncMetadata { last_ledger, cursor }))
+                Ok(cursor.map(|cursor| types::SyncMetadata {
+                    last_ledger,
+                    cursor,
+                }))
             })
             .optional()
             .context("Failed to query indexing_metadata")?;
@@ -132,8 +132,9 @@ impl Storage {
     }
 
     pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
-        self.conn.query_row(
-            "SELECT
+        self.conn
+            .query_row(
+                "SELECT
                 encryption_private_key,
                 encryption_public_key,
                 note_private_key,
@@ -143,27 +144,27 @@ impl Storage {
                 WHERE accounts.address = ?1
                 ORDER BY keypairs.id DESC
                 LIMIT 1",
-            params![address],
-            |row| {
-                let enc_priv: EncryptionPrivateKey = row.get(0)?;
-                let enc_pub: EncryptionPublicKey = row.get(1)?;
-                let note_priv: NotePrivateKey = row.get(2)?;
-                let note_pub: NotePublicKey = row.get(3)?;
+                params![address],
+                |row| {
+                    let enc_priv: EncryptionPrivateKey = row.get(0)?;
+                    let enc_pub: EncryptionPublicKey = row.get(1)?;
+                    let note_priv: NotePrivateKey = row.get(2)?;
+                    let note_pub: NotePublicKey = row.get(3)?;
 
-                Ok((
-                    NoteKeyPair {
-                        private: note_priv,
-                        public: note_pub,
-                    },
-                    EncryptionKeyPair {
-                        private: enc_priv,
-                        public: enc_pub,
-                    },
-                ))
-            },
-        )
-        .optional()
-        .context(format!("Failed to fetch keys for account: {}", address))
+                    Ok((
+                        NoteKeyPair {
+                            private: note_priv,
+                            public: note_pub,
+                        },
+                        EncryptionKeyPair {
+                            private: enc_priv,
+                            public: enc_pub,
+                        },
+                    ))
+                },
+            )
+            .optional()
+            .context(format!("Failed to fetch keys for account: {}", address))
     }
 
     pub fn save_encryption_and_note_keypairs(
@@ -172,7 +173,10 @@ impl Storage {
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
     ) -> Result<()> {
-        let tx = self.conn.transaction().context("failed to start transaction")?;
+        let tx = self
+            .conn
+            .transaction()
+            .context("failed to start transaction")?;
 
         let account_id = Self::get_or_create_account(&tx, account_address)?;
 
@@ -194,12 +198,18 @@ impl Storage {
         )
         .context("failed to insert keypairs")?;
         tx.commit().context("failed to commit transaction")?;
-        log::debug!("[STORAGE] saved new keypairs for the account {}", account_address);
+        log::debug!(
+            "[STORAGE] saved new keypairs for the account {}",
+            account_address
+        );
         Ok(())
     }
 
     pub fn get_disclaimer_state(&mut self, address: &str) -> Result<DisclaimerState> {
-        let tx = self.conn.transaction().context("failed to start transaction")?;
+        let tx = self
+            .conn
+            .transaction()
+            .context("failed to start transaction")?;
         let account_id = Self::get_or_create_account(&tx, address)?;
 
         let accepted: Option<i64> = tx
@@ -223,12 +233,19 @@ impl Storage {
         })
     }
 
-    pub fn accept_current_disclaimer(&mut self, address: &str, disclaimer_hash_hex: &str) -> Result<()> {
+    pub fn accept_current_disclaimer(
+        &mut self,
+        address: &str,
+        disclaimer_hash_hex: &str,
+    ) -> Result<()> {
         if disclaimer_hash_hex != CURRENT_DISCLAIMER_HASH_HEX {
             anyhow::bail!("Disclaimer hash mismatch. Please refresh and try again.");
         }
 
-        let tx = self.conn.transaction().context("failed to start transaction")?;
+        let tx = self
+            .conn
+            .transaction()
+            .context("failed to start transaction")?;
         let account_id = Self::get_or_create_account(&tx, address)?;
 
         tx.execute(
@@ -247,13 +264,16 @@ impl Storage {
         tx.execute(
             "INSERT OR IGNORE INTO accounts (address) VALUES (?1)",
             params![address],
-        ).context("failed to insert account")?;
+        )
+        .context("failed to insert account")?;
 
-        let id: i64 = tx.query_row(
-            "SELECT id FROM accounts WHERE address = ?1",
-            params![address],
-            |row| row.get(0),
-        ).context("failed to fetch account id")?;
+        let id: i64 = tx
+            .query_row(
+                "SELECT id FROM accounts WHERE address = ?1",
+                params![address],
+                |row| row.get(0),
+            )
+            .context("failed to fetch account id")?;
 
         Ok(id)
     }
@@ -361,12 +381,14 @@ impl Storage {
         Ok(out)
     }
 
-    /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no gaps.
+    /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no
+    /// gaps.
     ///
-    /// Returns the commitment list as [`Field`] values (each stored as 32-byte LE blob).
+    /// Returns the commitment list as [`Field`] values (each stored as 32-byte
+    /// LE blob).
     ///
-    /// Errors if there are gaps/out-of-order indices, because Merkle reconstruction would
-    /// be ambiguous/incorrect.
+    /// Errors if there are gaps/out-of-order indices, because Merkle
+    /// reconstruction would be ambiguous/incorrect.
     pub fn get_pool_commitment_leaves_ordered(&self) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
             "SELECT leaf_index, commitment
@@ -446,7 +468,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_nullifiers (nullifier, event_id)
                     VALUES (?1, ?2)
-                    ON CONFLICT(nullifier) DO NOTHING"
+                    ON CONFLICT(nullifier) DO NOTHING",
             )?;
 
             for event in events {
@@ -464,11 +486,16 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id)
                     VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(commitment) DO NOTHING"
+                    ON CONFLICT(commitment) DO NOTHING",
             )?;
 
             for event in events {
-                stmt.execute(params![event.commitment, event.index, event.encrypted_output, event.id])?;
+                stmt.execute(params![
+                    event.commitment,
+                    event.index,
+                    event.encrypted_output,
+                    event.id
+                ])?;
             }
         }
         tx.commit()?;
@@ -482,7 +509,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
                     VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(owner) DO NOTHING"
+                    ON CONFLICT(owner) DO NOTHING",
             )?;
 
             for event in events {
@@ -505,7 +532,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO asp_membership_leaves (leaf_index, leaf, root, event_id)
                     VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(leaf_index) DO NOTHING"
+                    ON CONFLICT(leaf_index) DO NOTHING",
             )?;
 
             for event in events {
@@ -516,31 +543,37 @@ impl Storage {
         Ok(())
     }
 
-    /// Checks whether ASP membership data is usable for proving at the current network tip.
+    /// Checks whether ASP membership data is usable for proving at the current
+    /// network tip.
     ///
     /// Returns:
     /// - `Ok(Some(user_leaf_index))`  if:
     ///   1) `user_leaf` is present in `asp_membership_leaves`, and
-    ///   2) `current_root` equals the last stored root in `asp_membership_leaves`, and
+    ///   2) `current_root` equals the last stored root in
+    ///      `asp_membership_leaves`, and
     ///   3) `current_ledger` equals the last stored ledger in the DB.
-    /// - `Ok(None)` if the DB is behind the chain tip (`current_ledger` is ahead of the
-    ///   last stored ledger), meaning the caller should sync more events.
-    /// - `Err(_)` if `current_ledger == last_db_ledger` but the user leaf is missing, or if
-    ///   roots/ledgers are inconsistent (indicates corruption or mismatched networks).
+    /// - `Ok(None)` if the DB is behind the chain tip (`current_ledger` is
+    ///   ahead of the last stored ledger), meaning the caller should sync more
+    ///   events.
+    /// - `Err(_)` if `current_ledger == last_db_ledger` but the user leaf is
+    ///   missing, or if roots/ledgers are inconsistent (indicates corruption or
+    ///   mismatched networks).
     pub fn check_asp_membership_precondition(
         &self,
         user_leaf: &Field,
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
-        // The indexer sync metadata is authoritative for "how far we've indexed", even if there
-        // were no ASP events in recent ledgers.
+        // The indexer sync metadata is authoritative for "how far we've indexed", even
+        // if there were no ASP events in recent ledgers.
         let Some(sync_meta) = self.get_sync_metadata()? else {
             return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
         if current_ledger > sync_meta.last_ledger {
-            return Ok(AspMembershipSync::SyncRequired(Some(current_ledger-sync_meta.last_ledger)));
+            return Ok(AspMembershipSync::SyncRequired(Some(
+                current_ledger - sync_meta.last_ledger,
+            )));
         }
 
         if current_ledger < sync_meta.last_ledger {
@@ -593,11 +626,11 @@ impl Storage {
     }
 
     // TODO ideally we should return an iterator here
-    /// Fetch all ASP membership leaves ordered by index (0..N-1), returning the leaf list
-    /// plus the last stored root (root after the last insertion).
+    /// Fetch all ASP membership leaves ordered by index (0..N-1), returning the
+    /// leaf list plus the last stored root (root after the last insertion).
     ///
-    /// Errors if there are gaps/out-of-order indices, because Merkle reconstruction would
-    /// be ambiguous/incorrect.
+    /// Errors if there are gaps/out-of-order indices, because Merkle
+    /// reconstruction would be ambiguous/incorrect.
     pub fn get_all_asp_membership_leaves_ordered(&self) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
             "SELECT leaf_index, leaf
@@ -647,7 +680,7 @@ impl Storage {
                 AND p.event_id IS NULL
                 AND l.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
-                LIMIT ?1"
+                LIMIT ?1",
         )?;
 
         let event_iter = stmt.query_map(params![limit], |row| {
@@ -748,7 +781,8 @@ impl Storage {
         offset = offset.rem_euclid(n_i64);
         let offset_usize = usize::try_from(offset).expect("offset fits usize");
 
-        // Histogram allocation: `total_limit` tokens distributed in RR order from `offset`.
+        // Histogram allocation: `total_limit` tokens distributed in RR order from
+        // `offset`.
         let mut counts: Vec<u32> = vec![0; n];
         for i in 0..total_limit {
             let idx = (offset_usize + usize::try_from(i).expect("u32 fits usize")) % n;
@@ -889,8 +923,8 @@ impl Storage {
         Ok(did_progress || has_pending)
     }
 
-    /// Reconcile new pool nullifiers against `user_notes.expected_nullifier`, updating
-    /// `user_notes.nullifier_id` for matching notes.
+    /// Reconcile new pool nullifiers against `user_notes.expected_nullifier`,
+    /// updating `user_notes.nullifier_id` for matching notes.
     pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
         let tx = self.conn.transaction()?;
 
@@ -1050,12 +1084,13 @@ mod tests {
             note_keypair.public.as_ref(),
             &blinding.to_le_bytes(),
         )?;
-        let commitment_le: [u8; 32] = commitment_le
-            .try_into()
-            .map_err(|v: Vec<u8>| anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
         let commitment = Field::try_from_le_bytes(commitment_le)?;
 
-        let encrypted_output = encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
         // Insert the raw event + the parsed pool commitment row.
         storage.save_events_batch(&ContractsEventData {
@@ -1089,9 +1124,10 @@ mod tests {
         };
         assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
 
-        let note_count: i64 = storage
-            .conn
-            .query_row("SELECT COUNT(*) FROM user_notes", [], |row| row.get(0))?;
+        let note_count: i64 =
+            storage
+                .conn
+                .query_row("SELECT COUNT(*) FROM user_notes", [], |row| row.get(0))?;
         assert_eq!(note_count, 1);
 
         let scanned: i64 = storage.conn.query_row(
@@ -1105,11 +1141,16 @@ mod tests {
         let leaf_index: u32 = 3;
         let mut path_indices_le = [0u8; 32];
         path_indices_le[..8].copy_from_slice(&(u64::from(leaf_index)).to_le_bytes());
-        let signature = crypto::compute_signature(&note_keypair.private.0, &commitment.to_le_bytes(), &path_indices_le)?;
-        let nullifier_le = crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
-        let nullifier_le: [u8; 32] = nullifier_le
-            .try_into()
-            .map_err(|v: Vec<u8>| anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len()))?;
+        let signature = crypto::compute_signature(
+            &note_keypair.private.0,
+            &commitment.to_le_bytes(),
+            &path_indices_le,
+        )?;
+        let nullifier_le =
+            crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
+        let nullifier_le: [u8; 32] = nullifier_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len())
+        })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
         storage.save_events_batch(&ContractsEventData {
@@ -1138,7 +1179,8 @@ mod tests {
     fn sync_metadata_advances_only_on_empty_page() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        // Non-empty batch should update the cursor but not advance the "fully indexed" ledger.
+        // Non-empty batch should update the cursor but not advance the "fully indexed"
+        // ledger.
         storage.save_events_batch(&ContractsEventData {
             cursor: "c1".to_string(),
             latest_ledger: 10,
@@ -1178,8 +1220,16 @@ mod tests {
             EncryptionSignature(vec![4u8; 64]),
         )?;
 
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair_1, &enc_keypair_1)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair_2, &enc_keypair_2)?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair_1,
+            &enc_keypair_1,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair_2,
+            &enc_keypair_2,
+        )?;
 
         let (got_note, got_enc) = storage
             .get_user_keys("GTESTACCOUNT")?
@@ -1191,24 +1241,24 @@ mod tests {
     }
 
     #[test]
-       fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
+    fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         let spending_sig = SpendingSignature(vec![1u8; 64]);
-      let encryption_sig = EncryptionSignature(vec![2u8; 64]);
-let (note_keypair, enc_keypair) =
-encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
 
-storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
-storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
 
-let count: i64 = storage.conn.query_row(
- "SELECT COUNT(*) FROM accounts WHERE address = ?1",
-      params!["GTESTACCOUNT"],
-       |row| row.get(0),
- )?;
-    assert_eq!(count, 1);
+        let count: i64 = storage.conn.query_row(
+            "SELECT COUNT(*) FROM accounts WHERE address = ?1",
+            params!["GTESTACCOUNT"],
+            |row| row.get(0),
+        )?;
+        assert_eq!(count, 1);
 
-       Ok(())
-  }
+        Ok(())
+    }
 }

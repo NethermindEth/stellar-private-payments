@@ -1,16 +1,15 @@
-pub mod workers;
 mod client;
-mod protocol;
 mod config;
+mod protocol;
+pub mod workers;
 
 use client::WebClient;
 use config::Config;
-use stellar::Indexer;
 use gloo_timers::future::TimeoutFuture;
-use wasm_bindgen_futures::spawn_local;
 use std::rc::Rc;
-use wasm_bindgen::JsError;
-use wasm_bindgen::prelude::*;
+use stellar::Indexer;
+use wasm_bindgen::{JsError, prelude::*};
+use wasm_bindgen_futures::spawn_local;
 
 #[wasm_bindgen]
 pub struct MainThreadHandle {
@@ -30,18 +29,16 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
     let client = WebClient::new(config.rpc_url()).map_err(|e| JsError::new(&e.to_string()))?;
-    client.ping_storage().await.map_err(|e| JsError::new(&e.to_string()))?;
-    let indexer = Indexer::init(
-            config.rpc_url(),
-            client.clone(),
-        )
+    client
+        .ping_storage()
+        .await
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let indexer = Indexer::init(config.rpc_url(), client.clone())
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
     start_indexer_loop(indexer, 5_000);
     log::debug!("[MAIN THREAD] initialized");
-    Ok(MainThreadHandle {
-            client,
-        })
+    Ok(MainThreadHandle { client })
 }
 
 fn start_indexer_loop(indexer: Indexer<WebClient>, interval_ms: u32) {

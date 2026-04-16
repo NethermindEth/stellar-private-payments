@@ -6,6 +6,7 @@ use crate::serialization::{bytes_to_scalar, scalar_to_bytes, scalar_to_hex};
 use alloc::{string::String, vec, vec::Vec};
 use anyhow::{Result, anyhow};
 use core::ops::Add;
+use types::{Field as AppField, NotePublicKey};
 use zkhash::{
     fields::bn256::FpBN256 as Scalar,
     poseidon2::{
@@ -15,7 +16,6 @@ use zkhash::{
         },
     },
 };
-use types::{Field as AppField, NotePublicKey};
 
 // Useful constants
 /// BN256 modulus as Big Endian bytes

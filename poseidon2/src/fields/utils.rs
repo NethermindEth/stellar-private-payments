@@ -1,7 +1,6 @@
 use ark_ff::PrimeField;
 use hex::FromHex;
 
-
 pub fn from_hex<F: PrimeField>(s: &str) -> F {
     let a = Vec::from_hex(&s[2..]).expect("Invalid Hex String");
     F::from_be_bytes_mod_order(&a as &[u8])

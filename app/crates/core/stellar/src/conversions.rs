@@ -1,11 +1,8 @@
-use stellar_strkey::ed25519;
-use stellar_xdr::curr::{
-    self as xdr, ReadXdr
-};
 use crate::rpc::Error;
-use types::ContractEvent;
-use types::U256;
 use std::collections::HashMap;
+use stellar_strkey::ed25519;
+use stellar_xdr::curr::{self as xdr, ReadXdr};
+use types::{ContractEvent, U256};
 
 /// Helper to convert ScVal Address to G... or C... string
 pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
@@ -21,7 +18,9 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
                 Ok(stellar_strkey::Contract(bytes).to_string())
             }
             // Handling MuxedAccount, ClaimableBalance, and LiquidityPool
-            _ => Err(Error::UnexpectedScVal(format!("Unsupported Address type: {addr:?}"))),
+            _ => Err(Error::UnexpectedScVal(format!(
+                "Unsupported Address type: {addr:?}"
+            ))),
         }
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
@@ -72,7 +71,6 @@ pub fn scval_to_u64(val: &xdr::ScVal) -> Result<u64, Error> {
     }
 }
 
-
 pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     if let xdr::ScVal::Bool(n) = val {
         Ok(*n)
@@ -84,7 +82,8 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
 #[derive(Debug)]
 pub struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
-    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a hyphen.
+    // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
+    // hyphen.
     pub id: String,
     // Sequence number of the ledger in which this event was emitted
     pub ledger: u32,
@@ -98,7 +97,13 @@ pub struct ParsedContractEvent {
 }
 
 pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent, Error> {
-    let ContractEvent{id, ledger, contract_id, topics, value} = event;
+    let ContractEvent {
+        id,
+        ledger,
+        contract_id,
+        topics,
+        value,
+    } = event;
 
     let mut iter = topics.iter();
     let first = iter.next().ok_or_else(|| xdr::Error::Invalid)?;
@@ -109,7 +114,11 @@ pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent,
 
     let name = match xdr::ScVal::from_xdr_base64(first, xdr::Limits::none())? {
         xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
-        _ => return Err(Error::UnexpectedScVal("the first topic of an event should be a symbol".into())),
+        _ => {
+            return Err(Error::UnexpectedScVal(
+                "the first topic of an event should be a symbol".into(),
+            ));
+        }
     };
 
     let data = xdr::ScVal::from_xdr_base64(value, xdr::Limits::none())?;
@@ -122,16 +131,29 @@ pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent,
             for xdr::ScMapEntry { key, val } in map.iter() {
                 let field_name = match key {
                     xdr::ScVal::Symbol(sym) => sym.to_utf8_string()?,
-                    _ => return Err(Error::UnexpectedScVal(format!("event data field name should be a symbol: {key:?}"))),
+                    _ => {
+                        return Err(Error::UnexpectedScVal(format!(
+                            "event data field name should be a symbol: {key:?}"
+                        )));
+                    }
                 };
                 values.insert(field_name, val.clone());
             }
-        },
-        xdr::ScVal::Void => {},
-        _ => return Err(Error::UnexpectedScVal("an event data format should be a map".into())),
+        }
+        xdr::ScVal::Void => {}
+        _ => {
+            return Err(Error::UnexpectedScVal(
+                "an event data format should be a map".into(),
+            ));
+        }
     };
 
-    Ok(ParsedContractEvent{
-        id, ledger, contract_id, name, topics, values
+    Ok(ParsedContractEvent {
+        id,
+        ledger,
+        contract_id,
+        name,
+        topics,
+        values,
     })
 }

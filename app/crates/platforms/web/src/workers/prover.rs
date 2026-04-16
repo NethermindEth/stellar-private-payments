@@ -1,32 +1,30 @@
-use anyhow::{Context as _, Result};
-use wasm_bindgen::JsError;
-use gloo_worker::oneshot::oneshot;
-use gloo_timers::future::TimeoutFuture;
-use std::cell::RefCell;
 use crate::protocol::{
     DepositPrepared, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
 };
-use wasm_bindgen_futures::spawn_local;
-use gloo_worker::Registrable;
+use anyhow::{Context as _, Result};
+use futures::try_join;
+use gloo_timers::future::TimeoutFuture;
+use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
-    flows::{deposit, transact, transfer, withdraw, TransactArtifacts},
+    flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
 };
-use futures::try_join;
-use wasm_bindgen::JsCast;
-use wasm_bindgen_futures::JsFuture;
+use std::cell::RefCell;
+use stellar::hash_ext_data_offchain;
+use wasm_bindgen::{JsCast, JsError, JsValue};
+use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
 use witness::WitnessCalculator;
-use wasm_bindgen::JsValue;
-use stellar::hash_ext_data_offchain;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
 // TODO make it dependent on the network during the compilation
-const PROVING_KEY: &[u8] = include_bytes!("../../../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
+const PROVING_KEY: &[u8] =
+    include_bytes!("../../../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
 
-// TODO for now it is a mix of async (because we want an async bridge for the main thread) and sync (blocking) code
-// in the future we should refactor to use wasm threads?
+// TODO for now it is a mix of async (because we want an async bridge for the
+// main thread) and sync (blocking) code in the future we should refactor to use
+// wasm threads?
 
 thread_local! {
     static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = RefCell::new(None);
@@ -40,12 +38,18 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     let (wasm_bytes, r1cs_bytes) = try_join!(
         async {
             let wasm_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.wasm").await?;
-            log::debug!("[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes", wasm_bytes.len());
+            log::debug!(
+                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
+                wasm_bytes.len()
+            );
             Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.r1cs").await?;
-            log::debug!("[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes", r1cs_bytes.len());
+            log::debug!(
+                "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
         }
     )?;
@@ -85,7 +89,7 @@ async fn init() -> Result<(), JsError> {
 pub(crate) async fn ProverWorker(req: ProverWorkerRequest) -> ProverWorkerResponse {
     match router(req).await {
         Ok(r) => r,
-        Err(e) => ProverWorkerResponse::Error(e.to_string())
+        Err(e) => ProverWorkerResponse::Error(e.to_string()),
     }
 }
 
@@ -95,7 +99,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Ping => {
             log::trace!("[{WORKER_NAME}] ping");
             loop {
-                let ready = WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some());
+                let ready = WITNESS_CALC.with(|s| s.borrow().is_some())
+                    && PROVER.with(|s| s.borrow().is_some());
 
                 if ready {
                     log::trace!("[{WORKER_NAME}] pong");
@@ -216,7 +221,6 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .as_string()
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
-
     let url_string = if path.starts_with("http") {
         path.to_string()
     } else {
@@ -237,16 +241,23 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .await
         .map_err(|e| JsError::new(&format!("Network error: {:?}", e)))?;
 
-    let resp: web_sys::Response = resp_value.dyn_into().map_err(|_| {
-        JsError::new("Failed to cast response")
-    })?;
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| JsError::new("Failed to cast response"))?;
 
     if !resp.ok() {
-        return Err(JsError::new(&format!("HTTP {} for {}", resp.status(), url_string)));
+        return Err(JsError::new(&format!(
+            "HTTP {} for {}",
+            resp.status(),
+            url_string
+        )));
     }
 
-    let array_buffer_promise = resp.array_buffer().map_err(|e| JsError::new(&format!("{:?}", e)))?;
-    let array_buffer_value = JsFuture::from(array_buffer_promise).await
+    let array_buffer_promise = resp
+        .array_buffer()
+        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
+    let array_buffer_value = JsFuture::from(array_buffer_promise)
+        .await
         .map_err(|e| JsError::new(&format!("{:?}", e)))?;
 
     let type_array = js_sys::Uint8Array::new(&array_buffer_value);

@@ -41,11 +41,11 @@ use ark_ff::PrimeField;
 use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use sha2::{Digest, Sha256};
-use x25519_dalek::{PublicKey, StaticSecret};
 use types::{
-    EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, EncryptionSignature, NoteAmount,
-    NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature, Field,
+    EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, EncryptionSignature, Field,
+    NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature,
 };
+use x25519_dalek::{PublicKey, StaticSecret};
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
@@ -63,7 +63,11 @@ pub fn derive_encryption_and_note_keypairs(
 ) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
     let note_private_key = derive_note_private_key(spending_signature)?;
     let pubkey = derive_public_key(&note_private_key.0)?;
-    let note_public_key = NotePublicKey(pubkey.try_into().map_err(|e: Vec<u8>| anyhow::anyhow!("Expected 32 bytes, but got {}", e.len()))?);
+    let note_public_key = NotePublicKey(
+        pubkey
+            .try_into()
+            .map_err(|e: Vec<u8>| anyhow::anyhow!("Expected 32 bytes, but got {}", e.len()))?,
+    );
     let note_keypair = NoteKeyPair {
         private: note_private_key,
         public: note_public_key,
@@ -205,7 +209,8 @@ pub fn encrypt_output_note(
 
 /// Decrypt output note data from on-chain storage.
 ///
-/// Returns `Ok(None)` if the ciphertext is not addressed to the given private key.
+/// Returns `Ok(None)` if the ciphertext is not addressed to the given private
+/// key.
 ///
 /// Expected plaintext format: `amount (8 bytes LE) || blinding (32 bytes LE)`.
 pub fn decrypt_output_note(
@@ -217,7 +222,10 @@ pub fn decrypt_output_note(
         return Ok(None);
     }
     if plaintext.len() != 40 {
-        return Err(anyhow!("Decrypted plaintext must be 40 bytes, got {}", plaintext.len()));
+        return Err(anyhow!(
+            "Decrypted plaintext must be 40 bytes, got {}",
+            plaintext.len()
+        ));
     }
 
     let mut amount_le = [0u8; 8];

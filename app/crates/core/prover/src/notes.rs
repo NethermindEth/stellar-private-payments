@@ -3,8 +3,8 @@
 //! This encapsulates the logic required to turn a pool commitment row into a
 //! `user_notes` row, given an account's keypairs.
 
-use anyhow::{Result, anyhow};
 use alloc::vec::Vec;
+use anyhow::{Result, anyhow};
 use types::{EncryptionPrivateKey, Field, NoteAmount, NoteKeyPair};
 
 use crate::{crypto, encryption};
@@ -16,7 +16,8 @@ pub struct DerivedUserNote {
     pub amount: NoteAmount,
     /// Decrypted note blinding factor.
     pub blinding: Field,
-    /// Expected nullifier for this note (matches on-chain nullifier event when spent).
+    /// Expected nullifier for this note (matches on-chain nullifier event when
+    /// spent).
     pub expected_nullifier: Field,
 }
 
@@ -44,7 +45,8 @@ pub fn try_decrypt_and_derive_user_note(
         return Ok(None);
     }
 
-    // Verify that (amount, blinding) corresponds to the claimed on-chain commitment.
+    // Verify that (amount, blinding) corresponds to the claimed on-chain
+    // commitment.
     let amount_field_le = Field::from(amount).to_le_bytes();
     let computed = crypto::compute_commitment(
         &amount_field_le,
