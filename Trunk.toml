@@ -21,7 +21,7 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p $TRUNK_STAGING_DIR/circuits =
+mkdir -p $TRUNK_STAGING_DIR/circuits
 
 # Circuit artifacts from Cargo build output
 CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
