@@ -13,7 +13,7 @@ Other directories in `app` directory mostly define interfaces for the `web` plat
 
 **Storage:**
 
-Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage accross different platforms allowing future data syncs across platforms.
+Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
 
 ## Web platform (WASM + Web Workers)
 
