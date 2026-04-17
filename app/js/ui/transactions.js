@@ -40,10 +40,53 @@ function noteAmountToStroopsBigInt(amount) {
     return 0n;
 }
 
-function xlmToStroopsBigInt(xlm) {
-    const n = Number(xlm);
-    if (!Number.isFinite(n)) return 0n;
-    return BigInt(Math.trunc(n * 10_000_000));
+const STROOPS_PER_XLM = 10_000_000n;
+
+function tryParseXlmToStroopsBigInt(xlmText, { allowNegative = false } = {}) {
+    const raw = xlmText == null ? '' : String(xlmText);
+    const s = raw.trim();
+    if (!s) return { ok: true, value: 0n };
+
+    // Decimal-only (no scientific notation). Accepts: [-+]?\d*(\.\d*)?
+    const m = /^([+-])?(\d*)(?:\.(\d*))?$/.exec(s);
+    if (!m) {
+        return { ok: false, error: 'Invalid amount (use a decimal number, no scientific notation).' };
+    }
+
+    const signChar = m[1] || '';
+    const intPart = m[2] || '';
+    const fracPart = m[3] || '';
+    const hasAnyDigits = /[0-9]/.test(intPart) || /[0-9]/.test(fracPart);
+    if (!hasAnyDigits) {
+        return { ok: false, error: 'Invalid amount.' };
+    }
+
+    if (fracPart.length > 7) {
+        return { ok: false, error: 'Too many decimal places (max 7).' };
+    }
+
+    let intVal = 0n;
+    let fracVal = 0n;
+    try {
+        intVal = intPart ? BigInt(intPart) : 0n;
+        fracVal = fracPart ? BigInt(fracPart.padEnd(7, '0')) : 0n;
+    } catch {
+        return { ok: false, error: 'Invalid amount.' };
+    }
+
+    const abs = intVal * STROOPS_PER_XLM + fracVal;
+    const isNegative = signChar === '-';
+    if (isNegative && !allowNegative && abs !== 0n) {
+        return { ok: false, error: 'Amount must be non-negative.' };
+    }
+
+    return { ok: true, value: isNegative ? -abs : abs };
+}
+
+function xlmToStroopsBigInt(xlm, opts) {
+    const res = tryParseXlmToStroopsBigInt(xlm, opts);
+    if (!res.ok) throw new Error(res.error);
+    return res.value;
 }
 
 function stroopsBigIntToXlmText(stroops) {
@@ -117,7 +160,7 @@ function collectNoteIds(containerId) {
 function collectOutputAmounts(containerId) {
     const out = [];
     document.querySelectorAll(`#${containerId} .output-amount`).forEach(input => {
-        out.push(xlmToStroopsBigInt(input.value));
+        out.push(xlmToStroopsBigInt(input.value, { allowNegative: false }));
     });
     while (out.length < N_OUTPUTS) out.push(0n);
     return out.slice(0, N_OUTPUTS);
@@ -191,15 +234,25 @@ function updateTransferBalance() {
 
     const inputsTotalStroops = sumInputNotesStroops('transfer-inputs');
     let outputsTotalStroops = 0n;
+    let outputsValid = true;
+    let outputsAnyNonEmpty = false;
     document.querySelectorAll('#transfer-outputs .output-amount').forEach(input => {
-        outputsTotalStroops += xlmToStroopsBigInt(input.value);
+        const raw = input.value;
+        if (raw && raw.trim()) outputsAnyNonEmpty = true;
+        const r = tryParseXlmToStroopsBigInt(raw, { allowNegative: false });
+        if (!r.ok) {
+            outputsValid = false;
+            return;
+        }
+        outputsTotalStroops += r.value;
     });
 
     eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
     eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
 
-    const shouldShow = inputsTotalStroops !== 0n || outputsTotalStroops !== 0n;
-    const isBalanced = inputsTotalStroops !== 0n && inputsTotalStroops === outputsTotalStroops;
+    const shouldShow = inputsTotalStroops !== 0n || outputsTotalStroops !== 0n || outputsAnyNonEmpty;
+    const isBalanced =
+        outputsValid && inputsTotalStroops !== 0n && inputsTotalStroops === outputsTotalStroops && shouldShow;
     setEqValidity(eq, isBalanced, shouldShow);
 }
 
@@ -211,19 +264,38 @@ function updateTransactBalance() {
     if (!eq || !inputsEl || !outputsEl || !amountEl) return;
 
     const inputsTotalStroops = sumInputNotesStroops('transact-inputs');
-    const publicStroops = xlmToStroopsBigInt(amountEl.value);
+    const publicRes = tryParseXlmToStroopsBigInt(amountEl.value, { allowNegative: true });
+    const publicValid = publicRes.ok;
+    const publicStroops = publicRes.ok ? publicRes.value : 0n;
     let outputsTotalStroops = 0n;
+    let outputsValid = true;
+    let outputsAnyNonEmpty = false;
     document.querySelectorAll('#transact-outputs .output-amount').forEach(input => {
-        outputsTotalStroops += xlmToStroopsBigInt(input.value);
+        const raw = input.value;
+        if (raw && raw.trim()) outputsAnyNonEmpty = true;
+        const r = tryParseXlmToStroopsBigInt(raw, { allowNegative: false });
+        if (!r.ok) {
+            outputsValid = false;
+            return;
+        }
+        outputsTotalStroops += r.value;
     });
 
-    const publicText = `${publicStroops >= 0n ? '+' : ''}${stroopsBigIntToXlmText(publicStroops)}`;
+    const publicText = publicValid
+        ? `${publicStroops >= 0n ? '+' : ''}${stroopsBigIntToXlmText(publicStroops)}`
+        : 'Invalid';
     eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
     eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicText}`;
     eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
 
-    const shouldShow = inputsTotalStroops !== 0n || publicStroops !== 0n || outputsTotalStroops !== 0n;
-    const isBalanced = inputsTotalStroops + publicStroops === outputsTotalStroops && shouldShow;
+    const publicAnyNonEmpty = !!(amountEl.value && amountEl.value.trim());
+    const shouldShow =
+        inputsTotalStroops !== 0n || publicStroops !== 0n || outputsTotalStroops !== 0n || outputsAnyNonEmpty || publicAnyNonEmpty;
+    const isBalanced =
+        publicValid &&
+        outputsValid &&
+        inputsTotalStroops + publicStroops === outputsTotalStroops &&
+        shouldShow;
     setEqValidity(eq, isBalanced, shouldShow);
 }
 
@@ -295,19 +367,43 @@ export const Transactions = {
         const btn = document.getElementById('btn-deposit');
 
         const updateBalance = () => {
-            const depositVal = parseFloat(amount?.value || '0') || 0;
-            let outputsTotal = 0;
-            document.querySelectorAll('#deposit-outputs .output-amount').forEach(input => {
-                outputsTotal += parseFloat(input.value) || 0;
-            });
             const eq = document.getElementById('deposit-balance');
             if (!eq) return false;
-            eq.querySelector('[data-eq="input"]').textContent = `Deposit: ${depositVal}`;
-            eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${outputsTotal}`;
 
-            const isBalanced = Math.abs(depositVal - outputsTotal) < 0.0000001 && depositVal > 0;
+            const depositRaw = amount?.value ?? '';
+            const depositRes = tryParseXlmToStroopsBigInt(depositRaw, { allowNegative: false });
+            const depositAnyNonEmpty = !!(depositRaw && String(depositRaw).trim());
+
+            let outputsTotalStroops = 0n;
+            let outputsValid = true;
+            let outputsAnyNonEmpty = false;
+            document.querySelectorAll('#deposit-outputs .output-amount').forEach(input => {
+                const raw = input.value;
+                if (raw && raw.trim()) outputsAnyNonEmpty = true;
+                const r = tryParseXlmToStroopsBigInt(raw, { allowNegative: false });
+                if (!r.ok) {
+                    outputsValid = false;
+                    return;
+                }
+                outputsTotalStroops += r.value;
+            });
+
+            eq.querySelector('[data-eq="input"]').textContent = `Deposit: ${
+                depositRes.ok ? stroopsBigIntToXlmText(depositRes.value) : 'Invalid'
+            }`;
+            eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${
+                outputsValid ? stroopsBigIntToXlmText(outputsTotalStroops) : 'Invalid'
+            }`;
+
+            const shouldShow = depositAnyNonEmpty || outputsAnyNonEmpty;
+            const isBalanced =
+                shouldShow &&
+                depositRes.ok &&
+                outputsValid &&
+                depositRes.value > 0n &&
+                depositRes.value === outputsTotalStroops;
             const status = eq.querySelector('[data-eq="status"]');
-            if (depositVal > 0 || outputsTotal > 0) {
+            if (shouldShow) {
                 if (isBalanced) {
                     status.innerHTML = '<svg class="w-5 h-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
                     eq.classList.remove('border-red-500/50', 'bg-red-500/5');
@@ -350,7 +446,7 @@ export const Transactions = {
 
                 const userAddress = App.state.wallet.address;
                 const membershipBlinding = parseMembershipBlinding('deposit-membership-blinding');
-                const amountStroops = xlmToStroopsBigInt(amount.value);
+                const amountStroops = xlmToStroopsBigInt(amount.value, { allowNegative: false });
                 const outputAmounts = collectOutputAmounts('deposit-outputs');
 
                 setLoading(btn, 'Validating…');
@@ -547,7 +643,7 @@ export const Transactions = {
                 requireWalletReady();
                 const userAddress = App.state.wallet.address;
                 const membershipBlinding = parseMembershipBlinding('transact-membership-blinding');
-                const extAmountStroops = xlmToStroopsBigInt(amount.value);
+                const extAmountStroops = xlmToStroopsBigInt(amount.value, { allowNegative: true });
                 const extRecipient = document.getElementById('transact-recipient')?.value?.trim() || userAddress;
                 if (extAmountStroops < 0n && !extRecipient) {
                     throw new Error('Withdrawal recipient is required when public amount is negative');
