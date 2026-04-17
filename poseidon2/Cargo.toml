@@ -7,7 +7,7 @@ authors = [
 ]
 description = "Rust implementations of Poseidon2 and similar arithmetization-oriented primitives"
 edition = "2018"
-license = "Apache-2.0"
+license = "Apache-2.0 OR MIT"
 
 [features]
 default = []

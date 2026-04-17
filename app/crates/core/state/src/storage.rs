@@ -449,7 +449,7 @@ impl Storage {
                 let amount_u64: u64 = amount_i64
                     .try_into()
                     .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, amount_i64))?;
-                let amount = NoteAmount(amount_u64);
+                let amount = NoteAmount::from(amount_u64);
                 let blinding: Field = row.get(1)?;
                 let leaf_index_i64: i64 = row.get(2)?;
                 let leaf_index = col_u32(leaf_index_i64, 2)?;
@@ -1073,7 +1073,7 @@ mod tests {
         )?;
 
         // Build a commitment + encrypted output addressed to the account.
-        let amount = NoteAmount(5);
+        let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
         blinding_le[0] = 7;
         let blinding = Field::try_from_le_bytes(blinding_le)?;

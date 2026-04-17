@@ -146,7 +146,6 @@ impl StateFetcher {
         let merkle_root = merkle_root.map(Field::try_from_u256).transpose()?;
 
         let pool = PoolInfo {
-            success: true,
             ledger: latest_ledger,
             contract_id: self.config.pool.clone(),
             contract_type: "Privacy Pool".to_string(),
@@ -206,7 +205,6 @@ impl StateFetcher {
         let root = Field::try_from_u256(root_u256)?;
 
         let asp_membership = AspMembership {
-            success: true,
             ledger: latest_ledger,
             contract_id: self.config.asp_membership.clone(),
             contract_type: "ASP Membership".to_string(),
@@ -241,12 +239,11 @@ impl StateFetcher {
         )?)?;
         let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
         let asp_non_membership = AspNonMembership {
-            success: true,
             ledger: latest_ledger,
             contract_id: self.config.asp_non_membership.clone(),
             contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
             root: asp_nonmem_root,
-            is_empty: asp_nonmem_root.as_u256() == U256::from(0u64),
+            is_empty: asp_nonmem_root.is_zero(),
             admin: scval_to_address_string(get_state!(
                 asp_non_membership_state,
                 "Admin",
@@ -400,8 +397,7 @@ impl StateFetcher {
     }
 
     fn field_to_scval_u256(v: Field) -> xdr::ScVal {
-        let mut be = [0u8; 32];
-        v.as_u256().to_big_endian(&mut be);
+        let be = v.to_be_bytes();
 
         let hi_hi = u64::from_be_bytes(be[0..8].try_into().unwrap());
         let hi_lo = u64::from_be_bytes(be[8..16].try_into().unwrap());
@@ -496,7 +492,6 @@ impl StateFetcher {
         )?;
 
         let data = ContractsStateData {
-            success: true,
             network: "testnet".to_string(),
             pool,
             asp_membership,

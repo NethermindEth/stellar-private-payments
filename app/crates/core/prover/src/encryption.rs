@@ -230,7 +230,7 @@ pub fn decrypt_output_note(
 
     let mut amount_le = [0u8; 8];
     amount_le.copy_from_slice(&plaintext[..8]);
-    let amount = NoteAmount(u64::from_le_bytes(amount_le));
+    let amount = NoteAmount::from(u64::from_le_bytes(amount_le));
 
     let mut blinding_le = [0u8; 32];
     blinding_le.copy_from_slice(&plaintext[8..]);
@@ -449,7 +449,7 @@ mod tests {
         let recipient_sig = EncryptionSignature(vec![9u8; 64]);
         let recip_keys = derive_keypair_from_signature(recipient_sig)?;
 
-        let amount = NoteAmount(42);
+        let amount = NoteAmount::from(42);
         let mut blind_le = [0u8; 32];
         blind_le[0] = 1;
         let blinding = Field::try_from_le_bytes(blind_le)?;

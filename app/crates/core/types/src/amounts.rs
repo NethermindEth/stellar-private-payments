@@ -11,6 +11,7 @@ use core::{
     str::FromStr,
 };
 
+use crate::{encode_0x_hex, parse_0x_hex_32};
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
@@ -44,7 +45,7 @@ fn bn254_modulus_u256() -> U256 {
 /// This is always non-negative and is currently constrained to what fits in the
 /// encrypted note plaintext format (u64, stored as 8 little-endian bytes).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NoteAmount(pub u64);
+pub struct NoteAmount(u64);
 
 impl NoteAmount {
     /// Maximum representable note amount (stored as `u64` stroops internally).
@@ -175,18 +176,13 @@ impl<'de> Deserialize<'de> for NoteAmount {
 /// - Withdraw: `ext_amount < 0`
 /// - Transfer: `ext_amount = 0`
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct ExtAmount(pub i128);
+pub struct ExtAmount(i128);
 
 impl ExtAmount {
     /// Unit amount.
     pub const ONE: ExtAmount = ExtAmount(1);
     /// Zero amount.
     pub const ZERO: ExtAmount = ExtAmount(0);
-
-    /// Returns the underlying signed stroops value.
-    pub const fn as_i128(self) -> i128 {
-        self.0
-    }
 
     /// Returns true if this amount is zero.
     pub const fn is_zero(self) -> bool {
@@ -324,11 +320,6 @@ impl Field {
         self == Field::ZERO
     }
 
-    /// Returns the underlying integer representation.
-    pub const fn as_u256(self) -> U256 {
-        self.0
-    }
-
     /// Converts this field element to 32-byte big-endian representation.
     pub fn to_be_bytes(self) -> [u8; 32] {
         let mut out = [0u8; 32];
@@ -372,25 +363,12 @@ impl Field {
 
     /// Parses a `0x`-prefixed 64-hex string into a [`Field`] as **raw
     /// little-endian bytes**.
-    ///
-    /// Repository convention: hex strings represent bytes "as-is" (no
-    /// reversal).
     pub fn from_0x_hex_le_bytes(s: &str) -> Result<Self> {
         let le = parse_0x_hex_32(s)?;
         Field::try_from_le_bytes(le)
     }
 
-    /// Returns this field element as a `0x`-prefixed 64-hex string of its
-    /// **little-endian bytes**.
-    ///
-    /// Repository convention: hex strings represent bytes "as-is" (no
-    /// reversal).
-    pub fn to_0x_hex_le_bytes(self) -> String {
-        let le = self.to_le_bytes();
-        encode_0x_hex(&le)
-    }
-
-    /// Legacy: Parses a `0x`-prefixed 64-hex string into a [`Field`]
+    /// Parses a `0x`-prefixed 64-hex string into a [`Field`]
     /// (big-endian integer).
     pub fn from_0x_hex_be(s: &str) -> Result<Self> {
         let be = parse_0x_hex_32(s)?;
@@ -427,7 +405,7 @@ impl FromStr for Field {
 }
 
 impl Serialize for Field {
-    /// Serialize as a `0x`-prefixed 64-hex string of **little-endian bytes**.
+    /// Serialize as a `0x`-prefixed 64-hex string of **big-endian bytes**.
     fn serialize<S: Serializer>(&self, serializer: S) -> core::result::Result<S::Ok, S::Error> {
         serializer.serialize_str(&self.to_0x_hex_be())
     }
@@ -511,41 +489,6 @@ impl SubAssign for Field {
     }
 }
 
-fn encode_0x_hex(bytes: &[u8; 32]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(2 + 64);
-    out.push_str("0x");
-    for &b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
-    }
-    out
-}
-
-fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
-    let s = s.strip_prefix("0x").unwrap_or(s);
-    if s.len() != 64 {
-        return Err(anyhow!("expected 64 hex chars, got {}", s.len()));
-    }
-    let mut out = [0u8; 32];
-    let bytes = s.as_bytes();
-    for i in 0..32 {
-        let hi = from_hex_nibble(bytes[i * 2])?;
-        let lo = from_hex_nibble(bytes[i * 2 + 1])?;
-        out[i] = (hi << 4) | lo;
-    }
-    Ok(out)
-}
-
-fn from_hex_nibble(b: u8) -> Result<u8> {
-    match b {
-        b'0'..=b'9' => Ok(b - b'0'),
-        b'a'..=b'f' => Ok(10 + (b - b'a')),
-        b'A'..=b'F' => Ok(10 + (b - b'A')),
-        _ => Err(anyhow!("invalid hex character")),
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -618,13 +561,13 @@ mod tests {
     #[test]
     fn ext_amount_zero_min_max() -> Result<()> {
         let z = ExtAmount(0);
-        assert_eq!(z.as_i128(), 0);
+        assert_eq!(z.0, 0);
         assert_eq!(z.to_string(), "0");
 
         let min = ExtAmount(i128::MIN);
         let max = ExtAmount(i128::MAX);
-        assert_eq!(min.as_i128(), i128::MIN);
-        assert_eq!(max.as_i128(), i128::MAX);
+        assert_eq!(min.0, i128::MIN);
+        assert_eq!(max.0, i128::MAX);
 
         // checked arithmetic corner cases
         assert_eq!(max.checked_add(ExtAmount(1)), None);

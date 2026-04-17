@@ -562,8 +562,6 @@ where
         "publicAmount",
         &field_bytes_to_hex(&public_amount_field_le)?,
     );
-    // `extDataHash` is injected later (after building `ExtData`) by the calling
-    // layer.
 
     // Input notes: compute commitments/signatures/nullifiers.
     let priv_key_hex = field_bytes_to_hex(&priv_key.0)?;
@@ -856,9 +854,9 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
-                amount_stroops: ExtAmount::from(NoteAmount(10)),
+                amount_stroops: ExtAmount::from(10),
                 outputs: vec![TransactOutput {
-                    amount_stroops: NoteAmount(10),
+                    amount_stroops: NoteAmount::from(10),
                     blinding: out_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
@@ -909,7 +907,7 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: NoteAmount(10),
+            amount_stroops: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
             merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
             merkle_path_indices: [0u8; 32],
@@ -921,7 +919,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 withdraw_recipient: "G...".into(),
-                withdraw_amount_stroops: ExtAmount::from(NoteAmount(7)),
+                withdraw_amount_stroops: ExtAmount::from(NoteAmount::from(7)),
                 inputs: vec![input],
                 outputs: None,
                 membership_proof: zero_membership(tree_depth_usize),
@@ -956,13 +954,13 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: NoteAmount(10),
+            amount_stroops: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
             merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
             merkle_path_indices: [0u8; 32],
         };
         let out = TransactOutput {
-            amount_stroops: NoteAmount(9), // unbalanced
+            amount_stroops: NoteAmount::from(9), // unbalanced
             blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
@@ -1017,7 +1015,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 withdraw_recipient: "G...".into(),
-                withdraw_amount_stroops: ExtAmount::from(NoteAmount(1)),
+                withdraw_amount_stroops: ExtAmount::ONE,
                 inputs: vec![input0, input1],
                 outputs: None,
                 membership_proof: zero_membership(tree_depth_usize),

@@ -179,7 +179,7 @@ impl WebClient {
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
 
         let amount_stroops = parse_ext_amount_decimal(&amount_stroops)?;
-        if amount_stroops.as_i128() <= 0 {
+        if amount_stroops <= ExtAmount::ZERO {
             return Err(JsError::new("amount_stroops must be > 0 for deposit"));
         }
 
@@ -1263,13 +1263,7 @@ fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
 }
 
 fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
-    let s = s.trim();
-    let prefixed = if s.starts_with("0x") || s.starts_with("0X") {
-        s.to_string()
-    } else {
-        format!("0x{s}")
-    };
-    Field::from_str(&prefixed).map_err(|e| JsError::new(&e.to_string()))
+    Field::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn parse_u32_decimal(s: &str) -> Result<u32, String> {

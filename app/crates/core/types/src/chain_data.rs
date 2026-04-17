@@ -5,15 +5,14 @@ use serde::{Deserialize, Serialize};
 ///
 /// Used by key wrapper types in `crate::lib` via `#[serde(with = "...")]`.
 pub(crate) mod serde_0x_hex_32 {
+    use crate::{encode_0x_hex, parse_0x_hex_32};
     use serde::{Deserialize, Deserializer, Serializer};
 
     pub fn serialize<S>(bytes: &[u8; 32], serializer: S) -> core::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        let mut out = String::with_capacity(2 + 64);
-        out.push_str("0x");
-        out.push_str(&hex::encode(bytes));
+        let out = encode_0x_hex(bytes);
         serializer.serialize_str(&out)
     }
 
@@ -22,16 +21,7 @@ pub(crate) mod serde_0x_hex_32 {
         D: Deserializer<'de>,
     {
         let s = String::deserialize(deserializer)?;
-        let s = s.strip_prefix("0x").unwrap_or(&s);
-        if s.len() != 64 {
-            return Err(serde::de::Error::custom(format!(
-                "expected 64 hex chars, got {}",
-                s.len()
-            )));
-        }
-
-        let mut out = [0u8; 32];
-        hex::decode_to_slice(s, &mut out).map_err(serde::de::Error::custom)?;
+        let out = parse_0x_hex_32(&s).map_err(serde::de::Error::custom)?;
         Ok(out)
     }
 }
@@ -39,7 +29,6 @@ pub(crate) mod serde_0x_hex_32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractsStateData {
-    pub success: bool,
     pub network: String,
     pub pool: PoolInfo,
     pub asp_membership: AspMembership,
@@ -49,7 +38,6 @@ pub struct ContractsStateData {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PoolInfo {
-    pub success: bool,
     /// Network tip (latest ledger observed by the RPC call used to fetch this
     /// state).
     pub ledger: u32,
@@ -72,7 +60,6 @@ pub struct PoolInfo {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AspMembership {
-    pub success: bool,
     /// Network tip (latest ledger observed by the RPC call used to fetch this
     /// state).
     pub ledger: u32,
@@ -90,7 +77,6 @@ pub struct AspMembership {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AspNonMembership {
-    pub success: bool,
     /// Network tip (latest ledger observed by the RPC call used to fetch this
     /// state).
     pub ledger: u32,

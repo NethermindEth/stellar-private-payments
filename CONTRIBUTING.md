@@ -25,6 +25,7 @@ stellar-private-payments/
 │   ├── js/                     # JavaScript frontend code (web interface)
 │   │   ├── ui/                 # UI components
 │   │   ├── admin.js            # Admin UI entry
+│   │   ├── stellar.js          # Stellar helpers
 │   │   ├── ui.js               # Main UI entry
 │   │   ├── wallet.js           # Freighter wallet integration
 │   │   └── wasm-facade.js      # Thin wrapper over WASM exports

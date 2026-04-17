@@ -147,41 +147,50 @@ pub struct NotePrivateKey(pub [u8; 32]);
 #[derive(Debug, Clone)]
 pub struct NotePublicKey(pub [u8; 32]);
 
-fn parse_hex_32_bytes(s: &str) -> Result<[u8; 32]> {
-    let s = s.trim().strip_prefix("0x").unwrap_or(s.trim());
+pub fn encode_0x_hex(bytes: &[u8; 32]) -> String {
+    let mut out = String::with_capacity(2 + 64);
+    out.push_str("0x");
+    out.push_str(&hex::encode(bytes));
+    out
+}
+
+pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
+    let s = s.strip_prefix("0x").unwrap_or(&s);
     if s.len() != 64 {
         return Err(anyhow!("expected 64 hex chars, got {}", s.len()));
     }
+
     let mut out = [0u8; 32];
-    hex::decode_to_slice(s, &mut out).map_err(|e| anyhow!(e))?;
+    hex::decode_to_slice(s, &mut out)
+        .map_err(|e| anyhow!("cannot decode hex `{s}` to 32 bytes: {e}"))?;
     Ok(out)
 }
 
 impl EncryptionPublicKey {
     /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_hex_32_bytes(s)?))
+        Ok(Self(parse_0x_hex_32(s)?))
     }
 }
 
 impl EncryptionPrivateKey {
     /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_hex_32_bytes(s)?))
+        Ok(Self(parse_0x_hex_32(s)?))
     }
 }
 
 impl NotePublicKey {
     /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_hex_32_bytes(s)?))
+        Ok(Self(parse_0x_hex_32(s)?))
     }
 }
 
 impl NotePrivateKey {
     /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
     pub fn parse(s: &str) -> Result<Self> {
-        Ok(Self(parse_hex_32_bytes(s)?))
+        Ok(Self(parse_0x_hex_32(s)?))
     }
 }
 

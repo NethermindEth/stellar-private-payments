@@ -19,7 +19,7 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
             "encrypted_output1",
             ScVal::Bytes(ext.encrypted_output1.clone().try_into()?),
         ),
-        ("ext_amount", i128_to_i256_scval(ext.ext_amount.as_i128())),
+        ("ext_amount", i128_to_i256_scval(ext.ext_amount.into())),
         (
             "recipient",
             ScVal::Address(ext.recipient.parse::<ScAddress>()?),
