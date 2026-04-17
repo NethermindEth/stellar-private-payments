@@ -1263,7 +1263,7 @@ fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
 }
 
 fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
-    Field::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
+    Field::from_str(s).map_err(|e| JsError::new(&e.to_string()))
 }
 
 fn parse_u32_decimal(s: &str) -> Result<u32, String> {
