@@ -556,12 +556,9 @@ where
     let mut circuit = CircuitInputs::new();
 
     // Public inputs.
-    circuit.set_single("root", &field_bytes_to_hex(&pool_root.to_le_bytes())?);
+    circuit.set_single("root", &field_to_circuit_hex(pool_root)?);
     let public_amount_field_le = Field::try_from(ext_amount)?.to_le_bytes();
-    circuit.set_single(
-        "publicAmount",
-        &field_bytes_to_hex(&public_amount_field_le)?,
-    );
+    circuit.set_single("publicAmount", &ext_amount_to_circuit_hex(ext_amount)?);
 
     // Input notes: compute commitments/signatures/nullifiers.
     let priv_key_hex = field_bytes_to_hex(&priv_key.0)?;
@@ -579,10 +576,11 @@ where
     let mut input_nullifiers_bytes: [[u8; 32]; N_INPUTS] = [[0u8; 32]; N_INPUTS];
 
     for (idx, inp) in input_slots.iter().enumerate() {
-        let amount_field = note_amount_to_field_le(inp.amount_stroops);
+        let amount_field = note_amount_to_field(inp.amount_stroops);
+        let amount_field_le = amount_field.to_le_bytes();
         let inp_blinding_le = inp.blinding.to_le_bytes();
         let commitment =
-            crypto::compute_commitment(&amount_field, &sender_note_pubkey, &inp_blinding_le)?;
+            crypto::compute_commitment(&amount_field_le, &sender_note_pubkey, &inp_blinding_le)?;
         let signature =
             crypto::compute_signature(&priv_key.0, &commitment, &inp.merkle_path_indices)?;
         let nullifier =
@@ -594,7 +592,7 @@ where
         input_nullifiers_bytes[idx] = nullifier_arr;
 
         input_nullifiers_hex.push(field_bytes_to_hex(&nullifier_arr)?);
-        in_amount_hex.push(field_bytes_to_hex(&amount_field)?);
+        in_amount_hex.push(field_to_circuit_hex(amount_field)?);
         in_priv_hex.push(priv_key_hex.clone());
         in_blinding_hex.push(field_bytes_to_hex(&inp_blinding_le)?);
         in_path_indices_hex.push(field_bytes_to_hex(&inp.merkle_path_indices)?);
@@ -623,10 +621,11 @@ where
             .clone()
             .unwrap_or_else(|| encryption_pubkey.clone());
 
-        let amount_field = note_amount_to_field_le(out.amount_stroops);
+        let amount_field = note_amount_to_field(out.amount_stroops);
+        let amount_field_le = amount_field.to_le_bytes();
         let out_blinding_le = out.blinding.to_le_bytes();
         let commitment =
-            crypto::compute_commitment(&amount_field, &recipient_note_pubkey, &out_blinding_le)?;
+            crypto::compute_commitment(&amount_field_le, &recipient_note_pubkey, &out_blinding_le)?;
         let commitment_arr: [u8; 32] = commitment
             .try_into()
             .map_err(|v: Vec<u8>| anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
@@ -639,7 +638,7 @@ where
         )?;
         encrypted_outputs[idx] = enc;
 
-        out_amount_hex.push(field_bytes_to_hex(&amount_field)?);
+        out_amount_hex.push(field_to_circuit_hex(amount_field)?);
         out_pubkey_hex.push(field_bytes_to_hex(&recipient_note_pubkey)?);
         out_blinding_hex.push(field_bytes_to_hex(&out_blinding_le)?);
         output_commitments_hex.push(field_bytes_to_hex(&commitment_arr)?);
@@ -662,8 +661,8 @@ where
     circuit.set_array("outBlinding", out_blinding_hex);
 
     // ASP roots arrays (flattened).
-    let membership_root_hex = field_bytes_to_hex(&membership_proof.root.to_le_bytes())?;
-    let non_membership_root_hex = field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?;
+    let membership_root_hex = field_to_circuit_hex(membership_proof.root)?;
+    let non_membership_root_hex = field_to_circuit_hex(non_membership_proof.root)?;
     circuit.set_array(
         "membershipRoots",
         vec![membership_root_hex.clone(), membership_root_hex.clone()],
@@ -682,48 +681,48 @@ where
         let prefix_m = format!("membershipProofs[{}][0].", slot);
         circuit.set_single(
             &format!("{prefix_m}leaf"),
-            &field_bytes_to_hex(&membership_proof.leaf.to_le_bytes())?,
+            &field_to_circuit_hex(membership_proof.leaf)?,
         );
         circuit.set_single(
             &format!("{prefix_m}blinding"),
-            &field_bytes_to_hex(&membership_proof.blinding.to_le_bytes())?,
+            &field_to_circuit_hex(membership_proof.blinding)?,
         );
         circuit.set_single(
             &format!("{prefix_m}pathIndices"),
-            &field_bytes_to_hex(&membership_proof.path_indices.to_le_bytes())?,
+            &field_to_circuit_hex(membership_proof.path_indices)?,
         );
         circuit.set_array(
             &format!("{prefix_m}pathElements"),
             membership_proof
                 .path_elements
                 .iter()
-                .map(|e| field_bytes_to_hex(&e.to_le_bytes()))
+                .map(|e| field_to_circuit_hex(*e))
                 .collect::<Result<Vec<_>>>()?,
         );
         circuit.set_single(
             &format!("{prefix_m}root"),
-            &field_bytes_to_hex(&membership_proof.root.to_le_bytes())?,
+            &field_to_circuit_hex(membership_proof.root)?,
         );
 
         let prefix_n = format!("nonMembershipProofs[{}][0].", slot);
         circuit.set_single(
             &format!("{prefix_n}key"),
-            &field_bytes_to_hex(&non_membership_proof.key.to_le_bytes())?,
+            &field_to_circuit_hex(non_membership_proof.key)?,
         );
         circuit.set_single(
             &format!("{prefix_n}oldKey"),
-            &field_bytes_to_hex(&non_membership_proof.old_key.to_le_bytes())?,
+            &field_to_circuit_hex(non_membership_proof.old_key)?,
         );
         circuit.set_single(
             &format!("{prefix_n}oldValue"),
-            &field_bytes_to_hex(&non_membership_proof.old_value.to_le_bytes())?,
+            &field_to_circuit_hex(non_membership_proof.old_value)?,
         );
         circuit.set_single(
             &format!("{prefix_n}isOld0"),
-            &field_bytes_to_hex(&if non_membership_proof.is_old0 {
-                Field::from(NoteAmount::ONE).to_le_bytes()
+            &field_to_circuit_hex(if non_membership_proof.is_old0 {
+                Field::from(NoteAmount::ONE)
             } else {
-                Field::ZERO.to_le_bytes()
+                Field::ZERO
             })?,
         );
         circuit.set_array(
@@ -731,12 +730,12 @@ where
             non_membership_proof
                 .siblings
                 .iter()
-                .map(|s| field_bytes_to_hex(&s.to_le_bytes()))
+                .map(|s| field_to_circuit_hex(*s))
                 .collect::<Result<Vec<_>>>()?,
         );
         circuit.set_single(
             &format!("{prefix_n}root"),
-            &field_bytes_to_hex(&non_membership_proof.root.to_le_bytes())?,
+            &field_to_circuit_hex(non_membership_proof.root)?,
         );
     }
 
@@ -776,8 +775,17 @@ fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
     })
 }
 
-fn note_amount_to_field_le(amount: NoteAmount) -> [u8; 32] {
-    Field::from(amount).to_le_bytes()
+fn note_amount_to_field(amount: NoteAmount) -> Field {
+    Field::from(amount)
+}
+
+fn field_to_circuit_hex(field: Field) -> Result<String> {
+    field_bytes_to_hex(&field.to_le_bytes())
+}
+
+fn ext_amount_to_circuit_hex(amount: ExtAmount) -> Result<String> {
+    let field = Field::try_from(amount)?;
+    field_to_circuit_hex(field)
 }
 
 // Note: `ExtAmount -> Field` conversion happens via
