@@ -636,6 +636,11 @@ fn build_pool_inputs(
             })?;
 
         let (path_elements, path_indices) = tree.proof_bytes(leaf_index)?;
+        let path_elements = path_elements
+            .into_iter()
+            .map(types::Field::try_from_le_bytes)
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        let path_indices = types::Field::try_from_le_bytes(path_indices)?;
 
         out.push(TransactInputNote {
             amount_stroops: amount,

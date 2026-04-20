@@ -33,11 +33,11 @@ pub struct TransactInputNote {
     pub amount_stroops: NoteAmount,
     /// Note blinding factor as a BN254 scalar field element.
     pub blinding: Field,
-    /// Merkle proof sibling hashes as BN254 scalars (little-endian field
-    /// bytes), one element per tree level.
-    pub merkle_path_elements: Vec<[u8; 32]>,
-    /// Merkle path indices packed into a scalar (little-endian field bytes).
-    pub merkle_path_indices: [u8; 32],
+    /// Merkle proof sibling hashes as BN254 field elements, one element per
+    /// tree level.
+    pub merkle_path_elements: Vec<Field>,
+    /// Merkle path indices packed into a BN254 field element.
+    pub merkle_path_indices: Field,
 }
 
 /// Output note specification for a pool transaction.
@@ -77,21 +77,19 @@ pub struct PreparedTx {
     ///
     /// For witness/public-input encoding, use `pool_root.to_le_bytes()`.
     pub pool_root: Field,
-    /// Computed nullifiers for both input slots (little-endian field bytes).
-    pub input_nullifiers: [[u8; 32]; N_INPUTS],
-    /// Computed commitments for both output slots (little-endian field bytes).
-    pub output_commitments: [[u8; 32]; N_OUTPUTS],
-    /// Field element representation of ext_amount (LE bytes).
-    pub public_amount_field: [u8; 32],
+    /// Computed nullifiers for both input slots.
+    pub input_nullifiers: [Field; N_INPUTS],
+    /// Computed commitments for both output slots.
+    pub output_commitments: [Field; N_OUTPUTS],
+    /// Field element representation of ext_amount.
+    pub public_amount_field: Field,
     /// Hash of extData used by both circuit and contract checks (32-byte
     /// big-endian).
     pub ext_data_hash_be: [u8; 32],
-    /// ASP membership root used for the circuit public inputs (little-endian
-    /// field bytes).
-    pub asp_membership_root: [u8; 32],
-    /// ASP non-membership root used for the circuit public inputs
-    /// (little-endian field bytes).
-    pub asp_non_membership_root: [u8; 32],
+    /// ASP membership root used for the circuit public inputs.
+    pub asp_membership_root: Field,
+    /// ASP non-membership root used for the circuit public inputs.
+    pub asp_non_membership_root: Field,
 }
 
 /// Full output of `transact()` and the wrapper flows.
@@ -557,7 +555,7 @@ where
 
     // Public inputs.
     circuit.set_single("root", &field_to_circuit_hex(pool_root)?);
-    let public_amount_field_le = Field::try_from(ext_amount)?.to_le_bytes();
+    let public_amount_field = Field::try_from(ext_amount)?;
     circuit.set_single("publicAmount", &ext_amount_to_circuit_hex(ext_amount)?);
 
     // Input notes: compute commitments/signatures/nullifiers.
@@ -573,31 +571,31 @@ where
         .ok_or_else(|| anyhow!("path elements capacity overflow"))?;
     let mut in_path_elements_hex: Vec<String> = Vec::with_capacity(in_path_elements_capacity);
 
-    let mut input_nullifiers_bytes: [[u8; 32]; N_INPUTS] = [[0u8; 32]; N_INPUTS];
+    let mut input_nullifiers_fields: [Field; N_INPUTS] = [Field::ZERO; N_INPUTS];
 
     for (idx, inp) in input_slots.iter().enumerate() {
         let amount_field = note_amount_to_field(inp.amount_stroops);
         let amount_field_le = amount_field.to_le_bytes();
         let inp_blinding_le = inp.blinding.to_le_bytes();
+        let merkle_path_indices = inp.merkle_path_indices.to_le_bytes();
         let commitment =
             crypto::compute_commitment(&amount_field_le, &sender_note_pubkey, &inp_blinding_le)?;
-        let signature =
-            crypto::compute_signature(&priv_key.0, &commitment, &inp.merkle_path_indices)?;
-        let nullifier =
-            crypto::compute_nullifier(&commitment, &inp.merkle_path_indices, &signature)?;
+        let signature = crypto::compute_signature(&priv_key.0, &commitment, &merkle_path_indices)?;
+        let nullifier = crypto::compute_nullifier(&commitment, &merkle_path_indices, &signature)?;
 
         let nullifier_arr: [u8; 32] = nullifier
             .try_into()
             .map_err(|v: Vec<u8>| anyhow!("nullifier: expected 32 bytes, got {}", v.len()))?;
-        input_nullifiers_bytes[idx] = nullifier_arr;
+        let nullifier_field = Field::try_from_le_bytes(nullifier_arr)?;
+        input_nullifiers_fields[idx] = nullifier_field;
 
-        input_nullifiers_hex.push(field_bytes_to_hex(&nullifier_arr)?);
+        input_nullifiers_hex.push(field_to_circuit_hex(nullifier_field)?);
         in_amount_hex.push(field_to_circuit_hex(amount_field)?);
         in_priv_hex.push(priv_key_hex.clone());
         in_blinding_hex.push(field_bytes_to_hex(&inp_blinding_le)?);
-        in_path_indices_hex.push(field_bytes_to_hex(&inp.merkle_path_indices)?);
+        in_path_indices_hex.push(field_to_circuit_hex(inp.merkle_path_indices)?);
         for pe in &inp.merkle_path_elements {
-            in_path_elements_hex.push(field_bytes_to_hex(pe)?);
+            in_path_elements_hex.push(field_to_circuit_hex(*pe)?);
         }
     }
 
@@ -607,7 +605,7 @@ where
     let mut out_blinding_hex: Vec<String> = Vec::with_capacity(N_OUTPUTS);
     let mut output_commitments_hex: Vec<String> = Vec::with_capacity(N_OUTPUTS);
 
-    let mut output_commitments_bytes: [[u8; 32]; N_OUTPUTS] = [[0u8; 32]; N_OUTPUTS];
+    let mut output_commitments_fields: [Field; N_OUTPUTS] = [Field::ZERO; N_OUTPUTS];
     let mut encrypted_outputs: [Vec<u8>; N_OUTPUTS] = [Vec::new(), Vec::new()];
 
     for (idx, out) in output_slots.iter().enumerate() {
@@ -629,7 +627,8 @@ where
         let commitment_arr: [u8; 32] = commitment
             .try_into()
             .map_err(|v: Vec<u8>| anyhow!("commitment: expected 32 bytes, got {}", v.len()))?;
-        output_commitments_bytes[idx] = commitment_arr;
+        let commitment_field = Field::try_from_le_bytes(commitment_arr)?;
+        output_commitments_fields[idx] = commitment_field;
 
         let enc = encryption::encrypt_output_note(
             &recipient_enc_pubkey,
@@ -641,7 +640,7 @@ where
         out_amount_hex.push(field_to_circuit_hex(amount_field)?);
         out_pubkey_hex.push(field_bytes_to_hex(&recipient_note_pubkey)?);
         out_blinding_hex.push(field_bytes_to_hex(&out_blinding_le)?);
-        output_commitments_hex.push(field_bytes_to_hex(&commitment_arr)?);
+        output_commitments_hex.push(field_to_circuit_hex(commitment_field)?);
     }
 
     // Wire public arrays.
@@ -755,12 +754,12 @@ where
         ext_data,
         prepared: PreparedTx {
             pool_root,
-            input_nullifiers: input_nullifiers_bytes,
-            output_commitments: output_commitments_bytes,
-            public_amount_field: public_amount_field_le,
+            input_nullifiers: input_nullifiers_fields,
+            output_commitments: output_commitments_fields,
+            public_amount_field,
             ext_data_hash_be,
-            asp_membership_root: membership_proof.root.to_le_bytes(),
-            asp_non_membership_root: non_membership_proof.root.to_le_bytes(),
+            asp_membership_root: membership_proof.root,
+            asp_non_membership_root: non_membership_proof.root,
         },
     })
 }
@@ -770,8 +769,8 @@ fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
     Ok(TransactInputNote {
         amount_stroops: NoteAmount::ZERO,
         blinding,
-        merkle_path_elements: vec![[0u8; 32]; tree_depth],
-        merkle_path_indices: [0u8; 32],
+        merkle_path_elements: vec![Field::ZERO; tree_depth],
+        merkle_path_indices: Field::ZERO,
     })
 }
 
@@ -917,8 +916,8 @@ mod tests {
         let input = TransactInputNote {
             amount_stroops: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
-            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
-            merkle_path_indices: [0u8; 32],
+            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
+            merkle_path_indices: Field::ZERO,
         };
 
         let artifacts = withdraw(
@@ -964,8 +963,8 @@ mod tests {
         let input = TransactInputNote {
             amount_stroops: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
-            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
-            merkle_path_indices: [0u8; 32],
+            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
+            merkle_path_indices: Field::ZERO,
         };
         let out = TransactOutput {
             amount_stroops: NoteAmount::from(9), // unbalanced
@@ -1006,14 +1005,14 @@ mod tests {
         let input0 = TransactInputNote {
             amount_stroops: NoteAmount::MAX,
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
-            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
-            merkle_path_indices: [0u8; 32],
+            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
+            merkle_path_indices: Field::ZERO,
         };
         let input1 = TransactInputNote {
             amount_stroops: NoteAmount::MAX,
             blinding: Field::try_from_le_bytes([5u8; 32]).expect("field"),
-            merkle_path_elements: vec![[0u8; 32]; tree_depth_usize],
-            merkle_path_indices: [0u8; 32],
+            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
+            merkle_path_indices: Field::ZERO,
         };
 
         // Withdraw a small amount so `change` is > NoteAmount::MAX.
