@@ -14,7 +14,7 @@ use zkhash::{ark_ff::PrimeField, fields::bn256::FpBN256 as Scalar};
 
 use crate::{
     crypto::{poseidon2_compression, poseidon2_hash2_internal},
-    serialization::{scalar_to_bytes},
+    serialization::scalar_to_bytes,
 };
 use types::Field;
 
