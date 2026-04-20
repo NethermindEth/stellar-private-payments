@@ -178,17 +178,11 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
         }
 
         let p = transact_artifacts.prepared.clone();
-        let input_nullifiers = [
-            types::Field::try_from_le_bytes(p.input_nullifiers[0])?,
-            types::Field::try_from_le_bytes(p.input_nullifiers[1])?,
-        ];
-        let output_commitments = [
-            types::Field::try_from_le_bytes(p.output_commitments[0])?,
-            types::Field::try_from_le_bytes(p.output_commitments[1])?,
-        ];
-        let public_amount = types::Field::try_from_le_bytes(p.public_amount_field)?;
-        let asp_membership_root = types::Field::try_from_le_bytes(p.asp_membership_root)?;
-        let asp_non_membership_root = types::Field::try_from_le_bytes(p.asp_non_membership_root)?;
+        let input_nullifiers = p.input_nullifiers;
+        let output_commitments = p.output_commitments;
+        let public_amount = p.public_amount_field;
+        let asp_membership_root = p.asp_membership_root;
+        let asp_non_membership_root = p.asp_non_membership_root;
 
         let prepared_public = PreparedTxPublic {
             pool_root: p.pool_root,
