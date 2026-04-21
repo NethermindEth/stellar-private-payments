@@ -49,8 +49,7 @@ stellar-private-payments/
 ├── e2e-tests/                  # End-to-end integration tests
 ├── poseidon2/                  # Poseidon2 hash implementation
 ├── scripts/                    # Deployment and utility scripts
-│   ├── deploy.sh               # Contract deployment script
-│   └── deployments.json        # Deployment output
+│   └── (moved to deployments/scripts/deploy.sh)
 ├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```
@@ -89,8 +88,8 @@ cargo build -p circuits
 
 The circuit crate also exposes 2 flags:
 - **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
-For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `scripts/testdata`, it will generate them.
-- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist. Should not generally be used, as it might cause issues with deployed contracts.
+For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
+- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash
@@ -107,14 +106,14 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package circom-groth16-verifier
 
 # Or use the deployment script which builds automatically
-./scripts/deploy.sh --help
+./deployments/scripts/deploy.sh --help
 ```
 
 ### Deploying Contracts
-You can use the script `scripts/deploy.sh` to deploy contracts to a Stellar network.
+You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a Stellar network.
 An example can be found in the _Demo Application_ section..
 
-See `./scripts/deploy.sh --help` for all options.
+See `./deployments/scripts/deploy.sh --help` for all options.
 
 
 ### End-to-End Tests

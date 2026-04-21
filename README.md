@@ -34,14 +34,14 @@ If you want to try it out:
 
 1. Deploy the contracts to a Stellar network:
     ```bash
-    ./scripts/deploy.sh <network> \                     # e.g. testnet
+    ./deployments/scripts/deploy.sh <network> \         # e.g. testnet
       --deployer <identity> \                           # Must be added in stellar-cli keys
       --asp-levels 10 \                                 # Number of levels in the ASP trees
       --pool-levels 10 \                                # Number of levels in the pool Merkle tree
       --max-deposit 1000000000 \                        # Maximum deposit amount (in Stroops)
-      --vk-file scripts/testdata/policy_test_vk.json # Verification key file
+      --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json # Verification key file
     ```
-   If you already have deployed contracts, make sure their addresses are updated in `scripts/deployments.json`.
+   If you already have deployed contracts, make sure their addresses are updated in `deployments/testnet/deployments.json`.
 
 2. Serve frontend
     ```bash

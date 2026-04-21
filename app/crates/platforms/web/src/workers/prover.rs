@@ -19,8 +19,9 @@ use witness::WitnessCalculator;
 const WORKER_NAME: &str = "WORKER-PROVER";
 
 // TODO make it dependent on the network during the compilation
-const PROVING_KEY: &[u8] =
-    include_bytes!("../../../../../../scripts/testdata/policy_tx_2_2_proving_key.bin");
+const PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
+);
 
 // TODO for now it is a mix of async (because we want an async bridge for the
 // main thread) and sync (blocking) code in the future we should refactor to use

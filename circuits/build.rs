@@ -13,7 +13,7 @@
 //!
 //! The script also generates Groth16 proving and verification
 //! keys for the main circuit (policy_tx_2_2) and outputs them to
-//! `scripts/testdata/`.
+//! `testdata/`.
 //!
 //! The output directory is exposed as en environment variable
 //! `std::env::var("CIRCUIT_OUT_DIR")`
@@ -64,7 +64,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
 
     // Rerun if testdata key files are missing or changed
-    let testdata_dir = crate_dir.join("../scripts/testdata");
+    let testdata_dir = crate_dir.join("../testdata");
     println!(
         "cargo:rerun-if-changed={}",
         testdata_dir.join("policy_tx_2_2_proving_key.bin").display()
@@ -912,9 +912,9 @@ fn generate_keys_if_needed(
     circuit_name: &str,
     r1cs_file: &Path,
 ) -> Result<bool> {
-    // Output keys to scripts/testdata/
-    let keys_dir = crate_dir.join("../scripts/testdata");
-    fs::create_dir_all(&keys_dir).context("Could not create scripts/testdata")?;
+    // Output keys to testdata/
+    let keys_dir = crate_dir.join("../testdata");
+    fs::create_dir_all(&keys_dir).context("Could not create testdata")?;
 
     let pk_path = keys_dir.join(format!("{circuit_name}_proving_key.bin"));
     let vk_path = keys_dir.join(format!("{circuit_name}_vk.json"));

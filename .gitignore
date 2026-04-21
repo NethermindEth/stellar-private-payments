@@ -43,8 +43,8 @@ app/e2e/.freighter-extension/
 app/e2e/test-results/
 app/e2e/playwright-report/
 
-# Scripts
-scripts/testdata/*
+# Testdata
+testdata/*
 
 # mdBook
 docs/book/
