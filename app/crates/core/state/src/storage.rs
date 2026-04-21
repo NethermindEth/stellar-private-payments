@@ -547,17 +547,21 @@ impl Storage {
     /// network tip.
     ///
     /// Returns:
-    /// - `Ok(Some(user_leaf_index))`  if:
-    ///   1) `user_leaf` is present in `asp_membership_leaves`, and
+    /// - `AspMembershipSync::UserIndex(user_leaf_index)` if:
+    ///   1) raw event ingestion is caught up to `current_ledger`,
     ///   2) `current_root` equals the last stored root in
-    ///      `asp_membership_leaves`, and
-    ///   3) `current_ledger` equals the last stored ledger in the DB.
-    /// - `Ok(None)` if the DB is behind the chain tip (`current_ledger` is
-    ///   ahead of the last stored ledger), meaning the caller should sync more
-    ///   events.
-    /// - `Err(_)` if `current_ledger == last_db_ledger` but the user leaf is
-    ///   missing, or if roots/ledgers are inconsistent (indicates corruption or
-    ///   mismatched networks).
+    ///      `asp_membership_leaves`,
+    ///   3) and `user_leaf` is present in `asp_membership_leaves`.
+    /// - `AspMembershipSync::RegisterAtASP` if the DB is caught up but either:
+    ///   1) no membership leaves have been observed yet, or
+    ///   2) the user leaf is not present.
+    /// - `AspMembershipSync::SyncRequired(Some(gap))` if:
+    ///   1) the indexer is behind the chain tip, or
+    ///   2) raw events are caught up but ASP membership leaf processing is
+    ///      behind (root mismatch where the last stored leaf is from an earlier
+    ///      ledger).
+    /// - `Err(_)` if local metadata is ahead of the chain tip or if the root is
+    ///   inconsistent at the same ledger (mismatched networks/corruption).
     pub fn check_asp_membership_precondition(
         &self,
         user_leaf: &Field,
@@ -584,25 +588,44 @@ impl Storage {
             );
         }
 
-        // Get the last stored root for the ASP membership tree.
+        // Get the last stored root for the ASP membership tree and the ledger
+        // that produced it. The ledger is derived by joining with the raw event
+        // log so we can distinguish:
+        // - "no new ASP events" (root matches, even if last leaf ledger < tip), vs
+        // - "partial processing" (raw events ingested to tip but leaves table lags).
         let mut stmt = self.conn.prepare(
-            "SELECT l.root
+            "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
              ORDER BY l.leaf_index DESC
              LIMIT 1",
         )?;
 
-        let last: Option<Field> = stmt
-            .query_row([], |row| row.get(0))
+        let last: Option<(Field, u32)> = stmt
+            .query_row([], |row| {
+                let root: Field = row.get(0)?;
+                let ledger_i64: i64 = row.get(1)?;
+                let ledger = col_u32(ledger_i64, 1)?;
+                Ok((root, ledger))
+            })
             .optional()
-            .context("Failed to query asp_membership_leaves last root")?;
+            .context("Failed to query asp_membership_leaves last root/ledger")?;
 
-        let Some(last_root) = last else {
+        let Some((last_root, last_leaf_ledger)) = last else {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
 
         // current_ledger == last_ledger: require root match and leaf existence.
         if *current_root != last_root {
+            // If the root at the chain tip doesn't match the last stored root
+            // but our last stored leaf is from an earlier ledger, we may have
+            // ingested raw events without yet processing them into
+            // asp_membership_leaves.
+            if last_leaf_ledger < current_ledger {
+                return Ok(AspMembershipSync::SyncRequired(Some(
+                    current_ledger - last_leaf_ledger,
+                )));
+            }
             anyhow::bail!("asp membership root mismatch at ledger {}", current_ledger);
         }
 
@@ -1010,8 +1033,8 @@ mod tests {
     use super::*;
     use prover::{crypto, encryption};
     use types::{
-        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature, NoteAmount,
-        NotePublicKey, PublicKeyEvent, SpendingSignature,
+        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature,
+        LeafAddedEvent, NoteAmount, NotePublicKey, PublicKeyEvent, SpendingSignature,
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -1259,6 +1282,168 @@ mod tests {
         )?;
         assert_eq!(count, 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn asp_membership_precondition_partial_processing_returns_sync_required() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let mut root_old_bytes = [0u8; 32];
+        root_old_bytes[0] = 1;
+        let root_old = Field::try_from_le_bytes(root_old_bytes)?;
+
+        let mut root_new_bytes = [0u8; 32];
+        root_new_bytes[0] = 2;
+        let root_new = Field::try_from_le_bytes(root_new_bytes)?;
+
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[0] = 3;
+        let leaf = Field::try_from_le_bytes(leaf_bytes)?;
+
+        let last_leaf_ledger = 10u32;
+        let current_ledger = 12u32;
+
+        // Ingest raw events (including a newer ASP event)...
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-raw".to_string(),
+            latest_ledger: 11,
+            events: vec![
+                ContractEvent {
+                    id: "asp-leaf-10".to_string(),
+                    ledger: last_leaf_ledger,
+                    contract_id: "CASP".to_string(),
+                    topics: vec!["leaf_added".to_string()],
+                    value: "dummy".to_string(),
+                },
+                ContractEvent {
+                    id: "asp-leaf-11-unprocessed".to_string(),
+                    ledger: 11,
+                    contract_id: "CASP".to_string(),
+                    topics: vec!["leaf_added".to_string()],
+                    value: "dummy".to_string(),
+                },
+            ],
+        })?;
+
+        // ...but only process the older one into asp_membership_leaves.
+        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
+            id: "asp-leaf-10".to_string(),
+            leaf,
+            index: 0,
+            root: root_old,
+        }])?;
+
+        // Mark the indexer as fully caught up to the chain tip (even though
+        // event processing is behind).
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-tip".to_string(),
+            latest_ledger: current_ledger,
+            events: vec![],
+        })?;
+
+        let status = storage.check_asp_membership_precondition(&leaf, &root_new, current_ledger)?;
+        assert!(matches!(
+            status,
+            AspMembershipSync::SyncRequired(Some(gap)) if gap == current_ledger - last_leaf_ledger
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn asp_membership_precondition_root_mismatch_at_same_ledger_errors() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let mut root_old_bytes = [0u8; 32];
+        root_old_bytes[0] = 1;
+        let root_old = Field::try_from_le_bytes(root_old_bytes)?;
+
+        let mut root_new_bytes = [0u8; 32];
+        root_new_bytes[0] = 2;
+        let root_new = Field::try_from_le_bytes(root_new_bytes)?;
+
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[0] = 3;
+        let leaf = Field::try_from_le_bytes(leaf_bytes)?;
+
+        let current_ledger = 10u32;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-raw".to_string(),
+            latest_ledger: current_ledger,
+            events: vec![ContractEvent {
+                id: "asp-leaf-10".to_string(),
+                ledger: current_ledger,
+                contract_id: "CASP".to_string(),
+                topics: vec!["leaf_added".to_string()],
+                value: "dummy".to_string(),
+            }],
+        })?;
+
+        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
+            id: "asp-leaf-10".to_string(),
+            leaf,
+            index: 0,
+            root: root_old,
+        }])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-tip".to_string(),
+            latest_ledger: current_ledger,
+            events: vec![],
+        })?;
+
+        let err = storage
+            .check_asp_membership_precondition(&leaf, &root_new, current_ledger)
+            .expect_err("root mismatch at same ledger should be an error");
+        assert!(err.to_string().contains("asp membership root mismatch"));
+        Ok(())
+    }
+
+    #[test]
+    fn asp_membership_precondition_allows_tip_without_recent_asp_events() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let mut root_bytes = [0u8; 32];
+        root_bytes[0] = 1;
+        let root = Field::try_from_le_bytes(root_bytes)?;
+
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[0] = 3;
+        let leaf = Field::try_from_le_bytes(leaf_bytes)?;
+
+        let last_leaf_ledger = 10u32;
+        let current_ledger = 12u32;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-raw".to_string(),
+            latest_ledger: last_leaf_ledger,
+            events: vec![ContractEvent {
+                id: "asp-leaf-10".to_string(),
+                ledger: last_leaf_ledger,
+                contract_id: "CASP".to_string(),
+                topics: vec!["leaf_added".to_string()],
+                value: "dummy".to_string(),
+            }],
+        })?;
+
+        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
+            id: "asp-leaf-10".to_string(),
+            leaf,
+            index: 0,
+            root,
+        }])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-tip".to_string(),
+            latest_ledger: current_ledger,
+            events: vec![],
+        })?;
+
+        // Root matches the last stored root: this should NOT require syncing
+        // even if the last ASP leaf was emitted earlier than the current tip.
+        let status = storage.check_asp_membership_precondition(&leaf, &root, current_ledger)?;
+        assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }
 }
