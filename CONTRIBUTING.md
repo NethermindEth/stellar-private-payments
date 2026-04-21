@@ -66,6 +66,7 @@ stellar-private-payments/
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
+- SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
 
 ## Building and testing crates
 
