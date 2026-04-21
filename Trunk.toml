@@ -32,6 +32,9 @@ fi
 
 # Static files
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
+
+# Distribution legal files (licenses + notices).
+sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
 """]
 
 # Bundle JS with esbuild

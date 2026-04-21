@@ -47,9 +47,11 @@ stellar-private-payments/
 │   ├── soroban-utils/          # Shared utilities (Poseidon2, etc.)
 │   └── types/                  # Shared contract types
 ├── e2e-tests/                  # End-to-end integration tests
+├── deployments/                # Deployment configs, scripts, and distribution legal
+│   ├── scripts/                # Deployment and utility scripts
+│   ├── legal/                  # Distribution-only license texts and notice templates
+│   └── <network>/              # Per-network deployments (e.g. testnet/)
 ├── poseidon2/                  # Poseidon2 hash implementation
-├── scripts/                    # Deployment and utility scripts
-│   └── (moved to deployments/scripts/deploy.sh)
 ├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```

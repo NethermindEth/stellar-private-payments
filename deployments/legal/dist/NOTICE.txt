@@ -1,0 +1,9 @@
+Stellar Private Payments — Distribution Notices
+
+This distribution is provided under the Apache License, Version 2.0, except
+for portions that are provided under different terms as described below.
+
+Third-party components included in this distribution:
+
+- iden3/circomlib (LGPL-3.0): used to build the compiled circuit artifacts in
+  `dist/circuits/*`. See `dist/circuits/NOTICE` and `dist/licenses/`.

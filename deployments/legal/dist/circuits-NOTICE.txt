@@ -1,0 +1,31 @@
+Circuits — Licensing Notice
+
+This directory contains compiled circuit artifacts (`*.r1cs` and `*.wasm`)
+that were generated from Circom sources in the repository
+
+https://github.com/NethermindEth/stellar-private-payments
+
+and that incorporate templates from `iden3/circomlib`, which is licensed
+under the GNU Lesser General Public License, version 3 (LGPL-3.0).
+
+As a result, distribution of these compiled artifacts must comply with LGPL-3.0
+requirements applicable to a Combined Work (see LGPL-3.0 §4).
+
+Licenses:
+- Apache-2.0: see `dist/LICENSE` (covers this project’s sources/assets in the distribution)
+- LGPL-3.0: see `dist/licenses/LGPL-3.0.txt`
+- GPL-3.0: see `dist/licenses/GPL-3.0.txt` (LGPL-3.0 requires a copy of GPL-3.0 as well)
+
+Build provenance:
+- The repository commit: @REPO_COMMIT@
+- Build date (UTC): @BUILD_DATE_UTC@
+- circomlib revision: @CIRCOMLIB_COMMIT@
+
+Corresponding Source / rebuild:
+To satisfy LGPL-3.0 “Corresponding Source” expectations for these artifacts, we
+provide a source bundle containing:
+- the Circom sources used to build these artifacts; and
+- `iden3/circomlib` at the exact revision listed above; and
+- build instructions.
+
+Source bundle: @SOURCE_BUNDLE_URL@
