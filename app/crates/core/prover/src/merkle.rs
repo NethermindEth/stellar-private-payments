@@ -380,6 +380,7 @@ impl MerklePrefixTreeBuilt {
 mod tests {
     use super::*;
     use alloc::vec;
+    use zkhash::ark_ff::{BigInteger, Zero};
 
     #[test]
     fn prefix_built_root_matches_prefix_root() {
@@ -466,5 +467,50 @@ mod tests {
                 "path mismatch at idx={idx}"
             );
         }
+    }
+
+    #[test]
+    fn field_to_scalar_roundtrip_zero_and_one() {
+        let zero = Field::ZERO;
+        let one = Field::ONE;
+
+        assert_eq!(field_to_scalar(zero), Scalar::from(0u64));
+        assert_eq!(field_to_scalar(one), Scalar::from(1u64));
+    }
+
+    #[test]
+    fn field_to_scalar_roundtrip_modulus_minus_one() {
+        let mut modulus_le = Scalar::MODULUS.to_bytes_le();
+        let mut borrow = 1u8;
+        for byte in &mut modulus_le {
+            if *byte >= borrow {
+                *byte -= borrow;
+                borrow = 0;
+                break;
+            } else {
+                *byte = 0xFF;
+                borrow = 1;
+            }
+        }
+        assert_eq!(borrow, 0, "modulus should be > 0");
+
+        let scalar = Scalar::from_le_bytes_mod_order(&modulus_le);
+        let field = scalar_to_field(scalar);
+
+        assert_eq!(field_to_scalar(field), scalar);
+    }
+
+    #[test]
+    fn field_to_scalar_modulus_reduces_to_zero() {
+        let modulus_le = Scalar::MODULUS.to_bytes_le();
+        let modulus_le: [u8; 32] = modulus_le
+            .try_into()
+            .expect("modulus bytes should be 32 bytes");
+        let reduced = Scalar::from_le_bytes_mod_order(&modulus_le);
+
+        assert!(reduced.is_zero());
+
+        let field = scalar_to_field(reduced);
+        assert_eq!(field_to_scalar(field), Scalar::from(0u64));
     }
 }
