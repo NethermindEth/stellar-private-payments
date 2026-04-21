@@ -145,6 +145,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
 fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
     let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
+    let ext_data = transact_artifacts.ext_data.clone();
     log::debug!("[{WORKER_NAME}] compute witness");
     let witness_bytes = WITNESS_CALC.with(|cell| {
         let mut borrow = cell.borrow_mut();
@@ -178,21 +179,15 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
             ));
         }
 
-        let p = transact_artifacts.prepared.clone();
-        let input_nullifiers = p.input_nullifiers;
-        let output_commitments = p.output_commitments;
-        let public_amount = p.public_amount_field;
-        let asp_membership_root = p.asp_membership_root;
-        let asp_non_membership_root = p.asp_non_membership_root;
-
+        let p = transact_artifacts.prepared;
         let prepared_public = PreparedTxPublic {
             pool_root: p.pool_root,
-            input_nullifiers,
-            output_commitments,
-            public_amount,
+            input_nullifiers: p.input_nullifiers,
+            output_commitments: p.output_commitments,
+            public_amount: p.public_amount_field,
             ext_data_hash_be: p.ext_data_hash_be,
-            asp_membership_root,
-            asp_non_membership_root,
+            asp_membership_root: p.asp_membership_root,
+            asp_non_membership_root: p.asp_non_membership_root,
         };
 
         Ok::<_, anyhow::Error>((proof_uncompressed, prepared_public))
@@ -200,7 +195,7 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
 
     Ok(PreparedProverTx {
         proof_uncompressed,
-        ext_data: transact_artifacts.ext_data,
+        ext_data,
         prepared: prepared_public,
     })
 }

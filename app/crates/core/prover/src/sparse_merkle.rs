@@ -418,7 +418,7 @@ impl WasmSparseMerkleTree {
     }
 
     /// Get a proof for a key, padded to max_levels
-    pub fn get_proof(&self, key_bytes: &[u8], max_levels: usize) -> Result<WasmSMTProof> {
+    pub fn get_proof(&self, key_bytes: &[u8], max_levels: usize) -> Result<SMTProof> {
         let key = bytes_to_field(key_bytes)?;
 
         let find_result = self.inner.find(&key).map_err(|e| anyhow!(e))?;
@@ -429,7 +429,7 @@ impl WasmSparseMerkleTree {
             siblings.push(Field::ZERO);
         }
 
-        Ok(WasmSMTProof {
+        Ok(SMTProof {
             found: find_result.found,
             siblings: siblings.iter().flat_map(|s| s.to_le_bytes()).collect(),
             found_value: find_result.found_value.to_le_bytes().to_vec(),
@@ -606,7 +606,7 @@ fn bytes_to_field(bytes: &[u8]) -> Result<Field> {
 }
 
 /// SMT Proof for circuit inputs
-pub struct WasmSMTProof {
+pub struct SMTProof {
     found: bool,
     siblings: Vec<u8>,
     found_value: Vec<u8>,
@@ -617,7 +617,7 @@ pub struct WasmSMTProof {
     num_siblings: usize,
 }
 
-impl WasmSMTProof {
+impl SMTProof {
     /// Whether the key was found
     pub fn found(&self) -> bool {
         self.found
