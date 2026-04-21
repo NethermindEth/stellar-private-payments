@@ -73,16 +73,6 @@ export const OnchainState = {
     _refreshing: false,
 
     init() {
-        document.getElementById('btn-refresh-state')?.addEventListener('click', () => {
-            this.refreshAll().catch(() => {});
-        });
-        document.getElementById('btn-scan-notes')?.addEventListener('click', () => {
-            Toast.show('Not supported in MVP yet', 'info');
-        });
-        document.getElementById('btn-force-resync')?.addEventListener('click', () => {
-            Toast.show('Not supported in MVP yet', 'info');
-        });
-
         App.events.addEventListener('wallet:ready', () => {
             this.start();
         });
@@ -149,8 +139,8 @@ export const OnchainState = {
             setText('chain-network-badge', data?.network || '—');
 
             // Pool
-            setIndicator('pool-indicator', !!data?.pool?.success);
-            setStatus('pool-status', data?.pool?.success, data?.pool?.ledger);
+            setIndicator('pool-indicator', data?.pool !== undefined);
+            setStatus('pool-status', data?.pool !== undefined , data?.pool?.ledger);
             setMonoText('pool-address', data?.pool?.contractId ? Utils.truncateHex(data.pool.contractId, 6, 6) : '—');
             document.getElementById('pool-address')?.setAttribute('title', data?.pool?.contractId || '');
 
@@ -162,8 +152,8 @@ export const OnchainState = {
             setText('pool-levels', data?.pool?.merkleLevels ?? '—');
 
             // ASP Membership
-            setIndicator('membership-indicator', !!data?.aspMembership?.success);
-            setStatus('membership-status', data?.aspMembership?.success, data?.aspMembership?.ledger);
+            setIndicator('membership-indicator', data?.aspMembership !== undefined);
+            setStatus('membership-status', data?.aspMembership !== undefined, data?.aspMembership?.ledger);
             setMonoText('membership-address', data?.aspMembership?.contractId ? Utils.truncateHex(data.aspMembership.contractId, 6, 6) : '—');
             document.getElementById('membership-address')?.setAttribute('title', data?.aspMembership?.contractId || '');
 
@@ -174,8 +164,8 @@ export const OnchainState = {
             setText('membership-count', data?.aspMembership?.nextIndex ?? '—');
 
             // ASP Non-Membership
-            setIndicator('nonmembership-indicator', !!data?.aspNonMembership?.success);
-            setStatus('nonmembership-status', data?.aspNonMembership?.success, data?.aspNonMembership?.ledger);
+            setIndicator('nonmembership-indicator', data?.aspNonMembership !== undefined);
+            setStatus('nonmembership-status', data?.aspNonMembership !== undefined, data?.aspNonMembership?.ledger);
             setMonoText('nonmembership-address', data?.aspNonMembership?.contractId ? Utils.truncateHex(data.aspNonMembership.contractId, 6, 6) : '—');
             document.getElementById('nonmembership-address')?.setAttribute('title', data?.aspNonMembership?.contractId || '');
 
@@ -186,7 +176,7 @@ export const OnchainState = {
             const isEmpty = data?.aspNonMembership?.isEmpty;
             setText('nonmembership-tree-status', isEmpty === true ? 'Empty' : isEmpty === false ? 'Non-empty' : '—');
 
-            // Stats (minimal MVP)
+            // Stats
             setText('pool-total-value', data?.pool?.totalCommitments ?? '—');
 
             setLastUpdated();
@@ -198,4 +188,3 @@ export const OnchainState = {
         }
     },
 };
-

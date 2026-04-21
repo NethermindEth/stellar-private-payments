@@ -25,7 +25,7 @@ async function assertFreighterInstalled() {
         throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
     }
     if (!conn?.isConnected) {
-        throw new Error("Freighter not detected");
+        throw new Error("Freighter not detected. Install from http://freighter.app/");
     }
 }
 
