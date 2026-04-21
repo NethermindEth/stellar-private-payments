@@ -223,79 +223,6 @@ impl MerklePrefixTree {
         Ok(nodes.first().copied().unwrap_or(self.empty[self.depth]))
     }
 
-    /// Compute a Merkle proof for `index`, returning:
-    /// - `path_elements`: sibling node values as 32-byte little-endian field
-    ///   bytes
-    /// - `path_indices`: packed path bits as a 32-byte little-endian scalar
-    ///
-    /// `index` must be `< leaf_count()`.
-    pub fn proof_bytes(&self, index: u32) -> Result<(Vec<[u8; 32]>, [u8; 32])> {
-        let idx_usize = usize::try_from(index).map_err(|_| anyhow!("index too large"))?;
-        if idx_usize >= self.leaves.len() {
-            return Err(anyhow!(
-                "leaf index out of range: index={}, leaves={}",
-                idx_usize,
-                self.leaves.len()
-            ));
-        }
-
-        let mut level_nodes = self.leaves.clone();
-        let mut index = idx_usize;
-
-        let mut path_elements = Vec::with_capacity(self.depth);
-        let mut path_indices_bits_lsb = Vec::with_capacity(self.depth);
-
-        for level in 0..self.depth {
-            let sib_index = if index.is_multiple_of(2) {
-                index
-                    .checked_add(1)
-                    .ok_or_else(|| anyhow!("sibling index overflow"))?
-            } else {
-                index
-                    .checked_sub(1)
-                    .ok_or_else(|| anyhow!("sibling index underflow"))?
-            };
-
-            let sib = level_nodes
-                .get(sib_index)
-                .copied()
-                .unwrap_or(self.empty[level]);
-            path_elements.push(sib.to_le_bytes());
-            path_indices_bits_lsb.push((index & 1) as u64);
-
-            if level_nodes.is_empty() {
-                level_nodes.push(self.empty[level]);
-            }
-            let level_len = level_nodes.len();
-            let next_len = level_len.div_ceil(2);
-            let mut next = Vec::with_capacity(next_len);
-            for i in 0..next_len {
-                let left_idx = i.checked_mul(2).expect("index overflow");
-                let right_idx = left_idx.checked_add(1).expect("index overflow");
-                let left = level_nodes
-                    .get(left_idx)
-                    .copied()
-                    .unwrap_or(self.empty[level]);
-                let right = level_nodes
-                    .get(right_idx)
-                    .copied()
-                    .unwrap_or(self.empty[level]);
-                next.push(hash_pair(left, right));
-            }
-            level_nodes = next;
-            index /= 2;
-        }
-
-        let mut path_indices: u64 = 0;
-        for (i, b) in path_indices_bits_lsb.into_iter().enumerate() {
-            path_indices |= b << i;
-        }
-
-        let mut idx_le = [0u8; 32];
-        idx_le[..8].copy_from_slice(&path_indices.to_le_bytes());
-
-        Ok((path_elements, idx_le))
-    }
 }
 
 impl MerklePrefixTreeBuilt {
@@ -361,19 +288,7 @@ impl MerklePrefixTreeBuilt {
         })
     }
 
-    /// Compute a pool-witness compatible Merkle proof for `index`.
-    ///
-    /// `index` must be `< leaf_count()`.
-    pub fn proof_bytes(&self, index: u32) -> Result<(Vec<[u8; 32]>, [u8; 32])> {
-        let proof = self.proof(index)?;
 
-        let mut out_elems = Vec::with_capacity(proof.path_elements.len());
-        for elem in proof.path_elements {
-            out_elems.push(elem.to_le_bytes());
-        }
-
-        Ok((out_elems, proof.path_indices.to_le_bytes()))
-    }
 }
 
 #[cfg(test)]
@@ -397,23 +312,7 @@ mod tests {
         assert_eq!(tree.root().expect("root"), built.root().expect("root"));
     }
 
-    #[test]
-    fn prefix_built_proof_bytes_matches_prefix_proof_bytes() {
-        let depth = 6u32;
-        let leaves: Vec<Field> = (0u8..15u8)
-            .map(|v| Field::try_from_le_bytes([v; 32]).expect("field"))
-            .collect();
 
-        let tree = MerklePrefixTree::new(depth, &leaves).expect("new");
-        let built = tree.build();
-
-        for idx in [0u32, 1u32, 2u32, 7u32, 14u32] {
-            let (a_elems, a_idx) = tree.proof_bytes(idx).expect("proof");
-            let (b_elems, b_idx) = built.proof_bytes(idx).expect("proof");
-            assert_eq!(a_elems, b_elems, "path elems mismatch at idx={idx}");
-            assert_eq!(a_idx, b_idx, "path idx mismatch at idx={idx}");
-        }
-    }
 
     #[test]
     fn prefix_built_proof_matches_circuits_full_tree() {
