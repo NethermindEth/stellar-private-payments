@@ -11,24 +11,19 @@ if [ -z "$LOCK_SHA" ]; then
   exit 1
 fi
 
+CIRCOMLIB_DIR="$REPO_ROOT/circuits/src/circomlib"
+if [ ! -d "$CIRCOMLIB_DIR" ]; then
+  echo "missing circuits/src/circomlib (build the project first so circomlib is staged)" >&2
+  exit 1
+fi
+
 TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM
 
 mkdir -p "$TMP_DIR/src/circuits"
 
-# Ensure we have circomlib sources at the locked revision.
-CIRCOMLIB_DIR="$REPO_ROOT/circuits/src/circomlib"
-if [ ! -d "$CIRCOMLIB_DIR/.git" ]; then
-  rm -rf "$CIRCOMLIB_DIR"
-  mkdir -p "$CIRCOMLIB_DIR"
-  git -C "$CIRCOMLIB_DIR" init -q
-  git -C "$CIRCOMLIB_DIR" remote add origin https://github.com/iden3/circomlib.git
-fi
-git -C "$CIRCOMLIB_DIR" fetch -q --depth 1 origin "$LOCK_SHA"
-git -C "$CIRCOMLIB_DIR" checkout -q --detach FETCH_HEAD
-
-# Copy Circom sources + circomlib.
+# Copy Circom sources + circomlib from the build-staged directory.
 mkdir -p "$TMP_DIR/src/circuits/src"
 cp -R "$REPO_ROOT/circuits/src/"* "$TMP_DIR/src/circuits/src/"
 

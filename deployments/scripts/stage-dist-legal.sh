@@ -36,26 +36,9 @@ fi
 
 BUILD_DATE_UTC="$(date -u +"%Y-%m-%dT%H:%M:%SZ")"
 
-# normalize github url to https://...
-REPO_URL="unknown"
-if command -v git >/dev/null 2>&1; then
-  ORIGIN_URL="$(git -C "$REPO_ROOT" config --get remote.origin.url 2>/dev/null || true)"
-  if [ -n "$ORIGIN_URL" ]; then
-    case "$ORIGIN_URL" in
-      git@github.com:*.git)
-        REPO_URL="https://github.com/$(echo "$ORIGIN_URL" | sed -e 's|^git@github.com:||' -e 's|\\.git$||')"
-        ;;
-      https://github.com/*.git)
-        REPO_URL="$(echo "$ORIGIN_URL" | sed -e 's|\\.git$||')"
-        ;;
-      https://github.com/*)
-        REPO_URL="$ORIGIN_URL"
-        ;;
-    esac
-  fi
-fi
-
-SOURCE_BUNDLE_URL="$REPO_URL/releases"
+# Hardcoded location of the Corresponding Source bundle for the published
+# distribution (served via GitHub Pages).
+SOURCE_BUNDLE_URL="https://nethermindeth.github.io/stellar-private-payments/circuits/source-bundle.tar.gz"
 
 sed \
   -e "s|@REPO_COMMIT@|$REPO_COMMIT|g" \
