@@ -19,6 +19,9 @@ export const App = {
         },
         notes: [],
         activeTab: 'deposit',
+        // Optional context for filling recipient keys from the address book.
+        // null | { kind: 'transfer' } | { kind: 'transact-output', outputIndex: number }
+        addressBookFillTarget: null,
     },
 
     // Lightweight event bus for cross-module coordination

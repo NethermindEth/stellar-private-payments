@@ -234,12 +234,75 @@ export const AddressBook = {
         row.querySelector('.copy-enckey-btn')?.addEventListener('click', () => Utils.copyToClipboard(String(encryptionKey)));
 
         row.querySelector('.use-transfer-btn')?.addEventListener('click', () => {
-            const nk = document.getElementById('transfer-recipient-key');
-            const ek = document.getElementById('transfer-recipient-enc-key');
-            if (nk) nk.value = String(noteKey);
-            if (ek) ek.value = String(encryptionKey);
-            document.getElementById('tab-transfer')?.click();
+            const noteKeyText = String(noteKey);
+            const encKeyText = String(encryptionKey);
+
+            const clearFillTarget = () => {
+                App.state.addressBookFillTarget = null;
+            };
+
+            const fillTransferRecipientKeys = () => {
+                const nk = document.getElementById('transfer-recipient-key');
+                const ek = document.getElementById('transfer-recipient-enc-key');
+                if (nk) nk.value = noteKeyText;
+                if (ek) ek.value = encKeyText;
+                nk?.dispatchEvent(new Event('input', { bubbles: true }));
+                ek?.dispatchEvent(new Event('input', { bubbles: true }));
+                return !!(nk && ek);
+            };
+
+            const fillTransactOutputRecipientKeys = () => {
+                const root = document.getElementById('transact-outputs');
+                if (!root) return false;
+
+                const t = App.state.addressBookFillTarget;
+                let targetRow = null;
+
+                if (t && t.kind === 'transact-output' && Number.isFinite(t.outputIndex)) {
+                    targetRow = root.querySelector(`.advanced-output-row[data-index="${t.outputIndex}"]`);
+                }
+
+                if (!targetRow) {
+                    const rows = Array.from(root.querySelectorAll('.advanced-output-row'));
+                    targetRow =
+                        rows.find(r => {
+                            const nk = r.querySelector('.output-note-key');
+                            const ek = r.querySelector('.output-enc-key');
+                            return !(nk?.value?.trim()) && !(ek?.value?.trim());
+                        }) || rows[0] || null;
+                }
+
+                if (!targetRow) return false;
+
+                const nk = targetRow.querySelector('.output-note-key');
+                const ek = targetRow.querySelector('.output-enc-key');
+                if (nk) nk.value = noteKeyText;
+                if (ek) ek.value = encKeyText;
+                nk?.dispatchEvent(new Event('input', { bubbles: true }));
+                ek?.dispatchEvent(new Event('input', { bubbles: true }));
+                return !!(nk && ek);
+            };
+
+            if (App.state.activeTab === 'transact') {
+                if (fillTransactOutputRecipientKeys()) {
+                    Toast.show('Recipient keys filled in Transact output', 'success');
+                    clearFillTarget();
+                    return;
+                }
+            }
+
+            if (!fillTransferRecipientKeys()) {
+                Toast.show('Failed to fill recipient keys', 'error', 6000);
+                clearFillTarget();
+                return;
+            }
+
+            if (App.state.activeTab !== 'transfer') {
+                document.getElementById('tab-transfer')?.click();
+            }
+
             Toast.show('Recipient keys filled from address book', 'success');
+            clearFillTarget();
         });
 
         return row;

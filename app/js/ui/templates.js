@@ -110,6 +110,7 @@ export const Templates = {
         
         // Address book lookup - scroll to address book section
         lookupBtn?.addEventListener('click', () => {
+            App.state.addressBookFillTarget = { kind: 'transact-output', outputIndex: index };
             AddressBook.switchSection('addressbook');
             const section = document.getElementById('section-panel-addressbook');
             if (section) {

@@ -550,6 +550,7 @@ export const Transactions = {
         const outputs = document.getElementById('transfer-outputs');
         const addressbookBtn = document.getElementById('transfer-addressbook-btn');
         addressbookBtn?.addEventListener('click', () => {
+            App.state.addressBookFillTarget = { kind: 'transfer' };
             document.getElementById('section-tab-addressbook')?.click();
             document.getElementById('section-panel-addressbook')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
