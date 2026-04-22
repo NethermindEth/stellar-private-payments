@@ -337,13 +337,15 @@ export const Transactions = {
         transactOutputs?.appendChild(Templates.createAdvancedOutputRow(1, 0));
         this._wireTransact();
 
-        // Prefill withdraw recipient on connect
-        App.events.addEventListener('wallet:ready', () => {
-            const w = App.state.wallet.address;
+        // Prefill withdraw recipient on connect + account change (always overwrite)
+        App.events.addEventListener('wallet:ready', (e) => {
+            const nextAddress = e?.detail?.address || App.state.wallet.address;
+            if (!nextAddress) return;
+
             const withdrawRecipient = document.getElementById('withdraw-recipient');
             const transactRecipient = document.getElementById('transact-recipient');
-            if (withdrawRecipient && !withdrawRecipient.value.trim()) withdrawRecipient.value = w;
-            if (transactRecipient && !transactRecipient.value.trim()) transactRecipient.value = w;
+            if (withdrawRecipient) withdrawRecipient.value = nextAddress;
+            if (transactRecipient) transactRecipient.value = nextAddress;
         });
 
         App.events.addEventListener('notes:updated', () => {
