@@ -14,10 +14,13 @@ mkdir -p "$STAGING_DIR/licenses"
 mkdir -p "$STAGING_DIR/circuits"
 
 # Top-level distribution license (Apache-2.0 for this project’s code/assets).
-cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE"
+cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE.txt"
 
 # Aggregate distribution notices.
-cp "$REPO_ROOT/deployments/legal/dist/NOTICE.txt" "$STAGING_DIR/NOTICE"
+cp "$REPO_ROOT/deployments/legal/dist/NOTICE.txt" "$STAGING_DIR/NOTICE.txt"
+
+# Terms & Conditions / disclaimer shown to users (kept as markdown).
+cp "$REPO_ROOT/app/crates/core/state/src/disclaimer.md" "$STAGING_DIR/DISCLAIMER.txt"
 
 # License texts needed for the circomlib (LGPL) sub-distribution.
 cp "$REPO_ROOT/deployments/legal/licenses/LGPL-3.0.txt" "$STAGING_DIR/licenses/LGPL-3.0.txt"
@@ -45,4 +48,4 @@ sed \
   -e "s|@BUILD_DATE_UTC@|$BUILD_DATE_UTC|g" \
   -e "s|@CIRCOMLIB_COMMIT@|$CIRCOMLIB_COMMIT|g" \
   -e "s|@SOURCE_BUNDLE_URL@|$SOURCE_BUNDLE_URL|g" \
-  "$REPO_ROOT/deployments/legal/dist/circuits-NOTICE.txt" > "$STAGING_DIR/circuits/NOTICE"
+  "$REPO_ROOT/deployments/legal/dist/circuits-NOTICE.txt" > "$STAGING_DIR/circuits/NOTICE.txt"

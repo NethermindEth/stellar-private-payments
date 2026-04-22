@@ -17,6 +17,13 @@ if [ ! -d "$CIRCOMLIB_DIR" ]; then
   exit 1
 fi
 
+REPO_COMMIT="unknown"
+if command -v git >/dev/null 2>&1 && git -C "$REPO_ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  REPO_COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
+fi
+
+REPO_URL="https://github.com/NethermindEth/stellar-private-payments"
+
 TMP_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$TMP_DIR"; }
 trap cleanup EXIT INT TERM
@@ -35,11 +42,30 @@ This bundle is provided to help recipients rebuild the compiled artifacts
 shipped under \`dist/circuits/\` and to satisfy LGPL-3.0 expectations.
 
 ## Contents
-- \`circuits/src/\`: Circom sources from this repository
-- \`circuits/src/circomlib/\`: iden3/circomlib at revision: $LOCK_SHA
+- \`circuits/src/\`: Circom sources from this repository (including the vendored \`circomlib\`)
+- \`licenses/\`: License texts for redistribution
 
 ## Build (example)
-From the repository root:
+This archive is **not** a standalone Rust workspace. To rebuild the compiled
+artifacts, you need the full repository checkout.
+
+1) Obtain the repository sources (at the same revision used to build the
+distributed artifacts):
+
+- Repository: $REPO_URL
+- Commit: $REPO_COMMIT
+
+2) Overlay the bundled circuits sources onto the repository checkout so that
+\`circomlib\` is present at the expected path:
+
+\`\`\`
+cp -R circuits/src/ <REPO_ROOT>/circuits/src/
+\`\`\`
+
+At minimum, ensure:
+\`<REPO_ROOT>/circuits/src/circomlib\` matches revision: $LOCK_SHA
+
+3) Build the circuits crate from the repository root:
 
 \`\`\`
 cargo build -p circuits --release

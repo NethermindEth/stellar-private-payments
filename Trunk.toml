@@ -35,6 +35,9 @@ cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
 
 # Distribution legal files (licenses + notices).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
+
+# Bundle corresponding source for LGPL compliance (served as a downloadable archive).
+sh deployments/scripts/package-circuits-source-bundle.sh "$TRUNK_STAGING_DIR/circuits/source-bundle.tar.gz"
 """]
 
 # Bundle JS with esbuild
