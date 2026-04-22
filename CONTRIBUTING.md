@@ -60,7 +60,6 @@ stellar-private-payments/
 - [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
-- [**Wasm-pack**](https://github.com/drager/wasm-pack) for building WASM modules.
 - [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
@@ -121,13 +120,6 @@ See `./deployments/scripts/deploy.sh --help` for all options.
 The E2E tests generate real Groth16 proofs and verify them, locally, using contracts and the Soroban-SDK. To run them:
 ```bash
 cargo test -p e2e-tests
-```
-
-### JavaScript Tests
-
-```bash
-cd app
-npm test
 ```
 
 ## Code quality assurance

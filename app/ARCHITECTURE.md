@@ -9,7 +9,7 @@ This document describes how the application manages local state, including persi
 Core application logic is implemented in Rust `app/crates/core` crates which define sync and async primitives and building blocks.
 Platforms `app/crates/platforms` (`web`, in the future - `cli`, `mcp` etc) provide compilation target specific dependencies, setup runtime (asynchronous/threaded), ui interaction protocol (e.g. FFI/http), order of operations.
 
-Other directories in `app` directory mostly define interfaces for the `web` platform but probably can be restructred in the future to include other platforms interfaces as well.
+Other directories in `app` directory mostly define interfaces for the `web` platform but probably can be restructured in the future to include other platforms interfaces as well.
 
 **Storage:**
 

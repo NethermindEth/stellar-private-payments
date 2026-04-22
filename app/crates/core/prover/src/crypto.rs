@@ -2,8 +2,8 @@
 //!
 //! Provides Poseidon2 hashing and key derivation functions matching
 //! the Circom circuit implementations.
-use crate::serialization::{bytes_to_scalar, scalar_to_bytes, scalar_to_hex};
-use alloc::{string::String, vec, vec::Vec};
+use crate::serialization::{bytes_to_scalar, scalar_to_bytes};
+use alloc::{vec, vec::Vec};
 use anyhow::{Result, anyhow};
 use core::ops::Add;
 use types::{Field as AppField, NotePublicKey};
@@ -73,15 +73,6 @@ pub(crate) fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
     perm[0].add(input[0])
 }
 
-/// Poseidon2 hash with 2 inputs as compression mode
-pub fn poseidon2_compression_wasm(input0: &[u8], input1: &[u8]) -> Result<Vec<u8>> {
-    let a = bytes_to_scalar(input0)?;
-    let b = bytes_to_scalar(input1)?;
-
-    let result = poseidon2_compression(a, b);
-    Ok(scalar_to_bytes(&result))
-}
-
 /// Poseidon2 hash with 2 inputs and domain separation
 ///
 /// Matches the Circom Poseidon2(2) template
@@ -101,13 +92,6 @@ pub fn derive_public_key(private_key: &[u8]) -> Result<Vec<u8>> {
     let sk = bytes_to_scalar(private_key)?;
     let pk = derive_public_key_internal(sk);
     Ok(scalar_to_bytes(&pk))
-}
-
-/// Derive public key and return as hex string (for JS BigInt)
-pub fn derive_public_key_hex(private_key: &[u8]) -> Result<String> {
-    let sk = bytes_to_scalar(private_key)?;
-    let pk = derive_public_key_internal(sk);
-    Ok(scalar_to_hex(&pk))
 }
 
 /// Compute commitment: hash(amount, publicKey, blinding)

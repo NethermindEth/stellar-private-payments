@@ -27,7 +27,7 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-          target: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
           override: true
 
       - name: Cache
@@ -35,5 +35,5 @@ jobs:
         with:
           cache-targets: "true"
 
-      - name: Install Google Chrome
-        run: cargo build -p web
+      - name: Check the wasm build
+        run: cargo build -p web --target wasm32-unknown-unknown
