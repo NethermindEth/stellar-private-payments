@@ -403,7 +403,7 @@ async function computeMembershipLeaf() {
     const privateValue = parseBigIntInput(privateKeyInput.value, 'Private key');
 
     let pubKey = null;
-    if (publicOverride !== null) {
+      if (publicOverride !== null) {
       pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
     } else if (privateValue !== null) {
       let { privKeyBytes, pubKey, ...rest} = await deriveKeysFromWallet(state.derivedKeys.sourceAccount, {
@@ -414,7 +414,7 @@ async function computeMembershipLeaf() {
       throw new Error('Provide a private key or a public key override');
     }
     const client = getHandle().webClient;
-    const leafHex = await client.deriveAspUserLeaf(blindingValue.toString(16).padStart(64, '0'), pubKey);
+    const leafHex = await client.deriveAspUserLeaf(blindingValue, pubKey);
     const leafDec = BigInt(leafHex).toString();
 
     derivedPubKeyEl.textContent = pubKey;
@@ -539,12 +539,28 @@ async function computeNonMembershipLeaf() {
     if (keyValue === null) {
       throw new Error('Key is required');
     }
-    const valueValue = parseBigIntInput(blockedValueInput.value, 'Value');
+    let valueValue = null;
+    if (valueSameCheckbox.checked) {
+        // If we use the key as an input then we should
+        // reverse the bytes order (as the key is in LE, while the value should be BE)
+        const reverseHexWithPrefix = (hex) => {
+            const hasPrefix = hex.startsWith("0x");
+            const pureHex = hasPrefix ? hex.slice(2) : hex;
+            const reversed = pureHex.match(/.{1,2}/g).reverse().join("");
+            return hasPrefix ? "0x" + reversed : reversed;
+        };
+        const reversed = reverseHexWithPrefix(blockedValueInput.value);
+        valueValue = parseBigIntInput(reversed, 'Value');
+    } else {
+        valueValue = parseBigIntInput(blockedValueInput.value, 'Value');
+    }
+
     if (valueValue === null) {
       throw new Error('Value is required');
     }
     const client = getHandle().webClient;
-    const leafBytes = await client.deriveAspUserLeaf(valueValue.toString(16).padStart(64, '0'), keyValue.toString(16).padStart(64, '0'));
+
+    const leafBytes = await client.deriveAspUserLeaf(valueValue, keyValue.toString(16).padStart(64, '0'));
     computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {
