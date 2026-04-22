@@ -227,8 +227,9 @@ impl Client {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            client_builder = client_builder
-                .timeout(std::time::Duration::from_secs(u64::from(Self::RPC_TIMEOUT_SECS)));
+            client_builder = client_builder.timeout(std::time::Duration::from_secs(u64::from(
+                Self::RPC_TIMEOUT_SECS,
+            )));
         }
 
         Ok(Self {
@@ -268,7 +269,7 @@ impl Client {
             futures::pin_mut!(request);
             match futures::future::select(request, TimeoutFuture::new(timeout_ms)).await {
                 Either::Left((result, _)) => result?,
-                Either::Right((_, _)) => return Err(Error::Timeout),
+                Either::Right(..) => return Err(Error::Timeout),
             }
         };
 
