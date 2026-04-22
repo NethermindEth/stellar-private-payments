@@ -22,5 +22,8 @@ stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
 thiserror = { workspace = true }
 types = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
+
 #[lints]
 #workspace = true

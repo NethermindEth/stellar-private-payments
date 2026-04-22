@@ -37,6 +37,8 @@ pub enum Error {
     RpcSyncGap(u32),
     #[error("invalid latestLedger value: {0}")]
     InvalidLatestLedger(i64),
+    #[error("RPC request timed out")]
+    Timeout,
 }
 
 // JSON-RPC Plumbing
@@ -197,6 +199,9 @@ pub struct Client {
 }
 
 impl Client {
+    // Timeout applied to every RPC call
+    const RPC_TIMEOUT_SECS: u32 = 30;
+
     pub fn new(base_url: &str) -> Result<Self, Error> {
         let uri = base_url.parse::<Uri>()?;
         let mut parts = uri.into_parts();
@@ -220,10 +225,10 @@ impl Client {
 
         let mut client_builder = reqwest::Client::builder();
 
-        // TODO add timeout for WASM
         #[cfg(not(target_arch = "wasm32"))]
         {
-            client_builder = client_builder.timeout(std::time::Duration::from_secs(30));
+            client_builder = client_builder
+                .timeout(std::time::Duration::from_secs(u64::from(Self::RPC_TIMEOUT_SECS)));
         }
 
         Ok(Self {
@@ -244,14 +249,31 @@ impl Client {
             params,
         };
 
-        let resp: JsonRpcResponse<R> = self
-            .http_client
-            .post(&self.base_url)
-            .json(&payload)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let request = async {
+            self.http_client
+                .post(&self.base_url)
+                .json(&payload)
+                .send()
+                .await?
+                .json::<JsonRpcResponse<R>>()
+                .await
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let resp = {
+            use futures::future::Either;
+            use gloo_timers::future::TimeoutFuture;
+
+            let timeout_ms = Self::RPC_TIMEOUT_SECS.saturating_mul(1_000);
+            futures::pin_mut!(request);
+            match futures::future::select(request, TimeoutFuture::new(timeout_ms)).await {
+                Either::Left((result, _)) => result?,
+                Either::Right((_, _)) => return Err(Error::Timeout),
+            }
+        };
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let resp = request.await?;
 
         if let Some(err) = resp.error {
             return Err(Error::JsonRpc {
@@ -260,7 +282,6 @@ impl Client {
             });
         }
 
-        // Replaced custom ok_ok with standard ok_or_else
         resp.result
             .ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
     }
