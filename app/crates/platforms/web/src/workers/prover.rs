@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use stellar::hash_ext_data_offchain;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{Request, RequestInit, RequestMode, Url};
+use web_sys::{Request, RequestInit, RequestMode};
 use witness::WitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
@@ -38,7 +38,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     }
     let (wasm_bytes, r1cs_bytes) = try_join!(
         async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.wasm").await?;
+            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
                 wasm_bytes.len()
@@ -46,7 +46,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.r1cs").await?;
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
                 r1cs_bytes.len()
@@ -212,40 +212,25 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
 }
 
 async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
+    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
     let global = js_sys::global();
 
     let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
         .map_err(|_| JsError::new("Accessing self.location failed"))?;
-
-    let href = js_sys::Reflect::get(&location, &JsValue::from_str("href"))
-        .map_err(|_| JsError::new("Accessing self.location.href failed"))?
-        .as_string()
-        .ok_or_else(|| JsError::new("href is not a string"))?;
 
     let origin = js_sys::Reflect::get(&location, &JsValue::from_str("origin"))
         .map_err(|_| JsError::new("Accessing self.location.origin failed"))?
         .as_string()
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
-    // In GitHub Pages project sites, the app is served from a sub-path like
-    // `/<repo>/...`, but callers often use absolute paths like `/circuits/...`.
-    // In a Worker context, we can infer the project base path from the worker
-    // script URL (typically `.../<repo>/js/<worker>.js`).
-    let site_root = js_sys::Reflect::get(&location, &JsValue::from_str("pathname"))
-        .ok()
-        .and_then(|v| v.as_string())
-        .and_then(|pathname| pathname.rfind("/js/").map(|idx| pathname[..idx].to_string()))
-        .map(|base_path| format!("{origin}{base_path}"))
-        .unwrap_or_else(|| origin.clone());
+    let public_url = PUBLIC_URL.unwrap_or("/");
 
-    let url_string = if path.starts_with("http://") || path.starts_with("https://") {
-        path.to_string()
-    } else if path.starts_with('/') {
-        format!("{site_root}{path}")
+    let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
+        format!("{public_url}{path}")
+    } else if public_url == "/" {
+        format!("{origin}/{path}")
     } else {
-        Url::new_with_base(path, &href)
-            .map_err(|e| JsError::new(&format!("Failed to resolve url for {path}: {:?}", e)))?
-            .href()
+        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
     };
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
