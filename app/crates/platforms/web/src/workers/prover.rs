@@ -212,7 +212,6 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
 }
 
 async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
-    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
     let global = js_sys::global();
 
     let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
@@ -223,7 +222,7 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .as_string()
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
-    let public_url = PUBLIC_URL.unwrap_or("/");
+    let public_url = env!("PUBLIC_URL");
 
     let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
         format!("{public_url}{path}")
