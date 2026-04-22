@@ -532,6 +532,13 @@ function syncNonMembershipValue() {
   blockedValueInput.setAttribute('disabled', 'disabled');
 }
 
+const reverseHexWithPrefix = (hex) => {
+    const hasPrefix = hex.startsWith("0x");
+    const pureHex = hasPrefix ? hex.slice(2) : hex;
+    const reversed = pureHex.match(/.{1,2}/g).reverse().join("");
+    return hasPrefix ? "0x" + reversed : reversed;
+};
+
 async function computeNonMembershipLeaf() {
   try {
     await ensureCryptoReady();
@@ -539,22 +546,7 @@ async function computeNonMembershipLeaf() {
     if (keyValue === null) {
       throw new Error('Key is required');
     }
-    let valueValue = null;
-    if (valueSameCheckbox.checked) {
-        // If we use the key as an input then we should
-        // reverse the bytes order (as the key is in LE, while the value should be BE)
-        const reverseHexWithPrefix = (hex) => {
-            const hasPrefix = hex.startsWith("0x");
-            const pureHex = hasPrefix ? hex.slice(2) : hex;
-            const reversed = pureHex.match(/.{1,2}/g).reverse().join("");
-            return hasPrefix ? "0x" + reversed : reversed;
-        };
-        const reversed = reverseHexWithPrefix(blockedValueInput.value);
-        valueValue = parseBigIntInput(reversed, 'Value');
-    } else {
-        valueValue = parseBigIntInput(blockedValueInput.value, 'Value');
-    }
-
+    const valueValue = parseBigIntInput(reverseHexWithPrefix(blockedValueInput.value), 'Value');
     if (valueValue === null) {
       throw new Error('Value is required');
     }
@@ -576,8 +568,8 @@ async function insertNonMembershipLeaf() {
       throw new Error('Non-membership contract ID is required');
     }
 
-    const keyValue = parseBigIntInput(blockedKeyInput.value, 'Key');
-    const valueValue = parseBigIntInput(blockedValueInput.value, 'Value');
+    const keyValue = parseBigIntInput(reverseHexWithPrefix(blockedKeyInput.value), 'Key');
+    const valueValue = parseBigIntInput(reverseHexWithPrefix(blockedValueInput.value), 'Value');
     if (keyValue === null || valueValue === null) {
       throw new Error('Key and value are required');
     }
