@@ -7,6 +7,7 @@ import { connectWallet, deriveKeysFromWallet, getWalletNetwork, startWalletWatch
 import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { submitPublicKeyRegistration } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
+import { ensurePersistentStorage } from './persistent-storage.js';
 import { setTabsRef } from './templates.js';
 
 /**
@@ -341,6 +342,14 @@ export const Wallet = {
             App.state.wallet.networkPassphrase = networkPassphrase;
 
             if (networkName) networkName.textContent = (network || 'TESTNET').toUpperCase();
+
+            // Request durable browser storage on manual onboarding so OPFS-backed SQLite
+            // is less likely to be evicted under storage pressure.
+            try {
+                await ensurePersistentStorage({ interactive: !auto });
+            } catch (e) {
+                console.debug('[Storage] persistence check failed:', e);
+            }
 
             setButtonLoading('Loading WASM...');
             try {
