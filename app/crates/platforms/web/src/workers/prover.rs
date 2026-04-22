@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use stellar::hash_ext_data_offchain;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{Request, RequestInit, RequestMode};
+use web_sys::{Request, RequestInit, RequestMode, Url};
 use witness::WitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
@@ -217,15 +217,35 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
     let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
         .map_err(|_| JsError::new("Accessing self.location failed"))?;
 
+    let href = js_sys::Reflect::get(&location, &JsValue::from_str("href"))
+        .map_err(|_| JsError::new("Accessing self.location.href failed"))?
+        .as_string()
+        .ok_or_else(|| JsError::new("href is not a string"))?;
+
     let origin = js_sys::Reflect::get(&location, &JsValue::from_str("origin"))
         .map_err(|_| JsError::new("Accessing self.location.origin failed"))?
         .as_string()
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
-    let url_string = if path.starts_with("http") {
+    // In GitHub Pages project sites, the app is served from a sub-path like
+    // `/<repo>/...`, but callers often use absolute paths like `/circuits/...`.
+    // In a Worker context, we can infer the project base path from the worker
+    // script URL (typically `.../<repo>/js/<worker>.js`).
+    let site_root = js_sys::Reflect::get(&location, &JsValue::from_str("pathname"))
+        .ok()
+        .and_then(|v| v.as_string())
+        .and_then(|pathname| pathname.rfind("/js/").map(|idx| pathname[..idx].to_string()))
+        .map(|base_path| format!("{origin}{base_path}"))
+        .unwrap_or_else(|| origin.clone());
+
+    let url_string = if path.starts_with("http://") || path.starts_with("https://") {
         path.to_string()
+    } else if path.starts_with('/') {
+        format!("{site_root}{path}")
     } else {
-        format!("{}{}", origin, path)
+        Url::new_with_base(path, &href)
+            .map_err(|e| JsError::new(&format!("Failed to resolve url for {path}: {:?}", e)))?
+            .href()
     };
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
