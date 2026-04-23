@@ -14,27 +14,37 @@ pub struct Indexer<S: ContractDataStorage> {
     min_pool_ledger: u32,
 }
 
+/// Contract IDs indexed by the app (enabled pools + ASP membership).
+pub fn contract_ids_for_indexer(config: &ContractConfig) -> Vec<String> {
+    config
+        .pools
+        .iter()
+        .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone()))
+        .chain(std::iter::once(config.asp_membership.clone()))
+        .collect()
+}
+
+/// Earliest deployment ledger among enabled pools.
+pub fn min_pool_ledger_for_indexer(config: &ContractConfig) -> Result<u32> {
+    config
+        .pools
+        .iter()
+        .filter(|p| p.enabled)
+        .map(|p| p.deployment_ledger)
+        .min()
+        .ok_or_else(|| anyhow!("at least one pool should be enabled"))
+}
+
 impl<S: ContractDataStorage> Indexer<S> {
     pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
 
-        let min_pool_ledger = config
-            .pools
-            .iter()
-            .filter(|p| p.enabled)
-            .map(|p| p.deployment_ledger)
-            .min()
-            .ok_or_else(|| anyhow!("at least one pool should be enabled"))?;
+        let min_pool_ledger = min_pool_ledger_for_indexer(config)?;
 
         // Retention-window check: if the RPC cannot serve events back to the deployment
         // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
         // trees.
-        let contract_ids: Vec<String> = config
-            .pools
-            .iter()
-            .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone()))
-            .chain(std::iter::once(config.asp_membership.to_string()))
-            .collect();
+        let contract_ids = contract_ids_for_indexer(config);
         match client
             .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
             .await
@@ -42,7 +52,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             Ok(_) => {}
             Err(RpcError::RpcSyncGap(oldest)) => {
                 return Err(anyhow!(
-                    "Your RPC node {rpc_url} oldest available ledger is {oldest}. \
+                    "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
+Your RPC node {rpc_url} oldest available ledger is {oldest}. \
 Indexing requires events back to the pool deployment ledger {0}. \
 Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
                     min_pool_ledger

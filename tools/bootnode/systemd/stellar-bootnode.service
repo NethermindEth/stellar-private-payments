@@ -1,0 +1,22 @@
+[Unit]
+Description=PoolStellar Bootnode (RPC retention bypass)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=bootnode
+Group=bootnode
+EnvironmentFile=/etc/stellar-bootnode/bootnode.env
+ExecStart=/usr/local/bin/bootnode
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/stellar-bootnode
+
+[Install]
+WantedBy=multi-user.target
+

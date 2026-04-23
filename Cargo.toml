@@ -13,6 +13,7 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
+    "tools/bootnode",
     "tools/ceremony-cli",
 ]
 resolver = "3"

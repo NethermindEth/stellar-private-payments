@@ -1,0 +1,35 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+      POSTGRES_DB: bootnode
+    ports:
+      - "5432:5432"
+    volumes:
+      - bootnode_pg:/var/lib/postgresql/data
+
+  bootnode:
+    build:
+      context: ../..
+      dockerfile: tools/bootnode/Dockerfile
+    depends_on:
+      - postgres
+    environment:
+      DATABASE_URL: postgres://postgres:postgres@postgres:5432/bootnode
+      BOOTNODE_UPSTREAM_RPC_URL: https://soroban-testnet.stellar.org
+      BOOTNODE_BIND: 0.0.0.0:443
+      BOOTNODE_DOMAIN: example.com
+      BOOTNODE_ACME_EMAIL: you@example.com
+      BOOTNODE_ACME_CACHE_DIR: /acme-cache
+      BOOTNODE_OTEL_ENABLED: "0"
+    ports:
+      - "443:443"
+    volumes:
+      - bootnode_acme:/acme-cache
+
+volumes:
+  bootnode_pg:
+  bootnode_acme:
+
