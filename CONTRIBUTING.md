@@ -15,16 +15,26 @@ Unified project documentation is available at https://nethermindeth.github.io/st
 ## Project Structure
 
 ```
-stellar-private-transactions/
-├── app/                        # Browser-based frontend application (See app/README.md for more information)
-│   ├── crates/                 # Rust WASM modules
-│   │   ├── prover/             # Groth16 proof generation
-│   │   └── witness/            # Circom witness calculator
-│   ├── js/                     # JavaScript frontend code
-│   │   ├── state/              # State management (IndexedDB, sync) (see app/ARCHITECTURE.md for more information)
-│   │   ├── ui/                 # UI components 
-│   │   └── *.js                # Core modules (bridge, wallet, stellar)
-│   └── index.html              # Main application entry
+stellar-private-payments/
+├── app/                        # Application (see app/README.md, app/ARCHITECTURE.md)
+│   ├── crates/
+│   │   ├── core/               # Platform-agnostic Rust logic (storage, prover flows, indexer, types, witness)
+│   │   │   ├── prover/
+│   │   │   ├── state/
+│   │   │   ├── stellar/
+│   │   │   ├── types/
+│   │   │   └── witness/
+│   │   └── platforms/
+│   │       └── web/            # WASM entrypoint + WebClient (wasm-bindgen) + internal worker protocol/bridges
+│   ├── js/                     # JavaScript frontend code (web interface)
+│   │   ├── ui/                 # UI components
+│   │   ├── admin.js            # Admin UI entry
+│   │   ├── stellar.js          # Stellar helpers
+│   │   ├── ui.js               # Main UI entry
+│   │   ├── wallet.js           # Freighter wallet integration
+│   │   └── wasm-facade.js      # Thin wrapper over WASM exports
+│   ├── index.html              # Main web application entry
+│   └── admin.html              # Admin entry
 ├── circuits/                   # Circom ZK circuits
 │   ├── src/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
@@ -43,8 +53,8 @@ stellar-private-transactions/
 ├── e2e-tests/                  # End-to-end integration tests
 ├── poseidon2/                  # Poseidon2 hash implementation
 ├── scripts/                    # Deployment and utility scripts
-│   ├── deploy.sh               # Contract deployment script
-│   └── deployments.json        # Deployment output
+│   └── (moved to deployments/scripts/deploy.sh)
+├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```
 
@@ -54,13 +64,22 @@ stellar-private-transactions/
 - [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
-- [**Wasm-pack**](https://github.com/drager/wasm-pack) for building WASM modules.
 - [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
 - [**Cargo Deny**](https://github.com/EmbarkStudios/cargo-deny)
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
+- SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
 
 ## Building and testing crates
+
+### Patches
+
+`ark-circom` is [patched](https://github.com/NethermindEth/circom-compat/commits/wasm-no-parallel/) 
+(`Cargo.toml` is cleaned up from hardcoded `parallel` features) to allow running 
+in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
+while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
+Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
+
 
 ### Building Circuits
 To explicitly build them:
@@ -72,8 +91,8 @@ cargo build -p circuits
 
 The circuit crate also exposes 2 flags:
 - **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
-For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `scripts/testdata`, it will generate them.
-- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist. Should not generally be used, as it might cause issues with deployed contracts.
+For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
+- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash
@@ -90,14 +109,14 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize --package circom-groth16-verifier
 
 # Or use the deployment script which builds automatically
-./scripts/deploy.sh --help
+./deployments/scripts/deploy.sh --help
 ```
 
 ### Deploying Contracts
-You can use the script `scripts/deploy.sh` to deploy contracts to a Stellar network.
+You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a Stellar network.
 An example can be found in the _Demo Application_ section..
 
-See `./scripts/deploy.sh --help` for all options.
+See `./deployments/scripts/deploy.sh --help` for all options.
 
 
 ### End-to-End Tests
@@ -105,13 +124,6 @@ See `./scripts/deploy.sh --help` for all options.
 The E2E tests generate real Groth16 proofs and verify them, locally, using contracts and the Soroban-SDK. To run them:
 ```bash
 cargo test -p e2e-tests
-```
-
-### JavaScript Tests
-
-```bash
-cd app
-npm test
 ```
 
 ## Code quality assurance

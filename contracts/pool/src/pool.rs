@@ -401,11 +401,9 @@ impl PoolContract {
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
 
-        // Public inputs expected by the Circom Transaction circuit:
-        // Order is important. Order is defined by the order in which the signals were
-        // declared in the circuit. The current order is [root, public_amount,
-        // ext_data_hash, asp_membership_root, asp_non_membership_root, input
-        // nullifiers, output_commitment0, output_commitment1]
+        // Public inputs must match the order declared by the policy circuit:
+        // [root, public_amount, ext_data_hash, input_nullifiers,
+        // output_commitments, membership_roots, non_membership_roots]
         let mut public_inputs: Vec<Fr> = Vec::new(env);
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
         public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
@@ -413,7 +411,17 @@ impl PoolContract {
             &proof.public_amount,
         )));
         public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
-        // Add policy roots. Order is important.
+        for nullifier in proof.input_nullifiers.iter() {
+            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+        }
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment0,
+        )));
+        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            env,
+            &proof.output_commitment1,
+        )));
         for _ in 0..proof.input_nullifiers.len() {
             public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
                 env,
@@ -426,17 +434,6 @@ impl PoolContract {
                 &proof.asp_non_membership_root,
             )));
         }
-        for nullifier in proof.input_nullifiers.iter() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
-        }
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment0,
-        )));
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
-            env,
-            &proof.output_commitment1,
-        )));
 
         let is_valid = client.verify(&proof.proof, &public_inputs);
 

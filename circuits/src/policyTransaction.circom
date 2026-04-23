@@ -39,24 +39,23 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
-    
-    // Policy inputs
-    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs]; 
-    input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
+    signal input inputNullifier[nIns];
+    signal input outputCommitment[nOuts];
+    // Policy roots
     signal input membershipRoots[nIns][nMembershipProofs];
     signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
-    
     /** PRIVATE INPUTS **/
+    // Policy witness data
+    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs];
+    input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     // Transaction input data
-    signal input inputNullifier[nIns];
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
     signal input inBlinding[nIns];
     signal input inPathIndices[nIns];
     signal input inPathElements[nIns][levels];
     // Transaction output data
-    signal input outputCommitment[nOuts];
     signal input outAmount[nOuts];
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
