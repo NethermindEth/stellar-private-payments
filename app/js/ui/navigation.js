@@ -10,6 +10,120 @@ import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
+const BOOTNODE_ENABLED_KEY = 'poolstellar_bootnode_enabled';
+const BOOTNODE_URL_KEY = 'poolstellar_bootnode_url';
+const DEFAULT_BOOTNODE_URL_TESTNET = 'https://bootnode.testnet.poolstellar.org';
+
+function getBootnodeSettings() {
+    try {
+        const enabled = window.localStorage.getItem(BOOTNODE_ENABLED_KEY) === '1';
+        const url = window.localStorage.getItem(BOOTNODE_URL_KEY) || DEFAULT_BOOTNODE_URL_TESTNET;
+        return { enabled, url };
+    } catch {
+        return { enabled: false, url: DEFAULT_BOOTNODE_URL_TESTNET };
+    }
+}
+
+function setBootnodeSettings({ enabled, url }) {
+    try {
+        window.localStorage.setItem(BOOTNODE_ENABLED_KEY, enabled ? '1' : '0');
+        if (url) window.localStorage.setItem(BOOTNODE_URL_KEY, url);
+    } catch {
+        // ignore
+    }
+}
+
+function isRpcSyncGapError(message) {
+    return typeof message === 'string' && message.startsWith('RPC_SYNC_GAP');
+}
+
+function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
+    const existing = document.getElementById('bootnode-consent-modal');
+    if (existing) existing.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'bootnode-consent-modal';
+    overlay.className = 'fixed inset-0 z-50';
+    overlay.innerHTML = `
+      <div class="absolute inset-0 bg-black/70"></div>
+      <div class="relative min-h-full flex items-center justify-center p-4">
+        <div class="w-full max-w-2xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
+          <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between gap-3">
+            <h2 class="text-lg font-semibold text-dark-100">Use bootnode to recover history?</h2>
+            <button id="bootnode-consent-close" type="button" class="p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Close">
+              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+            </button>
+          </div>
+          <div class="px-5 py-4 space-y-3 text-sm text-dark-200">
+            <p>Your current RPC node cannot serve historical events back to the contract deployment ledger (RPC retention window).</p>
+            <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-2">
+              <p class="text-dark-100 font-semibold">Trust assumptions</p>
+              <ul class="list-disc pl-5 space-y-1 text-dark-300">
+                <li>The bootnode can omit, censor, or serve incorrect historical event data.</li>
+                <li>The bootnode operator can observe your IP address and request timing.</li>
+                <li>Near the chain tip, the bootnode will redirect requests to your upstream RPC.</li>
+              </ul>
+              <p class="text-xs text-dark-400">Learn more: <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="docs/bootnode.html" target="_blank" rel="noreferrer noopener">Bootnode docs</a></p>
+            </div>
+            <label class="block text-xs text-dark-400">Bootnode URL (indexer only)</label>
+            <input id="bootnode-consent-url" type="text" class="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded font-mono text-xs text-dark-100 focus:outline-none focus:border-brand-500" />
+            <p class="text-xs text-dark-500 break-words">Wallet RPC (unchanged): <span class="font-mono">${rpcUrl || ''}</span></p>
+            <details class="text-xs text-dark-500">
+              <summary class="cursor-pointer select-none">Show technical details</summary>
+              <pre class="mt-2 p-3 bg-dark-950 border border-dark-800 rounded whitespace-pre-wrap break-words">${(errorMessage || '').replaceAll('<', '&lt;')}</pre>
+            </details>
+            <p id="bootnode-consent-error" class="hidden text-xs text-red-400"></p>
+          </div>
+          <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
+            <button id="bootnode-consent-cancel" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">Cancel</button>
+            <button id="bootnode-consent-accept" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">Use bootnode</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const urlInput = overlay.querySelector('#bootnode-consent-url');
+    const errorEl = overlay.querySelector('#bootnode-consent-error');
+    const acceptBtn = overlay.querySelector('#bootnode-consent-accept');
+    const cancelBtn = overlay.querySelector('#bootnode-consent-cancel');
+    const closeBtn = overlay.querySelector('#bootnode-consent-close');
+
+    if (urlInput) urlInput.value = defaultUrl || '';
+
+    return new Promise((resolve) => {
+        const cleanup = () => {
+            acceptBtn?.removeEventListener('click', onAccept);
+            cancelBtn?.removeEventListener('click', onCancel);
+            closeBtn?.removeEventListener('click', onCancel);
+            overlay.remove();
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve({ accepted: false, url: null });
+        };
+
+        const onAccept = () => {
+            const url = (urlInput?.value || '').trim();
+            if (!url.startsWith('https://')) {
+                if (errorEl) {
+                    errorEl.textContent = 'Bootnode URL must start with https://';
+                    errorEl.classList.remove('hidden');
+                }
+                return;
+            }
+            cleanup();
+            resolve({ accepted: true, url });
+        };
+
+        acceptBtn?.addEventListener('click', onAccept);
+        cancelBtn?.addEventListener('click', onCancel);
+        closeBtn?.addEventListener('click', onCancel);
+    });
+}
+
 /**
  * Updates the disabled state of all submit buttons and disclaimers based on wallet connection.
  * @param {boolean} connected
@@ -170,17 +284,41 @@ export const Wallet = {
 
             setButtonLoading('Loading WASM...');
             try {
-                await initializeWasm(rpcUrl);
+                const bootnode = getBootnodeSettings();
+                await initializeWasm(rpcUrl, bootnode.enabled ? bootnode.url : null);
             } catch (e) {
-                // Always toast init failures (even on auto-connect) because it's actionable.
-                const msg = e?.message || 'Failed to initialize WASM';
-                const now = Date.now();
-                const last = this._lastInitError || { msg: null, at: 0 };
-                if (msg !== last.msg || (now - last.at) > 20_000) {
-                    Toast.show(msg, 'error', 20_000);
-                    this._lastInitError = { msg, at: now };
+                let msg = e?.message || 'Failed to initialize WASM';
+                const bootnode = getBootnodeSettings();
+
+                // Retention-window bootstrap: offer an opt-in bootnode for the indexer only.
+                if (isRpcSyncGapError(msg) && !bootnode.enabled) {
+                    try {
+                        const modal = await showBootnodeConsentModal({
+                            defaultUrl: bootnode.url,
+                            rpcUrl,
+                            errorMessage: msg,
+                        });
+                        if (modal?.accepted && modal?.url) {
+                            setBootnodeSettings({ enabled: true, url: modal.url });
+                            setButtonLoading('Loading WASM (bootnode)...');
+                            await initializeWasm(rpcUrl, modal.url);
+                            msg = null;
+                        }
+                    } catch (modalErr) {
+                        console.debug('[Bootnode] consent flow failed:', modalErr);
+                    }
                 }
-                throw e;
+
+                if (msg) {
+                    // Always toast init failures (even on auto-connect) because it's actionable.
+                    const now = Date.now();
+                    const last = this._lastInitError || { msg: null, at: 0 };
+                    if (msg !== last.msg || (now - last.at) > 20_000) {
+                        Toast.show(msg, 'error', 20_000);
+                        this._lastInitError = { msg, at: now };
+                    }
+                    throw e;
+                }
             }
 
             setButtonLoading('Onboarding…');

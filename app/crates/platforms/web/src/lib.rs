@@ -33,7 +33,7 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
         .ping_storage()
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
-    let indexer = Indexer::init(config.rpc_url(), client.clone())
+    let indexer = Indexer::init(config.indexer_rpc_url(), client.clone())
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
     start_indexer_loop(indexer, 5_000);

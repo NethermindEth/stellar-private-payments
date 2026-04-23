@@ -31,7 +31,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             Ok(_) => {}
             Err(RpcError::RpcSyncGap(oldest)) => {
                 return Err(anyhow!(
-                    "Your RPC node {rpc_url} oldest available ledger is {oldest}. \
+                    "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
+Your RPC node {rpc_url} oldest available ledger is {oldest}. \
 Indexing requires events back to the pool deployment ledger {0}. \
 Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
                     config.deployment_ledger
