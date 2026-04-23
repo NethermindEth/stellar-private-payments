@@ -185,7 +185,7 @@ async function ensureDisclaimerAccepted(address, setButtonLoading) {
     const client = getHandle().webClient;
     setButtonLoading?.('Checking Terms & Conditions…');
     const state = await client.getDisclaimerState(address);
-    if (state?.accepted) return;
+    if (state?.accepted) return false;
 
     await showDisclaimerModal({
         disclaimerTextMd: state?.disclaimerTextMd || '',
@@ -197,6 +197,8 @@ async function ensureDisclaimerAccepted(address, setButtonLoading) {
             Toast.show('Terms & Conditions must be accepted to use this service.', 'error', 10_000);
         },
     });
+
+    return true;
 }
 
 export const Tabs = {
@@ -366,7 +368,15 @@ export const Wallet = {
                 throw e;
             }
 
-            await ensureDisclaimerAccepted(address, setButtonLoading);
+            const didPromptDisclaimer = await ensureDisclaimerAccepted(address, setButtonLoading);
+            if (auto && didPromptDisclaimer) {
+                try {
+                    setButtonLoading('Enable durable storage?');
+                    await ensurePersistentStorage({ interactive: true });
+                } catch (e) {
+                    console.debug('[Storage] persistence prompt failed:', e);
+                }
+            }
 
             // Ask for two signatures only if keys aren't already stored in WASM storage.
             const keys = await deriveKeysFromWallet(address, {

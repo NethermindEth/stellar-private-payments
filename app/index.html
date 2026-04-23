@@ -1051,60 +1051,6 @@
         </div>
     </div>
 
-    <!-- Terms & Conditions Modal -->
-    <div id="disclaimer-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="disclaimer-modal-title">
-        <div class="absolute inset-0 bg-black/70"></div>
-        <div class="relative min-h-full flex items-center justify-center p-4">
-            <div class="w-full max-w-3xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
-                <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-                    <h2 id="disclaimer-modal-title" class="text-lg font-semibold text-dark-100">Terms &amp; Conditions</h2>
-                </div>
-                <div class="px-5 py-4 max-h-[70vh] overflow-auto">
-                    <div id="disclaimer-modal-content" class="space-y-3 text-sm text-dark-300"></div>
-                    <p id="disclaimer-modal-error" class="hidden mt-4 text-sm text-red-400"></p>
-                </div>
-                <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
-                    <button id="disclaimer-decline-btn" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">
-                        Decline
-                    </button>
-                    <button id="disclaimer-accept-btn" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">
-                        Accept
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Durable Storage Modal -->
-    <div id="storage-persist-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="storage-persist-modal-title">
-        <div class="absolute inset-0 bg-black/70"></div>
-        <div class="relative min-h-full flex items-center justify-center p-4">
-            <div class="w-full max-w-xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
-                <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-                    <h2 id="storage-persist-modal-title" class="text-lg font-semibold text-dark-100">Enable durable storage?</h2>
-                </div>
-                <div class="px-5 py-4 space-y-3 text-sm text-dark-300">
-                    <p>
-                        This app stores your local database in the browser (SQLite via OPFS).
-                        Without durable storage, the browser may delete it under storage pressure.
-                    </p>
-                    <p class="text-xs text-dark-500">
-                        Durable storage helps prevent eviction, but clearing site data will still remove it.
-                    </p>
-                    <p id="storage-persist-modal-error" class="hidden mt-2 text-sm text-red-400"></p>
-                </div>
-                <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
-                    <button id="storage-persist-decline-btn" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">
-                        Not now
-                    </button>
-                    <button id="storage-persist-enable-btn" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">
-                        Enable durable storage
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
     <!-- Templates -->
 
     <!-- Deposit/Transact Output Row Template -->
