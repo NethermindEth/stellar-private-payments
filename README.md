@@ -32,30 +32,18 @@ The Frontend includes the [user-facing part](#transaction-flow) and an example o
 
 If you want to try it out:
 
-1. Install dependencies
+1. Deploy the contracts to a Stellar network:
     ```bash
-      make install
-    ``` 
-   
-
-2. Compile the project, including circuit tests:
-    ```bash
-      make circuits-build # or BUILD_TESTS=1 cargo build
-    ```
-   
-
-3. Deploy the contracts to a Stellar network:
-    ```bash
-    ./scripts/deploy.sh <network> \                     # e.g. testnet
+    ./deployments/scripts/deploy.sh <network> \         # e.g. testnet
       --deployer <identity> \                           # Must be added in stellar-cli keys
       --asp-levels 10 \                                 # Number of levels in the ASP trees
       --pool-levels 10 \                                # Number of levels in the pool Merkle tree
       --max-deposit 1000000000 \                        # Maximum deposit amount (in Stroops)
-      --vk-file scripts/testdata/policy_test_vk.json # Verification key file
+      --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json # Verification key file
     ```
-   If you already have deployed contracts, make sure their addresses are updated in `scripts/deployments.json`.
+   If you already have deployed contracts, make sure their addresses are updated in `deployments/testnet/deployments.json`.
 
-4. Serve frontend
+2. Serve frontend
     ```bash
       make serve
     ```
@@ -63,7 +51,7 @@ If you want to try it out:
     You might need to delete the browser cache from previous runs. Go to `Application` -> `Clear storage`.
 
 
-5. The pool is ready to use. But you will need to populate the ASP membership smart contracts with some public keys. You can do it directly from the stellar-cli:
+3. The pool is ready to use. But you will need to populate the ASP membership smart contracts with some public keys. You can do it directly from the stellar-cli:
     ```bash
     stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
     ```
@@ -74,7 +62,7 @@ If you want to try it out:
     This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
 
 
-6. Go back to `http://localhost:8080` and try it out!
+4. Go back to `http://localhost:8080` and try it out!
 
 ### Architecture Overview
 
@@ -125,10 +113,11 @@ As a proof of concept, this implementation has several limitations:
 
 - **No Groth16 Ceremony**: The Common Reference String (CRS) was not generated doing a decentralized ceremony.
 - **Single circuit support**: Now the demo only showcases a single circuit (2 inputs, 2 outputs). Support for multiple circuits might be added in the future.
-- **No Stellar Events**: The demo relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for longer periods of time. It requires a dedicated indexer serving events to users.
+- **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts. But this has not been tested in the UI.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
+- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them. In future versions cloud sync maybe introduced. Also clearing the app site data permanently deletes the app database with app-derived keys and notes.
 
 
 ## AI tools disclosure
@@ -156,9 +145,10 @@ The maintainers of this repository provide the source code "as is" and assume no
 
 ## Would like to contribute?
 
-See [Contributing](./CONTRIBUTING.md).
+Please check [the issues](https://github.com/NethermindEth/stellar-private-payments/issues).
+If you're an external contributor, please check the issues with the label `contributors-friendly`.
+See also [Contributing](./CONTRIBUTING.md).
 
 ## Credit
 
 Credit goes to Horizen Labs for their [Poseidon2 implementation](https://github.com/HorizenLabs/poseidon2), which is integrated into this repository.
-

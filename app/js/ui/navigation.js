@@ -1,68 +1,202 @@
 /**
- * Navigation - Tab switching and Wallet connection.
+ * Navigation - tab switching and wallet onboarding.
  * @module ui/navigation
  */
 
-import { connectWallet, getWalletNetwork, signWalletTransaction, signWalletAuthEntry } from '../wallet.js';
-import { validateWalletNetwork, registerPublicKey, getLatestLedger } from '../stellar.js';
-import { App, Utils, Toast, deriveKeysFromWallet, Storage } from './core.js';
+import { connectWallet, deriveKeysFromWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { getHandle, initializeWasm } from '../wasm-facade.js';
+import { submitPublicKeyRegistration } from '../stellar.js';
+import { App, Utils, Toast } from './core.js';
+import { ensurePersistentStorage } from './persistent-storage.js';
 import { setTabsRef } from './templates.js';
-import { fieldToHex } from '../bridge.js';
-import { publicKeyStore, notesStore, StateManager, poolStore } from '../state/index.js';
-import { bytesToHex } from '../state/utils.js';
-import { NotesTable } from './notes-table.js';
-
-// Callbacks for wallet connection events (set by transaction modules)
-const walletConnectCallbacks = [];
-const walletDisconnectCallbacks = [];
-const accountChangeCallbacks = [];
-
-// Polling interval for account change detection
-let accountCheckInterval = null;
-const ACCOUNT_CHECK_INTERVAL_MS = 3000;
-
-/**
- * Registers a callback to be called when wallet connects.
- * Used by Withdraw and Transact to prefill recipient fields.
- * @param {function} callback
- */
-export function onWalletConnect(callback) {
-    walletConnectCallbacks.push(callback);
-}
-
-/**
- * Registers a callback to be called when wallet disconnects.
- * @param {function} callback
- */
-export function onWalletDisconnect(callback) {
-    walletDisconnectCallbacks.push(callback);
-}
-
-/**
- * Registers a callback to be called when account changes (different address same wallet).
- * @param {function(string)} callback - Receives the new address
- */
-export function onAccountChange(callback) {
-    accountChangeCallbacks.push(callback);
-}
 
 /**
  * Updates the disabled state of all submit buttons and disclaimers based on wallet connection.
- * @param {boolean} connected - Whether wallet is connected
+ * @param {boolean} connected
  */
 function updateSubmitButtons(connected) {
     const modes = ['deposit', 'withdraw', 'transfer', 'transact'];
     for (const mode of modes) {
         const btn = document.getElementById(`btn-${mode}`);
         const disclaimer = document.getElementById(`wallet-disclaimer-${mode}`);
-        
-        if (btn) {
-            btn.disabled = !connected;
-        }
-        if (disclaimer) {
-            disclaimer.classList.toggle('hidden', connected);
-        }
+        if (btn) btn.disabled = !connected;
+        if (disclaimer) disclaimer.classList.toggle('hidden', connected);
     }
+}
+
+function renderDisclaimerMarkdown(md, container) {
+    container.textContent = '';
+
+    const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
+    let currentList = null;
+    let inCode = false;
+    let codeLines = [];
+
+    const flushList = () => {
+        currentList = null;
+    };
+
+    const flushCode = () => {
+        if (!codeLines.length) return;
+        const pre = document.createElement('pre');
+        pre.className = 'p-3 bg-dark-950 border border-dark-800 rounded-lg overflow-auto text-xs font-mono text-dark-200';
+        pre.textContent = codeLines.join('\n');
+        container.appendChild(pre);
+        codeLines = [];
+    };
+
+    for (const rawLine of lines) {
+        const line = rawLine.replace(/\s+$/g, '');
+
+        if (line.startsWith('```')) {
+            if (inCode) {
+                inCode = false;
+                flushCode();
+            } else {
+                flushList();
+                inCode = true;
+                codeLines = [];
+            }
+            continue;
+        }
+
+        if (inCode) {
+            codeLines.push(rawLine);
+            continue;
+        }
+
+        if (!line.trim()) {
+            flushList();
+            continue;
+        }
+
+        const headingMatch = line.match(/^(#{1,6})\s+(.*)$/);
+        if (headingMatch) {
+            flushList();
+            const level = headingMatch[1].length;
+            const text = headingMatch[2].trim();
+            const el = document.createElement(`h${level}`);
+            el.textContent = text;
+            el.className =
+                level === 1
+                    ? 'text-base sm:text-lg font-semibold text-dark-100 mt-2'
+                    : level === 2
+                        ? 'text-sm sm:text-base font-semibold text-dark-100 mt-4'
+                        : 'text-sm font-semibold text-dark-100 mt-3';
+            container.appendChild(el);
+            continue;
+        }
+
+        const listMatch = line.match(/^[-*]\s+(.*)$/);
+        if (listMatch) {
+            if (!currentList) {
+                currentList = document.createElement('ul');
+                currentList.className = 'list-disc pl-5 space-y-1';
+                container.appendChild(currentList);
+            }
+            const li = document.createElement('li');
+            li.textContent = listMatch[1].trim();
+            currentList.appendChild(li);
+            continue;
+        }
+
+        flushList();
+
+        const p = document.createElement('p');
+        p.className = 'leading-relaxed';
+
+        const trimmed = line.trim();
+        if (/^https?:\/\/\S+$/i.test(trimmed)) {
+            const a = document.createElement('a');
+            a.href = trimmed;
+            a.target = '_blank';
+            a.rel = 'noreferrer';
+            a.className = 'text-brand-400 hover:text-brand-300 underline';
+            a.textContent = trimmed;
+            p.appendChild(a);
+        } else {
+            p.textContent = trimmed;
+        }
+
+        container.appendChild(p);
+    }
+
+    if (inCode) {
+        flushCode();
+    }
+}
+
+function showDisclaimerModal({ disclaimerTextMd, onAccept, onDecline }) {
+    const modal = document.getElementById('disclaimer-modal');
+    const content = document.getElementById('disclaimer-modal-content');
+    const errorEl = document.getElementById('disclaimer-modal-error');
+    const acceptBtn = document.getElementById('disclaimer-accept-btn');
+    const declineBtn = document.getElementById('disclaimer-decline-btn');
+
+    if (!modal || !content || !acceptBtn || !declineBtn || !errorEl) {
+        throw new Error('Disclaimer modal is missing from the page');
+    }
+
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+    acceptBtn.disabled = false;
+    declineBtn.disabled = false;
+
+    renderDisclaimerMarkdown(disclaimerTextMd, content);
+    modal.classList.remove('hidden');
+
+    return new Promise((resolve, reject) => {
+        const cleanup = () => {
+            acceptBtn.removeEventListener('click', onAcceptClick);
+            declineBtn.removeEventListener('click', onDeclineClick);
+            modal.classList.add('hidden');
+        };
+
+        const onAcceptClick = async () => {
+            try {
+                acceptBtn.disabled = true;
+                declineBtn.disabled = true;
+                await onAccept?.();
+                cleanup();
+                resolve(true);
+            } catch (e) {
+                acceptBtn.disabled = false;
+                declineBtn.disabled = false;
+                errorEl.textContent = e?.message || 'Failed to accept Terms & Conditions';
+                errorEl.classList.remove('hidden');
+            }
+        };
+
+        const onDeclineClick = async () => {
+            try {
+                await onDecline?.();
+            } finally {
+                cleanup();
+                reject(new Error('Terms & Conditions must be accepted to use this service.'));
+            }
+        };
+
+        acceptBtn.addEventListener('click', onAcceptClick);
+        declineBtn.addEventListener('click', onDeclineClick);
+    });
+}
+
+async function ensureDisclaimerAccepted(address, setButtonLoading) {
+    const client = getHandle().webClient;
+    setButtonLoading?.('Checking Terms & Conditions…');
+    const state = await client.getDisclaimerState(address);
+    if (state?.accepted) return;
+
+    await showDisclaimerModal({
+        disclaimerTextMd: state?.disclaimerTextMd || '',
+        onAccept: async () => {
+            setButtonLoading?.('Accepting Terms & Conditions…');
+            await client.acceptDisclaimer(address, state?.disclaimerHashHex || '');
+        },
+        onDecline: async () => {
+            Toast.show('Terms & Conditions must be accepted to use this service.', 'error', 10_000);
+        },
+    });
 }
 
 export const Tabs = {
@@ -70,19 +204,15 @@ export const Tabs = {
         document.querySelectorAll('.tab-btn').forEach(btn => {
             btn.addEventListener('click', () => this.switch(btn.dataset.tab));
         });
-        
-        // Register with templates for cross-module access
         setTabsRef(this);
     },
-    
+
     switch(tabId) {
         App.state.activeTab = tabId;
-        
-        // Update tab buttons
+
         document.querySelectorAll('.tab-btn').forEach(btn => {
             const isActive = btn.dataset.tab === tabId;
             btn.setAttribute('aria-selected', isActive);
-            
             if (isActive) {
                 btn.classList.add('bg-dark-800', 'text-brand-500', 'border', 'border-brand-500/30', 'shadow-lg', 'shadow-brand-500/10');
                 btn.classList.remove('text-dark-400', 'hover:text-dark-200', 'hover:bg-dark-800');
@@ -91,8 +221,7 @@ export const Tabs = {
                 btn.classList.add('text-dark-400', 'hover:text-dark-200', 'hover:bg-dark-800');
             }
         });
-        
-        // Update panels
+
         document.querySelectorAll('.tab-panel').forEach(panel => {
             const isActive = panel.id === `panel-${tabId}`;
             panel.classList.toggle('hidden', !isActive);
@@ -102,321 +231,377 @@ export const Tabs = {
 
 export const Wallet = {
     dropdownOpen: false,
-    checkingAccount: false,
-    
+    _connectPromise: null,
+    _lastInitError: { msg: null, at: 0 },
+    _stopWatcher: null,
+    _walletChangeInFlight: null,
+
     init() {
         const btn = document.getElementById('wallet-btn');
         const dropdown = document.getElementById('wallet-dropdown');
         const disconnectBtn = document.getElementById('wallet-disconnect-btn');
         const registerBtn = document.getElementById('wallet-register-btn');
-        
-        btn.addEventListener('click', (e) => {
+
+        btn?.addEventListener('click', (e) => {
             if (App.state.wallet.connected) {
                 e.stopPropagation();
                 this.toggleDropdown();
             } else {
-                this.connect();
+                this.connect({ auto: false });
             }
         });
-        
+
         disconnectBtn?.addEventListener('click', () => {
             this.closeDropdown();
             this.disconnect();
         });
-        
+
         registerBtn?.addEventListener('click', () => {
             this.closeDropdown();
-            this.registerPublicKey();
+            this.registerPublicKey().catch(e => {
+                Toast.show(e?.message || 'Public key registration failed', 'error', 8000);
+            });
         });
-        
-        // Close dropdown when clicking outside
+
         document.addEventListener('click', (e) => {
             if (this.dropdownOpen && !dropdown?.contains(e.target) && e.target !== btn) {
                 this.closeDropdown();
             }
         });
-        
-        // Check for account changes when window gains focus
-        window.addEventListener('focus', () => {
-            if (App.state.wallet.connected) {
-                this.checkAccountChange();
-            }
-        });
-        
-        // Also check periodically while connected
-        this.startAccountCheck();
-        
-        // Initially disable submit buttons until wallet is connected
+
         updateSubmitButtons(false);
     },
-    
-    startAccountCheck() {
-        if (accountCheckInterval) return;
-        accountCheckInterval = setInterval(() => {
-            if (App.state.wallet.connected && document.visibilityState === 'visible') {
-                this.checkAccountChange();
-            }
-        }, ACCOUNT_CHECK_INTERVAL_MS);
-    },
-    
-    stopAccountCheck() {
-        if (accountCheckInterval) {
-            clearInterval(accountCheckInterval);
-            accountCheckInterval = null;
-        }
-    },
-    
-    async checkAccountChange() {
-        if (this.checkingAccount || !App.state.wallet.connected) return;
-        
-        this.checkingAccount = true;
-        try {
-            const currentAddress = await connectWallet();
-            const previousAddress = App.state.wallet.address;
-            
-            if (currentAddress !== previousAddress) {
-                console.log(`[Wallet] Account changed: ${previousAddress?.slice(0, 8)}... -> ${currentAddress.slice(0, 8)}...`);
-                
-                // Update state
-                App.state.wallet.address = currentAddress;
-                
-                // Update notes store owner and clear keypairs
-                notesStore.handleAccountChange(currentAddress);
-                
-                // Update UI
-                const text = document.getElementById('wallet-text');
-                const addressDisplay = document.getElementById('wallet-dropdown-address');
-                if (text) text.textContent = Utils.truncateHex(currentAddress, 7, 6);
-                if (addressDisplay) addressDisplay.textContent = currentAddress;
-                
-                // Reload notes for the new account
-                await NotesTable.reload();
-                
-                // Refresh pool state to ensure merkle tree is in sync
-                console.log('[Wallet] Refreshing pool state after account switch...');
-                try {
-                    await StateManager.startSync({ forceRefresh: true });
-                    await StateManager.rebuildPoolTree();
-                    console.log('[Wallet] Pool state refreshed, tree has', poolStore.getNextIndex(), 'leaves');
-                } catch (syncErr) {
-                    console.warn('[Wallet] Pool sync failed after account switch:', syncErr.message);
-                }
-                
-                // Notify callbacks
-                for (const callback of accountChangeCallbacks) {
-                    try {
-                        callback(currentAddress);
-                    } catch (e) {
-                        console.error('[Wallet] Account change callback error:', e);
-                    }
-                }
-                
-                Toast.show('Account changed - state synced', 'success');
-            }
-        } catch (e) {
-            // Wallet may have been disconnected externally
-            if (App.state.wallet.connected) {
-                console.warn('[Wallet] Failed to check account:', e.message);
-            }
-        } finally {
-            this.checkingAccount = false;
-        }
-    },
-    
+
     toggleDropdown() {
-        if (this.dropdownOpen) {
-            this.closeDropdown();
-        } else {
-            this.openDropdown();
-        }
+        if (this.dropdownOpen) this.closeDropdown();
+        else this.openDropdown();
     },
-    
+
     openDropdown() {
         const dropdown = document.getElementById('wallet-dropdown');
         const btn = document.getElementById('wallet-btn');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
         const addressDisplay = document.getElementById('wallet-dropdown-address');
-        
+
         if (addressDisplay && App.state.wallet.address) {
             addressDisplay.textContent = App.state.wallet.address;
         }
-        
+
         dropdown?.classList.remove('hidden');
         btn?.setAttribute('aria-expanded', 'true');
         dropdownIcon?.classList.add('rotate-180');
         this.dropdownOpen = true;
     },
-    
+
     closeDropdown() {
         const dropdown = document.getElementById('wallet-dropdown');
         const btn = document.getElementById('wallet-btn');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        
+
         dropdown?.classList.add('hidden');
         btn?.setAttribute('aria-expanded', 'false');
         dropdownIcon?.classList.remove('rotate-180');
         this.dropdownOpen = false;
     },
-    
-    async connect() {
+
+    /**
+     * Connect to Freighter, assert testnet, initialize WASM, and derive keys.
+     * @param {{auto?: boolean}} opts
+     */
+    async connect({ auto = false } = {}) {
+        if (this._connectPromise) return this._connectPromise;
+
         const btn = document.getElementById('wallet-btn');
         const text = document.getElementById('wallet-text');
-        const network = document.getElementById('network-name');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        
-        try {
-            const publicKey = await connectWallet();
-            App.state.wallet = { connected: true, address: publicKey };
-            
-            // Set the owner in notes store for filtering
-            notesStore.handleAccountChange(publicKey);
-            
-            btn.classList.add('border-emerald-500', 'bg-emerald-500/10');
-            text.textContent = Utils.truncateHex(App.state.wallet.address, 7, 6);
-            dropdownIcon?.classList.remove('hidden');
-        } catch (e) {
-            console.error('Wallet connection error:', e);
-            const message = e?.code === 'USER_REJECTED'
-                ? 'Wallet connection cancelled'
-                : (e?.message || 'Failed to connect wallet');
-            Toast.show(message, 'error');
-            return;
-        }
+        const addressDisplay = document.getElementById('wallet-dropdown-address');
+        const networkName = document.getElementById('network-name');
 
-        // Validate wallet is on the correct network
-        if (network) {
-            try {
-                const details = await getWalletNetwork();
-                validateWalletNetwork(details.network);
-                network.textContent = details.network || 'Unknown';
-            } catch (e) {
-                console.error('Wallet network error:', e);
-                network.textContent = 'Unknown';
-                Toast.show(e?.message || 'Failed to fetch wallet network', 'error');
+        const setButtonLoading = (msg) => {
+            if (text) text.textContent = msg;
+            if (btn) btn.disabled = true;
+        };
+
+        const run = async () => {
+            setButtonLoading('Connecting...');
+            const address = await connectWallet();
+
+            const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
+            const rpcUrl = sorobanRpcUrl || '';
+
+            if (!rpcUrl.toLowerCase().includes('testnet')) {
+                Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
                 this.disconnect();
                 return;
             }
-        }
 
-        Toast.show('Wallet connected!', 'success');
-        
-        // Enable submit buttons
-        updateSubmitButtons(true);
-        
-        // Load notes for this account
-        await NotesTable.reload();
-        
-        // Notify registered callbacks (Withdraw, Transact prefill recipient)
-        for (const callback of walletConnectCallbacks) {
+            App.state.wallet.connected = true;
+            App.state.wallet.address = address;
+            App.state.wallet.sorobanRpcUrl = rpcUrl;
+            App.state.wallet.network = network;
+            App.state.wallet.networkPassphrase = networkPassphrase;
+
+            if (networkName) networkName.textContent = (network || 'TESTNET').toUpperCase();
+
+            // Request durable browser storage on manual onboarding so OPFS-backed SQLite
+            // is less likely to be evicted under storage pressure.
             try {
-                callback();
+                await ensurePersistentStorage({ interactive: !auto });
             } catch (e) {
-                console.error('[Wallet] Callback error:', e);
+                console.debug('[Storage] persistence check failed:', e);
             }
-        }
+
+            setButtonLoading('Loading WASM...');
+            try {
+                await initializeWasm(rpcUrl);
+            } catch (e) {
+                // Always toast init failures (even on auto-connect) because it's actionable.
+                const msg = e?.message || 'Failed to initialize WASM';
+                const now = Date.now();
+                const last = this._lastInitError || { msg: null, at: 0 };
+                if (msg !== last.msg || (now - last.at) > 20_000) {
+                    Toast.show(msg, 'error', 20_000);
+                    this._lastInitError = { msg, at: now };
+                }
+                throw e;
+            }
+
+            await ensureDisclaimerAccepted(address, setButtonLoading);
+
+            // Ask for two signatures only if keys aren't already stored in WASM storage.
+            const keys = await deriveKeysFromWallet(address, {
+                onStatus: setButtonLoading,
+                signOptions: { address },
+                signDelay: 300,
+            });
+
+            App.state.keys.notePublicKey = keys?.pubKey || null;
+            App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
+
+            if (text) text.textContent = Utils.truncateHex(address, 7, 6);
+            if (dropdownIcon) dropdownIcon.classList.remove('hidden');
+            if (addressDisplay) addressDisplay.textContent = address;
+
+            updateSubmitButtons(true);
+            App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+
+            this._startWatcher();
+
+            if (!auto) {
+                Toast.show('Wallet connected. Privacy keys ready.', 'success');
+            }
+        };
+
+        this._connectPromise = (async () => {
+            try {
+                await run();
+            } catch (e) {
+                if (!auto) Toast.show(e?.message || 'Failed to connect wallet', 'error');
+                this.disconnect();
+                throw e;
+            } finally {
+                this._connectPromise = null;
+                if (btn) btn.disabled = false;
+                if (!App.state.wallet.connected && text) text.textContent = 'Connect Freighter';
+            }
+        })();
+
+        return this._connectPromise;
     },
-    
+
     disconnect() {
-        const btn = document.getElementById('wallet-btn');
+        this._stopWatcher?.();
+        this._stopWatcher = null;
+        this._walletChangeInFlight = null;
+
+        App.state.wallet.connected = false;
+        App.state.wallet.address = null;
+        App.state.wallet.sorobanRpcUrl = null;
+        App.state.wallet.network = null;
+        App.state.wallet.networkPassphrase = null;
+        App.state.keys.notePublicKey = null;
+        App.state.keys.encryptionPublicKey = null;
+
         const text = document.getElementById('wallet-text');
-        const network = document.getElementById('network-name');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        
-        App.state.wallet = { connected: false, address: null };
-        
-        // Clear owner in notes store
-        notesStore.handleAccountChange(null);
-        
-        // Clear notes from UI (no owner = empty list)
-        App.state.notes = [];
-        NotesTable.render();
-        
-        btn.classList.remove('border-emerald-500', 'bg-emerald-500/10');
-        text.textContent = 'Connect Freighter';
-        dropdownIcon?.classList.add('hidden');
-        if (network) {
-            network.textContent = 'Network';
-        }
-        
-        // Disable submit buttons
+        const addressDisplay = document.getElementById('wallet-dropdown-address');
+        if (text) text.textContent = 'Connect Freighter';
+        if (dropdownIcon) dropdownIcon.classList.add('hidden');
+        if (addressDisplay) addressDisplay.textContent = '';
+
         updateSubmitButtons(false);
-        
-        // Notify disconnect callbacks
-        for (const callback of walletDisconnectCallbacks) {
-            try {
-                callback();
-            } catch (e) {
-                console.error('[Wallet] Disconnect callback error:', e);
-            }
+        App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
+    }
+
+    ,
+
+    _startWatcher() {
+        if (this._stopWatcher) return;
+
+        try {
+            this._stopWatcher = startWalletWatcher({
+                intervalMs: 2000,
+                onChange: (info) => {
+                    void this._handleWalletChange(info);
+                },
+            });
+        } catch (e) {
+            console.warn('[Wallet] Failed to start watcher:', e);
         }
-        
-        Toast.show('Wallet disconnected', 'success');
     },
-    
-    /**
-     * Registers the user's public keys on-chain for address book discovery.
-     * Registers both the X25519 encryption key and BN254 note key.
-     */
+
+    async _handleWalletChange(info) {
+        if (!App.state.wallet.connected) return;
+        if (this._connectPromise) return;
+        if (!info || info.error) return;
+
+        const nextAddress = info.address || '';
+        const nextNetwork = info.network || '';
+        const nextNetworkPassphrase = info.networkPassphrase || '';
+
+        const addressChanged =
+            nextAddress &&
+            App.state.wallet.address &&
+            nextAddress !== App.state.wallet.address;
+
+        const networkChanged =
+            (nextNetwork && nextNetwork !== App.state.wallet.network) ||
+            (nextNetworkPassphrase && nextNetworkPassphrase !== App.state.wallet.networkPassphrase);
+
+        if (!addressChanged && !networkChanged) return;
+        if (this._walletChangeInFlight) return;
+
+        this._walletChangeInFlight = (async () => {
+            const btn = document.getElementById('wallet-btn');
+            const text = document.getElementById('wallet-text');
+            const addressDisplay = document.getElementById('wallet-dropdown-address');
+            const networkNameEl = document.getElementById('network-name');
+
+            const setButtonLoading = (msg) => {
+                if (text) text.textContent = msg;
+                if (btn) btn.disabled = true;
+            };
+
+            try {
+                setButtonLoading('Wallet changed…');
+                updateSubmitButtons(false);
+
+                const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
+                const rpcUrl = sorobanRpcUrl || App.state.wallet.sorobanRpcUrl || '';
+
+                if (!rpcUrl.toLowerCase().includes('testnet')) {
+                    Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
+                    this.disconnect();
+                    return;
+                }
+
+                App.state.wallet.network = network;
+                App.state.wallet.networkPassphrase = networkPassphrase;
+                App.state.wallet.sorobanRpcUrl = rpcUrl;
+                if (networkNameEl) networkNameEl.textContent = (network || 'TESTNET').toUpperCase();
+
+                if (addressChanged) {
+                    await this._applyWalletIdentityChange(nextAddress, setButtonLoading);
+                } else {
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                Toast.show(e?.message || 'Wallet changed; failed to re-onboard', 'error', 8000);
+                this.disconnect();
+            } finally {
+                const btn = document.getElementById('wallet-btn');
+                if (btn) btn.disabled = false;
+            }
+        })().finally(() => {
+            this._walletChangeInFlight = null;
+        });
+    },
+
+    async _applyWalletIdentityChange(nextAddress, setButtonLoading) {
+        const text = document.getElementById('wallet-text');
+        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
+        const addressDisplay = document.getElementById('wallet-dropdown-address');
+
+        App.state.wallet.address = nextAddress;
+        if (addressDisplay) addressDisplay.textContent = nextAddress;
+
+        setButtonLoading?.('Onboarding new account…');
+        await ensureDisclaimerAccepted(nextAddress, setButtonLoading);
+
+        const keys = await deriveKeysFromWallet(nextAddress, {
+            onStatus: setButtonLoading,
+            signOptions: { address: nextAddress },
+            signDelay: 300,
+        });
+
+        App.state.keys.notePublicKey = keys?.pubKey || null;
+        App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
+
+        if (text) text.textContent = Utils.truncateHex(nextAddress, 7, 6);
+        if (dropdownIcon) dropdownIcon.classList.remove('hidden');
+
+        updateSubmitButtons(true);
+        App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
+
+        Toast.show('Freighter account changed. Privacy keys ready.', 'info');
+    },
+
     async registerPublicKey() {
-        if (!App.state.wallet.connected) {
+        if (!App.state.wallet.connected || !App.state.wallet.address) {
             Toast.show('Please connect your wallet first', 'error');
             return;
         }
-        
-        Toast.show('Preparing registration...', 'info');
-        
+        if (!App.state.wallet.sorobanRpcUrl || !App.state.wallet.networkPassphrase) {
+            Toast.show('Wallet network details unavailable', 'error');
+            return;
+        }
+        if (!App.state.keys.notePublicKey || !App.state.keys.encryptionPublicKey) {
+            Toast.show('Privacy keys not ready yet. Please reconnect your wallet.', 'error', 8000);
+            return;
+        }
+
+        const registerBtn = document.getElementById('wallet-register-btn');
+        const originalText = registerBtn?.textContent || 'Register Public Key';
+        const setBtnText = (t) => {
+            if (registerBtn) registerBtn.textContent = t;
+        };
+
         try {
-            // Derive both keypairs from wallet signatures
-            const { pubKeyBytes, encryptionKeypair } = await deriveKeysFromWallet({
-                onStatus: (msg) => console.log('[Register]', msg),
-                signDelay: 300,
-            });
-            
-            // Get keys as hex strings for logging/storage
-            // Note: X25519 keys are raw bytes (not field elements), so use bytesToHex
-            // BN254 note keys are field elements, so use fieldToHex for BE hex representation
-            const encryptionKeyHex = bytesToHex(encryptionKeypair.publicKey);
-            const noteKeyHex = fieldToHex(pubKeyBytes);
-            
-            console.log('[Register] Registering keys:', {
-                encryptionKey: encryptionKeyHex.slice(0, 20) + '...',
-                noteKey: noteKeyHex.slice(0, 20) + '...',
-            });
-            
-            // Call the pool.register() function with both keys
-            const result = await registerPublicKey({
-                owner: App.state.wallet.address,
-                encryptionKey: encryptionKeypair.publicKey,
-                noteKey: pubKeyBytes,
-                signerOptions: {
-                    publicKey: App.state.wallet.address,
-                    signTransaction: signWalletTransaction,
-                    signAuthEntry: signWalletAuthEntry,
+            if (registerBtn) registerBtn.disabled = true;
+            setBtnText('Registering…');
+
+            const config = await getHandle().webClient.contractConfig();
+            const poolContractId = config?.pool;
+            if (!poolContractId) throw new Error('Pool contract ID not available');
+
+            const hash = await submitPublicKeyRegistration(
+                {
+                    address: App.state.wallet.address,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                    poolContractId,
+                    notePublicKeyHex: App.state.keys.notePublicKey,
+                    encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
                 },
-            });
-            
-            if (result.success) {
-                // Add to local store immediately so address book updates
-                try {
-                    const ledger = await getLatestLedger();
-                    await publicKeyStore.processPublicKeyEvent({
-                        owner: App.state.wallet.address,
-                        encryption_key: encryptionKeyHex,
-                        note_key: noteKeyHex,
-                    }, ledger);
-                    console.log('[Register] Added to local store');
-                } catch (storeError) {
-                    console.warn('[Register] Failed to add to local store:', storeError);
+                {
+                    onStatus: (p) => {
+                        const msg = p?.message || '';
+                        if (msg) setBtnText(msg);
+                    },
                 }
-                
-                Toast.show('Public keys registered successfully!', 'success');
-                console.log('[Register] Transaction hash:', result.txHash);
-            } else {
-                throw new Error(result.error || 'Registration failed');
-            }
+            );
+
+            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 8, 6)}`, 'success', 6000);
+            App.events.dispatchEvent(new CustomEvent('addressbook:refresh'));
         } catch (e) {
-            console.error('[Register] Failed:', e);
-            Toast.show('Registration failed: ' + e.message, 'error');
+            if (e?.code === 'USER_REJECTED') {
+                Toast.show('Registration cancelled in Freighter', 'error', 6000);
+                return;
+            }
+            throw e;
+        } finally {
+            setBtnText(originalText);
+            if (registerBtn) registerBtn.disabled = false;
         }
     }
 };

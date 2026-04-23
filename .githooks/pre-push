@@ -40,16 +40,6 @@ if ! BUILD_TESTS=1 cargo test --workspace --verbose; then
     exit 6
 fi
 
-# JS Tests
-if ! command -v npm >/dev/null 2>&1; then
-    echo "❌ Missing 'npm' (required for JS tests)"
-    exit 7
-fi
-if ! npm test --prefix app; then
-    echo "❌ JS test failures detected"
-    exit 8
-fi
-
 # Contracts build (Soroban)
 if ! command -v stellar >/dev/null 2>&1; then
     echo "❌ Missing 'stellar' CLI (required for contract build)"

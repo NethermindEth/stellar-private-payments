@@ -1,0 +1,26 @@
+[package]
+name = "stellar"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+http = "1.0.0"
+log = { workspace = true }
+reqwest = { version = "0.12", default-features = false, features = ["json"] }
+serde = { workspace = true }
+serde-aux = "4.1.2"
+serde_json = { workspace = true }
+sha3 = { version = "0.10", default-features = false }
+stellar-strkey = "0.0.15"
+stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
+thiserror = { workspace = true }
+types = { workspace = true }
+
+#[lints]
+#workspace = true

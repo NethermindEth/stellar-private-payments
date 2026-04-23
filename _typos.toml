@@ -13,5 +13,5 @@ consts = "consts"
 ignore-hidden = true
 extend-exclude = [
     "circuits/src/circomlib/",
-    "scripts/deployments.json",
+    "deployments/testnet/deployments.json",
 ]

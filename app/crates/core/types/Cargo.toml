@@ -1,0 +1,26 @@
+[package]
+name = "types"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[features]
+default = []
+rusqlite = ["dep:rusqlite"]
+
+[dependencies]
+anyhow = { workspace = true }
+hex = { workspace = true }
+rusqlite = { workspace = true, optional = true }
+serde = { workspace = true }
+serde_bytes = { workspace = true }
+uint = { workspace = true }
+
+[dev-dependencies]
+rusqlite = { workspace = true, features = ["buildtime_bindgen", "bundled"] }
+serde_json = { workspace = true, features = ["alloc"] }
+
+#[lints]
+#workspace = true

@@ -1,6 +1,5 @@
 use ark_ff::PrimeField;
 use hex::FromHex;
-// use rand::Rng; // unused import
 
 pub fn from_hex<F: PrimeField>(s: &str) -> F {
     let a = Vec::from_hex(&s[2..]).expect("Invalid Hex String");

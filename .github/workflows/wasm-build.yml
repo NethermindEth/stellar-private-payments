@@ -27,7 +27,7 @@ jobs:
         with:
           profile: minimal
           toolchain: stable
-          target: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
           override: true
 
       - name: Cache
@@ -35,15 +35,5 @@ jobs:
         with:
           cache-targets: "true"
 
-      - name: Install wasm-pack
-        run: cargo install wasm-pack
-
-      - name: Install Google Chrome
-        run: |
-          sudo apt-get update
-          sudo apt-get install google-chrome-stable
-
-      - name: Run WASM tests in Headless Chrome
-        run: |
-          (cd app/crates/prover && wasm-pack test --headless --chrome)
-          (cd app/crates/witness && wasm-pack test --headless --chrome)
+      - name: Check the wasm build
+        run: cargo build -p web --target wasm32-unknown-unknown

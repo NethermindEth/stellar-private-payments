@@ -15,20 +15,9 @@ serve: build
 	unset NO_COLOR && trunk serve --dist $(DIST_DIR)
 
 .PHONY: build
-build: install circuits-build wasm-witness
+build: install circuits-build
 	@echo "Building frontend with trunk..."
 	unset NO_COLOR && trunk build --dist $(DIST_DIR) $(if $(RELEASE),--release)
-
-.PHONY: wasm-witness
-wasm-witness: install
-	@echo "Building witness WASM module..."
-	@mkdir -p target/wasm-witness
-	wasm-pack build app/crates/witness \
-		--target web \
-		--out-name witness \
-		--out-dir ../../../target/wasm-witness \
-		--release
-	@rm -f target/wasm-witness/.gitignore target/wasm-witness/package.json 2>/dev/null || true
 
 .PHONY: circuits-build
 circuits-build:
@@ -41,7 +30,6 @@ install:
 	@npm install --prefix app
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
-	@command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
 
 .PHONY: clean
 clean:

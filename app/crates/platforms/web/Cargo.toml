@@ -1,0 +1,49 @@
+[package]
+name = "web"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Unified WASM facade for app crates"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "storage-worker"
+path = "src/bin/storage_worker.rs"
+
+[[bin]]
+name = "prover-worker"
+path = "src/bin/prover_worker.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+console_error_panic_hook = { workspace = true }
+futures = { workspace = true }
+# we have to use previous versions of gloo- crates because of wasmer and circom-compat
+gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
+gloo-worker = { version = "0.5", default-features = false, features = ["futures"] }
+js-sys = "0.3"
+log = { workspace = true }
+prover = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
+state = { workspace = true }
+stellar = { workspace = true }
+types = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
+wasm-log = { workspace = true }
+web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode"] }
+witness = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies] # only to please clippy, this crate is intended only for WASM
+sqlite-wasm-rs = { version = "0.5.2", default-features = false }
+sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
+
+#[lints]
+#workspace = true

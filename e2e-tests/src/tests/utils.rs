@@ -53,7 +53,7 @@ fn proving_key_path() -> std::path::PathBuf {
     manifest_dir
         .parent()
         .expect("Failed to get workspace root")
-        .join("scripts/testdata/policy_tx_2_2_proving_key.bin")
+        .join("testdata/policy_tx_2_2_proving_key.bin")
 }
 
 /// Addresses of deployed contracts for E2E tests

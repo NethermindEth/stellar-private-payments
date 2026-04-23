@@ -1,7 +1,11 @@
 [workspace]
 members = [
-    "app/crates/prover",
-    "app/crates/witness",
+    "app/crates/core/prover",
+    "app/crates/core/state",
+    "app/crates/core/stellar",
+    "app/crates/core/types",
+    "app/crates/core/witness",
+    "app/crates/platforms/web",
     "circuits",
     "contracts/*",
     "e2e-tests",
@@ -20,28 +24,52 @@ publish = false
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.5.0", default-features = false, features = ["curve"] }
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
+ark-crypto-primitives = { version = "0.5.0", default-features = false }
 ark-ec = { version = "0.5.0", default-features = false }
 ark-ff = { version = "0.5.0", default-features = false }
 ark-groth16 = { version = "0.5.0", default-features = false }
+ark-poly = { version = "0.5.0", default-features = false }
 ark-relations = { version = "0.5.1", default-features = false }
 ark-serialize = { version = "0.5.0", default-features = false }
 ark-snark = { version = "0.5.1", default-features = false }
 ark-std = { version = "0.5.0", default-features = false }
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
+async-trait = { version = "0.1.89", default-features = false }
+cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circuits = { path = "circuits", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
+futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", features = ["js"] }
-num-bigint = { version = "0.4.6", default-features = false }
+hex = { version = "0.4", default-features = false, features = ["alloc"] }
+log = { version = "0.4", default-features = false }
+num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
+num-traits = { version = "0.2", default-features = false }
+pool = { path = "contracts/pool" }
+prover = { path = "app/crates/core/prover" }
+rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
+serde-wasm-bindgen = { version = "0.6", default-features = false }
+serde_bytes = { version = "0.11", default-features = false }
+serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
 soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-wasm-bindgen = { version = "0.2.108", default-features = false }
-wasm-bindgen-test = { version = "0.3" }
+state = { path = "app/crates/core/state" }
+stellar = { path = "app/crates/core/stellar" }
+thiserror = { version = "1", default-features = false }
+types = { path = "app/crates/core/types" }
+uint = { version = "0.9", default-features = false }
+# pin for wasmer
+wasm-bindgen = { version = "=0.2.108", default-features = false, features = ["serde-serialize"] }
+wasm-log = { version = "0.3", default-features = false }
 wasmer = { version = "6.1", default-features = false }
+web = { path = "app/crates/platforms/web" }
+witness = { path = "app/crates/core/witness" }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]
@@ -75,6 +103,7 @@ inherits = "release"
 debug-assertions = true
 
 [patch.crates-io]
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", branch = "wasm-no-parallel" }
 ark-relations = { git = "https://github.com/arkworks-rs/snark.git" }
 ark-snark = { git = "https://github.com/arkworks-rs/snark.git" }
 ark-crypto-primitives = { git = "https://github.com/arkworks-rs/crypto-primitives.git" }
@@ -83,5 +112,7 @@ ark-ec = { git = "https://github.com/arkworks-rs/algebra.git" }
 ark-poly = { git = "https://github.com/arkworks-rs/algebra.git" }
 ark-serialize = { git = "https://github.com/arkworks-rs/algebra.git" }
 ark-bn254 = { git = "https://github.com/arkworks-rs/algebra.git" }
-ark-r1cs-std = { git = "https://github.com/arkworks-rs/r1cs-std.git" }
 ark-groth16 = { git = "https://github.com/arkworks-rs/groth16.git" }
+
+[patch."https://github.com/arkworks-rs/circom-compat.git"]
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", branch = "wasm-no-parallel" }
