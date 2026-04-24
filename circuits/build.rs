@@ -19,11 +19,9 @@
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
 use anyhow::{Context, Result, anyhow};
-use ark_bn254::{Bn254, Fq, G1Affine, G2Affine};
+use ark_bn254::Bn254;
 use ark_circom::{CircomBuilder, CircomConfig};
-use ark_ff::{BigInteger, PrimeField};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
-use ark_serialize::CanonicalSerialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use compiler::{
@@ -34,7 +32,6 @@ use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
 use regex::Regex;
-use serde_json::{Value, json};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -1101,196 +1098,21 @@ fn generate_keys_if_needed(
 }
 
 /// Write the proving key to a binary file using compressed serialization.
-///
-/// # Arguments
-///
-/// * `pk` - The proving key to serialize
-/// * `path` - Output file path
 fn write_proving_key(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
-    // Serialize to Vec<u8>
-    let mut bytes = Vec::new();
-    pk.serialize_compressed(&mut bytes)
-        .map_err(|e| anyhow!("Failed to serialize proving key: {e}"))?;
-    fs::write(path, &bytes).context("Failed to write proving key file")?;
-    Ok(())
+    circuit_keys::write_proving_key_bin(pk, path)
 }
 
 /// Write the verification key to a JSON file in snarkjs-compatible format.
-///
-/// # Arguments
-///
-/// * `vk` - The verification key to serialize
-/// * `path` - Output file path
 fn write_verification_key(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let vk_json = vk_to_snarkjs_json(vk);
-    let json_str = serde_json::to_string_pretty(&vk_json)?;
-    fs::write(path, json_str).context("Failed to write verification key")?;
-    Ok(())
-}
-
-/// Convert an ark-groth16 VerifyingKey to snarkjs-compatible JSON format.
-fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
-    json!({
-        "protocol": "groth16",
-        "curve": "bn128",
-        "nPublic": vk.gamma_abc_g1.len().saturating_sub(1),
-        "vk_alpha_1": g1_to_snarkjs(&vk.alpha_g1),
-        "vk_beta_2": g2_to_snarkjs(&vk.beta_g2),
-        "vk_gamma_2": g2_to_snarkjs(&vk.gamma_g2),
-        "vk_delta_2": g2_to_snarkjs(&vk.delta_g2),
-        "IC": vk.gamma_abc_g1.iter().map(g1_to_snarkjs).collect::<Vec<_>>()
-    })
-}
-
-/// Convert a G1Affine point to snarkjs JSON format.
-fn g1_to_snarkjs(p: &G1Affine) -> Value {
-    json!([fq_to_decimal(&p.x), fq_to_decimal(&p.y), "1"])
-}
-
-/// Convert a G2Affine point to snarkjs JSON format.
-/// snarkjs uses [c1, c0] ordering (imaginary first, real second) for Fq2
-/// elements.
-fn g2_to_snarkjs(p: &G2Affine) -> Value {
-    json!([
-        [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
-        [fq_to_decimal(&p.y.c1), fq_to_decimal(&p.y.c0)],
-        ["1", "0"]
-    ])
-}
-
-/// Convert an Fq field element to a decimal string.
-fn fq_to_decimal(f: &Fq) -> String {
-    let bigint = f.into_bigint();
-    let bytes = bigint.to_bytes_be();
-    num_bigint::BigUint::from_bytes_be(&bytes).to_string()
-}
-
-// Soroban-compatible serialization functions.
-// Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering.
-
-/// Converts a BigInteger to 32-byte big-endian representation.
-fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
-    let bytes = value.to_bytes_be();
-    let mut out = [0u8; 32];
-    let start = 32usize.saturating_sub(bytes.len());
-    out[start..].copy_from_slice(&bytes[..bytes.len().min(32)]);
-    out
-}
-
-/// Converts a G1Affine point to 64-byte Soroban format.
-fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
-    let mut out = [0u8; 64];
-    out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
-    out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
-    out
-}
-
-/// Converts a G2Affine point to 128-byte Soroban format with c1||c0 ordering.
-fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
-    let mut out = [0u8; 128];
-    // Soroban ordering: c1 (imaginary) || c0 (real)
-    out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
-    out[32..64].copy_from_slice(&bigint_to_be_32(p.x.c0.into_bigint()));
-    out[64..96].copy_from_slice(&bigint_to_be_32(p.y.c1.into_bigint()));
-    out[96..].copy_from_slice(&bigint_to_be_32(p.y.c0.into_bigint()));
-    out
+    circuit_keys::write_vk_snarkjs_json(vk, path)
 }
 
 /// Write the verification key as a Rust const file for embedding in contracts.
-///
-/// Generates a file with embedded byte arrays that can be included in Soroban
-/// contracts.
 fn write_verification_key_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let ic_count = vk.gamma_abc_g1.len();
-
-    let alpha_bytes = g1_to_soroban_bytes(&vk.alpha_g1);
-    let beta_bytes = g2_to_soroban_bytes(&vk.beta_g2);
-    let gamma_bytes = g2_to_soroban_bytes(&vk.gamma_g2);
-    let delta_bytes = g2_to_soroban_bytes(&vk.delta_g2);
-
-    let mut ic_arrays = Vec::with_capacity(ic_count);
-    for ic in &vk.gamma_abc_g1 {
-        ic_arrays.push(g1_to_soroban_bytes(ic));
-    }
-
-    let mut content = String::new();
-    content.push_str("//! Auto-generated verification key constants for Soroban contracts.\n");
-    content.push_str(
-        "//! DO NOT EDIT - regenerate by running `BUILD_TESTS=1 cargo build` in circuits/\n\n",
-    );
-    content.push_str("#![allow(dead_code)]\n\n");
-
-    // Alpha (G1)
-    content.push_str("/// Alpha point (G1, 64 bytes)\n");
-    content.push_str(&format!(
-        "pub const VK_ALPHA: [u8; 64] = {:?};\n\n",
-        alpha_bytes
-    ));
-
-    // Beta (G2)
-    content.push_str("/// Beta point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_BETA: [u8; 128] = {:?};\n\n",
-        beta_bytes
-    ));
-
-    // Gamma (G2)
-    content.push_str("/// Gamma point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_GAMMA: [u8; 128] = {:?};\n\n",
-        gamma_bytes
-    ));
-
-    // Delta (G2)
-    content.push_str("/// Delta point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_DELTA: [u8; 128] = {:?};\n\n",
-        delta_bytes
-    ));
-
-    // IC count
-    content.push_str("/// Number of IC points (public inputs + 1)\n");
-    content.push_str(&format!("pub const VK_IC_COUNT: usize = {};\n\n", ic_count));
-
-    // IC points as array of arrays
-    content.push_str("/// IC points (G1, 64 bytes each)\n");
-    content.push_str(&format!("pub const VK_IC: [[u8; 64]; {}] = [\n", ic_count));
-    for ic in &ic_arrays {
-        content.push_str(&format!("    {:?},\n", ic));
-    }
-    content.push_str("];\n");
-
-    fs::write(path, content).context("Failed to write VK Rust const file")?;
-    Ok(())
+    circuit_keys::write_vk_rust_const(vk, path)
 }
 
 /// Write the verification key as binary Soroban-compatible format.
 fn write_verification_key_soroban_bin(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let ic_count = vk.gamma_abc_g1.len();
-
-    // VK binary format: alpha(64) + beta(128) + gamma(128) + delta(128) +
-    // ic_count(4) + ic(64*n) Fixed header size: 64 + 128 + 128 + 128 + 4 = 452
-    // bytes
-    const HEADER_SIZE: usize = 452;
-    let ic_bytes = ic_count.checked_mul(64).context("IC count overflow")?;
-    let total_size = HEADER_SIZE
-        .checked_add(ic_bytes)
-        .context("Total size overflow")?;
-
-    let mut bytes = Vec::with_capacity(total_size);
-
-    bytes.extend_from_slice(&g1_to_soroban_bytes(&vk.alpha_g1));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.beta_g2));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.gamma_g2));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.delta_g2));
-
-    let ic_count_u32 = u32::try_from(ic_count).context("IC count exceeds u32 max")?;
-    bytes.extend_from_slice(&ic_count_u32.to_le_bytes());
-
-    for ic in &vk.gamma_abc_g1 {
-        bytes.extend_from_slice(&g1_to_soroban_bytes(ic));
-    }
-
-    fs::write(path, &bytes).context("Failed to write VK Soroban binary")?;
-    Ok(())
+    circuit_keys::write_vk_soroban_bin(vk, path)
 }
