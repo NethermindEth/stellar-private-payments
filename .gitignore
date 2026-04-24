@@ -36,7 +36,7 @@ e2e-tests/test_snapshots/*
 
 # App
 app/node_modules
-dist/
+/dist/
 
 # Playwright E2E
 app/e2e/.freighter-extension/

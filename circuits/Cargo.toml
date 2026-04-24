@@ -47,6 +47,7 @@ ark-groth16 = { workspace = true }
 ark-serialize = "0.5.0"
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
+circuit-keys = { workspace = true }
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
 constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }

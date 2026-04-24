@@ -1,6 +1,6 @@
 # Private Payments for Stellar
 
-[![Docs](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/docs.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/docs.yml)
+[![Deployment](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml)
 [![Lint](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml)
 [![Build](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml)
 [![Dependencies](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml)
@@ -111,7 +111,6 @@ The main transaction circuit proves:
 
 As a proof of concept, this implementation has several limitations:
 
-- **No Groth16 Ceremony**: The Common Reference String (CRS) was not generated doing a decentralized ceremony.
 - **Single circuit support**: Now the demo only showcases a single circuit (2 inputs, 2 outputs). Support for multiple circuits might be added in the future.
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts. But this has not been tested in the UI.

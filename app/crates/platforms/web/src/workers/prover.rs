@@ -38,7 +38,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     }
     let (wasm_bytes, r1cs_bytes) = try_join!(
         async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.wasm").await?;
+            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
                 wasm_bytes.len()
@@ -46,7 +46,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("/circuits/policy_tx_2_2.r1cs").await?;
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
                 r1cs_bytes.len()
@@ -212,6 +212,7 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
 }
 
 async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
+    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
     let global = js_sys::global();
 
     let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
@@ -222,10 +223,14 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .as_string()
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
-    let url_string = if path.starts_with("http") {
-        path.to_string()
+    let public_url = PUBLIC_URL.unwrap_or("/");
+
+    let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
+        format!("{public_url}{path}")
+    } else if public_url == "/" {
+        format!("{origin}/{path}")
     } else {
-        format!("{}{}", origin, path)
+        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
     };
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);

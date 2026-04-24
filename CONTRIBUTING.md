@@ -8,6 +8,10 @@ Enable [commit signing](https://docs.github.com/en/authentication/managing-commi
 git config commit.gpgsign true
 ```
 
+## Documentation
+
+Unified project documentation is available at https://nethermindeth.github.io/stellar-private-payments/docs/
+
 ## Project Structure
 
 ```
@@ -39,6 +43,7 @@ stellar-private-payments/
 │   │   ├── policyTransaction.circom  # Main transaction circuit
 │   │   └── *.circom            # Supporting circuits
 │   └── build.rs                # Circuit compilation build script
+├── circuit-keys/               # Helpers to convert snarkjs keys to Arkworks
 ├── contracts/                  # Soroban smart contracts
 │   ├── asp-membership/         # ASP membership Merkle tree
 │   ├── asp-non-membership/     # ASP non-membership sparse Merkle tree
