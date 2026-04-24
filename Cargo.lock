@@ -3451,6 +3451,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.5.0",
+ "ark-circom",
  "ark-ff 0.5.0",
  "ark-groth16",
  "ark-relations",

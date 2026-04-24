@@ -20,7 +20,7 @@
 
 use anyhow::{Context, Result, anyhow};
 use ark_bn254::Bn254;
-use ark_circom::{CircomBuilder, CircomConfig};
+use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
@@ -856,11 +856,7 @@ fn generate_groth16_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    // IMPORTANT: Use default LibsnarkReduction (NOT CircomReduction) for WASM
-    // prover compatibility. CircomReduction uses snarkjs-compatible QAP which
-    // differs from standard arkworks. Our WASM prover uses standard ark-groth16
-    // without the CircomReduction type parameter.
-    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(empty, &mut rng)
+    let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
     Ok((pk, vk))
