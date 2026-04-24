@@ -167,7 +167,7 @@ pub fn generate_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    // Use default LibsnarkReduction for WASM prover compatibility
+    // Match Circom's reduction (also used in `circuits/build.rs` key generation).
     let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
@@ -204,7 +204,7 @@ pub fn load_keys(pk_path: impl AsRef<Path>) -> Result<CircuitKeys> {
     let vk = pk.vk.clone();
 
     // Compute prepared verification key for efficient verification
-    // Use default LibsnarkReduction for WASM prover compatibility
+    // Must use the same reduction as the proving setup / proof generation.
     let pvk = Groth16::<Bn254, CircomReduction>::process_vk(&vk)
         .map_err(|e| anyhow!("process_vk failed: {e}"))?;
 
@@ -240,7 +240,6 @@ pub fn prove_and_verify_with_keys(
 
     let mut rng = thread_rng();
 
-    // Use default LibsnarkReduction for WASM prover compatibility
     let proof = Groth16::<Bn254, CircomReduction>::prove(&keys.pk, circuit.clone(), &mut rng)
         .map_err(|e| anyhow!("prove failed: {e}"))?;
 

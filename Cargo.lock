@@ -3697,15 +3697,9 @@ name = "prover"
 version = "0.1.0"
 dependencies = [
  "anyhow",
-<<<<<<< HEAD
  "ark-bn254 0.6.0",
  "ark-circom",
  "ark-ff 0.6.0",
-=======
- "ark-bn254 0.5.0",
- "ark-circom",
- "ark-ff 0.5.0",
->>>>>>> 7e7aa3e (circuit reduction)
  "ark-groth16",
  "ark-relations",
  "ark-serialize 0.6.0",
