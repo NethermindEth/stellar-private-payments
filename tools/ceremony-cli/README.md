@@ -134,7 +134,7 @@ Why this step exists:
 - the app prover also needs `policy_tx_2_2_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
-Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `circuits/build.rs`.
+Internally, the helper parses the binary `.zkey` directly via `ark_circom::read_zkey`, writes the arkworks-serialized `proving_key.bin`, and emits the verifier artifacts in the same formats as `circuits/build.rs`. No extra `snarkjs` invocation is required for this step, and every curve point is re-validated on the resulting `proving_key.bin` before the files are reported as generated.
 
 ---
 

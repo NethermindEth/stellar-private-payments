@@ -1,19 +1,30 @@
-//! Convert a final snarkjs zkey into the deployment artifacts used by this repo.
+//! Convert a final snarkjs zkey into the deployment artifacts used by this
+//! repo.
+//!
+//! The binary reads the final snarkjs `.zkey` directly into an arkworks
+//! [`ProvingKey`] via [`ark_circom::read_zkey`] and emits the four artifacts
+//! consumed by this repo:
+//!
+//! - `<basename>_proving_key.bin` — `CanonicalSerialize::serialize_compressed`
+//!   of [`ProvingKey<Bn254>`], consumed by the app prover
+//!   (see `app/crates/core/prover/src/prover.rs`).
+//! - `<basename>_vk.json`         — snarkjs-compatible verification key JSON (from the trusted ceremony).
+//! - `<basename>_vk_soroban.bin`  — packed VK used by the Soroban verifier.
+//! - `<basename>_vk_const.rs`     — the same VK as Rust `const` byte arrays.
 
 use anyhow::{Context, Result, anyhow, bail};
-use ark_bn254::{Bn254, Fq, Fq2, g1::G1Affine, g2::G2Affine};
+use ark_bn254::{Bn254, Fq, G1Affine, G2Affine};
+use ark_circom::read_zkey;
 use ark_ff::{BigInteger, PrimeField};
 use ark_groth16::{ProvingKey, VerifyingKey};
 use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use clap::Parser;
 use num_bigint::BigUint;
-use serde::Deserialize;
 use serde_json::{Value, json};
 use std::{
-    fs,
+    fs::{self, File},
+    io::BufReader,
     path::{Path, PathBuf},
-    process::Command,
-    time::{SystemTime, UNIX_EPOCH},
 };
 
 #[derive(Debug, Parser)]
@@ -36,47 +47,16 @@ struct Cli {
     force: bool,
 }
 
-#[derive(Debug, Deserialize)]
-struct ZkeyJson {
-    #[serde(rename = "nPublic")]
-    n_public: usize,
-    #[serde(rename = "vk_alpha_1")]
-    vk_alpha_1: G1PointJson,
-    #[serde(rename = "vk_beta_1")]
-    vk_beta_1: G1PointJson,
-    #[serde(rename = "vk_beta_2")]
-    vk_beta_2: G2PointJson,
-    #[serde(rename = "vk_gamma_2")]
-    vk_gamma_2: G2PointJson,
-    #[serde(rename = "vk_delta_1")]
-    vk_delta_1: G1PointJson,
-    #[serde(rename = "vk_delta_2")]
-    vk_delta_2: G2PointJson,
-    #[serde(rename = "IC")]
-    ic: Vec<G1PointJson>,
-    #[serde(rename = "A")]
-    a: Vec<G1PointJson>,
-    #[serde(rename = "B1")]
-    b1: Vec<G1PointJson>,
-    #[serde(rename = "B2")]
-    b2: Vec<G2PointJson>,
-    #[serde(rename = "C")]
-    c: Vec<Option<G1PointJson>>,
-    #[serde(rename = "hExps")]
-    h_exps: Vec<G1PointJson>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-struct G1PointJson(String, String, String);
-
-#[derive(Clone, Debug, Deserialize)]
-struct G2PointJson([String; 2], [String; 2], [String; 2]);
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     convert(cli)
 }
 
+/// Read the ceremony zkey and write all deployment artifacts.
+///
+/// # Errors
+/// Returns an error if the zkey cannot be read, any output file cannot be
+/// written, or any output already exists and `--force` was not passed.
 fn convert(cli: Cli) -> Result<()> {
     assert_readable_file(&cli.zkey, "zkey")?;
     assert_dir_exists(&cli.out_dir)?;
@@ -92,29 +72,15 @@ fn convert(cli: Cli) -> Result<()> {
         assert_output_allowed(path, cli.force)?;
     }
 
-    let exported_json_path = export_zkey_json(&cli.zkey)?;
-    let zkey_json: ZkeyJson = serde_json::from_slice(
-        &fs::read(&exported_json_path)
-            .with_context(|| format!("failed to read {}", exported_json_path.display()))?,
-    )
-    .with_context(|| format!("failed to parse {}", exported_json_path.display()))?;
-
-    let pk = proving_key_from_zkey_json(zkey_json)?;
+    let pk = load_zkey(&cli.zkey)?;
 
     write_proving_key(&pk, &pk_path)?;
     write_verification_key(&pk.vk, &vk_json_path)?;
     write_verification_key_soroban_bin(&pk.vk, &vk_soroban_path)?;
     write_verification_key_rust_const(&pk.vk, &vk_const_path)?;
-
-    // Validate the emitted proving key by round-tripping the on-disk bytes.
-    let written_pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(
-        &fs::read(&pk_path).with_context(|| format!("failed to read {}", pk_path.display()))?[..],
-    )
-    .map_err(|e| anyhow!("failed to round-trip {}: {e}", pk_path.display()))?;
-
-    if vk_to_snarkjs_json(&written_pk.vk) != vk_to_snarkjs_json(&pk.vk) {
-        bail!("round-trip validation failed: proving key contains a different verification key");
-    }
+    
+    // Check for malformed points now, rather than rejecting at proving time.
+    validate_written_proving_key(&pk_path)?;
 
     println!("Generated:");
     println!("  {}", pk_path.display());
@@ -125,115 +91,28 @@ fn convert(cli: Cli) -> Result<()> {
     Ok(())
 }
 
-fn export_zkey_json(zkey_path: &Path) -> Result<PathBuf> {
-    let stamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .context("clock before unix epoch")?
-        .as_nanos();
-    let out_path = std::env::temp_dir().join(format!("zkey-export-{stamp}.json"));
-
-    let status = Command::new("snarkjs")
-        .args([
-            "zkey",
-            "export",
-            "json",
-            zkey_path
-                .to_str()
-                .ok_or_else(|| anyhow!("zkey path is not valid UTF-8"))?,
-            out_path
-                .to_str()
-                .ok_or_else(|| anyhow!("temp export path is not valid UTF-8"))?,
-        ])
-        .status()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                anyhow!("`snarkjs` not found in PATH. Install with: npm install -g snarkjs")
-            } else {
-                anyhow!("failed to start snarkjs zkey export json: {e}")
-            }
-        })?;
-
-    if !status.success() {
-        bail!("snarkjs zkey export json failed with status {status}");
-    }
-
-    Ok(out_path)
+/// Read a snarkjs `.zkey` file directly into an arkworks
+/// [`ProvingKey<Bn254>`].
+///
+/// Delegates to [`ark_circom::read_zkey`], which parses the binary zkey format
+/// into arkworks types.
+///
+/// # Arguments
+/// * `path` - Filesystem path to the final ceremony `.zkey`.
+///
+/// # Errors
+/// Returns an error if the file cannot be opened or the zkey is malformed.
+fn load_zkey(path: &Path) -> Result<ProvingKey<Bn254>> {
+    let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    let (pk, _matrices) = read_zkey(&mut reader)
+        .map_err(|e| anyhow!("failed to parse zkey {}: {e}", path.display()))?;
+    Ok(pk)
 }
 
-fn proving_key_from_zkey_json(zkey: ZkeyJson) -> Result<ProvingKey<Bn254>> {
-    let vk = VerifyingKey::<Bn254> {
-        alpha_g1: parse_g1(&zkey.vk_alpha_1)?,
-        beta_g2: parse_g2(&zkey.vk_beta_2)?,
-        gamma_g2: parse_g2(&zkey.vk_gamma_2)?,
-        delta_g2: parse_g2(&zkey.vk_delta_2)?,
-        gamma_abc_g1: zkey.ic.iter().map(parse_g1).collect::<Result<Vec<_>>>()?,
-    };
-
-    if vk.gamma_abc_g1.len().saturating_sub(1) != zkey.n_public {
-        bail!(
-            "IC/public input mismatch: IC has {} points but zkey declares {} public inputs",
-            vk.gamma_abc_g1.len(),
-            zkey.n_public
-        );
-    }
-
-    let h_query_len = zkey.h_exps.len().saturating_sub(1);
-
-    Ok(ProvingKey::<Bn254> {
-        vk,
-        beta_g1: parse_g1(&zkey.vk_beta_1)?,
-        delta_g1: parse_g1(&zkey.vk_delta_1)?,
-        a_query: zkey.a.iter().map(parse_g1).collect::<Result<Vec<_>>>()?,
-        b_g1_query: zkey.b1.iter().map(parse_g1).collect::<Result<Vec<_>>>()?,
-        b_g2_query: zkey.b2.iter().map(parse_g2).collect::<Result<Vec<_>>>()?,
-        h_query: zkey
-            .h_exps
-            .iter()
-            .take(h_query_len)
-            .map(parse_g1)
-            .collect::<Result<Vec<_>>>()?,
-        l_query: zkey
-            .c
-            .into_iter()
-            .flatten()
-            .map(|point| parse_g1(&point))
-            .collect::<Result<Vec<_>>>()?,
-    })
-}
-
-fn parse_g1(point: &G1PointJson) -> Result<G1Affine> {
-    if point.2 != "1" {
-        return Ok(G1Affine::default());
-    }
-
-    Ok(G1Affine::new_unchecked(
-        parse_fq_decimal(&point.0)?,
-        parse_fq_decimal(&point.1)?,
-    ))
-}
-
-fn parse_g2(point: &G2PointJson) -> Result<G2Affine> {
-    if point.2 != [String::from("1"), String::from("0")] {
-        return Ok(G2Affine::default());
-    }
-
-    let x = Fq2::new(
-        parse_fq_decimal(&point.0[0])?,
-        parse_fq_decimal(&point.0[1])?,
-    );
-    let y = Fq2::new(
-        parse_fq_decimal(&point.1[0])?,
-        parse_fq_decimal(&point.1[1])?,
-    );
-    Ok(G2Affine::new_unchecked(x, y))
-}
-
-fn parse_fq_decimal(value: &str) -> Result<Fq> {
-    let bigint = BigUint::parse_bytes(value.as_bytes(), 10)
-        .ok_or_else(|| anyhow!("invalid decimal field element: {value}"))?;
-    Ok(Fq::from_be_bytes_mod_order(&bigint.to_bytes_be()))
-}
-
+/// Serialize a proving key with arkworks `CanonicalSerialize::serialize_compressed`
+/// and write it to `path`. The app prover loads this file via
+/// `ProvingKey::<Bn254>::deserialize_compressed_unchecked`.
 fn write_proving_key(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
     let mut bytes = Vec::new();
     pk.serialize_compressed(&mut bytes)
@@ -242,12 +121,28 @@ fn write_proving_key(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Re-read a written `proving_key.bin` with `ProvingKey::deserialize_compressed`
+/// to catch any malformed point before the key is shipped to a prover.
+fn validate_written_proving_key(path: &Path) -> Result<()> {
+    let file =
+        File::open(path).with_context(|| format!("failed to reopen {}", path.display()))?;
+    let mut reader = BufReader::new(file);
+    ProvingKey::<Bn254>::deserialize_compressed(&mut reader)
+        .map_err(|e| anyhow!("post-write validation of {} failed: {e}", path.display()))?;
+    Ok(())
+}
+
+/// Write the verification key to `path` in snarkjs-compatible JSON format.
 fn write_verification_key(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
     let json_str = serde_json::to_string_pretty(&vk_to_snarkjs_json(vk))?;
     fs::write(path, json_str).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
+/// Serialize an arkworks `VerifyingKey` as a snarkjs-compatible JSON value.
+///
+/// G2 coordinates are emitted in snarkjs' `[c1, c0]` (imaginary, real)
+/// convention.
 fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
     json!({
         "protocol": "groth16",
@@ -261,10 +156,12 @@ fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
     })
 }
 
+/// G1 → snarkjs `[x, y, z]` where z == "1" for affine points.
 fn g1_to_snarkjs(p: &G1Affine) -> Value {
     json!([fq_to_decimal(&p.x), fq_to_decimal(&p.y), "1"])
 }
 
+/// G2 → snarkjs `[[c1, c0], [c1, c0], ["1", "0"]]` (imaginary, real).
 fn g2_to_snarkjs(p: &G2Affine) -> Value {
     json!([
         [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
@@ -273,12 +170,16 @@ fn g2_to_snarkjs(p: &G2Affine) -> Value {
     ])
 }
 
+/// Render an `Fq` element as a decimal string (standard form, not Montgomery).
 fn fq_to_decimal(f: &Fq) -> String {
     let bigint = f.into_bigint();
     let bytes = bigint.to_bytes_be();
     BigUint::from_bytes_be(&bytes).to_string()
 }
 
+/// Left-pad a big-integer's big-endian bytes to exactly 32 bytes.
+///
+/// Used by the Soroban verifier which consumes fixed-width 32-byte limbs.
 fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
     let bytes = value.to_bytes_be();
     let mut out = [0u8; 32];
@@ -287,6 +188,7 @@ fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
     out
 }
 
+/// G1 → 64-byte Soroban layout: `x || y`, each 32 bytes big-endian.
 fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
@@ -294,6 +196,8 @@ fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
     out
 }
 
+/// G2 → 128-byte Soroban layout: `x.c1 || x.c0 || y.c1 || y.c0` (imaginary,
+/// real) to match the Soroban BN254 host function expectations.
 fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
@@ -303,6 +207,9 @@ fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
     out
 }
 
+/// Write a VK as a `#![allow(dead_code)]` Rust module exposing
+/// `VK_ALPHA`, `VK_BETA`, `VK_GAMMA`, `VK_DELTA`, `VK_IC_COUNT`, and `VK_IC`
+/// constants, ready to be `include!`'d into a Soroban contract.
 fn write_verification_key_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
     let ic_count = vk.gamma_abc_g1.len();
 
@@ -342,6 +249,10 @@ fn write_verification_key_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> R
     Ok(())
 }
 
+/// Write a VK as the packed binary blob expected by the Soroban verifier:
+///
+/// `alpha(64) || beta(128) || gamma(128) || delta(128) || ic_count(4 LE) ||
+///  ic_0(64) || ic_1(64) || ...`
 fn write_verification_key_soroban_bin(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
     const HEADER_SIZE: usize = 452;
 
