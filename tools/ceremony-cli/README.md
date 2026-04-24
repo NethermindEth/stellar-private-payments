@@ -10,6 +10,10 @@ It abstracts ceremony complexity into three commands:
 
 The tool logs every executed `snarkjs` command, validates input/output paths, refuses overwrites unless `--force` is set, and redacts sensitive parameters in logs.
 
+For full app compatibility after a ceremony, this package also includes a separate helper binary:
+
+- `zkey_to_deployment`
+
 ## Security model and guarantees
 
 - Contribution entropy is generated automatically from OS CSPRNG (`getrandom`) inside the CLI.
@@ -104,6 +108,33 @@ Outputs:
 - `artifacts/circuit_verification_key.json`
 
 Publish these with the ceremony transcript and beacon parameters.
+
+### 5) Generate repo deployment artifacts
+
+If you want the web prover and deployment files to use the final ceremony key material, convert the final `.zkey` into the repo-specific formats:
+
+```bash
+cargo run -p ceremony-cli --bin zkey_to_deployment -- \
+  --zkey ./artifacts/circuit_final.zkey \
+  --out-dir ./deployments/testnet/circuit_keys \
+  --basename policy_tx_2_2 \
+  --force
+```
+
+This generates:
+
+- `deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_vk.json`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_vk_soroban.bin`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_vk_const.rs`
+
+Why this step exists:
+
+- `artifacts/circuit_verification_key.json` is enough to redeploy the verifier contract.
+- the app prover also needs `policy_tx_2_2_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
+- `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
+
+Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `circuits/build.rs`.
 
 ---
 
