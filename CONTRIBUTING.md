@@ -8,6 +8,10 @@ Enable [commit signing](https://docs.github.com/en/authentication/managing-commi
 git config commit.gpgsign true
 ```
 
+## Documentation
+
+Unified project documentation is available at https://nethermindeth.github.io/stellar-private-payments/docs/
+
 ## Project Structure
 
 ```

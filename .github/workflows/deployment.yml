@@ -1,4 +1,4 @@
-name: Docs
+name: Deployment
 
 on:
   workflow_dispatch:
@@ -8,10 +8,10 @@ on:
 jobs:
   docs:
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
-    name: Documentation
+    name: Site
     timeout-minutes: 15
     runs-on: ubuntu-latest
     steps:
@@ -33,6 +33,14 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --no-default-features
 
+      - name: Build app (Trunk)
+        run: |
+          rm -rf site
+          make release DIST_DIR=site PUBLIC_URL="${{ steps.pages.outputs.base_url }}/"
+
+      - name: Package circuits source bundle
+        run: sh deployments/scripts/package-circuits-source-bundle.sh site/circuits/source-bundle.tar.gz
+
       - name: Resolve symlinks in docs
         run: |
           cd docs/src
@@ -47,11 +55,8 @@ jobs:
 
       - name: Build mdBook
         env:
-          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_url }}/
+          MDBOOK_OUTPUT__HTML__SITE_URL: ${{ steps.pages.outputs.base_url }}/docs/
         run: mdbook build docs/
-
-      - name: Clean docs folder
-        run: cargo clean --doc
 
       - name: Build API documentation
         run: cargo doc --no-deps --workspace
@@ -59,14 +64,17 @@ jobs:
       - name: Combine outputs
         run: |
           rm -f target/doc/.lock
-          cp -r target/doc docs/book/api
+          mkdir -p site/docs/api
+          cp -r docs/book/* site/docs/
+          cp -r target/doc/* site/docs/api/
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3
         with:
-          path: docs/book
+          path: site
 
-  publish-docs:
+  publish:
+    name: Deploy the app and publish docs
     permissions:
       pages: write
       id-token: write

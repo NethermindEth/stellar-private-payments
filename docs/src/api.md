@@ -8,8 +8,12 @@ Detailed API documentation generated from source code via `rustdoc`.
 
 ## App (WASM)
 
+- [types](api/types/index.html)
+- [state](api/state/index.html)
+- [stellar](api/stellar/index.html)
 - [prover](api/prover/index.html)
 - [witness](api/witness/index.html)
+- [web](api/web/index.html)
 
 ## Contracts
 
