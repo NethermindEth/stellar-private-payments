@@ -173,7 +173,7 @@ fn execute(cli: Cli, runner: &dyn CommandRunner) -> Result<()> {
         Commands::Init(args) => init(args, runner),
         Commands::Contribute(args) => contribute(args, runner),
         Commands::Finalize(args) => finalize(args, runner),
-        Commands::ExportDeployment(args) => export_deployment(args, runner),
+        Commands::ExportDeployment(args) => export_deployment(args),
     }
 }
 
@@ -313,8 +313,8 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
 }
 
 /// Converts a final snarkjs zkey into the deployment artifacts used by this repo.
-fn export_deployment(args: ExportDeploymentArgs, runner: &dyn CommandRunner) -> Result<()> {
-    export_deployment::export_deployment(args, runner)
+fn export_deployment(args: ExportDeploymentArgs) -> Result<()> {
+    export_deployment::export_deployment(args)
 }
 
 /// human-readable file size

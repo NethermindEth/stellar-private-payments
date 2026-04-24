@@ -10,10 +10,6 @@ publish.workspace = true
 name = "ceremony-cli"
 path = "src/main.rs"
 
-[[bin]]
-name = "zkey_to_deployment"
-path = "src/bin/zkey_to_deployment.rs"
-
 [dependencies]
 anyhow.workspace = true
 ark-bn254.workspace = true
