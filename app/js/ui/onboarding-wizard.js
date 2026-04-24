@@ -3,6 +3,24 @@ import { deriveKeysFromWallet } from '../wallet.js';
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 
+class OnboardingCancelledError extends Error {
+    constructor(message = 'Onboarding cancelled') {
+        super(message);
+        this.name = 'OnboardingCancelledError';
+    }
+}
+
+class TermsDeclinedError extends Error {
+    constructor(message = 'Terms & Conditions must be accepted to use this service.') {
+        super(message);
+        this.name = 'TermsDeclinedError';
+    }
+}
+
+export function isOnboardingCancelledError(e) {
+    return !!e && (e.name === 'OnboardingCancelledError' || e instanceof OnboardingCancelledError);
+}
+
 function hasStorageManager() {
     return (
         typeof navigator !== 'undefined' &&
@@ -293,15 +311,17 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
         renderStepContent(wrap);
 
         await new Promise((resolve, reject) => {
-            const onAbort = () => reject(new Error('Onboarding cancelled'));
+            const onAbort = () => reject(new OnboardingCancelledError());
             abort.signal.addEventListener('abort', onAbort, { once: true });
 
             const decline = makeButton({
                 text: 'Decline',
                 variant: 'danger',
                 onClick: () => {
-                    onClose();
-                    reject(new Error('Terms & Conditions must be accepted to use this service.'));
+                    abort.signal.removeEventListener('abort', onAbort);
+                    cancelled = true;
+                    hideModal();
+                    reject(new TermsDeclinedError());
                 },
             });
             const accept = makeButton({
@@ -327,7 +347,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
             renderActions([decline, accept]);
         });
 
-        if (cancelled) throw new Error('Onboarding cancelled');
+        if (cancelled) throw new OnboardingCancelledError();
         setStepState('disclaimer', 'done');
     }
 
@@ -393,7 +413,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
             renderActions([notNow, enable]);
         });
 
-        if (cancelled) throw new Error('Onboarding cancelled');
+        if (cancelled) throw new OnboardingCancelledError();
         setStepState('storage', 'done');
     }
 
@@ -434,7 +454,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
         renderStepContent(wrap);
 
         await new Promise((resolve, reject) => {
-            const onAbort = () => reject(new Error('Onboarding cancelled'));
+            const onAbort = () => reject(new OnboardingCancelledError());
             abort.signal.addEventListener('abort', onAbort, { once: true });
 
             const deriveBtn = makeButton({
@@ -470,7 +490,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
             renderActions([deriveBtn]);
         });
 
-        if (cancelled) throw new Error('Onboarding cancelled');
+        if (cancelled) throw new OnboardingCancelledError();
         if (!keys) throw new Error('Privacy keys not ready yet. Please try again.');
         setStepState('keys', 'done');
     }
