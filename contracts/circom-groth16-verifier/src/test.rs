@@ -1,5 +1,6 @@
 use super::*;
 use ark_bn254::{Bn254, Fr as ArkFr};
+use ark_circom::CircomReduction;
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
 use ark_relations::{
@@ -71,11 +72,15 @@ fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr
     let mut rng = seeded_rng();
     let inputs = [ArkFr::from(33u64); 11];
     let circuit = ElevenInputCircuit { inputs };
-    let params =
-        Groth16::<Bn254>::generate_random_parameters_with_reduction(circuit.clone(), &mut rng)
-            .expect("params failed to generate");
-    let proof = Groth16::<Bn254>::create_random_proof_with_reduction(circuit, &params, &mut rng)
-        .expect("proof failed");
+    let params = Groth16::<Bn254, CircomReduction>::generate_random_parameters_with_reduction(
+        circuit.clone(),
+        &mut rng,
+    )
+    .expect("params failed to generate");
+    let proof = Groth16::<Bn254, CircomReduction>::create_random_proof_with_reduction(
+        circuit, &params, &mut rng,
+    )
+    .expect("proof failed");
 
     let mut public_inputs: Vec<Fr> = Vec::new(env);
     for value in inputs {
