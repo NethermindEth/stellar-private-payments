@@ -383,15 +383,10 @@ impl Prover {
         };
 
         let mut rng = OsRng;
-<<<<<<< HEAD
         let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
             &self.pk, circuit, &mut rng,
         )
         .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
-=======
-        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
-            .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
->>>>>>> 7e7aa3e (circuit reduction)
 
         Ok(proof_to_uncompressed_bytes(&proof))
     }
@@ -470,7 +465,6 @@ impl Prover {
         }
 
         // Verify
-<<<<<<< HEAD
         let result =
             <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
                 &self.pvk,
@@ -478,14 +472,6 @@ impl Prover {
                 &proof,
             )
             .map_err(|e| anyhow!("Verification error: {}", e))?;
-=======
-        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-            &self.pvk,
-            &public_inputs,
-            &proof,
-        )
-        .map_err(|e| anyhow!("Verification error: {}", e))?;
->>>>>>> 7e7aa3e (circuit reduction)
 
         Ok(result)
     }
@@ -531,7 +517,6 @@ pub fn verify_proof(
     }
 
     // Verify
-<<<<<<< HEAD
     let result =
         <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
             &pvk,
@@ -539,14 +524,6 @@ pub fn verify_proof(
             &proof,
         )
         .map_err(|e| anyhow!("Verification error: {}", e))?;
-=======
-    let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-        &pvk,
-        &public_inputs,
-        &proof,
-    )
-    .map_err(|e| anyhow!("Verification error: {}", e))?;
->>>>>>> 7e7aa3e (circuit reduction)
 
     Ok(result)
 }
