@@ -312,7 +312,8 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
     Ok(())
 }
 
-/// Converts a final snarkjs zkey into the deployment artifacts used by this repo.
+/// Converts a final snarkjs zkey into the deployment artifacts used by this
+/// repo.
 fn export_deployment(args: ExportDeploymentArgs, runner: &dyn CommandRunner) -> Result<()> {
     export_deployment::export_deployment(args, runner)
 }

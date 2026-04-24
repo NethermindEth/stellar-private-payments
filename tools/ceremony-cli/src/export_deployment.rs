@@ -3,7 +3,10 @@
 //! Converts a final snarkjs `.zkey` into the binary and JSON formats used by
 //! this repository (deployments + web prover).
 
-use crate::{CommandRunner, ExportDeploymentArgs, assert_dir_exists, assert_output_allowed, assert_readable_file};
+use crate::{
+    CommandRunner, ExportDeploymentArgs, assert_dir_exists, assert_output_allowed,
+    assert_readable_file,
+};
 use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::{Bn254, Fq2, g1::G1Affine, g2::G2Affine};
 use ark_groth16::ProvingKey;
@@ -52,7 +55,10 @@ struct G1PointJson(String, String, String);
 #[derive(Clone, Debug, Deserialize)]
 struct G2PointJson([String; 2], [String; 2], [String; 2]);
 
-pub(crate) fn export_deployment(args: ExportDeploymentArgs, runner: &dyn CommandRunner) -> Result<()> {
+pub(crate) fn export_deployment(
+    args: ExportDeploymentArgs,
+    runner: &dyn CommandRunner,
+) -> Result<()> {
     assert_readable_file(&args.zkey, "zkey")?;
     assert_dir_exists(&args.out_dir)?;
 
@@ -63,9 +69,7 @@ pub(crate) fn export_deployment(args: ExportDeploymentArgs, runner: &dyn Command
     let vk_soroban_path = args
         .out_dir
         .join(format!("{}_vk_soroban.bin", args.basename));
-    let vk_const_path = args
-        .out_dir
-        .join(format!("{}_vk_const.rs", args.basename));
+    let vk_const_path = args.out_dir.join(format!("{}_vk_const.rs", args.basename));
 
     for path in [&pk_path, &vk_json_path, &vk_soroban_path, &vk_const_path] {
         assert_output_allowed(path, args.force)?;
@@ -93,7 +97,8 @@ pub(crate) fn export_deployment(args: ExportDeploymentArgs, runner: &dyn Command
     )
     .map_err(|e| anyhow!("failed to round-trip {}: {e}", pk_path.display()))?;
 
-    if circuit_keys::vk_to_snarkjs_json(&written_pk.vk) != circuit_keys::vk_to_snarkjs_json(&pk.vk) {
+    if circuit_keys::vk_to_snarkjs_json(&written_pk.vk) != circuit_keys::vk_to_snarkjs_json(&pk.vk)
+    {
         bail!("round-trip validation failed: proving key contains a different verification key");
     }
 

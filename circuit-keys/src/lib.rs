@@ -29,7 +29,8 @@ pub fn write_vk_snarkjs_json(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()
     Ok(())
 }
 
-/// Converts an ark-groth16 verifying key into the snarkjs JSON format used by this repo.
+/// Converts an ark-groth16 verifying key into the snarkjs JSON format used by
+/// this repo.
 pub fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
     json!({
         "protocol": "groth16",
@@ -167,8 +168,8 @@ pub fn parse_fq_decimal(value: &str) -> Result<Fq> {
     Ok(Fq::from_be_bytes_mod_order(&bigint.to_bytes_be()))
 }
 
-/// Parses an Fq2 element from a pair of decimal strings (c0, c1 are given separately).
+/// Parses an Fq2 element from a pair of decimal strings (c0, c1 are given
+/// separately).
 pub fn fq2_from_decimals(c0: &str, c1: &str) -> Result<Fq2> {
     Ok(Fq2::new(parse_fq_decimal(c0)?, parse_fq_decimal(c1)?))
 }
-

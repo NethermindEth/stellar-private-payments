@@ -308,8 +308,10 @@ impl Prover {
 
         // Generate proof
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
-            .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
+        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
+            &self.pk, circuit, &mut rng,
+        )
+        .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         // Serialize proof points
         let mut a_bytes = Vec::new();
@@ -381,8 +383,10 @@ impl Prover {
         };
 
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
-            .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
+        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
+            &self.pk, circuit, &mut rng,
+        )
+        .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         Ok(proof_to_uncompressed_bytes(&proof))
     }
@@ -461,12 +465,13 @@ impl Prover {
         }
 
         // Verify
-        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-            &self.pvk,
-            &public_inputs,
-            &proof,
-        )
-        .map_err(|e| anyhow!("Verification error: {}", e))?;
+        let result =
+            <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
+                &self.pvk,
+                &public_inputs,
+                &proof,
+            )
+            .map_err(|e| anyhow!("Verification error: {}", e))?;
 
         Ok(result)
     }
@@ -512,12 +517,13 @@ pub fn verify_proof(
     }
 
     // Verify
-    let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-        &pvk,
-        &public_inputs,
-        &proof,
-    )
-    .map_err(|e| anyhow!("Verification error: {}", e))?;
+    let result =
+        <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
+            &pvk,
+            &public_inputs,
+            &proof,
+        )
+        .map_err(|e| anyhow!("Verification error: {}", e))?;
 
     Ok(result)
 }
