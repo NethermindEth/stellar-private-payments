@@ -17,8 +17,9 @@ use crate::{
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
+use ark_circom::CircomReduction;
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
-use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_groth16::{Groth16, PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
     lc,
@@ -218,7 +219,7 @@ impl Prover {
     /// * `r1cs_bytes` - R1CS binary file contents
     pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
         // Deserialize proving key. Unchecked, proving key is trusted
-        let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
+        let pk = ProvingKey::<Bn254,>::deserialize_compressed_unchecked(pk_bytes)
             .map_err(|e| anyhow!("Failed to load proving key: {}", e))?;
 
         // Extract verifying key from proving key
@@ -233,7 +234,7 @@ impl Prover {
         }
 
         // Process verifying key for faster verification
-        let pvk = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::process_vk(&vk)
+        let pvk = <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&vk)
             .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
 
         Ok(Prover { pk, pvk, r1cs })
@@ -307,7 +308,7 @@ impl Prover {
 
         // Generate proof
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
+        let proof = <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
             .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         // Serialize proof points
@@ -380,7 +381,7 @@ impl Prover {
         };
 
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
+        let proof =  <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::prove(&self.pk, circuit, &mut rng)
             .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
 
         Ok(proof_to_uncompressed_bytes(&proof))
@@ -460,7 +461,7 @@ impl Prover {
         }
 
         // Verify
-        let result = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::verify_with_processed_vk(
+        let result =  <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
             &self.pvk,
             &public_inputs,
             &proof,
@@ -492,7 +493,7 @@ pub fn verify_proof(
         .map_err(|e| anyhow!("Failed to load VK: {}", e))?;
 
     // Process VK
-    let pvk = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::process_vk(&vk)
+    let pvk =  <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&vk)
         .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
 
     // Deserialize proof
@@ -511,7 +512,7 @@ pub fn verify_proof(
     }
 
     // Verify
-    let result = <ark_groth16::Groth16<Bn254> as SNARK<Fr>>::verify_with_processed_vk(
+    let result =  <Groth16::<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
         &pvk,
         &public_inputs,
         &proof,
