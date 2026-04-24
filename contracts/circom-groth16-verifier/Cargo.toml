@@ -17,6 +17,7 @@ soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [dev-dependencies]
 ark-bn254 = { workspace = true }
+ark-circom = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-relations = { workspace = true }

@@ -10,9 +10,8 @@ It abstracts ceremony complexity into three commands:
 
 The tool logs every executed `snarkjs` command, validates input/output paths, refuses overwrites unless `--force` is set, and redacts sensitive parameters in logs.
 
-For full app compatibility after a ceremony, this package also includes a separate helper binary:
-
-- `zkey_to_deployment`
+For full app compatibility after a ceremony, `ceremony-cli` can also export the
+repo-specific deployment key formats directly.
 
 ## Security model and guarantees
 
@@ -114,7 +113,7 @@ Publish these with the ceremony transcript and beacon parameters.
 If you want the web prover and deployment files to use the final ceremony key material, convert the final `.zkey` into the repo-specific formats:
 
 ```bash
-cargo run -p ceremony-cli --bin zkey_to_deployment -- \
+ceremony-cli export-deployment \
   --zkey ./artifacts/circuit_final.zkey \
   --out-dir ./deployments/testnet/circuit_keys \
   --basename policy_tx_2_2 \
