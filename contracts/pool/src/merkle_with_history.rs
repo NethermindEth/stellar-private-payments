@@ -25,6 +25,7 @@ pub enum Error {
     MerkleTreeFull,
     NextIndexNotEven,
     NotInitialized,
+    Overflow,
 }
 
 /// Storage keys for Merkle tree persistent data
@@ -82,7 +83,7 @@ impl MerkleTreeWithHistory {
         let zeros: Vec<U256> = get_zeroes(env);
 
         // Initialize filledSubtrees[i] = zeros(i) for each level
-        for i in 0..levels + 1 {
+        for i in 0..=levels {
             let z: U256 = zeros.get(i).ok_or(Error::NotInitialized)?;
             storage.set(&MerkleDataKey::FilledSubtree(i), &z);
             storage.set(&MerkleDataKey::Zeroes(i), &z);
@@ -137,7 +138,7 @@ impl MerkleTreeWithHistory {
             return Err(Error::NextIndexNotEven);
         }
 
-        if (next_index + 2) > max_leaves {
+        if next_index.checked_add(2).ok_or(Error::Overflow)? > max_leaves {
             return Err(Error::MerkleTreeFull);
         }
 
@@ -170,16 +171,23 @@ impl MerkleTreeWithHistory {
         }
 
         // Update the root history index
-        root_index = (root_index + 1) % ROOT_HISTORY_SIZE;
+        root_index = root_index.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
         // Update the root with the computed hash
         storage.set(&MerkleDataKey::Root(root_index), &current_hash);
         storage.set(&MerkleDataKey::CurrentRootIndex, &root_index);
 
         // Update NextIndex
-        storage.set(&MerkleDataKey::NextIndex, &(next_index + 2));
+        storage.set(
+            &MerkleDataKey::NextIndex,
+            &(next_index.checked_add(2).ok_or(Error::Overflow)?),
+        );
 
         // Return the index of the left leaf
-        Ok((next_index as u32, (next_index + 1) as u32))
+        Ok((
+            u32::try_from(next_index).map_err(|_| Error::MerkleTreeFull)?,
+            u32::try_from(next_index.checked_add(1).ok_or(Error::Overflow)?)
+                .map_err(|_| Error::MerkleTreeFull)?,
+        ))
     }
 
     /// Check if a root exists in the recent history
@@ -218,7 +226,7 @@ impl MerkleTreeWithHistory {
             {
                 return Ok(true);
             }
-            i = (i + 1) % ROOT_HISTORY_SIZE;
+            i = i.checked_add(1).ok_or(Error::Overflow)? % ROOT_HISTORY_SIZE;
             if i == current_root_index {
                 // Break after seeing all roots
                 break;
