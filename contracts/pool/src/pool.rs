@@ -48,6 +48,8 @@ pub enum Error {
     WrongExtHash = 10,
     /// Contract is not initialized
     NotInitialized = 11,
+    /// Arithmetic overflow occurred
+    Overflow = 12,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -60,6 +62,7 @@ impl From<MerkleError> for Error {
             MerkleError::WrongLevels => Error::WrongLevels,
             MerkleError::NextIndexNotEven => Error::NextIndexNotEven,
             MerkleError::NotInitialized => Error::NotInitialized,
+            MerkleError::Overflow => Error::Overflow,
         }
     }
 }

@@ -65,6 +65,7 @@ pub enum Error {
     KeyAlreadyExists = 3,
     InvalidProof = 4,
     NotInitialized = 5,
+    Overflow = 6,
 }
 
 // Events
@@ -279,10 +280,24 @@ impl ASPNonMembership {
             let level_idx = level;
             let mut result = if !key_bits.get(level_idx).ok_or(Error::KeyNotFound)? {
                 // Go left
-                Self::find_key_internal(env, store, key, key_bits, &left, level.wrapping_add(1))?
+                Self::find_key_internal(
+                    env,
+                    store,
+                    key,
+                    key_bits,
+                    &left,
+                    level.checked_add(1).ok_or(Error::Overflow)?,
+                )?
             } else {
                 // Go right
-                Self::find_key_internal(env, store, key, key_bits, &right, level.wrapping_add(1))?
+                Self::find_key_internal(
+                    env,
+                    store,
+                    key,
+                    key_bits,
+                    &right,
+                    level.checked_add(1).ok_or(Error::Overflow)?,
+                )?
             };
 
             // Add sibling to path
@@ -387,7 +402,7 @@ impl ASPNonMembership {
                     == key_bits.get(i).ok_or(Error::KeyNotFound)?
             {
                 siblings.push_back(zero.clone());
-                i = i.wrapping_add(1);
+                i = i.checked_add(1).ok_or(Error::Overflow)?;
             }
             rt_old = Self::hash_leaf(
                 &env,

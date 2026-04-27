@@ -43,6 +43,8 @@ pub enum Error {
     WrongLevels = 3,
     /// The contract has not been yet initialized
     NotInitialized = 4,
+    /// Arithmetic overflow occurred
+    Overflow = 5,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -242,7 +244,10 @@ impl ASPMembership {
         .publish(&env);
 
         // Update NextIndex
-        store.set(&DataKey::NextIndex, &(actual_index.wrapping_add(1)));
+        store.set(
+            &DataKey::NextIndex,
+            &(actual_index.checked_add(1).ok_or(Error::Overflow)?),
+        );
         Ok(())
     }
 }
