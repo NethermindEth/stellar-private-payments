@@ -45,5 +45,5 @@ witness = { workspace = true }
 sqlite-wasm-rs = { version = "0.5.2", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 
-#[lints]
-#workspace = true
+[lints]
+workspace = true

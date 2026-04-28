@@ -575,9 +575,8 @@ impl Storage {
         };
 
         if current_ledger > sync_meta.last_ledger {
-            return Ok(AspMembershipSync::SyncRequired(Some(
-                current_ledger - sync_meta.last_ledger,
-            )));
+            let gap = current_ledger.saturating_sub(sync_meta.last_ledger);
+            return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
         if current_ledger < sync_meta.last_ledger {
@@ -622,9 +621,8 @@ impl Storage {
             // ingested raw events without yet processing them into
             // asp_membership_leaves.
             if last_leaf_ledger < current_ledger {
-                return Ok(AspMembershipSync::SyncRequired(Some(
-                    current_ledger - last_leaf_ledger,
-                )));
+                let gap = current_ledger.saturating_sub(last_leaf_ledger);
+                return Ok(AspMembershipSync::SyncRequired(Some(gap)));
             }
             anyhow::bail!("asp membership root mismatch at ledger {}", current_ledger);
         }
@@ -808,7 +806,9 @@ impl Storage {
         // `offset`.
         let mut counts: Vec<u32> = vec![0; n];
         for i in 0..total_limit {
-            let idx = (offset_usize + usize::try_from(i).expect("u32 fits usize")) % n;
+            let i_usize = usize::try_from(i)
+                .map_err(|_| anyhow::anyhow!("scan limit exceeds platform usize"))?;
+            let idx = offset_usize.wrapping_add(i_usize).rem_euclid(n);
             counts[idx] = counts[idx].saturating_add(1);
         }
 
@@ -920,7 +920,7 @@ impl Storage {
 
         // Advance scheduler offset to continue after the last assigned token.
         let step = i64::from(total_limit).rem_euclid(n_i64);
-        let next_offset = (offset + step).rem_euclid(n_i64);
+        let next_offset = offset.wrapping_add(step).rem_euclid(n_i64);
         tx.execute(
             "UPDATE notes_scan_scheduler
              SET next_account_offset = ?1
@@ -1212,7 +1212,10 @@ mod tests {
 
         let meta = storage.get_sync_metadata()?;
         assert!(meta.is_some());
-        let meta = meta.unwrap();
+        let meta = match meta {
+            Some(meta) => meta,
+            None => anyhow::bail!("expected sync metadata"),
+        };
         assert_eq!(meta.cursor, "c1");
         assert_eq!(meta.last_ledger, 0);
 
@@ -1223,7 +1226,10 @@ mod tests {
             events: vec![],
         })?;
 
-        let meta = storage.get_sync_metadata()?.unwrap();
+        let meta = match storage.get_sync_metadata()? {
+            Some(meta) => meta,
+            None => anyhow::bail!("expected sync metadata"),
+        };
         assert_eq!(meta.cursor, "c2");
         assert_eq!(meta.last_ledger, 123);
 
