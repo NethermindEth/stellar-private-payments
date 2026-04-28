@@ -1,4 +1,5 @@
 use anyhow::Result;
+use core::ops::Rem;
 use sha3::{Digest, Keccak256};
 use std::convert::TryInto;
 use stellar_xdr::curr::{
@@ -57,7 +58,7 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     digest_be.copy_from_slice(digest.as_slice());
     let digest_u256 = U256::from_big_endian(&digest_be);
     let modulus = U256::from_big_endian(&BN254_MODULUS_BE);
-    let reduced = digest_u256 % modulus;
+    let reduced = Rem::rem(digest_u256, modulus);
 
     // 6. Convert to 32-byte big-endian array.
     let mut result_bytes = [0u8; 32];
@@ -68,10 +69,18 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
 /// Correctly maps i128 to Soroban's I256 XDR representation
 fn i128_to_i256_scval(n: i128) -> ScVal {
     let hi = if n < 0 { -1i64 } else { 0i64 };
+    let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
+    let bytes = n.to_be_bytes();
+    let lo_hi = u64::from_be_bytes([
+        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
+    ]);
+    let lo_lo = u64::from_be_bytes([
+        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15],
+    ]);
     ScVal::I256(Int256Parts {
         hi_hi: hi,
-        hi_lo: hi as u64,
-        lo_hi: (n >> 64) as u64,
-        lo_lo: n as u64,
+        hi_lo,
+        lo_hi,
+        lo_lo,
     })
 }

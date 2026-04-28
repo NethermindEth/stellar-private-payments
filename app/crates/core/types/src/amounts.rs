@@ -133,7 +133,10 @@ impl Add for NoteAmount {
 
 impl AddAssign for NoteAmount {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = match self.checked_add(rhs) {
+            Some(v) => v,
+            None => panic!("NoteAmount overflow"),
+        };
     }
 }
 
@@ -150,7 +153,10 @@ impl Sub for NoteAmount {
 
 impl SubAssign for NoteAmount {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = match self.checked_sub(rhs) {
+            Some(v) => v,
+            None => panic!("NoteAmount underflow"),
+        };
     }
 }
 
@@ -250,7 +256,10 @@ impl Add for ExtAmount {
 
 impl AddAssign for ExtAmount {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = match self.checked_add(rhs) {
+            Some(v) => v,
+            None => panic!("ExtAmount overflow"),
+        };
     }
 }
 
@@ -267,7 +276,10 @@ impl Sub for ExtAmount {
 
 impl SubAssign for ExtAmount {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = match self.checked_sub(rhs) {
+            Some(v) => v,
+            None => panic!("ExtAmount underflow"),
+        };
     }
 }
 
@@ -275,7 +287,10 @@ impl Neg for ExtAmount {
     type Output = ExtAmount;
 
     fn neg(self) -> Self::Output {
-        ExtAmount(-self.0)
+        match self.checked_neg() {
+            Some(v) => v,
+            None => panic!("ExtAmount negation overflow"),
+        }
     }
 }
 
@@ -447,7 +462,8 @@ impl TryFrom<ExtAmount> for Field {
         if abs_u256 >= m {
             return Err(anyhow!("ext amount abs out of field range"));
         }
-        Ok(Field(m - abs_u256))
+        let (v, _) = m.overflowing_sub(abs_u256);
+        Ok(Field(v))
     }
 }
 
@@ -456,9 +472,9 @@ impl Add for Field {
 
     fn add(self, rhs: Self) -> Self::Output {
         let m = Field::modulus();
-        let mut v = self.0 + rhs.0;
-        if v >= m {
-            v -= m;
+        let (mut v, overflow) = self.0.overflowing_add(rhs.0);
+        if overflow || v >= m {
+            v = v.overflowing_sub(m).0;
         }
         Field(v)
     }
@@ -466,7 +482,7 @@ impl Add for Field {
 
 impl AddAssign for Field {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = Self::add(*self, rhs);
     }
 }
 
@@ -476,16 +492,17 @@ impl Sub for Field {
     fn sub(self, rhs: Self) -> Self::Output {
         let m = Field::modulus();
         if self.0 >= rhs.0 {
-            Field(self.0 - rhs.0)
+            Field(self.0.overflowing_sub(rhs.0).0)
         } else {
-            Field(m - (rhs.0 - self.0))
+            let diff = rhs.0.overflowing_sub(self.0).0;
+            Field(m.overflowing_sub(diff).0)
         }
     }
 }
 
 impl SubAssign for Field {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = Self::sub(*self, rhs);
     }
 }
 
@@ -732,7 +749,8 @@ mod rusqlite_impls {
                     if i < 0 {
                         return Err(FromSqlError::OutOfRange(i));
                     }
-                    Ok(NoteAmount(i as u64))
+                    let value = u64::try_from(i).map_err(|_| FromSqlError::OutOfRange(i))?;
+                    Ok(NoteAmount(value))
                 }
                 _ => Err(FromSqlError::InvalidType),
             }

@@ -77,7 +77,8 @@ impl StateFetcher {
             return Err(anyhow!("{what} does not fit into i128"));
         }
 
-        Ok(low as i128)
+        let value = i128::try_from(low).map_err(|_| anyhow!("{what} does not fit into i128"))?;
+        Ok(value)
     }
 
     pub fn new(rpc_url: &str) -> Result<Self> {
@@ -315,10 +316,8 @@ impl StateFetcher {
         // Pad/trim siblings to circuit SMT depth.
         let mut siblings = parsed.siblings;
         if siblings.len() < smt_depth {
-            siblings.extend(core::iter::repeat_n(
-                Field::ZERO,
-                smt_depth - siblings.len(),
-            ));
+            let padding = smt_depth.saturating_sub(siblings.len());
+            siblings.extend(core::iter::repeat_n(Field::ZERO, padding));
         } else if siblings.len() > smt_depth {
             siblings.truncate(smt_depth);
         }
@@ -399,10 +398,15 @@ impl StateFetcher {
     fn field_to_scval_u256(v: Field) -> xdr::ScVal {
         let be = v.to_be_bytes();
 
-        let hi_hi = u64::from_be_bytes(be[0..8].try_into().unwrap());
-        let hi_lo = u64::from_be_bytes(be[8..16].try_into().unwrap());
-        let lo_hi = u64::from_be_bytes(be[16..24].try_into().unwrap());
-        let lo_lo = u64::from_be_bytes(be[24..32].try_into().unwrap());
+        let hi_hi = u64::from_be_bytes([be[0], be[1], be[2], be[3], be[4], be[5], be[6], be[7]]);
+        let hi_lo =
+            u64::from_be_bytes([be[8], be[9], be[10], be[11], be[12], be[13], be[14], be[15]]);
+        let lo_hi = u64::from_be_bytes([
+            be[16], be[17], be[18], be[19], be[20], be[21], be[22], be[23],
+        ]);
+        let lo_lo = u64::from_be_bytes([
+            be[24], be[25], be[26], be[27], be[28], be[29], be[30], be[31],
+        ]);
 
         xdr::ScVal::U256(xdr::UInt256Parts {
             hi_hi,

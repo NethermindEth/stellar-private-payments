@@ -1,4 +1,5 @@
 use crate::rpc::Error;
+use core::ops::Shl;
 use std::collections::HashMap;
 use stellar_strkey::ed25519;
 use stellar_xdr::curr::{self as xdr, ReadXdr};
@@ -49,7 +50,11 @@ pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
         let lo_hi = U256::from(parts.lo_hi);
         let lo_lo = U256::from(parts.lo_lo);
 
-        Ok((hi_hi << 192) + (hi_lo << 128) + (lo_hi << 64) + lo_lo)
+        let mut out = Shl::shl(hi_hi, 192);
+        out = out.overflowing_add(Shl::shl(hi_lo, 128)).0;
+        out = out.overflowing_add(Shl::shl(lo_hi, 64)).0;
+        out = out.overflowing_add(lo_lo).0;
+        Ok(out)
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
     }
