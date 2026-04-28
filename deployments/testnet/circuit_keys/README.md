@@ -8,3 +8,7 @@ Notes:
   ignored by git). Tests may still read keys from there.
 - Changing these keys requires redeploying the on-chain verifier and any
   dependent contracts.
+
+## Trusted ceremonies
+
+- https://github.com/NethermindEth/stellar-private-payments/issues/177

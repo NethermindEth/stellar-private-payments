@@ -31,6 +31,8 @@ enum Commands {
     Contribute(ContributeArgs),
     /// Finalize artifacts in one command (beacon + verification key export).
     Finalize(FinalizeArgs),
+    /// Convert a final snarkjs zkey into repo deployment key formats.
+    ExportDeployment(ExportDeploymentArgs),
 }
 
 /// Shared init arguments.
@@ -98,6 +100,23 @@ struct FinalizeArgs {
     force: bool,
 }
 
+/// Export deployment key artifacts from a final ceremony `.zkey`.
+#[derive(Debug, clap::Args)]
+struct ExportDeploymentArgs {
+    /// Final ceremony zkey.
+    #[arg(short = 'z', long = "zkey")]
+    zkey: PathBuf,
+    /// Output directory for generated files.
+    #[arg(short = 'o', long = "out-dir")]
+    out_dir: PathBuf,
+    /// Basename used for output files.
+    #[arg(long = "basename", default_value = "policy_tx_2_2")]
+    basename: String,
+    /// Overwrite existing outputs.
+    #[arg(long = "force", action = ArgAction::SetTrue)]
+    force: bool,
+}
+
 /// Abstraction for command execution.
 trait CommandRunner {
     /// Run a program with provided args and ensure success.
@@ -154,6 +173,7 @@ fn execute(cli: Cli, runner: &dyn CommandRunner) -> Result<()> {
         Commands::Init(args) => init(args, runner),
         Commands::Contribute(args) => contribute(args, runner),
         Commands::Finalize(args) => finalize(args, runner),
+        Commands::ExportDeployment(args) => export_deployment(args, runner),
     }
 }
 
@@ -290,6 +310,12 @@ fn finalize(args: FinalizeArgs, runner: &dyn CommandRunner) -> Result<()> {
     );
 
     Ok(())
+}
+
+/// Converts a final snarkjs zkey into the deployment artifacts used by this
+/// repo.
+fn export_deployment(args: ExportDeploymentArgs, runner: &dyn CommandRunner) -> Result<()> {
+    export_deployment::export_deployment(args, runner)
 }
 
 /// human-readable file size
@@ -523,6 +549,8 @@ fn validate_beacon_hash(value: &str) -> Result<()> {
     }
     Ok(())
 }
+
+mod export_deployment;
 
 /// Prints contributor guidance after a ceremony step.
 fn print_next_steps(zkey_path: &Path, actions: &[&str]) {

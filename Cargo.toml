@@ -6,6 +6,7 @@ members = [
     "app/crates/core/types",
     "app/crates/core/witness",
     "app/crates/platforms/web",
+    "circuit-keys",
     "circuits",
     "contracts/*",
     "e2e-tests",
@@ -39,6 +40,7 @@ asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.89", default-features = false }
 cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
