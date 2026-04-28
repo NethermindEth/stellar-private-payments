@@ -22,5 +22,5 @@ stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
 thiserror = { workspace = true }
 types = { workspace = true }
 
-#[lints]
-#workspace = true
+[lints]
+workspace = true

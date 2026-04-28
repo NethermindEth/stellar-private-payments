@@ -22,5 +22,5 @@ uint = { workspace = true }
 rusqlite = { workspace = true, features = ["buildtime_bindgen", "bundled"] }
 serde_json = { workspace = true, features = ["alloc"] }
 
-#[lints]
-#workspace = true
+[lints]
+workspace = true

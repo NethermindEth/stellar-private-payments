@@ -386,7 +386,10 @@ impl Client {
             durability: xdr::ContractDataDurability::Persistent,
         });
 
-        let mut keys = Vec::with_capacity(1 + enum_keys.len() + valued_keys.len());
+        let capacity = 1usize
+            .saturating_add(enum_keys.len())
+            .saturating_add(valued_keys.len());
+        let mut keys = Vec::with_capacity(capacity);
         keys.push(contract_key);
 
         for variant in enum_keys {
