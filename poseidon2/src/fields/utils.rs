@@ -7,7 +7,7 @@ pub fn from_hex<F: PrimeField>(s: &str) -> F {
 }
 
 pub fn random_scalar<F: PrimeField>() -> F {
-    let mut rng = ark_std::rand::thread_rng();
+    let mut rng = rand::thread_rng();
     F::rand(&mut rng)
 }
 

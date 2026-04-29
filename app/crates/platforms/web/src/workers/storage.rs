@@ -82,6 +82,7 @@ macro_rules! with_storage_mut {
 pub fn worker_main() {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
+    log::debug!("[{WORKER_NAME}] starting...");
     StorageWorker::registrar().register();
     spawn_local(async {
         if let Err(e) = init().await {

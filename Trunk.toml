@@ -23,11 +23,26 @@ command = "sh"
 command_arguments = ["-c", """
 mkdir -p $TRUNK_STAGING_DIR/circuits
 
-# Circuit artifacts from Cargo build output
-CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
+# Circuit artifacts from a deterministic publish directory
+#
+# `circuits/build.rs` publishes to:
+#   target/circuits-artifacts/<profile>/{name}.r1cs
+#   target/circuits-artifacts/<profile>/{name}.wasm
+#
+# Trunk is configured with `release = true`, so prefer `release/` but fall back
+# to `debug/` if it exists (still deterministic).
+CIRCUIT_OUT=""
+if [ -d target/circuits-artifacts/release ]; then
+    CIRCUIT_OUT=target/circuits-artifacts/release
+elif [ -d target/circuits-artifacts/debug ]; then
+    CIRCUIT_OUT=target/circuits-artifacts/debug
+fi
+
 if [ -n "$CIRCUIT_OUT" ]; then
     cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
-    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
+    cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
+else
+    echo "trunk:warning: no circuit artifacts found in target/circuits-artifacts/{release,debug}; run 'cargo build -p circuits --release' to generate them" >&2
 fi
 
 # Static files
