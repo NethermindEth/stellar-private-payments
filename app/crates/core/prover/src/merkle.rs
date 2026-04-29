@@ -380,6 +380,45 @@ impl MerklePrefixTreeBuilt {
 
         Ok((out_elems, proof.path_indices.to_le_bytes()))
     }
+
+    /// Append a new leaf to the built prefix tree.
+    ///
+    /// This updates the cached levels incrementally instead of rebuilding the
+    /// full tree from scratch.
+    pub fn append_leaf(&mut self, leaf: AppField) -> Result<()> {
+        let scalar = bytes_to_scalar(&leaf.to_le_bytes())?;
+        self.append_scalar_leaf(scalar)
+    }
+
+    fn append_scalar_leaf(&mut self, leaf: Scalar) -> Result<()> {
+        if self.levels.is_empty() {
+            anyhow::bail!("built tree has no levels");
+        }
+
+        self.levels[0].push(leaf);
+        let mut index = self.levels[0].len() - 1;
+
+        for level in 0..self.depth {
+            let parent_index = index / 2;
+            let left = self.levels[level][parent_index * 2];
+            let right = if index % 2 == 0 {
+                self.empty[level]
+            } else {
+                self.levels[level][parent_index * 2 + 1]
+            };
+            let parent_value = poseidon2_compression(left, right);
+
+            if self.levels[level + 1].len() > parent_index {
+                self.levels[level + 1][parent_index] = parent_value;
+            } else {
+                self.levels[level + 1].push(parent_value);
+            }
+
+            index = parent_index;
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -418,6 +457,36 @@ mod tests {
             assert_eq!(a_elems, b_elems, "path elems mismatch at idx={idx}");
             assert_eq!(a_idx, b_idx, "path idx mismatch at idx={idx}");
         }
+    }
+
+    #[test]
+    fn prefix_built_append_leaf_updates_root_and_proof() {
+        let depth = 6u32;
+        let mut leaves: Vec<AppField> = (0u8..8u8)
+            .map(|v| AppField::try_from_le_bytes([v; 32]).expect("field"))
+            .collect();
+
+        let mut tree = MerklePrefixTree::new(depth, &leaves)
+            .expect("new")
+            .into_built();
+
+        let old_root = tree.root().expect("root");
+        let new_leaf = AppField::try_from_le_bytes([10u8; 32]).expect("field");
+        tree.append_leaf(new_leaf).expect("append");
+
+        leaves.push(new_leaf);
+        let expected = MerklePrefixTree::new(depth, &leaves)
+            .expect("new")
+            .into_built();
+
+        assert_eq!(tree.root().expect("root"), expected.root().expect("root"));
+
+        let proof = tree.proof((leaves.len() - 1) as u32).expect("proof");
+        let expected_proof = expected.proof((leaves.len() - 1) as u32).expect("proof");
+        assert_eq!(proof.path_elements, expected_proof.path_elements);
+        assert_eq!(proof.path_indices.to_le_bytes(), expected_proof.path_indices.to_le_bytes());
+        assert_eq!(proof.root, expected_proof.root);
+        assert_ne!(old_root, tree.root().expect("root"));
     }
 
     #[test]

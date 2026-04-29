@@ -40,6 +40,7 @@ pub enum StorageWorkerRequest {
     Transfer(TransferRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
+    BenchmarkMerkle(u32),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -59,6 +60,7 @@ pub enum StorageWorkerResponse {
     TransferParams(TransferParams),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
+    BenchmarkResult(f64),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

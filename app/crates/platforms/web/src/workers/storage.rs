@@ -12,7 +12,7 @@ use prover::{
         DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
         TransferParams, WithdrawParams,
     },
-    merkle::{MerklePrefixTree, MerkleProof},
+    merkle::{MerklePrefixTree, MerklePrefixTreeBuilt, MerkleProof},
 };
 use state::{
     AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
@@ -20,9 +20,11 @@ use state::{
 use std::cell::RefCell;
 use types::{
     AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteKeyPair, NotePublicKey,
+    U256,
 };
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
+use web_sys::console;
 
 // TODO for now it is a mix of async (because we want an async bridge for the
 // main thread) and sync (blocking) code in the future we should refactor to use
@@ -49,6 +51,14 @@ thread_local! {
     // signalling the events processor
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+    static ASP_MEMBERSHIP_TREE_CACHE: RefCell<Option<CachedMerkleTree>> = const { RefCell::new(None) };
+    static POOL_COMMITMENT_TREE_CACHE: RefCell<Option<CachedMerkleTree>> = const { RefCell::new(None) };
+}
+
+struct CachedMerkleTree {
+    tree_depth: usize,
+    leaves: Vec<Field>,
+    tree: MerklePrefixTreeBuilt,
 }
 
 macro_rules! with_storage {
@@ -77,6 +87,61 @@ macro_rules! with_storage_mut {
             Ok::<_, anyhow::Error>($body)
         })
     };
+}
+
+fn get_cached_prefix_tree<F, R>(
+    cache: &'static std::thread::LocalKey<RefCell<Option<CachedMerkleTree>>>,
+    tree_depth: u32,
+    leaves: &[Field],
+    run: F,
+) -> Result<R>
+where
+    F: FnOnce(&MerklePrefixTreeBuilt) -> Result<R>,
+{
+    cache.with(|cell| {
+        let mut maybe_cache = cell.borrow_mut();
+        let depth = usize::try_from(tree_depth).map_err(|_| anyhow::anyhow!("tree depth too large"))?;
+
+        let rebuild = |cache: &mut Option<CachedMerkleTree>| -> Result<()> {
+            let start = web_sys::window().unwrap().performance().unwrap().now();
+            let built = MerklePrefixTree::new(tree_depth, leaves)?.into_built();
+            let end = web_sys::window().unwrap().performance().unwrap().now();
+            console::log_1(&format!("Merkle tree build time for {} leaves: {} ms", leaves.len(), end - start).into());
+            *cache = Some(CachedMerkleTree {
+                tree_depth: depth,
+                leaves: leaves.to_vec(),
+                tree: built,
+            });
+            Ok(())
+        };
+
+        let tree = if let Some(cached) = maybe_cache.as_mut() {
+            if cached.tree_depth == depth {
+                if cached.leaves.len() == leaves.len() {
+                    &cached.tree
+                } else if cached.leaves.len() <= leaves.len()
+                    && cached.leaves.iter().zip(leaves.iter()).all(|(a, b)| a == b)
+                {
+                    for leaf in leaves[cached.leaves.len()..].iter() {
+                        cached.tree.append_leaf(*leaf)?;
+                        cached.leaves.push(*leaf);
+                    }
+                    &cached.tree
+                } else {
+                    rebuild(&mut maybe_cache)?;
+                    &maybe_cache.as_ref().expect("cache just set").tree
+                }
+            } else {
+                rebuild(&mut maybe_cache)?;
+                &maybe_cache.as_ref().expect("cache just set").tree
+            }
+        } else {
+            rebuild(&mut maybe_cache)?;
+            &maybe_cache.as_ref().expect("cache just set").tree
+        };
+
+        run(tree)
+    })
 }
 
 pub fn worker_main() {
@@ -526,6 +591,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
             StorageWorkerResponse::TransactParams(params)
         }
+        StorageWorkerRequest::BenchmarkMerkle(leaf_count) => {
+            log::trace!("[{WORKER_NAME}] benchmark merkle tree build for {leaf_count} leaves");
+            let leaves: Vec<Field> = (0..leaf_count).map(|i| Field::try_from_u256(U256::from(i as u64)).unwrap()).collect();
+            let tree_depth = 20u32; // Typical depth
+            let start = web_sys::window().unwrap().performance().unwrap().now();
+            let _built = MerklePrefixTree::new(tree_depth, &leaves).unwrap().into_built();
+            let end = web_sys::window().unwrap().performance().unwrap().now();
+            let time_ms = end - start;
+            console::log_1(&format!("Benchmark: Merkle tree build time for {} leaves: {} ms", leaf_count, time_ms).into());
+            StorageWorkerResponse::BenchmarkResult(time_ms)
+        }
     };
     Ok(resp)
 }
@@ -581,22 +657,29 @@ fn build_membership_proof(
 
     let asp_membership_merkle_tree_leaves =
         with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
-    let aspmembership_tree =
-        MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
-    let MerkleProof {
-        path_indices,
-        path_elements,
-        root,
-        ..
-    } = aspmembership_tree.proof(user_leaf_index)?;
+    let proof = get_cached_prefix_tree(
+        &ASP_MEMBERSHIP_TREE_CACHE,
+        tree_depth,
+        &asp_membership_merkle_tree_leaves,
+        |tree| {
+            let MerkleProof {
+                path_indices,
+                path_elements,
+                root,
+                ..
+            } = tree.proof(user_leaf_index)?;
 
-    Ok(Ok(AspMembershipProof {
-        leaf: user_leaf,
-        blinding: membership_blinding,
-        path_elements,
-        path_indices,
-        root,
-    }))
+            Ok(AspMembershipProof {
+                leaf: user_leaf,
+                blinding: membership_blinding,
+                path_elements,
+                path_indices,
+                root,
+            })
+        },
+    )?;
+
+    Ok(Ok(proof))
 }
 
 fn build_pool_inputs(
@@ -621,31 +704,34 @@ fn build_pool_inputs(
         return Ok(Err(AspMembershipSync::SyncRequired(None)));
     }
 
-    let tree = MerklePrefixTree::new(tree_depth, &leaves)?.into_built();
-    let computed_root = tree.root()?;
-    if computed_root != expected_pool_root {
-        anyhow::bail!("pool root mismatch: local computed root does not match on-chain root");
-    }
+    let inputs = get_cached_prefix_tree(&POOL_COMMITMENT_TREE_CACHE, tree_depth, &leaves, |tree| {
+        let computed_root = tree.root()?;
+        if computed_root != expected_pool_root {
+            anyhow::bail!("pool root mismatch: local computed root does not match on-chain root");
+        }
 
-    let mut out = Vec::with_capacity(input_commitments.len());
-    for commitment in input_commitments {
-        let (amount, blinding, leaf_index) =
-            with_storage!(s => s.get_unspent_user_note_by_commitment(user_address, commitment)?)?
-                .ok_or_else(|| {
-                anyhow::anyhow!("unspent note not found for commitment {}", commitment)
-            })?;
+        let mut out = Vec::with_capacity(input_commitments.len());
+        for commitment in input_commitments {
+            let (amount, blinding, leaf_index) =
+                with_storage!(s => s.get_unspent_user_note_by_commitment(user_address, commitment)?)?
+                    .ok_or_else(|| {
+                        anyhow::anyhow!("unspent note not found for commitment {}", commitment)
+                    })?;
 
-        let (path_elements, path_indices) = tree.proof_bytes(leaf_index)?;
+            let (path_elements, path_indices) = tree.proof_bytes(leaf_index)?;
 
-        out.push(TransactInputNote {
-            amount_stroops: amount,
-            blinding,
-            merkle_path_elements: path_elements,
-            merkle_path_indices: path_indices,
-        });
-    }
+            out.push(TransactInputNote {
+                amount_stroops: amount,
+                blinding,
+                merkle_path_elements: path_elements,
+                merkle_path_indices: path_indices,
+            });
+        }
 
-    Ok(Ok(out))
+        Ok(out)
+    })?;
+
+    Ok(Ok(inputs))
 }
 
 fn kick_processor() {
