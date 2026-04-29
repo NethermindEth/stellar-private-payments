@@ -37,6 +37,8 @@ pub enum Error {
     RpcSyncGap(u32),
     #[error("invalid latestLedger value: {0}")]
     InvalidLatestLedger(i64),
+    #[error("RPC request timed out")]
+    Timeout,
 }
 
 // JSON-RPC Plumbing
@@ -194,10 +196,20 @@ pub struct SimulateTransactionResponse {
 pub struct Client {
     base_url: String,
     http_client: reqwest::Client,
+    #[cfg(target_arch = "wasm32")]
+    timeout_secs: u32,
 }
 
 impl Client {
+    const DEFAULT_TIMEOUT_SECS: u32 = 30;
+
+    /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {
+        Self::with_timeout(base_url, Self::DEFAULT_TIMEOUT_SECS)
+    }
+
+    /// Creates a client with a custom timeout in seconds.
+    pub fn with_timeout(base_url: &str, timeout_secs: u32) -> Result<Self, Error> {
         let uri = base_url.parse::<Uri>()?;
         let mut parts = uri.into_parts();
 
@@ -218,17 +230,18 @@ impl Client {
         let uri = Uri::from_parts(parts)?;
         let base_url = uri.to_string();
 
-        let mut client_builder = reqwest::Client::builder();
-
-        // TODO add timeout for WASM
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            client_builder = client_builder.timeout(std::time::Duration::from_secs(30));
-        }
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(u64::from(timeout_secs)))
+            .build()?;
+        #[cfg(target_arch = "wasm32")]
+        let http_client = reqwest::Client::builder().build()?;
 
         Ok(Self {
             base_url,
-            http_client: client_builder.build()?,
+            http_client,
+            #[cfg(target_arch = "wasm32")]
+            timeout_secs,
         })
     }
 
@@ -244,14 +257,21 @@ impl Client {
             params,
         };
 
-        let resp: JsonRpcResponse<R> = self
-            .http_client
-            .post(&self.base_url)
-            .json(&payload)
-            .send()
-            .await?
-            .json()
-            .await?;
+        let request = async {
+            self.http_client
+                .post(&self.base_url)
+                .json(&payload)
+                .send()
+                .await?
+                .json::<JsonRpcResponse<R>>()
+                .await
+        };
+
+        #[cfg(target_arch = "wasm32")]
+        let resp = race_with_timeout(request, self.timeout_secs).await?;
+
+        #[cfg(not(target_arch = "wasm32"))]
+        let resp = request.await?;
 
         if let Some(err) = resp.error {
             return Err(Error::JsonRpc {
@@ -260,7 +280,6 @@ impl Client {
             });
         }
 
-        // Replaced custom ok_ok with standard ok_or_else
         resp.result
             .ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
     }
@@ -454,6 +473,24 @@ impl Client {
     }
 }
 
+/// Races a request future against a [`gloo_timers::future::TimeoutFuture`].
+/// Returns [`Error::Timeout`] if the timer fires first.
+#[cfg(target_arch = "wasm32")]
+async fn race_with_timeout<F, T>(fut: F, timeout_secs: u32) -> Result<T, Error>
+where
+    F: std::future::Future<Output = Result<T, reqwest::Error>>,
+{
+    use futures::future::Either;
+    use gloo_timers::future::TimeoutFuture;
+
+    let timeout_ms = timeout_secs.saturating_mul(1_000);
+    futures::pin_mut!(fut);
+    match futures::future::select(fut, TimeoutFuture::new(timeout_ms)).await {
+        Either::Left((result, _)) => result.map_err(Error::from),
+        Either::Right(..) => Err(Error::Timeout),
+    }
+}
+
 // helper to parse "startLedger must be within the ledger range: 1936296 -
 // 2057255" from the RPC message
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
@@ -495,5 +532,27 @@ mod tests {
     fn parsing_range_error() {
         let msg = "startLedger must be within the ledger range: 1936296 - 2057255";
         assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    mod wasm {
+        use super::*;
+        use wasm_bindgen_test::wasm_bindgen_test;
+
+        #[wasm_bindgen_test]
+        async fn timeout_fires_when_request_pending() {
+            let pending: futures::future::Pending<Result<(), reqwest::Error>> =
+                futures::future::pending();
+            let result: Result<(), Error> = race_with_timeout(pending, 0).await;
+            assert!(matches!(result, Err(Error::Timeout)));
+        }
+
+        #[wasm_bindgen_test]
+        async fn returns_value_when_request_completes_first() {
+            let ready: futures::future::Ready<Result<u32, reqwest::Error>> =
+                futures::future::ready(Ok(42));
+            let result: Result<u32, Error> = race_with_timeout(ready, 60).await;
+            assert_eq!(result.expect("expected Ok"), 42);
+        }
     }
 }

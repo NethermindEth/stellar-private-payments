@@ -24,7 +24,7 @@ async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
 # we have to use previous versions of gloo- crates because of wasmer and circom-compat
-gloo-timers = { version = "0.3", default-features = false, features = ["futures"] }
+gloo-timers = { workspace = true }
 gloo-worker = { version = "0.5", default-features = false, features = ["futures"] }
 js-sys = "0.3"
 log = { workspace = true }
