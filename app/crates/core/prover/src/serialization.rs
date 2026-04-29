@@ -5,8 +5,9 @@
 use alloc::{format, string::String, vec, vec::Vec};
 use anyhow::{Result, anyhow};
 use ark_bn254::Fr;
-use ark_ff::{BigInteger, Field, PrimeField};
+use ark_ff::{BigInteger, Field as IField, PrimeField};
 use core::ops::{Add, Mul};
+use types::Field;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
 use crate::types::FIELD_SIZE;
@@ -55,6 +56,18 @@ pub fn bytes_to_scalar(bytes: &[u8]) -> Result<Scalar> {
 /// Convert zkhash Scalar to Little-Endian bytes
 pub fn scalar_to_bytes(scalar: &Scalar) -> Vec<u8> {
     prime_field_to_bytes(scalar)
+}
+
+/// Convert a zkhash Field element to a Scalar (Little-Endian).
+pub fn field_to_scalar(field: &Field) -> Scalar {
+    Scalar::from_le_bytes_mod_order(&field.to_le_bytes())
+}
+
+/// Convert a Scalar to a zkhash Field element (Little-Endian).
+pub fn scalar_to_field(scalar: &Scalar) -> Field {
+    let le = scalar_to_bytes(scalar);
+    let le: [u8; 32] = le.try_into().expect("scalar bytes length");
+    Field::try_from_le_bytes(le).expect("scalar to field conversion")
 }
 
 /// Convert zkhash Scalar to hex string (for JS BigInt)
