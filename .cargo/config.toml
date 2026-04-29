@@ -1,4 +1,5 @@
 [target.wasm32-unknown-unknown]
+runner = "wasm-bindgen-test-runner"
 rustflags = [
     "-Clink-arg=--initial-memory=67108864",
     "-Clink-arg=--max-memory=4294967296",

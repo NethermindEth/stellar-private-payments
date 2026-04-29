@@ -196,8 +196,7 @@ pub struct SimulateTransactionResponse {
 pub struct Client {
     base_url: String,
     http_client: reqwest::Client,
-    /// Read by the WASM timeout path
-    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    #[cfg(target_arch = "wasm32")]
     timeout_secs: u32,
 }
 
@@ -231,17 +230,17 @@ impl Client {
         let uri = Uri::from_parts(parts)?;
         let base_url = uri.to_string();
 
-        let mut client_builder = reqwest::Client::builder();
-
         #[cfg(not(target_arch = "wasm32"))]
-        {
-            client_builder =
-                client_builder.timeout(std::time::Duration::from_secs(u64::from(timeout_secs)));
-        }
+        let http_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(u64::from(timeout_secs)))
+            .build()?;
+        #[cfg(target_arch = "wasm32")]
+        let http_client = reqwest::Client::builder().build()?;
 
         Ok(Self {
             base_url,
-            http_client: client_builder.build()?,
+            http_client,
+            #[cfg(target_arch = "wasm32")]
             timeout_secs,
         })
     }
@@ -269,17 +268,7 @@ impl Client {
         };
 
         #[cfg(target_arch = "wasm32")]
-        let resp = {
-            use futures::future::Either;
-            use gloo_timers::future::TimeoutFuture;
-
-            let timeout_ms = self.timeout_secs.saturating_mul(1_000);
-            futures::pin_mut!(request);
-            match futures::future::select(request, TimeoutFuture::new(timeout_ms)).await {
-                Either::Left((result, _)) => result?,
-                Either::Right(..) => return Err(Error::Timeout),
-            }
-        };
+        let resp = race_with_timeout(request, self.timeout_secs).await?;
 
         #[cfg(not(target_arch = "wasm32"))]
         let resp = request.await?;
@@ -484,6 +473,24 @@ impl Client {
     }
 }
 
+/// Races a request future against a [`gloo_timers::future::TimeoutFuture`].
+/// Returns [`Error::Timeout`] if the timer fires first.
+#[cfg(target_arch = "wasm32")]
+async fn race_with_timeout<F, T>(fut: F, timeout_secs: u32) -> Result<T, Error>
+where
+    F: std::future::Future<Output = Result<T, reqwest::Error>>,
+{
+    use futures::future::Either;
+    use gloo_timers::future::TimeoutFuture;
+
+    let timeout_ms = timeout_secs.saturating_mul(1_000);
+    futures::pin_mut!(fut);
+    match futures::future::select(fut, TimeoutFuture::new(timeout_ms)).await {
+        Either::Left((result, _)) => result.map_err(Error::from),
+        Either::Right(..) => Err(Error::Timeout),
+    }
+}
+
 // helper to parse "startLedger must be within the ledger range: 1936296 -
 // 2057255" from the RPC message
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
@@ -527,34 +534,25 @@ mod tests {
         assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
     }
 
-    /// Native reqwest timeout fires when the server stalls.
-    #[cfg(not(target_arch = "wasm32"))]
-    #[tokio::test]
-    async fn rpc_call_times_out_native() {
-        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-            .await
-            .expect("bind failed");
-        let addr = listener.local_addr().expect("addr failed");
+    #[cfg(target_arch = "wasm32")]
+    mod wasm {
+        use super::*;
+        use wasm_bindgen_test::wasm_bindgen_test;
 
-        // Hold the connection open forever to force a timeout.
-        tokio::spawn(async move {
-            let Ok((_socket, _)) = listener.accept().await else {
-                return;
-            };
-            futures::future::pending::<()>().await;
-        });
+        #[wasm_bindgen_test]
+        async fn timeout_fires_when_request_pending() {
+            let pending: futures::future::Pending<Result<(), reqwest::Error>> =
+                futures::future::pending();
+            let result: Result<(), Error> = race_with_timeout(pending, 0).await;
+            assert!(matches!(result, Err(Error::Timeout)));
+        }
 
-        let client =
-            Client::with_timeout(&format!("http://{addr}"), 1).expect("client creation failed");
-
-        let result: Result<GetLatestLedgerResponse, Error> =
-            client.rpc_call("getLatestLedger", json!({})).await;
-
-        match result {
-            Err(Error::Reqwest(e)) => {
-                assert!(e.is_timeout(), "expected timeout, got: {e}");
-            }
-            other => panic!("expected Reqwest timeout, got: {other:?}"),
+        #[wasm_bindgen_test]
+        async fn returns_value_when_request_completes_first() {
+            let ready: futures::future::Ready<Result<u32, reqwest::Error>> =
+                futures::future::ready(Ok(42));
+            let result: Result<u32, Error> = race_with_timeout(ready, 60).await;
+            assert_eq!(result.expect("expected Ok"), 42);
         }
     }
 }

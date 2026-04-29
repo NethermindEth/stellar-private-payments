@@ -67,6 +67,7 @@ types = { path = "app/crates/core/types" }
 uint = { version = "0.9", default-features = false }
 # pin for wasmer
 wasm-bindgen = { version = "=0.2.108", default-features = false, features = ["serde-serialize"] }
+wasm-bindgen-test = { version = "=0.3.58" }
 wasm-log = { version = "0.3", default-features = false }
 wasmer = { version = "6.1", default-features = false }
 web = { path = "app/crates/platforms/web" }
