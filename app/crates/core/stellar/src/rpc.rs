@@ -196,13 +196,21 @@ pub struct SimulateTransactionResponse {
 pub struct Client {
     base_url: String,
     http_client: reqwest::Client,
+    /// Read by the WASM timeout path
+    #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
+    timeout_secs: u32,
 }
 
 impl Client {
-    // Timeout applied to every RPC call
-    const RPC_TIMEOUT_SECS: u32 = 30;
+    const DEFAULT_TIMEOUT_SECS: u32 = 30;
 
+    /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {
+        Self::with_timeout(base_url, Self::DEFAULT_TIMEOUT_SECS)
+    }
+
+    /// Creates a client with a custom timeout in seconds.
+    pub fn with_timeout(base_url: &str, timeout_secs: u32) -> Result<Self, Error> {
         let uri = base_url.parse::<Uri>()?;
         let mut parts = uri.into_parts();
 
@@ -227,14 +235,14 @@ impl Client {
 
         #[cfg(not(target_arch = "wasm32"))]
         {
-            client_builder = client_builder.timeout(std::time::Duration::from_secs(u64::from(
-                Self::RPC_TIMEOUT_SECS,
-            )));
+            client_builder =
+                client_builder.timeout(std::time::Duration::from_secs(u64::from(timeout_secs)));
         }
 
         Ok(Self {
             base_url,
             http_client: client_builder.build()?,
+            timeout_secs,
         })
     }
 
@@ -265,7 +273,7 @@ impl Client {
             use futures::future::Either;
             use gloo_timers::future::TimeoutFuture;
 
-            let timeout_ms = Self::RPC_TIMEOUT_SECS.saturating_mul(1_000);
+            let timeout_ms = self.timeout_secs.saturating_mul(1_000);
             futures::pin_mut!(request);
             match futures::future::select(request, TimeoutFuture::new(timeout_ms)).await {
                 Either::Left((result, _)) => result?,
@@ -517,5 +525,36 @@ mod tests {
     fn parsing_range_error() {
         let msg = "startLedger must be within the ledger range: 1936296 - 2057255";
         assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
+    }
+
+    /// Native reqwest timeout fires when the server stalls.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[tokio::test]
+    async fn rpc_call_times_out_native() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind failed");
+        let addr = listener.local_addr().expect("addr failed");
+
+        // Hold the connection open forever to force a timeout.
+        tokio::spawn(async move {
+            let Ok((_socket, _)) = listener.accept().await else {
+                return;
+            };
+            futures::future::pending::<()>().await;
+        });
+
+        let client =
+            Client::with_timeout(&format!("http://{addr}"), 1).expect("client creation failed");
+
+        let result: Result<GetLatestLedgerResponse, Error> =
+            client.rpc_call("getLatestLedger", json!({})).await;
+
+        match result {
+            Err(Error::Reqwest(e)) => {
+                assert!(e.is_timeout(), "expected timeout, got: {e}");
+            }
+            other => panic!("expected Reqwest timeout, got: {other:?}"),
+        }
     }
 }

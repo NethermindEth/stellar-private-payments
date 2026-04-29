@@ -25,5 +25,8 @@ types = { workspace = true }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }
 
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "net", "rt-multi-thread"] }
+
 #[lints]
 #workspace = true
