@@ -1,5 +1,7 @@
 mod client;
 mod config;
+#[cfg(target_arch = "wasm32")]
+mod merkle_benchmark;
 mod protocol;
 pub mod workers;
 
@@ -10,6 +12,9 @@ use std::rc::Rc;
 use stellar::Indexer;
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
+
+#[cfg(target_arch = "wasm32")]
+pub use merkle_benchmark::benchmark_merkle_prefix_tree;
 
 #[wasm_bindgen]
 pub struct MainThreadHandle {

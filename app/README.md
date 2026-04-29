@@ -47,6 +47,11 @@ This will:
 2. Install npm dependencies
 3. Serve the application at `http://localhost:8080`
 
+The Merkle prefix tree benchmark is served at `/merkle-benchmark.html` when
+running `make serve`. It measures tree construction and proof generation in the
+browser's single-threaded WASM runtime. See
+[MERKLE_BENCHMARK.md](MERKLE_BENCHMARK.md) for baseline measurements.
+
 ### Individual Build Steps
 
 ```bash
