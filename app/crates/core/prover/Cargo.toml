@@ -26,10 +26,20 @@ types = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
 # Poseidon2 hash
 zkhash = { workspace = true }
+
+[dev-dependencies]
+criterion = { version = "0.5", default-features = false }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 getrandom = { workspace = true }
-[target.'cfg(target_arch = "wasm32")'.dependencies]
+[target.'cfg(all(target_arch = "wasm32", target_os = "unknown"))'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
+[target.'cfg(all(target_arch = "wasm32", not(target_os = "unknown")))'.dependencies]
+getrandom = { workspace = true }
+
+[[bench]]
+name = "merkle_prefix_tree"
+harness = false
 
 [lints]
 workspace = true
