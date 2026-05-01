@@ -45,14 +45,14 @@ fn emit_progress(
         let _ = Reflect::set(
             &obj,
             &JsValue::from_str("current"),
-            &JsValue::from_f64(current as f64),
+            &JsValue::from_f64(f64::from(current)),
         );
     }
     if let Some(total) = total {
         let _ = Reflect::set(
             &obj,
             &JsValue::from_str("total"),
-            &JsValue::from_f64(total as f64),
+            &JsValue::from_f64(f64::from(total)),
         );
     }
 
@@ -170,7 +170,9 @@ impl WebClient {
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<Option<DepositPrepared>, JsError> {
-        if output_amounts.length() != N_OUTPUTS as u32 {
+        let expected_outputs =
+            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
+        if output_amounts.length() != expected_outputs {
             return Err(JsError::new(&format!(
                 "output_amounts must have length {N_OUTPUTS}"
             )));
@@ -194,7 +196,8 @@ impl WebClient {
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
         for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
-            let v = output_amounts.get(i as u32);
+            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
+            let v = output_amounts.get(idx);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
@@ -513,10 +516,12 @@ impl WebClient {
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<Option<PreparedProverTx>, JsError> {
+        let expected_outputs =
+            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
         if input_note_ids.length() == 0 || input_note_ids.length() > 2 {
             return Err(JsError::new("input_note_ids must have length 1..=2"));
         }
-        if output_amounts.length() != N_OUTPUTS as u32 {
+        if output_amounts.length() != expected_outputs {
             return Err(JsError::new(&format!(
                 "output_amounts must have length {N_OUTPUTS}"
             )));
@@ -550,7 +555,8 @@ impl WebClient {
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
         for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
-            let v = output_amounts.get(i as u32);
+            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
+            let v = output_amounts.get(idx);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
@@ -708,20 +714,22 @@ impl WebClient {
         out_recipient_enc_keys_hex: Array,
         on_status: Option<Function>,
     ) -> Result<Option<PreparedProverTx>, JsError> {
+        let expected_outputs =
+            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
         if input_note_ids.length() > 2 {
             return Err(JsError::new("input_note_ids must have length 0..=2"));
         }
-        if output_amounts.length() != N_OUTPUTS as u32 {
+        if output_amounts.length() != expected_outputs {
             return Err(JsError::new(&format!(
                 "output_amounts must have length {N_OUTPUTS}"
             )));
         }
-        if out_recipient_note_keys_hex.length() != N_OUTPUTS as u32 {
+        if out_recipient_note_keys_hex.length() != expected_outputs {
             return Err(JsError::new(&format!(
                 "out_recipient_note_keys_hex must have length {N_OUTPUTS}"
             )));
         }
-        if out_recipient_enc_keys_hex.length() != N_OUTPUTS as u32 {
+        if out_recipient_enc_keys_hex.length() != expected_outputs {
             return Err(JsError::new(&format!(
                 "out_recipient_enc_keys_hex must have length {N_OUTPUTS}"
             )));
@@ -751,7 +759,8 @@ impl WebClient {
 
         let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
         for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
-            let v = output_amounts.get(i as u32);
+            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
+            let v = output_amounts.get(idx);
             let bi: BigInt = v
                 .dyn_into()
                 .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
@@ -761,8 +770,9 @@ impl WebClient {
         let mut out_note_pks: [Option<NotePublicKey>; N_OUTPUTS] = [None, None];
         let mut out_enc_pks: [Option<EncryptionPublicKey>; N_OUTPUTS] = [None, None];
         for i in 0..N_OUTPUTS {
-            let nk = out_recipient_note_keys_hex.get(i as u32);
-            let ek = out_recipient_enc_keys_hex.get(i as u32);
+            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
+            let nk = out_recipient_note_keys_hex.get(idx);
+            let ek = out_recipient_enc_keys_hex.get(idx);
 
             let note_pk = if nk.is_null() || nk.is_undefined() {
                 None

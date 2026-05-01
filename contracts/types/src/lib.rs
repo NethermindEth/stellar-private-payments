@@ -25,10 +25,15 @@ pub enum Groth16Error {
 #[contracttype]
 #[derive(Clone)]
 pub struct VerificationKeyBytes {
+    /// Alpha G1 point
     pub alpha: BytesN<64>,
+    /// Beta G2 point
     pub beta: BytesN<128>,
+    /// Gamma G2 point
     pub gamma: BytesN<128>,
+    /// Delta G2 point
     pub delta: BytesN<128>,
+    /// IC (public input commitments)
     pub ic: Vec<BytesN<64>>,
 }
 
@@ -37,8 +42,11 @@ pub struct VerificationKeyBytes {
 #[derive(Clone)]
 #[contracttype]
 pub struct Groth16Proof {
+    /// Point A
     pub a: Bn254G1Affine,
+    /// Point B
     pub b: Bn254G2Affine,
+    /// Point C
     pub c: Bn254G1Affine,
 }
 

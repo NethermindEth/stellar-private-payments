@@ -635,7 +635,11 @@ fn build_pool_inputs(
                 anyhow::anyhow!("unspent note not found for commitment {}", commitment)
             })?;
 
-        let (path_elements, path_indices) = tree.proof_bytes(leaf_index)?;
+        let MerkleProof {
+            path_elements,
+            path_indices,
+            ..
+        } = tree.proof(leaf_index)?;
 
         out.push(TransactInputNote {
             amount_stroops: amount,

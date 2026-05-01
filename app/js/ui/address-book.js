@@ -86,6 +86,31 @@ export const AddressBook = {
         return this._cached;
     },
 
+    async _ensureLocalKeysLoaded(address) {
+        if (!address) return;
+        if (App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey) return;
+        if (!App.state.wallet.connected) return;
+
+        try {
+            const keys = await getHandle().webClient.getUserKeys(address);
+            if (!keys) return;
+
+            const notePub =
+                keys?.noteKeypair?.public ||
+                keys?.noteKeypair?.publicKey ||
+                null;
+            const encPub =
+                keys?.encryptionKeypair?.public ||
+                keys?.encryptionKeypair?.publicKey ||
+                null;
+
+            if (notePub) App.state.keys.notePublicKey = notePub;
+            if (encPub) App.state.keys.encryptionPublicKey = encPub;
+        } catch {
+            // Ignore errors here; address book should still render from on-chain entries.
+        }
+    },
+
     async render() {
         const tbody = document.getElementById('addressbook-tbody');
         const empty = document.getElementById('empty-addressbook');
@@ -108,30 +133,34 @@ export const AddressBook = {
 
         loading?.classList.add('hidden');
 
-        const selfAddress = App.state.wallet.connected ? App.state.wallet.address : null;
-        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+        const selfAddress = App.state.wallet.address || null;
         const onchainSelf = selfAddress
             ? registrations.find(r => String(r.address || '') === String(selfAddress))
             : null;
 
-        // Always show self entry first (even if not registered on-chain) for easy copy/share.
-        if (selfAddress && haveLocalKeys) {
-            if (onchainSelf) {
+        await this._ensureLocalKeysLoaded(selfAddress);
+        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+
+        let renderedSelfRow = false;
+        // Always show self entry first for easy copy/share.
+        if (selfAddress && (haveLocalKeys || onchainSelf)) {
+            if (haveLocalKeys) {
+                tbody.appendChild(this._createRow({
+                    address: selfAddress,
+                    noteKey: App.state.keys.notePublicKey,
+                    encryptionKey: App.state.keys.encryptionPublicKey,
+                    ledger: onchainSelf?.ledger ?? 0,
+                    _self: true,
+                    registeredOnchain: !!onchainSelf,
+                }));
+            } else if (onchainSelf) {
                 tbody.appendChild(this._createRow({
                     ...onchainSelf,
                     _self: true,
                     registeredOnchain: true,
                 }));
-            } else {
-                tbody.appendChild(this._createRow({
-                    address: selfAddress,
-                    noteKey: App.state.keys.notePublicKey,
-                    encryptionKey: App.state.keys.encryptionPublicKey,
-                    ledger: 0,
-                    _self: true,
-                    registeredOnchain: false,
-                }));
             }
+            renderedSelfRow = true;
         }
 
         if (filtered.length === 0 && tbody.children.length === 0) {
@@ -144,7 +173,7 @@ export const AddressBook = {
         empty?.classList.remove('flex');
 
         filtered.forEach(record => {
-            if (selfAddress && String(record.address || '') === String(selfAddress)) return;
+            if (renderedSelfRow && selfAddress && String(record.address || '') === String(selfAddress)) return;
             tbody.appendChild(this._createRow(record));
         });
     },
@@ -163,32 +192,36 @@ export const AddressBook = {
             ? registrations.filter(r => String(r.address || '').toUpperCase().startsWith(term))
             : registrations;
 
-        const selfAddress = App.state.wallet.connected ? App.state.wallet.address : null;
-        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+        const selfAddress = App.state.wallet.address || null;
         const onchainSelf = selfAddress
             ? registrations.find(r => String(r.address || '') === String(selfAddress))
             : null;
 
         tbody.replaceChildren();
 
+        await this._ensureLocalKeysLoaded(selfAddress);
+        const haveLocalKeys = !!(App.state.keys.notePublicKey && App.state.keys.encryptionPublicKey);
+
+        let renderedSelfRow = false;
         // Always keep self row first, even when filtering.
-        if (selfAddress && haveLocalKeys) {
-            if (onchainSelf) {
+        if (selfAddress && (haveLocalKeys || onchainSelf)) {
+            if (haveLocalKeys) {
+                tbody.appendChild(this._createRow({
+                    address: selfAddress,
+                    noteKey: App.state.keys.notePublicKey,
+                    encryptionKey: App.state.keys.encryptionPublicKey,
+                    ledger: onchainSelf?.ledger ?? 0,
+                    _self: true,
+                    registeredOnchain: !!onchainSelf,
+                }));
+            } else if (onchainSelf) {
                 tbody.appendChild(this._createRow({
                     ...onchainSelf,
                     _self: true,
                     registeredOnchain: true,
                 }));
-            } else {
-                tbody.appendChild(this._createRow({
-                    address: selfAddress,
-                    noteKey: App.state.keys.notePublicKey,
-                    encryptionKey: App.state.keys.encryptionPublicKey,
-                    ledger: 0,
-                    _self: true,
-                    registeredOnchain: false,
-                }));
             }
+            renderedSelfRow = true;
         }
 
         if (matches.length === 0 && tbody.children.length === 0) {
@@ -201,7 +234,7 @@ export const AddressBook = {
         empty?.classList.remove('flex');
 
         matches.forEach(record => {
-            if (selfAddress && String(record.address || '') === String(selfAddress)) return;
+            if (renderedSelfRow && selfAddress && String(record.address || '') === String(selfAddress)) return;
             tbody.appendChild(this._createRow(record));
         });
     },

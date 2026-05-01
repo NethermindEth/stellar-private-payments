@@ -38,7 +38,7 @@ use serde_json::{Value, json};
 use std::{
     env, fs,
     path::{Path, PathBuf},
-    process::{Command, ExitStatus},
+    process::Command,
     string::ToString,
 };
 use type_analysis::check_types::check_types;
@@ -79,8 +79,13 @@ fn main() -> Result<()> {
     );
 
     // === CIRCOMLIB DEPENDENCY ===
-    // Import circomlib library (only if not already present)
-    get_circomlib(&src_dir)?;
+    // Import circomlib library (only if not already present) and pin it to the
+    // revision in `circomlib.lock` for reproducible builds.
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_dir.join("circomlib.lock").display()
+    );
+    get_circomlib(&crate_dir, &src_dir)?;
 
     // === FIND CIRCOM FILES ===
     // Find all .circom files with a main component
@@ -627,30 +632,94 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
 ///
 /// # Returns
 /// Returns exit status of the import procedure
-fn get_circomlib(directory: &Path) -> Result<ExitStatus> {
-    let circomlib_path = directory.join("circomlib");
+fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
+    let circomlib_path = src_dir.join("circomlib");
+    let locked_rev = fs::read_to_string(crate_dir.join("circomlib.lock"))
+        .context("Failed to read circuits/circomlib.lock")?;
+    let locked_rev = locked_rev.trim();
+    if locked_rev.len() != 40 || !locked_rev.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Err(anyhow!(
+            "Invalid circomlib.lock value (expected 40-char hex SHA): {locked_rev:?}"
+        ));
+    }
 
-    // Check if circomlib already exists and is a valid git repository
-    if circomlib_path.exists() {
-        // Verify it's a valid git repository by checking for .git directory
-        if circomlib_path.join(".git").exists() {
-            println!("cargo:warning=circomlib already exists at {circomlib_path:?}");
-            return Ok(ExitStatus::default());
-        } else {
-            // Remove invalid directory and re-clone
-            fs::remove_dir_all(&circomlib_path)?;
+    if circomlib_path.exists() && !circomlib_path.join(".git").exists() {
+        // Remove invalid directory and re-initialize.
+        fs::remove_dir_all(&circomlib_path)?;
+    }
+
+    if !circomlib_path.join(".git").exists() {
+        fs::create_dir_all(&circomlib_path)?;
+        Command::new("git")
+            .arg("-C")
+            .arg(&circomlib_path)
+            .arg("init")
+            .status()
+            .map_err(|_| anyhow!("Error initializing circomlib git repository"))?
+            .success()
+            .then_some(())
+            .ok_or_else(|| anyhow!("git init failed for circomlib dependency"))?;
+
+        Command::new("git")
+            .arg("-C")
+            .arg(&circomlib_path)
+            .arg("remote")
+            .arg("add")
+            .arg("origin")
+            .arg("https://github.com/iden3/circomlib.git")
+            .status()
+            .map_err(|_| anyhow!("Error adding circomlib git remote"))?
+            .success()
+            .then_some(())
+            .ok_or_else(|| anyhow!("git remote add failed for circomlib dependency"))?;
+    }
+
+    // If already checked out at the locked rev, do nothing.
+    let head_out = Command::new("git")
+        .arg("-C")
+        .arg(&circomlib_path)
+        .arg("rev-parse")
+        .arg("HEAD")
+        .output()
+        .ok();
+    if let Some(out) = head_out
+        && out.status.success()
+    {
+        let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        if head == locked_rev {
+            println!("cargo:warning=circomlib already at locked revision {locked_rev}");
+            return Ok(());
         }
     }
 
-    // Clone the circomlib repository
-    println!("cargo:warning=Cloning circomlib repository...");
-    Command::new("git")
-        .arg("clone")
-        .arg("--depth=1") // Shallow clone to reduce size of build
-        .arg("https://github.com/iden3/circomlib.git")
+    println!("cargo:warning=Fetching circomlib revision {locked_rev}...");
+    let fetch_status = Command::new("git")
+        .arg("-C")
         .arg(&circomlib_path)
+        .arg("fetch")
+        .arg("--depth")
+        .arg("1")
+        .arg("origin")
+        .arg(locked_rev)
         .status()
-        .map_err(|_| anyhow!("Error cloning circomlib dependency"))
+        .map_err(|_| anyhow!("Error fetching circomlib dependency"))?;
+    if !fetch_status.success() {
+        return Err(anyhow!("git fetch failed for circomlib dependency"));
+    }
+
+    let checkout_status = Command::new("git")
+        .arg("-C")
+        .arg(&circomlib_path)
+        .arg("checkout")
+        .arg("--detach")
+        .arg("FETCH_HEAD")
+        .status()
+        .map_err(|_| anyhow!("Error checking out circomlib dependency"))?;
+    if !checkout_status.success() {
+        return Err(anyhow!("git checkout failed for circomlib dependency"));
+    }
+
+    Ok(())
 }
 
 /// Compile WASM using Rust through Circom library

@@ -66,10 +66,16 @@ fn test_constructor_sets_admin_and_levels() {
     let contract_id = env.register(ASPMembership, (admin.clone(), levels));
 
     let stored_admin: Address = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Admin).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin set in constructor")
     });
     let stored_levels: u32 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Levels).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Levels)
+            .expect("Levels set in constructor")
     });
 
     assert_eq!(stored_admin, admin);
@@ -90,7 +96,10 @@ fn test_get_root() {
 
     // Verify initial root matches what's in storage
     let stored_root: U256 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Root).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Root)
+            .expect("Root set in constructor")
     });
     assert_eq!(
         initial_root, stored_root,
@@ -110,7 +119,10 @@ fn test_get_root() {
 
     // Verify new root also matches storage
     let stored_new_root: U256 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Root).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Root)
+            .expect("Root set after insert")
     });
     assert_eq!(
         new_root, stored_new_root,
@@ -165,7 +177,10 @@ fn test_insert_leaf() {
 
     // Check NextIndex after both insertions
     let next_index1: u64 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::NextIndex).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
     });
     assert_eq!(next_index1, 2, "NextIndex should be 2 after two insertions");
 }
@@ -204,8 +219,8 @@ fn test_insert_leaf_merkle_tree_full() {
     env.mock_all_auths();
 
     // Insert 4 leaves
-    for i in 0..4 {
-        let leaf = U256::from_u32(&env, (i + 1) as u32);
+    for i in 0u32..4 {
+        let leaf = U256::from_u32(&env, i + 1);
         client.insert_leaf(&leaf);
     }
 
@@ -224,7 +239,10 @@ fn test_update_admin() {
 
     // Verify admin was set correctly
     let stored_admin: Address = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Admin).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin set in constructor")
     });
     assert_eq!(stored_admin, admin);
 
@@ -234,7 +252,10 @@ fn test_update_admin() {
 
     // Verify admin was updated in storage
     let stored_admin_after: Address = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Admin).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Admin)
+            .expect("Admin updated")
     });
     assert_eq!(stored_admin_after, new_admin);
 }
@@ -258,7 +279,10 @@ fn test_new_admin_can_insert_after_update() {
 
     // Verify the insertion succeeded
     let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::NextIndex).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
     });
     assert_eq!(
         next_index, 1,
@@ -276,14 +300,17 @@ fn test_multiple_insertions() {
     env.mock_all_auths();
 
     // Insert 5 leaves
-    for i in 0..5 {
-        let leaf = U256::from_u32(&env, (i + 1) as u32 * 100u32);
+    for i in 0u32..5 {
+        let leaf = U256::from_u32(&env, (i + 1) * 100u32);
         client.insert_leaf(&leaf);
     }
 
     // Verify NextIndex was updated correctly
     let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::NextIndex).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after inserts")
     });
     assert_eq!(
         next_index, 5,
@@ -301,7 +328,7 @@ fn test_admin_insert_only_defaults_to_true() {
         env.storage()
             .persistent()
             .get(&DataKey::AdminInsertOnly)
-            .unwrap()
+            .expect("AdminInsertOnly set in constructor")
     });
     assert!(stored, "AdminInsertOnly should default to true");
 }
@@ -322,7 +349,7 @@ fn test_set_admin_insert_only() {
         env.storage()
             .persistent()
             .get(&DataKey::AdminInsertOnly)
-            .unwrap()
+            .expect("AdminInsertOnly updated")
     });
     assert!(!stored, "AdminInsertOnly should be false after setting it");
 
@@ -333,7 +360,7 @@ fn test_set_admin_insert_only() {
         env.storage()
             .persistent()
             .get(&DataKey::AdminInsertOnly)
-            .unwrap()
+            .expect("AdminInsertOnly re-enabled")
     });
     assert!(stored, "AdminInsertOnly should be true after re-enabling");
 }
@@ -376,7 +403,10 @@ fn test_insert_leaf_without_admin_when_permissionless() {
     client.insert_leaf(&leaf);
 
     let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::NextIndex).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after insert")
     });
     assert_eq!(next_index, 1, "Leaf should be inserted without admin auth");
 }
@@ -433,7 +463,10 @@ fn test_permissionless_insert_multiple_leaves() {
     }
 
     let next_index: u64 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::NextIndex).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextIndex)
+            .expect("NextIndex set after inserts")
     });
     assert_eq!(
         next_index, 5,
@@ -509,7 +542,9 @@ fn test_hash_pair_consistency_1() {
     for (i, item) in bytes_offchain.iter().enumerate().take(32) {
         assert_eq!(
             *item,
-            bytes_on_chain.get(i as u32).unwrap(),
+            bytes_on_chain
+                .get(u32::try_from(i).expect("index fits in u32"))
+                .expect("byte exists at index"),
             "hash_pair compression on-chain should match poseidon2_compression off-chain"
         );
     }
@@ -548,7 +583,9 @@ fn test_hash_pair_consistency_2() {
     for (i, item) in bytes_offchain.iter().enumerate().take(32) {
         assert_eq!(
             *item,
-            bytes_on_chain.get(i as u32).unwrap(),
+            bytes_on_chain
+                .get(u32::try_from(i).expect("index fits in u32"))
+                .expect("byte exists at index"),
             "hash_pair compression on-chain should match poseidon2_compression off-chain"
         );
     }
@@ -625,11 +662,19 @@ fn test_merkle_consistency() {
 
     // Get the on-chain root
     let on_chain_root: U256 = env.as_contract(&contract_id, || {
-        env.storage().persistent().get(&DataKey::Root).unwrap()
+        env.storage()
+            .persistent()
+            .get(&DataKey::Root)
+            .expect("Root set in constructor")
     });
 
     // Empty roots should match
-    assert_eq!(on_chain_root, off_chain_roots.get(0).unwrap());
+    assert_eq!(
+        on_chain_root,
+        off_chain_roots
+            .get(0)
+            .expect("off_chain_roots has element 0")
+    );
 
     // Insert all leaves on-chain
     for i in 0..num_leaves {
@@ -638,10 +683,18 @@ fn test_merkle_consistency() {
 
         // Get the on-chain root
         let on_chain_root: U256 = env.as_contract(&contract_id, || {
-            env.storage().persistent().get(&DataKey::Root).unwrap()
+            env.storage()
+                .persistent()
+                .get(&DataKey::Root)
+                .expect("Root updated after insert")
         });
 
         // Enforce roots match after inserting a leaf
-        assert_eq!(on_chain_root, off_chain_roots.get(i + 1).unwrap());
+        assert_eq!(
+            on_chain_root,
+            off_chain_roots
+                .get(i + 1)
+                .expect("off_chain_roots has element")
+        );
     }
 }

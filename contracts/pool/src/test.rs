@@ -172,13 +172,13 @@ fn pool_constructor_sets_state() {
         env.storage()
             .persistent()
             .get(&crate::pool::DataKey::Admin)
-            .unwrap()
+            .unwrap_or_else(|| panic!("expected admin to be stored"))
     });
     let stored_max: U256 = env.as_contract(&pool_id, || {
         env.storage()
             .persistent()
             .get(&crate::pool::DataKey::MaximumDepositAmount)
-            .unwrap()
+            .unwrap_or_else(|| panic!("expected maximum deposit amount to be stored"))
     });
     let has_merkle_root = env.as_contract(&pool_id, || {
         env.storage()
@@ -245,20 +245,25 @@ fn merkle_insert_updates_root_and_index() {
         let leaf1 = U256::from_u32(&env, 0x01);
         let leaf2 = U256::from_u32(&env, 0x02);
 
-        let (idx_0, idx_1) = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1, leaf2).unwrap();
+        let (idx_0, idx_1) = MerkleTreeWithHistory::insert_two_leaves(&env, leaf1, leaf2)
+            .unwrap_or_else(|err| panic!("expected leaf insertion to succeed: {err:?}"));
         assert_eq!(idx_0, 0);
         assert_eq!(idx_1, 1);
 
         // last root must be known
-        let root = MerkleTreeWithHistory::get_last_root(&env).unwrap();
-        assert!(MerkleTreeWithHistory::is_known_root(&env, &root).unwrap());
+        let root = MerkleTreeWithHistory::get_last_root(&env)
+            .unwrap_or_else(|err| panic!("expected last root to exist: {err:?}"));
+        assert!(
+            MerkleTreeWithHistory::is_known_root(&env, &root)
+                .unwrap_or_else(|err| panic!("expected root lookup to succeed: {err:?}"))
+        );
 
         // nextIndex should now be 2 (stored in persistent storage)
         let next: u64 = env
             .storage()
             .persistent()
             .get(&MerkleDataKey::NextIndex)
-            .unwrap();
+            .unwrap_or_else(|| panic!("expected next index to be stored"));
         assert_eq!(next, 2);
     });
 }

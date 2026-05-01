@@ -259,6 +259,24 @@
       <pre class="font-mono text-xs text-dark-400 whitespace-pre-wrap" id="log"></pre>
     </section>
   </main>
+
+  <footer class="mt-8 border-t border-dark-800/80">
+    <div class="py-6 text-xs text-dark-400 space-y-2">
+      <p class="leading-relaxed">
+        Terms &amp; Conditions:
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
+      </p>
+      <p class="leading-relaxed">
+        Distribution notice:
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> ·
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> ·
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> ·
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> ·
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> ·
+        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
+      </p>
+    </div>
+  </footer>
 </div>
 
 <!-- Toast Container -->
@@ -268,7 +286,7 @@
 <template id="tpl-toast">
   <div class="toast flex items-center gap-3 px-4 py-3 bg-dark-800 border rounded-lg shadow-xl max-w-sm animate-slide-in" role="alert">
     <svg class="toast-icon w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
-    <p class="toast-message flex-1 text-sm"></p>
+    <p class="toast-message flex-1 min-w-0 text-sm break-words"></p>
     <button type="button" class="toast-close p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Dismiss">
       <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>

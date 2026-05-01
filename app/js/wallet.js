@@ -25,7 +25,7 @@ async function assertFreighterInstalled() {
         throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
     }
     if (!conn?.isConnected) {
-        throw new Error("Freighter not detected. Install from http://freighter.app/");
+        throw new Error("Freighter not detected. Install from https://www.freighter.app/");
     }
 }
 
@@ -207,10 +207,13 @@ export async function signWalletAuthEntry(entryXdr, opts = {}) {
  * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
  */
 export async function signWalletMessage(message, opts = {}) {
-    await ensureFreighterReady();
+    const { skipEnsureReady = false, ...freighterOpts } = opts || {};
+    if (!skipEnsureReady) {
+        await ensureFreighterReady();
+    }
 
     console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
-    const result = await signMessage(message, opts);
+    const result = await signMessage(message, freighterOpts);
     console.log('[Wallet] signMessage result:', {
         hasSignedMessage: !!result?.signedMessage,
         hasError: !!result?.error,
@@ -238,18 +241,29 @@ export async function signWalletMessage(message, opts = {}) {
  * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
  * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
  * @param {number} [options.signDelay=300] - Delay between signature requests (ms)
+ * @param {boolean} [options.skipCacheCheck=false] - Skip existing-key lookup before signature prompts
  * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
  * @throws {Error} If user rejects signature requests
  */
-export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}, signDelay = 300 }) {
+export async function deriveKeysFromWallet(
+    account,
+    { onStatus, signOptions = {}, signDelay = 300, skipCacheCheck = false }
+) {
     const client = getHandle().webClient;
-    let data = await client.getUserKeys(account);
-    if (data) {
-      onStatus?.('Loaded privacy keys from local storage');
-      return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {
-              publicKey: data.encryptionKeypair.public,
-              privateKey: data.encryptionKeypair.private,
-          } };
+    let data = null;
+    if (!skipCacheCheck) {
+        data = await client.getUserKeys(account);
+        if (data) {
+            onStatus?.('Loaded privacy keys from local storage');
+            return {
+                privKey: data.noteKeypair.private,
+                pubKey: data.noteKeypair.public,
+                encryptionKeypair: {
+                    publicKey: data.encryptionKeypair.public,
+                    privateKey: data.encryptionKeypair.private,
+                },
+            };
+        }
     }
 
     onStatus?.(
@@ -258,7 +272,10 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
 
     let spendingResult;
     try {
-        spendingResult = await signWalletMessage(client.spendingKeyMessage(), signOptions);
+        spendingResult = await signWalletMessage(client.spendingKeyMessage(), {
+            ...signOptions,
+            skipEnsureReady: true,
+        });
     } catch (e) {
         if (e.code === 'USER_REJECTED') {
             throw new Error('Please approve the message signature to derive your spending key');
@@ -280,7 +297,10 @@ export async function deriveKeysFromWallet(account, { onStatus, signOptions = {}
 
     let encryptionResult;
     try {
-        encryptionResult = await signWalletMessage(client.encryptionDerivationMessage(), signOptions);
+        encryptionResult = await signWalletMessage(client.encryptionDerivationMessage(), {
+            ...signOptions,
+            skipEnsureReady: true,
+        });
     } catch (e) {
         if (e.code === 'USER_REJECTED') {
             throw new Error('Please approve the message signature to derive your encryption key');

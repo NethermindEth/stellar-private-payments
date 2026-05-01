@@ -15,7 +15,7 @@ asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
-circuits = { workspace = true }
+circuits = { workspace = true, features = ["std"] }
 num-bigint = { workspace = true }
 
 # Contract dependencies

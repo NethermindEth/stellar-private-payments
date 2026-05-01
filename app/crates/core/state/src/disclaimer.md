@@ -1,7 +1,7 @@
-# STELLAR PRIVATE PAYMENTS — PROOF OF CONCEPT DEMO
-https://github.com/NethermindEth/stellar-private-payments | Apache 2.0 | © 2025 Stellar Development Foundation
+# STELLAR PRIVATE PAYMENTS - PROOF OF CONCEPT DEMO
+https://github.com/NethermindEth/stellar-private-payments | Apache 2.0 | Copyright 2025 Stellar Development Foundation
 
-## TESTNET ONLY — NO REAL VALUE
+## TESTNET ONLY - NO REAL VALUE
 This demo operates exclusively on the Stellar Testnet. All tokens used (including Test XLM) have no monetary value, cannot be exchanged for fiat currency or any other asset, and are not issued on receipt of funds. Testnet state is subject to periodic resets; no balances or transaction history will persist.
 
 ## TECHNICAL PROOF OF CONCEPT ONLY

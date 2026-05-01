@@ -65,6 +65,7 @@ pub enum Error {
     KeyAlreadyExists = 3,
     InvalidProof = 4,
     NotInitialized = 5,
+    Overflow = 6,
 }
 
 // Events
@@ -245,9 +246,11 @@ impl ASPNonMembership {
         let node_data: Vec<U256> = store.get(&node_key).ok_or(Error::KeyNotFound)?;
 
         // Check if it's a leaf node (3 elements: [1, key, value])
-        if node_data.len() == 3 && node_data.get(0).unwrap() == U256::from_u32(env, 1u32) {
-            let stored_key = node_data.get(1).unwrap();
-            let stored_value = node_data.get(2).unwrap();
+        if node_data.len() == 3
+            && node_data.get(0).ok_or(Error::KeyNotFound)? == U256::from_u32(env, 1u32)
+        {
+            let stored_key = node_data.get(1).ok_or(Error::KeyNotFound)?;
+            let stored_value = node_data.get(2).ok_or(Error::KeyNotFound)?;
             if stored_key == *key {
                 // Key found
                 return Ok(FindResult {
@@ -271,20 +274,34 @@ impl ASPNonMembership {
             }
         } else if node_data.len() == 2 {
             // Internal node (2 elements: [left, right])
-            let left = node_data.get(0).unwrap();
-            let right = node_data.get(1).unwrap();
+            let left = node_data.get(0).ok_or(Error::KeyNotFound)?;
+            let right = node_data.get(1).ok_or(Error::KeyNotFound)?;
 
             let level_idx = level;
-            let mut result = if !key_bits.get(level_idx).unwrap() {
+            let mut result = if !key_bits.get(level_idx).ok_or(Error::KeyNotFound)? {
                 // Go left
-                Self::find_key_internal(env, store, key, key_bits, &left, level + 1)?
+                Self::find_key_internal(
+                    env,
+                    store,
+                    key,
+                    key_bits,
+                    &left,
+                    level.checked_add(1).ok_or(Error::Overflow)?,
+                )?
             } else {
                 // Go right
-                Self::find_key_internal(env, store, key, key_bits, &right, level + 1)?
+                Self::find_key_internal(
+                    env,
+                    store,
+                    key,
+                    key_bits,
+                    &right,
+                    level.checked_add(1).ok_or(Error::Overflow)?,
+                )?
             };
 
             // Add sibling to path
-            let sibling = if !key_bits.get(level_idx).unwrap() {
+            let sibling = if !key_bits.get(level_idx).ok_or(Error::KeyNotFound)? {
                 right.clone()
             } else {
                 left.clone()
@@ -348,9 +365,10 @@ impl ASPNonMembership {
     ///
     /// * `Error::KeyAlreadyExists` - Key already exists in the tree
     /// * `Error::KeyNotFound` - Database operations failed
+    #[allow(clippy::cast_possible_truncation)]
     pub fn insert_leaf(env: Env, key: U256, value: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
+        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
 
         let root: U256 = store
@@ -380,10 +398,11 @@ impl ASPNonMembership {
             // Extend siblings with zeros for common prefix bits
             while i < old_key_bits.len()
                 && i < key_bits.len()
-                && old_key_bits.get(i).unwrap() == key_bits.get(i).unwrap()
+                && old_key_bits.get(i).ok_or(Error::KeyNotFound)?
+                    == key_bits.get(i).ok_or(Error::KeyNotFound)?
             {
                 siblings.push_back(zero.clone());
-                i += 1;
+                i = i.checked_add(1).ok_or(Error::Overflow)?;
             }
             rt_old = Self::hash_leaf(
                 &env,
@@ -410,7 +429,7 @@ impl ASPNonMembership {
             // Check if we need to delete old nodes (mixed case)
             // Skip the last index if added_one=true (it's the old leaf, not an internal
             // node)
-            let is_last_added_leaf = added_one && (i == (siblings_len - 1) as usize);
+            let is_last_added_leaf = added_one && (i == siblings_len.saturating_sub(1) as usize);
             if !is_last_added_leaf
                 && (i as u32) < siblings_len.saturating_sub(1)
                 && sibling.clone() != zero
@@ -420,11 +439,15 @@ impl ASPNonMembership {
 
             if mixed && !is_last_added_leaf {
                 let old_sibling = if (i as u32) < find_result.siblings.len() {
-                    find_result.siblings.get(i as u32).unwrap().clone()
+                    find_result
+                        .siblings
+                        .get(i as u32)
+                        .ok_or(Error::KeyNotFound)?
+                        .clone()
                 } else {
                     zero.clone()
                 };
-                let bit = key_bits.get(i as u32).unwrap();
+                let bit = key_bits.get(i as u32).ok_or(Error::KeyNotFound)?;
                 rt_old = if bit {
                     Self::hash_internal(&env, old_sibling.clone(), rt_old.clone())
                 } else {
@@ -434,7 +457,7 @@ impl ASPNonMembership {
             }
 
             // Build a new internal node
-            let bit = key_bits.get(i as u32).unwrap();
+            let bit = key_bits.get(i as u32).ok_or(Error::KeyNotFound)?;
             let (left_hash, right_hash) = if bit {
                 (sibling.clone(), rt.clone())
             } else {
@@ -454,8 +477,8 @@ impl ASPNonMembership {
         }
         // Remove trailing zeros from siblings
         while !siblings.is_empty() {
-            let last_idx = siblings.len() - 1;
-            if siblings.get(last_idx).unwrap() == zero {
+            let last_idx = siblings.len().saturating_sub(1);
+            if siblings.get(last_idx).ok_or(Error::KeyNotFound)? == zero {
                 siblings.pop_back();
             } else {
                 break;
@@ -500,9 +523,9 @@ impl ASPNonMembership {
     ///   operations failed
     pub fn delete_leaf(env: Env, key: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
+        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
-        let root: U256 = store.get(&DataKey::Root).unwrap();
+        let root: U256 = store.get(&DataKey::Root).ok_or(Error::NotInitialized)?;
 
         // Compute key bits once for both find and delete operations
         let key_bits = Self::split_bits(&env, &key);
@@ -529,7 +552,7 @@ impl ASPNonMembership {
             let node_key = DataKey::Node(last_sibling.clone());
             if let Some(node_data) = store.get::<DataKey, Vec<U256>>(&node_key) {
                 // Check if it's a leaf node (3 elements: [1, key, value])
-                if node_data.len() == 3 && node_data.get(0).unwrap() == one {
+                if node_data.len() == 3 && node_data.get(0).ok_or(Error::KeyNotFound)? == one {
                     // Last sibling is a leaf - promote it
                     rt_new = last_sibling.clone();
                     // Remove the last sibling from the list since we're promoting it
@@ -553,14 +576,14 @@ impl ASPNonMembership {
         let siblings_len = siblings_to_use.len();
 
         for level_idx in 0..siblings_len {
-            let level = siblings_len - 1 - level_idx; // Process from leaf to root
-            let sibling = siblings_to_use.get(level).unwrap();
+            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Process from leaf to root
+            let sibling = siblings_to_use.get(level).ok_or(Error::KeyNotFound)?;
 
             // Use actual sibling value
             let new_sibling = sibling.clone();
 
             // Delete old internal node along the old path
-            let bit = key_bits.get(level).unwrap();
+            let bit = key_bits.get(level).ok_or(Error::KeyNotFound)?;
             rt_old = if bit {
                 Self::hash_internal(&env, sibling.clone(), rt_old)
             } else {
@@ -624,7 +647,7 @@ impl ASPNonMembership {
     ///   operations failed
     pub fn update_leaf(env: Env, key: U256, new_value: U256) -> Result<(), Error> {
         let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).unwrap();
+        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
         admin.require_auth();
         let root: U256 = store
             .get(&DataKey::Root)
@@ -660,9 +683,9 @@ impl ASPNonMembership {
 
         let siblings_len = find_result.siblings.len();
         for level_idx in 0..siblings_len {
-            let level = siblings_len - 1 - level_idx; // Reverse: process from leaf to root
-            let sibling = find_result.siblings.get(level).unwrap();
-            let bit = key_bits.get(level).unwrap();
+            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Reverse: process from leaf to root
+            let sibling = find_result.siblings.get(level).ok_or(Error::KeyNotFound)?;
+            let bit = key_bits.get(level).ok_or(Error::KeyNotFound)?;
 
             let (left_hash, right_hash) = if bit {
                 (sibling.clone(), current_hash)
@@ -723,6 +746,7 @@ impl ASPNonMembership {
     ///
     /// Returns `Ok(true)` if non-membership is verified, `Ok(false)` if the key
     /// actually exists in the tree.
+    #[allow(clippy::cast_possible_truncation)]
     pub fn verify_non_membership(
         env: Env,
         key: U256,
@@ -751,7 +775,10 @@ impl ASPNonMembership {
         }
 
         for (i, sibling) in siblings.iter().enumerate() {
-            let expected = find_result.siblings.get(i as u32).unwrap();
+            let expected = find_result
+                .siblings
+                .get(i as u32)
+                .ok_or(Error::InvalidProof)?;
             if sibling != expected {
                 return Err(Error::InvalidProof);
             }
@@ -773,9 +800,9 @@ impl ASPNonMembership {
 
         let siblings_len = siblings.len();
         for level_idx in 0..siblings_len {
-            let level = siblings_len - 1 - level_idx; // Reverse: process from leaf to root
-            let sibling = siblings.get(level).unwrap();
-            let bit = key_bits.get(level).unwrap();
+            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Reverse: process from leaf to root
+            let sibling = siblings.get(level).ok_or(Error::InvalidProof)?;
+            let bit = key_bits.get(level).ok_or(Error::InvalidProof)?;
 
             computed_root = if bit {
                 Self::hash_internal(&env, sibling.clone(), computed_root)

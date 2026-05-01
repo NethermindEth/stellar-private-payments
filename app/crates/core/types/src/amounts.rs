@@ -133,7 +133,10 @@ impl Add for NoteAmount {
 
 impl AddAssign for NoteAmount {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = match self.checked_add(rhs) {
+            Some(v) => v,
+            None => panic!("NoteAmount overflow"),
+        };
     }
 }
 
@@ -150,7 +153,10 @@ impl Sub for NoteAmount {
 
 impl SubAssign for NoteAmount {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = match self.checked_sub(rhs) {
+            Some(v) => v,
+            None => panic!("NoteAmount underflow"),
+        };
     }
 }
 
@@ -250,7 +256,10 @@ impl Add for ExtAmount {
 
 impl AddAssign for ExtAmount {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = match self.checked_add(rhs) {
+            Some(v) => v,
+            None => panic!("ExtAmount overflow"),
+        };
     }
 }
 
@@ -267,7 +276,10 @@ impl Sub for ExtAmount {
 
 impl SubAssign for ExtAmount {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = match self.checked_sub(rhs) {
+            Some(v) => v,
+            None => panic!("ExtAmount underflow"),
+        };
     }
 }
 
@@ -275,7 +287,10 @@ impl Neg for ExtAmount {
     type Output = ExtAmount;
 
     fn neg(self) -> Self::Output {
-        ExtAmount(-self.0)
+        match self.checked_neg() {
+            Some(v) => v,
+            None => panic!("ExtAmount negation overflow"),
+        }
     }
 }
 
@@ -447,7 +462,10 @@ impl TryFrom<ExtAmount> for Field {
         if abs_u256 >= m {
             return Err(anyhow!("ext amount abs out of field range"));
         }
-        Ok(Field(m - abs_u256))
+        let v = m
+            .checked_sub(abs_u256)
+            .expect("Field negative mapping underflow");
+        Ok(Field(v))
     }
 }
 
@@ -456,9 +474,9 @@ impl Add for Field {
 
     fn add(self, rhs: Self) -> Self::Output {
         let m = Field::modulus();
-        let mut v = self.0 + rhs.0;
+        let mut v = self.0.checked_add(rhs.0).expect("Field addition overflow");
         if v >= m {
-            v -= m;
+            v = v.checked_sub(m).expect("Field reduction underflow");
         }
         Field(v)
     }
@@ -466,7 +484,7 @@ impl Add for Field {
 
 impl AddAssign for Field {
     fn add_assign(&mut self, rhs: Self) {
-        *self = *self + rhs;
+        *self = Self::add(*self, rhs);
     }
 }
 
@@ -476,16 +494,24 @@ impl Sub for Field {
     fn sub(self, rhs: Self) -> Self::Output {
         let m = Field::modulus();
         if self.0 >= rhs.0 {
-            Field(self.0 - rhs.0)
+            Field(
+                self.0
+                    .checked_sub(rhs.0)
+                    .expect("Field subtraction underflow"),
+            )
         } else {
-            Field(m - (rhs.0 - self.0))
+            let diff = rhs
+                .0
+                .checked_sub(self.0)
+                .expect("Field subtraction underflow");
+            Field(m.checked_sub(diff).expect("Field reduction underflow"))
         }
     }
 }
 
 impl SubAssign for Field {
     fn sub_assign(&mut self, rhs: Self) {
-        *self = *self - rhs;
+        *self = Self::sub(*self, rhs);
     }
 }
 
@@ -625,6 +651,24 @@ mod tests {
     }
 
     #[test]
+    fn field_add_sub_edge_cases() -> Result<()> {
+        let p = Field::modulus();
+        let one = Field(U256::from(1u64));
+        let two = Field(U256::from(2u64));
+        let zero = Field(U256::from(0u64));
+        let pm1 = Field(p - U256::from(1u64));
+        let pm2 = Field(p - U256::from(2u64));
+        let pm4 = Field(p - U256::from(4u64));
+
+        assert_eq!(zero + zero, zero);
+        assert_eq!(zero - zero, zero);
+        assert_eq!(pm1 + pm1, pm2);
+        assert_eq!(one - pm1, two);
+        assert_eq!(pm2 + pm2, pm4);
+        Ok(())
+    }
+
+    #[test]
     fn try_from_amounts_to_field_corners() -> Result<()> {
         // NoteAmount always maps directly.
         let n0 = Field::from(NoteAmount(0));
@@ -732,7 +776,8 @@ mod rusqlite_impls {
                     if i < 0 {
                         return Err(FromSqlError::OutOfRange(i));
                     }
-                    Ok(NoteAmount(i as u64))
+                    let value = u64::try_from(i).map_err(|_| FromSqlError::OutOfRange(i))?;
+                    Ok(NoteAmount(value))
                 }
                 _ => Err(FromSqlError::InvalidType),
             }

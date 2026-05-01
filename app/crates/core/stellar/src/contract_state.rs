@@ -8,7 +8,7 @@ use crate::{
 use anyhow::{Result, anyhow};
 use futures::try_join;
 use serde::{Deserialize, Serialize};
-use std::str::FromStr;
+use std::{convert::TryInto, str::FromStr};
 use stellar_strkey::ed25519;
 use stellar_xdr::{curr as xdr, curr::ReadXdr};
 use types::{
@@ -77,7 +77,8 @@ impl StateFetcher {
             return Err(anyhow!("{what} does not fit into i128"));
         }
 
-        Ok(low as i128)
+        let value = i128::try_from(low).map_err(|_| anyhow!("{what} does not fit into i128"))?;
+        Ok(value)
     }
 
     pub fn new(rpc_url: &str) -> Result<Self> {
@@ -315,10 +316,8 @@ impl StateFetcher {
         // Pad/trim siblings to circuit SMT depth.
         let mut siblings = parsed.siblings;
         if siblings.len() < smt_depth {
-            siblings.extend(core::iter::repeat_n(
-                Field::ZERO,
-                smt_depth - siblings.len(),
-            ));
+            let padding = smt_depth.saturating_sub(siblings.len());
+            siblings.extend(core::iter::repeat_n(Field::ZERO, padding));
         } else if siblings.len() > smt_depth {
             siblings.truncate(smt_depth);
         }
@@ -399,10 +398,10 @@ impl StateFetcher {
     fn field_to_scval_u256(v: Field) -> xdr::ScVal {
         let be = v.to_be_bytes();
 
-        let hi_hi = u64::from_be_bytes(be[0..8].try_into().unwrap());
-        let hi_lo = u64::from_be_bytes(be[8..16].try_into().unwrap());
-        let lo_hi = u64::from_be_bytes(be[16..24].try_into().unwrap());
-        let lo_lo = u64::from_be_bytes(be[24..32].try_into().unwrap());
+        let hi_hi = u64::from_be_bytes(be[0..8].try_into().expect("U256 hi_hi slice"));
+        let hi_lo = u64::from_be_bytes(be[8..16].try_into().expect("U256 hi_lo slice"));
+        let lo_hi = u64::from_be_bytes(be[16..24].try_into().expect("U256 lo_hi slice"));
+        let lo_lo = u64::from_be_bytes(be[24..32].try_into().expect("U256 lo_lo slice"));
 
         xdr::ScVal::U256(xdr::UInt256Parts {
             hi_hi,

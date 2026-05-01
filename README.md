@@ -1,6 +1,6 @@
 # Private Payments for Stellar
 
-[![Docs](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/docs.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/docs.yml)
+[![Deployment](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml)
 [![Lint](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml)
 [![Build](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml)
 [![Dependencies](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml)

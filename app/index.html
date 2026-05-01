@@ -977,58 +977,58 @@
 
         <!-- Toast Container -->
         <div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-50" role="region" aria-label="Notifications" aria-live="polite"></div>
+
+        <footer class="mt-8 border-t border-dark-800/80">
+            <div class="py-6 text-xs text-dark-400 space-y-2">
+                <p class="leading-relaxed">
+                    Terms &amp; Conditions:
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
+                </p>
+                <p class="leading-relaxed">
+                    Distribution notice:
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> ·
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> ·
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> ·
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> ·
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> ·
+                    <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
+                </p>
+            </div>
+        </footer>
     </div>
 
-    <!-- Terms & Conditions Modal -->
-    <div id="disclaimer-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="disclaimer-modal-title">
+    <!-- Onboarding Wizard Modal -->
+    <div id="onboarding-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
         <div class="absolute inset-0 bg-black/70"></div>
         <div class="relative min-h-full flex items-center justify-center p-4">
             <div class="w-full max-w-3xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
-                <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-                    <h2 id="disclaimer-modal-title" class="text-lg font-semibold text-dark-100">Terms &amp; Conditions</h2>
+                <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between gap-3">
+                    <h2 id="onboarding-title" class="text-lg font-semibold text-dark-100">Set up PoolStellar</h2>
+                    <button id="onboarding-close-btn" type="button" class="p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Close onboarding">
+                        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                    </button>
+                </div>
+                <div class="px-5 py-3 border-b border-dark-700">
+                    <ol id="onboarding-steps" class="flex flex-wrap gap-2 text-xs">
+                        <li data-step="disclaimer" data-state="pending" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-dark-700 bg-dark-900/40 text-dark-400">
+                            <span class="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-semibold">1</span>
+                            <span>Terms</span>
+                        </li>
+                        <li data-step="storage" data-state="pending" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-dark-700 bg-dark-900/40 text-dark-400">
+                            <span class="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-semibold">2</span>
+                            <span>Storage</span>
+                        </li>
+                        <li data-step="keys" data-state="pending" class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full border border-dark-700 bg-dark-900/40 text-dark-400">
+                            <span class="w-5 h-5 rounded-full border border-current flex items-center justify-center text-[10px] font-semibold">3</span>
+                            <span>Privacy keys</span>
+                        </li>
+                    </ol>
                 </div>
                 <div class="px-5 py-4 max-h-[70vh] overflow-auto">
-                    <div id="disclaimer-modal-content" class="space-y-3 text-sm text-dark-300"></div>
-                    <p id="disclaimer-modal-error" class="hidden mt-4 text-sm text-red-400"></p>
+                    <div id="onboarding-content" class="space-y-3"></div>
+                    <p id="onboarding-error" class="hidden mt-4 text-sm text-red-400"></p>
                 </div>
-                <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
-                    <button id="disclaimer-decline-btn" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">
-                        Decline
-                    </button>
-                    <button id="disclaimer-accept-btn" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">
-                        Accept
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- Durable Storage Modal -->
-    <div id="storage-persist-modal" class="hidden fixed inset-0 z-50" role="dialog" aria-modal="true" aria-labelledby="storage-persist-modal-title">
-        <div class="absolute inset-0 bg-black/70"></div>
-        <div class="relative min-h-full flex items-center justify-center p-4">
-            <div class="w-full max-w-xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
-                <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between">
-                    <h2 id="storage-persist-modal-title" class="text-lg font-semibold text-dark-100">Enable durable storage?</h2>
-                </div>
-                <div class="px-5 py-4 space-y-3 text-sm text-dark-300">
-                    <p>
-                        This app stores your local database in the browser (SQLite via OPFS).
-                        Without durable storage, the browser may delete it under storage pressure.
-                    </p>
-                    <p class="text-xs text-dark-500">
-                        Durable storage helps prevent eviction, but clearing site data will still remove it.
-                    </p>
-                    <p id="storage-persist-modal-error" class="hidden mt-2 text-sm text-red-400"></p>
-                </div>
-                <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
-                    <button id="storage-persist-decline-btn" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">
-                        Not now
-                    </button>
-                    <button id="storage-persist-enable-btn" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">
-                        Enable durable storage
-                    </button>
-                </div>
+                <div id="onboarding-actions" class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end"></div>
             </div>
         </div>
     </div>
@@ -1121,7 +1121,7 @@
     <template id="tpl-toast">
         <div class="toast flex items-center gap-3 px-4 py-3 bg-dark-800 border rounded-lg shadow-xl max-w-sm animate-slide-in" role="alert">
             <svg class="toast-icon w-5 h-5 flex-shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"></svg>
-            <p class="toast-message flex-1 min-w-0 text-sm break-all"></p>
+            <p class="toast-message flex-1 min-w-0 text-sm break-words"></p>
             <a class="toast-open hidden p-1 text-dark-400 hover:text-brand-400 transition-colors" target="_blank" rel="noopener noreferrer" aria-label="Open link">
                 <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                     <path d="M14 3h7v7"/>
