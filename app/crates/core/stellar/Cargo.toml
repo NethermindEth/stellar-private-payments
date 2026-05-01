@@ -18,7 +18,7 @@ serde-aux = "4.1.2"
 serde_json = { workspace = true }
 sha3 = { version = "0.10", default-features = false }
 stellar-strkey = "0.0.15"
-stellar-xdr = { version = "25.0.0", features = ["curr", "serde", "base64"] }
+stellar-xdr = { version = "26.0.1", features = ["curr", "serde", "base64"] }
 thiserror = { workspace = true }
 types = { workspace = true }
 

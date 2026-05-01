@@ -1821,9 +1821,9 @@ checksum = "2bfcf67fea2815c2fc3b90873fae90957be12ff417335dfadc7f52927feb03b2"
 
 [[package]]
 name = "ethnum"
-version = "1.5.2"
+version = "1.5.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ca81e6b4777c89fd810c25a4be2b1bd93ea034fbe58e6a75216a34c6b82c539b"
+checksum = "40404c3f5f511ec4da6fe866ddf6a717c309fdbb69fbbad7b0f3edab8f2e835f"
 
 [[package]]
 name = "eyre"
@@ -3505,9 +3505,9 @@ dependencies = [
 
 [[package]]
 name = "rand"
-version = "0.8.5"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404"
+checksum = "5ca0ecfa931c29007047d1bc58e623ab12e5590e8c7cc53200d5202b69266d8a"
 dependencies = [
  "libc",
  "rand_chacha",
@@ -4201,7 +4201,7 @@ dependencies = [
  "soroban-env-macros",
  "soroban-wasmi",
  "static_assertions",
- "stellar-xdr",
+ "stellar-xdr 25.0.0",
  "wasmparser 0.116.1",
 ]
 
@@ -4263,15 +4263,15 @@ dependencies = [
  "quote",
  "serde",
  "serde_json",
- "stellar-xdr",
+ "stellar-xdr 25.0.0",
  "syn 2.0.114",
 ]
 
 [[package]]
 name = "soroban-ledger-snapshot"
-version = "25.1.0"
+version = "25.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "99c5285c83e7a5581879b7a65033eae53b24ac9689975aa6887f1d8ee3e941c9"
+checksum = "2ca06e6c5029d1285e66219cb387a234224e26969ce8ad2bc2d5017e9395d63b"
 dependencies = [
  "serde",
  "serde_json",
@@ -4283,9 +4283,9 @@ dependencies = [
 
 [[package]]
 name = "soroban-sdk"
-version = "25.1.0"
+version = "25.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b1262aa83e99a0fb3e8cd56d6e5ca4c28ac4f9871ac7173f65301a8b9a12c20f"
+checksum = "4502f2e018f238a4c5d3212d7d20ea6abcdc6e58babd63b642b693739db30fd1"
 dependencies = [
  "arbitrary",
  "bytes-lit",
@@ -4307,9 +4307,9 @@ dependencies = [
 
 [[package]]
 name = "soroban-sdk-macros"
-version = "25.1.0"
+version = "25.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93b62c526917a1e77b6dce3cd841b6c271f0fff344ea93ad92a8c45afe8051b6"
+checksum = "ca03e9cf61d241cb9afdd6ddf41f6c25698b3f566a875e7009ea799b89e2bf0a"
 dependencies = [
  "darling 0.20.11",
  "heck",
@@ -4321,34 +4321,35 @@ dependencies = [
  "soroban-env-common",
  "soroban-spec",
  "soroban-spec-rust",
- "stellar-xdr",
+ "stellar-xdr 25.0.0",
  "syn 2.0.114",
 ]
 
 [[package]]
 name = "soroban-spec"
-version = "25.1.0"
+version = "25.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0186c943a78de7038ce7eee478f521f7a7665440101ae0d24b4a59833fb6d833"
+checksum = "aa02e07f507cc27406ae0834db4dcf309b78c4cc8776eb3b2d662d66e8859d25"
 dependencies = [
  "base64",
- "stellar-xdr",
+ "sha2",
+ "stellar-xdr 25.0.0",
  "thiserror 1.0.69",
  "wasmparser 0.116.1",
 ]
 
 [[package]]
 name = "soroban-spec-rust"
-version = "25.1.0"
+version = "25.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7a948196ed0633be3a4125e0c7a4fc0bb6337942e538813b1f171331738f9058"
+checksum = "6835bb510763ef3fa5405e89036e3c8ea6ef5abe55fc52cfe9ac0e38be9d531c"
 dependencies = [
  "prettyplease",
  "proc-macro2",
  "quote",
  "sha2",
  "soroban-spec",
- "stellar-xdr",
+ "stellar-xdr 25.0.0",
  "syn 2.0.114",
  "thiserror 1.0.69",
 ]
@@ -4466,7 +4467,7 @@ dependencies = [
  "serde_json",
  "sha3",
  "stellar-strkey 0.0.15",
- "stellar-xdr",
+ "stellar-xdr 26.0.1",
  "thiserror 1.0.69",
  "types",
 ]
@@ -4509,6 +4510,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "10d20dafed80076b227d4b17c0c508a4bbc4d5e4c3d4c1de7cd42242df4b1eaf"
 dependencies = [
  "arbitrary",
+ "base64",
+ "cfg_eval",
+ "crate-git-revision",
+ "escape-bytes",
+ "ethnum",
+ "hex",
+ "serde",
+ "serde_with",
+ "sha2",
+ "stellar-strkey 0.0.13",
+]
+
+[[package]]
+name = "stellar-xdr"
+version = "26.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ea6e29c7e1f071c2767916460d006668197843d5d93f0ec8893a26f72a14f595"
+dependencies = [
  "base64",
  "cfg_eval",
  "crate-git-revision",

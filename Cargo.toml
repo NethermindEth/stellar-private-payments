@@ -57,7 +57,7 @@ serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_bytes = { version = "0.11", default-features = false }
 serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.10.9", default-features = false }
-soroban-sdk = { version = "25.0.2", default-features = false, features = ["hazmat"] }
+soroban-sdk = { version = "25.3.0", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "app/crates/core/state" }
 stellar = { path = "app/crates/core/stellar" }
