@@ -38,6 +38,12 @@ num-integer = { workspace = true, optional = true }
 # Core dependencies (no_std compatible)
 zkhash = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ark-circom = { workspace = true, features = ["parallel"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ark-circom = { workspace = true, optional = true }
+
 [build-dependencies]
 anyhow = { workspace = true }
 ark-bn254 = { workspace = true }

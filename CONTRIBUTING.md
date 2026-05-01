@@ -69,7 +69,6 @@ stellar-private-payments/
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
-- LLVM development libraries for Wasmer LLVM backend - version 21 (see Build requirements https://crates.io/crates/llvm-sys)
 
 ## Building and testing crates
 
