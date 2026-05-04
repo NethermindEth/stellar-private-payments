@@ -24,9 +24,9 @@ serde_json = { workspace = true, default-features = false, features = ["alloc", 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ark-circom = { workspace = true, features = ["parallel"] }
-# TODO Consider a llvm backend if performance is an issue (but it drags deps) for a native execution.
-# cranelift backend is in conflict with a soroban-sdk because of the `arbitrary` crate dependency
-wasmer = { workspace = true, features = ["wasmi"] }
+# cranelift backend is in conflict because of the dependencies
+# singlepass backend is not appropriate because of the license https://github.com/wasmerio/wasmer/blob/main/lib/compiler-singlepass/LICENSE
+wasmer = { workspace = true, features = ["llvm"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 ark-circom = { workspace = true }
