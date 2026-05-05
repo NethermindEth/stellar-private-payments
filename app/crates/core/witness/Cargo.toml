@@ -24,9 +24,8 @@ serde_json = { workspace = true, default-features = false, features = ["alloc", 
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 ark-circom = { workspace = true, features = ["parallel"] }
-# cranelift backend is in conflict because of the dependencies
-# singlepass backend is not appropriate because of the license https://github.com/wasmerio/wasmer/blob/main/lib/compiler-singlepass/LICENSE
-wasmer = { workspace = true, features = ["llvm"] }
+# see https://github.com/NethermindEth/stellar-private-payments/issues/192
+wasmer = { workspace = true, features = ["wasmi"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 ark-circom = { workspace = true }

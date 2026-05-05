@@ -81,11 +81,11 @@ fn publish_circuit_artifacts(
     let r1cs_dst = publish_dir.join(format!("{circuit_name}.r1cs"));
     copy(r1cs_file, &r1cs_dst)?;
 
-    if let Some(wasm_file) = wasm_file {
-        if wasm_file.exists() {
-            let wasm_dst = publish_dir.join(format!("{circuit_name}.wasm"));
-            copy(wasm_file, &wasm_dst)?;
-        }
+    if let Some(wasm_file) = wasm_file
+        && wasm_file.exists()
+    {
+        let wasm_dst = publish_dir.join(format!("{circuit_name}.wasm"));
+        copy(wasm_file, &wasm_dst)?;
     }
 
     Ok(())

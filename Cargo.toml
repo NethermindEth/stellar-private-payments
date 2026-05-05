@@ -24,8 +24,7 @@ publish = false
 [workspace.dependencies]
 anyhow = { version = "1", default-features = false }
 ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] }
-#ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
-ark-circom = { path = "/home/work/workspace/circom-compat", default-features = false }
+ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
 ark-crypto-primitives = { version = "0.6.0", default-features = false }
 ark-ec = { version = "0.6.0", default-features = false }
 ark-ff = { version = "0.6.0", default-features = false }
@@ -67,7 +66,10 @@ types = { path = "app/crates/core/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-log = { version = "0.3", default-features = false }
-wasmer = { git = "https://github.com/NethermindEth/wasmer.git", default-features = false, branch = "upgrade-wasm-bindgen" }
+# see https://github.com/NethermindEth/stellar-private-payments/issues/192
+# and https://github.com/wasmerio/wasmer/pull/6554
+# we are basically locked for 7.1.0
+wasmer = { git = "https://github.com/NethermindEth/wasmer.git", default-features = false, branch = "wasm-bingen-7.1.0" }
 web = { path = "app/crates/platforms/web" }
 witness = { path = "app/crates/core/witness" }
 zkhash = { path = "poseidon2" }
