@@ -67,9 +67,7 @@ uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-log = { version = "0.3", default-features = false }
 # see https://github.com/NethermindEth/stellar-private-payments/issues/192
-# and https://github.com/wasmerio/wasmer/pull/6554
-# we are basically locked for 7.1.0
-wasmer = { git = "https://github.com/NethermindEth/wasmer.git", default-features = false, branch = "wasm-bingen-7.1.0" }
+wasmer = { git = "https://github.com/wasmerio/wasmer", default-features = false, rev = "763e9f2800644f51ce27f6f5c1752776da16ddd1" }
 web = { path = "app/crates/platforms/web" }
 witness = { path = "app/crates/core/witness" }
 zkhash = { path = "poseidon2" }

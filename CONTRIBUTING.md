@@ -69,14 +69,6 @@ stellar-private-payments/
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
-- Install LLVM toolchain (https://apt.llvm.org/). E.g. for Debian/Ubuntu
-
-```sh
-wget https://apt.llvm.org/llvm.sh
-chmod +x llvm.sh
-sudo ./llvm.sh 22 all
-export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 # or add to bashrc
-```
 
 ## Building and testing crates
 
@@ -87,7 +79,7 @@ export LLVM_SYS_221_PREFIX=/usr/lib/llvm-22 # or add to bashrc
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
-
+`vendor/cranelift-control` is patched - see https://github.com/NethermindEth/stellar-private-payments/issues/192
 
 ### Building Circuits
 To explicitly build them:
