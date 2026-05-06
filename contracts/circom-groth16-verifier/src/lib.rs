@@ -9,7 +9,7 @@ extern crate alloc;
 pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
     Env, Vec, contract, contractimpl, contracttype,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine, Bn254Fr},
+    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     vec,
 };
 

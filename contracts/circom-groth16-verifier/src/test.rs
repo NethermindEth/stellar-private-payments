@@ -63,7 +63,14 @@ fn serialize_proof(env: &Env, proof: &Groth16Proof) -> Bytes {
     data
 }
 
-fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Bn254Fr>, [ArkFr; 11]) {
+fn build_test(
+    env: &Env,
+) -> (
+    VerificationKeyBytes,
+    Groth16Proof,
+    Vec<Bn254Fr>,
+    [ArkFr; 11],
+) {
     let mut rng = seeded_rng();
     let inputs = [ArkFr::from(33u64); 11];
     let circuit = ElevenInputCircuit { inputs };
