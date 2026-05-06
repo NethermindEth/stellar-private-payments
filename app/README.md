@@ -20,12 +20,7 @@ see [ARCHITECTURE.md](ARCHITECTURE.md)
 
 ## Building
 
-### Prerequisites
-
-- Rust toolchain with `wasm32-unknown-unknown` target
-- [wasm-pack](https://rustwasm.github.io/wasm-pack/) for WASM bundling
-- [Trunk](https://trunkrs.dev/) for serving the application
-- Node.js for JavaScript dependencies and testing
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for the prerequisites.
 
 ### Build Commands
 

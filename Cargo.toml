@@ -66,7 +66,7 @@ thiserror = { version = "2", default-features = false }
 types = { path = "app/crates/core/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
-wasm-bindgen-test = { version = "0.3", default-features = false }
+wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
 wasm-log = { version = "0.3", default-features = false }
 # see https://github.com/NethermindEth/stellar-private-payments/issues/192
 wasmer = { git = "https://github.com/wasmerio/wasmer", default-features = false, rev = "763e9f2800644f51ce27f6f5c1752776da16ddd1" }
