@@ -23,7 +23,7 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
-gloo-timers = { workspace = true,  features = ["futures"] }
+gloo-timers = { workspace = true, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 js-sys = "0.3"
 log = { workspace = true }

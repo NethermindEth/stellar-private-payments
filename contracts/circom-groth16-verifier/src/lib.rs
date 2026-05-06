@@ -9,7 +9,7 @@ extern crate alloc;
 pub use contract_types::{Groth16Error, Groth16Proof, VerificationKeyBytes};
 use soroban_sdk::{
     Env, Vec, contract, contractimpl, contracttype,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine, Fr},
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine, Bn254Fr},
     vec,
 };
 
@@ -61,7 +61,7 @@ impl CircomGroth16Verifier {
     pub fn verify(
         env: Env,
         proof: Groth16Proof,
-        public_inputs: Vec<Fr>,
+        public_inputs: Vec<Bn254Fr>,
     ) -> Result<bool, Groth16Error> {
         let vk_bytes: VerificationKeyBytes = env
             .storage()
@@ -76,7 +76,7 @@ impl CircomGroth16Verifier {
         env: &Env,
         vk: &VerificationKey,
         proof: Groth16Proof,
-        pub_inputs: Vec<Fr>,
+        pub_inputs: Vec<Bn254Fr>,
     ) -> Result<bool, Groth16Error> {
         let bn = env.crypto().bn254();
 
