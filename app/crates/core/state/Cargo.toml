@@ -25,5 +25,5 @@ sha2 = { workspace = true }
 [dev-dependencies]
 prover = { workspace = true }
 
-#[lints]
-#workspace = true
+[lints]
+workspace = true
