@@ -79,7 +79,8 @@ stellar-private-payments/
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
-`vendor/cranelift-control` is patched - see https://github.com/NethermindEth/stellar-private-payments/issues/192
+`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in 
+the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
 
 ### Building Circuits
 To explicitly build them:
