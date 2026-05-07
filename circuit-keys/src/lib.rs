@@ -11,21 +11,110 @@ use ark_groth16::{ProvingKey, VerifyingKey};
 use ark_serialize::CanonicalSerialize;
 use num_bigint::BigUint;
 use serde_json::{Value, json};
-use std::{fs, path::Path};
+use std::{
+    fs,
+    fs::{File, OpenOptions},
+    io::Write,
+    path::Path,
+};
+
+#[cfg(unix)]
+fn atomic_write(path: &Path, bytes: &[u8]) -> Result<()> {
+    let parent = path
+        .parent()
+        .with_context(|| format!("missing parent directory for {}", path.display()))?;
+
+    let file_name = path
+        .file_name()
+        .with_context(|| format!("missing file name for {}", path.display()))?
+        .to_string_lossy();
+
+    let pid = std::process::id();
+    let mut temp_path = parent.join(format!(".{file_name}.tmp.{pid}"));
+
+    let mut temp_file = None;
+    for attempt in 0u32..1000 {
+        if attempt != 0 {
+            temp_path = parent.join(format!(".{file_name}.tmp.{pid}.{attempt}"));
+        }
+
+        match OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temp_path)
+        {
+            Ok(file) => {
+                temp_file = Some(file);
+                break;
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(e) => {
+                return Err(e).with_context(|| {
+                    format!("failed to create temp file {}", temp_path.display())
+                });
+            }
+        }
+    }
+
+    let result = (|| -> Result<()> {
+        let mut temp_file = temp_file
+            .with_context(|| format!("failed to create unique temp file for {}", path.display()))?;
+
+        temp_file
+            .write_all(bytes)
+            .with_context(|| format!("failed to write temp file {}", temp_path.display()))?;
+        temp_file
+            .sync_all()
+            .with_context(|| format!("failed to sync temp file {}", temp_path.display()))?;
+        drop(temp_file);
+
+        fs::rename(&temp_path, path).with_context(|| {
+            format!(
+                "failed to rename temp file {} to {}",
+                temp_path.display(),
+                path.display()
+            )
+        })?;
+
+        Ok(())
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_file(&temp_path);
+    }
+    result?;
+
+    // Ensure rename is durably recorded.
+    File::open(parent)
+        .with_context(|| format!("failed to open parent directory {}", parent.display()))?
+        .sync_all()
+        .with_context(|| format!("failed to sync parent directory {}", parent.display()))?;
+
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn atomic_write(path: &Path, _bytes: &[u8]) -> Result<()> {
+    Err(anyhow!(
+        "atomic writes are currently supported only on unix targets (attempted: {})",
+        path.display()
+    ))
+}
 
 /// Writes a Groth16 proving key as compressed arkworks bytes.
 pub fn write_proving_key_bin(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
     let mut bytes = Vec::new();
     pk.serialize_compressed(&mut bytes)
         .map_err(|e| anyhow!("failed to serialize proving key: {e}"))?;
-    fs::write(path, &bytes).with_context(|| format!("failed to write {}", path.display()))?;
+    atomic_write(path, &bytes).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
 /// Writes a Groth16 verifying key as snarkjs-compatible JSON.
 pub fn write_vk_snarkjs_json(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
     let json_str = serde_json::to_string_pretty(&vk_to_snarkjs_json(vk))?;
-    fs::write(path, json_str).with_context(|| format!("failed to write {}", path.display()))?;
+    atomic_write(path, json_str.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
@@ -117,7 +206,7 @@ pub fn write_vk_soroban_bin(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()>
         bytes.extend_from_slice(&g1_to_soroban_bytes(ic));
     }
 
-    fs::write(path, bytes).with_context(|| format!("failed to write {}", path.display()))?;
+    atomic_write(path, &bytes).with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
@@ -157,7 +246,8 @@ pub fn write_vk_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> 
     }
     content.push_str("];\n");
 
-    fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
+    atomic_write(path, content.as_bytes())
+        .with_context(|| format!("failed to write {}", path.display()))?;
     Ok(())
 }
 
@@ -172,4 +262,58 @@ pub fn parse_fq_decimal(value: &str) -> Result<Fq> {
 /// separately).
 pub fn fq2_from_decimals(c0: &str, c1: &str) -> Result<Fq2> {
     Ok(Fq2::new(parse_fq_decimal(c0)?, parse_fq_decimal(c1)?))
+}
+
+#[cfg(all(test, unix))]
+mod tests {
+    use super::atomic_write;
+    use anyhow::Result;
+    use std::{
+        fs,
+        path::{Path, PathBuf},
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
+    fn unique_test_dir(prefix: &str) -> Result<PathBuf> {
+        let mut dir = std::env::temp_dir();
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        dir.push(format!(
+            "circuit_keys_{prefix}_{}_{}",
+            std::process::id(),
+            nanos
+        ));
+        fs::create_dir(&dir)?;
+        Ok(dir)
+    }
+
+    fn list_file_names(dir: &Path) -> Result<Vec<String>> {
+        let mut names = Vec::new();
+        for entry in fs::read_dir(dir)? {
+            let entry = entry?;
+            names.push(entry.file_name().to_string_lossy().to_string());
+        }
+        names.sort();
+        Ok(names)
+    }
+
+    #[test]
+    fn atomic_write_replaces_contents_and_cleans_up_temp() -> Result<()> {
+        let dir = unique_test_dir("atomic_write")?;
+        let path = dir.join("vk.json");
+
+        atomic_write(&path, b"first")?;
+        atomic_write(&path, b"second")?;
+
+        let contents = fs::read(&path)?;
+        assert_eq!(contents, b"second");
+
+        let names = list_file_names(&dir)?;
+        assert_eq!(names, vec!["vk.json".to_string()]);
+
+        fs::remove_dir_all(&dir)?;
+        Ok(())
+    }
 }
