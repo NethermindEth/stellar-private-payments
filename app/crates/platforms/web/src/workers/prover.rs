@@ -34,7 +34,7 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
 }
 
 fn to_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
+    let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
     for b in bytes {
         write!(&mut out, "{:02x}", b).expect("writing to String should not fail");
     }
