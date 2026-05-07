@@ -3,6 +3,10 @@ mod config;
 mod protocol;
 pub mod workers;
 
+pub(crate) mod artifact_hashes {
+    include!(concat!(env!("OUT_DIR"), "/artifact_hashes.rs"));
+}
+
 use client::WebClient;
 use config::Config;
 use gloo_timers::future::TimeoutFuture;

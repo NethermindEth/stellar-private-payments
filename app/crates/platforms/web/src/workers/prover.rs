@@ -5,6 +5,7 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
+use sha2::{Digest as _, Sha256};
 use prover::{
     flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
@@ -22,6 +23,49 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest[..]);
+    out
+}
+
+fn to_hex_64(bytes: [u8; 32]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(64);
+    for b in bytes {
+        out.push(HEX[(b >> 4) as usize] as char);
+        out.push(HEX[(b & 0x0f) as usize] as char);
+    }
+    out
+}
+
+fn ensure_sha256_matches(
+    name: &str,
+    bytes: &[u8],
+    expected_len: usize,
+    expected_sha256: [u8; 32],
+) -> Result<(), JsError> {
+    if bytes.len() != expected_len {
+        return Err(JsError::new(&format!(
+            "{name} length mismatch: expected={}, got={}",
+            expected_len,
+            bytes.len(),
+        )));
+    }
+    let actual = sha256(bytes);
+    if actual != expected_sha256 {
+        return Err(JsError::new(&format!(
+            "{name} SHA256 mismatch: expected={}, got={}",
+            to_hex_64(expected_sha256),
+            to_hex_64(actual),
+        )));
+    }
+    Ok(())
+}
 
 // TODO for now it is a mix of async (because we want an async bridge for the
 // main thread) and sync (blocking) code in the future we should refactor to use
@@ -53,6 +97,27 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
         }
+    )?;
+
+    // Integrity checks (regular builds): ensure we are using the exact
+    // artifact versions this binary was built against.
+    ensure_sha256_matches(
+        "policy_tx_2_2_proving_key.bin",
+        PROVING_KEY,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "policy_tx_2_2.wasm",
+        &wasm_bytes,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "policy_tx_2_2.r1cs",
+        &r1cs_bytes,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
     )?;
 
     let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
