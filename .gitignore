@@ -51,3 +51,5 @@ docs/book/
 
 # Ceremony
 ceremony/
+*.ptau
+artifacts.zip
