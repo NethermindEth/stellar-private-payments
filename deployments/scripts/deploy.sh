@@ -120,9 +120,9 @@ def to_hex32(v):
 def g1_bytes(pt):
     return to_hex32(pt[0]) + to_hex32(pt[1])
 def g2_bytes(pt):
-    # snarkjs format uses [imag, real] for Fq2 components.
-    x_im, x_re = pt[0]
-    y_im, y_re = pt[1]
+    # snarkjs format uses [real, imag] for Fq2 components.
+    x_re, x_im = pt[0]
+    y_re, y_im = pt[1]
     return to_hex32(x_im) + to_hex32(x_re) + to_hex32(y_im) + to_hex32(y_re)
 out = {
     "alpha": g1_bytes(data["vk_alpha_1"]),
