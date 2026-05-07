@@ -35,6 +35,9 @@ jobs:
         with:
           cache-targets: "true"
 
+      - name: Build circuit artifacts (required by web)
+        run: cargo build -p circuits
+
       - name: Check the wasm build
         run: cargo build -p web --target wasm32-unknown-unknown
 
