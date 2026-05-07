@@ -10,7 +10,7 @@ use prover::{
     prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
-use std::cell::RefCell;
+use std::{cell::RefCell, fmt::Write as _};
 use stellar::hash_ext_data_offchain;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -33,12 +33,10 @@ fn sha256(bytes: &[u8]) -> [u8; 32] {
     out
 }
 
-fn to_hex_64(bytes: [u8; 32]) -> String {
-    const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut out = String::with_capacity(64);
+fn to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len() * 2);
     for b in bytes {
-        out.push(HEX[(b >> 4) as usize] as char);
-        out.push(HEX[(b & 0x0f) as usize] as char);
+        write!(&mut out, "{:02x}", b).expect("writing to String should not fail");
     }
     out
 }
@@ -60,8 +58,8 @@ fn ensure_sha256_matches(
     if actual != expected_sha256 {
         return Err(JsError::new(&format!(
             "{name} SHA256 mismatch: expected={}, got={}",
-            to_hex_64(expected_sha256),
-            to_hex_64(actual),
+            to_hex(&expected_sha256),
+            to_hex(&actual),
         )));
     }
     Ok(())
