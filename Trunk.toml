@@ -29,21 +29,23 @@ mkdir -p $TRUNK_STAGING_DIR/circuits
 #   target/circuits-artifacts/<profile>/{name}.r1cs
 #   target/circuits-artifacts/<profile>/{name}.wasm
 #
-# Trunk is configured with `release = true`, so prefer `release/` but fall back
-# to `debug/` if it exists (still deterministic).
-CIRCUIT_OUT=""
-if [ -d target/circuits-artifacts/release ]; then
-    CIRCUIT_OUT=target/circuits-artifacts/release
-elif [ -d target/circuits-artifacts/debug ]; then
-    CIRCUIT_OUT=target/circuits-artifacts/debug
+# Prefer the artifacts which match the active Trunk build profile. Trunk exposes
+# the selected profile to hooks via `TRUNK_PROFILE`.
+PROFILE="${TRUNK_PROFILE:-release}"
+CIRCUIT_OUT="target/circuits-artifacts/$PROFILE"
+
+if [ ! -d "$CIRCUIT_OUT" ]; then
+    echo "trunk:error: missing circuit artifacts dir: $CIRCUIT_OUT" >&2
+    if [ "$PROFILE" = "release" ]; then
+        echo "trunk:error: run 'cargo build -p circuits --release' to generate them" >&2
+    else
+        echo "trunk:error: run 'cargo build -p circuits' to generate them" >&2
+    fi
+    exit 1
 fi
 
-if [ -n "$CIRCUIT_OUT" ]; then
-    cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
-    cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
-else
-    echo "trunk:warning: no circuit artifacts found in target/circuits-artifacts/{release,debug}; run 'cargo build -p circuits --release' to generate them" >&2
-fi
+cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/
+cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/
 
 # Static files
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true

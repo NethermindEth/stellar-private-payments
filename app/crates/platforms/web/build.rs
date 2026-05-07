@@ -45,26 +45,27 @@ fn main() {
     let proving_key_path =
         repo_root.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
 
-    let circuits_release = repo_root.join("target/circuits-artifacts/release");
-    let circuits_debug = repo_root.join("target/circuits-artifacts/debug");
+    let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
+    let circuits_out = repo_root
+        .join("target/circuits-artifacts")
+        .join(&profile);
 
-    let circuits_out = if circuits_release.is_dir() {
-        circuits_release
-    } else if circuits_debug.is_dir() {
-        circuits_debug
-    } else {
+    if !circuits_out.is_dir() {
+        let suggestion = if profile == "release" {
+            "cargo build -p circuits --release"
+        } else {
+            "cargo build -p circuits"
+        };
         panic!(
-            "web/build.rs: missing circuit artifacts directory: {} or {}. Run `cargo build -p circuits --release` first.",
-            repo_root
-                .join("target/circuits-artifacts/release")
-                .display(),
-            repo_root.join("target/circuits-artifacts/debug").display(),
+            "web/build.rs: missing circuit artifacts directory for PROFILE={profile}: {}. Run `{suggestion}` first.",
+            circuits_out.display(),
         );
-    };
+    }
 
     let wasm_path = circuits_out.join("policy_tx_2_2.wasm");
     let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
 
+    println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed={}", proving_key_path.display());
     println!("cargo:rerun-if-changed={}", wasm_path.display());
     println!("cargo:rerun-if-changed={}", r1cs_path.display());
