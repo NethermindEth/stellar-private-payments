@@ -139,8 +139,8 @@ fn g1_to_snarkjs(p: &G1Affine) -> Value {
 
 fn g2_to_snarkjs(p: &G2Affine) -> Value {
     json!([
-        [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
-        [fq_to_decimal(&p.y.c1), fq_to_decimal(&p.y.c0)],
+        [fq_to_decimal(&p.x.c0), fq_to_decimal(&p.x.c1)],
+        [fq_to_decimal(&p.y.c0), fq_to_decimal(&p.y.c1)],
         ["1", "0"]
     ])
 }

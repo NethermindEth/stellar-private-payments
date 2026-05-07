@@ -1,7 +1,6 @@
 use sha2::{Digest, Sha256};
 use std::{
-    env,
-    fs,
+    env, fs,
     path::{Path, PathBuf},
 };
 
@@ -35,7 +34,8 @@ fn repo_root_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
 }
 
 fn read_file(path: &Path) -> Vec<u8> {
-    fs::read(path).unwrap_or_else(|e| panic!("web/build.rs: failed to read {}: {e}", path.display()))
+    fs::read(path)
+        .unwrap_or_else(|e| panic!("web/build.rs: failed to read {}: {e}", path.display()))
 }
 
 fn main() {
@@ -55,7 +55,9 @@ fn main() {
     } else {
         panic!(
             "web/build.rs: missing circuit artifacts directory: {} or {}. Run `cargo build -p circuits --release` first.",
-            repo_root.join("target/circuits-artifacts/release").display(),
+            repo_root
+                .join("target/circuits-artifacts/release")
+                .display(),
             repo_root.join("target/circuits-artifacts/debug").display(),
         );
     };
@@ -103,4 +105,3 @@ pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
     fs::write(&out_path, contents)
         .unwrap_or_else(|e| panic!("web/build.rs: failed to write {}: {e}", out_path.display()));
 }
-

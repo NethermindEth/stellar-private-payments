@@ -5,11 +5,11 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
-use sha2::{Digest as _, Sha256};
 use prover::{
     flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
 };
+use sha2::{Digest as _, Sha256};
 use std::cell::RefCell;
 use stellar::hash_ext_data_offchain;
 use wasm_bindgen::{JsCast, JsError, JsValue};

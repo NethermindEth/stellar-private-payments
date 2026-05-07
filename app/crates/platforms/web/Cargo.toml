@@ -28,10 +28,10 @@ gloo-worker = { version = "0.6", default-features = false, features = ["futures"
 js-sys = "0.3"
 log = { workspace = true }
 prover = { workspace = true }
-sha2 = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
+sha2 = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
 types = { workspace = true }

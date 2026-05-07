@@ -817,6 +817,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
+ "ark-circom",
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-serialize 0.6.0",
@@ -5763,6 +5764,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
  "state",
