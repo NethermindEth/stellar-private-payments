@@ -46,9 +46,7 @@ fn main() {
         repo_root.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
 
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
-    let circuits_out = repo_root
-        .join("target/circuits-artifacts")
-        .join(&profile);
+    let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
 
     if !circuits_out.is_dir() {
         let suggestion = if profile == "release" {
