@@ -12,3 +12,6 @@ doctest = false
 
 [dependencies]
 soroban-sdk = { workspace = true, features = ["alloc"] }
+
+[lints]
+workspace = true

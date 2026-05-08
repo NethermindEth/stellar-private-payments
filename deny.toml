@@ -85,15 +85,7 @@ unused = 'warn'
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-    "https://github.com/stellar/rs-soroban-sdk",
-    "https://github.com/stellar/rs-soroban-env",
-    "https://github.com/stellar/wasmi",
-    "https://github.com/stellar/rs-stellar-xdr",
-    "https://github.com/arkworks-rs/snark",
-    "https://github.com/arkworks-rs/algebra",
-    "https://github.com/arkworks-rs/groth16",
-    "https://github.com/arkworks-rs/crypto-primitives",
-    "https://github.com/arkworks-rs/circom-compat",
+    "https://github.com/wasmerio/wasmer"
 ]
 
 [sources.allow-org]

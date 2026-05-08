@@ -14,16 +14,25 @@ use zkhash::{ark_ff::PrimeField, fields::bn256::FpBN256 as Scalar};
 
 use crate::{
     crypto::{poseidon2_compression, poseidon2_hash2_internal},
-    serialization::{bytes_to_scalar, scalar_to_bytes},
+    serialization::{field_to_scalar, scalar_to_field},
 };
+use types::Field;
 
 /// Poseidon2 hash for leaf nodes: Poseidon2(key, value, domain=1)
-fn poseidon2_hash_leaf(key: Scalar, value: Scalar) -> Scalar {
-    poseidon2_hash2_internal(key, value, Some(Scalar::from(1u64)))
+fn poseidon2_hash_leaf(key: Field, value: Field) -> Field {
+    let key_s = field_to_scalar(&key);
+    let value_s = field_to_scalar(&value);
+    let hashed = poseidon2_hash2_internal(key_s, value_s, Some(Scalar::from(1u64)));
+    scalar_to_field(&hashed)
 }
 
-/// Split a scalar into 256 bits (LSB first)
-fn scalar_to_bits(scalar: &Scalar) -> Vec<bool> {
+fn field_to_key(field: &Field) -> [u8; 32] {
+    field.to_le_bytes()
+}
+
+/// Split a field element into 256 bits (LSB first)
+fn field_to_bits(field: &Field) -> Vec<bool> {
+    let scalar = field_to_scalar(field);
     let bigint = scalar.into_bigint();
     let mut bits = Vec::with_capacity(256);
 
@@ -43,9 +52,9 @@ enum Node {
     /// Empty node (represents zero)
     Empty,
     /// Leaf node containing (key, value)
-    Leaf { key: Scalar, value: Scalar },
+    Leaf { key: Field, value: Field },
     /// Internal node containing (left_child_hash, right_child_hash)
-    Internal { left: Scalar, right: Scalar },
+    Internal { left: Field, right: Field },
 }
 
 /// Result of SMT find operation
@@ -54,13 +63,13 @@ pub struct FindResult {
     /// Whether the key was found
     pub found: bool,
     /// Sibling hashes along the path
-    pub siblings: Vec<Scalar>,
+    pub siblings: Vec<Field>,
     /// The found value (if found)
-    pub found_value: Scalar,
+    pub found_value: Field,
     /// The key that was not found (for collision detection)
-    pub not_found_key: Scalar,
+    pub not_found_key: Field,
     /// The value at collision (if not found)
-    pub not_found_value: Scalar,
+    pub not_found_value: Field,
     /// Whether the path ended at zero
     pub is_old0: bool,
 }
@@ -69,19 +78,19 @@ pub struct FindResult {
 #[derive(Clone, Debug)]
 pub struct SMTResult {
     /// The old root before the operation
-    pub old_root: Scalar,
+    pub old_root: Field,
     /// The new root after the operation
-    pub new_root: Scalar,
+    pub new_root: Field,
     /// Sibling hashes along the path
-    pub siblings: Vec<Scalar>,
+    pub siblings: Vec<Field>,
     /// The old key
-    pub old_key: Scalar,
+    pub old_key: Field,
     /// The old value
-    pub old_value: Scalar,
+    pub old_value: Field,
     /// The new key
-    pub new_key: Scalar,
+    pub new_key: Field,
     /// The new value
-    pub new_value: Scalar,
+    pub new_value: Field,
     /// Whether the old value was zero
     pub is_old0: bool,
 }
@@ -91,7 +100,7 @@ pub struct SparseMerkleTree {
     /// Database storing nodes by their hash
     db: BTreeMap<[u8; 32], Node>,
     /// Current root hash
-    root: Scalar,
+    root: Field,
 }
 
 impl Default for SparseMerkleTree {
@@ -105,41 +114,38 @@ impl SparseMerkleTree {
     pub fn new() -> Self {
         SparseMerkleTree {
             db: BTreeMap::new(),
-            root: Scalar::from(0u64),
+            root: Field::ZERO,
         }
     }
 
     /// Get the current root
-    pub fn root(&self) -> Scalar {
+    pub fn root(&self) -> Field {
         self.root
     }
 
-    /// Convert scalar to bytes for use as BTreeMap key
-    fn scalar_to_key(s: &Scalar) -> [u8; 32] {
-        let mut key = [0u8; 32];
-        let bytes = scalar_to_bytes(s);
-        key.copy_from_slice(&bytes);
-        key
+    /// Convert field to bytes for use as BTreeMap key
+    fn field_to_key(s: &Field) -> [u8; 32] {
+        field_to_key(s)
     }
 
     /// Get a node from the database
-    fn get_node(&self, hash: &Scalar) -> Option<&Node> {
-        if *hash == Scalar::from(0u64) {
+    fn get_node(&self, hash: &Field) -> Option<&Node> {
+        if *hash == Field::ZERO {
             return Some(&Node::Empty);
         }
-        self.db.get(&Self::scalar_to_key(hash))
+        self.db.get(&Self::field_to_key(hash))
     }
 
     /// Store a node in the database
-    fn put_node(&mut self, hash: Scalar, node: Node) {
-        if hash != Scalar::from(0u64) {
-            self.db.insert(Self::scalar_to_key(&hash), node);
+    fn put_node(&mut self, hash: Field, node: Node) {
+        if hash != Field::ZERO {
+            self.db.insert(Self::field_to_key(&hash), node);
         }
     }
 
     /// Find a key in the tree
-    pub fn find(&self, key: &Scalar) -> Result<FindResult, &'static str> {
-        let key_bits = scalar_to_bits(key);
+    pub fn find(&self, key: &Field) -> Result<FindResult, &'static str> {
+        let key_bits = field_to_bits(key);
         let mut result = self.find_internal(key, &key_bits, &self.root, 0)?;
         result.siblings.reverse();
         Ok(result)
@@ -147,22 +153,22 @@ impl SparseMerkleTree {
 
     fn find_internal(
         &self,
-        key: &Scalar,
+        key: &Field,
         key_bits: &[bool],
-        current_hash: &Scalar,
+        current_hash: &Field,
         level: usize,
     ) -> Result<FindResult, &'static str> {
         if level >= 256 {
             return Err("Maximum tree depth exceeded");
         }
 
-        if *current_hash == Scalar::from(0u64) {
+        if *current_hash == Field::ZERO {
             return Ok(FindResult {
                 found: false,
                 siblings: Vec::new(),
-                found_value: Scalar::from(0u64),
+                found_value: Field::ZERO,
                 not_found_key: *key,
-                not_found_value: Scalar::from(0u64),
+                not_found_value: Field::ZERO,
                 is_old0: true,
             });
         }
@@ -177,15 +183,15 @@ impl SparseMerkleTree {
                         found: true,
                         siblings: Vec::new(),
                         found_value: *leaf_value,
-                        not_found_key: Scalar::from(0u64),
-                        not_found_value: Scalar::from(0u64),
+                        not_found_key: Field::ZERO,
+                        not_found_value: Field::ZERO,
                         is_old0: false,
                     })
                 } else {
                     Ok(FindResult {
                         found: false,
                         siblings: Vec::new(),
-                        found_value: Scalar::from(0u64),
+                        found_value: Field::ZERO,
                         not_found_key: *leaf_key,
                         not_found_value: *leaf_value,
                         is_old0: false,
@@ -209,9 +215,9 @@ impl SparseMerkleTree {
             Some(Node::Empty) => Ok(FindResult {
                 found: false,
                 siblings: Vec::new(),
-                found_value: Scalar::from(0u64),
+                found_value: Field::ZERO,
                 not_found_key: *key,
-                not_found_value: Scalar::from(0u64),
+                not_found_value: Field::ZERO,
                 is_old0: true,
             }),
             None => Err("Node not found in database"),
@@ -219,7 +225,7 @@ impl SparseMerkleTree {
     }
 
     /// Insert a key-value pair
-    pub fn insert(&mut self, key: &Scalar, value: &Scalar) -> Result<SMTResult, &'static str> {
+    pub fn insert(&mut self, key: &Field, value: &Field) -> Result<SMTResult, &'static str> {
         let find_result = self.find(key)?;
 
         if find_result.found {
@@ -227,7 +233,7 @@ impl SparseMerkleTree {
         }
 
         let old_root = self.root;
-        let key_bits = scalar_to_bits(key);
+        let key_bits = field_to_bits(key);
 
         // Create the new leaf
         let new_leaf_hash = poseidon2_hash_leaf(*key, *value);
@@ -246,12 +252,12 @@ impl SparseMerkleTree {
         // If there's a collision (not_found_key != 0 and is_old0 == false), we need to
         // extend the path
         if !find_result.is_old0 {
-            let old_key_bits = scalar_to_bits(&find_result.not_found_key);
+            let old_key_bits = field_to_bits(&find_result.not_found_key);
 
             // Find where the paths diverge
             let mut diverge_level = siblings.len();
             while diverge_level < 256 && old_key_bits[diverge_level] == key_bits[diverge_level] {
-                siblings.push(Scalar::from(0u64));
+                siblings.push(Field::ZERO);
                 diverge_level = diverge_level.saturating_add(1);
             }
 
@@ -269,7 +275,7 @@ impl SparseMerkleTree {
                 (current_hash, *sibling)
             };
 
-            current_hash = poseidon2_compression(left, right);
+            current_hash = smt_hash_pair_field(left, right);
             self.put_node(current_hash, Node::Internal { left, right });
         }
 
@@ -277,7 +283,7 @@ impl SparseMerkleTree {
 
         // Trim trailing zeros from siblings for the result
         let mut result_siblings = siblings;
-        while result_siblings.last() == Some(&Scalar::from(0u64)) {
+        while result_siblings.last() == Some(&Field::ZERO) {
             result_siblings.pop();
         }
         // Remove the collision leaf if we added one
@@ -298,7 +304,7 @@ impl SparseMerkleTree {
     }
 
     /// Update a key's value
-    pub fn update(&mut self, key: &Scalar, new_value: &Scalar) -> Result<SMTResult, &'static str> {
+    pub fn update(&mut self, key: &Field, new_value: &Field) -> Result<SMTResult, &'static str> {
         let find_result = self.find(key)?;
 
         if !find_result.found {
@@ -307,7 +313,7 @@ impl SparseMerkleTree {
 
         let old_root = self.root;
         let old_value = find_result.found_value;
-        let key_bits = scalar_to_bits(key);
+        let key_bits = field_to_bits(key);
 
         // Create the new leaf
         let new_leaf_hash = poseidon2_hash_leaf(*key, *new_value);
@@ -328,7 +334,7 @@ impl SparseMerkleTree {
                 (current_hash, *sibling)
             };
 
-            current_hash = poseidon2_compression(left, right);
+            current_hash = smt_hash_pair_field(left, right);
             self.put_node(current_hash, Node::Internal { left, right });
         }
 
@@ -362,7 +368,7 @@ impl WasmSparseMerkleTree {
 
     /// Get the current root as bytes (32 bytes, Little-Endian)
     pub fn root(&self) -> Vec<u8> {
-        scalar_to_bytes(&self.inner.root())
+        self.inner.root().to_le_bytes().to_vec()
     }
 
     /// Insert a key-value pair into the tree
@@ -371,8 +377,8 @@ impl WasmSparseMerkleTree {
     /// * `key_bytes` - Key as 32 bytes (Little-Endian)
     /// * `value_bytes` - Value as 32 bytes (Little-Endian)
     pub fn insert(&mut self, key_bytes: &[u8], value_bytes: &[u8]) -> Result<WasmSMTResult> {
-        let key = bytes_to_scalar(key_bytes)?;
-        let value = bytes_to_scalar(value_bytes)?;
+        let key = bytes_to_field(key_bytes)?;
+        let value = bytes_to_field(value_bytes)?;
 
         let result = self.inner.insert(&key, &value).map_err(|e| anyhow!(e))?;
 
@@ -381,8 +387,8 @@ impl WasmSparseMerkleTree {
 
     /// Update a key's value in the tree
     pub fn update(&mut self, key_bytes: &[u8], new_value_bytes: &[u8]) -> Result<WasmSMTResult> {
-        let key = bytes_to_scalar(key_bytes)?;
-        let new_value = bytes_to_scalar(new_value_bytes)?;
+        let key = bytes_to_field(key_bytes)?;
+        let new_value = bytes_to_field(new_value_bytes)?;
 
         let result = self
             .inner
@@ -394,7 +400,7 @@ impl WasmSparseMerkleTree {
 
     /// Find a key in the tree and get a membership/non-membership proof
     pub fn find(&self, key_bytes: &[u8]) -> Result<WasmFindResult> {
-        let key = bytes_to_scalar(key_bytes)?;
+        let key = bytes_to_field(key_bytes)?;
 
         let result = self.inner.find(&key).map_err(|e| anyhow!(e))?;
 
@@ -402,25 +408,25 @@ impl WasmSparseMerkleTree {
     }
 
     /// Get a proof for a key, padded to max_levels
-    pub fn get_proof(&self, key_bytes: &[u8], max_levels: usize) -> Result<WasmSMTProof> {
-        let key = bytes_to_scalar(key_bytes)?;
+    pub fn get_proof(&self, key_bytes: &[u8], max_levels: usize) -> Result<SMTProof> {
+        let key = bytes_to_field(key_bytes)?;
 
         let find_result = self.inner.find(&key).map_err(|e| anyhow!(e))?;
 
         // Pad siblings to max_levels
         let mut siblings = find_result.siblings.clone();
         while siblings.len() < max_levels {
-            siblings.push(Scalar::from(0u64));
+            siblings.push(Field::ZERO);
         }
 
-        Ok(WasmSMTProof {
+        Ok(SMTProof {
             found: find_result.found,
-            siblings: siblings.iter().flat_map(scalar_to_bytes).collect(),
-            found_value: scalar_to_bytes(&find_result.found_value),
-            not_found_key: scalar_to_bytes(&find_result.not_found_key),
-            not_found_value: scalar_to_bytes(&find_result.not_found_value),
+            siblings: siblings.iter().flat_map(|s| s.to_le_bytes()).collect(),
+            found_value: find_result.found_value.to_le_bytes().to_vec(),
+            not_found_key: find_result.not_found_key.to_le_bytes().to_vec(),
+            not_found_value: find_result.not_found_value.to_le_bytes().to_vec(),
             is_old0: find_result.is_old0,
-            root: scalar_to_bytes(&self.inner.root()),
+            root: self.inner.root().to_le_bytes().to_vec(),
             num_siblings: siblings.len(),
         })
     }
@@ -495,13 +501,13 @@ impl WasmSMTResult {
 impl WasmSMTResult {
     fn from_result(r: &SMTResult) -> Self {
         WasmSMTResult {
-            old_root: scalar_to_bytes(&r.old_root),
-            new_root: scalar_to_bytes(&r.new_root),
-            siblings: r.siblings.iter().flat_map(scalar_to_bytes).collect(),
-            old_key: scalar_to_bytes(&r.old_key),
-            old_value: scalar_to_bytes(&r.old_value),
-            new_key: scalar_to_bytes(&r.new_key),
-            new_value: scalar_to_bytes(&r.new_value),
+            old_root: r.old_root.to_le_bytes().to_vec(),
+            new_root: r.new_root.to_le_bytes().to_vec(),
+            siblings: r.siblings.iter().flat_map(|s| s.to_le_bytes()).collect(),
+            old_key: r.old_key.to_le_bytes().to_vec(),
+            old_value: r.old_value.to_le_bytes().to_vec(),
+            new_key: r.new_key.to_le_bytes().to_vec(),
+            new_value: r.new_value.to_le_bytes().to_vec(),
             is_old0: r.is_old0,
             num_siblings: r.siblings.len(),
         }
@@ -563,22 +569,34 @@ impl WasmFindResult {
 }
 
 impl WasmFindResult {
-    fn from_result(r: &FindResult, root: &Scalar) -> Self {
+    fn from_result(r: &FindResult, root: &Field) -> Self {
         WasmFindResult {
             found: r.found,
-            siblings: r.siblings.iter().flat_map(scalar_to_bytes).collect(),
-            found_value: scalar_to_bytes(&r.found_value),
-            not_found_key: scalar_to_bytes(&r.not_found_key),
-            not_found_value: scalar_to_bytes(&r.not_found_value),
+            siblings: r.siblings.iter().flat_map(|s| s.to_le_bytes()).collect(),
+            found_value: r.found_value.to_le_bytes().to_vec(),
+            not_found_key: r.not_found_key.to_le_bytes().to_vec(),
+            not_found_value: r.not_found_value.to_le_bytes().to_vec(),
             is_old0: r.is_old0,
-            root: scalar_to_bytes(root),
+            root: root.to_le_bytes().to_vec(),
             num_siblings: r.siblings.len(),
         }
     }
 }
 
+fn smt_hash_pair_field(left: Field, right: Field) -> Field {
+    let left_s = field_to_scalar(&left);
+    let right_s = field_to_scalar(&right);
+    let hashed = poseidon2_compression(left_s, right_s);
+    scalar_to_field(&hashed)
+}
+
+fn bytes_to_field(bytes: &[u8]) -> Result<Field> {
+    let arr: [u8; 32] = bytes.try_into().map_err(|_| anyhow!("expected 32 bytes"))?;
+    Field::try_from_le_bytes(arr)
+}
+
 /// SMT Proof for circuit inputs
-pub struct WasmSMTProof {
+pub struct SMTProof {
     found: bool,
     siblings: Vec<u8>,
     found_value: Vec<u8>,
@@ -589,7 +607,7 @@ pub struct WasmSMTProof {
     num_siblings: usize,
 }
 
-impl WasmSMTProof {
+impl SMTProof {
     /// Whether the key was found
     pub fn found(&self) -> bool {
         self.found
@@ -633,16 +651,16 @@ impl WasmSMTProof {
 
 /// Compute Poseidon2 compression hash of two field elements
 pub fn smt_hash_pair(left: &[u8], right: &[u8]) -> Result<Vec<u8>> {
-    let l = bytes_to_scalar(left)?;
-    let r = bytes_to_scalar(right)?;
-    let result = poseidon2_compression(l, r);
-    Ok(scalar_to_bytes(&result))
+    let l = bytes_to_field(left)?;
+    let r = bytes_to_field(right)?;
+    let result = smt_hash_pair_field(l, r);
+    Ok(result.to_le_bytes().to_vec())
 }
 
 /// Compute Poseidon2 hash for leaf nodes: hash(key, value, 1)
 pub fn smt_hash_leaf(key: &[u8], value: &[u8]) -> Result<Vec<u8>> {
-    let k = bytes_to_scalar(key)?;
-    let v = bytes_to_scalar(value)?;
+    let k = bytes_to_field(key)?;
+    let v = bytes_to_field(value)?;
     let result = poseidon2_hash_leaf(k, v);
-    Ok(scalar_to_bytes(&result))
+    Ok(result.to_le_bytes().to_vec())
 }

@@ -69,6 +69,8 @@ stellar-private-payments/
 - [**Typos**](https://github.com/crate-ci/typos?tab=readme-ov-file#install)
 - [**Cargo Sort**](https://github.com/DevinR528/cargo-sort)
 - SQLite development libraries (e.g. for Debian/Ubuntu `sudo apt install libsqlite3-dev`)
+- [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (provides `wasm-bindgen-test-runner` for `cargo test --target wasm32-unknown-unknown`)
+- [**wasm-pack**](https://rustwasm.github.io/wasm-pack/) for WASM bundling
 
 ## Building and testing crates
 
@@ -79,7 +81,22 @@ stellar-private-payments/
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
+`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in 
+the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
 
+### Running WASM tests
+
+Some crates include unit tests intended to run under `wasm32-unknown-unknown` via `wasm-bindgen-test`.
+The workspace is configured to use `wasm-bindgen-test-runner` as the wasm test runner (see `.cargo/config.toml`),
+so you need it available on your `PATH` (typically by installing `wasm-bindgen-cli`).
+
+```bash
+# Install a compatible wasm-bindgen toolchain (adjust the version if `Cargo.lock` changes)
+cargo install wasm-bindgen-cli --version 0.2.120
+
+# Example: run wasm tests for the Stellar core crate
+cargo test --target wasm32-unknown-unknown -p stellar
+```
 
 ### Building Circuits
 To explicitly build them:
@@ -147,12 +164,6 @@ The whole app:
 ```sh
 $ make install
 $ make serve
-```
-
-The Rust part - check compilation
-
-```sh
-$ make wasm
 ```
 
 Prepare a production build (TODO: enable optimizations and minification)

@@ -1,4 +1,5 @@
 use crate::rpc::Error;
+use core::ops::Shl;
 use std::collections::HashMap;
 use stellar_strkey::ed25519;
 use stellar_xdr::curr::{self as xdr, ReadXdr};
@@ -11,11 +12,14 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
             xdr::ScAddress::Account(account_id) => {
                 // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant -> Uint256
                 let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(bytes)) = &account_id.0;
-                Ok(ed25519::PublicKey(*bytes).to_string())
+                Ok(ed25519::PublicKey(*bytes).to_string().as_str().to_string())
             }
             xdr::ScAddress::Contract(contract_id) => {
                 let bytes = contract_id.0.0;
-                Ok(stellar_strkey::Contract(bytes).to_string())
+                Ok(stellar_strkey::Contract(bytes)
+                    .to_string()
+                    .as_str()
+                    .to_string())
             }
             // Handling MuxedAccount, ClaimableBalance, and LiquidityPool
             _ => Err(Error::UnexpectedScVal(format!(
@@ -49,7 +53,17 @@ pub fn scval_to_u256(val: &xdr::ScVal) -> Result<U256, Error> {
         let lo_hi = U256::from(parts.lo_hi);
         let lo_lo = U256::from(parts.lo_lo);
 
-        Ok((hi_hi << 192) + (hi_lo << 128) + (lo_hi << 64) + lo_lo)
+        let mut out = Shl::shl(hi_hi, 192);
+        out = out
+            .checked_add(Shl::shl(hi_lo, 128))
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (hi_lo)".into()))?;
+        out = out
+            .checked_add(Shl::shl(lo_hi, 64))
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (lo_hi)".into()))?;
+        out = out
+            .checked_add(lo_lo)
+            .ok_or_else(|| Error::UnexpectedScVal("U256 overflow (lo_lo)".into()))?;
+        Ok(out)
     } else {
         Err(Error::UnexpectedScVal(format!("{val:?}")))
     }

@@ -27,7 +27,7 @@ x25519-dalek = { version = "2.0", default-features = false, features = ["static_
 # Poseidon2 hash
 zkhash = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = { workspace = true }
+getrandom = { workspace = true, features = ["std"] }
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 getrandom = { workspace = true, features = ["js"] }
 

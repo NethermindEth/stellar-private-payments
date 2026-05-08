@@ -18,7 +18,7 @@
 //! The output directory is exposed as en environment variable
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::{Bn254, Fq, G1Affine, G2Affine};
 use ark_circom::{CircomBuilder, CircomConfig};
 use ark_ff::{BigInteger, PrimeField};
@@ -45,6 +45,52 @@ use type_analysis::check_types::check_types;
 
 const CURVE_ID: &str = "bn128";
 
+fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
+    let workspace_root = crate_dir.parent().unwrap_or(crate_dir);
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join("target"));
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    Ok(target_dir.join("circuits-artifacts").join(profile))
+}
+
+fn copy(src: &Path, dst: &Path) -> Result<()> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Could not create directory {}", parent.display()))?;
+    }
+
+    let tmp = dst.with_extension(format!("tmp-{}", std::process::id()));
+    fs::copy(src, &tmp)
+        .with_context(|| format!("Failed to copy {} to {}", src.display(), tmp.display()))?;
+
+    if dst.exists() {
+        let _ = fs::remove_file(dst);
+    }
+    fs::rename(&tmp, dst)
+        .with_context(|| format!("Failed to rename {} to {}", tmp.display(), dst.display()))?;
+    Ok(())
+}
+
+fn publish_circuit_artifacts(
+    publish_dir: &Path,
+    circuit_name: &str,
+    r1cs_file: &Path,
+    wasm_file: Option<&Path>,
+) -> Result<()> {
+    let r1cs_dst = publish_dir.join(format!("{circuit_name}.r1cs"));
+    copy(r1cs_file, &r1cs_dst)?;
+
+    if let Some(wasm_file) = wasm_file
+        && wasm_file.exists()
+    {
+        let wasm_dst = publish_dir.join(format!("{circuit_name}.wasm"));
+        copy(wasm_file, &wasm_dst)?;
+    }
+
+    Ok(())
+}
+
 fn main() -> Result<()> {
     println!(
         "cargo:warning=Circuits builder Copyright (C) 2025 Stellar Development Foundation. This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions."
@@ -56,6 +102,11 @@ fn main() -> Result<()> {
     // Put build artifacts under OUT_DIR/circuits
     let out_dir = PathBuf::from(env::var("OUT_DIR")?).join("circuits");
     fs::create_dir_all(&out_dir).context("Could not create OUT_DIR/circuits")?;
+
+    // Also publish artifacts to a deterministic directory under target/
+    let publish_dir = publish_dir_path(&crate_dir)?;
+    fs::create_dir_all(&publish_dir)
+        .with_context(|| format!("Could not create {}", publish_dir.display()))?;
 
     // Expose the path to your runtime/tests
     println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
@@ -164,6 +215,11 @@ fn main() -> Result<()> {
             .to_string_lossy()
             .to_string();
 
+        let wasm_path = out_dir
+            .join("wasm")
+            .join(format!("{circuit_name}_js"))
+            .join(format!("{circuit_name}.wasm"));
+
         if r1cs_file.exists() && sym_file.exists() {
             let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
             let sym_modified = fs::metadata(&sym_file)?.modified()?;
@@ -179,37 +235,39 @@ fn main() -> Result<()> {
                     circom_file.display()
                 );
 
-                // Still check if we need to generate keys for policy_tx_2_2
-                if circuit_name == "policy_tx_2_2" {
-                    // Check if WASM exists before attempting key generation
-                    let wasm_path = out_dir
-                        .join("wasm")
-                        .join(format!("{circuit_name}_js"))
-                        .join(format!("{circuit_name}.wasm"));
-
-                    if !wasm_path.exists() {
-                        // WASM doesn't exist but keys might be needed - force recompilation
+                // Keep deterministic publish directory updated even on "skip" builds.
+                if wasm_path.exists() {
+                    if let Err(e) = publish_circuit_artifacts(
+                        &publish_dir,
+                        &circuit_name,
+                        &r1cs_file,
+                        Some(&wasm_path),
+                    ) {
                         println!(
-                            "cargo:warning=WASM missing for {} - forcing recompilation to enable key generation",
-                            circuit_name
+                            "cargo:warning=Failed to publish artifacts for {circuit_name}: {e}"
                         );
-                        // Don't continue, let the compilation proceed
-                    } else {
-                        // WASM exists, try key generation
-                        match generate_keys_if_needed(
-                            &crate_dir,
-                            &out_dir,
-                            &circuit_name,
-                            &r1cs_file,
-                        ) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("cargo:warning=Key generation failed: {e}");
-                            }
-                        }
-                        continue;
                     }
                 } else {
+                    // WASM missing: fall through so we can regenerate it instead of silently
+                    // leaving the deterministic directory incomplete.
+                    println!(
+                        "cargo:warning=WASM missing for {} - recompiling to restore deterministic artifacts",
+                        circuit_name
+                    );
+                }
+
+                // Still check if we need to generate keys for policy_tx_2_2
+                if circuit_name == "policy_tx_2_2" && wasm_path.exists() {
+                    match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("cargo:warning=Key generation failed: {e}");
+                        }
+                    }
+                    continue;
+                }
+
+                if wasm_path.exists() {
                     continue;
                 }
             }
@@ -270,12 +328,25 @@ fn main() -> Result<()> {
             }
         };
 
+        if let Err(e) = publish_circuit_artifacts(
+            &publish_dir,
+            &circuit_name,
+            &r1cs_file,
+            if wasm_success {
+                Some(wasm_path.as_path())
+            } else {
+                None
+            },
+        ) {
+            println!("cargo:warning=Failed to publish artifacts for {circuit_name}: {e}");
+        }
+
         // === GROTH16 Proving/Verifying key generation ===
         // For now we only generate keys for the policy_tx_2_2 circuit.
         if circuit_name == "policy_tx_2_2" {
             if !wasm_success {
-                println!(
-                    "cargo:warning=Skipping key generation for {} - WASM compilation failed",
+                bail!(
+                    "Skipping key generation for {} - WASM compilation failed",
                     circuit_name
                 );
             } else {
@@ -742,7 +813,7 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
         produce_input_log: false,
         wat_flag: false,
         no_asm_flag: false,
-        constraint_assert_disabled_flag: false,
+        sanity_check_style: 0,
         debug_output: false,
     };
 
@@ -779,9 +850,7 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
     )
     .map_err(|_| anyhow!("write_wasm failed"))?;
 
-    if let Err(e) = wat_to_wasm(&wat_file, &wasm_file) {
-        println!("cargo:warning=WAT → WASM compilation failed: {e}");
-    }
+    wat_to_wasm(&wat_file, &wasm_file)?;
     Ok(())
 }
 
@@ -812,16 +881,38 @@ fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
         parser::{self, ParseBuffer},
     };
 
+    println!("cargo:warning= ===== wat_file {}...", wat_file.display());
+
     let wat_contents = fs::read_to_string(wat_file)
         .map_err(|e| anyhow!("read_to_string({}): {e}", wat_file.display()))?;
+
+    // Fix legacy instructions generated by circom
+    let wat_contents = wat_contents
+        .replace("get_local", "local.get")
+        .replace("set_local", "local.set")
+        .replace("tee_local", "local.tee")
+        .replace("get_global", "global.get")
+        .replace("set_global", "global.set")
+        // Conversion operators (The slash fix)
+        .replace("i32.wrap/i64", "i32.wrap_i64")
+        .replace("i64.extend_s/i32", "i64.extend_i32_s")
+        .replace("i64.extend_u/i32", "i64.extend_i32_u")
+        .replace("f32.convert_s/i32", "f32.convert_i32_s")
+        .replace("f64.convert_s/i32", "f64.convert_i32_s")
+        // Memory operators
+        .replace("grow_memory", "memory.grow")
+        .replace("current_memory", "memory.size");
 
     let buf =
         ParseBuffer::new(&wat_contents).map_err(|e| anyhow!("ParseBuffer::new failed: {e}"))?;
 
-    let mut wat = parser::parse::<Wat>(&buf).map_err(|e| anyhow!("WAT parse failed: {e}"))?;
+    let wat = parser::parse::<Wat>(&buf).map_err(|e| anyhow!("WAT parse failed: {e}"))?;
 
-    let wasm_bytes = wat
-        .module
+    let Wat::Module(mut module) = wat else {
+        bail!("WAT {wat_file:?} should be a module");
+    };
+
+    let wasm_bytes = module
         .encode()
         .map_err(|e| anyhow!("WASM encode failed: {e}"))?;
 

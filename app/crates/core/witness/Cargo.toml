@@ -12,7 +12,6 @@ anyhow = { workspace = true }
 
 # Arkworks
 ark-bn254 = { workspace = true }
-ark-circom = { git = "https://github.com/arkworks-rs/circom-compat.git", rev = "09e92d4c5887cec9ea558dc7e775a8ab3b02aafc", default-features = false }
 ark-ff = { workspace = true }
 ark-std = { workspace = true }
 getrandom = { workspace = true }
@@ -23,12 +22,14 @@ num-bigint = { workspace = true }
 # JSON parsing
 serde_json = { workspace = true, default-features = false, features = ["alloc", "std"] }
 
-# Wasmer for WASM runtime
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-wasmer = { workspace = true, features = ["default"] }
+ark-circom = { workspace = true, features = ["parallel"] }
+# see https://github.com/NethermindEth/stellar-private-payments/issues/192
+wasmer = { workspace = true, features = ["cranelift"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-wasmer = { workspace = true, features = ["js-default"] }
+ark-circom = { workspace = true }
+wasmer = { workspace = true, features = ["js", "js-default"] }
 
 [lints]
 workspace = true

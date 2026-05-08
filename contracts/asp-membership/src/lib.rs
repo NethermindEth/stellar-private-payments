@@ -43,6 +43,8 @@ pub enum Error {
     WrongLevels = 3,
     /// The contract has not been yet initialized
     NotInitialized = 4,
+    /// Arithmetic overflow occurred
+    Overflow = 5,
 }
 
 /// Event emitted when a new leaf is added to the Merkle tree
@@ -94,14 +96,14 @@ impl ASPMembership {
 
         // Initialize an empty tree with zero hashes at each level
         let zeros: Vec<U256> = get_zeroes(&env);
-        for lvl in 0..levels + 1 {
-            let zero_val = zeros.get(lvl).unwrap();
+        for lvl in 0..=levels {
+            let zero_val = zeros.get(lvl).ok_or(Error::NotInitialized)?;
             store.set(&DataKey::FilledSubtrees(lvl), &zero_val);
             store.set(&DataKey::Zeroes(lvl), &zero_val);
         }
 
         // Set initial root to the zero hash at the top level
-        let root_val = zeros.get(levels).unwrap();
+        let root_val = zeros.get(levels).ok_or(Error::NotInitialized)?;
         store.set(&DataKey::Root, &root_val);
 
         Ok(())
@@ -194,16 +196,18 @@ impl ASPMembership {
         let store = env.storage().persistent();
         let admin_only: bool = store.get(&DataKey::AdminInsertOnly).unwrap_or(true);
         if admin_only {
-            let admin: Address = store.get(&DataKey::Admin).unwrap();
+            let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
             admin.require_auth();
         }
 
-        let levels: u32 = store.get(&DataKey::Levels).unwrap();
-        let actual_index: u64 = store.get(&DataKey::NextIndex).unwrap();
+        let levels: u32 = store.get(&DataKey::Levels).ok_or(Error::NotInitialized)?;
+        let actual_index: u64 = store
+            .get(&DataKey::NextIndex)
+            .ok_or(Error::NotInitialized)?;
         let mut current_index = actual_index;
 
         // Check if tree is full (capacity is 2^levels leaves)
-        if current_index >= (1 << levels) {
+        if current_index >= 1u64.checked_shl(levels).ok_or(Error::MerkleTreeFull)? {
             return Err(Error::MerkleTreeFull);
         }
         let mut current_hash = leaf.clone();
@@ -213,12 +217,16 @@ impl ASPMembership {
             let is_right = current_index & 1 == 1;
             if is_right {
                 // Leaf is right child, get the stored left sibling
-                let left: U256 = store.get(&DataKey::FilledSubtrees(lvl)).unwrap();
+                let left: U256 = store
+                    .get(&DataKey::FilledSubtrees(lvl))
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, left, current_hash);
             } else {
                 // Leaf is left child, store it and pair with zero hash
                 store.set(&DataKey::FilledSubtrees(lvl), &current_hash);
-                let zero_val: U256 = store.get(&DataKey::Zeroes(lvl)).unwrap();
+                let zero_val: U256 = store
+                    .get(&DataKey::Zeroes(lvl))
+                    .ok_or(Error::NotInitialized)?;
                 current_hash = poseidon2_compress(&env, current_hash, zero_val);
             }
             current_index >>= 1;
@@ -236,7 +244,10 @@ impl ASPMembership {
         .publish(&env);
 
         // Update NextIndex
-        store.set(&DataKey::NextIndex, &(actual_index + 1));
+        store.set(
+            &DataKey::NextIndex,
+            &(actual_index.checked_add(1).ok_or(Error::Overflow)?),
+        );
         Ok(())
     }
 }

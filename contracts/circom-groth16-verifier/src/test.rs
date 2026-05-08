@@ -2,10 +2,7 @@ use super::*;
 use ark_bn254::{Bn254, Fr as ArkFr};
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
-use ark_relations::{
-    gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
-    lc,
-};
+use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
 use ark_std::rand::{SeedableRng, rngs::StdRng};
 use contract_types::PROOF_SIZE;
 use soroban_sdk::{Bytes, BytesN, Env, Vec};
@@ -31,11 +28,10 @@ impl<F: Field> ConstraintSynthesizer<F> for ElevenInputCircuit<F> {
 
         // Constrain a witness to equal the first public input: w * 1 = input_0
         let witness = cs.new_witness_variable(|| Ok(self.inputs[0]))?;
-        cs.enforce_r1cs_constraint(
-            || lc!() + witness,
-            || lc!() + Variable::One,
-            || lc!() + input_vars[0],
-        )?;
+        let a_lc = witness.into();
+        let b_lc = Variable::One.into();
+        let c_lc = input_vars[0].into();
+        cs.enforce_r1cs_constraint(|| a_lc, || b_lc, || c_lc)?;
         Ok(())
     }
 }
@@ -44,11 +40,11 @@ fn seeded_rng() -> StdRng {
     StdRng::seed_from_u64(7)
 }
 
-fn fr_from_ark(env: &Env, value: ArkFr) -> Fr {
+fn fr_from_ark(env: &Env, value: ArkFr) -> Bn254Fr {
     let bytes = value.into_bigint().to_bytes_be();
     let mut buf = [0u8; 32];
     buf.copy_from_slice(&bytes);
-    Fr::from_bytes(BytesN::from_array(env, &buf))
+    Bn254Fr::from_bytes(BytesN::from_array(env, &buf))
 }
 
 fn groth16_proof_from_ark(env: &Env, proof: &Proof<Bn254>) -> Groth16Proof {
@@ -67,7 +63,14 @@ fn serialize_proof(env: &Env, proof: &Groth16Proof) -> Bytes {
     data
 }
 
-fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr; 11]) {
+fn build_test(
+    env: &Env,
+) -> (
+    VerificationKeyBytes,
+    Groth16Proof,
+    Vec<Bn254Fr>,
+    [ArkFr; 11],
+) {
     let mut rng = seeded_rng();
     let inputs = [ArkFr::from(33u64); 11];
     let circuit = ElevenInputCircuit { inputs };
@@ -77,7 +80,7 @@ fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr
     let proof = Groth16::<Bn254>::create_random_proof_with_reduction(circuit, &params, &mut rng)
         .expect("proof failed");
 
-    let mut public_inputs: Vec<Fr> = Vec::new(env);
+    let mut public_inputs: Vec<Bn254Fr> = Vec::new(env);
     for value in inputs {
         public_inputs.push_back(fr_from_ark(env, value));
     }
@@ -136,7 +139,7 @@ fn rejects_wrong_public_input_length() {
     let client = CircomGroth16VerifierClient::new(&env, &contract_id);
 
     // Provide too few public inputs (length 5 instead of 11)
-    let mut short_inputs: Vec<Fr> = Vec::new(&env);
+    let mut short_inputs: Vec<Bn254Fr> = Vec::new(&env);
     for value in inputs.iter().take(5) {
         short_inputs.push_back(fr_from_ark(&env, *value));
     }

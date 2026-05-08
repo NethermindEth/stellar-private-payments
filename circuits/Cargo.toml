@@ -38,25 +38,31 @@ num-integer = { workspace = true, optional = true }
 # Core dependencies (no_std compatible)
 zkhash = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+ark-circom = { workspace = true, features = ["parallel"], optional = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+ark-circom = { workspace = true, optional = true }
+
 [build-dependencies]
 anyhow = { workspace = true }
 ark-bn254 = { workspace = true }
-ark-circom = { workspace = true, default-features = false }
+ark-circom = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
-ark-serialize = "0.5.0"
+ark-serialize = "0.6.0"
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
-compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
-constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
-constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
+constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
+constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 num-bigint = { workspace = true }
-parser = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
-program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
+parser = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
+program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 regex = "1"
 serde_json = "1.0"
-type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.2" }
-wast = "39.0.0"
+type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
+wast = "248.0.0"
 
 [lints]
 workspace = true

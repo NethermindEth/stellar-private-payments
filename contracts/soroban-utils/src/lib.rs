@@ -1,5 +1,4 @@
 #![no_std]
-
 //! Shared utilities for Soroban contracts
 //!
 //! This crate provides common functions and constants that can be reused
