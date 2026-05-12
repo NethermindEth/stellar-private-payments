@@ -59,7 +59,7 @@ jobs:
         run: mdbook build docs/
 
       - name: Build API documentation
-        run: cargo doc --no-deps --workspace
+        run: cargo doc --no-deps --workspace --release
 
       - name: Combine outputs
         run: |
