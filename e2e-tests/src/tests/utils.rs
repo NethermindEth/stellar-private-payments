@@ -15,7 +15,7 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::PoolContract;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256, Vec as SorobanVec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, U256, contract, contractimpl,
     crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
