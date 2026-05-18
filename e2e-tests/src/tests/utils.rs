@@ -15,7 +15,7 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::PoolContract;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256, Vec, contract, contractimpl,
+    Address, Bytes, BytesN, Env, U256, Vec as SorobanVec, contract, contractimpl,
     crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
@@ -35,7 +35,7 @@ impl MockVerifier {
     pub fn verify(
         _env: Env,
         _proof: Groth16Proof,
-        _public_inputs: Vec<Bn254Fr>,
+        _public_inputs: SorobanVec<Bn254Fr>,
     ) -> Result<bool, Groth16Error> {
         Ok(true)
     }
