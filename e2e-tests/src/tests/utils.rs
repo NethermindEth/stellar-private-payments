@@ -35,7 +35,7 @@ impl MockVerifier {
     pub fn verify(
         _env: Env,
         _proof: Groth16Proof,
-        _public_inputs: SorobanVec<Bn254Fr>,
+        _public_inputs: soroban_sdk::Vec<Bn254Fr>,
     ) -> Result<bool, Groth16Error> {
         Ok(true)
     }
