@@ -4,7 +4,7 @@ use crate::{
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof, VerificationKeyBytes};
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -75,24 +75,6 @@ fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     }
 }
 
-fn dummy_vk_bytes(env: &Env) -> VerificationKeyBytes {
-    let alpha = BytesN::from_array(env, &[0u8; 64]);
-    let beta = BytesN::from_array(env, &[0u8; 128]);
-    let gamma = BytesN::from_array(env, &[0u8; 128]);
-    let delta = BytesN::from_array(env, &[0u8; 128]);
-    let mut ic = Vec::new(env);
-    for _ in 0..12 {
-        ic.push_back(BytesN::from_array(env, &[0u8; 64]));
-    }
-    VerificationKeyBytes {
-        alpha,
-        beta,
-        gamma,
-        delta,
-        ic,
-    }
-}
-
 /// Helper struct to hold all test setup
 struct TestSetup {
     admin: Address,
@@ -118,7 +100,7 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &asp_non_membership_address);
 
     // Register CircomGroth16Verifier contract
-    let verifier_address = env.register(CircomGroth16Verifier, (dummy_vk_bytes(env),));
+    let verifier_address = env.register(CircomGroth16Verifier, ());
 
     TestSetup {
         admin,

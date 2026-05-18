@@ -1,11 +1,9 @@
 //! Utility functions and types for end-to-end tests
 
 use anyhow::Result;
-use ark_bn254::Bn254;
-use ark_groth16::VerifyingKey;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
-use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
+use circom_groth16_verifier::{Groth16Error, Groth16Proof};
 use circuits::test::utils::{
     circom_tester::{CircomResult, SignalKey, load_keys, prove_and_verify_with_keys},
     general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
@@ -17,14 +15,31 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::PoolContract;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256,
-    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    Address, Bytes, BytesN, Env, U256, Vec, contract, contractimpl,
+    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
-use soroban_utils::{
-    g1_bytes_from_ark, g2_bytes_from_ark,
-    utils::{MockToken, vk_bytes_from_ark},
-};
+
+use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
+
+/// Mock verifier contract for testing — always approves any proof.
+///
+/// The ZK proof verification logic is covered by the circom-groth16-verifier
+/// unit tests; e2e pool tests only need to exercise the pool's transaction
+/// flow, so a verifier that unconditionally returns `Ok(true)` is sufficient.
+#[contract]
+struct MockVerifier;
+
+#[contractimpl]
+impl MockVerifier {
+    pub fn verify(
+        _env: Env,
+        _proof: Groth16Proof,
+        _public_inputs: Vec<Bn254Fr>,
+    ) -> Result<bool, Groth16Error> {
+        Ok(true)
+    }
+}
 use zkhash::{
     ark_ff::{BigInteger, PrimeField, Zero},
     fields::bn256::FpBN256 as Scalar,
@@ -80,13 +95,12 @@ pub struct DeployedContracts {
 /// # Returns
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
-pub fn deploy_contracts(env: &Env, vk: &VerifyingKey<Bn254>) -> DeployedContracts {
+pub fn deploy_contracts(env: &Env) -> DeployedContracts {
     let admin = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
 
-    let vk_bytes = vk_bytes_from_ark(env, vk);
-    let verifier_address = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
+    let verifier_address = env.register(MockVerifier, ());
 
     let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
 

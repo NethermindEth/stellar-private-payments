@@ -892,6 +892,8 @@ dependencies = [
  "ark-relations",
  "ark-std 0.6.0",
  "contract-types",
+ "num-bigint",
+ "serde_json",
  "soroban-sdk",
  "soroban-utils",
 ]

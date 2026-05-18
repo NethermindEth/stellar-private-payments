@@ -159,14 +159,14 @@ fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
     out
 }
 
-fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
+pub fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
     out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
     out
 }
 
-fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
+pub fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
     out[32..64].copy_from_slice(&bigint_to_be_32(p.x.c0.into_bigint()));

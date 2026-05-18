@@ -27,8 +27,8 @@ Options:
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
-  --vk-json JSON        VerificationKeyBytes JSON for circom verifier constructor
-  --vk-file PATH        JSON file containing VerificationKeyBytes
+  --vk-json JSON        Verification key as a JSON string (snarkjs or repo format)
+  --vk-file PATH        Path to a verification key JSON file
   --skip-init           Deploy only, do not call constructors
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
@@ -36,17 +36,16 @@ Options:
 Examples:
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
+    --vk-file ceremony/verification_key.json \
     --token CB... \
     --asp-levels 8 \
     --pool-levels 8 \
-    --max-deposit 1000000000 \
-    --vk-file ./vk.json
+    --max-deposit 1000000000
 
 Notes:
-  - VerificationKeyBytes must match the contract type:
-    {"alpha":"...","beta":"...","gamma":"...","delta":"...","ic":["..."]}
-  - Use --vk-json to pass the JSON inline or --vk-file to read it from disk.
-  - snarkjs-style vk.json files are converted automatically.
+  - Provide --vk-file or --vk-json to embed the verification key and build the
+    verifier contract automatically.  Omit both only if the verifier WASM was
+    already built via scripts/build-verifier-with-vk.sh.
   - If --token is omitted, defaults to the Soroban native XLM contract for the selected network.
   - Deployment output is written to deployments/<network>/deployments.json.
 USAGE
@@ -104,37 +103,6 @@ if [[ -n "$VK_JSON" && -n "$VK_FILE" ]]; then
   die "use only one of --vk-json or --vk-file"
 fi
 
-if [[ "$SKIP_INIT" != "true" ]]; then
-  if [[ -n "$VK_FILE" ]]; then
-    [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
-    VK_JSON="$(tr -d '\n' < "$VK_FILE")"
-  fi
-  [[ -n "$VK_JSON" ]] || die "verification key required (use --vk-json or --vk-file)"
-  if [[ "$VK_JSON" == *"vk_alpha_1"* ]]; then
-    need python3
-    VK_JSON="$(python3 -c 'import json,sys
-data = json.load(sys.stdin)
-def to_hex32(v):
-    n = int(v)
-    return n.to_bytes(32, "big").hex()
-def g1_bytes(pt):
-    return to_hex32(pt[0]) + to_hex32(pt[1])
-def g2_bytes(pt):
-    # snarkjs format uses [real, imag] for Fq2 components.
-    x_re, x_im = pt[0]
-    y_re, y_im = pt[1]
-    return to_hex32(x_im) + to_hex32(x_re) + to_hex32(y_im) + to_hex32(y_re)
-out = {
-    "alpha": g1_bytes(data["vk_alpha_1"]),
-    "beta": g2_bytes(data["vk_beta_2"]),
-    "gamma": g2_bytes(data["vk_gamma_2"]),
-    "delta": g2_bytes(data["vk_delta_2"]),
-    "ic": [g1_bytes(p) for p in data["IC"]],
-}
-print(json.dumps(out, separators=(",", ":")))' <<<"$VK_JSON")"
-  fi
-fi
-
 if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
   die "mainnet requires --yes"
 fi
@@ -175,10 +143,24 @@ DEPLOYMENT_LEDGER="$(get_latest_ledger_seq)"
 
 step "build contracts"
 mkdir -p "$WASM_DIR"
-for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+for pkg in asp-membership asp-non-membership pool; do
   stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
     --package "$pkg" >/dev/null
 done
+
+if [[ -n "$VK_FILE" || -n "$VK_JSON" ]]; then
+  if [[ -n "$VK_FILE" ]]; then
+    [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
+    "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" "$VK_FILE" --out-dir "$WASM_DIR"
+  else
+    TMP_VK="$(mktemp --suffix=.json)"
+    printf '%s' "$VK_JSON" > "$TMP_VK"
+    "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" "$TMP_VK" --out-dir "$WASM_DIR"
+    rm -f "$TMP_VK"
+  fi
+fi
+# If neither --vk-json nor --vk-file was given, the verifier WASM must already
+# exist in WASM_DIR (pre-built via scripts/build-verifier-with-vk.sh).
 
 ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
 ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
@@ -221,11 +203,8 @@ else
 fi
 
 step "deploy circom-groth16-verifier"
-if [[ "$SKIP_INIT" != "true" ]]; then
-  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM" --vk "$VK_JSON")"
-else
-  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
-fi
+# The VK is embedded in the WASM at compile time; no constructor arguments needed.
+VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
 
 step "deploy pool"
 if [[ "$SKIP_INIT" != "true" ]]; then

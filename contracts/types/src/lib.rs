@@ -16,8 +16,6 @@ pub enum Groth16Error {
     MalformedPublicInputs = 1,
     /// The proof bytes are malformed.
     MalformedProof = 2,
-    /// The contract was not initialized
-    NotInitialized = 3,
 }
 
 /// Groth16 verification key for BN254 curve (byte-oriented).
