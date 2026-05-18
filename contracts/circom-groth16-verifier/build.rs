@@ -52,9 +52,10 @@ fn g1_bytes(pt: &Value) -> [u8; 64] {
 
 /// Encode a snarkjs G2 point `[[x_c0, x_c1], [y_c0, y_c1], ...]` as 128 bytes.
 ///
-/// This repo's snarkjs JSON format (produced by `circuit_keys::vk_to_snarkjs_json`)
-/// stores Fq2 components as `[real, imaginary]` (c0 before c1).
-/// `circuit_keys::fq2_from_decimals` expects `(c0, c1)`, matching this order directly.
+/// This repo's snarkjs JSON format (produced by
+/// `circuit_keys::vk_to_snarkjs_json`) stores Fq2 components as `[real,
+/// imaginary]` (c0 before c1). `circuit_keys::fq2_from_decimals` expects `(c0,
+/// c1)`, matching this order directly.
 fn g2_bytes(pt: &Value) -> [u8; 128] {
     let arr = pt.as_array().expect("G2 point must be a JSON array");
     let x = arr[0].as_array().expect("G2.x must be a JSON array");
