@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{Inputs, generate_keys, prove_and_verify_with_keys},
+        circom_tester::{CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys},
         general::{load_artifacts, scalar_to_bigint},
         keypair::derive_public_key,
         merkle_tree::{merkle_proof, merkle_root},
@@ -9,7 +9,30 @@ mod tests {
     };
     use anyhow::{Context, Result};
     use num_bigint::BigInt;
+    use std::{
+        panic::{self, AssertUnwindSafe},
+        path::Path,
+    };
     use zkhash::fields::bn256::FpBN256 as Scalar;
+
+    /// Returns `true` when the prover produced a verifying proof for the given
+    /// inputs. Any other outcome (a returned `Err`, a `verified == false`
+    /// result, or a panic from the WASM witness calculator) counts as a
+    /// rejection and yields `false`, so negative tests can assert on this
+    /// uniformly regardless of which layer trips first.
+    /// This is needed because `arkworks` and `wasmer` might panic or return
+    /// depending on in which layer the error is found.
+    fn proof_verifies(
+        wasm: impl AsRef<Path>,
+        r1cs: impl AsRef<Path>,
+        inputs: &Inputs,
+        keys: &CircuitKeys,
+    ) -> bool {
+        let outcome = panic::catch_unwind(AssertUnwindSafe(|| {
+            prove_and_verify_with_keys(wasm.as_ref(), r1cs.as_ref(), inputs, keys)
+        }));
+        matches!(outcome, Ok(Ok(ref res)) if res.verified)
+    }
 
     const LEVELS: usize = 10;
     const EXT_CONTEXT_HASH: u64 = 0xC0FFEE_u64;
@@ -35,7 +58,10 @@ mod tests {
 
         let root = merkle_root(frozen.clone());
         let (siblings, path_idx_u64, depth) = merkle_proof(&frozen, note.leaf_index);
-        assert_eq!(depth, LEVELS, "unexpected Merkle depth: expected {LEVELS}, got {depth}");
+        assert_eq!(
+            depth, LEVELS,
+            "unexpected Merkle depth: expected {LEVELS}, got {depth}"
+        );
 
         let path_elements: Vec<BigInt> = siblings.into_iter().map(scalar_to_bigint).collect();
 
@@ -67,8 +93,8 @@ mod tests {
     #[test]
     #[ignore]
     fn test_selective_disclosure_valid_note() -> Result<()> {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(7);
@@ -82,10 +108,9 @@ mod tests {
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_private_key_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(14);
@@ -94,15 +119,17 @@ mod tests {
             build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
         inputs.set("inPrivateKey", vec![Scalar::from(9999u64)]);
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong private key case unexpectedly verified; expected rejection"
+        );
     }
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_amount_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(18);
@@ -111,15 +138,17 @@ mod tests {
             build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
         inputs.set("inAmount", vec![Scalar::from(9999u64)]);
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong amount case unexpectedly verified; expected rejection"
+        );
     }
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_blinding_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(25);
@@ -128,15 +157,17 @@ mod tests {
             build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
         inputs.set("inBlinding", vec![Scalar::from(8888u64)]);
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong blinding case unexpectedly verified; expected rejection"
+        );
     }
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_path_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(21);
@@ -146,15 +177,17 @@ mod tests {
         let zeros: Vec<BigInt> = (0..LEVELS).map(|_| BigInt::from(0u32)).collect();
         inputs.set("inPathElements", zeros);
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong Merkle path case unexpectedly verified; expected rejection"
+        );
     }
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_root_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(28);
@@ -163,15 +196,17 @@ mod tests {
             build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
         inputs.set("roots", vec![scalar_to_bigint(Scalar::from(12345u64))]);
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong root case unexpectedly verified; expected rejection"
+        );
     }
 
     #[test]
     #[ignore]
-    #[should_panic]
     fn test_selective_disclosure_wrong_note_commitment_fails() {
-        let (wasm, r1cs) =
-            load_artifacts("selectiveDisclosure_1").expect("Cannot find selectiveDisclosure_1 artifacts");
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(35);
@@ -183,7 +218,9 @@ mod tests {
             vec![scalar_to_bigint(Scalar::from(99999u64))],
         );
 
-        prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys).unwrap();
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong note commitment case unexpectedly verified; expected rejection"
+        );
     }
-
 }
