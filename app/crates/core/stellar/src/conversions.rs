@@ -31,7 +31,7 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
     }
 }
 
-/// Helper to convert ScVal Bytes to a Vec<u8>
+/// Helper to convert ScVal Bytes to a `Vec<u8>`
 pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
     if let xdr::ScVal::Bytes(sc_bytes) = val {
         Ok(sc_bytes.0.to_vec())
