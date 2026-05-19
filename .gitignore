@@ -45,7 +45,6 @@ app/e2e/playwright-report/
 
 # Testdata
 testdata/*
-!testdata/policy_tx_2_2_vk.json
 
 # mdBook
 docs/book/

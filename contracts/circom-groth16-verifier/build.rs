@@ -26,16 +26,12 @@ fn main() {
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR not set"));
 
-    let content = match env::var("VERIFIER_VK_JSON") {
-        Ok(path) => {
-            let path = PathBuf::from(&path);
-            println!("cargo:rerun-if-changed={}", path.display());
-            let json = fs::read_to_string(&path)
-                .unwrap_or_else(|e| panic!("failed to read VK file `{}`: {e}", path.display()));
-            vk_rs_from_json(&json)
-        }
-        Err(_) => placeholder_vk_rs(),
-    };
+    let path = env::var("VERIFIER_VK_JSON").expect("VERIFIER_VK_JSON not set");
+    let path = PathBuf::from(&path);
+    println!("cargo:rerun-if-changed={}", path.display());
+    let json = fs::read_to_string(&path)
+        .unwrap_or_else(|e| panic!("failed to read VK file `{}`: {e}", path.display()));
+    let content = vk_rs_from_json(&json);
 
     fs::write(out_dir.join("vk.rs"), content).expect("failed to write vk.rs");
 }
@@ -116,28 +112,5 @@ fn vk_rs_from_json(json: &str) -> String {
         ic_items.join(",")
     )
     .expect("infallible write to String");
-    out
-}
-
-/// Zero-filled placeholder emitted when `VERIFIER_VK_JSON` is not set.
-///
-/// Allows `cargo check` and direct `verify_with_vk` unit tests to compile
-/// without a real ceremony output.  A contract built from this placeholder
-/// will always return `Groth16Error::MalformedPublicInputs` because `IC` is
-/// empty.
-fn placeholder_vk_rs() -> String {
-    let mut out = String::new();
-    writeln!(
-        out,
-        "// Placeholder VK (zeroed). Set VERIFIER_VK_JSON to embed a real key."
-    )
-    .expect("infallible write to String");
-    writeln!(out, "const VK_ALPHA_G1: [u8; 64] = [0u8; 64];").expect("infallible write to String");
-    writeln!(out, "const VK_BETA_G2: [u8; 128] = [0u8; 128];").expect("infallible write to String");
-    writeln!(out, "const VK_GAMMA_G2: [u8; 128] = [0u8; 128];")
-        .expect("infallible write to String");
-    writeln!(out, "const VK_DELTA_G2: [u8; 128] = [0u8; 128];")
-        .expect("infallible write to String");
-    writeln!(out, "const VK_IC: [[u8; 64]; 0] = [];").expect("infallible write to String");
     out
 }
