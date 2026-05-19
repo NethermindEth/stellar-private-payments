@@ -3,7 +3,7 @@
 use anyhow::Result;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
-use circom_groth16_verifier::{Groth16Error, Groth16Proof};
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use circuits::test::utils::{
     circom_tester::{CircomResult, SignalKey, load_keys, prove_and_verify_with_keys},
     general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
@@ -15,31 +15,13 @@ use circuits::test::utils::{
 use num_bigint::{BigInt, BigUint};
 use pool::PoolContract;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, U256, contract, contractimpl,
-    crypto::bn254::{Bn254Fr, Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
+    Address, Bytes, BytesN, Env, U256,
+    crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
 
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
 
-/// Mock verifier contract for testing — always approves any proof.
-///
-/// The ZK proof verification logic is covered by the circom-groth16-verifier
-/// unit tests; e2e pool tests only need to exercise the pool's transaction
-/// flow, so a verifier that unconditionally returns `Ok(true)` is sufficient.
-#[contract]
-struct MockVerifier;
-
-#[contractimpl]
-impl MockVerifier {
-    pub fn verify(
-        _env: Env,
-        _proof: Groth16Proof,
-        _public_inputs: soroban_sdk::Vec<Bn254Fr>,
-    ) -> Result<bool, Groth16Error> {
-        Ok(true)
-    }
-}
 use zkhash::{
     ark_ff::{BigInteger, PrimeField, Zero},
     fields::bn256::FpBN256 as Scalar,
@@ -84,13 +66,12 @@ pub struct DeployedContracts {
 /// Deploy all contracts required for E2E testing
 ///
 /// Deploys and runs constructors for the Pool, ASP Membership, ASP
-/// Non-Membership, and Groth16 Verifier contracts with the provided
-/// verification key.
+/// Non-Membership, and Groth16 Verifier contracts.  The verifier uses the
+/// verification key embedded at compile time via `VERIFIER_VK_JSON`.
 ///
 /// # Arguments
 ///
 /// * `env` - The Soroban environment
-/// * `vk` - The Groth16 verification key for proof verification
 ///
 /// # Returns
 ///
@@ -100,7 +81,7 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
 
     let token_address = env.register(MockToken, ());
 
-    let verifier_address = env.register(MockVerifier, ());
+    let verifier_address = env.register(CircomGroth16Verifier, ());
 
     let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
 

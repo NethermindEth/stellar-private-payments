@@ -1,3 +1,10 @@
+# Set the test VK so `circom-groth16-verifier` embeds a real key during
+# `cargo test`. CI deployments can override this by exporting VERIFIER_VK_JSON
+# explicitly before building (the `force` flag is intentionally absent so the
+# env-var takes precedence when set).
+[env]
+VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_vk.json", relative = true }
+
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
 rustflags = [
