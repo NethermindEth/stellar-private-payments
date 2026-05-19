@@ -35,7 +35,7 @@ jobs:
         with:
           cache-targets: "true"
 
-      - name: Build circuit artifacts (required by web)
+      - name: Build circuit artifacts
         run: cargo build -p circuits
 
       - name: Check the wasm build
