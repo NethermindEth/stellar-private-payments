@@ -1,9 +1,11 @@
 mod amounts;
 mod chain_data;
+mod disclosure;
 mod ext_data;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
+pub use disclosure::*;
 pub use ext_data::*;
 
 use serde::{Deserialize, Serialize};
