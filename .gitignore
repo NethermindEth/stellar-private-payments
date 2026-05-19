@@ -53,5 +53,3 @@ docs/book/
 ceremony/
 *.ptau
 artifacts.zip
-flake.nix
-flake.lock
