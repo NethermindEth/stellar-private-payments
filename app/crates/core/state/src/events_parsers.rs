@@ -47,13 +47,13 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
     let ParsedContractEvent {
-        id, name, topics, ..
+        id, name, topics, contract_id, ..
     } = parsed;
     let nullifier_scval = topics
         .first()
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have a nullifier topic value"))?;
     let nullifier = Field::try_from_u256(scval_to_u256(nullifier_scval)?)?;
-    Ok(NewNullifierEvent { id, nullifier })
+    Ok(NewNullifierEvent { id, contract_id, nullifier })
 }
 
 // #[contractevent]
@@ -73,6 +73,7 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
         name,
         topics,
         values,
+        contract_id,
         ..
     } = parsed;
     let commitment_scval = topics
@@ -89,6 +90,7 @@ fn parse_new_commitment_event(parsed: ParsedContractEvent) -> Result<NewCommitme
     let encrypted_output = scval_to_bytes(encrypted_output_scval)?;
     Ok(NewCommitmentEvent {
         id,
+        contract_id,
         commitment,
         index,
         encrypted_output,
@@ -112,6 +114,7 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent>
         name,
         topics,
         values,
+        contract_id,
         ..
     } = parsed;
     let owner_scval = topics
@@ -128,6 +131,7 @@ fn parse_public_key_event(parsed: ParsedContractEvent) -> Result<PublicKeyEvent>
     let note_key = scval_to_bytes(note_key_scval)?.try_into()?;
     Ok(PublicKeyEvent {
         id,
+        contract_id,
         owner,
         encryption_key,
         note_key,

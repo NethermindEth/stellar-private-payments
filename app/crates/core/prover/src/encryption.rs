@@ -195,15 +195,15 @@ pub fn generate_random_blinding() -> Result<Field> {
 
 /// Encrypt output note data for on-chain storage.
 ///
-/// Plaintext format: `amount (8 bytes LE) || blinding (32 bytes)`.
+/// Plaintext format: `amount (16 bytes LE) || blinding (32 bytes)`.
 pub fn encrypt_output_note(
     recipient_pubkey: &EncryptionPublicKey,
-    amount_stroops: NoteAmount,
+    amount: NoteAmount,
     blinding: &Field,
 ) -> Result<Vec<u8>> {
-    let mut plaintext = [0u8; 40];
-    plaintext[..8].copy_from_slice(&amount_stroops.to_le_bytes());
-    plaintext[8..].copy_from_slice(&blinding.to_le_bytes());
+    let mut plaintext = [0u8; 48];
+    plaintext[..16].copy_from_slice(&amount.to_le_bytes());
+    plaintext[16..].copy_from_slice(&blinding.to_le_bytes());
     encrypt_note_data(recipient_pubkey.as_ref(), &plaintext)
 }
 
@@ -212,7 +212,7 @@ pub fn encrypt_output_note(
 /// Returns `Ok(None)` if the ciphertext is not addressed to the given private
 /// key.
 ///
-/// Expected plaintext format: `amount (8 bytes LE) || blinding (32 bytes LE)`.
+/// Expected plaintext format: `amount (16 bytes LE) || blinding (32 bytes LE)`.
 pub fn decrypt_output_note(
     recipient_privkey: &EncryptionPrivateKey,
     encrypted_output: &[u8],
@@ -221,19 +221,19 @@ pub fn decrypt_output_note(
     if plaintext.is_empty() {
         return Ok(None);
     }
-    if plaintext.len() != 40 {
+    if plaintext.len() != 48 {
         return Err(anyhow!(
-            "Decrypted plaintext must be 40 bytes, got {}",
+            "Decrypted plaintext must be 48 bytes, got {}",
             plaintext.len()
         ));
     }
 
-    let mut amount_le = [0u8; 8];
-    amount_le.copy_from_slice(&plaintext[..8]);
-    let amount = NoteAmount::from(u64::from_le_bytes(amount_le));
+    let mut amount_le = [0u8; 16];
+    amount_le.copy_from_slice(&plaintext[..16]);
+    let amount = NoteAmount::from(u128::from_le_bytes(amount_le));
 
     let mut blinding_le = [0u8; 32];
-    blinding_le.copy_from_slice(&plaintext[8..]);
+    blinding_le.copy_from_slice(&plaintext[16..]);
     let blinding = Field::try_from_le_bytes(blinding_le)?;
 
     Ok(Some((amount, blinding)))
@@ -253,7 +253,7 @@ pub fn decrypt_output_note(
 /// # Arguments
 /// * `recipient_pubkey_bytes` - Recipient's X25519 encryption public key (32
 ///   bytes)
-/// * `plaintext` - Note data: `[amount (8 bytes LE)] [blinding (32 bytes)]` =
+/// * `plaintext` - Note data: `[amount (16 bytes LE)] [blinding (32 bytes)]` =
 ///   40 bytes
 ///
 /// # Returns
@@ -262,7 +262,7 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
     if recipient_pubkey_bytes.len() != 32 {
         return Err(anyhow!("Recipient public key must be 32 bytes"));
     }
-    if plaintext.len() != 40 {
+    if plaintext.len() != 48 {
         return Err(anyhow!(
             "Plaintext must be 40 bytes (8 amount + 32 blinding)"
         ));
@@ -321,7 +321,7 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
 /// * `encrypted_data` - Encrypted data from on-chain event (112+ bytes)
 ///
 /// # Returns
-/// - Success: `[amount (8 bytes LE)] [blinding (32 bytes)]` = 40 bytes
+/// - Success: `[amount (16 bytes LE)] [blinding (32 bytes)]` = 48 bytes
 /// - Failure: Empty vec (note was not addressed to us)
 fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>> {
     if private_key_bytes.len() != 32 {
@@ -392,8 +392,8 @@ mod tests {
         let pub_key = recip_keys.public.as_ref();
         let priv_key = recip_keys.private.as_ref();
 
-        // 8 bytes amount + 32 bytes blinding = 40 bytes
-        let amount = [10u8; 8];
+        // 16 bytes amount + 32 bytes blinding = 48 bytes
+        let amount = [10u8; 16];
         let blinding = [20u8; 32];
         let mut plaintext = Vec::with_capacity(40);
         plaintext.extend_from_slice(&amount);
@@ -458,7 +458,7 @@ mod tests {
         let got = decrypt_output_note(&recip_keys.private, &encrypted)?
             .expect("should decrypt for recipient key");
 
-        assert_eq!(got.0.as_u64(), amount.as_u64());
+        assert_eq!(got.0.as_u128(), amount.as_u128());
         assert_eq!(got.1.to_le_bytes(), blinding.to_le_bytes());
         Ok(())
     }
