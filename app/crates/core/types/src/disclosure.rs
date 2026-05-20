@@ -234,7 +234,8 @@ mod tests {
             },
             context: DisclosureContext {
                 network: "testnet".to_string(),
-                pool_address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA".to_string(),
+                pool_address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .to_string(),
                 authority_label: "Authority XYZ".to_string(),
                 authority_identity_payload_hex: "0x617574686f72697479".to_string(),
                 purpose: "kyc-review".to_string(),

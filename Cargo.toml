@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "app/crates/core/prover",
+    "app/crates/core/disclosure",
     "app/crates/core/state",
     "app/crates/core/stellar",
     "app/crates/core/types",
@@ -54,6 +55,7 @@ num-integer = { version = "0.1.46", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
+disclosure = { path = "app/crates/core/disclosure" }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
