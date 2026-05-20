@@ -143,7 +143,7 @@ export const NotesTable = {
             case 'status':
                 return dir * ((a.spent ? 1 : 0) - (b.spent ? 1 : 0));
             default:
-                return (b.leafIndex ?? 0) - (a.leafIndex ?? 0);
+                return 0;
         }
     },
 
