@@ -8,7 +8,7 @@ import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { submitPublicKeyRegistration } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
-import { runOnboardingWizard } from './onboarding-wizard.js';
+import { isOnboardingCancelledError, runOnboardingWizard } from './onboarding-wizard.js';
 
 /**
  * Updates the disabled state of all submit buttons and disclaimers based on wallet connection.
@@ -72,7 +72,9 @@ export const Wallet = {
                 e.stopPropagation();
                 this.toggleDropdown();
             } else {
-                this.connect({ auto: false });
+                this.connect({ auto: false }).catch((err) => {
+                    if (!isOnboardingCancelledError(err)) console.error(err);
+                });
             }
         });
 
@@ -207,6 +209,10 @@ export const Wallet = {
             try {
                 await run();
             } catch (e) {
+                if (isOnboardingCancelledError(e)) {
+                    this.disconnect();
+                    return;
+                }
                 if (!auto) Toast.show(e?.message || 'Failed to connect wallet', 'error');
                 this.disconnect();
                 throw e;
@@ -317,7 +323,9 @@ export const Wallet = {
                     if (btn) btn.disabled = false;
                 }
             } catch (e) {
-                Toast.show(e?.message || 'Wallet changed; failed to re-onboard', 'error', 8000);
+                if (!isOnboardingCancelledError(e)) {
+                    Toast.show(e?.message || 'Wallet changed; failed to re-onboard', 'error', 8000);
+                }
                 this.disconnect();
             } finally {
                 const btn = document.getElementById('wallet-btn');
