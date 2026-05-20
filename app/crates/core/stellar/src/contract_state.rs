@@ -92,11 +92,11 @@ impl StateFetcher {
         &self.config
     }
 
-    pub async fn pool_contract_state(&self) -> Result<PoolInfo> {
+    pub async fn pool_contract_state(&self, pool_contract_id: &str) -> Result<PoolInfo> {
         let (pool_state, latest_ledger) = self
             .client
             .get_contract_data(
-                &self.config.pool,
+                pool_contract_id,
                 &[
                     "Admin",
                     "Token",
@@ -117,27 +117,27 @@ impl StateFetcher {
                 let (state, _root_ledger) = self
                     .client
                     .get_contract_data(
-                        &self.config.pool,
+                        pool_contract_id,
                         &[],
                         &[("Root", merkle_current_root_index)],
                     )
                     .await?;
                 (
                     Some(merkle_current_root_index),
-                    Some(scval_to_u256(get_state!(state, "Root", self.config.pool)?)?),
+                    Some(scval_to_u256(get_state!(state, "Root", pool_contract_id)?)?),
                 )
             } else {
                 (None, None)
             };
 
-        let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", self.config.pool)?)?;
+        let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", pool_contract_id)?)?;
         let merkle_capacity = 2u64.pow(merkle_levels);
         let merkle_next_index =
-            scval_to_u64(get_state!(pool_state, "NextIndex", self.config.pool)?)?;
+            scval_to_u64(get_state!(pool_state, "NextIndex", pool_contract_id)?)?;
         let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
             pool_state,
             "MaximumDepositAmount",
-            self.config.pool
+            pool_contract_id
         )?)?;
         let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
             maximum_deposit_amount_u256,
@@ -147,24 +147,24 @@ impl StateFetcher {
 
         let pool = PoolInfo {
             ledger: latest_ledger,
-            contract_id: self.config.pool.clone(),
+            contract_id: pool_contract_id.to_string(),
             contract_type: "Privacy Pool".to_string(),
-            admin: scval_to_address_string(get_state!(pool_state, "Admin", self.config.pool)?)?,
-            token: scval_to_address_string(get_state!(pool_state, "Token", self.config.pool)?)?,
+            admin: scval_to_address_string(get_state!(pool_state, "Admin", pool_contract_id)?)?,
+            token: scval_to_address_string(get_state!(pool_state, "Token", pool_contract_id)?)?,
             verifier: scval_to_address_string(get_state!(
                 pool_state,
                 "Verifier",
-                self.config.pool
+                pool_contract_id
             )?)?,
             aspmembership: scval_to_address_string(get_state!(
                 pool_state,
                 "ASPMembership",
-                self.config.pool
+                pool_contract_id
             )?)?,
             aspnonmembership: scval_to_address_string(get_state!(
                 pool_state,
                 "ASPNonMembership",
-                self.config.pool
+                pool_contract_id
             )?)?,
             merkle_levels,
             merkle_current_root_index,
@@ -483,20 +483,26 @@ impl StateFetcher {
     }
 
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
+        let pool_id = self
+            .config
+            .pools
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.pool_contract_id.as_str())
+            .ok_or_else(|| anyhow!("no enabled pools in deployments config"))?;
+
         let (pool, asp_membership, asp_non_membership) = try_join!(
-            self.pool_contract_state(),
+            self.pool_contract_state(pool_id),
             self.asp_membership_contract_state(),
             self.asp_nonmembership_contract_state(),
         )?;
 
-        let data = ContractsStateData {
-            network: "testnet".to_string(),
+        Ok(ContractsStateData {
+            network: self.config.network.clone(),
             pool,
             asp_membership,
             asp_non_membership,
-        };
-
-        Ok(data)
+        })
     }
 
     fn muxed_account_from_g(account: &str) -> Result<xdr::MuxedAccount> {

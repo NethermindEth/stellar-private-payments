@@ -1,3 +1,21 @@
+function formatBaseUnitsForDisplay(v) {
+    const decimals = (typeof TOKEN_DECIMALS === 'number') ? TOKEN_DECIMALS : 7;
+    const symbol = (typeof TOKEN_SYMBOL === 'string' && TOKEN_SYMBOL) ? TOKEN_SYMBOL : 'XLM';
+    try {
+        let bi = typeof v === 'bigint' ? v : BigInt(v || 0);
+        const neg = bi < 0n;
+        if (neg) bi = -bi;
+        const absStr = bi.toString().padStart(decimals + 1, '0');
+        const intPart = absStr.slice(0, -decimals);
+        const fracRaw = absStr.slice(-decimals);
+        const frac = fracRaw.replace(/0+$/, '');
+        const out = frac ? `${intPart}.${frac}` : intPart;
+        return `${neg ? '-' : ''}${out} ${symbol}`;
+    } catch {
+        return `0 ${symbol}`;
+    }
+}
+
 /**
  * Template Manager - handles DOM template cloning and population.
  * @module ui/templates
@@ -152,12 +170,11 @@ export const Templates = {
             
             if (note) {
                 // Convert stroops to XLM for display
-                const amountXLM = Number(note.amount) / 1e7;
-                valueDisplay.textContent = `${amountXLM} XLM`;
+                valueDisplay.textContent = formatBaseUnitsForDisplay(note.amount);
                 valueDisplay.classList.remove('text-dark-500');
                 valueDisplay.classList.add('text-brand-400');
             } else {
-                valueDisplay.textContent = '0 XLM';
+                valueDisplay.textContent = formatBaseUnitsForDisplay(0);
                 valueDisplay.classList.add('text-dark-500');
                 valueDisplay.classList.remove('text-brand-400', 'italic');
                 valueDisplay.title = '';
@@ -182,8 +199,7 @@ export const Templates = {
         
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
         // Note.amount is in stroops - convert to XLM for display
-        const amountXLM = Number(note.amount) / 1e7;
-        row.querySelector('.note-amount').textContent = `${amountXLM.toFixed(7).replace(/\.?0+$/, '')} XLM`;
+        row.querySelector('.note-amount').textContent = formatBaseUnitsForDisplay(note.amount);
         row.querySelector('.note-date').textContent = note.createdAtText || '';
         
         const badge = row.querySelector('.status-badge');

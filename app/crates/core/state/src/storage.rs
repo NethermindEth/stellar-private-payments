@@ -11,6 +11,7 @@ use types::{
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
 
+
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -61,8 +62,19 @@ impl Storage {
         Ok(Self { conn })
     }
 
-    pub fn save_events_batch(&mut self, data: &types::ContractsEventData) -> Result<()> {
+    pub fn save_events_batch(&mut self, contract_id: &str, data: &types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
+        tx.execute(
+            "INSERT INTO contracts (contract_id) VALUES (?1)
+             ON CONFLICT(contract_id) DO NOTHING",
+            params![contract_id],
+        )?;
+        tx.execute(
+            "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
+             VALUES (?1, NULL, 0)
+             ON CONFLICT(contract_id) DO NOTHING",
+            params![contract_id],
+        )?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
@@ -82,16 +94,16 @@ impl Storage {
 
             if data.events.is_empty() {
                 tx.execute(
-                    "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor, last_fully_indexed_ledger)
-                     VALUES (1, ?1, ?2)",
-                    params![data.cursor, data.latest_ledger],
+                    "INSERT OR REPLACE INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
+                     VALUES (?1, ?2, ?3)",
+                    params![contract_id, data.cursor, data.latest_ledger],
                 )?;
             } else {
                 tx.execute(
                     "UPDATE indexing_metadata
-                     SET last_cursor = ?1
-                     WHERE id = 1",
-                    params![data.cursor],
+                     SET last_cursor = ?2
+                     WHERE contract_id = ?1",
+                    params![contract_id, data.cursor],
                 )?;
             }
         }
@@ -105,19 +117,20 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
+    pub fn get_sync_metadata(&self, contract_id: &str) -> Result<Option<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
             "SELECT last_fully_indexed_ledger, last_cursor
              FROM indexing_metadata
-             WHERE id = 1",
+             WHERE contract_id = ?1",
         )?;
 
         let status = stmt
-            .query_row([], |row| {
+            .query_row(params![contract_id], |row| {
                 let ledger_i64: i64 = row.get(0)?;
                 let last_ledger = col_u32(ledger_i64, 0)?;
                 let cursor: Option<String> = row.get(1)?;
                 Ok(cursor.map(|cursor| types::SyncMetadata {
+                    contract_id: contract_id.to_string(),
                     last_ledger,
                     cursor,
                 }))
@@ -127,7 +140,7 @@ impl Storage {
 
         match status {
             Some(v) => Ok(v),
-            None => anyhow::bail!("indexing_metadata singleton row (id=1) is missing"),
+            None => Ok(None),
         }
     }
 
@@ -389,14 +402,15 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_pool_commitment_leaves_ordered(&self) -> Result<Vec<Field>> {
+    pub fn get_pool_commitment_leaves_ordered(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
             "SELECT leaf_index, commitment
              FROM pool_commitments
+             WHERE pool_contract_id = ?1
              ORDER BY leaf_index ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![pool_contract_id], |row| {
             let idx: i64 = row.get(0)?;
             let idx = col_u32(idx, 0)?;
             let commitment: Field = row.get(1)?;
@@ -429,6 +443,7 @@ impl Storage {
     /// Returns `(amount, blinding, leaf_index)` when found and unspent.
     pub fn get_unspent_user_note_by_commitment(
         &self,
+        pool_contract_id: &str,
         account_address: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
@@ -437,19 +452,18 @@ impl Storage {
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
-             WHERE a.address = ?1
-               AND c.commitment = ?2
+             WHERE a.address = ?2
+               AND c.pool_contract_id = ?1
+               AND c.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
         )?;
 
         let row = stmt
-            .query_row(params![account_address, commitment], |row| {
-                let amount_i64: i64 = row.get(0)?;
-                let amount_u64: u64 = amount_i64
-                    .try_into()
-                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, amount_i64))?;
-                let amount = NoteAmount::from(amount_u64);
+            .query_row(params![pool_contract_id, account_address, commitment], |row| {
+                let amount_s: String = row.get(0)?;
+                let amount: u128 = amount_s.parse().map_err(|_| rusqlite::Error::InvalidColumnType(0, "amount".into(), rusqlite::types::Type::Text))?;
+                let amount = NoteAmount::from(amount);
                 let blinding: Field = row.get(1)?;
                 let leaf_index_i64: i64 = row.get(2)?;
                 let leaf_index = col_u32(leaf_index_i64, 2)?;
@@ -466,13 +480,13 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_nullifiers (nullifier, event_id)
-                    VALUES (?1, ?2)
-                    ON CONFLICT(nullifier) DO NOTHING",
+                "INSERT INTO pool_nullifiers (pool_contract_id, nullifier, event_id)
+                    VALUES (?1, ?2, ?3)
+                    ON CONFLICT(pool_contract_id, nullifier) DO NOTHING",
             )?;
 
             for event in events {
-                stmt.execute(params![event.nullifier, event.id])?;
+                                stmt.execute(params![event.contract_id, event.nullifier, event.id])?;
             }
         }
         tx.commit()?;
@@ -484,13 +498,14 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id)
-                    VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(commitment) DO NOTHING",
+                "INSERT INTO pool_commitments (pool_contract_id, commitment, leaf_index, encrypted_output, event_id)
+                    VALUES (?1, ?2, ?3, ?4, ?5)
+                    ON CONFLICT(pool_contract_id, commitment) DO NOTHING",
             )?;
 
             for event in events {
                 stmt.execute(params![
+                    event.contract_id,
                     event.commitment,
                     event.index,
                     event.encrypted_output,
@@ -507,13 +522,14 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
-                    VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(owner) DO NOTHING",
+                "INSERT INTO public_keys (pool_contract_id, owner, encryption_key, note_key, event_id)
+                    VALUES (?1, ?2, ?3, ?4, ?5)
+                    ON CONFLICT(pool_contract_id, owner) DO NOTHING",
             )?;
 
             for event in events {
                 stmt.execute(params![
+                    event.contract_id,
                     event.owner,
                     event.encryption_key,
                     event.note_key,
@@ -564,13 +580,14 @@ impl Storage {
     ///   inconsistent at the same ledger (mismatched networks/corruption).
     pub fn check_asp_membership_precondition(
         &self,
+        asp_membership_contract_id: &str,
         user_leaf: &Field,
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
         // The indexer sync metadata is authoritative for "how far we've indexed", even
         // if there were no ASP events in recent ledgers.
-        let Some(sync_meta) = self.get_sync_metadata()? else {
+        let Some(sync_meta) = self.get_sync_metadata(asp_membership_contract_id)? else {
             return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
@@ -783,81 +800,221 @@ impl Storage {
             return Ok(false);
         }
 
-        let tx = self.conn.transaction()?;
+        // Scan each observed pool independently.
+        let pool_ids: Vec<String> = self
+            .conn
+            .prepare("SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<core::result::Result<Vec<String>, _>>()?;
 
-        // Ensure scheduler row exists.
-        tx.execute(
-            "INSERT OR IGNORE INTO notes_scan_scheduler (id, next_account_offset)
-             VALUES (1, 0)",
-            [],
-        )?;
-
-        let n = accounts.len();
-        let n_i64 = i64::try_from(n).expect("accounts len fits i64");
-        let mut offset: i64 = tx.query_row(
-            "SELECT next_account_offset FROM notes_scan_scheduler WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        offset = offset.rem_euclid(n_i64);
-        let offset_usize = usize::try_from(offset).expect("offset fits usize");
-
-        // Histogram allocation: `total_limit` tokens distributed in RR order from
-        // `offset`.
-        let mut counts: Vec<u32> = vec![0; n];
-        for i in 0..total_limit {
-            let i_usize = usize::try_from(i)
-                .map_err(|_| anyhow::anyhow!("scan limit exceeds platform usize"))?;
-            let idx = offset_usize.wrapping_add(i_usize).rem_euclid(n);
-            counts[idx] = counts[idx].saturating_add(1);
+        if pool_ids.is_empty() {
+            return Ok(false);
         }
 
-        // Ensure scan cursors exist for all accounts.
-        for a in &accounts {
+        let mut did_any_progress = false;
+
+        for pool_contract_id in pool_ids {
+            let tx = self.conn.transaction()?;
+
+            // Ensure scheduler row exists for this pool.
             tx.execute(
-                "INSERT OR IGNORE INTO account_commitment_scan (account_id, last_commitment_id)
+                "INSERT OR IGNORE INTO notes_scan_scheduler (pool_contract_id, next_account_offset)
                  VALUES (?1, 0)",
-                params![a.account_id],
+                params![pool_contract_id],
             )?;
+
+            let n = accounts.len();
+            let n_i64 = i64::try_from(n).expect("accounts len fits i64");
+            let mut offset: i64 = tx.query_row(
+                "SELECT next_account_offset FROM notes_scan_scheduler WHERE pool_contract_id = ?1",
+                params![pool_contract_id],
+                |row| row.get(0),
+            )?;
+            offset = offset.rem_euclid(n_i64);
+            let offset_usize = usize::try_from(offset).expect("offset fits usize");
+
+            // Histogram allocation: `total_limit` tokens distributed in RR order from `offset`.
+            let mut counts: Vec<u32> = vec![0; n];
+            for i in 0..total_limit {
+                let i_usize = usize::try_from(i)
+                    .map_err(|_| anyhow::anyhow!("scan limit exceeds platform usize"))?;
+                let idx = offset_usize.wrapping_add(i_usize).rem_euclid(n);
+                counts[idx] = counts[idx].saturating_add(1);
+            }
+
+            // Ensure scan cursors exist for all accounts for this pool.
+            for a in &accounts {
+                tx.execute(
+                    "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
+                     VALUES (?1, ?2, 0)",
+                    params![pool_contract_id, a.account_id],
+                )?;
+            }
+
+            let mut did_progress = false;
+
+            for (idx, quota) in counts.into_iter().enumerate() {
+                if quota == 0 {
+                    continue;
+                }
+                let account = &accounts[idx];
+
+                let last_commitment_id: i64 = tx.query_row(
+                    "SELECT last_commitment_id
+                     FROM account_commitment_scan
+                     WHERE pool_contract_id = ?1 AND account_id = ?2",
+                    params![pool_contract_id, account.account_id],
+                    |row| row.get(0),
+                )?;
+
+                let commitments: Vec<PoolCommitmentRow> = {
+                    let mut stmt = tx.prepare(
+                        "SELECT id, commitment, leaf_index, encrypted_output
+                         FROM pool_commitments
+                         WHERE pool_contract_id = ?1 AND id > ?2
+                         ORDER BY id ASC
+                         LIMIT ?3",
+                    )?;
+
+                    let rows = stmt.query_map(params![pool_contract_id, last_commitment_id, quota], |row| {
+                        let commitment_id: i64 = row.get(0)?;
+                        let commitment: Field = row.get(1)?;
+                        let leaf_index_i64: i64 = row.get(2)?;
+                        let leaf_index = col_u32(leaf_index_i64, 2)?;
+                        let encrypted_output: Vec<u8> = row.get(3)?;
+                        Ok(PoolCommitmentRow {
+                            commitment_id,
+                            commitment,
+                            leaf_index,
+                            encrypted_output,
+                        })
+                    })?;
+
+                    let mut out = Vec::new();
+                    for r in rows {
+                        out.push(r?);
+                    }
+                    out
+                };
+
+                let mut max_scanned_id = last_commitment_id;
+                for row in commitments {
+                    if row.commitment_id > max_scanned_id {
+                        max_scanned_id = row.commitment_id;
+                    }
+
+                    let Some(derived) = derive(account, &row)? else {
+                        continue;
+                    };
+
+                    let nullifier_id: Option<i64> = tx
+                        .query_row(
+                            "SELECT id FROM pool_nullifiers
+                             WHERE pool_contract_id = ?1 AND nullifier = ?2
+                             LIMIT 1",
+                            params![pool_contract_id, derived.expected_nullifier],
+                            |r| r.get(0),
+                        )
+                        .optional()?;
+
+                    tx.execute(
+                        "INSERT OR IGNORE INTO user_notes (
+                            id,
+                            account_id,
+                            commitment_id,
+                            nullifier_id,
+                            expected_nullifier,
+                            blinding,
+                            amount
+                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                        params![
+                            row.commitment,
+                            account.account_id,
+                            row.commitment_id,
+                            nullifier_id,
+                            derived.expected_nullifier,
+                            derived.blinding,
+                            derived.amount.as_u128().to_string()
+                        ],
+                    )?;
+                }
+
+                if max_scanned_id > last_commitment_id {
+                    tx.execute(
+                        "UPDATE account_commitment_scan
+                         SET last_commitment_id = ?1
+                         WHERE pool_contract_id = ?2 AND account_id = ?3",
+                        params![max_scanned_id, pool_contract_id, account.account_id],
+                    )?;
+                    did_progress = true;
+                }
+            }
+
+            // Advance scheduler offset to continue after the last assigned token.
+            let step = i64::from(total_limit).rem_euclid(n_i64);
+            let next_offset = offset.wrapping_add(step).rem_euclid(n_i64);
+            tx.execute(
+                "UPDATE notes_scan_scheduler
+                 SET next_account_offset = ?1
+                 WHERE pool_contract_id = ?2",
+                params![next_offset, pool_contract_id],
+            )?;
+
+            tx.commit()?;
+
+            did_any_progress |= did_progress;
         }
 
-        let mut did_progress = false;
+        Ok(did_any_progress)
+    }
 
-        for (idx, quota) in counts.into_iter().enumerate() {
-            if quota == 0 {
-                continue;
-            }
-            let account = &accounts[idx];
+    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
+        if limit == 0 {
+            return Ok(false);
+        }
 
-            let last_commitment_id: i64 = tx.query_row(
-                "SELECT last_commitment_id
-                 FROM account_commitment_scan
-                 WHERE account_id = ?1",
-                params![account.account_id],
+        // Reconcile per pool to avoid cross-asset note marking.
+        let pool_ids: Vec<String> = self
+            .conn
+            .prepare("SELECT DISTINCT pool_contract_id FROM pool_nullifiers ORDER BY pool_contract_id")?
+            .query_map([], |row| row.get(0))?
+            .collect::<core::result::Result<Vec<String>, _>>()?;
+
+        if pool_ids.is_empty() {
+            return Ok(false);
+        }
+
+        let mut did_any = false;
+
+        for pool_contract_id in pool_ids {
+            let tx = self.conn.transaction()?;
+
+            // Ensure scan-state row exists.
+            tx.execute(
+                "INSERT OR IGNORE INTO nullifier_scan_state (pool_contract_id, last_nullifier_id)
+                 VALUES (?1, 0)",
+                params![pool_contract_id],
+            )?;
+
+            let last_nullifier_id: i64 = tx.query_row(
+                "SELECT last_nullifier_id FROM nullifier_scan_state WHERE pool_contract_id = ?1",
+                params![pool_contract_id],
                 |row| row.get(0),
             )?;
 
-            let commitments: Vec<PoolCommitmentRow> = {
+            let nullifiers: Vec<(i64, Field)> = {
                 let mut stmt = tx.prepare(
-                    "SELECT id, commitment, leaf_index, encrypted_output
-                     FROM pool_commitments
-                     WHERE id > ?1
+                    "SELECT id, nullifier
+                     FROM pool_nullifiers
+                     WHERE pool_contract_id = ?1 AND id > ?2
                      ORDER BY id ASC
-                     LIMIT ?2",
+                     LIMIT ?3",
                 )?;
 
-                let rows = stmt.query_map(params![last_commitment_id, quota], |row| {
-                    let commitment_id: i64 = row.get(0)?;
-                    let commitment: Field = row.get(1)?;
-                    let leaf_index_i64: i64 = row.get(2)?;
-                    let leaf_index = col_u32(leaf_index_i64, 2)?;
-                    let encrypted_output: Vec<u8> = row.get(3)?;
-                    Ok(PoolCommitmentRow {
-                        commitment_id,
-                        commitment,
-                        leaf_index,
-                        encrypted_output,
-                    })
+                let rows = stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
+                    let id: i64 = row.get(0)?;
+                    let nullifier: Field = row.get(1)?;
+                    Ok((id, nullifier))
                 })?;
 
                 let mut out = Vec::new();
@@ -867,146 +1024,44 @@ impl Storage {
                 out
             };
 
-            let mut max_scanned_id = last_commitment_id;
-            for row in commitments {
-                if row.commitment_id > max_scanned_id {
-                    max_scanned_id = row.commitment_id;
+            let mut max_id = last_nullifier_id;
+
+            for (nullifier_id, nullifier) in nullifiers {
+                did_any = true;
+                if nullifier_id > max_id {
+                    max_id = nullifier_id;
                 }
 
-                let Some(derived) = derive(account, &row)? else {
-                    continue;
-                };
-
-                let nullifier_id: Option<i64> = tx
-                    .query_row(
-                        "SELECT id FROM pool_nullifiers WHERE nullifier = ?1 LIMIT 1",
-                        params![derived.expected_nullifier],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-
                 tx.execute(
-                    "INSERT OR IGNORE INTO user_notes (
-                        id,
-                        account_id,
-                        commitment_id,
-                        nullifier_id,
-                        expected_nullifier,
-                        blinding,
-                        amount
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        row.commitment,
-                        account.account_id,
-                        row.commitment_id,
-                        nullifier_id,
-                        derived.expected_nullifier,
-                        derived.blinding,
-                        derived.amount
-                    ],
+                    "UPDATE user_notes
+                     SET nullifier_id = ?1
+                     WHERE nullifier_id IS NULL
+                       AND expected_nullifier = ?2
+                       AND EXISTS (
+                           SELECT 1
+                           FROM pool_commitments c
+                           WHERE c.id = user_notes.commitment_id
+                             AND c.pool_contract_id = ?3
+                       )",
+                    params![nullifier_id, nullifier, pool_contract_id],
                 )?;
             }
 
-            if max_scanned_id > last_commitment_id {
+            if max_id > last_nullifier_id {
                 tx.execute(
-                    "UPDATE account_commitment_scan
-                     SET last_commitment_id = ?1
-                     WHERE account_id = ?2",
-                    params![max_scanned_id, account.account_id],
+                    "UPDATE nullifier_scan_state
+                     SET last_nullifier_id = ?1
+                     WHERE pool_contract_id = ?2",
+                    params![max_id, pool_contract_id],
                 )?;
-                did_progress = true;
-            }
-        }
-
-        // Advance scheduler offset to continue after the last assigned token.
-        let step = i64::from(total_limit).rem_euclid(n_i64);
-        let next_offset = offset.wrapping_add(step).rem_euclid(n_i64);
-        tx.execute(
-            "UPDATE notes_scan_scheduler
-             SET next_account_offset = ?1
-             WHERE id = 1",
-            params![next_offset],
-        )?;
-
-        // If there's remaining work for any account, keep the processing loop alive.
-        let has_pending: bool = tx
-            .query_row(
-                "SELECT 1
-                 FROM account_commitment_scan s
-                 WHERE EXISTS (SELECT 1 FROM keypairs k WHERE k.account_id = s.account_id)
-                   AND EXISTS (SELECT 1 FROM pool_commitments c WHERE c.id > s.last_commitment_id)
-                 LIMIT 1",
-                [],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-
-        tx.commit()?;
-        Ok(did_progress || has_pending)
-    }
-
-    /// Reconcile new pool nullifiers against `user_notes.expected_nullifier`,
-    /// updating `user_notes.nullifier_id` for matching notes.
-    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
-        let tx = self.conn.transaction()?;
-
-        let last_nullifier_id: i64 = tx.query_row(
-            "SELECT last_nullifier_id FROM nullifier_scan_state WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
-
-        let nullifiers: Vec<(i64, Field)> = {
-            let mut stmt = tx.prepare(
-                "SELECT id, nullifier
-                 FROM pool_nullifiers
-                 WHERE id > ?1
-                 ORDER BY id ASC
-                 LIMIT ?2",
-            )?;
-
-            let rows = stmt.query_map(params![last_nullifier_id, limit], |row| {
-                let id: i64 = row.get(0)?;
-                let nullifier: Field = row.get(1)?;
-                Ok((id, nullifier))
-            })?;
-
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r?);
-            }
-            out
-        };
-
-        let mut max_id = last_nullifier_id;
-        let mut did_any = false;
-
-        for (nullifier_id, nullifier) in nullifiers {
-            did_any = true;
-            if nullifier_id > max_id {
-                max_id = nullifier_id;
             }
 
-            tx.execute(
-                "UPDATE user_notes
-                 SET nullifier_id = ?1
-                 WHERE nullifier_id IS NULL
-                   AND expected_nullifier = ?2",
-                params![nullifier_id, nullifier],
-            )?;
+            tx.commit()?;
         }
 
-        if max_id > last_nullifier_id {
-            tx.execute(
-                "UPDATE nullifier_scan_state SET last_nullifier_id = ?1 WHERE id = 1",
-                params![max_id],
-            )?;
-        }
-
-        tx.commit()?;
         Ok(did_any)
     }
+
 }
 
 // ---------------------------------------------------------------------------
@@ -1052,7 +1107,7 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         let event_id = "pk_event_1";
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CPOOL", &ContractsEventData {
             cursor: "cursor".to_string(),
             latest_ledger: 42,
             events: vec![ContractEvent {
@@ -1065,6 +1120,7 @@ mod tests {
         })?;
 
         storage.save_public_key_events_batch(&vec![PublicKeyEvent {
+            contract_id: "CPOOL".to_string(),
             id: event_id.to_string(),
             owner: "GTESTOWNER".to_string(),
             encryption_key: EncryptionPublicKey([1u8; 32]),
@@ -1116,12 +1172,13 @@ mod tests {
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
         // Insert the raw event + the parsed pool commitment row.
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CPOOL", &ContractsEventData {
             events: vec![dummy_event("evt-commit")],
             cursor: "cur".to_string(),
             latest_ledger: 1,
         })?;
         storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            contract_id: "CPOOL".to_string(),
             id: "evt-commit".to_string(),
             commitment,
             index: 3,
@@ -1176,12 +1233,13 @@ mod tests {
         })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CPOOL", &ContractsEventData {
             events: vec![dummy_event("evt-null")],
             cursor: "cur2".to_string(),
             latest_ledger: 1,
         })?;
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
+            contract_id: "CPOOL".to_string(),
             id: "evt-null".to_string(),
             nullifier,
         }])?;
@@ -1204,27 +1262,27 @@ mod tests {
 
         // Non-empty batch should update the cursor but not advance the "fully indexed"
         // ledger.
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CPOOL", &ContractsEventData {
             cursor: "c1".to_string(),
             latest_ledger: 10,
             events: vec![dummy_event("evt-1")],
         })?;
 
         let meta = storage
-            .get_sync_metadata()?
+             .get_sync_metadata("CPOOL")?
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c1");
         assert_eq!(meta.last_ledger, 0);
 
         // Empty batch is the "caught up" proof and advances last_fully_indexed_ledger.
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CPOOL", &ContractsEventData {
             cursor: "c2".to_string(),
             latest_ledger: 123,
             events: vec![],
         })?;
 
         let meta = storage
-            .get_sync_metadata()?
+             .get_sync_metadata("CPOOL")?
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c2");
         assert_eq!(meta.last_ledger, 123);
@@ -1307,7 +1365,7 @@ mod tests {
         let current_ledger = 12u32;
 
         // Ingest raw events (including a newer ASP event)...
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: 11,
             events: vec![
@@ -1338,13 +1396,13 @@ mod tests {
 
         // Mark the indexer as fully caught up to the chain tip (even though
         // event processing is behind).
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
         })?;
 
-        let status = storage.check_asp_membership_precondition(&leaf, &root_new, current_ledger)?;
+        let status = storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
         assert!(matches!(
             status,
             AspMembershipSync::SyncRequired(Some(gap)) if gap == current_ledger - last_leaf_ledger
@@ -1370,7 +1428,7 @@ mod tests {
 
         let current_ledger = 10u32;
 
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: current_ledger,
             events: vec![ContractEvent {
@@ -1389,14 +1447,14 @@ mod tests {
             root: root_old,
         }])?;
 
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
         })?;
 
         let err = storage
-            .check_asp_membership_precondition(&leaf, &root_new, current_ledger)
+            .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
             .expect_err("root mismatch at same ledger should be an error");
         assert!(err.to_string().contains("asp membership root mismatch"));
         Ok(())
@@ -1417,7 +1475,7 @@ mod tests {
         let last_leaf_ledger = 10u32;
         let current_ledger = 12u32;
 
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: last_leaf_ledger,
             events: vec![ContractEvent {
@@ -1436,7 +1494,7 @@ mod tests {
             root,
         }])?;
 
-        storage.save_events_batch(&ContractsEventData {
+        storage.save_events_batch("CASP", &ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
@@ -1444,7 +1502,7 @@ mod tests {
 
         // Root matches the last stored root: this should NOT require syncing
         // even if the last ASP leaf was emitted earlier than the current tip.
-        let status = storage.check_asp_membership_precondition(&leaf, &root, current_ledger)?;
+        let status = storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }

@@ -170,7 +170,7 @@ impl WebClient {
         &self,
         user_address: String,
         membership_blinding: BigInt,
-        amount_stroops: BigInt,
+        amount: BigInt,
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<Option<DepositPrepared>, JsError> {
@@ -184,9 +184,9 @@ impl WebClient {
 
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
 
-        let amount_stroops = parse_ext_amount_decimal(&amount_stroops)?;
-        if amount_stroops <= ExtAmount::ZERO {
-            return Err(JsError::new("amount_stroops must be > 0 for deposit"));
+        let amount = parse_ext_amount_decimal(&amount)?;
+        if amount <= ExtAmount::ZERO {
+            return Err(JsError::new("amount must be > 0 for deposit"));
         }
 
         emit_progress(
@@ -266,10 +266,11 @@ impl WebClient {
             let req = DepositRequest {
                 user_address: user_address.clone(),
                 membership_blinding,
-                amount_stroops,
+                amount,
                 pool_root,
                 pool_address: data.pool.contract_id,
                 aspmem_root: data.asp_membership.root,
+                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 output_amounts: out_amounts,
                 smt_depth: SMT_DEPTH,
@@ -437,7 +438,9 @@ impl WebClient {
                 withdraw_recipient: withdraw_recipient.clone(),
                 pool_root,
                 pool_next_index,
+                pool_address: data.pool.contract_id.clone(),
                 aspmem_root: data.asp_membership.root,
+                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 smt_depth: SMT_DEPTH,
@@ -631,6 +634,7 @@ impl WebClient {
                 pool_next_index,
                 pool_address: data.pool.contract_id,
                 aspmem_root: data.asp_membership.root,
+                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
@@ -711,7 +715,7 @@ impl WebClient {
         user_address: String,
         membership_blinding: BigInt,
         ext_recipient: String,
-        ext_amount_stroops: BigInt,
+        ext_amount: BigInt,
         input_note_ids: Array,
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
@@ -740,7 +744,7 @@ impl WebClient {
         }
 
         let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-        let ext_amount = parse_ext_amount_decimal(&ext_amount_stroops)?;
+        let ext_amount = parse_ext_amount_decimal(&ext_amount)?;
 
         emit_progress(
             &on_status,
@@ -866,6 +870,7 @@ impl WebClient {
                 ext_recipient: ext_recipient.clone(),
                 ext_amount,
                 aspmem_root: data.asp_membership.root,
+                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
@@ -945,9 +950,18 @@ impl WebClient {
 impl WebClient {
     #[wasm_bindgen(js_name = poolContractState)]
     pub async fn pool_contract_state(&self) -> Result<JsValue, JsError> {
+        let pool_id = self
+            .fetcher
+            .contract_config()
+            .pools
+            .iter()
+            .find(|p| p.enabled)
+            .map(|p| p.pool_contract_id.clone())
+            .ok_or_else(|| JsError::new("no enabled pools in deployments config"))?;
+
         let pool_info = self
             .fetcher
-            .pool_contract_state()
+            .pool_contract_state(&pool_id)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&pool_info)?)
@@ -1115,7 +1129,7 @@ impl WebClient {
         &self,
         user_address: String,
         membership_blinding: BigInt,
-        amount_stroops: BigInt,
+        amount: BigInt,
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
@@ -1123,7 +1137,7 @@ impl WebClient {
             .prove_deposit_inner(
                 user_address,
                 membership_blinding,
-                amount_stroops,
+                amount,
                 output_amounts,
                 on_status,
             )
@@ -1194,7 +1208,7 @@ impl WebClient {
         user_address: String,
         membership_blinding: BigInt,
         ext_recipient: String,
-        ext_amount_stroops: BigInt,
+        ext_amount: BigInt,
         input_note_ids: Array,
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
@@ -1206,7 +1220,7 @@ impl WebClient {
                 user_address,
                 membership_blinding,
                 ext_recipient,
-                ext_amount_stroops,
+                ext_amount,
                 input_note_ids,
                 output_amounts,
                 out_recipient_note_keys_hex,
@@ -1223,9 +1237,9 @@ impl WebClient {
 
 #[async_trait::async_trait(?Send)]
 impl stellar::ContractDataStorage for WebClient {
-    async fn get_sync_state(&self) -> anyhow::Result<Option<types::SyncMetadata>> {
+    async fn get_sync_state(&self, contract_id: &str) -> anyhow::Result<Option<types::SyncMetadata>> {
         let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
+        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState(contract_id.to_string()))).await?;
         match resp {
             StorageWorkerResponse::SyncState(state) => Ok(state),
             StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
@@ -1233,9 +1247,9 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_events_batch(&self, data: types::ContractsEventData) -> anyhow::Result<()> {
+    async fn save_events_batch(&self, contract_id: &str, data: types::ContractsEventData) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
+        let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(contract_id.to_string(), data))).await?;
         match resp {
             StorageWorkerResponse::Saved => Ok(()),
             StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
