@@ -9,6 +9,7 @@ description = "Selective disclosure receipt validation and circuit metadata"
 
 [dependencies]
 anyhow = { workspace = true }
+prover = { workspace = true }
 types = { workspace = true }
 
 [dev-dependencies]

@@ -8,8 +8,8 @@ pub const DISCLOSURE_RECEIPT_VERSION: u32 = 1;
 /// Initial selective-disclosure circuit entry point.
 pub const SELECTIVE_DISCLOSURE_1_CIRCUIT: &str = "selectiveDisclosure_1";
 
-/// Uncompressed Groth16 proof size used by the existing Soroban proof format.
-pub const UNCOMPRESSED_GROTH16_PROOF_BYTES: usize = 256;
+/// Compressed Groth16 proof size used by arkworks for BN254 proofs.
+pub const COMPRESSED_GROTH16_PROOF_BYTES: usize = 128;
 
 /// Portable receipt proving ownership of one or more disclosed notes.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -23,8 +23,8 @@ pub struct DisclosureReceipt {
     pub context: DisclosureContext,
     /// Named public inputs for the selective disclosure circuit.
     pub public_inputs: DisclosurePublicInputs,
-    /// Uncompressed Groth16 proof encoded as `0x`-prefixed lowercase hex.
-    pub proof_uncompressed_hex: String,
+    /// Compressed Groth16 proof encoded as `0x`-prefixed lowercase hex.
+    pub proof_compressed_hex: String,
     /// Issuance timestamp string.
     pub issued_at: String,
 }
@@ -40,9 +40,9 @@ impl DisclosureReceipt {
         self.context.validate()?;
         self.public_inputs.validate(self.circuit.n_notes)?;
         parse_0x_hex_exact(
-            "proof_uncompressed_hex",
-            &self.proof_uncompressed_hex,
-            UNCOMPRESSED_GROTH16_PROOF_BYTES,
+            "proof_compressed_hex",
+            &self.proof_compressed_hex,
+            COMPRESSED_GROTH16_PROOF_BYTES,
         )?;
 
         if self.issued_at.is_empty() {
@@ -50,6 +50,22 @@ impl DisclosureReceipt {
         }
 
         Ok(())
+    }
+
+    /// Decodes the compressed Groth16 proof bytes carried by this receipt.
+    ///
+    /// # Returns
+    /// Returns the compressed proof encoded in `proof_compressed_hex`.
+    ///
+    /// # Errors
+    /// Returns an error if the proof is not canonical `0x`-prefixed lowercase
+    /// hex or does not decode to the expected compressed proof length.
+    pub fn proof_compressed_bytes(&self) -> Result<Vec<u8>> {
+        parse_0x_hex_exact(
+            "proof_compressed_hex",
+            &self.proof_compressed_hex,
+            COMPRESSED_GROTH16_PROOF_BYTES,
+        )
     }
 }
 
@@ -63,7 +79,8 @@ pub struct DisclosureCircuitMetadata {
     pub levels: u32,
     /// Number of note disclosures represented by this circuit instance.
     pub n_notes: u32,
-    /// Hash of the verifying key encoded as `0x`-prefixed lowercase 32-byte hex.
+    /// Hash of the verifying key encoded as `0x`-prefixed lowercase 32-byte
+    /// hex.
     pub vk_hash: String,
 }
 
@@ -171,8 +188,8 @@ pub struct DisclosureVerificationReport {
 ///
 /// # Arguments
 /// * `name` - Field name used in validation error messages.
-/// * `value` - Hex string to parse. It must start with `0x`, use lowercase
-///   hex digits, and contain at least one byte.
+/// * `value` - Hex string to parse. It must start with `0x`, use lowercase hex
+///   digits, and contain at least one byte.
 ///
 /// # Returns
 /// Returns the decoded bytes when the string is canonical.
@@ -246,7 +263,7 @@ mod tests {
                 note_commitments: vec![field(2)],
                 ext_context_hash: field(3),
             },
-            proof_uncompressed_hex: format!("0x{}", "aa".repeat(UNCOMPRESSED_GROTH16_PROOF_BYTES)),
+            proof_compressed_hex: format!("0x{}", "aa".repeat(COMPRESSED_GROTH16_PROOF_BYTES)),
             issued_at: "2026-05-19T14:00:00Z".to_string(),
         }
     }
@@ -271,7 +288,7 @@ mod tests {
             "circuit": {"name": "selectiveDisclosure_1", "levels": 10, "nNotes": 1, "vkHash": "0x1111111111111111111111111111111111111111111111111111111111111111"},
             "context": {"network": "testnet", "poolAddress": "CAAA", "authorityLabel": "A", "authorityIdentityPayloadHex": "0x61", "purpose": "p", "contextNonce": "0x0000000000000000000000000000000000000000000000000000000000000000"},
             "publicInputs": {"roots": [], "noteCommitments": [], "extContextHash": "0x0000000000000000000000000000000000000000000000000000000000000000"},
-            "proofUncompressedHex": "0x",
+            "proofCompressedHex": "0x",
             "issuedAt": "now"
         }"#;
 
@@ -289,7 +306,7 @@ mod tests {
     #[test]
     fn validate_rejects_malformed_proof_hex() {
         let mut receipt = valid_receipt();
-        receipt.proof_uncompressed_hex = "0xaa".to_string();
+        receipt.proof_compressed_hex = "0xaa".to_string();
 
         assert!(receipt.validate().is_err());
     }

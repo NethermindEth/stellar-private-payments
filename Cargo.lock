@@ -1774,6 +1774,7 @@ name = "disclosure"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "prover",
  "serde_json",
  "types",
 ]
