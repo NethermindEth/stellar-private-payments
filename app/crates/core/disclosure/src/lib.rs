@@ -140,6 +140,26 @@ pub fn validate_registered_receipt(
     Ok(circuit)
 }
 
+/// Mock-checks every root named by a disclosure receipt.
+///
+/// # Arguments
+/// * `receipt` - Receipt containing the roots to check.
+/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
+///
+/// # Returns
+/// Returns `true` after receipt metadata validation.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid.
+/// TODO: REMOVE THIS AFTER MODIFYING THE SMART CONTRACT.
+pub fn mock_receipt_roots_are_known(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+) -> Result<bool> {
+    validate_registered_receipt(receipt, expected_vk_hash)?;
+    Ok(true)
+}
+
 /// Proof bytes and public inputs produced for a disclosure receipt.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProvedReceiptProof {
