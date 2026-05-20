@@ -29,8 +29,8 @@ pub const N_OUTPUTS: usize = 2;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactInputNote {
-    /// Note amount in stroops (1 XLM = 10_000_000 stroops).
-    pub amount_stroops: NoteAmount,
+    /// Note amount in token base units (e.g. for XLM it is stroops).
+    pub amount: NoteAmount,
     /// Note blinding factor as a BN254 scalar field element.
     pub blinding: Field,
     /// Merkle proof sibling hashes as BN254 field elements, one element per
@@ -51,8 +51,8 @@ pub struct TransactInputNote {
 /// provide 0, 1, or 2, and `transact()` will pad with dummy outputs as needed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TransactOutput {
-    /// Output amount in stroops.
-    pub amount_stroops: NoteAmount,
+    /// Output amount in token base units (e.g. for XLM it is stroops).
+    pub amount: NoteAmount,
     /// Output blinding factor as a BN254 scalar field element.
     pub blinding: Field,
     /// Optional external recipient note public key (BN254 - used for
@@ -169,7 +169,7 @@ pub struct DepositParams {
     /// Pool contract address (recipient for extData).
     pub pool_address: String,
     /// Total amount to deposit (stroops). Passed as `ext_amount > 0`.
-    pub amount_stroops: ExtAmount,
+    pub amount: ExtAmount,
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
     pub outputs: Vec<TransactOutput>,
 
@@ -206,7 +206,7 @@ pub struct WithdrawParams {
     pub withdraw_recipient: String,
     /// Amount to withdraw in stroops. `withdraw()` sets `ext_amount =
     /// -withdraw_amount`.
-    pub withdraw_amount_stroops: ExtAmount,
+    pub withdraw_amount: ExtAmount,
     /// Notes to spend (1..=2). If one is provided, `transact()` pads the second
     /// input with a dummy.
     pub inputs: Vec<TransactInputNote>,
@@ -270,7 +270,7 @@ where
         encryption_pubkey,
         pool_root,
         pool_address,
-        amount_stroops,
+        amount,
         outputs,
         membership_proof,
         non_membership_proof,
@@ -284,7 +284,7 @@ where
             encryption_pubkey,
             pool_root,
             ext_recipient: pool_address,
-            ext_amount: amount_stroops,
+            ext_amount: amount,
             inputs: Vec::new(),
             outputs,
             membership_proof,
@@ -306,7 +306,7 @@ where
         encryption_pubkey,
         pool_root,
         withdraw_recipient,
-        withdraw_amount_stroops,
+        withdraw_amount,
         inputs,
         outputs,
         membership_proof,
@@ -316,15 +316,15 @@ where
     } = params;
 
     let input_total = sum_amounts(&inputs)?;
-    if input_total < withdraw_amount_stroops {
+    if input_total < withdraw_amount {
         return Err(anyhow!(
             "insufficient input amount: have {}, need {}",
             input_total,
-            withdraw_amount_stroops
+            withdraw_amount
         ));
     }
     let change = input_total
-        .checked_sub(withdraw_amount_stroops)
+        .checked_sub(withdraw_amount)
         .ok_or_else(|| anyhow!("insufficient input amount"))?;
 
     let outputs = match outputs {
@@ -333,7 +333,7 @@ where
             let (out0_amount, out1_amount) = match NoteAmount::try_from(change) {
                 Ok(v) => (v, NoteAmount::ZERO),
                 Err(_) => {
-                    let max_ext = ExtAmount::from(NoteAmount::MAX);
+                    let max_ext = ExtAmount::MAX;
                     let remainder = change
                         .checked_sub(max_ext)
                         .ok_or_else(|| anyhow!("negative withdrawal change remainder"))?;
@@ -344,13 +344,13 @@ where
             let dummy_blinding = encryption::generate_random_blinding()?;
             vec![
                 TransactOutput {
-                    amount_stroops: out0_amount,
+                    amount: out0_amount,
                     blinding: change_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
                 },
                 TransactOutput {
-                    amount_stroops: out1_amount,
+                    amount: out1_amount,
                     blinding: dummy_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
@@ -365,7 +365,7 @@ where
             encryption_pubkey,
             pool_root,
             ext_recipient: withdraw_recipient,
-            ext_amount: withdraw_amount_stroops
+            ext_amount: withdraw_amount
                 .checked_neg()
                 .ok_or_else(|| anyhow!("withdraw amount overflow"))?,
             inputs,
@@ -531,7 +531,7 @@ where
     while output_slots.len() < N_OUTPUTS {
         let blinding = encryption::generate_random_blinding()?;
         output_slots.push(TransactOutput {
-            amount_stroops: NoteAmount::ZERO,
+            amount: NoteAmount::ZERO,
             blinding,
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
@@ -574,7 +574,7 @@ where
     let mut input_nullifiers_fields: [Field; N_INPUTS] = [Field::ZERO; N_INPUTS];
 
     for (idx, inp) in input_slots.iter().enumerate() {
-        let amount_field = note_amount_to_field(&inp.amount_stroops);
+        let amount_field = note_amount_to_field(&inp.amount);
         let amount_field_le = amount_field.to_le_bytes();
         let inp_blinding_le = inp.blinding.to_le_bytes();
         let merkle_path_indices = inp.merkle_path_indices.to_le_bytes();
@@ -619,7 +619,7 @@ where
             .clone()
             .unwrap_or_else(|| encryption_pubkey.clone());
 
-        let amount_field = note_amount_to_field(&out.amount_stroops);
+        let amount_field = note_amount_to_field(&out.amount);
         let amount_field_le = amount_field.to_le_bytes();
         let out_blinding_le = out.blinding.to_le_bytes();
         let commitment =
@@ -632,7 +632,7 @@ where
 
         let enc = encryption::encrypt_output_note(
             &recipient_enc_pubkey,
-            out.amount_stroops,
+            out.amount,
             &out.blinding,
         )?;
         encrypted_outputs[idx] = enc;
@@ -767,7 +767,7 @@ where
 fn dummy_input(tree_depth: usize) -> Result<TransactInputNote> {
     let blinding = encryption::generate_random_blinding()?;
     Ok(TransactInputNote {
-        amount_stroops: NoteAmount::ZERO,
+        amount: NoteAmount::ZERO,
         blinding,
         merkle_path_elements: vec![Field::ZERO; tree_depth],
         merkle_path_indices: Field::ZERO,
@@ -803,7 +803,7 @@ fn sum_amounts(inputs: &[TransactInputNote]) -> Result<ExtAmount> {
     let mut sum = ExtAmount::ZERO;
     for n in inputs {
         sum = sum
-            .checked_add(ExtAmount::from(n.amount_stroops))
+            .checked_add(ExtAmount::try_from(n.amount)?)
             .ok_or_else(|| anyhow!("overflow summing input amounts"))?;
     }
     Ok(sum)
@@ -813,7 +813,7 @@ fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<ExtAmount> {
     let mut sum = ExtAmount::ZERO;
     for o in outputs {
         sum = sum
-            .checked_add(ExtAmount::from(o.amount_stroops))
+            .checked_add(ExtAmount::try_from(o.amount)?)
             .ok_or_else(|| anyhow!("overflow summing output amounts"))?;
     }
     Ok(sum)
@@ -861,9 +861,9 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 pool_address: "POOL".into(),
-                amount_stroops: ExtAmount::from(10),
+                amount: ExtAmount::from(10),
                 outputs: vec![TransactOutput {
-                    amount_stroops: NoteAmount::from(10),
+                    amount: NoteAmount::from(10),
                     blinding: out_blinding,
                     recipient_note_pubkey: None,
                     recipient_encryption_pubkey: None,
@@ -914,7 +914,7 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: NoteAmount::from(10),
+            amount: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
             merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
             merkle_path_indices: Field::ZERO,
@@ -926,7 +926,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 withdraw_recipient: "G...".into(),
-                withdraw_amount_stroops: ExtAmount::from(NoteAmount::from(7)),
+                withdraw_amount: ExtAmount::from(7),
                 inputs: vec![input],
                 outputs: None,
                 membership_proof: zero_membership(tree_depth_usize),
@@ -961,13 +961,13 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input = TransactInputNote {
-            amount_stroops: NoteAmount::from(10),
+            amount: NoteAmount::from(10),
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
             merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
             merkle_path_indices: Field::ZERO,
         };
         let out = TransactOutput {
-            amount_stroops: NoteAmount::from(9), // unbalanced
+            amount: NoteAmount::from(9), // unbalanced
             blinding: Field::try_from_le_bytes([7u8; 32]).expect("field"),
             recipient_note_pubkey: None,
             recipient_encryption_pubkey: None,
@@ -1003,13 +1003,13 @@ mod tests {
         let encryption_pubkey = EncryptionPublicKey([2u8; 32]);
 
         let input0 = TransactInputNote {
-            amount_stroops: NoteAmount::MAX,
+            amount: NoteAmount::MAX,
             blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
             merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
             merkle_path_indices: Field::ZERO,
         };
         let input1 = TransactInputNote {
-            amount_stroops: NoteAmount::MAX,
+            amount: NoteAmount::MAX,
             blinding: Field::try_from_le_bytes([5u8; 32]).expect("field"),
             merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
             merkle_path_indices: Field::ZERO,
@@ -1022,7 +1022,7 @@ mod tests {
                 encryption_pubkey,
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 withdraw_recipient: "G...".into(),
-                withdraw_amount_stroops: ExtAmount::ONE,
+                withdraw_amount: ExtAmount::ONE,
                 inputs: vec![input0, input1],
                 outputs: None,
                 membership_proof: zero_membership(tree_depth_usize),
