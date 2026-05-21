@@ -489,9 +489,7 @@ impl Storage {
 
         let row = stmt
             .query_row(params![pool_contract_id, account_address, commitment], |row| {
-                let amount_s: String = row.get(0)?;
-                let amount: u128 = amount_s.parse().map_err(|_| rusqlite::Error::InvalidColumnType(0, "amount".into(), rusqlite::types::Type::Text))?;
-                let amount = NoteAmount::from(amount);
+                let amount: NoteAmount = row.get(0)?;
                 let blinding: Field = row.get(1)?;
                 let leaf_index_i64: i64 = row.get(2)?;
                 let leaf_index = col_u32(leaf_index_i64, 2)?;
