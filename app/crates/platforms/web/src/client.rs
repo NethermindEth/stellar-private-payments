@@ -168,6 +168,7 @@ impl WebClient {
 
     async fn prove_deposit_inner(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         amount: BigInt,
@@ -219,7 +220,7 @@ impl WebClient {
             );
             let data = self
                 .fetcher
-                .all_contracts_data()
+                .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -270,7 +271,7 @@ impl WebClient {
                 pool_root,
                 pool_address: data.pool.contract_id,
                 aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+                aspmem_contract_id: data.asp_membership.contract_id.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 output_amounts: out_amounts,
                 smt_depth: SMT_DEPTH,
@@ -344,6 +345,7 @@ impl WebClient {
 
     async fn prove_withdraw_inner(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         withdraw_recipient: String,
@@ -386,7 +388,7 @@ impl WebClient {
             );
             let data = self
                 .fetcher
-                .all_contracts_data()
+                .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -440,7 +442,7 @@ impl WebClient {
                 pool_next_index,
                 pool_address: data.pool.contract_id.clone(),
                 aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+                aspmem_contract_id: data.asp_membership.contract_id.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 smt_depth: SMT_DEPTH,
@@ -515,6 +517,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     async fn prove_transfer_inner(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         recipient_note_key_hex: String,
@@ -581,7 +584,7 @@ impl WebClient {
             );
             let data = self
                 .fetcher
-                .all_contracts_data()
+                .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -634,7 +637,7 @@ impl WebClient {
                 pool_next_index,
                 pool_address: data.pool.contract_id,
                 aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+                aspmem_contract_id: data.asp_membership.contract_id.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
@@ -712,6 +715,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     async fn prove_transact_inner(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         ext_recipient: String,
@@ -815,7 +819,7 @@ impl WebClient {
             );
             let data = self
                 .fetcher
-                .all_contracts_data()
+                .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -870,7 +874,7 @@ impl WebClient {
                 ext_recipient: ext_recipient.clone(),
                 ext_amount,
                 aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+                aspmem_contract_id: data.asp_membership.contract_id.clone(),
                 aspmem_ledger: data.asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
@@ -1127,6 +1131,7 @@ impl WebClient {
     #[wasm_bindgen(js_name = proveDeposit)]
     pub async fn prove_deposit(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         amount: BigInt,
@@ -1135,6 +1140,7 @@ impl WebClient {
     ) -> Result<JsValue, JsError> {
         let prepared = self
             .prove_deposit_inner(
+                pool_contract_id,
                 user_address,
                 membership_blinding,
                 amount,
@@ -1151,6 +1157,7 @@ impl WebClient {
     #[wasm_bindgen(js_name = proveWithdraw)]
     pub async fn prove_withdraw(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         withdraw_recipient: String,
@@ -1159,6 +1166,7 @@ impl WebClient {
     ) -> Result<JsValue, JsError> {
         let prepared = self
             .prove_withdraw_inner(
+                pool_contract_id,
                 user_address,
                 membership_blinding,
                 withdraw_recipient,
@@ -1176,6 +1184,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     pub async fn prove_transfer(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         recipient_note_key_hex: String,
@@ -1186,6 +1195,7 @@ impl WebClient {
     ) -> Result<JsValue, JsError> {
         let prepared = self
             .prove_transfer_inner(
+                pool_contract_id,
                 user_address,
                 membership_blinding,
                 recipient_note_key_hex,
@@ -1205,6 +1215,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     pub async fn prove_transact(
         &self,
+        pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         ext_recipient: String,
@@ -1217,6 +1228,7 @@ impl WebClient {
     ) -> Result<JsValue, JsError> {
         let prepared = self
             .prove_transact_inner(
+                pool_contract_id,
                 user_address,
                 membership_blinding,
                 ext_recipient,

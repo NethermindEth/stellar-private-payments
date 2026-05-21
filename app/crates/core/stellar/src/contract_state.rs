@@ -3,12 +3,11 @@ use crate::{
     conversions::{
         scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64, scval_to_u256,
     },
-    rpc::Client,
+    rpc::{Client, ContractDataBulkRequest},
 };
 use anyhow::{Result, anyhow};
-use futures::try_join;
 use serde::{Deserialize, Serialize};
-use std::{convert::TryInto, str::FromStr};
+use std::{collections::HashMap, convert::TryInto, str::FromStr};
 use stellar_strkey::ed25519;
 use stellar_xdr::{curr as xdr, curr::ReadXdr};
 use types::{
@@ -90,6 +89,498 @@ impl StateFetcher {
 
     pub fn contract_config(&self) -> &ContractConfig {
         &self.config
+    }
+
+
+    fn pool_asp_membership_id<'a>(&'a self, pool_id: &str) -> Result<&'a str> {
+        self.config
+            .pools
+            .iter()
+            .find(|p| p.pool_contract_id == pool_id)
+            .map(|p| p.asp_membership.as_deref().unwrap_or(self.config.asp_membership.as_str()))
+            .ok_or_else(|| anyhow!("pool not found in config: {pool_id}"))
+    }
+
+    fn pool_asp_non_membership_id<'a>(&'a self, pool_id: &str) -> Result<&'a str> {
+        self.config
+            .pools
+            .iter()
+            .find(|p| p.pool_contract_id == pool_id)
+            .map(|p| {
+                p.asp_non_membership
+                    .as_deref()
+                    .unwrap_or(self.config.asp_non_membership.as_str())
+            })
+            .ok_or_else(|| anyhow!("pool not found in config: {pool_id}"))
+    }
+
+    pub async fn all_enabled_contracts_data(&self) -> Result<Vec<ContractsStateData>> {
+        const MAX_SNAPSHOT_ATTEMPTS: u32 = 3;
+
+        let enabled_pools: Vec<&types::PoolConfigEntry> = self
+            .config
+            .pools
+            .iter()
+            .filter(|p| p.enabled)
+            .collect();
+
+        if enabled_pools.is_empty() {
+            return Err(anyhow!("no enabled pools in deployments config"));
+        }
+
+        let mut requests = Vec::new();
+        for pool in &enabled_pools {
+            requests.push(ContractDataBulkRequest {
+                contract_id: &pool.pool_contract_id,
+                enum_keys: vec![
+                    "Admin",
+                    "Token",
+                    "Verifier",
+                    "ASPMembership",
+                    "ASPNonMembership",
+                    "Levels",
+                    "CurrentRootIndex",
+                    "NextIndex",
+                    "MaximumDepositAmount",
+                ],
+                valued_keys: vec![],
+            });
+        }
+
+        let mut asp_membership_ids = std::collections::BTreeSet::new();
+        let mut asp_non_membership_ids = std::collections::BTreeSet::new();
+        for pool in &enabled_pools {
+            asp_membership_ids.insert(
+                pool.asp_membership
+                    .as_deref()
+                    .unwrap_or(self.config.asp_membership.as_str())
+                    .to_string(),
+            );
+            asp_non_membership_ids.insert(
+                pool.asp_non_membership
+                    .as_deref()
+                    .unwrap_or(self.config.asp_non_membership.as_str())
+                    .to_string(),
+            );
+        }
+
+        for asp_id in &asp_membership_ids {
+            requests.push(ContractDataBulkRequest {
+                contract_id: asp_id,
+                enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+                valued_keys: vec![],
+            });
+        }
+        for asp_id in &asp_non_membership_ids {
+            requests.push(ContractDataBulkRequest {
+                contract_id: asp_id,
+                enum_keys: vec!["Root", "Admin"],
+                valued_keys: vec![],
+            });
+        }
+
+        let mut last_drift = String::new();
+
+        for attempt in 1..=MAX_SNAPSHOT_ATTEMPTS {
+            let (bulk_state, base_latest_ledger) = self.client.get_contract_data_bulk(&requests).await?;
+
+            let mut expected_root_indices: HashMap<String, u32> = HashMap::new();
+            let mut root_requests = Vec::new();
+            for pool in &enabled_pools {
+                let pool_state = bulk_state
+                    .get(&pool.pool_contract_id)
+                    .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
+                if let Some(current_root_index_val) = pool_state.get("CurrentRootIndex") {
+                    let current_root_index = scval_to_u32(current_root_index_val)?;
+                    expected_root_indices.insert(pool.pool_contract_id.clone(), current_root_index);
+                    root_requests.push(ContractDataBulkRequest {
+                        contract_id: &pool.pool_contract_id,
+                        enum_keys: vec![],
+                        valued_keys: vec![("Root", current_root_index)],
+                    });
+                }
+            }
+
+            let root_state = if root_requests.is_empty() {
+                HashMap::new()
+            } else {
+                let (root_state, _root_latest) = self.client.get_contract_data_bulk(&root_requests).await?;
+                root_state
+            };
+
+            if !expected_root_indices.is_empty() {
+                let mut index_check_requests = Vec::new();
+                for pool in &enabled_pools {
+                    index_check_requests.push(ContractDataBulkRequest {
+                        contract_id: &pool.pool_contract_id,
+                        enum_keys: vec!["CurrentRootIndex"],
+                        valued_keys: vec![],
+                    });
+                }
+
+                let (index_check_state, _) = self.client.get_contract_data_bulk(&index_check_requests).await?;
+
+                let mut drift = Vec::new();
+                for pool in &enabled_pools {
+                    let Some(expected) = expected_root_indices.get(&pool.pool_contract_id) else {
+                        continue;
+                    };
+
+                    let check_state = index_check_state
+                        .get(&pool.pool_contract_id)
+                        .ok_or_else(|| anyhow!("missing pool index check state for {}", pool.pool_contract_id))?;
+                    let observed = scval_to_u32(get_state!(
+                        check_state,
+                        "CurrentRootIndex",
+                        pool.pool_contract_id
+                    )?)?;
+
+                    if observed != *expected {
+                        drift.push(format!(
+                            "{} expected_index={} observed_index={}",
+                            pool.pool_contract_id, expected, observed
+                        ));
+                    }
+                }
+
+                if !drift.is_empty() {
+                    last_drift = drift.join(", ");
+                    eprintln!(
+                        "snapshot drift detected while fetching pool roots (attempt {attempt}/{MAX_SNAPSHOT_ATTEMPTS}): {last_drift}"
+                    );
+                    if attempt < MAX_SNAPSHOT_ATTEMPTS {
+                        continue;
+                    }
+                    return Err(anyhow!(
+                        "inconsistent snapshot after {MAX_SNAPSHOT_ATTEMPTS} attempts: {last_drift}"
+                    ));
+                }
+            }
+
+            let mut out = Vec::with_capacity(enabled_pools.len());
+            for pool in &enabled_pools {
+                let pool_state = bulk_state
+                    .get(&pool.pool_contract_id)
+                    .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
+
+                let merkle_current_root_index = pool_state
+                    .get("CurrentRootIndex")
+                    .map(scval_to_u32)
+                    .transpose()?;
+                let merkle_root = root_state
+                    .get(&pool.pool_contract_id)
+                    .and_then(|state| state.get("Root"))
+                    .map(scval_to_u256)
+                    .transpose()?
+                    .map(Field::try_from_u256)
+                    .transpose()?;
+
+                let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
+                let merkle_capacity = 2u64.pow(merkle_levels);
+                let merkle_next_index =
+                    scval_to_u64(get_state!(pool_state, "NextIndex", pool.pool_contract_id)?)?;
+                let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
+                    pool_state,
+                    "MaximumDepositAmount",
+                    pool.pool_contract_id
+                )?)?;
+                let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
+                    maximum_deposit_amount_u256,
+                    "maximum_deposit_amount",
+                )?);
+
+                let pool_info = PoolInfo {
+                    ledger: base_latest_ledger,
+                    contract_id: pool.pool_contract_id.clone(),
+                    contract_type: "Privacy Pool".to_string(),
+                    admin: scval_to_address_string(get_state!(pool_state, "Admin", pool.pool_contract_id)?)?,
+                    token: scval_to_address_string(get_state!(pool_state, "Token", pool.pool_contract_id)?)?,
+                    verifier: scval_to_address_string(get_state!(pool_state, "Verifier", pool.pool_contract_id)?)?,
+                    aspmembership: scval_to_address_string(get_state!(pool_state, "ASPMembership", pool.pool_contract_id)?)?,
+                    aspnonmembership: scval_to_address_string(get_state!(pool_state, "ASPNonMembership", pool.pool_contract_id)?)?,
+                    merkle_levels,
+                    merkle_current_root_index,
+                    merkle_next_index: merkle_next_index.to_string(),
+                    maximum_deposit_amount,
+                    merkle_root,
+                    merkle_capacity,
+                    total_commitments: merkle_next_index.to_string(),
+                };
+
+                let asp_membership_id = self.pool_asp_membership_id(&pool.pool_contract_id)?;
+                let asp_membership_state = bulk_state
+                    .get(asp_membership_id)
+                    .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
+                let asp_mem_next_index = scval_to_u64(get_state!(
+                    asp_membership_state,
+                    "NextIndex",
+                    asp_membership_id
+                )?)?;
+                let asp_mem_levels =
+                    scval_to_u32(get_state!(asp_membership_state, "Levels", asp_membership_id)?)?;
+                let asp_mem_capacity = 2u64.pow(asp_mem_levels);
+                let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", asp_membership_id)?)?;
+                let asp_membership = AspMembership {
+                    ledger: base_latest_ledger,
+                    contract_id: asp_membership_id.to_string(),
+                    contract_type: "ASP Membership".to_string(),
+                    root: Field::try_from_u256(root_u256)?,
+                    levels: asp_mem_levels,
+                    next_index: asp_mem_next_index.to_string(),
+                    admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", asp_membership_id)?)?,
+                    admin_insert_only: scval_to_bool(get_state!(
+                        asp_membership_state,
+                        "AdminInsertOnly",
+                        asp_membership_id
+                    )?)?,
+                    capacity: asp_mem_capacity,
+                    used_slots: asp_mem_next_index.to_string(),
+                };
+
+                let asp_non_membership_id = self.pool_asp_non_membership_id(&pool.pool_contract_id)?;
+                let asp_non_membership_state = bulk_state
+                    .get(asp_non_membership_id)
+                    .ok_or_else(|| anyhow!("missing asp non-membership state for {asp_non_membership_id}"))?;
+                let asp_nonmem_root_u256 = scval_to_u256(get_state!(
+                    asp_non_membership_state,
+                    "Root",
+                    asp_non_membership_id
+                )?)?;
+                let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
+                let asp_non_membership = AspNonMembership {
+                    ledger: base_latest_ledger,
+                    contract_id: asp_non_membership_id.to_string(),
+                    contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
+                    root: asp_nonmem_root,
+                    is_empty: asp_nonmem_root.is_zero(),
+                    admin: scval_to_address_string(get_state!(
+                        asp_non_membership_state,
+                        "Admin",
+                        asp_non_membership_id
+                    )?)?,
+                };
+
+                out.push(ContractsStateData {
+                    network: self.config.network.clone(),
+                    pool: pool_info,
+                    asp_membership,
+                    asp_non_membership,
+                });
+            }
+
+            return Ok(out);
+        }
+
+        Err(anyhow!(
+            "inconsistent snapshot after {MAX_SNAPSHOT_ATTEMPTS} attempts: {last_drift}"
+        ))
+    }
+
+    pub async fn contracts_data_for_pool(&self, pool_contract_id: &str) -> Result<ContractsStateData> {
+        const MAX_SNAPSHOT_ATTEMPTS: u32 = 3;
+
+        let pool = self
+            .config
+            .pools
+            .iter()
+            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
+            .ok_or_else(|| anyhow!("enabled pool not found in deployments config: {pool_contract_id}"))?;
+
+        let asp_membership_id = pool
+            .asp_membership
+            .as_deref()
+            .unwrap_or(self.config.asp_membership.as_str())
+            .to_string();
+        let asp_non_membership_id = pool
+            .asp_non_membership
+            .as_deref()
+            .unwrap_or(self.config.asp_non_membership.as_str())
+            .to_string();
+
+        let mut requests = Vec::new();
+        requests.push(ContractDataBulkRequest {
+            contract_id: &pool.pool_contract_id,
+            enum_keys: vec![
+                "Admin",
+                "Token",
+                "Verifier",
+                "ASPMembership",
+                "ASPNonMembership",
+                "Levels",
+                "CurrentRootIndex",
+                "NextIndex",
+                "MaximumDepositAmount",
+            ],
+            valued_keys: vec![],
+        });
+        requests.push(ContractDataBulkRequest {
+            contract_id: &asp_membership_id,
+            enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+            valued_keys: vec![],
+        });
+        requests.push(ContractDataBulkRequest {
+            contract_id: &asp_non_membership_id,
+            enum_keys: vec!["Root", "Admin"],
+            valued_keys: vec![],
+        });
+
+        let mut last_drift = String::new();
+
+        for attempt in 1..=MAX_SNAPSHOT_ATTEMPTS {
+            let (bulk_state, base_latest_ledger) = self.client.get_contract_data_bulk(&requests).await?;
+            let pool_state = bulk_state
+                .get(&pool.pool_contract_id)
+                .ok_or_else(|| anyhow!("missing pool state for {}", pool.pool_contract_id))?;
+
+            let expected_root_index = pool_state
+                .get("CurrentRootIndex")
+                .map(scval_to_u32)
+                .transpose()?;
+
+            let root_state = if let Some(current_root_index) = expected_root_index {
+                let root_requests = vec![ContractDataBulkRequest {
+                    contract_id: &pool.pool_contract_id,
+                    enum_keys: vec![],
+                    valued_keys: vec![("Root", current_root_index)],
+                }];
+                let (root_state, _root_latest) = self.client.get_contract_data_bulk(&root_requests).await?;
+                root_state
+            } else {
+                HashMap::new()
+            };
+
+            if let Some(expected_root_index) = expected_root_index {
+                let index_check_requests = vec![ContractDataBulkRequest {
+                    contract_id: &pool.pool_contract_id,
+                    enum_keys: vec!["CurrentRootIndex"],
+                    valued_keys: vec![],
+                }];
+                let (index_check_state, _) = self.client.get_contract_data_bulk(&index_check_requests).await?;
+                let check_state = index_check_state
+                    .get(&pool.pool_contract_id)
+                    .ok_or_else(|| anyhow!("missing pool index check state for {}", pool.pool_contract_id))?;
+                let observed = scval_to_u32(get_state!(check_state, "CurrentRootIndex", pool.pool_contract_id)?)?;
+                if observed != expected_root_index {
+                    last_drift = format!(
+                        "{} expected_index={} observed_index={}",
+                        pool.pool_contract_id, expected_root_index, observed
+                    );
+                    eprintln!(
+                        "snapshot drift detected while fetching pool roots (attempt {attempt}/{MAX_SNAPSHOT_ATTEMPTS}): {last_drift}"
+                    );
+                    if attempt < MAX_SNAPSHOT_ATTEMPTS {
+                        continue;
+                    }
+                    return Err(anyhow!(
+                        "inconsistent snapshot after {MAX_SNAPSHOT_ATTEMPTS} attempts: {last_drift}"
+                    ));
+                }
+            }
+
+            let merkle_current_root_index = pool_state
+                .get("CurrentRootIndex")
+                .map(scval_to_u32)
+                .transpose()?;
+            let merkle_root = root_state
+                .get(&pool.pool_contract_id)
+                .and_then(|state| state.get("Root"))
+                .map(scval_to_u256)
+                .transpose()?
+                .map(Field::try_from_u256)
+                .transpose()?;
+
+            let merkle_levels = scval_to_u32(get_state!(pool_state, "Levels", pool.pool_contract_id)?)?;
+            let merkle_capacity = 2u64.pow(merkle_levels);
+            let merkle_next_index = scval_to_u64(get_state!(pool_state, "NextIndex", pool.pool_contract_id)?)?;
+            let maximum_deposit_amount_u256 = scval_to_u256(get_state!(
+                pool_state,
+                "MaximumDepositAmount",
+                pool.pool_contract_id
+            )?)?;
+            let maximum_deposit_amount = ExtAmount::from(Self::u256_to_i128_checked(
+                maximum_deposit_amount_u256,
+                "maximum_deposit_amount",
+            )?);
+
+            let pool_info = PoolInfo {
+                ledger: base_latest_ledger,
+                contract_id: pool.pool_contract_id.clone(),
+                contract_type: "Privacy Pool".to_string(),
+                admin: scval_to_address_string(get_state!(pool_state, "Admin", pool.pool_contract_id)?)?,
+                token: scval_to_address_string(get_state!(pool_state, "Token", pool.pool_contract_id)?)?,
+                verifier: scval_to_address_string(get_state!(pool_state, "Verifier", pool.pool_contract_id)?)?,
+                aspmembership: scval_to_address_string(get_state!(pool_state, "ASPMembership", pool.pool_contract_id)?)?,
+                aspnonmembership: scval_to_address_string(get_state!(pool_state, "ASPNonMembership", pool.pool_contract_id)?)?,
+                merkle_levels,
+                merkle_current_root_index,
+                merkle_next_index: merkle_next_index.to_string(),
+                maximum_deposit_amount,
+                merkle_root,
+                merkle_capacity,
+                total_commitments: merkle_next_index.to_string(),
+            };
+
+            let asp_membership_state = bulk_state
+                .get(&asp_membership_id)
+                .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
+            let asp_mem_next_index = scval_to_u64(get_state!(
+                asp_membership_state,
+                "NextIndex",
+                asp_membership_id
+            )?)?;
+            let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", asp_membership_id)?)?;
+            let asp_mem_capacity = 2u64.pow(asp_mem_levels);
+            let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", asp_membership_id)?)?;
+            let asp_membership = AspMembership {
+                ledger: base_latest_ledger,
+                contract_id: asp_membership_id.clone(),
+                contract_type: "ASP Membership".to_string(),
+                root: Field::try_from_u256(root_u256)?,
+                levels: asp_mem_levels,
+                next_index: asp_mem_next_index.to_string(),
+                admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", asp_membership_id)?)?,
+                admin_insert_only: scval_to_bool(get_state!(
+                    asp_membership_state,
+                    "AdminInsertOnly",
+                    asp_membership_id
+                )?)?,
+                capacity: asp_mem_capacity,
+                used_slots: asp_mem_next_index.to_string(),
+            };
+
+            let asp_non_membership_state = bulk_state
+                .get(&asp_non_membership_id)
+                .ok_or_else(|| anyhow!("missing asp non-membership state for {asp_non_membership_id}"))?;
+            let asp_nonmem_root_u256 = scval_to_u256(get_state!(
+                asp_non_membership_state,
+                "Root",
+                asp_non_membership_id
+            )?)?;
+            let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
+            let asp_non_membership = AspNonMembership {
+                ledger: base_latest_ledger,
+                contract_id: asp_non_membership_id.clone(),
+                contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
+                root: asp_nonmem_root,
+                is_empty: asp_nonmem_root.is_zero(),
+                admin: scval_to_address_string(get_state!(
+                    asp_non_membership_state,
+                    "Admin",
+                    asp_non_membership_id
+                )?)?,
+            };
+
+            return Ok(ContractsStateData {
+                network: self.config.network.clone(),
+                pool: pool_info,
+                asp_membership,
+                asp_non_membership,
+            });
+        }
+
+        Err(anyhow!(
+            "inconsistent snapshot after {MAX_SNAPSHOT_ATTEMPTS} attempts: {last_drift}"
+        ))
     }
 
     pub async fn pool_contract_state(&self, pool_contract_id: &str) -> Result<PoolInfo> {
@@ -482,27 +973,8 @@ impl StateFetcher {
         })
     }
 
-    pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
-        let pool_id = self
-            .config
-            .pools
-            .iter()
-            .find(|p| p.enabled)
-            .map(|p| p.pool_contract_id.as_str())
-            .ok_or_else(|| anyhow!("no enabled pools in deployments config"))?;
-
-        let (pool, asp_membership, asp_non_membership) = try_join!(
-            self.pool_contract_state(pool_id),
-            self.asp_membership_contract_state(),
-            self.asp_nonmembership_contract_state(),
-        )?;
-
-        Ok(ContractsStateData {
-            network: self.config.network.clone(),
-            pool,
-            asp_membership,
-            asp_non_membership,
-        })
+    pub async fn all_contracts_data(&self) -> Result<Vec<ContractsStateData>> {
+        self.all_enabled_contracts_data().await
     }
 
     fn muxed_account_from_g(account: &str) -> Result<xdr::MuxedAccount> {

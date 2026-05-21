@@ -463,8 +463,10 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
+	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveDeposit(
+	                    config?.pool,
 	                    userAddress,
 	                    membershipBlinding,
 	                    amountStroops,
@@ -477,7 +479,6 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
 	                const txHash = await submitProvedPoolTransact(proved, {
 	                    address: userAddress,
@@ -520,8 +521,10 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
+	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveWithdraw(
+	                    config?.pool,
 	                    userAddress,
 	                    membershipBlinding,
 	                    recipient,
@@ -533,7 +536,6 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
 	                const txHash = await submitProvedPoolTransact(proved, {
 	                    address: userAddress,
@@ -586,8 +588,10 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
+	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveTransfer(
+	                    config?.pool,
 	                    userAddress,
 	                    membershipBlinding,
 	                    recipientNoteKey,
@@ -601,7 +605,6 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
 	                const txHash = await submitProvedPoolTransact(proved, {
 	                    address: userAddress,
@@ -669,8 +672,10 @@ export const Transactions = {
 
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
+	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveTransact(
+	                    config?.pool,
 	                    userAddress,
 	                    membershipBlinding,
 	                    extRecipient,
@@ -686,7 +691,6 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
 	                const txHash = await submitProvedPoolTransact(proved, {
 	                    address: userAddress,

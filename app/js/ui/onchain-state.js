@@ -133,7 +133,8 @@ export const OnchainState = {
         this._refreshing = true;
         try {
             hideError();
-            const data = await getHandle().webClient.allContractsData();
+            const allData = await getHandle().webClient.allContractsData();
+            const data = Array.isArray(allData) ? (allData[0] ?? null) : null;
 
             // Network badge
             setText('chain-network-badge', data?.network || '—');

@@ -169,6 +169,12 @@ pub struct GetLedgerEntriesResponse {
     pub latest_ledger: i64,
 }
 
+pub struct ContractDataBulkRequest<'a> {
+    pub contract_id: &'a str,
+    pub enum_keys: Vec<&'a str>,
+    pub valued_keys: Vec<(&'a str, u32)>,
+}
+
 #[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
@@ -202,6 +208,7 @@ pub struct Client {
 
 impl Client {
     const DEFAULT_TIMEOUT_SECS: u32 = 30;
+    const MAX_LEDGER_KEYS_PER_REQUEST: usize = 150;
 
     /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {
@@ -469,6 +476,103 @@ impl Client {
         Ok((results_map, latest_ledger))
     }
 
+    pub async fn get_contract_data_bulk(
+        &self,
+        requests: &[ContractDataBulkRequest<'_>],
+    ) -> Result<(HashMap<String, HashMap<String, xdr::ScVal>>, u32), Error> {
+        #[derive(Clone)]
+        struct KeyMeta {
+            contract_id: String,
+            key_name: String,
+            required: bool,
+        }
+
+        let mut all_keys: Vec<LedgerKey> = Vec::new();
+        let mut key_meta_by_xdr: HashMap<String, KeyMeta> = HashMap::new();
+        let mut required_keys_total: HashMap<String, usize> = HashMap::new();
+
+        for request in requests {
+            let specs = self.build_contract_data_key_specs(
+                request.contract_id,
+                request.enum_keys.as_slice(),
+                request.valued_keys.as_slice(),
+            )?;
+
+            for (key, key_name, required) in specs {
+                let key_xdr = key.to_xdr_base64(Limits::none())?;
+                if !key_meta_by_xdr.contains_key(&key_xdr) {
+                    all_keys.push(key);
+                    key_meta_by_xdr.insert(
+                        key_xdr,
+                        KeyMeta {
+                            contract_id: request.contract_id.to_string(),
+                            key_name: key_name.to_string(),
+                            required,
+                        },
+                    );
+                }
+
+                if required {
+                    *required_keys_total
+                        .entry(request.contract_id.to_string())
+                        .or_insert(0usize) += 1;
+                }
+            }
+        }
+
+        if all_keys.is_empty() {
+            return Ok((HashMap::new(), 0));
+        }
+
+        let mut max_latest_ledger = 0u32;
+        let mut result: HashMap<String, HashMap<String, xdr::ScVal>> = HashMap::new();
+        let mut required_hits: HashMap<String, usize> = HashMap::new();
+
+        for chunk in all_keys.chunks(Self::MAX_LEDGER_KEYS_PER_REQUEST) {
+            let response = self.get_ledger_entries(chunk).await?;
+            let latest_ledger: u32 = response
+                .latest_ledger
+                .try_into()
+                .map_err(|_| Error::InvalidLatestLedger(response.latest_ledger))?;
+            max_latest_ledger = max_latest_ledger.max(latest_ledger);
+
+            for entry in response.entries.unwrap_or_default() {
+                let Some(meta) = key_meta_by_xdr.get(&entry.key) else {
+                    continue;
+                };
+
+                let LedgerEntryData::ContractData(data) =
+                    LedgerEntryData::from_xdr_base64(&entry.xdr, Limits::none())?
+                else {
+                    continue;
+                };
+
+                result
+                    .entry(meta.contract_id.clone())
+                    .or_default()
+                    .insert(meta.key_name.clone(), data.val);
+
+                if meta.required {
+                    *required_hits.entry(meta.contract_id.clone()).or_insert(0) += 1;
+                }
+            }
+        }
+
+        for request in requests {
+            let contract_id = request.contract_id.to_string();
+            let expected = required_keys_total.get(&contract_id).copied().unwrap_or(0usize);
+            if expected == 0 {
+                continue;
+            }
+            let actual = required_hits.get(&contract_id).copied().unwrap_or(0usize);
+            if actual == 0 {
+                return Err(Error::NotFound("Contract/Keys", contract_id));
+            }
+        }
+
+        Ok((result, max_latest_ledger))
+    }
+
     pub async fn simulate_transaction(
         &self,
         tx: &xdr::TransactionEnvelope,
@@ -478,6 +582,72 @@ impl Client {
         self.rpc_call("simulateTransaction", params).await
     }
 }
+
+impl Client {
+    fn build_contract_data_key_specs<'a>(
+        &self,
+        contract_id: &str,
+        enum_keys: &[&'a str],
+        valued_keys: &[(&'a str, u32)],
+    ) -> Result<Vec<(LedgerKey, &'a str, bool)>, Error> {
+        let contract =
+            stellar_strkey::Contract::from_str(contract_id).map_err(Error::InvalidAddress)?;
+
+        let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
+
+        let mut out = Vec::with_capacity(
+            1usize
+                .saturating_add(enum_keys.len())
+                .saturating_add(valued_keys.len()),
+        );
+
+        out.push((
+            LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                contract: contract_address.clone(),
+                key: xdr::ScVal::LedgerKeyContractInstance,
+                durability: xdr::ContractDataDurability::Persistent,
+            }),
+            "__contract_instance",
+            false,
+        ));
+
+        for variant in enum_keys {
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
+
+            out.push((
+                LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                    contract: contract_address.clone(),
+                    key: xdr::ScVal::Vec(Some(sc_vec)),
+                    durability: xdr::ContractDataDurability::Persistent,
+                }),
+                *variant,
+                true,
+            ));
+        }
+
+        for (variant, value) in valued_keys {
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec =
+                xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
+
+            out.push((
+                LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                    contract: contract_address.clone(),
+                    key: xdr::ScVal::Vec(Some(sc_vec)),
+                    durability: xdr::ContractDataDurability::Persistent,
+                }),
+                *variant,
+                true,
+            ));
+        }
+
+        Ok(out)
+    }
+}
+
 
 /// Races a request future against a [`gloo_timers::future::TimeoutFuture`].
 /// Returns [`Error::Timeout`] if the timer fires first.
