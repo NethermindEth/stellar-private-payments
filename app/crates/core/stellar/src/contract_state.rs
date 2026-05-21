@@ -61,8 +61,7 @@ pub struct PreparedSorobanTx {
 
 impl StateFetcher {
     fn u256_to_i128_checked(v: U256, what: &'static str) -> Result<i128> {
-        let mut be = [0u8; 32];
-        v.to_big_endian(&mut be);
+        let be = v.to_big_endian();
 
         // Must fit into 128 bits to be representable as i128.
         if be[..16].iter().any(|&b| b != 0) {

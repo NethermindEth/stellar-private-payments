@@ -28,7 +28,7 @@ pub enum Error {
     #[error("json decoding error: {0}")]
     Serde(#[from] serde_json::Error),
     #[error("{0} not found: {1}")]
-    NotFound(String, String),
+    NotFound(&'static str, String),
     #[error("Duplicate key found in contract data: {0}")]
     DuplicateContractKey(String),
     #[error("Unexpected ScVal: {0:?}")]
@@ -281,7 +281,7 @@ impl Client {
         }
 
         resp.result
-            .ok_or_else(|| Error::NotFound("RPC Result".to_string(), method.to_string()))
+            .ok_or_else(|| Error::NotFound("RPC Result", method.to_string()))
     }
 
     pub async fn get_contract_events(
@@ -444,8 +444,11 @@ impl Client {
         let entries = response.entries.unwrap_or_default();
 
         if entries.is_empty() {
-            let addr_str = stellar_strkey::Contract(contract.0).to_string();
-            return Err(Error::NotFound("Contract/Keys".to_string(), addr_str));
+            let addr = stellar_strkey::Contract(contract.0);
+            return Err(Error::NotFound(
+                "Contract/Keys",
+                addr.to_string().as_str().to_string(),
+            ));
         }
 
         let mut results_map = HashMap::new();

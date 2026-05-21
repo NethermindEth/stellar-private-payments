@@ -33,7 +33,7 @@ pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 /// Poseidon2 hash of 2 field elements (t = 3, r=2, c=1)
 ///
 /// Performs a Poseidon2 permutation on two field elements with an optional
-/// domain separator, returning the first element (state[0]).
+/// domain separator, returning the first element (state\[0\]).
 ///
 /// # Arguments
 ///
@@ -43,7 +43,7 @@ pub fn poseidon2_compression(left: Scalar, right: Scalar) -> Scalar {
 ///
 /// # Returns
 ///
-/// Returns the first lane (state[0]) of the permutation result.
+/// Returns the first lane (state\[0\]) of the permutation result.
 pub fn poseidon2_hash2(a: Scalar, b: Scalar, dom_sep: Option<Scalar>) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_3);
     let perm: Vec<Scalar>;
@@ -58,7 +58,7 @@ pub fn poseidon2_hash2(a: Scalar, b: Scalar, dom_sep: Option<Scalar>) -> Scalar 
 /// Poseidon2 hash of 3 field elements (t = 4, r=3, c=1)
 ///
 /// Performs a Poseidon2 permutation on three field elements with an optional
-/// domain separator, returning the first element (state[0]).
+/// domain separator, returning the first element (state\[0\]).
 ///
 /// # Arguments
 ///
@@ -69,7 +69,7 @@ pub fn poseidon2_hash2(a: Scalar, b: Scalar, dom_sep: Option<Scalar>) -> Scalar 
 ///
 /// # Returns
 ///
-/// Returns the first element (state[0]) of the permutation result.
+/// Returns the first element (state\[0\]) of the permutation result.
 pub fn poseidon2_hash3(a: Scalar, b: Scalar, c: Scalar, dom_sep: Option<Scalar>) -> Scalar {
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);
     let perm: Vec<Scalar>;

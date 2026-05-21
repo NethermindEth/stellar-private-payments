@@ -9,7 +9,8 @@ use prover::{
     flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
 };
-use std::cell::RefCell;
+use sha2::{Digest as _, Sha256};
+use std::{cell::RefCell, fmt::Write as _};
 use stellar::hash_ext_data_offchain;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
@@ -22,6 +23,47 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
+
+fn sha256(bytes: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(bytes);
+    let digest = hasher.finalize();
+    let mut out = [0u8; 32];
+    out.copy_from_slice(&digest[..]);
+    out
+}
+
+fn to_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
+    for b in bytes {
+        write!(&mut out, "{:02x}", b).expect("writing to String should not fail");
+    }
+    out
+}
+
+fn ensure_sha256_matches(
+    name: &str,
+    bytes: &[u8],
+    expected_len: usize,
+    expected_sha256: [u8; 32],
+) -> Result<(), JsError> {
+    if bytes.len() != expected_len {
+        return Err(JsError::new(&format!(
+            "{name} length mismatch: expected={}, got={}",
+            expected_len,
+            bytes.len(),
+        )));
+    }
+    let actual = sha256(bytes);
+    if actual != expected_sha256 {
+        return Err(JsError::new(&format!(
+            "{name} SHA256 mismatch: expected={}, got={}",
+            to_hex(&expected_sha256),
+            to_hex(&actual),
+        )));
+    }
+    Ok(())
+}
 
 // TODO for now it is a mix of async (because we want an async bridge for the
 // main thread) and sync (blocking) code in the future we should refactor to use
@@ -55,6 +97,27 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         }
     )?;
 
+    // Integrity checks (regular builds): ensure we are using the exact
+    // artifact versions this binary was built against.
+    ensure_sha256_matches(
+        "policy_tx_2_2_proving_key.bin",
+        PROVING_KEY,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "policy_tx_2_2.wasm",
+        &wasm_bytes,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "policy_tx_2_2.r1cs",
+        &r1cs_bytes,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
+    )?;
+
     let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
@@ -71,6 +134,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
 pub fn worker_main() {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
+    log::debug!("[{WORKER_NAME}] starting...");
     ProverWorker::registrar().register();
     spawn_local(async {
         if let Err(e) = init().await {

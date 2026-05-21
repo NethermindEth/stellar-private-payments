@@ -1,5 +1,6 @@
 use super::*;
 use ark_bn254::{Bn254, Fr as ArkFr};
+use ark_circom::CircomReduction;
 use ark_ff::{BigInteger, Field, PrimeField};
 use ark_groth16::{Groth16, Proof};
 use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
@@ -40,18 +41,18 @@ fn seeded_rng() -> StdRng {
     StdRng::seed_from_u64(7)
 }
 
-fn fr_from_ark(env: &Env, value: ArkFr) -> Fr {
+fn fr_from_ark(env: &Env, value: ArkFr) -> Bn254Fr {
     let bytes = value.into_bigint().to_bytes_be();
     let mut buf = [0u8; 32];
     buf.copy_from_slice(&bytes);
-    Fr::from_bytes(BytesN::from_array(env, &buf))
+    Bn254Fr::from_bytes(BytesN::from_array(env, &buf))
 }
 
 fn groth16_proof_from_ark(env: &Env, proof: &Proof<Bn254>) -> Groth16Proof {
     Groth16Proof {
-        a: G1Affine::from_array(env, &g1_bytes_from_ark(proof.a)),
-        b: G2Affine::from_array(env, &g2_bytes_from_ark(proof.b)),
-        c: G1Affine::from_array(env, &g1_bytes_from_ark(proof.c)),
+        a: G1Affine::from_bytes(BytesN::from_array(env, &g1_bytes_from_ark(proof.a))),
+        b: G2Affine::from_bytes(BytesN::from_array(env, &g2_bytes_from_ark(proof.b))),
+        c: G1Affine::from_bytes(BytesN::from_array(env, &g1_bytes_from_ark(proof.c))),
     }
 }
 
@@ -63,17 +64,28 @@ fn serialize_proof(env: &Env, proof: &Groth16Proof) -> Bytes {
     data
 }
 
-fn build_test(env: &Env) -> (VerificationKeyBytes, Groth16Proof, Vec<Fr>, [ArkFr; 11]) {
+fn build_test(
+    env: &Env,
+) -> (
+    VerificationKeyBytes,
+    Groth16Proof,
+    Vec<Bn254Fr>,
+    [ArkFr; 11],
+) {
     let mut rng = seeded_rng();
     let inputs = [ArkFr::from(33u64); 11];
     let circuit = ElevenInputCircuit { inputs };
-    let params =
-        Groth16::<Bn254>::generate_random_parameters_with_reduction(circuit.clone(), &mut rng)
-            .expect("params failed to generate");
-    let proof = Groth16::<Bn254>::create_random_proof_with_reduction(circuit, &params, &mut rng)
-        .expect("proof failed");
+    let params = Groth16::<Bn254, CircomReduction>::generate_random_parameters_with_reduction(
+        circuit.clone(),
+        &mut rng,
+    )
+    .expect("params failed to generate");
+    let proof = Groth16::<Bn254, CircomReduction>::create_random_proof_with_reduction(
+        circuit, &params, &mut rng,
+    )
+    .expect("proof failed");
 
-    let mut public_inputs: Vec<Fr> = Vec::new(env);
+    let mut public_inputs: Vec<Bn254Fr> = Vec::new(env);
     for value in inputs {
         public_inputs.push_back(fr_from_ark(env, value));
     }
@@ -116,32 +128,27 @@ fn test_env() -> Env {
 fn verifies_valid_proof() {
     let env = test_env();
     let (vk_bytes, proof, public_inputs, _) = build_test(&env);
-    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
-    let client = CircomGroth16VerifierClient::new(&env, &contract_id);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
 
-    let result = client.try_verify(&proof, &public_inputs);
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, public_inputs);
 
-    assert_eq!(result, Ok(Ok(true)));
+    assert_eq!(result, Ok(true));
 }
 
 #[test]
 fn rejects_wrong_public_input_length() {
     let env = test_env();
     let (vk_bytes, proof, _public_inputs, inputs) = build_test(&env);
-    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
-    let client = CircomGroth16VerifierClient::new(&env, &contract_id);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
 
     // Provide too few public inputs (length 5 instead of 11)
-    let mut short_inputs: Vec<Fr> = Vec::new(&env);
+    let mut short_inputs: Vec<Bn254Fr> = Vec::new(&env);
     for value in inputs.iter().take(5) {
         short_inputs.push_back(fr_from_ark(&env, *value));
     }
 
-    let result = client.try_verify(&proof, &short_inputs);
-    assert!(matches!(
-        result,
-        Err(Ok(Groth16Error::MalformedPublicInputs))
-    ));
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, short_inputs);
+    assert!(matches!(result, Err(Groth16Error::MalformedPublicInputs)));
 }
 
 #[test]

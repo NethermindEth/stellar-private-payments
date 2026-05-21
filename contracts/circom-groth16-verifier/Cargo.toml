@@ -14,9 +14,13 @@ contract-types = { workspace = true }
 soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [build-dependencies]
+ark-bn254 = { workspace = true }
+circuit-keys = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
 
 [dev-dependencies]
 ark-bn254 = { workspace = true }
+ark-circom = { workspace = true }
 ark-ff = { workspace = true }
 ark-groth16 = { workspace = true }
 ark-relations = { workspace = true }

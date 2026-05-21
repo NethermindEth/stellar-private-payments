@@ -94,8 +94,12 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
 impl WebClient {
     pub fn new(rpc_url: &str) -> anyhow::Result<Self> {
         Ok(Self {
-            storage_bridge: StorageWorker::spawner().spawn("./js/storage-worker.js"),
-            prover_bridge: ProverWorker::spawner().spawn("./js/prover-worker.js"),
+            storage_bridge: StorageWorker::spawner()
+                .as_module(true)
+                .spawn("./js/storage-worker.js"),
+            prover_bridge: ProverWorker::spawner()
+                .as_module(true)
+                .spawn("./js/prover-worker.js"),
             fetcher: Rc::new(CoreStateFetcher::new(rpc_url)?),
         })
     }

@@ -3,6 +3,10 @@ mod config;
 mod protocol;
 pub mod workers;
 
+pub(crate) mod artifact_hashes {
+    include!(concat!(env!("OUT_DIR"), "/artifact_hashes.rs"));
+}
+
 use client::WebClient;
 use config::Config;
 use gloo_timers::future::TimeoutFuture;
@@ -28,6 +32,7 @@ impl MainThreadHandle {
 pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
+    log::debug!("[MAIN THREAD] starting initialization...");
     let client = WebClient::new(config.rpc_url()).map_err(|e| JsError::new(&e.to_string()))?;
     client
         .ping_storage()

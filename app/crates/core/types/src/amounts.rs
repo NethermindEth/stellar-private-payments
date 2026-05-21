@@ -337,16 +337,12 @@ impl Field {
 
     /// Converts this field element to 32-byte big-endian representation.
     pub fn to_be_bytes(self) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        self.0.to_big_endian(&mut out);
-        out
+        self.0.to_big_endian()
     }
 
     /// Converts this field element to 32-byte little-endian representation.
     pub fn to_le_bytes(self) -> [u8; 32] {
-        let mut out = [0u8; 32];
-        self.0.to_little_endian(&mut out);
-        out
+        self.0.to_little_endian()
     }
 
     /// Builds a field element from a 32-byte big-endian representation.

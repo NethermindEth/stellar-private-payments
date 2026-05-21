@@ -17,7 +17,8 @@ use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
 use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractclient, contracterror,
-    contractevent, contractimpl, contracttype, crypto::bn254::Fr, token::TokenClient, xdr::ToXdr,
+    contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
+    xdr::ToXdr,
 };
 use soroban_utils::constants::bn256_modulus;
 
@@ -163,7 +164,11 @@ pub trait ASPNonMembershipInterface {
 
 #[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
 pub trait CircomGroth16VerifierInterface {
-    fn verify(env: Env, proof: Groth16Proof, public_inputs: Vec<Fr>) -> Result<bool, Groth16Error>;
+    fn verify(
+        env: Env,
+        proof: Groth16Proof,
+        public_inputs: Vec<Bn254Fr>,
+    ) -> Result<bool, Groth16Error>;
 }
 
 /// Storage keys for contract persistent data
@@ -407,32 +412,32 @@ impl PoolContract {
         // Public inputs must match the order declared by the policy circuit:
         // [root, public_amount, ext_data_hash, input_nullifiers,
         // output_commitments, membership_roots, non_membership_roots]
-        let mut public_inputs: Vec<Fr> = Vec::new(env);
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+        let mut public_inputs: Vec<Bn254Fr> = Vec::new(env);
+        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
+        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
             env,
             &proof.public_amount,
         )));
-        public_inputs.push_back(Fr::from_bytes(proof.ext_data_hash.clone()));
+        public_inputs.push_back(Bn254Fr::from_bytes(proof.ext_data_hash.clone()));
         for nullifier in proof.input_nullifiers.iter() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
+            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(env, &nullifier)));
         }
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
             env,
             &proof.output_commitment0,
         )));
-        public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+        public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
             env,
             &proof.output_commitment1,
         )));
         for _ in 0..proof.input_nullifiers.len() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
                 env,
                 &proof.asp_membership_root,
             )));
         }
         for _ in 0..proof.input_nullifiers.len() {
-            public_inputs.push_back(Fr::from_bytes(Self::u256_to_bytes(
+            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
                 env,
                 &proof.asp_non_membership_root,
             )));

@@ -12,11 +12,14 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
             xdr::ScAddress::Account(account_id) => {
                 // AccountId -> PublicKey enum -> PublicKeyTypeEd25519 variant -> Uint256
                 let xdr::PublicKey::PublicKeyTypeEd25519(xdr::Uint256(bytes)) = &account_id.0;
-                Ok(ed25519::PublicKey(*bytes).to_string())
+                Ok(ed25519::PublicKey(*bytes).to_string().as_str().to_string())
             }
             xdr::ScAddress::Contract(contract_id) => {
                 let bytes = contract_id.0.0;
-                Ok(stellar_strkey::Contract(bytes).to_string())
+                Ok(stellar_strkey::Contract(bytes)
+                    .to_string()
+                    .as_str()
+                    .to_string())
             }
             // Handling MuxedAccount, ClaimableBalance, and LiquidityPool
             _ => Err(Error::UnexpectedScVal(format!(
@@ -28,7 +31,7 @@ pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
     }
 }
 
-/// Helper to convert ScVal Bytes to a Vec<u8>
+/// Helper to convert ScVal Bytes to a `Vec<u8>`
 pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
     if let xdr::ScVal::Bytes(sc_bytes) = val {
         Ok(sc_bytes.0.to_vec())

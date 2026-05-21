@@ -18,12 +18,10 @@
 //! The output directory is exposed as en environment variable
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
-use anyhow::{Context, Result, anyhow};
-use ark_bn254::{Bn254, Fq, G1Affine, G2Affine};
-use ark_circom::{CircomBuilder, CircomConfig};
-use ark_ff::{BigInteger, PrimeField};
+use anyhow::{Context, Result, anyhow, bail};
+use ark_bn254::Bn254;
+use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
-use ark_serialize::CanonicalSerialize;
 use ark_snark::SNARK;
 use ark_std::rand::thread_rng;
 use compiler::{
@@ -34,7 +32,6 @@ use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
 use regex::Regex;
-use serde_json::{Value, json};
 use std::{
     env, fs,
     path::{Path, PathBuf},
@@ -44,6 +41,52 @@ use std::{
 use type_analysis::check_types::check_types;
 
 const CURVE_ID: &str = "bn128";
+
+fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
+    let workspace_root = crate_dir.parent().unwrap_or(crate_dir);
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| workspace_root.join("target"));
+    let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
+    Ok(target_dir.join("circuits-artifacts").join(profile))
+}
+
+fn copy(src: &Path, dst: &Path) -> Result<()> {
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("Could not create directory {}", parent.display()))?;
+    }
+
+    let tmp = dst.with_extension(format!("tmp-{}", std::process::id()));
+    fs::copy(src, &tmp)
+        .with_context(|| format!("Failed to copy {} to {}", src.display(), tmp.display()))?;
+
+    if dst.exists() {
+        let _ = fs::remove_file(dst);
+    }
+    fs::rename(&tmp, dst)
+        .with_context(|| format!("Failed to rename {} to {}", tmp.display(), dst.display()))?;
+    Ok(())
+}
+
+fn publish_circuit_artifacts(
+    publish_dir: &Path,
+    circuit_name: &str,
+    r1cs_file: &Path,
+    wasm_file: Option<&Path>,
+) -> Result<()> {
+    let r1cs_dst = publish_dir.join(format!("{circuit_name}.r1cs"));
+    copy(r1cs_file, &r1cs_dst)?;
+
+    if let Some(wasm_file) = wasm_file
+        && wasm_file.exists()
+    {
+        let wasm_dst = publish_dir.join(format!("{circuit_name}.wasm"));
+        copy(wasm_file, &wasm_dst)?;
+    }
+
+    Ok(())
+}
 
 fn main() -> Result<()> {
     println!(
@@ -56,6 +99,11 @@ fn main() -> Result<()> {
     // Put build artifacts under OUT_DIR/circuits
     let out_dir = PathBuf::from(env::var("OUT_DIR")?).join("circuits");
     fs::create_dir_all(&out_dir).context("Could not create OUT_DIR/circuits")?;
+
+    // Also publish artifacts to a deterministic directory under target/
+    let publish_dir = publish_dir_path(&crate_dir)?;
+    fs::create_dir_all(&publish_dir)
+        .with_context(|| format!("Could not create {}", publish_dir.display()))?;
 
     // Expose the path to your runtime/tests
     println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
@@ -164,6 +212,11 @@ fn main() -> Result<()> {
             .to_string_lossy()
             .to_string();
 
+        let wasm_path = out_dir
+            .join("wasm")
+            .join(format!("{circuit_name}_js"))
+            .join(format!("{circuit_name}.wasm"));
+
         if r1cs_file.exists() && sym_file.exists() {
             let r1cs_modified = fs::metadata(&r1cs_file)?.modified()?;
             let sym_modified = fs::metadata(&sym_file)?.modified()?;
@@ -179,37 +232,39 @@ fn main() -> Result<()> {
                     circom_file.display()
                 );
 
-                // Still check if we need to generate keys for policy_tx_2_2
-                if circuit_name == "policy_tx_2_2" {
-                    // Check if WASM exists before attempting key generation
-                    let wasm_path = out_dir
-                        .join("wasm")
-                        .join(format!("{circuit_name}_js"))
-                        .join(format!("{circuit_name}.wasm"));
-
-                    if !wasm_path.exists() {
-                        // WASM doesn't exist but keys might be needed - force recompilation
+                // Keep deterministic publish directory updated even on "skip" builds.
+                if wasm_path.exists() {
+                    if let Err(e) = publish_circuit_artifacts(
+                        &publish_dir,
+                        &circuit_name,
+                        &r1cs_file,
+                        Some(&wasm_path),
+                    ) {
                         println!(
-                            "cargo:warning=WASM missing for {} - forcing recompilation to enable key generation",
-                            circuit_name
+                            "cargo:warning=Failed to publish artifacts for {circuit_name}: {e}"
                         );
-                        // Don't continue, let the compilation proceed
-                    } else {
-                        // WASM exists, try key generation
-                        match generate_keys_if_needed(
-                            &crate_dir,
-                            &out_dir,
-                            &circuit_name,
-                            &r1cs_file,
-                        ) {
-                            Ok(_) => {}
-                            Err(e) => {
-                                println!("cargo:warning=Key generation failed: {e}");
-                            }
-                        }
-                        continue;
                     }
                 } else {
+                    // WASM missing: fall through so we can regenerate it instead of silently
+                    // leaving the deterministic directory incomplete.
+                    println!(
+                        "cargo:warning=WASM missing for {} - recompiling to restore deterministic artifacts",
+                        circuit_name
+                    );
+                }
+
+                // Still check if we need to generate keys for policy_tx_2_2
+                if circuit_name == "policy_tx_2_2" && wasm_path.exists() {
+                    match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
+                        Ok(_) => {}
+                        Err(e) => {
+                            println!("cargo:warning=Key generation failed: {e}");
+                        }
+                    }
+                    continue;
+                }
+
+                if wasm_path.exists() {
                     continue;
                 }
             }
@@ -270,12 +325,25 @@ fn main() -> Result<()> {
             }
         };
 
+        if let Err(e) = publish_circuit_artifacts(
+            &publish_dir,
+            &circuit_name,
+            &r1cs_file,
+            if wasm_success {
+                Some(wasm_path.as_path())
+            } else {
+                None
+            },
+        ) {
+            println!("cargo:warning=Failed to publish artifacts for {circuit_name}: {e}");
+        }
+
         // === GROTH16 Proving/Verifying key generation ===
         // For now we only generate keys for the policy_tx_2_2 circuit.
         if circuit_name == "policy_tx_2_2" {
             if !wasm_success {
-                println!(
-                    "cargo:warning=Skipping key generation for {} - WASM compilation failed",
+                bail!(
+                    "Skipping key generation for {} - WASM compilation failed",
                     circuit_name
                 );
             } else {
@@ -742,7 +810,7 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
         produce_input_log: false,
         wat_flag: false,
         no_asm_flag: false,
-        constraint_assert_disabled_flag: false,
+        sanity_check_style: 0,
         debug_output: false,
     };
 
@@ -779,9 +847,7 @@ pub fn compile_wasm(entry_file: &Path, out_dir: &Path, vcp: VCP) -> Result<()> {
     )
     .map_err(|_| anyhow!("write_wasm failed"))?;
 
-    if let Err(e) = wat_to_wasm(&wat_file, &wasm_file) {
-        println!("cargo:warning=WAT → WASM compilation failed: {e}");
-    }
+    wat_to_wasm(&wat_file, &wasm_file)?;
     Ok(())
 }
 
@@ -812,16 +878,38 @@ fn wat_to_wasm(wat_file: &Path, wasm_file: &Path) -> Result<()> {
         parser::{self, ParseBuffer},
     };
 
+    println!("cargo:warning= ===== wat_file {}...", wat_file.display());
+
     let wat_contents = fs::read_to_string(wat_file)
         .map_err(|e| anyhow!("read_to_string({}): {e}", wat_file.display()))?;
+
+    // Fix legacy instructions generated by circom
+    let wat_contents = wat_contents
+        .replace("get_local", "local.get")
+        .replace("set_local", "local.set")
+        .replace("tee_local", "local.tee")
+        .replace("get_global", "global.get")
+        .replace("set_global", "global.set")
+        // Conversion operators (The slash fix)
+        .replace("i32.wrap/i64", "i32.wrap_i64")
+        .replace("i64.extend_s/i32", "i64.extend_i32_s")
+        .replace("i64.extend_u/i32", "i64.extend_i32_u")
+        .replace("f32.convert_s/i32", "f32.convert_i32_s")
+        .replace("f64.convert_s/i32", "f64.convert_i32_s")
+        // Memory operators
+        .replace("grow_memory", "memory.grow")
+        .replace("current_memory", "memory.size");
 
     let buf =
         ParseBuffer::new(&wat_contents).map_err(|e| anyhow!("ParseBuffer::new failed: {e}"))?;
 
-    let mut wat = parser::parse::<Wat>(&buf).map_err(|e| anyhow!("WAT parse failed: {e}"))?;
+    let wat = parser::parse::<Wat>(&buf).map_err(|e| anyhow!("WAT parse failed: {e}"))?;
 
-    let wasm_bytes = wat
-        .module
+    let Wat::Module(mut module) = wat else {
+        bail!("WAT {wat_file:?} should be a module");
+    };
+
+    let wasm_bytes = module
         .encode()
         .map_err(|e| anyhow!("WASM encode failed: {e}"))?;
 
@@ -859,11 +947,7 @@ fn generate_groth16_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    // IMPORTANT: Use default LibsnarkReduction (NOT CircomReduction) for WASM
-    // prover compatibility. CircomReduction uses snarkjs-compatible QAP which
-    // differs from standard arkworks. Our WASM prover uses standard ark-groth16
-    // without the CircomReduction type parameter.
-    let (pk, vk) = Groth16::<Bn254>::circuit_specific_setup(empty, &mut rng)
+    let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 
     Ok((pk, vk))
@@ -1101,196 +1185,21 @@ fn generate_keys_if_needed(
 }
 
 /// Write the proving key to a binary file using compressed serialization.
-///
-/// # Arguments
-///
-/// * `pk` - The proving key to serialize
-/// * `path` - Output file path
 fn write_proving_key(pk: &ProvingKey<Bn254>, path: &Path) -> Result<()> {
-    // Serialize to Vec<u8>
-    let mut bytes = Vec::new();
-    pk.serialize_compressed(&mut bytes)
-        .map_err(|e| anyhow!("Failed to serialize proving key: {e}"))?;
-    fs::write(path, &bytes).context("Failed to write proving key file")?;
-    Ok(())
+    circuit_keys::write_proving_key_bin(pk, path)
 }
 
 /// Write the verification key to a JSON file in snarkjs-compatible format.
-///
-/// # Arguments
-///
-/// * `vk` - The verification key to serialize
-/// * `path` - Output file path
 fn write_verification_key(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let vk_json = vk_to_snarkjs_json(vk);
-    let json_str = serde_json::to_string_pretty(&vk_json)?;
-    fs::write(path, json_str).context("Failed to write verification key")?;
-    Ok(())
-}
-
-/// Convert an ark-groth16 VerifyingKey to snarkjs-compatible JSON format.
-fn vk_to_snarkjs_json(vk: &VerifyingKey<Bn254>) -> Value {
-    json!({
-        "protocol": "groth16",
-        "curve": "bn128",
-        "nPublic": vk.gamma_abc_g1.len().saturating_sub(1),
-        "vk_alpha_1": g1_to_snarkjs(&vk.alpha_g1),
-        "vk_beta_2": g2_to_snarkjs(&vk.beta_g2),
-        "vk_gamma_2": g2_to_snarkjs(&vk.gamma_g2),
-        "vk_delta_2": g2_to_snarkjs(&vk.delta_g2),
-        "IC": vk.gamma_abc_g1.iter().map(g1_to_snarkjs).collect::<Vec<_>>()
-    })
-}
-
-/// Convert a G1Affine point to snarkjs JSON format.
-fn g1_to_snarkjs(p: &G1Affine) -> Value {
-    json!([fq_to_decimal(&p.x), fq_to_decimal(&p.y), "1"])
-}
-
-/// Convert a G2Affine point to snarkjs JSON format.
-/// snarkjs uses [c1, c0] ordering (imaginary first, real second) for Fq2
-/// elements.
-fn g2_to_snarkjs(p: &G2Affine) -> Value {
-    json!([
-        [fq_to_decimal(&p.x.c1), fq_to_decimal(&p.x.c0)],
-        [fq_to_decimal(&p.y.c1), fq_to_decimal(&p.y.c0)],
-        ["1", "0"]
-    ])
-}
-
-/// Convert an Fq field element to a decimal string.
-fn fq_to_decimal(f: &Fq) -> String {
-    let bigint = f.into_bigint();
-    let bytes = bigint.to_bytes_be();
-    num_bigint::BigUint::from_bytes_be(&bytes).to_string()
-}
-
-// Soroban-compatible serialization functions.
-// Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering.
-
-/// Converts a BigInteger to 32-byte big-endian representation.
-fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
-    let bytes = value.to_bytes_be();
-    let mut out = [0u8; 32];
-    let start = 32usize.saturating_sub(bytes.len());
-    out[start..].copy_from_slice(&bytes[..bytes.len().min(32)]);
-    out
-}
-
-/// Converts a G1Affine point to 64-byte Soroban format.
-fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
-    let mut out = [0u8; 64];
-    out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
-    out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
-    out
-}
-
-/// Converts a G2Affine point to 128-byte Soroban format with c1||c0 ordering.
-fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
-    let mut out = [0u8; 128];
-    // Soroban ordering: c1 (imaginary) || c0 (real)
-    out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
-    out[32..64].copy_from_slice(&bigint_to_be_32(p.x.c0.into_bigint()));
-    out[64..96].copy_from_slice(&bigint_to_be_32(p.y.c1.into_bigint()));
-    out[96..].copy_from_slice(&bigint_to_be_32(p.y.c0.into_bigint()));
-    out
+    circuit_keys::write_vk_snarkjs_json(vk, path)
 }
 
 /// Write the verification key as a Rust const file for embedding in contracts.
-///
-/// Generates a file with embedded byte arrays that can be included in Soroban
-/// contracts.
 fn write_verification_key_rust_const(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let ic_count = vk.gamma_abc_g1.len();
-
-    let alpha_bytes = g1_to_soroban_bytes(&vk.alpha_g1);
-    let beta_bytes = g2_to_soroban_bytes(&vk.beta_g2);
-    let gamma_bytes = g2_to_soroban_bytes(&vk.gamma_g2);
-    let delta_bytes = g2_to_soroban_bytes(&vk.delta_g2);
-
-    let mut ic_arrays = Vec::with_capacity(ic_count);
-    for ic in &vk.gamma_abc_g1 {
-        ic_arrays.push(g1_to_soroban_bytes(ic));
-    }
-
-    let mut content = String::new();
-    content.push_str("//! Auto-generated verification key constants for Soroban contracts.\n");
-    content.push_str(
-        "//! DO NOT EDIT - regenerate by running `BUILD_TESTS=1 cargo build` in circuits/\n\n",
-    );
-    content.push_str("#![allow(dead_code)]\n\n");
-
-    // Alpha (G1)
-    content.push_str("/// Alpha point (G1, 64 bytes)\n");
-    content.push_str(&format!(
-        "pub const VK_ALPHA: [u8; 64] = {:?};\n\n",
-        alpha_bytes
-    ));
-
-    // Beta (G2)
-    content.push_str("/// Beta point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_BETA: [u8; 128] = {:?};\n\n",
-        beta_bytes
-    ));
-
-    // Gamma (G2)
-    content.push_str("/// Gamma point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_GAMMA: [u8; 128] = {:?};\n\n",
-        gamma_bytes
-    ));
-
-    // Delta (G2)
-    content.push_str("/// Delta point (G2, 128 bytes, c1||c0 ordering)\n");
-    content.push_str(&format!(
-        "pub const VK_DELTA: [u8; 128] = {:?};\n\n",
-        delta_bytes
-    ));
-
-    // IC count
-    content.push_str("/// Number of IC points (public inputs + 1)\n");
-    content.push_str(&format!("pub const VK_IC_COUNT: usize = {};\n\n", ic_count));
-
-    // IC points as array of arrays
-    content.push_str("/// IC points (G1, 64 bytes each)\n");
-    content.push_str(&format!("pub const VK_IC: [[u8; 64]; {}] = [\n", ic_count));
-    for ic in &ic_arrays {
-        content.push_str(&format!("    {:?},\n", ic));
-    }
-    content.push_str("];\n");
-
-    fs::write(path, content).context("Failed to write VK Rust const file")?;
-    Ok(())
+    circuit_keys::write_vk_rust_const(vk, path)
 }
 
 /// Write the verification key as binary Soroban-compatible format.
 fn write_verification_key_soroban_bin(vk: &VerifyingKey<Bn254>, path: &Path) -> Result<()> {
-    let ic_count = vk.gamma_abc_g1.len();
-
-    // VK binary format: alpha(64) + beta(128) + gamma(128) + delta(128) +
-    // ic_count(4) + ic(64*n) Fixed header size: 64 + 128 + 128 + 128 + 4 = 452
-    // bytes
-    const HEADER_SIZE: usize = 452;
-    let ic_bytes = ic_count.checked_mul(64).context("IC count overflow")?;
-    let total_size = HEADER_SIZE
-        .checked_add(ic_bytes)
-        .context("Total size overflow")?;
-
-    let mut bytes = Vec::with_capacity(total_size);
-
-    bytes.extend_from_slice(&g1_to_soroban_bytes(&vk.alpha_g1));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.beta_g2));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.gamma_g2));
-    bytes.extend_from_slice(&g2_to_soroban_bytes(&vk.delta_g2));
-
-    let ic_count_u32 = u32::try_from(ic_count).context("IC count exceeds u32 max")?;
-    bytes.extend_from_slice(&ic_count_u32.to_le_bytes());
-
-    for ic in &vk.gamma_abc_g1 {
-        bytes.extend_from_slice(&g1_to_soroban_bytes(ic));
-    }
-
-    fs::write(path, &bytes).context("Failed to write VK Soroban binary")?;
-    Ok(())
+    circuit_keys::write_vk_soroban_bin(vk, path)
 }

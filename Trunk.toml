@@ -23,12 +23,29 @@ command = "sh"
 command_arguments = ["-c", """
 mkdir -p $TRUNK_STAGING_DIR/circuits
 
-# Circuit artifacts from Cargo build output
-CIRCUIT_OUT=$(find target -path '*/build/circuits-*/out/circuits' -type d 2>/dev/null | head -1)
-if [ -n "$CIRCUIT_OUT" ]; then
-    cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
-    cp "$CIRCUIT_OUT"/wasm/*_js/*.wasm $TRUNK_STAGING_DIR/circuits/ 2>/dev/null || true
+# Circuit artifacts from a deterministic publish directory
+#
+# `circuits/build.rs` publishes to:
+#   target/circuits-artifacts/<profile>/{name}.r1cs
+#   target/circuits-artifacts/<profile>/{name}.wasm
+#
+# Prefer the artifacts which match the active Trunk build profile. Trunk exposes
+# the selected profile to hooks via `TRUNK_PROFILE`.
+PROFILE="${TRUNK_PROFILE:-release}"
+CIRCUIT_OUT="target/circuits-artifacts/$PROFILE"
+
+if [ ! -d "$CIRCUIT_OUT" ]; then
+    echo "trunk:error: missing circuit artifacts dir: $CIRCUIT_OUT" >&2
+    if [ "$PROFILE" = "release" ]; then
+        echo "trunk:error: run 'cargo build -p circuits --release' to generate them" >&2
+    else
+        echo "trunk:error: run 'cargo build -p circuits' to generate them" >&2
+    fi
+    exit 1
 fi
+
+cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/
+cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/
 
 # Static files
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true

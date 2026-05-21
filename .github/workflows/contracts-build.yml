@@ -39,6 +39,9 @@ jobs:
         with:
           version: v25.1.0
 
+      - name: Build circuit artifacts
+        run: cargo build -p circuits
+
       - name: Build contracts
         run: |
           mkdir -p target/stellar

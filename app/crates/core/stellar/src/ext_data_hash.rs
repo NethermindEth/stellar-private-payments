@@ -61,9 +61,7 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     let reduced = Rem::rem(digest_u256, modulus);
 
     // 6. Convert to 32-byte big-endian array.
-    let mut result_bytes = [0u8; 32];
-    reduced.to_big_endian(&mut result_bytes);
-    Ok(result_bytes)
+    Ok(reduced.to_big_endian())
 }
 
 /// Correctly maps i128 to Soroban's I256 XDR representation
