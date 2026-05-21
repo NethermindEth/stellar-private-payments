@@ -11,7 +11,6 @@ use types::{
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
 
-
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
@@ -305,19 +304,16 @@ impl Storage {
     }
 
     fn get_or_create_contract_id(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
-        tx.execute(
-            "INSERT OR IGNORE INTO contracts (address) VALUES (?1)",
-            params![address],
-        )
-        .context("failed to insert contract")?;
-
         let id: i64 = tx
             .query_row(
-                "SELECT contract_id FROM contracts WHERE address = ?1",
+                "INSERT INTO contracts (address)
+                 VALUES (?1)
+                 ON CONFLICT(address) DO UPDATE SET address = excluded.address
+                 RETURNING contract_id",
                 params![address],
                 |row| row.get(0),
             )
-            .context("failed to fetch contract id")?;
+            .context("failed to get or create contract id")?;
 
         Ok(id)
     }
