@@ -66,4 +66,7 @@ command_arguments = ["-c", """
 ./app/node_modules/.bin/esbuild app/js/ui.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/admin.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/disclosure.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/disclosure.js --format=esm
+
+# Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
+cp app/js/sw.js $TRUNK_STAGING_DIR/sw.js
 """]
