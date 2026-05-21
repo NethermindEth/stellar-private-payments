@@ -9,6 +9,8 @@ import { Templates } from './templates.js';
 
 export const NotesTable = {
     filter: 'all',
+    sortKey: null,
+    sortDir: 'desc',
     _timer: null,
     _refreshing: false,
     
@@ -29,6 +31,21 @@ export const NotesTable = {
             });
         });
         
+        // Sort buttons
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const key = btn.dataset.sort;
+                if (this.sortKey === key) {
+                    this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortKey = key;
+                    this.sortDir = 'asc';
+                }
+                this._updateSortIcons();
+                this.render();
+            });
+        });
+
         this.render();
 
         App.events.addEventListener('wallet:ready', () => {
@@ -96,6 +113,40 @@ export const NotesTable = {
         }
     },
     
+    _updateSortIcons() {
+        document.querySelectorAll('.sort-btn').forEach(btn => {
+            const key = btn.dataset.sort;
+            const icon = btn.querySelector('.sort-icon');
+            if (this.sortKey === key) {
+                btn.classList.add('text-brand-400');
+                btn.classList.remove('text-dark-500');
+                icon.classList.remove('opacity-50');
+                icon.style.transform = this.sortDir === 'asc' ? 'rotate(0deg)' : 'rotate(180deg)';
+            } else {
+                btn.classList.remove('text-brand-400');
+                btn.classList.add('text-dark-500');
+                icon.classList.add('opacity-50');
+                icon.style.transform = 'none';
+            }
+        });
+    },
+
+    _compareNotes(a, b) {
+        const dir = this.sortDir === 'asc' ? 1 : -1;
+        switch (this.sortKey) {
+            case 'id':
+                return dir * a.id.localeCompare(b.id);
+            case 'amount':
+                return dir * ((a.amount ?? 0) - (b.amount ?? 0));
+            case 'created':
+                return dir * ((a.createdAtLedger ?? 0) - (b.createdAtLedger ?? 0));
+            case 'status':
+                return dir * ((a.spent ? 1 : 0) - (b.spent ? 1 : 0));
+            default:
+                return 0;
+        }
+    },
+
     render() {
         const tbody = document.getElementById('notes-tbody');
         const empty = document.getElementById('empty-notes');
@@ -107,7 +158,7 @@ export const NotesTable = {
         let notes = [...App.state.notes];
         if (this.filter === 'unspent') notes = notes.filter(n => !n.spent);
         if (this.filter === 'spent') notes = notes.filter(n => n.spent);
-        notes.sort((a, b) => (b.leafIndex ?? 0) - (a.leafIndex ?? 0));
+        notes.sort((a, b) => this._compareNotes(a, b));
         
         if (notes.length === 0) {
             empty.classList.remove('hidden');
