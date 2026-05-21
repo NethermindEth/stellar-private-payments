@@ -1,8 +1,4 @@
 //! Selective-disclosure circuit metadata and receipt validation.
-//!
-//! This crate intentionally does not perform proving or Groth16 verification
-//! yet. It owns the circuit-specific receipt checks that sit above the generic
-//! `prover` crate and below the platforms entry points.
 
 use anyhow::{Result, anyhow};
 use prover::prover::{Prover, verify_proof};
