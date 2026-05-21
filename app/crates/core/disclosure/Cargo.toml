@@ -1,0 +1,19 @@
+[package]
+name = "disclosure"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Selective disclosure receipt validation and circuit metadata"
+
+[dependencies]
+anyhow = { workspace = true }
+prover = { workspace = true }
+types = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true, features = ["alloc"] }
+
+[lints]
+workspace = true
