@@ -12,13 +12,14 @@
 --
 -- Storage is event-driven: contracts are inserted on first observation.
 CREATE TABLE contracts (
-    contract_id TEXT PRIMARY KEY
+    contract_id INTEGER PRIMARY KEY,
+    address TEXT NOT NULL UNIQUE
 );
 
 -- Stores the last RPC cursor used by the indexer.
 -- Per-contract table keyed by contract_id.
 CREATE TABLE indexing_metadata (
-    contract_id TEXT PRIMARY KEY,
+    contract_id INTEGER PRIMARY KEY,
     -- RPC pagination cursor (opaque).
     last_cursor TEXT,
     -- Latest ledger that the indexer has fully caught up to.
@@ -40,9 +41,10 @@ CREATE TABLE raw_contract_events (
     id TEXT PRIMARY KEY,
     -- Ledger sequence that emitted this event.
     ledger INTEGER NOT NULL,
-    contract_id TEXT NOT NULL,
+    contract_id INTEGER NOT NULL,
     topics TEXT NOT NULL,
-    value TEXT NOT NULL
+    value TEXT NOT NULL,
+    FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id);
 
@@ -72,7 +74,7 @@ CREATE INDEX idx_keypairs_account_id_id ON keypairs(account_id, id);
 -- Linked to `raw_contract_events` so entries can be traced back to the originating event.
 CREATE TABLE pool_nullifiers (
     id INTEGER PRIMARY KEY,
-    pool_contract_id TEXT NOT NULL,
+    pool_contract_id INTEGER NOT NULL,
     nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
     -- Foreign key to `raw_contract_events.id` for the event that emitted this nullifier.
     event_id  TEXT NOT NULL UNIQUE,
@@ -89,7 +91,7 @@ CREATE TABLE pool_nullifiers (
 -- - `encrypted_output`: encrypted note output intended for recipients.
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
-    pool_contract_id TEXT NOT NULL,
+    pool_contract_id INTEGER NOT NULL,
     commitment BLOB NOT NULL CHECK (length(commitment) = 32),
     leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
@@ -107,7 +109,7 @@ CREATE TABLE pool_commitments (
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
 -- be recovered by joining on the raw event.
 CREATE TABLE public_keys (
-    pool_contract_id TEXT NOT NULL,
+    pool_contract_id INTEGER NOT NULL,
     owner TEXT NOT NULL,
     encryption_key BLOB NOT NULL,
     note_key BLOB NOT NULL,
@@ -160,7 +162,7 @@ CREATE INDEX idx_user_notes_unspent_expected_nullifier
 --
 -- Tracks how far each account has progressed when scanning commitments for decryptable notes.
 CREATE TABLE account_commitment_scan (
-    pool_contract_id TEXT NOT NULL,
+    pool_contract_id INTEGER NOT NULL,
     account_id INTEGER NOT NULL,
     last_commitment_id INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (pool_contract_id, account_id),
@@ -174,7 +176,7 @@ CREATE TABLE account_commitment_scan (
 -- Tracks how far reconciliation has progressed when matching on-chain nullifiers against
 -- `user_notes.expected_nullifier`.
 CREATE TABLE nullifier_scan_state (
-    pool_contract_id TEXT PRIMARY KEY,
+    pool_contract_id INTEGER PRIMARY KEY,
     last_nullifier_id INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
@@ -184,7 +186,7 @@ CREATE TABLE nullifier_scan_state (
 --
 -- Maintains which account should be scanned first on the next scan pass.
 CREATE TABLE notes_scan_scheduler (
-    pool_contract_id TEXT PRIMARY KEY,
+    pool_contract_id INTEGER PRIMARY KEY,
     next_account_offset INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );

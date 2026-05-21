@@ -64,11 +64,7 @@ impl Storage {
 
     pub fn save_events_batch(&mut self, contract_id: &str, data: &types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
-        tx.execute(
-            "INSERT INTO contracts (contract_id) VALUES (?1)
-             ON CONFLICT(contract_id) DO NOTHING",
-            params![contract_id],
-        )?;
+        let contract_id = Self::get_or_create_contract_id(&tx, contract_id)?;
         tx.execute(
             "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
              VALUES (?1, NULL, 0)
@@ -83,10 +79,11 @@ impl Storage {
             )?;
 
             for event in &data.events {
+                let event_contract_id = Self::get_or_create_contract_id(&tx, &event.contract_id)?;
                 stmt.execute(params![
                     event.id,
                     event.ledger,
-                    event.contract_id,
+                    event_contract_id,
                     event.topics.join(","),
                     event.value
                 ])?;
@@ -119,9 +116,10 @@ impl Storage {
 
     pub fn get_sync_metadata(&self, contract_id: &str) -> Result<Option<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT last_fully_indexed_ledger, last_cursor
-             FROM indexing_metadata
-             WHERE contract_id = ?1",
+            "SELECT m.last_fully_indexed_ledger, m.last_cursor
+             FROM indexing_metadata m
+             JOIN contracts c ON c.contract_id = m.contract_id
+             WHERE c.address = ?1",
         )?;
 
         let status = stmt
@@ -291,6 +289,24 @@ impl Storage {
         Ok(id)
     }
 
+    fn get_or_create_contract_id(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
+        tx.execute(
+            "INSERT OR IGNORE INTO contracts (address) VALUES (?1)",
+            params![address],
+        )
+        .context("failed to insert contract")?;
+
+        let id: i64 = tx
+            .query_row(
+                "SELECT contract_id FROM contracts WHERE address = ?1",
+                params![address],
+                |row| row.get(0),
+            )
+            .context("failed to fetch contract id")?;
+
+        Ok(id)
+    }
+
     /// Returns $limit public keys ordered by ledger descending.
     /// for an address book
     pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
@@ -404,10 +420,11 @@ impl Storage {
     /// reconstruction would be ambiguous/incorrect.
     pub fn get_pool_commitment_leaves_ordered(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index, commitment
-             FROM pool_commitments
-             WHERE pool_contract_id = ?1
-             ORDER BY leaf_index ASC",
+            "SELECT c.leaf_index, c.commitment
+             FROM pool_commitments c
+             JOIN contracts pc ON pc.contract_id = c.pool_contract_id
+             WHERE pc.address = ?1
+             ORDER BY c.leaf_index ASC",
         )?;
 
         let rows = stmt.query_map(params![pool_contract_id], |row| {
@@ -453,7 +470,7 @@ impl Storage {
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
              WHERE a.address = ?2
-               AND c.pool_contract_id = ?1
+               AND c.pool_contract_id = (SELECT contract_id FROM contracts WHERE address = ?1)
                AND c.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
@@ -481,7 +498,7 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_nullifiers (pool_contract_id, nullifier, event_id)
-                    VALUES (?1, ?2, ?3)
+                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3)
                     ON CONFLICT(pool_contract_id, nullifier) DO NOTHING",
             )?;
 
@@ -499,7 +516,7 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO pool_commitments (pool_contract_id, commitment, leaf_index, encrypted_output, event_id)
-                    VALUES (?1, ?2, ?3, ?4, ?5)
+                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3, ?4, ?5)
                     ON CONFLICT(pool_contract_id, commitment) DO NOTHING",
             )?;
 
@@ -523,7 +540,7 @@ impl Storage {
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO public_keys (pool_contract_id, owner, encryption_key, note_key, event_id)
-                    VALUES (?1, ?2, ?3, ?4, ?5)
+                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3, ?4, ?5)
                     ON CONFLICT(pool_contract_id, owner) DO NOTHING",
             )?;
 
@@ -707,8 +724,9 @@ impl Storage {
     /// Unprocessed raw events fetch
     pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT r.id, r.ledger, r.contract_id, r.topics, r.value
+            "SELECT r.id, r.ledger, c.address, r.topics, r.value
                 FROM raw_contract_events r
+                JOIN contracts c ON c.contract_id = r.contract_id
                 LEFT JOIN pool_nullifiers n ON r.id = n.event_id
                 LEFT JOIN pool_commitments c ON r.id = c.event_id
                 LEFT JOIN public_keys p ON r.id = p.event_id
@@ -801,11 +819,11 @@ impl Storage {
         }
 
         // Scan each observed pool independently.
-        let pool_ids: Vec<String> = self
+        let pool_ids: Vec<i64> = self
             .conn
             .prepare("SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id")?
             .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<String>, _>>()?;
+            .collect::<core::result::Result<Vec<i64>, _>>()?;
 
         if pool_ids.is_empty() {
             return Ok(false);
@@ -974,11 +992,11 @@ impl Storage {
         }
 
         // Reconcile per pool to avoid cross-asset note marking.
-        let pool_ids: Vec<String> = self
+        let pool_ids: Vec<i64> = self
             .conn
             .prepare("SELECT DISTINCT pool_contract_id FROM pool_nullifiers ORDER BY pool_contract_id")?
             .query_map([], |row| row.get(0))?
-            .collect::<core::result::Result<Vec<String>, _>>()?;
+            .collect::<core::result::Result<Vec<i64>, _>>()?;
 
         if pool_ids.is_empty() {
             return Ok(false);
