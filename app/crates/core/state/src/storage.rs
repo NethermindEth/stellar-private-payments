@@ -62,15 +62,8 @@ impl Storage {
         Ok(Self { conn })
     }
 
-    pub fn save_events_batch(&mut self, contract_id: &str, data: &types::ContractsEventData) -> Result<()> {
+    pub fn save_events_batch(&mut self, data: &types::ContractsEventData) -> Result<()> {
         let tx = self.conn.transaction()?;
-        let contract_id = Self::get_or_create_contract_id(&tx, contract_id)?;
-        tx.execute(
-            "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
-             VALUES (?1, NULL, 0)
-             ON CONFLICT(contract_id) DO NOTHING",
-            params![contract_id],
-        )?;
         {
             let mut stmt = tx.prepare(
                 "INSERT INTO raw_contract_events (id, ledger, contract_id, topics, value)
@@ -89,20 +82,6 @@ impl Storage {
                 ])?;
             }
 
-            if data.events.is_empty() {
-                tx.execute(
-                    "INSERT OR REPLACE INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
-                     VALUES (?1, ?2, ?3)",
-                    params![contract_id, data.cursor, data.latest_ledger],
-                )?;
-            } else {
-                tx.execute(
-                    "UPDATE indexing_metadata
-                     SET last_cursor = ?2
-                     WHERE contract_id = ?1",
-                    params![contract_id, data.cursor],
-                )?;
-            }
         }
         tx.commit()?;
         log::debug!(
@@ -111,6 +90,42 @@ impl Storage {
             data.cursor,
             data.latest_ledger
         );
+        Ok(())
+    }
+
+    pub fn save_sync_progress(
+        &mut self,
+        contract_id: &str,
+        cursor: &str,
+        latest_ledger: u32,
+        fully_indexed: bool,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let contract_id = Self::get_or_create_contract_id(&tx, contract_id)?;
+        tx.execute(
+            "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
+             VALUES (?1, ?2, 0)
+             ON CONFLICT(contract_id) DO NOTHING",
+            params![contract_id, cursor],
+        )?;
+
+        if fully_indexed {
+            tx.execute(
+                "UPDATE indexing_metadata
+                 SET last_cursor = ?2, last_fully_indexed_ledger = ?3
+                 WHERE contract_id = ?1",
+                params![contract_id, cursor, latest_ledger],
+            )?;
+        } else {
+            tx.execute(
+                "UPDATE indexing_metadata
+                 SET last_cursor = ?2
+                 WHERE contract_id = ?1",
+                params![contract_id, cursor],
+            )?;
+        }
+
+        tx.commit()?;
         Ok(())
     }
 
@@ -1125,7 +1140,7 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         let event_id = "pk_event_1";
-        storage.save_events_batch("CPOOL", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cursor".to_string(),
             latest_ledger: 42,
             events: vec![ContractEvent {
@@ -1190,7 +1205,7 @@ mod tests {
             encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
 
         // Insert the raw event + the parsed pool commitment row.
-        storage.save_events_batch("CPOOL", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             events: vec![dummy_event("evt-commit")],
             cursor: "cur".to_string(),
             latest_ledger: 1,
@@ -1251,7 +1266,7 @@ mod tests {
         })?;
         let nullifier = Field::try_from_le_bytes(nullifier_le)?;
 
-        storage.save_events_batch("CPOOL", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             events: vec![dummy_event("evt-null")],
             cursor: "cur2".to_string(),
             latest_ledger: 1,
@@ -1280,11 +1295,12 @@ mod tests {
 
         // Non-empty batch should update the cursor but not advance the "fully indexed"
         // ledger.
-        storage.save_events_batch("CPOOL", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "c1".to_string(),
             latest_ledger: 10,
             events: vec![dummy_event("evt-1")],
         })?;
+        storage.save_sync_progress("CPOOL", "c1", 10, false)?;
 
         let meta = storage
              .get_sync_metadata("CPOOL")?
@@ -1293,11 +1309,12 @@ mod tests {
         assert_eq!(meta.last_ledger, 0);
 
         // Empty batch is the "caught up" proof and advances last_fully_indexed_ledger.
-        storage.save_events_batch("CPOOL", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "c2".to_string(),
             latest_ledger: 123,
             events: vec![],
         })?;
+        storage.save_sync_progress("CPOOL", "c2", 123, true)?;
 
         let meta = storage
              .get_sync_metadata("CPOOL")?
@@ -1383,7 +1400,7 @@ mod tests {
         let current_ledger = 12u32;
 
         // Ingest raw events (including a newer ASP event)...
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: 11,
             events: vec![
@@ -1414,11 +1431,12 @@ mod tests {
 
         // Mark the indexer as fully caught up to the chain tip (even though
         // event processing is behind).
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress("CASP", "cur-tip", current_ledger, true)?;
 
         let status = storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
         assert!(matches!(
@@ -1446,7 +1464,7 @@ mod tests {
 
         let current_ledger = 10u32;
 
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: current_ledger,
             events: vec![ContractEvent {
@@ -1465,11 +1483,12 @@ mod tests {
             root: root_old,
         }])?;
 
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress("CASP", "cur-tip", current_ledger, true)?;
 
         let err = storage
             .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
@@ -1493,7 +1512,7 @@ mod tests {
         let last_leaf_ledger = 10u32;
         let current_ledger = 12u32;
 
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: last_leaf_ledger,
             events: vec![ContractEvent {
@@ -1512,11 +1531,12 @@ mod tests {
             root,
         }])?;
 
-        storage.save_events_batch("CASP", &ContractsEventData {
+        storage.save_events_batch(&ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress("CASP", "cur-tip", current_ledger, true)?;
 
         // Root matches the last stored root: this should NOT require syncing
         // even if the last ASP leaf was emitted earlier than the current tip.

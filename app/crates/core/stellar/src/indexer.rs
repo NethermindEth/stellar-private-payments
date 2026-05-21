@@ -77,67 +77,47 @@ Please use a fresher contracts deployment / a different RPC which stores events 
     pub async fn fetch_contract_events(&self) -> Result<()> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
 
-        // 1) Pool contracts (one cursor per pool).
-        for p in self.config.pools.iter().filter(|p| p.enabled) {
-            self.fetch_one_contract(
-                &p.pool_contract_id,
-                p.deployment_ledger,
-                network_tip,
-            )
-            .await?;
+        let enabled_pools: Vec<&types::PoolConfigEntry> =
+            self.config.pools.iter().filter(|p| p.enabled).collect();
+        if enabled_pools.is_empty() {
+            return Ok(());
         }
 
-        // 2) ASP membership contract (one cursor).
-        if let Some(min_pool_ledger) = self
-            .config
-            .pools
+        let min_pool_ledger = enabled_pools
             .iter()
-            .filter(|p| p.enabled)
             .map(|p| p.deployment_ledger)
             .min()
-        {
-            self.fetch_one_contract(
-                &self.config.asp_membership,
-                min_pool_ledger,
-                network_tip,
-            )
-            .await?;
-        }
+            .ok_or_else(|| anyhow!("no enabled pools in config"))?;
 
-        Ok(())
-    }
+        let mut contract_ids: Vec<String> = enabled_pools
+            .iter()
+            .map(|p| p.pool_contract_id.clone())
+            .collect();
+        contract_ids.push(self.config.asp_membership.clone());
+        contract_ids.push(self.config.asp_non_membership.clone());
+        contract_ids.sort();
+        contract_ids.dedup();
 
-    async fn fetch_one_contract(
-        &self,
-        contract_id: &str,
-        deployment_ledger: u32,
-        network_tip: u32,
-    ) -> Result<()> {
-        log::debug!(
-            "[INDEXER] starting round for contract={contract_id}, network_tip={network_tip}"
-        );
-
+        let sync_scope_contract_id = &enabled_pools[0].pool_contract_id;
         let (mut cursor, start_ledger) = if let Some(SyncMetadata {
             cursor,
             last_ledger,
             ..
-        }) = self.storage.get_sync_state(contract_id).await?
+        }) = self.storage.get_sync_state(sync_scope_contract_id).await?
         {
             (Some(cursor), last_ledger)
         } else {
-            log::debug!(
-                "[INDEXER] no saved sync metadata for contract {contract_id} - cold start at deployment ledger {deployment_ledger}"
-            );
-            (None, deployment_ledger)
+            (None, min_pool_ledger)
         };
 
         for page in 0..MAX_PAGES_PER_ROUND {
             log::trace!(
-                "[INDEXER] contract={contract_id} page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
+                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
+
             let (new_cursor, events, latest_ledger) = self
                 .client
-                .get_contract_events(&[contract_id.to_string()], start_ledger, PAGE_SIZE, cursor)
+                .get_contract_events(&contract_ids, start_ledger, PAGE_SIZE, cursor)
                 .await?;
 
             let new_cursor = new_cursor
@@ -145,26 +125,19 @@ Please use a fresher contracts deployment / a different RPC which stores events 
                 .ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
             let is_empty = events.is_empty();
 
-            log::trace!(
-                "[INDEXER] contract={contract_id} fetched {} events (latest_ledger={})",
-                events.len(),
-                latest_ledger
-            );
+            self.storage
+                .save_events_batch(ContractsEventData {
+                    cursor: new_cursor.clone(),
+                    latest_ledger,
+                    events: events.into_iter().map(|e| e.into()).collect(),
+                })
+                .await?;
 
             self.storage
-                .save_events_batch(
-                    contract_id,
-                    ContractsEventData {
-                        cursor: new_cursor.clone(),
-                        latest_ledger,
-                        events: events.into_iter().map(|e| e.into()).collect(),
-                    },
-                )
+                .save_sync_progress(sync_scope_contract_id, new_cursor.clone(), latest_ledger, is_empty)
                 .await?;
 
             cursor = Some(new_cursor);
-
-            // Prove "caught up" by observing an empty page for the current cursor.
             if is_empty {
                 break;
             }
@@ -180,10 +153,14 @@ pub trait ContractDataStorage {
     async fn get_sync_state(&self, contract_id: &str) -> anyhow::Result<Option<SyncMetadata>>;
 
     /// Sends a batch of events to be saved and waits for confirmation.
-    async fn save_events_batch(
+    async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()>;
+
+    async fn save_sync_progress(
         &self,
         contract_id: &str,
-        batch: ContractsEventData,
+        cursor: String,
+        latest_ledger: u32,
+        fully_indexed: bool,
     ) -> anyhow::Result<()>;
 }
 

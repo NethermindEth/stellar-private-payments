@@ -187,12 +187,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             log::trace!("[{WORKER_NAME}] sending current sync");
             resp
         }
-        StorageWorkerRequest::SaveEvents(contract_id, events_data) => {
+        StorageWorkerRequest::SaveEvents(events_data) => {
             log::trace!(
                 "[{WORKER_NAME}] saving {} raw contract events",
                 events_data.events.len()
             );
-            with_storage_mut!(s => s.save_events_batch(&contract_id, &events_data)?)?;
+            with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
             // We could pass the events_data here further for the processing but
             // for the sake of the sequential processing we drop it here
             // the storage is the single source of raw events for the processors
@@ -201,6 +201,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 events_data.events.len()
             );
             kick_processor();
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::SaveSyncProgress(contract_id, cursor, latest_ledger, fully_indexed) => {
+            log::trace!("[{WORKER_NAME}] saving sync progress for {contract_id}: cursor={cursor}, latest={latest_ledger}, fully={fully_indexed}");
+            with_storage_mut!(s => s.save_sync_progress(&contract_id, &cursor, latest_ledger, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(

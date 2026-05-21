@@ -27,7 +27,8 @@ pub struct DisclaimerStatePayload {
 pub enum StorageWorkerRequest {
     Ping,
     SyncState(Address),
-    SaveEvents(Address, ContractsEventData),
+    SaveEvents(ContractsEventData),
+    SaveSyncProgress(Address, String, u32, bool),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),

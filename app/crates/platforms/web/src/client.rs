@@ -1259,9 +1259,34 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_events_batch(&self, contract_id: &str, data: types::ContractsEventData) -> anyhow::Result<()> {
+    async fn save_events_batch(&self, data: types::ContractsEventData) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(contract_id.to_string(), data))).await?;
+        let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
+        match resp {
+            StorageWorkerResponse::Saved => Ok(()),
+            StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
+            other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
+        }
+    }
+
+    async fn save_sync_progress(
+        &self,
+        contract_id: &str,
+        cursor: String,
+        latest_ledger: u32,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()> {
+        let mut bridge = self.storage_bridge.fork();
+        let resp = with_timeout(
+            10_000,
+            bridge.run(StorageWorkerRequest::SaveSyncProgress(
+                contract_id.to_string(),
+                cursor,
+                latest_ledger,
+                fully_indexed,
+            )),
+        )
+        .await?;
         match resp {
             StorageWorkerResponse::Saved => Ok(()),
             StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
