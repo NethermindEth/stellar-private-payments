@@ -246,18 +246,18 @@ pub fn decrypt_output_note(
 ///
 /// # Output Format
 /// ```text
-/// [ephemeral_pubkey (32)] [nonce (24)] [ciphertext (40) + tag (16)]
-/// Total: 112 bytes minimum
+/// [ephemeral_pubkey (32)] [nonce (24)] [ciphertext (48) + tag (16)]
+/// Total: 120 bytes minimum
 /// ```
 ///
 /// # Arguments
 /// * `recipient_pubkey_bytes` - Recipient's X25519 encryption public key (32
 ///   bytes)
 /// * `plaintext` - Note data: `[amount (16 bytes LE)] [blinding (32 bytes)]` =
-///   40 bytes
+///   48 bytes
 ///
 /// # Returns
-/// Encrypted data (112 bytes)
+/// Encrypted data (120 bytes)
 fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
     if recipient_pubkey_bytes.len() != 32 {
         return Err(anyhow!("Recipient public key must be 32 bytes"));
@@ -318,7 +318,7 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
 ///
 /// # Arguments
 /// * `private_key_bytes` - Our X25519 encryption private key (32 bytes)
-/// * `encrypted_data` - Encrypted data from on-chain event (112+ bytes)
+/// * `encrypted_data` - Encrypted data from on-chain event (120+ bytes)
 ///
 /// # Returns
 /// - Success: `[amount (16 bytes LE)] [blinding (32 bytes)]` = 48 bytes
@@ -328,9 +328,9 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
         return Err(anyhow!("Private key must be 32 bytes"));
     }
 
-    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (40) + tag
-    // (16) = 112
-    if encrypted_data.len() < 112 {
+    // Minimum size: ephemeral_pubkey (32) + nonce (24) + min ciphertext (48) + tag
+    // (16) = 120
+    if encrypted_data.len() < 120 {
         return Err(anyhow!("Encrypted data too short"));
     }
 
@@ -416,7 +416,7 @@ mod tests {
 
         // Encrypt for Alice.
         let alice_pub = alice_keys.public.as_ref();
-        let plaintext = [0u8; 40];
+        let plaintext = [0u8; 48];
         let encrypted = encrypt_note_data(alice_pub, &plaintext).expect("Encryption failed");
 
         // Bob tries to decrypt.
@@ -440,7 +440,7 @@ mod tests {
         assert!(res.is_err());
 
         // Invalid pubkey length
-        let res = encrypt_note_data(&[0u8; 31], &[0u8; 40]);
+        let res = encrypt_note_data(&[0u8; 31], &[0u8; 48]);
         assert!(res.is_err());
     }
 
