@@ -31,7 +31,6 @@ CREATE TABLE indexing_metadata (
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 
-
 -- Append-only log of raw contract events fetched from RPC.
 --
 -- Notes:
@@ -83,7 +82,6 @@ CREATE TABLE pool_nullifiers (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
-
 -- Pool Merkle tree commitments observed on-chain.
 --
 -- Each commitment carries:
@@ -103,7 +101,6 @@ CREATE TABLE pool_commitments (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
-
 -- An address book of registered public keys in the pool contract for sending private transfers
 --
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
@@ -119,7 +116,6 @@ CREATE TABLE public_keys (
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
-
 
 -- Leaves of the ASP membership Merkle tree observed on-chain.
 --
@@ -170,7 +166,6 @@ CREATE TABLE account_commitment_scan (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
-
 -- Per-pool nullifier scan high-water mark (pool_nullifiers.id).
 --
 -- Tracks how far reconciliation has progressed when matching on-chain nullifiers against
@@ -181,7 +176,6 @@ CREATE TABLE nullifier_scan_state (
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 
-
 -- Round-robin scheduler for commitment scanning fairness across accounts.
 --
 -- Maintains which account should be scanned first on the next scan pass.
@@ -190,7 +184,6 @@ CREATE TABLE notes_scan_scheduler (
     next_account_offset INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
-
 
 -- Terms & Conditions (disclaimer) acceptances per account and disclaimer hash.
 --
