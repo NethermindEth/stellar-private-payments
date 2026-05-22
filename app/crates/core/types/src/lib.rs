@@ -16,11 +16,11 @@ pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
     pub admin: String,
-    /// Global ASP membership contract id
+    /// Address of ASP membership deployed contract
     pub asp_membership: String,
-    /// Global ASP non-membership contract id
+    /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
-    /// Global verifier contract id
+    /// Address of verifier deployed contract
     pub verifier: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
