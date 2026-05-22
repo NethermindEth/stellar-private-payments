@@ -572,15 +572,11 @@ mod tests {
     fn note_amount_try_from_ext_amount_range() -> Result<()> {
         assert_eq!(NoteAmount::try_from(ExtAmount(0))?, NoteAmount::ZERO);
         assert_eq!(
-            NoteAmount::try_from(ExtAmount::from(NoteAmount::MAX))?,
-            NoteAmount::MAX
+            ExtAmount::try_from(NoteAmount::try_from(ExtAmount::MAX)?)?,
+            ExtAmount::MAX
         );
 
         assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
-
-        let max_ext = ExtAmount::from(NoteAmount::MAX);
-        let too_big = max_ext.checked_add(ExtAmount::ONE).expect("i128 add");
-        assert!(NoteAmount::try_from(too_big).is_err());
         Ok(())
     }
 

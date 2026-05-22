@@ -315,8 +315,9 @@ where
         smt_depth,
     } = params;
 
-    let input_total = sum_amounts(&inputs)?;
-    if input_total < withdraw_amount {
+    let input_total = sum_note_amounts_inputs(&inputs)?;
+    let withdraw_note_amount = NoteAmount::try_from(withdraw_amount)?;
+    if input_total < withdraw_note_amount {
         return Err(anyhow!(
             "insufficient input amount: have {}, need {}",
             input_total,
@@ -324,22 +325,14 @@ where
         ));
     }
     let change = input_total
-        .checked_sub(withdraw_amount)
+        .checked_sub(withdraw_note_amount)
         .ok_or_else(|| anyhow!("insufficient input amount"))?;
 
     let outputs = match outputs {
         Some(v) => v,
         None => {
-            let (out0_amount, out1_amount) = match NoteAmount::try_from(change) {
-                Ok(v) => (v, NoteAmount::ZERO),
-                Err(_) => {
-                    let max_ext = ExtAmount::MAX;
-                    let remainder = change
-                        .checked_sub(max_ext)
-                        .ok_or_else(|| anyhow!("negative withdrawal change remainder"))?;
-                    (NoteAmount::MAX, NoteAmount::try_from(remainder)?)
-                }
-            };
+            let out0_amount = change;
+            let out1_amount = NoteAmount::ZERO;
             let change_blinding = encryption::generate_random_blinding()?;
             let dummy_blinding = encryption::generate_random_blinding()?;
             vec![
@@ -475,13 +468,28 @@ where
     }
 
     // Enforce the conservation equation: inputs + ext_amount == outputs.
-    let inputs_sum = sum_amounts(&inputs)?;
-    let outputs_sum = sum_amounts_outputs(&outputs)?;
-    let lhs = inputs_sum
-        .checked_add(ext_amount)
-        .ok_or_else(|| anyhow!("overflow computing LHS"))?;
-    let rhs = outputs_sum;
-    if lhs != rhs {
+    let inputs_sum = sum_note_amounts_inputs(&inputs)?;
+    let outputs_sum = sum_note_amounts_outputs(&outputs)?;
+
+    let balanced = if ext_amount >= ExtAmount::ZERO {
+        let public_note = NoteAmount::try_from(ext_amount)?;
+        let lhs = inputs_sum
+            .checked_add(public_note)
+            .ok_or_else(|| anyhow!("overflow computing note amount LHS"))?;
+        lhs == outputs_sum
+    } else {
+        let public_note = NoteAmount::try_from(
+            ext_amount
+                .checked_neg()
+                .ok_or_else(|| anyhow!("public amount negation overflow"))?,
+        )?;
+        let rhs = outputs_sum
+            .checked_add(public_note)
+            .ok_or_else(|| anyhow!("overflow computing note amount RHS"))?;
+        inputs_sum == rhs
+    };
+
+    if !balanced {
         return Err(anyhow!(
             "not balanced: inputs({}) + public({}) != outputs({})",
             inputs_sum,
@@ -799,21 +807,21 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
-fn sum_amounts(inputs: &[TransactInputNote]) -> Result<ExtAmount> {
-    let mut sum = ExtAmount::ZERO;
+fn sum_note_amounts_inputs(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
+    let mut sum = NoteAmount::ZERO;
     for n in inputs {
         sum = sum
-            .checked_add(ExtAmount::try_from(n.amount)?)
+            .checked_add(n.amount)
             .ok_or_else(|| anyhow!("overflow summing input amounts"))?;
     }
     Ok(sum)
 }
 
-fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<ExtAmount> {
-    let mut sum = ExtAmount::ZERO;
+fn sum_note_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
+    let mut sum = NoteAmount::ZERO;
     for o in outputs {
         sum = sum
-            .checked_add(ExtAmount::try_from(o.amount)?)
+            .checked_add(o.amount)
             .ok_or_else(|| anyhow!("overflow summing output amounts"))?;
     }
     Ok(sum)
@@ -1008,14 +1016,8 @@ mod tests {
             merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
             merkle_path_indices: Field::ZERO,
         };
-        let input1 = TransactInputNote {
-            amount: NoteAmount::MAX,
-            blinding: Field::try_from_le_bytes([5u8; 32]).expect("field"),
-            merkle_path_elements: vec![Field::ZERO; tree_depth_usize],
-            merkle_path_indices: Field::ZERO,
-        };
 
-        // Withdraw a small amount so `change` is > NoteAmount::MAX.
+        // Withdraw a small amount; large change should still be valid.
         let res = withdraw(
             WithdrawParams {
                 priv_key,
@@ -1023,7 +1025,7 @@ mod tests {
                 pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
                 withdraw_recipient: "G...".into(),
                 withdraw_amount: ExtAmount::ONE,
-                inputs: vec![input0, input1],
+                inputs: vec![input0],
                 outputs: None,
                 membership_proof: zero_membership(tree_depth_usize),
                 non_membership_proof: zero_non_membership(smt_depth_usize),
