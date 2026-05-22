@@ -822,12 +822,13 @@ impl Storage {
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
     ) -> Result<bool> {
+        const ACCOUNT_CHUNK: u32 = 4;
+
         let accounts = self.get_accounts_with_latest_keypairs()?;
         if accounts.is_empty() || total_limit == 0 {
             return Ok(false);
         }
 
-        // Scan each observed pool independently.
         let pool_ids: Vec<i64> = self
             .conn
             .prepare("SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id")?
@@ -838,158 +839,160 @@ impl Storage {
             return Ok(false);
         }
 
+        let pool_count_u32 = u32::try_from(pool_ids.len())
+            .map_err(|_| anyhow::anyhow!("pool count exceeds u32"))?;
+        let base_quota = if pool_count_u32 == 0 {
+            0
+        } else {
+            total_limit / pool_count_u32
+        };
+
+        let mut quotas = vec![base_quota; pool_ids.len()];
+        let assigned = base_quota.saturating_mul(pool_count_u32);
+        let mut remainder = total_limit.saturating_sub(assigned);
+        let mut next_pool = 0usize;
+        while remainder > 0 {
+            quotas[next_pool] = quotas[next_pool].saturating_add(1);
+            remainder = remainder.saturating_sub(1);
+            next_pool = (next_pool + 1) % pool_ids.len();
+        }
+
         let mut did_any_progress = false;
 
-        for pool_contract_id in pool_ids {
-            let tx = self.conn.transaction()?;
-
-            // Ensure scheduler row exists for this pool.
-            tx.execute(
-                "INSERT OR IGNORE INTO notes_scan_scheduler (pool_contract_id, next_account_offset)
-                 VALUES (?1, 0)",
-                params![pool_contract_id],
-            )?;
-
-            let n = accounts.len();
-            let n_i64 = i64::try_from(n).expect("accounts len fits i64");
-            let mut offset: i64 = tx.query_row(
-                "SELECT next_account_offset FROM notes_scan_scheduler WHERE pool_contract_id = ?1",
-                params![pool_contract_id],
-                |row| row.get(0),
-            )?;
-            offset = offset.rem_euclid(n_i64);
-            let offset_usize = usize::try_from(offset).expect("offset fits usize");
-
-            // Histogram allocation: `total_limit` tokens distributed in RR order from `offset`.
-            let mut counts: Vec<u32> = vec![0; n];
-            for i in 0..total_limit {
-                let i_usize = usize::try_from(i)
-                    .map_err(|_| anyhow::anyhow!("scan limit exceeds platform usize"))?;
-                let idx = offset_usize.wrapping_add(i_usize).rem_euclid(n);
-                counts[idx] = counts[idx].saturating_add(1);
+        for (pool_idx, pool_contract_id) in pool_ids.iter().enumerate() {
+            let mut pool_quota = quotas[pool_idx];
+            if pool_quota == 0 {
+                continue;
             }
 
-            // Ensure scan cursors exist for all accounts for this pool.
-            for a in &accounts {
+            let tx = self.conn.transaction()?;
+
+            for account in &accounts {
                 tx.execute(
                     "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
                      VALUES (?1, ?2, 0)",
-                    params![pool_contract_id, a.account_id],
+                    params![pool_contract_id, account.account_id],
                 )?;
             }
 
-            let mut did_progress = false;
+            let mut did_progress_in_pool = false;
 
-            for (idx, quota) in counts.into_iter().enumerate() {
-                if quota == 0 {
-                    continue;
-                }
-                let account = &accounts[idx];
+            while pool_quota > 0 {
+                let mut progressed_this_cycle = false;
 
-                let last_commitment_id: i64 = tx.query_row(
-                    "SELECT last_commitment_id
-                     FROM account_commitment_scan
-                     WHERE pool_contract_id = ?1 AND account_id = ?2",
-                    params![pool_contract_id, account.account_id],
-                    |row| row.get(0),
-                )?;
+                for account in &accounts {
+                    if pool_quota == 0 {
+                        break;
+                    }
 
-                let commitments: Vec<PoolCommitmentRow> = {
-                    let mut stmt = tx.prepare(
-                        "SELECT id, commitment, leaf_index, encrypted_output
-                         FROM pool_commitments
-                         WHERE pool_contract_id = ?1 AND id > ?2
-                         ORDER BY id ASC
-                         LIMIT ?3",
+                    let last_commitment_id: i64 = tx.query_row(
+                        "SELECT last_commitment_id
+                         FROM account_commitment_scan
+                         WHERE pool_contract_id = ?1 AND account_id = ?2",
+                        params![pool_contract_id, account.account_id],
+                        |row| row.get(0),
                     )?;
 
-                    let rows = stmt.query_map(params![pool_contract_id, last_commitment_id, quota], |row| {
-                        let commitment_id: i64 = row.get(0)?;
-                        let commitment: Field = row.get(1)?;
-                        let leaf_index_i64: i64 = row.get(2)?;
-                        let leaf_index = col_u32(leaf_index_i64, 2)?;
-                        let encrypted_output: Vec<u8> = row.get(3)?;
-                        Ok(PoolCommitmentRow {
-                            commitment_id,
-                            commitment,
-                            leaf_index,
-                            encrypted_output,
-                        })
-                    })?;
+                    let quota = pool_quota.min(ACCOUNT_CHUNK);
+                    let commitments: Vec<PoolCommitmentRow> = {
+                        let mut stmt = tx.prepare(
+                            "SELECT id, commitment, leaf_index, encrypted_output
+                             FROM pool_commitments
+                             WHERE pool_contract_id = ?1 AND id > ?2
+                             ORDER BY id ASC
+                             LIMIT ?3",
+                        )?;
 
-                    let mut out = Vec::new();
-                    for r in rows {
-                        out.push(r?);
-                    }
-                    out
-                };
+                        let rows = stmt.query_map(params![pool_contract_id, last_commitment_id, quota], |row| {
+                            let commitment_id: i64 = row.get(0)?;
+                            let commitment: Field = row.get(1)?;
+                            let leaf_index_i64: i64 = row.get(2)?;
+                            let leaf_index = col_u32(leaf_index_i64, 2)?;
+                            let encrypted_output: Vec<u8> = row.get(3)?;
+                            Ok(PoolCommitmentRow {
+                                commitment_id,
+                                commitment,
+                                leaf_index,
+                                encrypted_output,
+                            })
+                        })?;
 
-                let mut max_scanned_id = last_commitment_id;
-                for row in commitments {
-                    if row.commitment_id > max_scanned_id {
-                        max_scanned_id = row.commitment_id;
-                    }
-
-                    let Some(derived) = derive(account, &row)? else {
-                        continue;
+                        let mut out = Vec::new();
+                        for r in rows {
+                            out.push(r?);
+                        }
+                        out
                     };
 
-                    let nullifier_id: Option<i64> = tx
-                        .query_row(
-                            "SELECT id FROM pool_nullifiers
-                             WHERE pool_contract_id = ?1 AND nullifier = ?2
-                             LIMIT 1",
-                            params![pool_contract_id, derived.expected_nullifier],
-                            |r| r.get(0),
-                        )
-                        .optional()?;
+                    if commitments.is_empty() {
+                        continue;
+                    }
 
-                    tx.execute(
-                        "INSERT OR IGNORE INTO user_notes (
-                            id,
-                            account_id,
-                            commitment_id,
-                            nullifier_id,
-                            expected_nullifier,
-                            blinding,
-                            amount
-                        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                        params![
-                            row.commitment,
-                            account.account_id,
-                            row.commitment_id,
-                            nullifier_id,
-                            derived.expected_nullifier,
-                            derived.blinding,
-                            derived.amount.to_string()
-                        ],
-                    )?;
-                }
+                    progressed_this_cycle = true;
+                    did_progress_in_pool = true;
 
-                if max_scanned_id > last_commitment_id {
+                    let mut max_scanned_id = last_commitment_id;
+                    let scanned_count = u32::try_from(commitments.len())
+                        .map_err(|_| anyhow::anyhow!("commitments batch length exceeds u32"))?;
+
+                    for row in commitments {
+                        if row.commitment_id > max_scanned_id {
+                            max_scanned_id = row.commitment_id;
+                        }
+
+                        let Some(derived) = derive(account, &row)? else {
+                            continue;
+                        };
+
+                        let nullifier_id: Option<i64> = tx
+                            .query_row(
+                                "SELECT id FROM pool_nullifiers
+                                 WHERE pool_contract_id = ?1 AND nullifier = ?2
+                                 LIMIT 1",
+                                params![pool_contract_id, derived.expected_nullifier],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+
+                        tx.execute(
+                            "INSERT OR IGNORE INTO user_notes (
+                                id,
+                                account_id,
+                                commitment_id,
+                                nullifier_id,
+                                expected_nullifier,
+                                blinding,
+                                amount
+                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![
+                                row.commitment,
+                                account.account_id,
+                                row.commitment_id,
+                                nullifier_id,
+                                derived.expected_nullifier,
+                                derived.blinding,
+                                derived.amount.to_string()
+                            ],
+                        )?;
+                    }
+
                     tx.execute(
                         "UPDATE account_commitment_scan
                          SET last_commitment_id = ?1
                          WHERE pool_contract_id = ?2 AND account_id = ?3",
                         params![max_scanned_id, pool_contract_id, account.account_id],
                     )?;
-                    did_progress = true;
+
+                    pool_quota = pool_quota.saturating_sub(scanned_count);
+                }
+
+                if !progressed_this_cycle {
+                    break;
                 }
             }
 
-            // Advance scheduler offset to continue after the last assigned token.
-            let step = i64::from(total_limit).rem_euclid(n_i64);
-            let next_offset = offset.wrapping_add(step).rem_euclid(n_i64);
-            tx.execute(
-                "UPDATE notes_scan_scheduler
-                 SET next_account_offset = ?1
-                 WHERE pool_contract_id = ?2",
-                params![next_offset, pool_contract_id],
-            )?;
-
             tx.commit()?;
-
-            did_any_progress |= did_progress;
+            did_any_progress |= did_progress_in_pool;
         }
 
         Ok(did_any_progress)
