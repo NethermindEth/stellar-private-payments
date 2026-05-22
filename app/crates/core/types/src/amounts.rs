@@ -55,11 +55,6 @@ impl NoteAmount {
     /// Zero amount.
     pub const ZERO: NoteAmount = NoteAmount(0);
 
-    /// Returns the underlying token base units value.
-    pub const fn as_u128(self) -> u128 {
-        self.0
-    }
-
     /// Returns true if this amount is zero.
     pub const fn is_zero(self) -> bool {
         self.0 == 0
@@ -553,7 +548,6 @@ mod tests {
     #[test]
     fn note_amount_zero_min_max() -> Result<()> {
         let z = NoteAmount(0);
-        assert_eq!(z.as_u128(), 0);
         assert_eq!(z.to_string(), "0");
         assert_eq!(z.to_le_bytes(), [0u8; 16]);
 
@@ -577,6 +571,7 @@ mod tests {
         );
 
         assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
+        assert_eq!(NoteAmount::try_from(ExtAmount::MAX)? + NoteAmount::try_from(ExtAmount::MAX)?, NoteAmount::from(i128::MAX as u128 + i128::MAX as u128));
         Ok(())
     }
 

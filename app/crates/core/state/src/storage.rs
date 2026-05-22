@@ -961,7 +961,7 @@ impl Storage {
                             nullifier_id,
                             derived.expected_nullifier,
                             derived.blinding,
-                            derived.amount.as_u128().to_string()
+                            derived.amount.to_string()
                         ],
                     )?;
                 }

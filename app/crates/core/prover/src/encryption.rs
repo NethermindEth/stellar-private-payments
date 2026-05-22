@@ -458,7 +458,7 @@ mod tests {
         let got = decrypt_output_note(&recip_keys.private, &encrypted)?
             .expect("should decrypt for recipient key");
 
-        assert_eq!(got.0.as_u128(), amount.as_u128());
+        assert_eq!(got.0, amount);
         assert_eq!(got.1.to_le_bytes(), blinding.to_le_bytes());
         Ok(())
     }
