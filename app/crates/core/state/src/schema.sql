@@ -176,15 +176,6 @@ CREATE TABLE nullifier_scan_state (
     FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 
--- Round-robin scheduler for commitment scanning fairness across accounts.
---
--- Maintains which account should be scanned first on the next scan pass.
-CREATE TABLE notes_scan_scheduler (
-    pool_contract_id INTEGER PRIMARY KEY,
-    next_account_offset INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
-);
-
 -- Terms & Conditions (disclaimer) acceptances per account and disclaimer hash.
 --
 -- When the disclaimer text changes, it yields a new hash and each account must accept again.
