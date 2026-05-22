@@ -91,29 +91,6 @@ impl StateFetcher {
         &self.config
     }
 
-
-    fn pool_asp_membership_id<'a>(&'a self, pool_id: &str) -> Result<&'a str> {
-        self.config
-            .pools
-            .iter()
-            .find(|p| p.pool_contract_id == pool_id)
-            .map(|p| p.asp_membership.as_deref().unwrap_or(self.config.asp_membership.as_str()))
-            .ok_or_else(|| anyhow!("pool not found in config: {pool_id}"))
-    }
-
-    fn pool_asp_non_membership_id<'a>(&'a self, pool_id: &str) -> Result<&'a str> {
-        self.config
-            .pools
-            .iter()
-            .find(|p| p.pool_contract_id == pool_id)
-            .map(|p| {
-                p.asp_non_membership
-                    .as_deref()
-                    .unwrap_or(self.config.asp_non_membership.as_str())
-            })
-            .ok_or_else(|| anyhow!("pool not found in config: {pool_id}"))
-    }
-
     pub async fn all_enabled_contracts_data(&self) -> Result<Vec<ContractsStateData>> {
         const MAX_SNAPSHOT_ATTEMPTS: u32 = 3;
 
@@ -147,37 +124,17 @@ impl StateFetcher {
             });
         }
 
-        let mut asp_membership_ids = std::collections::BTreeSet::new();
-        let mut asp_non_membership_ids = std::collections::BTreeSet::new();
-        for pool in &enabled_pools {
-            asp_membership_ids.insert(
-                pool.asp_membership
-                    .as_deref()
-                    .unwrap_or(self.config.asp_membership.as_str())
-                    .to_string(),
-            );
-            asp_non_membership_ids.insert(
-                pool.asp_non_membership
-                    .as_deref()
-                    .unwrap_or(self.config.asp_non_membership.as_str())
-                    .to_string(),
-            );
-        }
+        requests.push(ContractDataBulkRequest {
+            contract_id: self.config.asp_membership.as_str(),
+            enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+            valued_keys: vec![],
+        });
 
-        for asp_id in &asp_membership_ids {
-            requests.push(ContractDataBulkRequest {
-                contract_id: asp_id,
-                enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
-                valued_keys: vec![],
-            });
-        }
-        for asp_id in &asp_non_membership_ids {
-            requests.push(ContractDataBulkRequest {
-                contract_id: asp_id,
-                enum_keys: vec!["Root", "Admin"],
-                valued_keys: vec![],
-            });
-        }
+        requests.push(ContractDataBulkRequest {
+            contract_id: self.config.asp_non_membership.as_str(),
+            enum_keys: vec!["Root", "Admin"],
+            valued_keys: vec![],
+        });
 
         let mut last_drift = String::new();
 
@@ -307,7 +264,7 @@ impl StateFetcher {
                     total_commitments: merkle_next_index.to_string(),
                 };
 
-                let asp_membership_id = self.pool_asp_membership_id(&pool.pool_contract_id)?;
+                let asp_membership_id = &self.config.asp_membership;
                 let asp_membership_state = bulk_state
                     .get(asp_membership_id)
                     .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
@@ -337,7 +294,7 @@ impl StateFetcher {
                     used_slots: asp_mem_next_index.to_string(),
                 };
 
-                let asp_non_membership_id = self.pool_asp_non_membership_id(&pool.pool_contract_id)?;
+                let asp_non_membership_id = &self.config.asp_non_membership;
                 let asp_non_membership_state = bulk_state
                     .get(asp_non_membership_id)
                     .ok_or_else(|| anyhow!("missing asp non-membership state for {asp_non_membership_id}"))?;
@@ -386,19 +343,8 @@ impl StateFetcher {
             .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
             .ok_or_else(|| anyhow!("enabled pool not found in deployments config: {pool_contract_id}"))?;
 
-        let asp_membership_id = pool
-            .asp_membership
-            .as_deref()
-            .unwrap_or(self.config.asp_membership.as_str())
-            .to_string();
-        let asp_non_membership_id = pool
-            .asp_non_membership
-            .as_deref()
-            .unwrap_or(self.config.asp_non_membership.as_str())
-            .to_string();
-
-        let mut requests = Vec::new();
-        requests.push(ContractDataBulkRequest {
+        let requests = vec![
+        ContractDataBulkRequest {
             contract_id: &pool.pool_contract_id,
             enum_keys: vec![
                 "Admin",
@@ -412,17 +358,17 @@ impl StateFetcher {
                 "MaximumDepositAmount",
             ],
             valued_keys: vec![],
-        });
-        requests.push(ContractDataBulkRequest {
-            contract_id: &asp_membership_id,
+        },
+        ContractDataBulkRequest {
+            contract_id: self.config.asp_membership.as_str(),
             enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
             valued_keys: vec![],
-        });
-        requests.push(ContractDataBulkRequest {
-            contract_id: &asp_non_membership_id,
+        },
+        ContractDataBulkRequest {
+            contract_id: self.config.asp_non_membership.as_str(),
             enum_keys: vec!["Root", "Admin"],
             valued_keys: vec![],
-        });
+        }];
 
         let mut last_drift = String::new();
 
@@ -521,52 +467,52 @@ impl StateFetcher {
             };
 
             let asp_membership_state = bulk_state
-                .get(&asp_membership_id)
-                .ok_or_else(|| anyhow!("missing asp membership state for {asp_membership_id}"))?;
+                .get(self.config.asp_membership.as_str())
+                .ok_or_else(|| anyhow!("missing asp membership state for {}", self.config.asp_membership))?;
             let asp_mem_next_index = scval_to_u64(get_state!(
                 asp_membership_state,
                 "NextIndex",
-                asp_membership_id
+                self.config.asp_membership.as_str()
             )?)?;
-            let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", asp_membership_id)?)?;
+            let asp_mem_levels = scval_to_u32(get_state!(asp_membership_state, "Levels", self.config.asp_membership.as_str())?)?;
             let asp_mem_capacity = 2u64.pow(asp_mem_levels);
-            let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", asp_membership_id)?)?;
+            let root_u256 = scval_to_u256(get_state!(asp_membership_state, "Root", self.config.asp_membership.as_str())?)?;
             let asp_membership = AspMembership {
                 ledger: base_latest_ledger,
-                contract_id: asp_membership_id.clone(),
+                contract_id: self.config.asp_membership.clone(),
                 contract_type: "ASP Membership".to_string(),
                 root: Field::try_from_u256(root_u256)?,
                 levels: asp_mem_levels,
                 next_index: asp_mem_next_index.to_string(),
-                admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", asp_membership_id)?)?,
+                admin: scval_to_address_string(get_state!(asp_membership_state, "Admin", self.config.asp_membership.as_str())?)?,
                 admin_insert_only: scval_to_bool(get_state!(
                     asp_membership_state,
                     "AdminInsertOnly",
-                    asp_membership_id
+                    self.config.asp_membership.as_str()
                 )?)?,
                 capacity: asp_mem_capacity,
                 used_slots: asp_mem_next_index.to_string(),
             };
 
             let asp_non_membership_state = bulk_state
-                .get(&asp_non_membership_id)
-                .ok_or_else(|| anyhow!("missing asp non-membership state for {asp_non_membership_id}"))?;
+                .get(self.config.asp_non_membership.as_str())
+                .ok_or_else(|| anyhow!("missing asp non-membership state for {}", self.config.asp_non_membership))?;
             let asp_nonmem_root_u256 = scval_to_u256(get_state!(
                 asp_non_membership_state,
                 "Root",
-                asp_non_membership_id
+                self.config.asp_non_membership.as_str()
             )?)?;
             let asp_nonmem_root = Field::try_from_u256(asp_nonmem_root_u256)?;
             let asp_non_membership = AspNonMembership {
                 ledger: base_latest_ledger,
-                contract_id: asp_non_membership_id.clone(),
+                contract_id: self.config.asp_non_membership.clone(),
                 contract_type: "ASP Non-Membership (Sparse Merkle Tree)".to_string(),
                 root: asp_nonmem_root,
                 is_empty: asp_nonmem_root.is_zero(),
                 admin: scval_to_address_string(get_state!(
                     asp_non_membership_state,
                     "Admin",
-                    asp_non_membership_id
+                    self.config.asp_non_membership.as_str()
                 )?)?,
             };
 

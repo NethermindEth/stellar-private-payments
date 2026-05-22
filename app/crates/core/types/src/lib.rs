@@ -16,14 +16,11 @@ pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
     pub admin: String,
-    /// Global ASP membership contract id (may be overridden per-pool via
-    /// `pools[].asp_membership`).
+    /// Global ASP membership contract id
     pub asp_membership: String,
-    /// Global ASP non-membership contract id (may be overridden per-pool via
-    /// `pools[].asp_non_membership`).
+    /// Global ASP non-membership contract id
     pub asp_non_membership: String,
-    /// Global verifier contract id (may be overridden per-pool via
-    /// `pools[].verifier`).
+    /// Global verifier contract id
     pub verifier: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
@@ -41,13 +38,6 @@ pub struct PoolConfigEntry {
     pub deployment_ledger: u32,
     pub enabled: bool,
     pub asset: AssetDescriptor,
-    /// Optional per-pool overrides.
-    #[serde(default)]
-    pub asp_membership: Option<String>,
-    #[serde(default)]
-    pub asp_non_membership: Option<String>,
-    #[serde(default)]
-    pub verifier: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
