@@ -18,8 +18,8 @@ use prover::{
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
-    AspMembershipSync, EncryptionPublicKey, EncryptionSignature, ExtAmount, Field, NoteAmount,
-    NotePublicKey, SMT_DEPTH, SpendingSignature,
+    AspMembershipSync, ContractsStateData, EncryptionPublicKey, EncryptionSignature, ExtAmount,
+    Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -218,13 +218,21 @@ impl WebClient {
                 None,
                 None,
             );
-            let data = self
+            let ContractsStateData {
+                pools,
+                asp_membership,
+                asp_non_membership,
+            } = self
                 .fetcher
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
-            let pool_root = data.pool.merkle_root;
+            let pool = pools
+                .into_iter()
+                .next()
+                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
+            let pool_root = pool.merkle_root;
 
             emit_progress(
                 &on_status,
@@ -257,7 +265,7 @@ impl WebClient {
                 .fetcher
                 .get_nonmembership_proof(
                     &note_pubkey,
-                    data.asp_non_membership.root,
+                    asp_non_membership.root,
                     SMT_DEPTH as usize,
                     &user_address,
                 )
@@ -269,13 +277,13 @@ impl WebClient {
                 membership_blinding,
                 amount,
                 pool_root,
-                pool_address: data.pool.contract_id,
-                aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: data.asp_membership.contract_id.clone(),
-                aspmem_ledger: data.asp_membership.ledger,
+                pool_address: pool.contract_id,
+                aspmem_root: asp_membership.root,
+                aspmem_contract_id: asp_membership.contract_id.clone(),
+                aspmem_ledger: asp_membership.ledger,
                 output_amounts: out_amounts,
                 smt_depth: SMT_DEPTH,
-                tree_depth: data.pool.merkle_levels,
+                tree_depth: pool.merkle_levels,
                 non_membership_proof,
             };
 
@@ -386,15 +394,23 @@ impl WebClient {
                 None,
                 None,
             );
-            let data = self
+            let ContractsStateData {
+                pools,
+                asp_membership,
+                asp_non_membership,
+            } = self
                 .fetcher
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
-            let pool_root = data.pool.merkle_root;
+            let pool = pools
+                .into_iter()
+                .next()
+                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
+            let pool_root = pool.merkle_root;
             let pool_next_index =
-                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -427,7 +443,7 @@ impl WebClient {
                 .fetcher
                 .get_nonmembership_proof(
                     &note_pubkey,
-                    data.asp_non_membership.root,
+                    asp_non_membership.root,
                     SMT_DEPTH as usize,
                     &user_address,
                 )
@@ -440,13 +456,13 @@ impl WebClient {
                 withdraw_recipient: withdraw_recipient.clone(),
                 pool_root,
                 pool_next_index,
-                pool_address: data.pool.contract_id.clone(),
-                aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: data.asp_membership.contract_id.clone(),
-                aspmem_ledger: data.asp_membership.ledger,
+                pool_address: pool.contract_id.clone(),
+                aspmem_root: asp_membership.root,
+                aspmem_contract_id: asp_membership.contract_id.clone(),
+                aspmem_ledger: asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 smt_depth: SMT_DEPTH,
-                tree_depth: data.pool.merkle_levels,
+                tree_depth: pool.merkle_levels,
                 non_membership_proof,
             };
 
@@ -582,15 +598,23 @@ impl WebClient {
                 None,
                 None,
             );
-            let data = self
+            let ContractsStateData {
+                pools,
+                asp_membership,
+                asp_non_membership,
+            } = self
                 .fetcher
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
-            let pool_root = data.pool.merkle_root;
+            let pool = pools
+                .into_iter()
+                .next()
+                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
+            let pool_root = pool.merkle_root;
             let pool_next_index =
-                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -623,7 +647,7 @@ impl WebClient {
                 .fetcher
                 .get_nonmembership_proof(
                     &note_pubkey,
-                    data.asp_non_membership.root,
+                    asp_non_membership.root,
                     SMT_DEPTH as usize,
                     &user_address,
                 )
@@ -635,16 +659,16 @@ impl WebClient {
                 membership_blinding,
                 pool_root,
                 pool_next_index,
-                pool_address: data.pool.contract_id,
-                aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: data.asp_membership.contract_id.clone(),
-                aspmem_ledger: data.asp_membership.ledger,
+                pool_address: pool.contract_id,
+                aspmem_root: asp_membership.root,
+                aspmem_contract_id: asp_membership.contract_id.clone(),
+                aspmem_ledger: asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
                 recipient_note_pubkey: recipient_note_pubkey.clone(),
                 recipient_encryption_pubkey: recipient_enc_pubkey.clone(),
                 smt_depth: SMT_DEPTH,
-                tree_depth: data.pool.merkle_levels,
+                tree_depth: pool.merkle_levels,
                 non_membership_proof,
             };
 
@@ -817,15 +841,23 @@ impl WebClient {
                 None,
                 None,
             );
-            let data = self
+            let ContractsStateData {
+                pools,
+                asp_membership,
+                asp_non_membership,
+            } = self
                 .fetcher
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
-            let pool_root = data.pool.merkle_root;
+            let pool = pools
+                .into_iter()
+                .next()
+                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
+            let pool_root = pool.merkle_root;
             let pool_next_index =
-                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
             emit_progress(
                 &on_status,
@@ -858,7 +890,7 @@ impl WebClient {
                 .fetcher
                 .get_nonmembership_proof(
                     &note_pubkey,
-                    data.asp_non_membership.root,
+                    asp_non_membership.root,
                     SMT_DEPTH as usize,
                     &user_address,
                 )
@@ -870,18 +902,18 @@ impl WebClient {
                 membership_blinding,
                 pool_root,
                 pool_next_index,
-                pool_address: data.pool.contract_id,
+                pool_address: pool.contract_id,
                 ext_recipient: ext_recipient.clone(),
                 ext_amount,
-                aspmem_root: data.asp_membership.root,
-                aspmem_contract_id: data.asp_membership.contract_id.clone(),
-                aspmem_ledger: data.asp_membership.ledger,
+                aspmem_root: asp_membership.root,
+                aspmem_contract_id: asp_membership.contract_id.clone(),
+                aspmem_ledger: asp_membership.ledger,
                 input_commitments: input_commitments.clone(),
                 output_amounts: out_amounts,
                 out_recipient_note_pubkeys: out_note_pks.clone(),
                 out_recipient_encryption_pubkeys: out_enc_pks.clone(),
                 smt_depth: SMT_DEPTH,
-                tree_depth: data.pool.merkle_levels,
+                tree_depth: pool.merkle_levels,
                 non_membership_proof,
             };
 
@@ -952,43 +984,14 @@ impl WebClient {
 
 #[wasm_bindgen]
 impl WebClient {
-    #[wasm_bindgen(js_name = poolContractState)]
-    pub async fn pool_contract_state(&self) -> Result<JsValue, JsError> {
-        let pool_id = self
+    #[wasm_bindgen(js_name = aspState)]
+    pub async fn asp_state(&self) -> Result<JsValue, JsError> {
+        let asp_state = self
             .fetcher
-            .contract_config()
-            .pools
-            .iter()
-            .find(|p| p.enabled)
-            .map(|p| p.pool_contract_id.clone())
-            .ok_or_else(|| JsError::new("no enabled pools in deployments config"))?;
-
-        let pool_info = self
-            .fetcher
-            .pool_contract_state(&pool_id)
+            .asp_state()
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&pool_info)?)
-    }
-
-    #[wasm_bindgen(js_name = aspMembershipContractState)]
-    pub async fn asp_membership_contract_state(&self) -> Result<JsValue, JsError> {
-        let asp_membership = self
-            .fetcher
-            .asp_membership_contract_state()
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&asp_membership)?)
-    }
-
-    #[wasm_bindgen(js_name = aspNonmembershipContractState)]
-    pub async fn asp_nonmembership_contract_state(&self) -> Result<JsValue, JsError> {
-        let asp_nonmembership = self
-            .fetcher
-            .asp_nonmembership_contract_state()
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&asp_nonmembership)?)
+        Ok(serde_wasm_bindgen::to_value(&asp_state)?)
     }
 
     #[wasm_bindgen(js_name = allContractsData)]

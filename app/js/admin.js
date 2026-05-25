@@ -361,10 +361,9 @@ async function refreshState() {
     setStatus('Loading contract state...', 'info');
     const client = getHandle().webClient;
 
-    const [membershipState, nonMembershipState] = await Promise.all([
-      client.aspMembershipContractState(),
-      client.aspNonmembershipContractState(),
-    ]);
+    const state = await client.aspState();
+    const membershipState = state.aspMembership;
+    const nonMembershipState = state.aspNonMembership;
 
     if (membershipContractInput) {
       membershipContractInput.value = membershipState.contractId;
