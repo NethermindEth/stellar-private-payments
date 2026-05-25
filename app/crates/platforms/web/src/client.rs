@@ -1252,9 +1252,9 @@ impl WebClient {
 
 #[async_trait::async_trait(?Send)]
 impl stellar::ContractDataStorage for WebClient {
-    async fn get_sync_state(&self, contract_id: &str) -> anyhow::Result<Option<types::SyncMetadata>> {
+    async fn get_sync_state(&self) -> anyhow::Result<Vec<types::SyncMetadata>> {
         let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState(contract_id.to_string()))).await?;
+        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
         match resp {
             StorageWorkerResponse::SyncState(state) => Ok(state),
             StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
@@ -1274,20 +1274,13 @@ impl stellar::ContractDataStorage for WebClient {
 
     async fn save_sync_progress(
         &self,
-        contract_id: &str,
-        cursor: String,
-        latest_ledger: u32,
+        metadata: Vec<types::SyncMetadata>,
         fully_indexed: bool,
     ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(
-                contract_id.to_string(),
-                cursor,
-                latest_ledger,
-                fully_indexed,
-            )),
+            bridge.run(StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed)),
         )
         .await?;
         match resp {

@@ -180,9 +180,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 TimeoutFuture::new(50).await;
             }
         }
-        StorageWorkerRequest::SyncState(contract_id) => {
+        StorageWorkerRequest::SyncState => {
             log::trace!("[{WORKER_NAME}] get current sync");
-            let state = with_storage!(s => s.get_sync_metadata(&contract_id)?)?;
+            let state = with_storage!(s => s.get_sync_metadata()?)?;
             let resp = StorageWorkerResponse::SyncState(state);
             log::trace!("[{WORKER_NAME}] sending current sync");
             resp
@@ -203,9 +203,9 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::SaveSyncProgress(contract_id, cursor, latest_ledger, fully_indexed) => {
-            log::trace!("[{WORKER_NAME}] saving sync progress for {contract_id}: cursor={cursor}, latest={latest_ledger}, fully={fully_indexed}");
-            with_storage_mut!(s => s.save_sync_progress(&contract_id, &cursor, latest_ledger, fully_indexed)?)?;
+        StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed) => {
+            log::trace!("[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}", metadata.len());
+            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(

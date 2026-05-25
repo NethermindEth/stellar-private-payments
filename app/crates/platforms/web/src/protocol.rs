@@ -26,9 +26,9 @@ pub struct DisclaimerStatePayload {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     Ping,
-    SyncState(Address),
+    SyncState,
     SaveEvents(ContractsEventData),
-    SaveSyncProgress(Address, String, u32, bool),
+    SaveSyncProgress(Vec<SyncMetadata>, bool),
     DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
@@ -46,7 +46,7 @@ pub enum StorageWorkerRequest {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerResponse {
     Pong,
-    SyncState(Option<SyncMetadata>),
+    SyncState(Vec<SyncMetadata>),
     Saved,
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
