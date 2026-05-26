@@ -432,12 +432,12 @@ impl Storage {
     /// reconstruction would be ambiguous/incorrect.
     pub fn get_pool_commitment_leaves_ordered(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.leaf_index, c.commitment
-             FROM pool_commitments c
+            "SELECT pc.leaf_index, pc.commitment
+             FROM pool_commitments pc
              JOIN raw_contract_events r ON r.id = c.event_id
-             JOIN contracts pc ON pc.contract_id = r.contract_id
-             WHERE pc.address = ?1
-             ORDER BY c.leaf_index ASC",
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
+             ORDER BY pc.leaf_index ASC",
         )?;
 
         let rows = stmt.query_map(params![pool_contract_id], |row| {
@@ -481,12 +481,12 @@ impl Storage {
             "SELECT n.amount, n.blinding, c.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN pool_commitments pc ON pc.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
-             JOIN contracts pc ON pc.contract_id = r.contract_id
+             JOIN contracts c ON c.contract_id = r.contract_id
              WHERE a.address = ?2
-               AND pc.address = ?1
-               AND c.commitment = ?3
+               AND c.address = ?1
+               AND pc.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
         )?;
