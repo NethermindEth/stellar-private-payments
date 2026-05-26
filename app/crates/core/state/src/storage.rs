@@ -644,12 +644,14 @@ impl Storage {
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
              JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
              ORDER BY l.leaf_index DESC
              LIMIT 1",
         )?;
 
         let last: Option<(Field, u32)> = stmt
-            .query_row([], |row| {
+            .query_row(params![asp_membership_contract_id], |row| {
                 let root: Field = row.get(0)?;
                 let ledger_i64: i64 = row.get(1)?;
                 let ledger = col_u32(ledger_i64, 1)?;
@@ -676,14 +678,18 @@ impl Storage {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index
-             FROM asp_membership_leaves
-             WHERE leaf = ?1
+            "SELECT l.leaf_index
+             FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE l.leaf = ?1 AND c.address = ?2
              LIMIT 1",
         )?;
 
         let user_leaf_index: Option<u32> = stmt
-            .query_row(params![user_leaf], |row| row.get(0))
+            .query_row(params![user_leaf, asp_membership_contract_id], |row| {
+                row.get(0)
+            })
             .optional()
             .context("Failed to query asp_membership_leaves user leaf existence")?;
 
@@ -700,14 +706,20 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_all_asp_membership_leaves_ordered(&self) -> Result<Vec<Field>> {
+    pub fn get_all_asp_membership_leaves_ordered(
+        &self,
+        asp_membership_contract_id: &str,
+    ) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index, leaf
-             FROM asp_membership_leaves
-             ORDER BY leaf_index ASC",
+            "SELECT l.leaf_index, l.leaf
+             FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
+             ORDER BY l.leaf_index ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![asp_membership_contract_id], |row| {
             let idx: i64 = row.get(0)?;
             let idx = col_u32(idx, 0)?;
             let leaf: Field = row.get(1)?;

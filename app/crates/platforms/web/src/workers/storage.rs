@@ -598,7 +598,7 @@ fn build_membership_proof(
     };
 
     let asp_membership_merkle_tree_leaves =
-        with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
+        with_storage!(s => s.get_all_asp_membership_leaves_ordered(aspmem_contract_id)?)?;
     let aspmembership_tree =
         MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
     let MerkleProof {
