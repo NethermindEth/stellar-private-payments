@@ -434,7 +434,7 @@ impl Storage {
         let mut stmt = self.conn.prepare(
             "SELECT pc.leaf_index, pc.commitment
              FROM pool_commitments pc
-             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN raw_contract_events r ON r.id = pc.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE c.address = ?1
              ORDER BY pc.leaf_index ASC",
@@ -478,11 +478,11 @@ impl Storage {
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT n.amount, n.blinding, c.leaf_index
+            "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments pc ON pc.id = n.commitment_id
-             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN raw_contract_events r ON r.id = pc.event_id
              JOIN contracts c ON c.contract_id = r.contract_id
              WHERE a.address = ?2
                AND c.address = ?1
