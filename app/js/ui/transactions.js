@@ -21,6 +21,14 @@ async function getContractConfig() {
     return cachedContractConfig;
 }
 
+function getActivePoolContractId(config) {
+    const pools = Array.isArray(config?.pools) ? config.pools : [];
+    const selected = pools.find(p => p?.enabled) || pools[0];
+    const poolContractId = selected?.poolContractId;
+    if (!poolContractId) throw new Error("Pool contract ID not available");
+    return poolContractId;
+}
+
 function noteAmountToStroopsBigInt(amount) {
     if (amount == null) return 0n;
     if (typeof amount === 'bigint') return amount;
@@ -464,9 +472,10 @@ export const Transactions = {
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
 	                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveDeposit(
-	                    config?.pool,
+	                    poolContractId,
 	                    userAddress,
 	                    membershipBlinding,
 	                    amountStroops,
@@ -484,7 +493,7 @@ export const Transactions = {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
+	                    poolContractId: poolContractId,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -522,9 +531,10 @@ export const Transactions = {
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
 	                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveWithdraw(
-	                    config?.pool,
+	                    poolContractId,
 	                    userAddress,
 	                    membershipBlinding,
 	                    recipient,
@@ -541,7 +551,7 @@ export const Transactions = {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
+	                    poolContractId: poolContractId,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -589,9 +599,10 @@ export const Transactions = {
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
 	                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveTransfer(
-	                    config?.pool,
+	                    poolContractId,
 	                    userAddress,
 	                    membershipBlinding,
 	                    recipientNoteKey,
@@ -610,7 +621,7 @@ export const Transactions = {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
+	                    poolContractId: poolContractId,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -673,9 +684,10 @@ export const Transactions = {
                 setLoading(btn, 'Validating…');
                 const onStatus = p => p?.message && setLoadingText(btn, p.message);
 	                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
 	                setLoadingText(btn, 'Proving…');
 	                const proved = await getHandle().webClient.proveTransact(
-	                    config?.pool,
+	                    poolContractId,
 	                    userAddress,
 	                    membershipBlinding,
 	                    extRecipient,
@@ -696,7 +708,7 @@ export const Transactions = {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
+	                    poolContractId: poolContractId,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,

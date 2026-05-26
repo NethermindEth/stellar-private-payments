@@ -133,24 +133,25 @@ export const OnchainState = {
         this._refreshing = true;
         try {
             hideError();
-            const allData = await getHandle().webClient.allContractsData();
-            const data = Array.isArray(allData) ? (allData[0] ?? null) : null;
+            const data = await getHandle().webClient.allContractsData();
+            const pools = Array.isArray(data?.pools) ? data.pools : [];
+            const primaryPool = pools.find(p => p?.enabled) || pools[0] || null;
 
             // Network badge
             setText('chain-network-badge', data?.network || '—');
 
             // Pool
-            setIndicator('pool-indicator', data?.pool !== undefined);
-            setStatus('pool-status', data?.pool !== undefined , data?.pool?.ledger);
-            setMonoText('pool-address', data?.pool?.contractId ? Utils.truncateHex(data.pool.contractId, 6, 6) : '—');
-            document.getElementById('pool-address')?.setAttribute('title', data?.pool?.contractId || '');
+            setIndicator('pool-indicator', primaryPool !== null);
+            setStatus('pool-status', primaryPool !== null , primaryPool?.ledger);
+            setMonoText('pool-address', primaryPool?.contractId ? Utils.truncateHex(primaryPool.contractId, 6, 6) : '—');
+            document.getElementById('pool-address')?.setAttribute('title', primaryPool?.contractId || '');
 
-            const poolRoot = data?.pool?.merkleRoot ?? null;
+            const poolRoot = primaryPool?.merkleRoot ?? null;
             setMonoText('pool-root', poolRoot ? Utils.truncateHex(poolRoot, 10, 8) : '—');
             document.getElementById('pool-root')?.setAttribute('title', poolRoot || '');
 
-            setText('pool-commitments', data?.pool?.totalCommitments ?? '—');
-            setText('pool-levels', data?.pool?.merkleLevels ?? '—');
+            setText('pool-commitments', primaryPool?.totalCommitments ?? '—');
+            setText('pool-levels', primaryPool?.merkleLevels ?? '—');
 
             // ASP Membership
             setIndicator('membership-indicator', data?.aspMembership !== undefined);
@@ -178,7 +179,7 @@ export const OnchainState = {
             setText('nonmembership-tree-status', isEmpty === true ? 'Empty' : isEmpty === false ? 'Non-empty' : '—');
 
             // Stats
-            setText('pool-total-value', data?.pool?.totalCommitments ?? '—');
+            setText('pool-total-value', primaryPool?.totalCommitments ?? '—');
 
             setLastUpdated();
         } catch (e) {
