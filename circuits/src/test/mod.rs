@@ -11,5 +11,6 @@ mod prove_sparse;
 
 mod prove_keypair;
 mod prove_policy;
+mod prove_selective_disclosure;
 mod prove_transaction;
 pub mod utils;

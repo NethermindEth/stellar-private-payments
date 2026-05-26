@@ -9,7 +9,7 @@
 //! - Sections for header info, constraints, and wire mappings
 //!
 //! # Reference
-//! https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md
+//! <https://github.com/iden3/r1csfile/blob/master/doc/r1cs_bin_format.md>
 
 use alloc::vec::Vec;
 

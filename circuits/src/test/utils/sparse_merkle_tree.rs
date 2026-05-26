@@ -1,7 +1,7 @@
 //! Sparse Merkle Tree implementation compatible with circomlibjs/smt.js
 //!
 //! This is a Rust port of the Sparse Merkle Tree implementation from:
-//! - JavaScript: https://github.com/iden3/circomlibjs/blob/main/src/smt.js
+//! - JavaScript: <https://github.com/iden3/circomlibjs/blob/main/src/smt.js>
 //!
 //! This implementation uses Poseidon2 hash function for compatibility with
 //! circomlib circuits.

@@ -112,7 +112,7 @@ impl Inputs {
         self.inner.insert(key.into(), value.into());
     }
 
-    /// Set using a SignalKey path (e.g., membershipProofs[0][0].leaf).
+    /// Set using a SignalKey path (e.g., membershipProofs\[0\]\[0\].leaf).
     pub fn set_key<V>(&mut self, key: &SignalKey, value: V)
     where
         V: Into<InputValue>,
