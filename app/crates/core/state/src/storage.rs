@@ -758,12 +758,12 @@ impl Storage {
                 FROM raw_contract_events r
                 JOIN contracts c ON c.contract_id = r.contract_id
                 LEFT JOIN pool_commitments pc ON r.id = pc.event_id
-                LEFT JOIN pool_commitments c ON r.id = c.event_id
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
-                AND pc.event_id IS NULL
-                AND c.event_id IS NULL
+                LEFT JOIN pool_nullifiers pn ON r.id = pn.event_id
+                WHERE pc.event_id IS NULL
                 AND p.event_id IS NULL
+                AND pn.event_id IS NULL
                 AND l.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
@@ -1330,6 +1330,8 @@ mod tests {
     fn sync_metadata_advances_only_on_empty_page() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
+        // Non-empty batch should update the cursor but not advance the "fully indexed"
+        // ledger.
         storage.save_events_batch(&ContractsEventData {
             cursor: "c1".to_string(),
             latest_ledger: 10,
@@ -1352,6 +1354,7 @@ mod tests {
         assert_eq!(meta.cursor, "c1");
         assert_eq!(meta.last_ledger, 0);
 
+        // Empty batch is the "caught up" proof and advances last_fully_indexed_ledger.
         storage.save_events_batch(&ContractsEventData {
             cursor: "c2".to_string(),
             latest_ledger: 123,
@@ -1451,6 +1454,7 @@ mod tests {
         let last_leaf_ledger = 10u32;
         let current_ledger = 12u32;
 
+        // Ingest raw events (including a newer ASP event)...
         storage.save_events_batch(&ContractsEventData {
             cursor: "cur-raw".to_string(),
             latest_ledger: 11,
@@ -1472,6 +1476,7 @@ mod tests {
             ],
         })?;
 
+        // ...but only process the older one into asp_membership_leaves.
         storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
             id: "asp-leaf-10".to_string(),
             leaf,
@@ -1479,6 +1484,8 @@ mod tests {
             root: root_old,
         }])?;
 
+        // Mark the indexer as fully caught up to the chain tip (even though
+        // event processing is behind).
         storage.save_events_batch(&ContractsEventData {
             cursor: "cur-tip".to_string(),
             latest_ledger: current_ledger,
@@ -1493,6 +1500,8 @@ mod tests {
             true,
         )?;
 
+        // Root matches the last stored root: this should NOT require syncing
+        // even if the last ASP leaf was emitted earlier than the current tip.
         let status =
             storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
         assert!(matches!(
