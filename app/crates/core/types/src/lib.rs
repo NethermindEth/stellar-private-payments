@@ -45,9 +45,14 @@ pub struct PoolConfigEntry {
 pub enum AssetDescriptor {
     Native,
     /// Classic Stellar asset (CODE:ISSUER).
-    Classic { code: String, issuer: String },
+    Classic {
+        code: String,
+        issuer: String,
+    },
     /// Token contract address (Soroban contract id).
-    Contract { contract_id: String },
+    Contract {
+        contract_id: String,
+    },
 }
 
 /// ASP membership proof data needed by the circuit.

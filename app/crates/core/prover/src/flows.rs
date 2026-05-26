@@ -638,11 +638,8 @@ where
         let commitment_field = Field::try_from_le_bytes(commitment_arr)?;
         output_commitments_fields[idx] = commitment_field;
 
-        let enc = encryption::encrypt_output_note(
-            &recipient_enc_pubkey,
-            out.amount,
-            &out.blinding,
-        )?;
+        let enc =
+            encryption::encrypt_output_note(&recipient_enc_pubkey, out.amount, &out.blinding)?;
         encrypted_outputs[idx] = enc;
 
         out_amount_hex.push(field_to_circuit_hex(&amount_field)?);

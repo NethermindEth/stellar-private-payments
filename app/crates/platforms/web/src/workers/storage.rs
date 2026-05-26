@@ -204,7 +204,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed) => {
-            log::trace!("[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}", metadata.len());
+            log::trace!(
+                "[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}",
+                metadata.len()
+            );
             with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
@@ -389,7 +392,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 encryption_pubkey,
                 pool_root,
                 withdraw_recipient: req.withdraw_recipient,
-                withdraw_amount: withdraw_amount,
+                withdraw_amount,
                 inputs,
                 outputs: None,
                 membership_proof,
@@ -658,7 +661,7 @@ fn build_pool_inputs(
         } = tree.proof(leaf_index)?;
 
         out.push(TransactInputNote {
-            amount: amount,
+            amount,
             blinding,
             merkle_path_elements: path_elements,
             merkle_path_indices: path_indices,

@@ -80,7 +80,6 @@ impl Storage {
                     event.value
                 ])?;
             }
-
         }
         tx.commit()?;
         log::debug!(
@@ -91,7 +90,6 @@ impl Storage {
         );
         Ok(())
     }
-
 
     pub fn save_sync_progress(
         &mut self,
@@ -155,6 +153,7 @@ impl Storage {
 
         Ok(metadata)
     }
+
     pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
         self.conn
             .query_row(
@@ -487,13 +486,16 @@ impl Storage {
         )?;
 
         let row = stmt
-            .query_row(params![pool_contract_id, account_address, commitment], |row| {
-                let amount: NoteAmount = row.get(0)?;
-                let blinding: Field = row.get(1)?;
-                let leaf_index_i64: i64 = row.get(2)?;
-                let leaf_index = col_u32(leaf_index_i64, 2)?;
-                Ok((amount, blinding, leaf_index))
-            })
+            .query_row(
+                params![pool_contract_id, account_address, commitment],
+                |row| {
+                    let amount: NoteAmount = row.get(0)?;
+                    let blinding: Field = row.get(1)?;
+                    let leaf_index_i64: i64 = row.get(2)?;
+                    let leaf_index = col_u32(leaf_index_i64, 2)?;
+                    Ok((amount, blinding, leaf_index))
+                },
+            )
             .optional()
             .context("Failed to query unspent user note by commitment")?;
 
@@ -511,7 +513,7 @@ impl Storage {
             )?;
 
             for event in events {
-                                stmt.execute(params![event.contract_id, event.nullifier, event.id])?;
+                stmt.execute(params![event.contract_id, event.nullifier, event.id])?;
             }
         }
         tx.commit()?;
@@ -834,7 +836,9 @@ impl Storage {
 
         let pool_ids: Vec<i64> = self
             .conn
-            .prepare("SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id")?
+            .prepare(
+                "SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id",
+            )?
             .query_map([], |row| row.get(0))?
             .collect::<core::result::Result<Vec<i64>, _>>()?;
 
@@ -842,12 +846,14 @@ impl Storage {
             return Ok(false);
         }
 
-        let pool_count_u32 = u32::try_from(pool_ids.len())
-            .map_err(|_| anyhow::anyhow!("pool count exceeds u32"))?;
+        let pool_count_u32 =
+            u32::try_from(pool_ids.len()).map_err(|_| anyhow::anyhow!("pool count exceeds u32"))?;
         let base_quota = if pool_count_u32 == 0 {
             0
         } else {
-            total_limit / pool_count_u32
+            total_limit
+                .checked_div(pool_count_u32)
+                .expect("pool count is not zero")
         };
 
         let mut quotas = vec![base_quota; pool_ids.len()];
@@ -857,7 +863,11 @@ impl Storage {
         while remainder > 0 {
             quotas[next_pool] = quotas[next_pool].saturating_add(1);
             remainder = remainder.saturating_sub(1);
-            next_pool = (next_pool + 1) % pool_ids.len();
+            next_pool = (next_pool
+                .checked_add(1)
+                .expect("next_pool shouldn't overflow"))
+            .checked_rem(pool_ids.len())
+            .expect("pool ids is not zero");
         }
 
         let mut did_any_progress = false;
@@ -906,19 +916,22 @@ impl Storage {
                              LIMIT ?3",
                         )?;
 
-                        let rows = stmt.query_map(params![pool_contract_id, last_commitment_id, quota], |row| {
-                            let commitment_id: i64 = row.get(0)?;
-                            let commitment: Field = row.get(1)?;
-                            let leaf_index_i64: i64 = row.get(2)?;
-                            let leaf_index = col_u32(leaf_index_i64, 2)?;
-                            let encrypted_output: Vec<u8> = row.get(3)?;
-                            Ok(PoolCommitmentRow {
-                                commitment_id,
-                                commitment,
-                                leaf_index,
-                                encrypted_output,
-                            })
-                        })?;
+                        let rows = stmt.query_map(
+                            params![pool_contract_id, last_commitment_id, quota],
+                            |row| {
+                                let commitment_id: i64 = row.get(0)?;
+                                let commitment: Field = row.get(1)?;
+                                let leaf_index_i64: i64 = row.get(2)?;
+                                let leaf_index = col_u32(leaf_index_i64, 2)?;
+                                let encrypted_output: Vec<u8> = row.get(3)?;
+                                Ok(PoolCommitmentRow {
+                                    commitment_id,
+                                    commitment,
+                                    leaf_index,
+                                    encrypted_output,
+                                })
+                            },
+                        )?;
 
                         let mut out = Vec::new();
                         for r in rows {
@@ -1009,7 +1022,9 @@ impl Storage {
         // Reconcile per pool to avoid cross-asset note marking.
         let pool_ids: Vec<i64> = self
             .conn
-            .prepare("SELECT DISTINCT pool_contract_id FROM pool_nullifiers ORDER BY pool_contract_id")?
+            .prepare(
+                "SELECT DISTINCT pool_contract_id FROM pool_nullifiers ORDER BY pool_contract_id",
+            )?
             .query_map([], |row| row.get(0))?
             .collect::<core::result::Result<Vec<i64>, _>>()?;
 
@@ -1044,11 +1059,12 @@ impl Storage {
                      LIMIT ?3",
                 )?;
 
-                let rows = stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
-                    let id: i64 = row.get(0)?;
-                    let nullifier: Field = row.get(1)?;
-                    Ok((id, nullifier))
-                })?;
+                let rows =
+                    stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
+                        let id: i64 = row.get(0)?;
+                        let nullifier: Field = row.get(1)?;
+                        Ok((id, nullifier))
+                    })?;
 
                 let mut out = Vec::new();
                 for r in rows {
@@ -1094,7 +1110,6 @@ impl Storage {
 
         Ok(did_any)
     }
-
 }
 
 // ---------------------------------------------------------------------------
@@ -1121,8 +1136,8 @@ mod tests {
     use super::*;
     use prover::{crypto, encryption};
     use types::{
-        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature,
-        LeafAddedEvent, NoteAmount, NotePublicKey, PublicKeyEvent, SpendingSignature,
+        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature, NoteAmount,
+        NotePublicKey, PublicKeyEvent, SpendingSignature,
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -1395,7 +1410,6 @@ mod tests {
         Ok(())
     }
 
-}
     #[test]
     fn asp_membership_precondition_partial_processing_returns_sync_required() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
@@ -1457,7 +1471,8 @@ mod tests {
             true,
         )?;
 
-        let status = storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
+        let status =
+            storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
         assert!(matches!(
             status,
             AspMembershipSync::SyncRequired(Some(gap)) if gap == current_ledger - last_leaf_ledger
@@ -1571,7 +1586,9 @@ mod tests {
             true,
         )?;
 
-        let status = storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
+        let status =
+            storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }
+}

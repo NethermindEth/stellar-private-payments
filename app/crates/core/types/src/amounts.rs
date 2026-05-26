@@ -48,7 +48,8 @@ fn bn254_modulus_u256() -> U256 {
 pub struct NoteAmount(u128);
 
 impl NoteAmount {
-    /// Maximum representable note amount (stored as `u128` token base units internally).
+    /// Maximum representable note amount (stored as `u128` token base units
+    /// internally).
     pub const MAX: NoteAmount = NoteAmount(u128::MAX);
     /// Unit amount.
     pub const ONE: NoteAmount = NoteAmount(1);
@@ -571,7 +572,10 @@ mod tests {
         );
 
         assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
-        assert_eq!(NoteAmount::try_from(ExtAmount::MAX)? + NoteAmount::try_from(ExtAmount::MAX)?, NoteAmount::from(i128::MAX as u128 + i128::MAX as u128));
+        assert_eq!(
+            NoteAmount::try_from(ExtAmount::MAX)? + NoteAmount::try_from(ExtAmount::MAX)?,
+            NoteAmount::from(i128::MAX as u128 + i128::MAX as u128)
+        );
         Ok(())
     }
 

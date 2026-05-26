@@ -5,7 +5,10 @@ use http::{Uri, uri::Authority};
 use serde::{Deserialize, Serialize};
 use serde_aux::prelude::deserialize_default_from_null;
 use serde_json::json;
-use std::{collections::{BTreeSet, HashMap}, str::FromStr};
+use std::{
+    collections::{BTreeSet, HashMap},
+    str::FromStr,
+};
 use stellar_xdr::curr::{
     self as xdr, ContractId, Error as XdrError, LedgerEntryData, LedgerKey, Limits, ReadXdr,
     WriteXdr,
@@ -487,17 +490,14 @@ impl Client {
 
             for (key, key_name, required) in specs {
                 let key_xdr = key.to_xdr_base64(Limits::none())?;
-                if !key_meta_by_xdr.contains_key(&key_xdr) {
+                key_meta_by_xdr.entry(key_xdr).or_insert_with(|| {
                     all_keys.push(key);
-                    key_meta_by_xdr.insert(
-                        key_xdr,
-                        KeyMeta {
-                            contract_id: request.contract_id.to_string(),
-                            key_name: key_name.to_string(),
-                            required,
-                        },
-                    );
-                }
+                    KeyMeta {
+                        contract_id: request.contract_id.to_string(),
+                        key_name: key_name.to_string(),
+                        required,
+                    }
+                });
             }
         }
 
@@ -553,11 +553,11 @@ impl Client {
         }
 
         for (contract_id, expected) in expected_required {
-            let actual = actual_required.get(&contract_id).cloned().unwrap_or_default();
-            let missing: Vec<String> = expected
-                .difference(&actual)
+            let actual = actual_required
+                .get(&contract_id)
                 .cloned()
-                .collect();
+                .unwrap_or_default();
+            let missing: Vec<String> = expected.difference(&actual).cloned().collect();
 
             if !missing.is_empty() {
                 return Err(Error::MissingRequiredContractKeys {

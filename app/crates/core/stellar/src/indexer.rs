@@ -1,9 +1,7 @@
-use crate::{
-    rpc::{Client, Error as RpcError},
-};
+use crate::rpc::{Client, Error as RpcError};
 use anyhow::{Result, anyhow};
-use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 use std::collections::HashSet;
+use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
 const PAGE_SIZE: usize = 300;
@@ -13,7 +11,7 @@ pub struct Indexer<S: ContractDataStorage> {
     client: Client,
     storage: S,
     contract_ids: Vec<String>,
-    min_pool_ledger: u32
+    min_pool_ledger: u32,
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
@@ -25,7 +23,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             .iter()
             .filter(|p| p.enabled)
             .map(|p| p.deployment_ledger)
-            .min().ok_or_else(|| anyhow!("at least one pool should be enabled"))?;
+            .min()
+            .ok_or_else(|| anyhow!("at least one pool should be enabled"))?;
 
         // Retention-window check: if the RPC cannot serve events back to the deployment
         // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
@@ -33,7 +32,9 @@ impl<S: ContractDataStorage> Indexer<S> {
         let contract_ids: Vec<String> = config
             .pools
             .iter()
-            .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone())).chain(std::iter::once(config.asp_membership.to_string())).collect();
+            .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone()))
+            .chain(std::iter::once(config.asp_membership.to_string()))
+            .collect();
         match client
             .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
             .await
@@ -54,7 +55,7 @@ Please use a fresher contracts deployment / a different RPC which stores events 
             client,
             storage,
             contract_ids,
-            min_pool_ledger
+            min_pool_ledger,
         })
     }
 

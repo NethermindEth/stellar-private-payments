@@ -47,13 +47,21 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
 // }
 fn parse_new_nullifier_event(parsed: ParsedContractEvent) -> Result<NewNullifierEvent> {
     let ParsedContractEvent {
-        id, name, topics, contract_id, ..
+        id,
+        name,
+        topics,
+        contract_id,
+        ..
     } = parsed;
     let nullifier_scval = topics
         .first()
         .ok_or_else(|| anyhow!("event `{name}` id {id} should have a nullifier topic value"))?;
     let nullifier = Field::try_from_u256(scval_to_u256(nullifier_scval)?)?;
-    Ok(NewNullifierEvent { id, contract_id, nullifier })
+    Ok(NewNullifierEvent {
+        id,
+        contract_id,
+        nullifier,
+    })
 }
 
 // #[contractevent]

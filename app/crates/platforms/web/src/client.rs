@@ -18,8 +18,8 @@ use prover::{
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
-    AspMembershipSync, ContractsStateData, EncryptionPublicKey, EncryptionSignature, ExtAmount,
-    Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature, ContractConfig
+    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey,
+    EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -1280,7 +1280,10 @@ impl stellar::ContractDataStorage for WebClient {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed)),
+            bridge.run(StorageWorkerRequest::SaveSyncProgress(
+                metadata,
+                fully_indexed,
+            )),
         )
         .await?;
         match resp {

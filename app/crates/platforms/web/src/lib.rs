@@ -36,8 +36,10 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
     log::debug!("[MAIN THREAD] starting initialization...");
-    let contract_config: &'static ContractConfig = Box::leak(Box::new(serde_json::from_str(DEPLOYMENT)?));
-    let client = WebClient::new(config.rpc_url(), contract_config).map_err(|e| JsError::new(&e.to_string()))?;
+    let contract_config: &'static ContractConfig =
+        Box::leak(Box::new(serde_json::from_str(DEPLOYMENT)?));
+    let client = WebClient::new(config.rpc_url(), contract_config)
+        .map_err(|e| JsError::new(&e.to_string()))?;
     client
         .ping_storage()
         .await
