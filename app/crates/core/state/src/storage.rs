@@ -135,19 +135,22 @@ impl Storage {
              ORDER BY m.contract_id",
         )?;
 
-        let mut rows = stmt.query([])?;
-        let mut metadata = Vec::new();
-        while let Some(row) = rows.next()? {
+        let rows = stmt.query_map([], |row| {
             let contract_id: String = row.get(0)?;
             let ledger_i64: i64 = row.get(1)?;
             let last_ledger = col_u32(ledger_i64, 1)?;
             let cursor: Option<String> = row.get(2)?;
-            if let Some(cursor) = cursor {
-                metadata.push(types::SyncMetadata {
-                    contract_id,
-                    last_ledger,
-                    cursor,
-                });
+            Ok(cursor.map(|cursor| types::SyncMetadata {
+                contract_id,
+                last_ledger,
+                cursor,
+            }))
+        })?;
+
+        let mut metadata = Vec::new();
+        for row in rows {
+            if let Some(entry) = row? {
+                metadata.push(entry);
             }
         }
 
@@ -754,11 +757,11 @@ impl Storage {
             "SELECT r.id, r.ledger, c.address, r.topics, r.value
                 FROM raw_contract_events r
                 JOIN contracts c ON c.contract_id = r.contract_id
-                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+                LEFT JOIN pool_commitments pc ON r.id = pc.event_id
                 LEFT JOIN pool_commitments c ON r.id = c.event_id
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
-                WHERE n.event_id IS NULL
+                AND pc.event_id IS NULL
                 AND c.event_id IS NULL
                 AND p.event_id IS NULL
                 AND l.event_id IS NULL
