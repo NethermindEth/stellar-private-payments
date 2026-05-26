@@ -1,5 +1,4 @@
 use crate::{
-    DEPLOYMENT,
     rpc::{Client, Error as RpcError},
 };
 use anyhow::{Result, anyhow};
@@ -12,15 +11,13 @@ const MAX_PAGES_PER_ROUND: usize = 10;
 
 pub struct Indexer<S: ContractDataStorage> {
     client: Client,
-    config: ContractConfig,
     storage: S,
     contract_ids: Vec<String>,
     min_pool_ledger: u32
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(rpc_url: &str, storage: S) -> Result<Self> {
-        let config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
+    pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
 
         let min_pool_ledger = config
@@ -33,7 +30,7 @@ impl<S: ContractDataStorage> Indexer<S> {
         // Retention-window check: if the RPC cannot serve events back to the deployment
         // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
         // trees.
-        let contract_ids: Vec<String> =config
+        let contract_ids: Vec<String> = config
             .pools
             .iter()
             .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone())).chain(std::iter::once(config.asp_membership.to_string())).collect();
@@ -55,7 +52,6 @@ Please use a fresher contracts deployment / a different RPC which stores events 
 
         Ok(Self {
             client,
-            config,
             storage,
             contract_ids,
             min_pool_ledger

@@ -1,5 +1,4 @@
 use crate::{
-    DEPLOYMENT,
     conversions::{
         scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64, scval_to_u256,
     },
@@ -25,7 +24,7 @@ macro_rules! get_state {
 
 pub struct StateFetcher {
     client: Client,
-    config: ContractConfig,
+    config: &'static ContractConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -79,8 +78,7 @@ impl StateFetcher {
         Ok(value)
     }
 
-    pub fn new(rpc_url: &str) -> Result<Self> {
-        let config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
+    pub fn new(rpc_url: &str, config: &'static ContractConfig) -> Result<Self> {
         Ok(Self {
             client: Client::new(rpc_url)?,
             config,

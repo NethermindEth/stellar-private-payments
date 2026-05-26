@@ -19,7 +19,7 @@ use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
     AspMembershipSync, ContractsStateData, EncryptionPublicKey, EncryptionSignature, ExtAmount,
-    Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
+    Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature, ContractConfig
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -92,7 +92,7 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
 }
 
 impl WebClient {
-    pub fn new(rpc_url: &str) -> anyhow::Result<Self> {
+    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
             storage_bridge: StorageWorker::spawner()
                 .as_module(true)
@@ -100,7 +100,7 @@ impl WebClient {
             prover_bridge: ProverWorker::spawner()
                 .as_module(true)
                 .spawn("./js/prover-worker.js"),
-            fetcher: Rc::new(CoreStateFetcher::new(rpc_url)?),
+            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
         })
     }
 
@@ -1134,13 +1134,14 @@ impl WebClient {
     #[wasm_bindgen(js_name = proveDeposit)]
     pub async fn prove_deposit(
         &self,
-        pool_contract_id: String,
+        //pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         amount: BigInt,
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
+        let pool_contract_id = self.fetcher.contract_config().pools.first().expect("at least one pool is deployed").pool_contract_id.clone();
         let prepared = self
             .prove_deposit_inner(
                 pool_contract_id,
@@ -1160,13 +1161,14 @@ impl WebClient {
     #[wasm_bindgen(js_name = proveWithdraw)]
     pub async fn prove_withdraw(
         &self,
-        pool_contract_id: String,
+        //pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         withdraw_recipient: String,
         input_note_ids: Array,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
+        let pool_contract_id = self.fetcher.contract_config().pools.first().expect("at least one pool is deployed").pool_contract_id.clone();
         let prepared = self
             .prove_withdraw_inner(
                 pool_contract_id,
@@ -1187,7 +1189,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     pub async fn prove_transfer(
         &self,
-        pool_contract_id: String,
+        //pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         recipient_note_key_hex: String,
@@ -1196,6 +1198,7 @@ impl WebClient {
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
+        let pool_contract_id = self.fetcher.contract_config().pools.first().expect("at least one pool is deployed").pool_contract_id.clone();
         let prepared = self
             .prove_transfer_inner(
                 pool_contract_id,
@@ -1218,7 +1221,7 @@ impl WebClient {
     #[allow(clippy::too_many_arguments)]
     pub async fn prove_transact(
         &self,
-        pool_contract_id: String,
+        //pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         ext_recipient: String,
@@ -1229,6 +1232,7 @@ impl WebClient {
         out_recipient_enc_keys_hex: Array,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
+        let pool_contract_id = self.fetcher.contract_config().pools.first().expect("at least one pool is deployed").pool_contract_id.clone();
         let prepared = self
             .prove_transact_inner(
                 pool_contract_id,
