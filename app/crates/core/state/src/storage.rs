@@ -760,10 +760,10 @@ impl Storage {
                 LEFT JOIN pool_commitments pc ON r.id = pc.event_id
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
-                LEFT JOIN pool_nullifiers pn ON r.id = pn.event_id
+                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
                 WHERE pc.event_id IS NULL
                 AND p.event_id IS NULL
-                AND pn.event_id IS NULL
+                AND n.event_id IS NULL
                 AND l.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
