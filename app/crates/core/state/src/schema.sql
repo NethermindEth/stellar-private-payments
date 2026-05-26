@@ -73,12 +73,9 @@ CREATE INDEX idx_keypairs_account_id_id ON keypairs(account_id, id);
 -- Linked to `raw_contract_events` so entries can be traced back to the originating event.
 CREATE TABLE pool_nullifiers (
     id INTEGER PRIMARY KEY,
-    pool_contract_id INTEGER NOT NULL,
-    nullifier BLOB NOT NULL CHECK (length(nullifier) = 32),
+    nullifier BLOB NOT NULL UNIQUE CHECK (length(nullifier) = 32),
     -- Foreign key to `raw_contract_events.id` for the event that emitted this nullifier.
     event_id  TEXT NOT NULL UNIQUE,
-    UNIQUE(pool_contract_id, nullifier),
-    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
@@ -89,15 +86,11 @@ CREATE TABLE pool_nullifiers (
 -- - `encrypted_output`: encrypted note output intended for recipients.
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
-    pool_contract_id INTEGER NOT NULL,
-    commitment BLOB NOT NULL CHECK (length(commitment) = 32),
+    commitment BLOB NOT NULL UNIQUE CHECK (length(commitment) = 32),
     leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this commitment.
     event_id  TEXT NOT NULL UNIQUE,
-    UNIQUE(pool_contract_id, commitment),
-    UNIQUE(pool_contract_id, leaf_index),
-    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
@@ -106,14 +99,11 @@ CREATE TABLE pool_commitments (
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
 -- be recovered by joining on the raw event.
 CREATE TABLE public_keys (
-    pool_contract_id INTEGER NOT NULL,
     owner TEXT NOT NULL,
     encryption_key BLOB NOT NULL,
     note_key BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that registered these keys.
-    event_id  TEXT NOT NULL UNIQUE,
-    PRIMARY KEY (pool_contract_id, owner),
-    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE,
+    event_id  TEXT NOT NULL PRIMARY KEY,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 

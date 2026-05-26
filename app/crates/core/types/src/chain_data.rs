@@ -169,8 +169,6 @@ pub struct NewNullifierEvent {
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
     // hyphen.
     pub id: String,
-    /// Pool contract id (C...).
-    pub contract_id: String,
     /// The nullifier that was spent (BN254 field element).
     pub nullifier: Field,
 }
@@ -183,8 +181,6 @@ pub struct NewCommitmentEvent {
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
     // hyphen.
     pub id: String,
-    /// Pool contract id (C...).
-    pub contract_id: String,
     /// The commitment hash added to the tree (BN254 field element).
     pub commitment: Field,
     /// Index position in the Merkle tree
@@ -201,8 +197,6 @@ pub struct PublicKeyEvent {
     // It combines a 19-character TOID and a 10-character, zero-padded event index, separated by a
     // hyphen.
     pub id: String,
-    /// Pool contract id (C...).
-    pub contract_id: String,
     /// Address of the account owner
     pub owner: String,
     /// X25519 encryption public key

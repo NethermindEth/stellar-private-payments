@@ -431,7 +431,8 @@ impl Storage {
         let mut stmt = self.conn.prepare(
             "SELECT c.leaf_index, c.commitment
              FROM pool_commitments c
-             JOIN contracts pc ON pc.contract_id = c.pool_contract_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pc ON pc.contract_id = r.contract_id
              WHERE pc.address = ?1
              ORDER BY c.leaf_index ASC",
         )?;
@@ -478,8 +479,10 @@ impl Storage {
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pc ON pc.contract_id = r.contract_id
              WHERE a.address = ?2
-               AND c.pool_contract_id = (SELECT contract_id FROM contracts WHERE address = ?1)
+               AND pc.address = ?1
                AND c.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
@@ -507,13 +510,13 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_nullifiers (pool_contract_id, nullifier, event_id)
-                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3)
-                    ON CONFLICT(pool_contract_id, nullifier) DO NOTHING",
+                "INSERT INTO pool_nullifiers (nullifier, event_id)
+                    VALUES (?1, ?2)
+                    ON CONFLICT(nullifier) DO NOTHING",
             )?;
 
             for event in events {
-                stmt.execute(params![event.contract_id, event.nullifier, event.id])?;
+                stmt.execute(params![event.nullifier, event.id])?;
             }
         }
         tx.commit()?;
@@ -525,14 +528,13 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO pool_commitments (pool_contract_id, commitment, leaf_index, encrypted_output, event_id)
-                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3, ?4, ?5)
-                    ON CONFLICT(pool_contract_id, commitment) DO NOTHING",
+                "INSERT INTO pool_commitments (commitment, leaf_index, encrypted_output, event_id)
+                    VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(commitment) DO NOTHING",
             )?;
 
             for event in events {
                 stmt.execute(params![
-                    event.contract_id,
                     event.commitment,
                     event.index,
                     event.encrypted_output,
@@ -549,14 +551,13 @@ impl Storage {
         let tx = self.conn.transaction()?;
         {
             let mut stmt = tx.prepare(
-                "INSERT INTO public_keys (pool_contract_id, owner, encryption_key, note_key, event_id)
-                    VALUES ((SELECT contract_id FROM contracts WHERE address = ?1), ?2, ?3, ?4, ?5)
-                    ON CONFLICT(pool_contract_id, owner) DO NOTHING",
+                "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
+                    VALUES (?1, ?2, ?3, ?4)
+                    ON CONFLICT(event_id) DO NOTHING",
             )?;
 
             for event in events {
                 stmt.execute(params![
-                    event.contract_id,
                     event.owner,
                     event.encryption_key,
                     event.note_key,
@@ -849,7 +850,10 @@ impl Storage {
         let pool_ids: Vec<i64> = self
             .conn
             .prepare(
-                "SELECT DISTINCT pool_contract_id FROM pool_commitments ORDER BY pool_contract_id",
+                "SELECT DISTINCT r.contract_id
+                 FROM pool_commitments c
+                 JOIN raw_contract_events r ON r.id = c.event_id
+                 ORDER BY r.contract_id",
             )?
             .query_map([], |row| row.get(0))?
             .collect::<core::result::Result<Vec<i64>, _>>()?;
@@ -921,10 +925,11 @@ impl Storage {
                     let quota = pool_quota.min(ACCOUNT_CHUNK);
                     let commitments: Vec<PoolCommitmentRow> = {
                         let mut stmt = tx.prepare(
-                            "SELECT id, commitment, leaf_index, encrypted_output
-                             FROM pool_commitments
-                             WHERE pool_contract_id = ?1 AND id > ?2
-                             ORDER BY id ASC
+                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output
+                             FROM pool_commitments c
+                             JOIN raw_contract_events r ON r.id = c.event_id
+                             WHERE r.contract_id = ?1 AND c.id > ?2
+                             ORDER BY c.id ASC
                              LIMIT ?3",
                         )?;
 
@@ -974,8 +979,10 @@ impl Storage {
 
                         let nullifier_id: Option<i64> = tx
                             .query_row(
-                                "SELECT id FROM pool_nullifiers
-                                 WHERE pool_contract_id = ?1 AND nullifier = ?2
+                                "SELECT n.id
+                                 FROM pool_nullifiers n
+                                 JOIN raw_contract_events r ON r.id = n.event_id
+                                 WHERE r.contract_id = ?1 AND n.nullifier = ?2
                                  LIMIT 1",
                                 params![pool_contract_id, derived.expected_nullifier],
                                 |r| r.get(0),
@@ -1031,11 +1038,13 @@ impl Storage {
             return Ok(false);
         }
 
-        // Reconcile per pool to avoid cross-asset note marking.
         let pool_ids: Vec<i64> = self
             .conn
             .prepare(
-                "SELECT DISTINCT pool_contract_id FROM pool_nullifiers ORDER BY pool_contract_id",
+                "SELECT DISTINCT r.contract_id
+                 FROM pool_nullifiers n
+                 JOIN raw_contract_events r ON r.id = n.event_id
+                 ORDER BY r.contract_id",
             )?
             .query_map([], |row| row.get(0))?
             .collect::<core::result::Result<Vec<i64>, _>>()?;
@@ -1049,7 +1058,6 @@ impl Storage {
         for pool_contract_id in pool_ids {
             let tx = self.conn.transaction()?;
 
-            // Ensure scan-state row exists.
             tx.execute(
                 "INSERT OR IGNORE INTO nullifier_scan_state (pool_contract_id, last_nullifier_id)
                  VALUES (?1, 0)",
@@ -1064,10 +1072,11 @@ impl Storage {
 
             let nullifiers: Vec<(i64, Field)> = {
                 let mut stmt = tx.prepare(
-                    "SELECT id, nullifier
-                     FROM pool_nullifiers
-                     WHERE pool_contract_id = ?1 AND id > ?2
-                     ORDER BY id ASC
+                    "SELECT n.id, n.nullifier
+                     FROM pool_nullifiers n
+                     JOIN raw_contract_events r ON r.id = n.event_id
+                     WHERE r.contract_id = ?1 AND n.id > ?2
+                     ORDER BY n.id ASC
                      LIMIT ?3",
                 )?;
 
@@ -1101,8 +1110,9 @@ impl Storage {
                        AND EXISTS (
                            SELECT 1
                            FROM pool_commitments c
+                           JOIN raw_contract_events r ON r.id = c.event_id
                            WHERE c.id = user_notes.commitment_id
-                             AND c.pool_contract_id = ?3
+                             AND r.contract_id = ?3
                        )",
                     params![nullifier_id, nullifier, pool_contract_id],
                 )?;
@@ -1180,7 +1190,6 @@ mod tests {
         })?;
 
         storage.save_public_key_events_batch(&vec![PublicKeyEvent {
-            contract_id: "CPOOL".to_string(),
             id: event_id.to_string(),
             owner: "GTESTOWNER".to_string(),
             encryption_key: EncryptionPublicKey([1u8; 32]),
@@ -1238,7 +1247,6 @@ mod tests {
             latest_ledger: 1,
         })?;
         storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
-            contract_id: "CPOOL".to_string(),
             id: "evt-commit".to_string(),
             commitment,
             index: 3,
@@ -1299,7 +1307,6 @@ mod tests {
             latest_ledger: 1,
         })?;
         storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
-            contract_id: "CPOOL".to_string(),
             id: "evt-null".to_string(),
             nullifier,
         }])?;
