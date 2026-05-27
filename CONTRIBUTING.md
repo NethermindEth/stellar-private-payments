@@ -12,6 +12,12 @@ git config commit.gpgsign true
 
 Unified project documentation is available at https://nethermindeth.github.io/stellar-private-payments/docs/
 
+## Communication and environment notes
+
+- External contributors should mention their PR in the project [LinkedIn group](https://www.linkedin.com/groups/18809039/). PRs from forks are not reviewed without this notice because we need to see a human behind the contribution.
+- Active development discussions happen in the [Telegram group](https://t.me/stellar_privacy). If you have technical questions you should ask them there.
+- You may need to reset local browser storage from time to time. [Bootnode](https://github.com/NethermindEth/stellar-private-payments/issues/169) support is not available yet, and contracts are redeployed during development.
+
 ## Project Structure
 
 ```
