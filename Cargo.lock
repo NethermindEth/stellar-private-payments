@@ -1774,8 +1774,10 @@ name = "disclosure"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "hex",
  "prover",
  "serde_json",
+ "sha2 0.11.0",
  "types",
 ]
 
