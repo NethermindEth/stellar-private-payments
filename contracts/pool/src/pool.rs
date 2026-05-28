@@ -712,8 +712,8 @@ impl PoolContract {
     ///
     /// * `env` - The Soroban environment
     /// * `root` - Pool Merkle root to check
-    pub fn is_known_root(env: &Env, root: U256) -> Result<bool, Error> {
-        Ok(MerkleTreeWithHistory::is_known_root(env, &root)?)
+    pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
+        Ok(MerkleTreeWithHistory::is_known_root(env, root)?)
     }
 
     /// Update the contract administrator
