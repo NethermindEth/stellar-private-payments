@@ -8,8 +8,11 @@
 [![Coverage](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/stellar_privacy)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/groups/18809039/)
 
-> **Disclaimer**: This project is a **Proof of Concept (PoC)** and prototype implementation. It is intended for research and educational purposes only. The code has not been audited and should not be used in production environments with real assets.
+> [!WARNING]
+> This project is a **Proof of Concept (PoC)** and prototype implementation. It is intended for research and educational purposes only. The code has not been audited and should not be used in production environments with real assets.
 
 A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
@@ -67,7 +70,6 @@ If you want to try it out:
 ### Architecture Overview
 
 #### Transaction Flow
-![Deposit Page](assets/demo-001.png)
 
 1. **Deposit**: User deposits tokens into the pool, creating a commitment (UTXO). No input notes are spent, creates output notes.
 2. **Withdraw**: User proves ownership of commitments and withdraws tokens. Inputs notes are spent, no output notes are created.
@@ -75,7 +77,6 @@ If you want to try it out:
 4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
 
 #### ASP Admin Page
-![ASP Admin Page](assets/demo-002.png)
 
 This is the administrative control panel for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
 
@@ -87,7 +88,8 @@ This provides **illicit activity safeguards** while maintaining user privacy. Th
 
 The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
 
-> **WARNING:** Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
+> [!WARNING]
+> Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
 
 
 #### Zero-Knowledge Circuits
