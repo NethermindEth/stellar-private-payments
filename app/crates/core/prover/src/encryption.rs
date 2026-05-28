@@ -264,7 +264,7 @@ fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<
     }
     if plaintext.len() != 48 {
         return Err(anyhow!(
-            "Plaintext must be 40 bytes (8 amount + 32 blinding)"
+            "Plaintext must be 48 bytes (16 amount + 32 blinding)"
         ));
     }
 

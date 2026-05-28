@@ -869,10 +869,15 @@ impl Storage {
             u32::try_from(pool_ids.len()).map_err(|_| anyhow::anyhow!("pool count exceeds u32"))?;
         let base_quota = if pool_count_u32 == 0 {
             0
-        } else {
+        } else if total_limit >= pool_count_u32 {
             total_limit
                 .checked_div(pool_count_u32)
                 .expect("pool count is not zero")
+        } else {
+            log::warn!(
+                "pool count {pool_count_u32} exceeds total limit {total_limit} of commitments to scan"
+            );
+            1
         };
 
         let mut quotas = vec![base_quota; pool_ids.len()];

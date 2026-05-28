@@ -153,7 +153,7 @@ pub struct TransactParams {
 
 /// Parameters for a deposit transaction.
 ///
-/// Handles XLM deposits into the privacy pool.
+/// Handles deposits into the privacy pool.
 ///
 /// Deposit invariant:
 /// `Deposit amount must equal sum of outputs`.
@@ -186,7 +186,7 @@ pub struct DepositParams {
 
 /// Parameters for a withdrawal transaction.
 ///
-/// Handles XLM withdrawals from the privacy pool.
+/// Handles withdrawals from the privacy pool.
 ///
 /// Withdrawal semantics:
 /// - spends existing notes (inputs),

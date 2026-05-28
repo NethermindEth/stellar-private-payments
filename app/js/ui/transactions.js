@@ -51,11 +51,6 @@ function noteAmountToStroopsBigInt(amount) {
 let TOKEN_DECIMALS = 7;
 let TOKEN_SYMBOL = "XLM";
 
-function setTokenMeta(decimals, symbol) {
-    if (Number.isInteger(decimals) && decimals >= 0 && decimals <= 30) TOKEN_DECIMALS = decimals;
-    if (typeof symbol === "string" && symbol.trim()) TOKEN_SYMBOL = symbol.trim();
-}
-
 function baseUnitsPerToken() {
     return 10n ** BigInt(TOKEN_DECIMALS);
 }
