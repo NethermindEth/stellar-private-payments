@@ -339,6 +339,28 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::Disclosure(receipt)
         }
+        ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
+            log::debug!("[{WORKER_NAME}] verify disclosure proof");
+
+            // Validate receipt metadata and circuit registration
+            disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
+
+            // Extract proof bytes and public inputs from receipt
+            let proof_bytes = receipt.proof_compressed_bytes()?;
+            let public_inputs =
+                disclosure::receipt_public_inputs_bytes(&receipt, &expected_vk_hash)?;
+
+            // Verify using the prover's own VK (derived from embedded proving key)
+            let proof_verified = DISCLOSURE_PROVER.with(|cell| {
+                let borrow = cell.borrow();
+                let prover = borrow
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
+                prover.verify(&proof_bytes, &public_inputs)
+            })?;
+
+            ProverWorkerResponse::DisclosureProofVerified(proof_verified)
+        }
     };
     Ok(resp)
 }

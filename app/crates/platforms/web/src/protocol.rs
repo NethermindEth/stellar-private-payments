@@ -72,6 +72,7 @@ pub enum ProverWorkerRequest {
     Transfer(TransferParams),
     Transact(TransactParams),
     Disclosure(DisclosureProverRequest),
+    VerifyDisclosureProof(DisclosureReceipt, String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -83,6 +84,7 @@ pub enum ProverWorkerResponse {
     TransferPrepared(PreparedProverTx),
     TransactPrepared(PreparedProverTx),
     Disclosure(DisclosureReceipt),
+    DisclosureProofVerified(bool),
 }
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -19,8 +19,8 @@ use prover::{
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
-    AspMembershipSync, DisclosureReceipt, EncryptionPublicKey, EncryptionSignature, ExtAmount,
-    Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
+    AspMembershipSync, DisclosureReceipt, DisclosureVerificationReport, EncryptionPublicKey,
+    EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -1370,6 +1370,60 @@ impl WebClient {
         };
 
         Ok(Some(receipt))
+    }
+
+    #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+    pub async fn verify_selective_disclosure(
+        &self,
+        receipt_json: String,
+        expected_vk_hash: String,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+        // Verify proof via prover worker
+        let proof_verified = match self
+            .prover_request(
+                ProverWorkerRequest::VerifyDisclosureProof(
+                    receipt.clone(),
+                    expected_vk_hash,
+                ),
+                20_000,
+            )
+            .await?
+        {
+            ProverWorkerResponse::DisclosureProofVerified(v) => v,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        // Check root freshness via on-chain contract
+        let mut known_root_status = true;
+        for root in &receipt.public_inputs.roots {
+            let is_known = self
+                .fetcher
+                .is_pool_known_root(*root)
+                .await
+                .map_err(|e| JsError::new(&format!("root freshness check failed: {e}")))?;
+            if !is_known {
+                known_root_status = false;
+                break;
+            }
+        }
+
+        let report = DisclosureVerificationReport {
+            proof_verified,
+            // Context-hash verification is pending completion of the
+            // ext_context_hash derivation path (Phase 3).
+            context_verified: false,
+            known_root_status,
+        };
+
+        Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 }
 

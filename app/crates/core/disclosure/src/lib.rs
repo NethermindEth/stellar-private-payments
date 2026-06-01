@@ -2,7 +2,10 @@
 
 use anyhow::{Result, anyhow};
 use prover::prover::{Prover, verify_proof};
-use types::{DisclosureCircuitMetadata, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT};
+use types::{
+    DisclosureCircuitMetadata, DisclosureReceipt, DisclosureVerificationReport, Field,
+    SELECTIVE_DISCLOSURE_1_CIRCUIT,
+};
 
 /// Public input order declared by `selectiveDisclosure_1.circom`.
 pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] =
@@ -136,26 +139,6 @@ pub fn validate_registered_receipt(
     Ok(circuit)
 }
 
-/// Mock-checks every root named by a disclosure receipt.
-///
-/// # Arguments
-/// * `receipt` - Receipt containing the roots to check.
-/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
-///
-/// # Returns
-/// Returns `true` after receipt metadata validation.
-///
-/// # Errors
-/// Returns an error if receipt metadata is invalid.
-/// TODO: REMOVE THIS AFTER MODIFYING THE SMART CONTRACT.
-pub fn mock_receipt_roots_are_known(
-    receipt: &DisclosureReceipt,
-    expected_vk_hash: &str,
-) -> Result<bool> {
-    validate_registered_receipt(receipt, expected_vk_hash)?;
-    Ok(true)
-}
-
 /// Proof bytes and public inputs produced for a disclosure receipt.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProvedReceiptProof {
@@ -261,6 +244,75 @@ pub fn verify_receipt_proof(
     verify_proof(vk_bytes, &proof_bytes, &public_inputs)
 }
 
+/// Checks that every receipt root is still known by the pool.
+///
+/// # Arguments
+/// * `receipt` - Receipt containing roots to check.
+/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
+/// * `is_known_root` - Root freshness predicate (for example, a contract call).
+///
+/// # Returns
+/// Returns `true` when all roots in the receipt are known.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid or if `is_known_root`
+/// fails for any root.
+pub fn verify_receipt_known_roots_with<F>(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+    mut is_known_root: F,
+) -> Result<bool>
+where
+    F: FnMut(Field) -> Result<bool>,
+{
+    validate_registered_receipt(receipt, expected_vk_hash)?;
+    for root in &receipt.public_inputs.roots {
+        if !is_known_root(*root)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Builds a disclosure verification report by combining proof and root checks.
+///
+/// # Arguments
+/// * `receipt` - Disclosure receipt to verify.
+/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
+/// * `verify_proof` - Proof-verification function.
+/// * `context_verified` - Result of context-hash verification.
+/// * `is_known_root` - Root freshness predicate.
+///
+/// # Returns
+/// Returns a report that keeps proof-validity and root-freshness status
+/// separate.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid or if callbacks fail.
+pub fn verify_receipt_report_with<P, R>(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+    mut verify_proof: P,
+    context_verified: bool,
+    mut is_known_root: R,
+) -> Result<DisclosureVerificationReport>
+where
+    P: FnMut(&DisclosureReceipt, &str) -> Result<bool>,
+    R: FnMut(Field) -> Result<bool>,
+{
+    validate_registered_receipt(receipt, expected_vk_hash)?;
+
+    let proof_verified = verify_proof(receipt, expected_vk_hash)?;
+    let known_root_status =
+        verify_receipt_known_roots_with(receipt, expected_vk_hash, &mut is_known_root)?;
+
+    Ok(DisclosureVerificationReport {
+        proof_verified,
+        context_verified,
+        known_root_status,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -357,5 +409,63 @@ mod tests {
         let wrong_hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
         assert!(receipt_public_inputs_bytes(&receipt, wrong_hash).is_err());
+    }
+
+    #[test]
+    fn known_roots_returns_false_when_root_is_stale() -> Result<()> {
+        let receipt = valid_receipt();
+        let known = verify_receipt_known_roots_with(&receipt, VK_HASH, |_root| Ok(false))?;
+        assert!(!known);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_distinguishes_proof_from_root_freshness() -> Result<()> {
+        let receipt = valid_receipt();
+
+        // Shape validation succeeds and the injected proof checker says the
+        // proof is valid, but root freshness fails.
+        let report = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            true,
+            |_root| Ok(false),
+        )?;
+
+        assert!(report.proof_verified);
+        assert!(report.context_verified);
+        assert!(!report.known_root_status);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_short_circuits_on_invalid_metadata() {
+        let mut receipt = valid_receipt();
+        receipt.circuit.levels = 11;
+
+        let mut proof_called = false;
+        let mut root_called = false;
+
+        let result = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |_r, _vk_hash| {
+                proof_called = true;
+                Ok(true)
+            },
+            true,
+            |_root| {
+                root_called = true;
+                Ok(true)
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!proof_called);
+        assert!(!root_called);
     }
 }
