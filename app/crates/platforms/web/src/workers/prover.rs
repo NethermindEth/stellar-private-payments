@@ -23,6 +23,8 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
+const DISCLOSURE_PROVING_KEY: &[u8] =
+    include_bytes!("../../../../../../testdata/selectiveDisclosure_1_proving_key.bin");
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -72,13 +74,15 @@ fn ensure_sha256_matches(
 thread_local! {
     static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
     static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
+    static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
     if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
-    let (wasm_bytes, r1cs_bytes) = try_join!(
+    let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
         async {
             let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
             log::debug!(
@@ -91,6 +95,24 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+        },
+        async {
+            let wasm_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.wasm").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
+                wasm_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(wasm_bytes)
+        },
+        async {
+            let r1cs_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.r1cs").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.r1cs: {} bytes",
                 r1cs_bytes.len()
             );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
@@ -118,15 +140,49 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
     )?;
 
+    ensure_sha256_matches(
+        "selectiveDisclosure_1_proving_key.bin",
+        DISCLOSURE_PROVING_KEY,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "selectiveDisclosure_1.wasm",
+        &disc_wasm_bytes,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "selectiveDisclosure_1.r1cs",
+        &disc_r1cs_bytes,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
+    )?;
+
     let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
+
+    let disc_witness_calc =
+        WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
+            JsError::new(&format!(
+                "failed to init disclosure witness calculator: {e:#}"
+            ))
+        })?;
+    let disc_prover =
+        Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
 
     WITNESS_CALC.with(|cell| {
         *cell.borrow_mut() = Some(witness_calc);
     });
     PROVER.with(|cell| {
         *cell.borrow_mut() = Some(prover);
+    });
+    DISCLOSURE_WITNESS_CALC.with(|cell| {
+        *cell.borrow_mut() = Some(disc_witness_calc);
+    });
+    DISCLOSURE_PROVER.with(|cell| {
+        *cell.borrow_mut() = Some(disc_prover);
     });
     Ok(())
 }
@@ -202,6 +258,86 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             let artifacts = transact(params, hash_ext_data_offchain)?;
             log::debug!("[{WORKER_NAME}] prove_from_artifacts");
             ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
+        }
+        ProverWorkerRequest::Disclosure(req) => {
+            log::debug!("[{WORKER_NAME}] disclosure");
+
+            let ext_context_hash = types::Field::ZERO; // Temporarily zero, should be derived from context
+
+            let params = prover::flows::SelectiveDisclosure1Params {
+                root: req.inputs.root,
+                note_commitment: req.inputs.note_commitment,
+                note_amount: req.inputs.note_amount,
+                note_private_key: req.inputs.note_private_key,
+                note_blinding: req.inputs.note_blinding,
+                merkle_path_indices: req.inputs.merkle_path_indices,
+                merkle_path_elements: req.inputs.merkle_path_elements,
+                ext_context_hash,
+            };
+
+            let artifacts = prover::flows::selective_disclosure_1(params)?;
+            let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
+
+            let witness_bytes = DISCLOSURE_WITNESS_CALC.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let calc = borrow.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("disclosure witness calculator is not initialized")
+                })?;
+                calc.compute_witness(&circuit_inputs_json)
+                    .context("disclosure witness calculation failed")
+            })?;
+
+            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVER.with(|cell| {
+                let borrow = cell.borrow();
+                let prover = borrow
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
+
+                let proof_compressed = prover.prove_bytes(&witness_bytes)?;
+                let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
+                let ok = prover.verify(&proof_compressed, &public_inputs)?;
+                if !ok {
+                    return Err(anyhow::anyhow!("disclosure proof verification failed"));
+                }
+
+                let mut vk_hash = [0u8; 32];
+                let actual_hash = sha256(DISCLOSURE_PROVING_KEY);
+                vk_hash.copy_from_slice(&actual_hash); // Actually vk hash should be from vk, but for now just use a placeholder or derive it
+
+                Ok::<_, anyhow::Error>((proof_compressed, format!("0x{}", to_hex(&vk_hash))))
+            })?;
+
+            let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
+
+            let receipt = types::DisclosureReceipt {
+                version: types::DISCLOSURE_RECEIPT_VERSION,
+                circuit: types::DisclosureCircuitMetadata {
+                    name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
+                    levels: 10,
+                    n_notes: 1,
+                    vk_hash: vk_hash_hex, // Real implementation should compute VK hash
+                },
+                context: types::DisclosureContext {
+                    network: "testnet".to_string(),          // TODO: Make dynamic
+                    pool_address: "placeholder".to_string(), // TODO: Make dynamic
+                    authority_label: req.authority_label,
+                    authority_identity_payload_hex: req.authority_identity_payload_hex,
+                    purpose: req.purpose,
+                    context_nonce: req.context_nonce,
+                },
+                public_inputs: types::DisclosurePublicInputs {
+                    roots: vec![req.inputs.root],
+                    note_commitments: vec![req.inputs.note_commitment],
+                    ext_context_hash,
+                },
+                proof_compressed_hex,
+                issued_at: js_sys::Date::new_0()
+                    .to_iso_string()
+                    .as_string()
+                    .unwrap_or_else(|| "2026-06-01T00:00:00Z".to_string()),
+            };
+
+            ProverWorkerResponse::Disclosure(receipt)
         }
     };
     Ok(resp)

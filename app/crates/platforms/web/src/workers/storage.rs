@@ -288,14 +288,11 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let (note_privkey, _note_pubkey, _encryption_pubkey) =
                 load_user_key_material(&req.user_address)?;
 
-            let tree = match build_validated_pool_tree(
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-            )? {
-                Ok(tree) => tree,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
+            let tree =
+                match build_validated_pool_tree(req.pool_next_index, req.tree_depth, pool_root)? {
+                    Ok(tree) => tree,
+                    Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
+                };
 
             let (amount, blinding, leaf_index) = with_storage!(
                 s => s.get_unspent_user_note_by_commitment(&req.user_address, &req.selected_commitment)?
@@ -705,7 +702,9 @@ fn build_pool_input_note(
 ) -> Result<TransactInputNote> {
     let (amount, blinding, leaf_index) =
         with_storage!(s => s.get_unspent_user_note_by_commitment(user_address, commitment)?)?
-            .ok_or_else(|| anyhow::anyhow!("unspent note not found for commitment {}", commitment))?;
+            .ok_or_else(|| {
+                anyhow::anyhow!("unspent note not found for commitment {}", commitment)
+            })?;
 
     let MerkleProof {
         path_elements,

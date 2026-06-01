@@ -3,10 +3,10 @@ use serde::{Deserialize, Serialize};
 use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams};
 pub type Address = String;
 use types::{
-    AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair,
-    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePrivateKey,
-    NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata,
-    UserNoteSummary,
+    AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt,
+    EncryptionKeyPair, EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair,
+    NotePrivateKey, NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SpendingSignature,
+    SyncMetadata, UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,6 +71,7 @@ pub enum ProverWorkerRequest {
     Withdraw(WithdrawParams),
     Transfer(TransferParams),
     Transact(TransactParams),
+    Disclosure(DisclosureProverRequest),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -81,6 +82,7 @@ pub enum ProverWorkerResponse {
     WithdrawPrepared(PreparedProverTx),
     TransferPrepared(PreparedProverTx),
     TransactPrepared(PreparedProverTx),
+    Disclosure(DisclosureReceipt),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -220,4 +222,14 @@ pub struct PreparedProverTx {
 pub struct AdminASPRequest {
     pub membership_blinding: Field,
     pub pubkey: NotePublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureProverRequest {
+    pub inputs: DisclosureInputs,
+    pub authority_label: String,
+    pub authority_identity_payload_hex: String,
+    pub purpose: String,
+    pub context_nonce: Field,
 }

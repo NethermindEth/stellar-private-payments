@@ -799,6 +799,69 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
+/// Parameters for a selective disclosure (1 note).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectiveDisclosure1Params {
+    pub root: Field,
+    pub note_commitment: Field,
+    pub note_amount: NoteAmount,
+    pub note_private_key: NotePrivateKey,
+    pub note_blinding: Field,
+    pub merkle_path_indices: Field,
+    pub merkle_path_elements: Vec<Field>,
+    pub ext_context_hash: Field,
+}
+
+/// Artifacts generated for selective disclosure.
+#[derive(Clone, Debug)]
+pub struct DisclosureArtifacts {
+    pub circuit_inputs: CircuitInputs,
+    pub ext_context_hash: Field,
+}
+
+/// Generates circuit inputs for selectiveDisclosure_1.
+pub fn selective_disclosure_1(params: SelectiveDisclosure1Params) -> Result<DisclosureArtifacts> {
+    let mut circuit = CircuitInputs::new();
+
+    // Public inputs
+    circuit.set_array("roots", vec![field_to_circuit_hex(&params.root)?]);
+    circuit.set_array(
+        "noteCommitments",
+        vec![field_to_circuit_hex(&params.note_commitment)?],
+    );
+    circuit.set_single(
+        "extContextHash",
+        &field_to_circuit_hex(&params.ext_context_hash)?,
+    );
+
+    // Private inputs
+    let amount_field = note_amount_to_field(&params.note_amount);
+    circuit.set_array("inAmount", vec![field_to_circuit_hex(&amount_field)?]);
+
+    let priv_key_hex = field_bytes_to_hex(&params.note_private_key.0)?;
+    circuit.set_array("inPrivateKey", vec![priv_key_hex]);
+
+    let blinding_hex = field_bytes_to_hex(&params.note_blinding.to_le_bytes())?;
+    circuit.set_array("inBlinding", vec![blinding_hex]);
+
+    circuit.set_array(
+        "inPathIndices",
+        vec![field_to_circuit_hex(&params.merkle_path_indices)?],
+    );
+
+    let mut path_elements_hex = Vec::with_capacity(params.merkle_path_elements.len());
+    for pe in &params.merkle_path_elements {
+        path_elements_hex.push(field_to_circuit_hex(pe)?);
+    }
+    circuit.set_array("inPathElements", path_elements_hex);
+
+    Ok(DisclosureArtifacts {
+        circuit_inputs: circuit,
+        ext_context_hash: params.ext_context_hash,
+    })
+}
+
 fn sum_amounts(inputs: &[TransactInputNote]) -> Result<ExtAmount> {
     let mut sum = ExtAmount::ZERO;
     for n in inputs {
