@@ -4,8 +4,9 @@ use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, Wi
 pub type Address = String;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair,
-    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata, UserNoteSummary,
+    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePrivateKey,
+    NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata,
+    UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -35,6 +36,7 @@ pub enum StorageWorkerRequest {
     UserNotes(Address, u32),
     RecentPoolActivity(u32),
     RecentPubKeys(u32),
+    DisclosureInputs(DisclosureInputsRequest),
     Deposit(DepositRequest),
     Withdraw(WithdrawRequest),
     Transfer(TransferRequest),
@@ -54,6 +56,7 @@ pub enum StorageWorkerResponse {
     RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
     AspMembershipSync(AspMembershipSync),
+    DisclosureInputs(DisclosureInputs),
     DepositParams(DepositParams),
     WithdrawParams(WithdrawParams),
     TransferParams(TransferParams),
@@ -78,6 +81,28 @@ pub enum ProverWorkerResponse {
     WithdrawPrepared(PreparedProverTx),
     TransferPrepared(PreparedProverTx),
     TransactPrepared(PreparedProverTx),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureInputsRequest {
+    pub user_address: Address,
+    pub selected_commitment: Field,
+    pub pool_root: Option<Field>,
+    pub pool_next_index: u32,
+    pub tree_depth: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureInputs {
+    pub root: Field,
+    pub note_commitment: Field,
+    pub note_amount: NoteAmount,
+    pub note_private_key: NotePrivateKey,
+    pub note_blinding: Field,
+    pub merkle_path_indices: Field,
+    pub merkle_path_elements: Vec<Field>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
