@@ -1384,10 +1384,7 @@ impl WebClient {
         // Verify proof via prover worker
         let proof_verified = match self
             .prover_request(
-                ProverWorkerRequest::VerifyDisclosureProof(
-                    receipt.clone(),
-                    expected_vk_hash,
-                ),
+                ProverWorkerRequest::VerifyDisclosureProof(receipt.clone(), expected_vk_hash),
                 20_000,
             )
             .await?

@@ -885,6 +885,7 @@ fn sum_amounts_outputs(outputs: &[TransactOutput]) -> Result<ExtAmount> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::InputValue;
 
     fn zero_membership(tree_depth: usize) -> AspMembershipProof {
         AspMembershipProof {
@@ -1097,5 +1098,117 @@ mod tests {
         );
 
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn selective_disclosure_1_witness_shape_is_correct() {
+        let tree_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+
+        let params = SelectiveDisclosure1Params {
+            root: Field::try_from_le_bytes([1u8; 32]).expect("field"),
+            note_commitment: Field::try_from_le_bytes([2u8; 32]).expect("field"),
+            note_amount: NoteAmount::from(42),
+            note_private_key: NotePrivateKey([3u8; 32]),
+            note_blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_indices: Field::try_from_le_bytes([5u8; 32]).expect("field"),
+            merkle_path_elements: vec![
+                Field::try_from_le_bytes([6u8; 32]).expect("field");
+                tree_depth_usize
+            ],
+            ext_context_hash: Field::try_from_le_bytes([7u8; 32]).expect("field"),
+        };
+
+        let artifacts = selective_disclosure_1(params.clone()).expect("builds witness");
+
+        // Public inputs
+        assert!(artifacts.circuit_inputs.signals.contains_key("roots"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("noteCommitments")
+        );
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("extContextHash")
+        );
+
+        // Private inputs
+        assert!(artifacts.circuit_inputs.signals.contains_key("inAmount"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPrivateKey")
+        );
+        assert!(artifacts.circuit_inputs.signals.contains_key("inBlinding"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPathIndices")
+        );
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPathElements")
+        );
+
+        // Array shapes for n_notes = 1
+        match artifacts.circuit_inputs.signals.get("roots").unwrap() {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("roots should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("noteCommitments")
+            .unwrap()
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("noteCommitments should be an array"),
+        }
+        match artifacts.circuit_inputs.signals.get("inAmount").unwrap() {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inAmount should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPrivateKey")
+            .unwrap()
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inPrivateKey should be an array"),
+        }
+        match artifacts.circuit_inputs.signals.get("inBlinding").unwrap() {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inBlinding should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPathIndices")
+            .unwrap()
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inPathIndices should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPathElements")
+            .unwrap()
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), tree_depth_usize),
+            _ => panic!("inPathElements should be an array"),
+        }
+
+        // ext_context_hash is preserved
+        assert_eq!(artifacts.ext_context_hash, params.ext_context_hash);
     }
 }

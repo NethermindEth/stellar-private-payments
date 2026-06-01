@@ -468,4 +468,33 @@ mod tests {
         assert!(!proof_called);
         assert!(!root_called);
     }
+
+    #[test]
+    fn known_roots_returns_true_when_all_roots_are_known() -> Result<()> {
+        let receipt = valid_receipt();
+        let known = verify_receipt_known_roots_with(&receipt, VK_HASH, |_root| Ok(true))?;
+        assert!(known);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_all_checks_pass() -> Result<()> {
+        let receipt = valid_receipt();
+
+        let report = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            true,
+            |_root| Ok(true),
+        )?;
+
+        assert!(report.proof_verified);
+        assert!(report.context_verified);
+        assert!(report.known_root_status);
+        Ok(())
+    }
 }
