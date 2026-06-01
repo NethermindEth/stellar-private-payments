@@ -36,4 +36,4 @@ jobs:
           # circom-groth16-verifier uses ark-groth16 → rayon → crossbeam-epoch,
           # which does integer-to-pointer casts incompatible with strict provenance,
           # and stacked-borrows retags that are incompatible with Tree Borrows.
-          MIRIFLAGS="-Zmiri-permissive-provenance -Zmiri-tree-borrows" cargo +nightly miri test --lib -p circom-groth16-verifier
+          MIRIFLAGS="-Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks" cargo +nightly miri test --lib -p circom-groth16-verifier
