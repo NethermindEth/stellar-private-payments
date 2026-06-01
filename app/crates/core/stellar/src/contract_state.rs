@@ -25,8 +25,8 @@ macro_rules! get_state {
 }
 
 pub struct StateFetcher {
-    client: Client,
-    config: ContractConfig,
+    pub(crate) client: Client,
+    pub(crate) config: ContractConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -51,7 +51,7 @@ pub struct OnchainProofPublicInputs {
     pub asp_non_membership_root: Field,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedSorobanTx {
     pub tx_xdr: String,
@@ -347,7 +347,7 @@ impl StateFetcher {
         )
     }
 
-    fn build_invoke_contract_tx_envelope(
+    pub(crate) fn build_invoke_contract_tx_envelope(
         source_account: &str,
         seq_num: xdr::SequenceNumber,
         fee: u32,

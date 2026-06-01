@@ -5,7 +5,7 @@
 
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
-import { submitPublicKeyRegistration } from '../stellar.js';
+import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -375,25 +375,25 @@ export const Wallet = {
             if (registerBtn) registerBtn.disabled = true;
             setBtnText('Registering…');
 
-            const config = await getHandle().webClient.contractConfig();
-            const poolContractId = config?.pool;
-            if (!poolContractId) throw new Error('Pool contract ID not available');
+            const prepared = await getHandle().webClient.prepareRegisterPublicKeys(
+                App.state.wallet.address,
+                App.state.keys.notePublicKey,
+                App.state.keys.encryptionPublicKey,
+            );
 
-            const hash = await submitPublicKeyRegistration(
+            const hash = await submitPreparedSorobanTx(
+                prepared,
                 {
                     address: App.state.wallet.address,
                     rpcUrl: App.state.wallet.sorobanRpcUrl,
                     networkPassphrase: App.state.wallet.networkPassphrase,
-                    poolContractId,
-                    notePublicKeyHex: App.state.keys.notePublicKey,
-                    encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
                 },
                 {
                     onStatus: (p) => {
                         const msg = p?.message || '';
                         if (msg) setBtnText(msg);
                     },
-                }
+                },
             );
 
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 8, 6)}`, 'success', 6000);

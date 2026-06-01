@@ -8,18 +8,11 @@
  */
 
 import { getHandle } from '../wasm-facade.js';
-import { submitProvedPoolTransact } from '../stellar.js';
+import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
-let cachedContractConfig = null;
-
-async function getContractConfig() {
-    if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = await getHandle().webClient.contractConfig();
-    return cachedContractConfig;
-}
 
 function noteAmountToStroopsBigInt(amount) {
     if (amount == null) return 0n;
@@ -467,13 +460,11 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
+	                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -523,13 +514,11 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
+	                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -591,13 +580,11 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
+	                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
@@ -676,13 +663,11 @@ export const Transactions = {
 	                    return;
 	                }
 
-	                const config = await getContractConfig();
 	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
+	                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
 	                    address: userAddress,
 	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
 	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
 	                }, { onStatus });
                 Toast.show(
                     `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,

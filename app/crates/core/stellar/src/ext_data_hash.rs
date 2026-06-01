@@ -64,8 +64,8 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
     Ok(reduced.to_big_endian())
 }
 
-/// Correctly maps i128 to Soroban's I256 XDR representation
-fn i128_to_i256_scval(n: i128) -> ScVal {
+/// Correctly maps i128 to Soroban's I256 XDR representation.
+pub(crate) fn i128_to_i256_scval(n: i128) -> ScVal {
     let hi = if n < 0 { -1i64 } else { 0i64 };
     let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
     let bytes = n.to_be_bytes();

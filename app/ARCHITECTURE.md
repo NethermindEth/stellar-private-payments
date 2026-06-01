@@ -103,7 +103,8 @@ flowchart LR
   WC -->|"ProverWorkerRequest::*"| PR
   PR -->|"ProverWorkerResponse::*"| WC
   DB -->|"StorageWorkerResponse::*"| WC
-  WC -->|"returns prepared data"| UI
+  WC -->|"returns proved tx + PreparedSorobanTx"| UI
+  UI -->|"sign + submit (JS)"| RPC
 
   classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
   style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;
