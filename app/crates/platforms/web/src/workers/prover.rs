@@ -303,8 +303,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 let proved = disclosure::prove_receipt_proof_with_prover(prover, &witness_bytes)?;
 
                 let vk_bytes = prover.get_verifying_key()?;
-                let vk_hash = sha256(&vk_bytes);
-                let vk_hash_hex = format!("0x{}", to_hex(&vk_hash));
+                let vk_hash_hex = disclosure::vk_hash_hex(&vk_bytes);
 
                 Ok::<_, anyhow::Error>((proved.proof_compressed, vk_hash_hex))
             })?;
@@ -345,12 +344,23 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             let public_inputs =
                 disclosure::receipt_public_inputs_bytes(&receipt, &expected_vk_hash)?;
 
-            // Verify using the prover's own VK (derived from embedded proving key)
+            // Verify that the embedded VK matches the expected hash before
+            // verifying the proof against it.
             let proof_verified = DISCLOSURE_PROVER.with(|cell| {
                 let borrow = cell.borrow();
                 let prover = borrow
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
+
+                let actual_vk_hash = disclosure::vk_hash_hex(&prover.get_verifying_key()?);
+                if actual_vk_hash != expected_vk_hash {
+                    return Err(anyhow::anyhow!(
+                        "VK hash mismatch: prover has {}, receipt expects {}",
+                        actual_vk_hash,
+                        expected_vk_hash
+                    ));
+                }
+
                 prover.verify(&proof_bytes, &public_inputs)
             })?;
 

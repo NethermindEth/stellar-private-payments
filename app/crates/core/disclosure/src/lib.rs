@@ -11,6 +11,18 @@ use types::{
 /// Domain prefix for `ext_context_hash` derivation.
 const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
 
+/// Compute the canonical `vk_hash` string from verifying-key bytes.
+///
+/// The hash is SHA-256 over the compressed VK bytes, formatted as a
+/// `0x`-prefixed lowercase hex string. Both the prover and verifier must
+/// use this exact function to stay in sync.
+pub fn vk_hash_hex(vk_bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(vk_bytes);
+    let digest = hasher.finalize();
+    format!("0x{}", hex::encode(digest))
+}
+
 /// Derives the `ext_context_hash` from disclosure context fields.
 ///
 /// The derivation is deterministic and uses SHA-256 over a canonical,
@@ -655,5 +667,27 @@ mod tests {
         let mut ctx = valid_receipt().context;
         ctx.network = "".to_string();
         assert!(derive_ext_context_hash(&ctx).is_err());
+    }
+
+    #[test]
+    fn vk_hash_hex_is_deterministic() {
+        let a = vk_hash_hex(&[1u8, 2, 3]);
+        let b = vk_hash_hex(&[1u8, 2, 3]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn vk_hash_hex_is_sensitive_to_input() {
+        let a = vk_hash_hex(&[1u8, 2, 3]);
+        let b = vk_hash_hex(&[1u8, 2, 4]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn vk_hash_hex_format_is_valid() {
+        let h = vk_hash_hex(&[0u8; 32]);
+        assert!(h.starts_with("0x"));
+        assert_eq!(h.len(), 66); // 0x + 64 hex chars
+        assert!(h.chars().skip(2).all(|c| c.is_ascii_hexdigit()));
     }
 }
