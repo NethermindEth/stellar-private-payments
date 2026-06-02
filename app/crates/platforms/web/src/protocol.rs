@@ -230,6 +230,8 @@ pub struct AdminASPRequest {
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureProverRequest {
     pub inputs: DisclosureInputs,
+    pub network: String,
+    pub pool_address: String,
     pub authority_label: String,
     pub authority_identity_payload_hex: String,
     pub purpose: String,

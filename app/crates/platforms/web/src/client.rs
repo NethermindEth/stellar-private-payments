@@ -1273,7 +1273,7 @@ impl WebClient {
             None,
         );
 
-        let inputs = loop {
+        let (inputs, network, pool_address) = loop {
             emit_progress(
                 &on_status,
                 "disclosure",
@@ -1312,7 +1312,9 @@ impl WebClient {
                 .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
                 .await?
             {
-                StorageWorkerResponse::DisclosureInputs(inputs) => break inputs,
+                StorageWorkerResponse::DisclosureInputs(inputs) => {
+                    break (inputs, data.network, data.pool.contract_id)
+                }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!(
                         "[DISCLOSURE] the account {user_address} should register within ASP"
@@ -1352,6 +1354,8 @@ impl WebClient {
 
         let prover_req = DisclosureProverRequest {
             inputs,
+            network,
+            pool_address,
             authority_label,
             authority_identity_payload_hex,
             purpose,
