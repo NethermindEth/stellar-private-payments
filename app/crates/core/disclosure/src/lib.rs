@@ -2,10 +2,69 @@
 
 use anyhow::{Result, anyhow};
 use prover::prover::{Prover, verify_proof};
+use sha2::{Digest, Sha256};
 use types::{
-    DisclosureCircuitMetadata, DisclosureReceipt, DisclosureVerificationReport, Field,
-    SELECTIVE_DISCLOSURE_1_CIRCUIT,
+    DisclosureCircuitMetadata, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
+    Field, SELECTIVE_DISCLOSURE_1_CIRCUIT,
 };
+
+/// Domain prefix for `ext_context_hash` derivation.
+const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
+
+/// Derives the `ext_context_hash` from disclosure context fields.
+///
+/// The derivation is deterministic and uses SHA-256 over a canonical,
+/// length-delimited encoding of all context fields, reduced modulo the BN254
+/// prime. Both the prover and verifier must use this exact function to stay
+/// in sync.
+///
+/// # Arguments
+/// * `context` - Disclosure context containing network, pool address,
+///   authority, purpose, and nonce.
+///
+/// # Returns
+/// Returns the derived field element.
+///
+/// # Errors
+/// Returns an error if context validation fails.
+pub fn derive_ext_context_hash(context: &DisclosureContext) -> Result<Field> {
+    context.validate()?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(CONTEXT_HASH_DOMAIN);
+
+    // Helper to feed a string with its length prefix (little-endian u32).
+    let mut feed_str = |s: &str| {
+        hasher.update(u32::try_from(s.len()).unwrap_or(u32::MAX).to_le_bytes());
+        hasher.update(s.as_bytes());
+    };
+
+    feed_str(&context.network);
+    feed_str(&context.pool_address);
+    feed_str(&context.authority_label);
+    feed_str(&context.authority_identity_payload_hex);
+    feed_str(&context.purpose);
+    hasher.update(context.context_nonce.to_le_bytes());
+
+    let hash: [u8; 32] = hasher.finalize().into();
+    Ok(Field::from_le_bytes_mod_order(hash))
+}
+
+/// Verifies that a receipt's `ext_context_hash` is internally consistent with
+/// its declared [`DisclosureContext`].
+///
+/// # Arguments
+/// * `receipt` - Receipt to verify.
+///
+/// # Returns
+/// Returns `true` when the re-derived hash matches the stored public input.
+///
+/// # Errors
+/// Returns an error if the receipt context is invalid.
+pub fn verify_receipt_context(receipt: &DisclosureReceipt) -> Result<bool> {
+    let expected = derive_ext_context_hash(&receipt.context)?;
+    Ok(expected == receipt.public_inputs.ext_context_hash)
+}
 
 /// Public input order declared by `selectiveDisclosure_1.circom`.
 pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] =
@@ -496,5 +555,70 @@ mod tests {
         assert!(report.context_verified);
         assert!(report.known_root_status);
         Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_is_deterministic() -> Result<()> {
+        let ctx = valid_receipt().context;
+        let a = derive_ext_context_hash(&ctx)?;
+        let b = derive_ext_context_hash(&ctx)?;
+        assert_eq!(a, b);
+        Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_is_sensitive_to_every_field() -> Result<()> {
+        let base = valid_receipt().context;
+        let base_hash = derive_ext_context_hash(&base)?;
+
+        let mut mutated = base.clone();
+        mutated.network = "mainnet".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.pool_address = "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
+            .to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.authority_label = "Authority ABC".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.authority_identity_payload_hex = "0xdeadbeef".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.purpose = "aml-check".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.context_nonce = field(99);
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        Ok(())
+    }
+
+    #[test]
+    fn verify_receipt_context_succeeds_when_hash_matches() -> Result<()> {
+        let mut receipt = valid_receipt();
+        let expected = derive_ext_context_hash(&receipt.context)?;
+        receipt.public_inputs.ext_context_hash = expected;
+        assert!(verify_receipt_context(&receipt)?);
+        Ok(())
+    }
+
+    #[test]
+    fn verify_receipt_context_fails_when_hash_mismatches() -> Result<()> {
+        let receipt = valid_receipt();
+        assert!(!verify_receipt_context(&receipt)?);
+        Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_rejects_invalid_context() {
+        let mut ctx = valid_receipt().context;
+        ctx.network = "".to_string();
+        assert!(derive_ext_context_hash(&ctx).is_err());
     }
 }

@@ -1776,6 +1776,7 @@ dependencies = [
  "anyhow",
  "prover",
  "serde_json",
+ "sha2 0.11.0",
  "types",
 ]
 
