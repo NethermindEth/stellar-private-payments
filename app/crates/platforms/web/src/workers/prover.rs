@@ -24,7 +24,7 @@ const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
 const DISCLOSURE_PROVING_KEY: &[u8] =
-    include_bytes!("../../../../../../testdata/selectiveDisclosure_1_proving_key.bin");
+    include_bytes!("../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
 const DISCLOSURE_VERIFYING_KEY: &[u8] =
     include_bytes!("../../../../../../testdata/selectiveDisclosure_1_vk.json");
 

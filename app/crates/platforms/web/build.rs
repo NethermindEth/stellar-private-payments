@@ -45,7 +45,7 @@ fn main() {
     let proving_key_path =
         repo_root.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
     let disclosure_proving_key_path =
-        repo_root.join("testdata/selectiveDisclosure_1_proving_key.bin");
+        repo_root.join("deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
 
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
     let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
