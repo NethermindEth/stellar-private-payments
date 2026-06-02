@@ -25,6 +25,8 @@ const PROVING_KEY: &[u8] = include_bytes!(
 );
 const DISCLOSURE_PROVING_KEY: &[u8] =
     include_bytes!("../../../../../../testdata/selectiveDisclosure_1_proving_key.bin");
+const DISCLOSURE_VERIFYING_KEY: &[u8] =
+    include_bytes!("../../../../../../testdata/selectiveDisclosure_1_vk.json");
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -309,8 +311,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 }
 
                 let mut vk_hash = [0u8; 32];
-                let actual_hash = sha256(DISCLOSURE_PROVING_KEY);
-                vk_hash.copy_from_slice(&actual_hash); // Actually vk hash should be from vk, but for now just use a placeholder or derive it
+                let actual_hash = sha256(DISCLOSURE_VERIFYING_KEY);
+                vk_hash.copy_from_slice(&actual_hash);
 
                 Ok::<_, anyhow::Error>((proof_compressed, format!("0x{}", to_hex(&vk_hash))))
             })?;
