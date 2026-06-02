@@ -45,9 +45,9 @@ pub fn derive_ext_context_hash(context: &DisclosureContext) -> Result<Field> {
     let mut hasher = Sha256::new();
     hasher.update(CONTEXT_HASH_DOMAIN);
 
-    // Helper to feed a string with its length prefix (little-endian u32).
+    // Helper to feed a string with its exact length prefix (little-endian u64).
     let mut feed_str = |s: &str| {
-        hasher.update(u32::try_from(s.len()).unwrap_or(u32::MAX).to_le_bytes());
+        hasher.update((s.len() as u64).to_le_bytes());
         hasher.update(s.as_bytes());
     };
 
@@ -240,17 +240,7 @@ pub fn prove_receipt_proof(
     witness_bytes: &[u8],
 ) -> Result<ProvedReceiptProof> {
     let prover = Prover::new(proving_key_bytes, r1cs_bytes)?;
-    let proof_compressed = prover.prove_bytes(witness_bytes)?;
-    let public_inputs = prover.extract_public_inputs(witness_bytes)?;
-
-    if !prover.verify(&proof_compressed, &public_inputs)? {
-        return Err(anyhow!("Generated disclosure proof did not verify"));
-    }
-
-    Ok(ProvedReceiptProof {
-        proof_compressed,
-        public_inputs,
-    })
+    prove_receipt_proof_with_prover(&prover, witness_bytes)
 }
 
 /// Proves a disclosure witness using an existing Groth16 prover.

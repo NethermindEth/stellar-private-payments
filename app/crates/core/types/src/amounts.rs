@@ -721,6 +721,11 @@ mod tests {
     }
 
     #[test]
+    fn bn254_prime_matches_modulus() {
+        assert_eq!(BN254_PRIME, Field::modulus());
+    }
+
+    #[test]
     fn field_from_le_bytes_mod_order_reduces_correctly() -> Result<()> {
         // A value one greater than the prime should reduce to 1.
         let p_plus_one = BN254_PRIME + U256::from(1u64);

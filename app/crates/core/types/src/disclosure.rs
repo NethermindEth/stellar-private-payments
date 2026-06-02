@@ -169,6 +169,12 @@ impl DisclosurePublicInputs {
 }
 
 /// Verification status returned.
+///
+/// # Security semantics
+/// A receipt is trustworthy **only when all three fields are `true`**:
+/// `proof_verified && context_verified && known_root_status`. The fields are
+/// kept separate so callers can diagnose *why* verification failed, but a
+/// consumer must check the conjunction, not any individual flag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisclosureVerificationReport {
@@ -178,6 +184,13 @@ pub struct DisclosureVerificationReport {
     pub context_verified: bool,
     /// Status of the known-root freshness check.
     pub known_root_status: bool,
+}
+
+impl DisclosureVerificationReport {
+    /// Returns `true` only when proof, context, and root freshness all pass.
+    pub fn is_fully_verified(&self) -> bool {
+        self.proof_verified && self.context_verified && self.known_root_status
+    }
 }
 
 /// Parses a strict `0x`-prefixed lowercase hex string.
