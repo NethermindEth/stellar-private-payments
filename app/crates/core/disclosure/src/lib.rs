@@ -613,8 +613,8 @@ mod tests {
         assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
 
         mutated = base.clone();
-        mutated.pool_address = "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-            .to_string();
+        mutated.pool_address =
+            "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string();
         assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
 
         mutated = base.clone();

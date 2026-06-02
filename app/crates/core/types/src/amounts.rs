@@ -376,9 +376,7 @@ impl Field {
     /// exceed the field modulus.
     pub fn from_le_bytes_mod_order(bytes: [u8; 32]) -> Self {
         let v = U256::from_little_endian(&bytes);
-        let reduced = v
-            .checked_rem(BN254_PRIME)
-            .expect("BN254_PRIME is non-zero");
+        let reduced = v.checked_rem(BN254_PRIME).expect("BN254_PRIME is non-zero");
         Field(reduced)
     }
 

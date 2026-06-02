@@ -1510,8 +1510,7 @@ mod tests {
 
         let result = storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &commitment)?;
         assert!(result.is_some());
-        let (got_amount, got_blinding, got_leaf_index) =
-            result.expect("just checked is_some");
+        let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
         assert_eq!(got_blinding, blinding);
         assert_eq!(got_leaf_index, 3);

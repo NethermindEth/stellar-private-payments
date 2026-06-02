@@ -23,8 +23,9 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
-const DISCLOSURE_PROVING_KEY: &[u8] =
-    include_bytes!("../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
+const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
+);
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -316,7 +317,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
                     levels: 10,
                     n_notes: 1,
-                    vk_hash: vk_hash_hex
+                    vk_hash: vk_hash_hex,
                 },
                 context,
                 public_inputs: types::DisclosurePublicInputs {

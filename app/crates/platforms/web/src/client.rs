@@ -1313,7 +1313,7 @@ impl WebClient {
                 .await?
             {
                 StorageWorkerResponse::DisclosureInputs(inputs) => {
-                    break (inputs, data.network, data.pool.contract_id)
+                    break (inputs, data.network, data.pool.contract_id);
                 }
                 StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
                     log::warn!(
@@ -1418,10 +1418,8 @@ impl WebClient {
             }
         }
 
-        let context_verified =
-            disclosure::verify_receipt_context(&receipt).map_err(|e| {
-                JsError::new(&format!("context verification failed: {e}"))
-            })?;
+        let context_verified = disclosure::verify_receipt_context(&receipt)
+            .map_err(|e| JsError::new(&format!("context verification failed: {e}")))?;
 
         let report = DisclosureVerificationReport {
             proof_verified,
