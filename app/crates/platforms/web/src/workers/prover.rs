@@ -262,7 +262,15 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Disclosure(req) => {
             log::debug!("[{WORKER_NAME}] disclosure");
 
-            let ext_context_hash = types::Field::ZERO; // Temporarily zero, should be derived from context
+            let context = types::DisclosureContext {
+                network: req.network,
+                pool_address: req.pool_address,
+                authority_label: req.authority_label,
+                authority_identity_payload_hex: req.authority_identity_payload_hex,
+                purpose: req.purpose,
+                context_nonce: req.context_nonce,
+            };
+            let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
             let params = prover::flows::SelectiveDisclosure1Params {
                 root: req.inputs.root,
@@ -317,14 +325,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     n_notes: 1,
                     vk_hash: vk_hash_hex, // Real implementation should compute VK hash
                 },
-                context: types::DisclosureContext {
-                    network: "testnet".to_string(),          // TODO: Make dynamic
-                    pool_address: "placeholder".to_string(), // TODO: Make dynamic
-                    authority_label: req.authority_label,
-                    authority_identity_payload_hex: req.authority_identity_payload_hex,
-                    purpose: req.purpose,
-                    context_nonce: req.context_nonce,
-                },
+                context,
                 public_inputs: types::DisclosurePublicInputs {
                     roots: vec![req.inputs.root],
                     note_commitments: vec![req.inputs.note_commitment],
