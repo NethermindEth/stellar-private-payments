@@ -5,7 +5,6 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
-use disclosure;
 use prover::{
     flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
@@ -26,8 +25,6 @@ const PROVING_KEY: &[u8] = include_bytes!(
 );
 const DISCLOSURE_PROVING_KEY: &[u8] =
     include_bytes!("../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
-const DISCLOSURE_VERIFYING_KEY: &[u8] =
-    include_bytes!("../../../../../../testdata/selectiveDisclosure_1_vk.json");
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -298,16 +295,19 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     .context("disclosure witness calculation failed")
             })?;
 
-            let proof_compressed = DISCLOSURE_PROVER.with(|cell| {
+            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVER.with(|cell| {
                 let borrow = cell.borrow();
                 let prover = borrow
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
                 let proved = disclosure::prove_receipt_proof_with_prover(prover, &witness_bytes)?;
-                Ok::<_, anyhow::Error>(proved.proof_compressed)
-            })?;
 
-            let vk_hash_hex = format!("0x{}", to_hex(&sha256(DISCLOSURE_VERIFYING_KEY)));
+                let vk_bytes = prover.get_verifying_key()?;
+                let vk_hash = sha256(&vk_bytes);
+                let vk_hash_hex = format!("0x{}", to_hex(&vk_hash));
+
+                Ok::<_, anyhow::Error>((proved.proof_compressed, vk_hash_hex))
+            })?;
 
             let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
 
@@ -317,7 +317,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
                     levels: 10,
                     n_notes: 1,
-                    vk_hash: vk_hash_hex, // Real implementation should compute VK hash
+                    vk_hash: vk_hash_hex
                 },
                 context,
                 public_inputs: types::DisclosurePublicInputs {
