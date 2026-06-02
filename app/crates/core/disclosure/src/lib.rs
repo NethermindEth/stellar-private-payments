@@ -241,6 +241,41 @@ pub fn prove_receipt_proof(
     })
 }
 
+/// Proves a disclosure witness using an existing Groth16 prover.
+///
+/// This is identical to [`prove_receipt_proof`] but reuses an already
+/// initialised [`Prover`] instance, avoiding the cost of re-deserialising
+/// the proving key and R1CS for each request.
+///
+/// # Arguments
+/// * `prover` - Initialised Groth16 prover holding the disclosure circuit
+///   proving key and R1CS.
+/// * `witness_bytes` - Witness bytes produced by the circuit witness
+///   calculator.
+///
+/// # Returns
+/// Returns the compressed proof bytes and extracted public inputs.
+///
+/// # Errors
+/// Returns an error if proving fails, public input extraction fails, or the
+/// generated proof does not verify locally.
+pub fn prove_receipt_proof_with_prover(
+    prover: &Prover,
+    witness_bytes: &[u8],
+) -> Result<ProvedReceiptProof> {
+    let proof_compressed = prover.prove_bytes(witness_bytes)?;
+    let public_inputs = prover.extract_public_inputs(witness_bytes)?;
+
+    if !prover.verify(&proof_compressed, &public_inputs)? {
+        return Err(anyhow!("Generated disclosure proof did not verify"));
+    }
+
+    Ok(ProvedReceiptProof {
+        proof_compressed,
+        public_inputs,
+    })
+}
+
 /// Serializes receipt public inputs in the circuit's declared order.
 ///
 /// # Arguments

@@ -5,6 +5,7 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
+use disclosure;
 use prover::{
     flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
     prover::Prover,
@@ -297,25 +298,16 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     .context("disclosure witness calculation failed")
             })?;
 
-            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVER.with(|cell| {
+            let proof_compressed = DISCLOSURE_PROVER.with(|cell| {
                 let borrow = cell.borrow();
                 let prover = borrow
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
-
-                let proof_compressed = prover.prove_bytes(&witness_bytes)?;
-                let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
-                let ok = prover.verify(&proof_compressed, &public_inputs)?;
-                if !ok {
-                    return Err(anyhow::anyhow!("disclosure proof verification failed"));
-                }
-
-                let mut vk_hash = [0u8; 32];
-                let actual_hash = sha256(DISCLOSURE_VERIFYING_KEY);
-                vk_hash.copy_from_slice(&actual_hash);
-
-                Ok::<_, anyhow::Error>((proof_compressed, format!("0x{}", to_hex(&vk_hash))))
+                let proved = disclosure::prove_receipt_proof_with_prover(prover, &witness_bytes)?;
+                Ok::<_, anyhow::Error>(proved.proof_compressed)
             })?;
+
+            let vk_hash_hex = format!("0x{}", to_hex(&sha256(DISCLOSURE_VERIFYING_KEY)));
 
             let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
 
