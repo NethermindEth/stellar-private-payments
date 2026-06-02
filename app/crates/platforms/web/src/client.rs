@@ -1418,11 +1418,14 @@ impl WebClient {
             }
         }
 
+        let context_verified =
+            disclosure::verify_receipt_context(&receipt).map_err(|e| {
+                JsError::new(&format!("context verification failed: {e}"))
+            })?;
+
         let report = DisclosureVerificationReport {
             proof_verified,
-            // Context-hash verification is pending completion of the
-            // ext_context_hash derivation path (Phase 3).
-            context_verified: false,
+            context_verified,
             known_root_status,
         };
 
