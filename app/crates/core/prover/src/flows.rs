@@ -1159,7 +1159,12 @@ mod tests {
         );
 
         // Array shapes for n_notes = 1
-        match artifacts.circuit_inputs.signals.get("roots").unwrap() {
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("roots")
+            .expect("roots present")
+        {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("roots should be an array"),
         }
@@ -1167,12 +1172,17 @@ mod tests {
             .circuit_inputs
             .signals
             .get("noteCommitments")
-            .unwrap()
+            .expect("noteCommitments present")
         {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("noteCommitments should be an array"),
         }
-        match artifacts.circuit_inputs.signals.get("inAmount").unwrap() {
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inAmount")
+            .expect("inAmount present")
+        {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("inAmount should be an array"),
         }
@@ -1180,12 +1190,17 @@ mod tests {
             .circuit_inputs
             .signals
             .get("inPrivateKey")
-            .unwrap()
+            .expect("inPrivateKey present")
         {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("inPrivateKey should be an array"),
         }
-        match artifacts.circuit_inputs.signals.get("inBlinding").unwrap() {
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inBlinding")
+            .expect("inBlinding present")
+        {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("inBlinding should be an array"),
         }
@@ -1193,7 +1208,7 @@ mod tests {
             .circuit_inputs
             .signals
             .get("inPathIndices")
-            .unwrap()
+            .expect("inPathIndices present")
         {
             InputValue::Array(v) => assert_eq!(v.len(), 1),
             _ => panic!("inPathIndices should be an array"),
@@ -1202,7 +1217,7 @@ mod tests {
             .circuit_inputs
             .signals
             .get("inPathElements")
-            .unwrap()
+            .expect("inPathElements present")
         {
             InputValue::Array(v) => assert_eq!(v.len(), tree_depth_usize),
             _ => panic!("inPathElements should be an array"),

@@ -1222,6 +1222,7 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
+    #[allow(clippy::too_many_arguments)]
     pub async fn generate_selective_disclosure(
         &self,
         user_address: String,
@@ -1249,6 +1250,7 @@ impl WebClient {
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn generate_selective_disclosure_inner(
         &self,
         user_address: String,
