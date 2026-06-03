@@ -3,6 +3,7 @@ members = [
     "app/crates/core/prover",
     "app/crates/core/state",
     "app/crates/core/stellar",
+    "app/crates/core/tx-planner",
     "app/crates/core/types",
     "app/crates/core/witness",
     "app/crates/platforms/web",
