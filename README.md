@@ -50,7 +50,7 @@ If you want to try it out:
     ```bash
       make serve
     ```
-    Open `http://localhost:8080` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
+    Open `http://localhost:8000` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
     You might need to delete the browser cache from previous runs. Go to `Application` -> `Clear storage`.
 
 
@@ -58,14 +58,14 @@ If you want to try it out:
     ```bash
     stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
     ```
-    Or, directly access `http://localhost:8080/admin.html` and use the UI to add public keys.
+    Or, directly access `http://localhost:8000/admin.html` and use the UI to add public keys.
     Please note that the admin UI allows deriving keys for ANY account.
     But insertion MUST be signed by the ASP admin account.
     You can add your Freighter account to your Stellar-cli keys with `stellar keys add <NAME_FOR_ACCOUNT> --seed-phrase`.
     This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
 
 
-4. Go back to `http://localhost:8080` and try it out!
+4. Go back to `http://localhost:8000` and try it out!
 
 ### Architecture Overview
 
@@ -84,7 +84,7 @@ This is the administrative control panel for managing the **Association Set Prov
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
 3. **Derive keys** for accounts - Generate derived keys for any account (though insertion must be signed by the ASP admin account)
 
-This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8080/admin.html`
+This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8000/admin.html`
 
 The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
 

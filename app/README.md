@@ -40,7 +40,7 @@ make serve
 This will:
 1. Build WASM modules
 2. Install npm dependencies
-3. Serve the application at `http://localhost:8080`
+3. Serve the application at `http://localhost:8000`
 
 ### Individual Build Steps
 
