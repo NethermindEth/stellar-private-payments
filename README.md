@@ -1,4 +1,4 @@
-# Private Payments for Stellar
+# Private Payments for Stellar a
 
 [![Deployment](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/deployment.yml)
 [![Lint](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml)
