@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub const SMT_DEPTH: u32 = 10;
 
 // deployments/<network>/deployments.json
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConfig {
     pub network: String,
     pub deployer: String,

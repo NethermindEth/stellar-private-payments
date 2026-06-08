@@ -5,18 +5,21 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
-use prover::{
-    flows::{TransactArtifacts, transact},
-    prover::Prover,
-};
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
-use stellar::hash_ext_data_offchain;
-use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
+use stellar_private_payments_sdk::{
+    chain::hash_ext_data_offchain,
+    proving::{Prover, WitnessCalculator},
+    tx::flows::{SelectiveDisclosure1Params, TransactArtifacts, selective_disclosure_1, transact},
+    types::{
+        DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosureContext,
+        DisclosurePublicInputs, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+        SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES,
+    },
+};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
-use witness::WitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
@@ -242,7 +245,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Disclosure(req) => {
             log::debug!("[{WORKER_NAME}] disclosure");
 
-            let context = types::DisclosureContext {
+            let context = DisclosureContext {
                 network: req.network,
                 pool_address: req.pool_address,
                 authority_label: req.authority_label,
@@ -252,7 +255,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             };
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
-            let params = prover::flows::SelectiveDisclosure1Params {
+            let params = SelectiveDisclosure1Params {
                 root: req.inputs.root,
                 note_commitment: req.inputs.note_commitment,
                 note_amount: req.inputs.note_amount,
@@ -263,7 +266,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 ext_context_hash,
             };
 
-            let artifacts = prover::flows::selective_disclosure_1(params)?;
+            let artifacts = selective_disclosure_1(params)?;
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
             let witness_bytes = DISCLOSURE_WITNESS_CALC.with(|cell| {
@@ -290,16 +293,16 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
 
-            let receipt = types::DisclosureReceipt {
-                version: types::DISCLOSURE_RECEIPT_VERSION,
-                circuit: types::DisclosureCircuitMetadata {
-                    name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
+            let receipt = DisclosureReceipt {
+                version: DISCLOSURE_RECEIPT_VERSION,
+                circuit: DisclosureCircuitMetadata {
+                    name: SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
                     levels: SELECTIVE_DISCLOSURE_1_LEVELS,
                     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
                     vk_hash: vk_hash_hex,
                 },
                 context,
-                public_inputs: types::DisclosurePublicInputs {
+                public_inputs: DisclosurePublicInputs {
                     roots: vec![req.inputs.root],
                     note_commitments: vec![req.inputs.note_commitment],
                     ext_context_hash,

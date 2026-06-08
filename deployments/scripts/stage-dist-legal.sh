@@ -20,7 +20,7 @@ cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE.txt"
 cp "$REPO_ROOT/deployments/legal/dist/NOTICE.txt" "$STAGING_DIR/NOTICE.txt"
 
 # Terms & Conditions / disclaimer shown to users (kept as markdown).
-cp "$REPO_ROOT/app/crates/core/state/src/disclaimer.md" "$STAGING_DIR/DISCLAIMER.txt"
+cp "$REPO_ROOT/sdk/state/src/disclaimer.md" "$STAGING_DIR/DISCLAIMER.txt"
 
 # License texts needed for the circomlib (LGPL) sub-distribution.
 cp "$REPO_ROOT/deployments/legal/licenses/LGPL-3.0.txt" "$STAGING_DIR/licenses/LGPL-3.0.txt"

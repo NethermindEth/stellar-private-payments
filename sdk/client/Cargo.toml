@@ -1,0 +1,22 @@
+[package]
+name = "stellar-private-payments-sdk"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Stellar Private Payments Rust SDK"
+
+[lib]
+name = "stellar_private_payments_sdk"
+
+[dependencies]
+anyhow = { workspace = true }
+prover = { workspace = true }
+state = { workspace = true }
+stellar = { workspace = true }
+types = { workspace = true, features = ["rusqlite"] }
+witness = { workspace = true }
+
+[lints]
+workspace = true

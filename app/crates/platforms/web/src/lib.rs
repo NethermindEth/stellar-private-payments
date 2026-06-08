@@ -13,7 +13,7 @@ const DEPLOYMENT: &str = include_str!("../../../../../deployments/testnet/deploy
 use client::WebClient;
 use config::Config;
 use events::{bootnode_check, events_listener};
-use types::ContractConfig;
+use stellar_private_payments_sdk::types::ContractConfig;
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
 

@@ -4788,6 +4788,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "stellar-private-payments-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "prover",
+ "state",
+ "stellar",
+ "types",
+ "witness",
+]
+
+[[package]]
 name = "stellar-strkey"
 version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5856,24 +5868,20 @@ dependencies = [
  "gloo-worker",
  "js-sys",
  "log",
- "prover",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "state",
- "stellar",
+ "stellar-private-payments-sdk",
  "tokio",
  "tx-planner",
- "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
  "wiremock",
- "witness",
 ]
 
 [[package]]

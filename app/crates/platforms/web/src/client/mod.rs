@@ -11,16 +11,15 @@ use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
-use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
-use stellar::{
-    OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
-    StateFetcher as CoreStateFetcher,
-};
-use types::{
-    AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
-    EncryptionPublicKey, ExtAmount, Field, KeyDerivationSignature, NoteAmount, NotePublicKey,
-    parse_0x_hex_32,
+use stellar_private_payments_sdk::{
+    chain::{OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher},
+    tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
+    types::{
+        AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
+        EncryptionPublicKey, ExtAmount, ExtData, Field, KeyDerivationSignature, NoteAmount,
+        NotePublicKey, SyncMetadata, ContractsEventData, parse_0x_hex_32,
+    },
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -76,7 +75,7 @@ fn emit_progress(
 pub struct WebClient {
     storage_bridge: OneshotBridge<StorageWorker>,
     prover_bridge: OneshotBridge<ProverWorker>,
-    fetcher: Rc<CoreStateFetcher>,
+    fetcher: Rc<StateFetcher>,
 }
 
 impl Clone for WebClient {
@@ -122,7 +121,7 @@ impl WebClient {
         pool_contract_id: &str,
         user_address: &str,
         proof_uncompressed: Vec<u8>,
-        ext_data: types::ExtData,
+        ext_data: ExtData,
         prepared: &PreparedTxPublic,
     ) -> Result<PreparedSorobanTx, JsError> {
         self.fetcher
@@ -175,7 +174,7 @@ impl WebClient {
             prover_bridge: ProverWorker::spawner()
                 .as_module(true)
                 .spawn("./js/prover-worker.js"),
-            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
+            fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
         })
     }
 
@@ -804,8 +803,10 @@ impl WebClient {
 }
 
 #[async_trait::async_trait(?Send)]
-impl stellar::ContractDataStorage for WebClient {
-    async fn get_sync_state(&self) -> anyhow::Result<Vec<types::SyncMetadata>> {
+impl stellar_private_payments_sdk::chain::ContractDataStorage for WebClient {
+    async fn get_sync_state(
+        &self,
+    ) -> anyhow::Result<Vec<SyncMetadata>> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
         match resp {
@@ -815,7 +816,10 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_events_batch(&self, data: types::ContractsEventData) -> anyhow::Result<()> {
+    async fn save_events_batch(
+        &self,
+        data: ContractsEventData,
+    ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
         match resp {
@@ -827,7 +831,7 @@ impl stellar::ContractDataStorage for WebClient {
 
     async fn save_sync_progress(
         &self,
-        metadata: Vec<types::SyncMetadata>,
+        metadata: Vec<SyncMetadata>,
         fully_indexed: bool,
     ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();

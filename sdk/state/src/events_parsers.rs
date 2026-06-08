@@ -24,9 +24,9 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
         // ASP membership events contracts/asp-membership
         "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),
         // ASP non-membership events contracts/asp-non-membership
-        // for now they're not collected - check also app/crates/core/stellar/src/indexer.rs
+        // for now they're not collected - check also sdk/stellar/src/indexer.rs
         // if they should be collected then
-        // app/crates/core/state/src/processor.rs should be extended
+        // sdk/state/src/processor.rs should be extended
         // (to avoid looping over the unprocessed events)
         "leaf_inserted" | "LeafInserted" => {
             ProcessedEvent::LeafInserted(parse_leaf_inserted(parsed)?)

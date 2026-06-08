@@ -27,7 +27,7 @@ macro_rules! get_state {
 
 pub struct StateFetcher {
     pub(crate) client: Client,
-    pub(crate) config: &'static ContractConfig,
+    config: ContractConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -84,7 +84,7 @@ impl StateFetcher {
         Ok(value)
     }
 
-    pub fn new(rpc_url: &str, config: &'static ContractConfig) -> Result<Self> {
+    pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
         Ok(Self {
             client: Client::new(rpc_url)?,
             config,
@@ -92,7 +92,7 @@ impl StateFetcher {
     }
 
     pub fn contract_config(&self) -> &ContractConfig {
-        self.config
+        &self.config
     }
 
     pub fn enabled_pool_for(&self, pool_contract_id: &str) -> Result<&types::PoolConfigEntry> {

@@ -12,13 +12,15 @@ use crate::protocol::{
 };
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function, Promise};
-use prover::flows::N_OUTPUTS;
 use serde::Serialize;
-use tx_planner::{SpendSession, SpendSessionError, SpendTarget, SpendableNote, Transact, plan};
-use types::{
-    AspMembershipSync, ContractsStateData, EncryptionPublicKey, ExtAmount, Field, NoteAmount,
-    NotePublicKey, SMT_DEPTH,
+use stellar_private_payments_sdk::{
+    tx::flows::N_OUTPUTS,
+    types::{
+        AspMembershipSync, ContractsStateData, EncryptionPublicKey, ExtAmount, Field, NoteAmount,
+        NotePublicKey, SMT_DEPTH,
+    },
 };
+use tx_planner::{SpendSession, SpendSessionError, SpendTarget, SpendableNote, Transact, plan};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 

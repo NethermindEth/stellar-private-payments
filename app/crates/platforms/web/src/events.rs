@@ -1,7 +1,9 @@
 use crate::client::WebClient;
 use gloo_timers::future::TimeoutFuture;
-use stellar::{Indexer, RpcError};
-use types::ContractConfig;
+use stellar_private_payments_sdk::{
+    chain::{Indexer, RpcError},
+    types::ContractConfig,
+};
 
 const INDEXER_INTERVAL_MS: u32 = 5_000;
 /// Bootnode JSON-RPC code: historical range complete, continue on the wallet
@@ -151,8 +153,10 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::{cell::RefCell, rc::Rc};
-    use stellar::{Client, ContractDataStorage};
-    use types::{ContractsEventData, SyncMetadata};
+    use stellar_private_payments_sdk::{
+        chain::{Client, ContractDataStorage},
+        types::{ContractsEventData, SyncMetadata},
+    };
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{body_string_contains, method},

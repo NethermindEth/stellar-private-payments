@@ -1,24 +1,28 @@
 use serde::{Deserialize, Serialize};
 
-use prover::flows::{N_OUTPUTS, TransactParams};
-pub type Address = String;
-use stellar::PreparedSorobanTx;
-use types::{
-    AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
-    ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SyncMetadata, UserNoteSummary,
+use stellar_private_payments_sdk::{
+    chain::PreparedSorobanTx,
+    tx::flows::{N_OUTPUTS, TransactParams},
+    types::{
+        AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt,
+        EncryptionPublicKey, ExtAmount, ExtData, Field, KeyDerivationSignature, NoteAmount,
+        NotePrivateKey, NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SyncMetadata,
+        UserNoteSummary,
+    },
 };
+
+pub type Address = String;
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicNoteKeyPair {
-    pub public: types::NotePublicKey,
+    pub public: NotePublicKey,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicEncryptionKeyPair {
-    pub public: types::EncryptionPublicKey,
+    pub public: EncryptionPublicKey,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -159,7 +163,7 @@ pub struct TransactRequest {
     pub input_commitments: Vec<Field>,
     pub output_amounts: [NoteAmount; N_OUTPUTS],
     pub out_recipient_note_pubkeys: [Option<NotePublicKey>; N_OUTPUTS],
-    pub out_recipient_encryption_pubkeys: [Option<types::EncryptionPublicKey>; N_OUTPUTS],
+    pub out_recipient_encryption_pubkeys: [Option<EncryptionPublicKey>; N_OUTPUTS],
     pub smt_depth: u32,
     pub tree_depth: u32,
     pub non_membership_proof: AspNonMembershipProof,
