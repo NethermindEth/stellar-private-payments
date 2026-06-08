@@ -19,7 +19,7 @@ const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
 /// use this exact function to stay in sync.
 pub fn vk_hash_hex(vk_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(vk_bytes);
+    hasher.update(vk_bytes);is_known_root
     let digest = hasher.finalize();
     format!("0x{}", hex::encode(digest))
 }
@@ -105,7 +105,7 @@ pub struct RegisteredCircuit {
     pub levels: u32,
     /// Number of note disclosures represented by the circuit.
     pub n_notes: u32,
-    /// Public input order used by the witness and verifier.
+    /// Public input order used by the wis_known_rootitness and verifier.
     pub public_inputs_order: &'static [&'static str],
     /// Artifact file names used by build, web, and CLI callers.
     pub artifacts: CircuitArtifacts,
@@ -159,6 +159,95 @@ impl RegisteredCircuit {
 
         Ok(())
     }
+
+    /// Serializes receipt public inputs in `public_inputs_order`.
+    ///
+    /// The caller must already have validated `receipt` against this circuit
+    /// (via [`validate_registered_receipt`] or
+    /// [`RegisteredCircuit::validate_receipt`]).
+    ///
+    /// # Arguments
+    /// * `receipt` - Receipt whose public inputs are serialized.
+    ///
+    /// # Returns
+    /// Returns public inputs as 32-byte little-endian field elements, suitable
+    /// for the generic Groth16 verifier.
+    ///
+    /// # Errors
+    /// Returns an error if `public_inputs_order` contains an unknown name or if
+    /// the output buffer capacity overflows.
+    pub fn public_inputs_bytes(&self, receipt: &DisclosureReceipt) -> Result<Vec<u8>> {
+        let n_notes =
+            usize::try_from(self.n_notes).map_err(|_| anyhow!("Circuit n_notes out of range"))?;
+        let capacity = n_notes
+            .checked_mul(2)
+            .and_then(|n| n.checked_add(1))
+            .and_then(|n| n.checked_mul(32))
+            .ok_or_else(|| anyhow!("Public input byte capacity overflow"))?;
+        let mut out = Vec::with_capacity(capacity);
+
+        for &name in self.public_inputs_order {
+            match name {
+                "roots" => {
+                    for root in &receipt.public_inputs.roots {
+                        out.extend_from_slice(&root.to_le_bytes());
+                    }
+                }
+                "noteCommitments" => {
+                    for note_commitment in &receipt.public_inputs.note_commitments {
+                        out.extend_from_slice(&note_commitment.to_le_bytes());
+                    }
+                }
+                "extContextHash" => {
+                    out.extend_from_slice(&receipt.public_inputs.ext_context_hash.to_le_bytes());
+                }
+                other => {
+                    return Err(anyhow!(
+                        "Unknown public input `{other}` in circuit `{}` order",
+                        self.name
+                    ));
+                }
+            }
+        }
+
+        Ok(out)
+    }
+}
+
+/// Hashes serialized verifying-key bytes using the receipt VK hash format.
+///
+/// # Arguments
+/// * `vk_bytes` - Serialized compressed arkworks verifying key.
+///
+/// # Returns
+/// Returns the `0x`-prefixed lowercase SHA-256 hash used in disclosure
+/// receipts.
+pub fn verifying_key_hash(vk_bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(vk_bytes);
+    format!("0x{}", hex::encode(hasher.finalize()))
+}
+
+/// Validates that serialized verifying-key bytes match an expected VK hash.
+///
+/// # Arguments
+/// * `vk_bytes` - Serialized compressed arkworks verifying key.
+/// * `expected_vk_hash` - Expected `0x`-prefixed lowercase SHA-256 hash.
+///
+/// # Returns
+/// Returns `Ok(())` when `vk_bytes` hash to `expected_vk_hash`.
+///
+/// # Errors
+/// Returns an error when the actual verifying-key hash differs from
+/// `expected_vk_hash`.
+fn validate_verifying_key_hash(vk_bytes: &[u8], expected_vk_hash: &str) -> Result<bool> {
+    let actual_vk_hash = verifying_key_hash(vk_bytes);
+
+    if actual_vk_hash != expected_vk_hash {
+        return Err(anyhow!("Verifying key hash mismatch"));
+    }
+
+    Ok(true)
 }
 
 /// Circuit metadata for `selectiveDisclosure_1`.
@@ -279,7 +368,16 @@ pub fn prove_receipt_proof_with_prover(
     })
 }
 
-/// Serializes receipt public inputs in the circuit's declared order.
+/// Validates a receipt, then serializes its public inputs for Groth16
+/// verification.
+///
+/// This is a convenience wrapper for callers that have not already validated
+/// the receipt. It checks the receipt against the registered circuit and
+/// `expected_vk_hash` before serializing public inputs.
+///
+/// Prefer [`validate_registered_receipt`] plus
+/// [`RegisteredCircuit::public_inputs_bytes`] when the receipt is already
+/// validated in the same call path.
 ///
 /// # Arguments
 /// * `receipt` - Receipt containing named public inputs.
@@ -290,31 +388,14 @@ pub fn prove_receipt_proof_with_prover(
 /// the generic Groth16 verifier.
 ///
 /// # Errors
-/// Returns an error if the receipt does not match a registered circuit or if
-/// its public-input shape is invalid.
-pub fn receipt_public_inputs_bytes(
+/// Returns an error if receipt validation fails, the receipt does not match a
+/// registered circuit, or public-input serialization fails.
+pub fn validate_and_serialize_receipt_public_inputs(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
 ) -> Result<Vec<u8>> {
     let circuit = validate_registered_receipt(receipt, expected_vk_hash)?;
-    let n_notes =
-        usize::try_from(circuit.n_notes).map_err(|_| anyhow!("Circuit n_notes out of range"))?;
-    let capacity = n_notes
-        .checked_mul(2)
-        .and_then(|n| n.checked_add(1))
-        .and_then(|n| n.checked_mul(32))
-        .ok_or_else(|| anyhow!("Public input byte capacity overflow"))?;
-    let mut out = Vec::with_capacity(capacity);
-
-    for root in &receipt.public_inputs.roots {
-        out.extend_from_slice(&root.to_le_bytes());
-    }
-    for note_commitment in &receipt.public_inputs.note_commitments {
-        out.extend_from_slice(&note_commitment.to_le_bytes());
-    }
-    out.extend_from_slice(&receipt.public_inputs.ext_context_hash.to_le_bytes());
-
-    Ok(out)
+    circuit.public_inputs_bytes(receipt)
 }
 
 /// Verifies the Groth16 proof carried by a disclosure receipt.
@@ -329,17 +410,21 @@ pub fn receipt_public_inputs_bytes(
 /// receipt public inputs.
 ///
 /// # Errors
-/// Returns an error if the receipt is malformed, targets an unsupported
-/// circuit, has unexpected metadata, or contains malformed proof bytes.
+/// Returns an error if `vk_bytes` do not match `expected_vk_hash`, the receipt
+/// is malformed, targets an unsupported circuit, has unexpected metadata, or
+/// contains malformed proof bytes.
 pub fn verify_receipt_proof(
     receipt: &DisclosureReceipt,
     vk_bytes: &[u8],
     expected_vk_hash: &str,
 ) -> Result<bool> {
+    validate_verifying_key_hash(vk_bytes, expected_vk_hash)?;
+
+    let circuit = validate_registered_receipt(receipt, expected_vk_hash)?;
     let proof_bytes = receipt.proof_compressed_bytes()?;
-    let public_inputs = receipt_public_inputs_bytes(receipt, expected_vk_hash)?;
+    let public_inputs = circuit.public_inputs_bytes(receipt)?;
     verify_proof(vk_bytes, &proof_bytes, &public_inputs)
-}
+}Mark
 
 /// Checks that every receipt root is still known by the pool.
 ///
@@ -481,6 +566,25 @@ mod tests {
     }
 
     #[test]
+    fn hashes_verifying_key_bytes() {
+        let vk_bytes = b"verifying key bytes";
+
+        assert_eq!(
+            verifying_key_hash(vk_bytes),
+            "0x7330601fe3493c2be3f5ebbca5fc7879af6d7b102016e37d81f12ad40d316fd0"
+        );
+    }
+
+    #[test]
+    fn rejects_verifying_key_hash_mismatch() {
+        let expected_vk_hash = verifying_key_hash(b"trusted verifying key bytes");
+
+        assert!(
+            validate_verifying_key_hash(b"other verifying key bytes", &expected_vk_hash).is_err()
+        );
+    }
+
+    #[test]
     fn rejects_wrong_circuit_levels() {
         let mut receipt = valid_receipt();
         receipt.circuit.levels = 11;
@@ -491,7 +595,8 @@ mod tests {
     #[test]
     fn serializes_public_inputs_in_circuit_order() -> Result<()> {
         let receipt = valid_receipt();
-        let bytes = receipt_public_inputs_bytes(&receipt, VK_HASH)?;
+        let circuit = validate_registered_receipt(&receipt, VK_HASH)?;
+        let bytes = circuit.public_inputs_bytes(&receipt)?;
 
         assert_eq!(bytes.len(), 96);
         assert_eq!(&bytes[..32], &field(1).to_le_bytes());
@@ -501,11 +606,22 @@ mod tests {
     }
 
     #[test]
+    fn validate_and_serialize_matches_circuit_serialization() -> Result<()> {
+        let receipt = valid_receipt();
+        let circuit = validate_registered_receipt(&receipt, VK_HASH)?;
+        let direct = circuit.public_inputs_bytes(&receipt)?;
+        let wrapped = validate_and_serialize_receipt_public_inputs(&receipt, VK_HASH)?;
+
+        assert_eq!(direct, wrapped);
+        Ok(())
+    }
+
+    #[test]
     fn public_input_serialization_rejects_wrong_vk_hash() {
         let receipt = valid_receipt();
         let wrong_hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
-        assert!(receipt_public_inputs_bytes(&receipt, wrong_hash).is_err());
+        assert!(validate_and_serialize_receipt_public_inputs(&receipt, wrong_hash).is_err());
     }
 
     #[test]
