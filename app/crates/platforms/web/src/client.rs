@@ -11,15 +11,15 @@ use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
-use prover::{
-    encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE},
-    flows::N_OUTPUTS,
-};
 use std::{rc::Rc, str::FromStr};
-use stellar::StateFetcher as CoreStateFetcher;
-use types::{
-    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey,
-    EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
+use stellar_private_payments_sdk::{
+    AspMembershipSync, Client as SdkClient, ContractConfig, ContractsStateData,
+    EncryptionPublicKey, EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey,
+    SMT_DEPTH, SpendingSignature,
+    tx::{
+        encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE},
+        flows::N_OUTPUTS,
+    },
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -66,7 +66,7 @@ fn emit_progress(
 pub struct WebClient {
     storage_bridge: OneshotBridge<StorageWorker>,
     prover_bridge: OneshotBridge<ProverWorker>,
-    fetcher: Rc<CoreStateFetcher>,
+    sdk: Rc<SdkClient>,
 }
 
 impl Clone for WebClient {
@@ -74,7 +74,7 @@ impl Clone for WebClient {
         Self {
             storage_bridge: self.storage_bridge.fork(),
             prover_bridge: self.prover_bridge.fork(),
-            fetcher: self.fetcher.clone(),
+            sdk: self.sdk.clone(),
         }
     }
 }
@@ -92,7 +92,7 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
 }
 
 impl WebClient {
-    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
+    pub fn new(rpc_url: &str, contract_config: ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
             storage_bridge: StorageWorker::spawner()
                 .as_module(true)
@@ -100,7 +100,7 @@ impl WebClient {
             prover_bridge: ProverWorker::spawner()
                 .as_module(true)
                 .spawn("./js/prover-worker.js"),
-            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
+            sdk: Rc::new(SdkClient::new(rpc_url, contract_config)?),
         })
     }
 
@@ -223,7 +223,7 @@ impl WebClient {
                 asp_membership,
                 asp_non_membership,
             } = self
-                .fetcher
+                .sdk
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
@@ -262,8 +262,8 @@ impl WebClient {
                 None,
             );
             let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
+                .sdk
+                .asp_non_membership_proof(
                     &note_pubkey,
                     asp_non_membership.root,
                     SMT_DEPTH as usize,
@@ -399,7 +399,7 @@ impl WebClient {
                 asp_membership,
                 asp_non_membership,
             } = self
-                .fetcher
+                .sdk
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
@@ -440,8 +440,8 @@ impl WebClient {
                 None,
             );
             let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
+                .sdk
+                .asp_non_membership_proof(
                     &note_pubkey,
                     asp_non_membership.root,
                     SMT_DEPTH as usize,
@@ -603,7 +603,7 @@ impl WebClient {
                 asp_membership,
                 asp_non_membership,
             } = self
-                .fetcher
+                .sdk
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
@@ -644,8 +644,8 @@ impl WebClient {
                 None,
             );
             let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
+                .sdk
+                .asp_non_membership_proof(
                     &note_pubkey,
                     asp_non_membership.root,
                     SMT_DEPTH as usize,
@@ -846,7 +846,7 @@ impl WebClient {
                 asp_membership,
                 asp_non_membership,
             } = self
-                .fetcher
+                .sdk
                 .contracts_data_for_pool(&pool_contract_id)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
@@ -887,8 +887,8 @@ impl WebClient {
                 None,
             );
             let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
+                .sdk
+                .asp_non_membership_proof(
                     &note_pubkey,
                     asp_non_membership.root,
                     SMT_DEPTH as usize,
@@ -987,7 +987,7 @@ impl WebClient {
     #[wasm_bindgen(js_name = aspState)]
     pub async fn asp_state(&self) -> Result<JsValue, JsError> {
         let asp_state = self
-            .fetcher
+            .sdk
             .asp_state()
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
@@ -997,7 +997,7 @@ impl WebClient {
     #[wasm_bindgen(js_name = allContractsData)]
     pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
         let data = self
-            .fetcher
+            .sdk
             .all_contracts_data()
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
@@ -1006,9 +1006,7 @@ impl WebClient {
 
     #[wasm_bindgen(js_name = contractConfig)]
     pub fn contract_config(&self) -> Result<JsValue, JsError> {
-        Ok(serde_wasm_bindgen::to_value(
-            self.fetcher.contract_config(),
-        )?)
+        Ok(serde_wasm_bindgen::to_value(self.sdk.config())?)
     }
 
     #[wasm_bindgen(js_name = encryptionDerivationMessage)]
@@ -1251,8 +1249,10 @@ impl WebClient {
 }
 
 #[async_trait::async_trait(?Send)]
-impl stellar::ContractDataStorage for WebClient {
-    async fn get_sync_state(&self) -> anyhow::Result<Vec<types::SyncMetadata>> {
+impl stellar_private_payments_sdk::chain::ContractDataStorage for WebClient {
+    async fn get_sync_state(
+        &self,
+    ) -> anyhow::Result<Vec<stellar_private_payments_sdk::SyncMetadata>> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
         match resp {
@@ -1262,7 +1262,10 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_events_batch(&self, data: types::ContractsEventData) -> anyhow::Result<()> {
+    async fn save_events_batch(
+        &self,
+        data: stellar_private_payments_sdk::ContractsEventData,
+    ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
         match resp {
@@ -1274,7 +1277,7 @@ impl stellar::ContractDataStorage for WebClient {
 
     async fn save_sync_progress(
         &self,
-        metadata: Vec<types::SyncMetadata>,
+        metadata: Vec<stellar_private_payments_sdk::SyncMetadata>,
         fully_indexed: bool,
     ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();

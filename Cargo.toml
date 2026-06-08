@@ -1,10 +1,11 @@
 [workspace]
 members = [
-    "app/crates/core/prover",
-    "app/crates/core/state",
-    "app/crates/core/stellar",
-    "app/crates/core/types",
-    "app/crates/core/witness",
+    "sdk/client",
+    "sdk/prover",
+    "sdk/state",
+    "sdk/stellar",
+    "sdk/types",
+    "sdk/witness",
     "app/crates/platforms/web",
     "circuit-keys",
     "circuits",
@@ -53,19 +54,20 @@ num-bigint = { version = "0.4.6", default-features = false, features = ["serde"]
 num-integer = { version = "0.1.46", default-features = false }
 num-traits = { version = "0.2", default-features = false }
 pool = { path = "contracts/pool" }
-prover = { path = "app/crates/core/prover" }
+prover = { path = "sdk/prover" }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_bytes = { version = "0.11", default-features = false }
 serde_json = { version = "1", default-features = false }
+stellar-private-payments-sdk = { path = "sdk/client" }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "26", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
-state = { path = "app/crates/core/state" }
-stellar = { path = "app/crates/core/stellar" }
+state = { path = "sdk/state" }
+stellar = { path = "sdk/stellar" }
 thiserror = { version = "2", default-features = false }
-types = { path = "app/crates/core/types" }
+types = { path = "sdk/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
@@ -73,7 +75,7 @@ wasm-log = { version = "0.3", default-features = false }
 # see https://github.com/NethermindEth/stellar-private-payments/issues/192
 wasmer = { git = "https://github.com/wasmerio/wasmer", rev = "763e9f2800644f51ce27f6f5c1752776da16ddd1", shallow = true, default-features = false }
 web = { path = "app/crates/platforms/web" }
-witness = { path = "app/crates/core/witness" }
+witness = { path = "sdk/witness" }
 zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]

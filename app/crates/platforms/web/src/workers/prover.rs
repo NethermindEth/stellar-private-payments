@@ -5,17 +5,16 @@ use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
-use prover::{
-    flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
-    prover::Prover,
-};
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
-use stellar::hash_ext_data_offchain;
+use stellar_private_payments_sdk::{
+    chain::hash_ext_data_offchain,
+    proving::{Prover, WitnessCalculator},
+    tx::flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
+};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
-use witness::WitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
