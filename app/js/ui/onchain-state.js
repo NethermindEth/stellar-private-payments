@@ -23,6 +23,24 @@ function setMonoText(id, value) {
     el.title = value ?? '';
 }
 
+function setAddressLink(id, contractId) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (!contractId) {
+        el.textContent = '—';
+        el.title = '';
+        return;
+    }
+    const a = document.createElement('a');
+    a.href = `https://stellar.expert/explorer/testnet/contract/${contractId}`;
+    a.target = '_blank';
+    a.rel = 'noopener noreferrer';
+    a.className = 'hover:text-brand-400 transition-colors inline-flex items-center gap-1';
+    a.innerHTML = `${Utils.truncateHex(contractId, 6, 6)} <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>`;
+    el.replaceChildren(a);
+    el.title = contractId;
+}
+
 function setIndicator(indicatorId, ok) {
     const el = document.getElementById(indicatorId);
     if (!el) return;
@@ -143,8 +161,7 @@ export const OnchainState = {
             // Pool
             setIndicator('pool-indicator', primaryPool !== null);
             setStatus('pool-status', primaryPool !== null , primaryPool?.ledger);
-            setMonoText('pool-address', primaryPool?.contractId ? Utils.truncateHex(primaryPool.contractId, 6, 6) : '—');
-            document.getElementById('pool-address')?.setAttribute('title', primaryPool?.contractId || '');
+            setAddressLink('pool-address', primaryPool?.contractId);
 
             const poolRoot = primaryPool?.merkleRoot ?? null;
             setMonoText('pool-root', poolRoot ? Utils.truncateHex(poolRoot, 10, 8) : '—');
@@ -156,8 +173,7 @@ export const OnchainState = {
             // ASP Membership
             setIndicator('membership-indicator', data?.aspMembership !== undefined);
             setStatus('membership-status', data?.aspMembership !== undefined, data?.aspMembership?.ledger);
-            setMonoText('membership-address', data?.aspMembership?.contractId ? Utils.truncateHex(data.aspMembership.contractId, 6, 6) : '—');
-            document.getElementById('membership-address')?.setAttribute('title', data?.aspMembership?.contractId || '');
+            setAddressLink('membership-address', data?.aspMembership?.contractId);
 
             const memRoot = data?.aspMembership?.root ?? null;
             setMonoText('membership-root', memRoot ? Utils.truncateHex(memRoot, 10, 8) : '—');
@@ -168,8 +184,7 @@ export const OnchainState = {
             // ASP Non-Membership
             setIndicator('nonmembership-indicator', data?.aspNonMembership !== undefined);
             setStatus('nonmembership-status', data?.aspNonMembership !== undefined, data?.aspNonMembership?.ledger);
-            setMonoText('nonmembership-address', data?.aspNonMembership?.contractId ? Utils.truncateHex(data.aspNonMembership.contractId, 6, 6) : '—');
-            document.getElementById('nonmembership-address')?.setAttribute('title', data?.aspNonMembership?.contractId || '');
+            setAddressLink('nonmembership-address', data?.aspNonMembership?.contractId);
 
             const nonRoot = data?.aspNonMembership?.root ?? null;
             setMonoText('nonmembership-root', nonRoot ? Utils.truncateHex(nonRoot, 10, 8) : '—');

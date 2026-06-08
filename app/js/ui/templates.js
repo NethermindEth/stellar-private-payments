@@ -200,7 +200,18 @@ export const Templates = {
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
         // Note.amount is in token decimals - convert to token for display
         row.querySelector('.note-amount').textContent = formatBaseUnitsForDisplay(note.amount);
-        row.querySelector('.note-date').textContent = note.createdAtText || '';
+        const dateEl = row.querySelector('.note-date');
+        if (note.createdAtLedger) {
+            const a = document.createElement('a');
+            a.href = `https://stellar.expert/explorer/testnet/ledger/${note.createdAtLedger}`;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'hover:text-brand-400 transition-colors inline-flex items-center gap-1';
+            a.innerHTML = `${note.createdAtText} <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>`;
+            dateEl.replaceChildren(a);
+        } else {
+            dateEl.textContent = note.createdAtText || '';
+        }
 
         const badge = row.querySelector('.status-badge');
         if (note.spent) {
