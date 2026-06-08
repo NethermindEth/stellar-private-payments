@@ -72,7 +72,7 @@ impl TransactionPlan {
     pub fn final_step(&self) -> &PlannedStep {
         self.steps
             .last()
-            .expect("transaction plan always has atleast one step")
+            .expect("transaction plan always has at least one step")
     }
 }
 
@@ -109,9 +109,9 @@ pub fn plan(
     let (indices, change) = match combo {
         CombinationResult::Impossible => return Err(PlanError::NoCombination),
         CombinationResult::OneExact(i) => (vec![i], None),
-        CombinationResult::TwoExact(a, b) => (vec![a, b], None),
+        CombinationResult::TwoExact(i, j) => (vec![i, j], None),
         CombinationResult::OneOvershoot(i, excess) => (vec![i], Some(excess)),
-        CombinationResult::TwoOvershoot(a, b, excess) => (vec![a, b], Some(excess)),
+        CombinationResult::TwoOvershoot(i, j, excess) => (vec![i, j], Some(excess)),
         CombinationResult::ExactK(indices) => (indices, None),
         CombinationResult::Overshoot(indices, excess) => (indices, Some(excess)),
     };
@@ -148,9 +148,10 @@ pub fn plan(
         let mut prev_note = note0;
         for index in indices.iter().skip(1) {
             let current_note = StepNote::from_spendable(notes[*index].clone());
-            sum = sum
-                .checked_add(current_note.amount)
-                .ok_or(PlanError::InputAmountOverflow)?;
+            let Some(next_sum) = sum.checked_add(current_note.amount) else {
+                return Err(PlanError::InputAmountOverflow);
+            };
+            sum = next_sum;
             let action = StepAction::Consolidate { output: sum };
             let step = PlannedStep {
                 inputs: (prev_note, Some(current_note)),

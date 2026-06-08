@@ -15,6 +15,9 @@ pub enum PlanError {
     #[error("input amount overflow")]
     InputAmountOverflow,
 
+    #[error("planner internal error: {reason}")]
+    InternalError { reason: &'static str },
+
     #[error("planner produced an invalid transaction plan")]
     InvalidPlan,
 
@@ -33,4 +36,10 @@ pub enum PlanError {
 
     #[error("multiple spendable notes with amount {amount}")]
     AmbiguousNoteForAmount { amount: types::NoteAmount },
+}
+
+impl PlanError {
+    pub(crate) const fn internal(reason: &'static str) -> Self {
+        Self::InternalError { reason }
+    }
 }
