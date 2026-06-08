@@ -44,6 +44,8 @@ fn main() {
 
     let proving_key_path =
         repo_root.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
+    let disclosure_proving_key_path =
+        repo_root.join("deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
 
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
     let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
@@ -63,19 +65,34 @@ fn main() {
     let wasm_path = circuits_out.join("policy_tx_2_2.wasm");
     let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
 
+    let disclosure_wasm_path = circuits_out.join("selectiveDisclosure_1.wasm");
+    let disclosure_r1cs_path = circuits_out.join("selectiveDisclosure_1.r1cs");
+
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed={}", proving_key_path.display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        disclosure_proving_key_path.display()
+    );
     println!("cargo:rerun-if-changed={}", wasm_path.display());
     println!("cargo:rerun-if-changed={}", r1cs_path.display());
+    println!("cargo:rerun-if-changed={}", disclosure_wasm_path.display());
+    println!("cargo:rerun-if-changed={}", disclosure_r1cs_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
     let proving_key_bytes = read_file(&proving_key_path);
+    let disclosure_proving_key_bytes = read_file(&disclosure_proving_key_path);
     let wasm_bytes = read_file(&wasm_path);
     let r1cs_bytes = read_file(&r1cs_path);
+    let disclosure_wasm_bytes = read_file(&disclosure_wasm_path);
+    let disclosure_r1cs_bytes = read_file(&disclosure_r1cs_path);
 
     let proving_key_hash = sha256(&proving_key_bytes);
+    let disclosure_proving_key_hash = sha256(&disclosure_proving_key_bytes);
     let wasm_hash = sha256(&wasm_bytes);
     let r1cs_hash = sha256(&r1cs_bytes);
+    let disclosure_wasm_hash = sha256(&disclosure_wasm_bytes);
+    let disclosure_r1cs_hash = sha256(&disclosure_r1cs_bytes);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
     let out_path = out_dir.join("artifact_hashes.rs");
@@ -92,6 +109,14 @@ pub const EXPECTED_POLICY_TX_2_2_R1CS_SHA256: [u8; 32] = {r1cs_hash};
 pub const EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN: usize = {proving_key_len};
 pub const EXPECTED_POLICY_TX_2_2_WASM_LEN: usize = {wasm_len};
 pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
+
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256: [u8; 32] = {disclosure_proving_key_hash};
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256: [u8; 32] = {disclosure_wasm_hash};
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256: [u8; 32] = {disclosure_r1cs_hash};
+
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN: usize = {disclosure_proving_key_len};
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN: usize = {disclosure_wasm_len};
+pub const EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN: usize = {disclosure_r1cs_len};
 ",
         proving_key_hash = fmt_u8_array(&proving_key_hash),
         wasm_hash = fmt_u8_array(&wasm_hash),
@@ -99,6 +124,12 @@ pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
         proving_key_len = proving_key_bytes.len(),
         wasm_len = wasm_bytes.len(),
         r1cs_len = r1cs_bytes.len(),
+        disclosure_proving_key_hash = fmt_u8_array(&disclosure_proving_key_hash),
+        disclosure_wasm_hash = fmt_u8_array(&disclosure_wasm_hash),
+        disclosure_r1cs_hash = fmt_u8_array(&disclosure_r1cs_hash),
+        disclosure_proving_key_len = disclosure_proving_key_bytes.len(),
+        disclosure_wasm_len = disclosure_wasm_bytes.len(),
+        disclosure_r1cs_len = disclosure_r1cs_bytes.len(),
     );
 
     fs::write(&out_path, contents)

@@ -22,6 +22,7 @@ path = "src/bin/prover_worker.rs"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
+disclosure = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }

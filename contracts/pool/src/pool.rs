@@ -703,7 +703,7 @@ impl PoolContract {
 
     /// Get the latest root of the Merkle tree that defines the pool
     pub fn get_root(env: &Env) -> Result<U256, Error> {
-        Ok(MerkleTreeWithHistory::get_last_root(env)?)
+        Ok(MerkleTreeWithHistory::get_lasis_known_roott_root(env)?)
     }
 
     /// Check whether a pool Merkle root is still in the recent root history.

@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 use std::{convert::TryInto, str::FromStr};
 use stellar_strkey::ed25519;
 use stellar_xdr::{curr as xdr, curr::ReadXdr};
+
+const DEFAULT_NETWORK: &str = "testnet";
 use types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
     ExtAmount, Field, NotePublicKey, PoolInfo, U256,
@@ -534,7 +536,7 @@ impl StateFetcher {
         )?;
 
         let data = ContractsStateData {
-            network: "testnet".to_string(),
+            network: DEFAULT_NETWORK.to_string(),
             pool,
             asp_membership,
             asp_non_membership,

@@ -1,8 +1,9 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, ProverWorkerRequest,
-        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse, TransactRequest,
-        TransferRequest, WithdrawRequest,
+        AdminASPRequest, DepositPrepared, DepositRequest, DisclosureInputsRequest,
+        DisclosureProverRequest, PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse,
+        StorageWorkerRequest, StorageWorkerResponse, TransactRequest, TransferRequest,
+        WithdrawRequest,
     },
     workers::{prover::ProverWorker, storage::StorageWorker},
 };
@@ -18,8 +19,8 @@ use prover::{
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
-    AspMembershipSync, EncryptionPublicKey, EncryptionSignature, ExtAmount, Field, NoteAmount,
-    NotePublicKey, SMT_DEPTH, SpendingSignature,
+    AspMembershipSync, DisclosureReceipt, DisclosureVerificationReport, EncryptionPublicKey,
+    EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -1218,6 +1219,221 @@ impl WebClient {
             None => Ok(JsValue::NULL),
             Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
         }
+    }
+
+    #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn generate_selective_disclosure(
+        &self,
+        user_address: String,
+        selected_commitment_hex: String,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<JsValue, JsError> {
+        let receipt = self
+            .generate_selective_disclosure_inner(
+                user_address,
+                selected_commitment_hex,
+                authority_label,
+                authority_identity_payload_hex,
+                purpose,
+                context_nonce,
+                on_status,
+            )
+            .await?;
+        match receipt {
+            None => Ok(JsValue::NULL),
+            Some(r) => Ok(serde_wasm_bindgen::to_value(&r)?),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn generate_selective_disclosure_inner(
+        &self,
+        user_address: String,
+        selected_commitment_hex: String,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<Option<DisclosureReceipt>, JsError> {
+        let selected_commitment = parse_field_hex_str(&selected_commitment_hex)?;
+        let context_nonce = parse_field_bigint_numeric(&context_nonce)?;
+
+        emit_progress(
+            &on_status,
+            "disclosure",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
+
+        let (inputs, network, pool_address) = loop {
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
+            let data = self
+                .fetcher
+                .all_contracts_data()
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let pool_root = data.pool.merkle_root;
+            let pool_next_index =
+                parse_u32_decimal(&data.pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+
+            let req = DisclosureInputsRequest {
+                user_address: user_address.clone(),
+                selected_commitment,
+                pool_root,
+                pool_next_index,
+                tree_depth: data.pool.merkle_levels,
+            };
+
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
+            match self
+                .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
+                .await?
+            {
+                StorageWorkerResponse::DisclosureInputs(inputs) => {
+                    break (inputs, data.network, data.pool.contract_id);
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
+                    log::warn!(
+                        "[DISCLOSURE] the account {user_address} should register within ASP"
+                    );
+                    return Ok(None);
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
+                    log::info!("[DISCLOSURE] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "disclosure",
+                        "sync_wait",
+                        if let Some(gap) = gap {
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
+                        } else {
+                            "Waiting to sync ledgers from the chain...".to_string()
+                        },
+                        None,
+                        None,
+                    );
+                    TimeoutFuture::new(1_000).await;
+                    continue;
+                }
+                other => {
+                    return Err(JsError::new(&format!(
+                        "Unexpected storage worker response: {:?}",
+                        other
+                    )));
+                }
+            }
+        };
+
+        emit_progress(&on_status, "disclosure", "prove", "Proving…", None, None);
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        let prover_req = DisclosureProverRequest {
+            inputs,
+            network,
+            pool_address,
+            authority_label,
+            authority_identity_payload_hex,
+            purpose,
+            context_nonce,
+        };
+
+        let receipt = match self
+            .prover_request(ProverWorkerRequest::Disclosure(prover_req), 20_000)
+            .await?
+        {
+            ProverWorkerResponse::Disclosure(receipt) => receipt,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        Ok(Some(receipt))
+    }
+
+    #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+    pub async fn verify_selective_disclosure(
+        &self,
+        receipt_json: String,
+        expected_vk_hash: String,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+        // Wait for prover worker initialization before verifying, otherwise
+        // DISCLOSURE_PROVER may not be populated yet on a fresh client.
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        // Verify proof via prover worker
+        let proof_verified = match self
+            .prover_request(
+                ProverWorkerRequest::VerifyDisclosureProof(receipt.clone(), expected_vk_hash),
+                20_000,
+            )
+            .await?
+        {
+            ProverWorkerResponse::DisclosureProofVerified(v) => v,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        // Check root freshness via on-chain contract
+        let mut known_root_status = true;
+        for root in &receipt.public_inputs.roots {
+            let is_known = self
+                .fetcher
+                .is_pool_known_root(*root)
+                .await
+                .map_err(|e| JsError::new(&format!("root freshness check failed: {e}")))?;
+            if !is_known {
+                known_root_status = false;
+                break;
+            }
+        }
+
+        let context_verified = disclosure::verify_receipt_context(&receipt)
+            .map_err(|e| JsError::new(&format!("context verification failed: {e}")))?;
+
+        let report = DisclosureVerificationReport {
+            proof_verified,
+            context_verified,
+            known_root_status,
+        };
+
+        Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 }
 

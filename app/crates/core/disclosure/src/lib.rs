@@ -3,7 +3,81 @@
 use anyhow::{Result, anyhow};
 use prover::prover::{Prover, verify_proof};
 use sha2::{Digest, Sha256};
-use types::{DisclosureCircuitMetadata, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT};
+use types::{
+    DisclosureCircuitMetadata, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
+    Field, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
+    SELECTIVE_DISCLOSURE_1_N_NOTES,
+};
+
+/// Domain prefix for `ext_context_hash` derivation.
+const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
+
+/// Compute the canonical `vk_hash` string from verifying-key bytes.
+///
+/// The hash is SHA-256 over the compressed VK bytes, formatted as a
+/// `0x`-prefixed lowercase hex string. Both the prover and verifier must
+/// use this exact function to stay in sync.
+pub fn vk_hash_hex(vk_bytes: &[u8]) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(vk_bytes);is_known_root
+    let digest = hasher.finalize();
+    format!("0x{}", hex::encode(digest))
+}
+
+/// Derives the `ext_context_hash` from disclosure context fields.
+///
+/// The derivation is deterministic and uses SHA-256 over a canonical,
+/// length-delimited encoding of all context fields, reduced modulo the BN254
+/// prime. Both the prover and verifier must use this exact function to stay
+/// in sync.
+///
+/// # Arguments
+/// * `context` - Disclosure context containing network, pool address,
+///   authority, purpose, and nonce.
+///
+/// # Returns
+/// Returns the derived field element.
+///
+/// # Errors
+/// Returns an error if context validation fails.
+pub fn derive_ext_context_hash(context: &DisclosureContext) -> Result<Field> {
+    context.validate()?;
+
+    let mut hasher = Sha256::new();
+    hasher.update(CONTEXT_HASH_DOMAIN);
+
+    // Helper to feed a string with its exact length prefix (little-endian u64).
+    let mut feed_str = |s: &str| {
+        hasher.update((s.len() as u64).to_le_bytes());
+        hasher.update(s.as_bytes());
+    };
+
+    feed_str(&context.network);
+    feed_str(&context.pool_address);
+    feed_str(&context.authority_label);
+    feed_str(&context.authority_identity_payload_hex);
+    feed_str(&context.purpose);
+    hasher.update(context.context_nonce.to_le_bytes());
+
+    let hash: [u8; 32] = hasher.finalize().into();
+    Ok(Field::from_le_bytes_mod_order(hash))
+}
+
+/// Verifies that a receipt's `ext_context_hash` is internally consistent with
+/// its declared [`DisclosureContext`].
+///
+/// # Arguments
+/// * `receipt` - Receipt to verify.
+///
+/// # Returns
+/// Returns `true` when the re-derived hash matches the stored public input.
+///
+/// # Errors
+/// Returns an error if the receipt context is invalid.
+pub fn verify_receipt_context(receipt: &DisclosureReceipt) -> Result<bool> {
+    let expected = derive_ext_context_hash(&receipt.context)?;
+    Ok(expected == receipt.public_inputs.ext_context_hash)
+}
 
 /// Public input order declared by `selectiveDisclosure_1.circom`.
 pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] =
@@ -31,7 +105,7 @@ pub struct RegisteredCircuit {
     pub levels: u32,
     /// Number of note disclosures represented by the circuit.
     pub n_notes: u32,
-    /// Public input order used by the witness and verifier.
+    /// Public input order used by the wis_known_rootitness and verifier.
     pub public_inputs_order: &'static [&'static str],
     /// Artifact file names used by build, web, and CLI callers.
     pub artifacts: CircuitArtifacts,
@@ -179,8 +253,8 @@ fn validate_verifying_key_hash(vk_bytes: &[u8], expected_vk_hash: &str) -> Resul
 /// Circuit metadata for `selectiveDisclosure_1`.
 pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_1_CIRCUIT,
-    levels: 10,
-    n_notes: 1,
+    levels: SELECTIVE_DISCLOSURE_1_LEVELS,
+    n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         wasm: "selectiveDisclosure_1.wasm",
@@ -226,26 +300,6 @@ pub fn validate_registered_receipt(
     Ok(circuit)
 }
 
-/// Mock-checks every root named by a disclosure receipt.
-///
-/// # Arguments
-/// * `receipt` - Receipt containing the roots to check.
-/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
-///
-/// # Returns
-/// Returns `true` after receipt metadata validation.
-///
-/// # Errors
-/// Returns an error if receipt metadata is invalid.
-/// TODO: REMOVE THIS AFTER MODIFYING THE SMART CONTRACT.
-pub fn mock_receipt_roots_are_known(
-    receipt: &DisclosureReceipt,
-    expected_vk_hash: &str,
-) -> Result<bool> {
-    validate_registered_receipt(receipt, expected_vk_hash)?;
-    Ok(true)
-}
-
 /// Proof bytes and public inputs produced for a disclosure receipt.
 #[derive(Debug, Clone, Eq, PartialEq)]
 pub struct ProvedReceiptProof {
@@ -276,6 +330,31 @@ pub fn prove_receipt_proof(
     witness_bytes: &[u8],
 ) -> Result<ProvedReceiptProof> {
     let prover = Prover::new(proving_key_bytes, r1cs_bytes)?;
+    prove_receipt_proof_with_prover(&prover, witness_bytes)
+}
+
+/// Proves a disclosure witness using an existing Groth16 prover.
+///
+/// This is identical to [`prove_receipt_proof`] but reuses an already
+/// initialised [`Prover`] instance, avoiding the cost of re-deserialising
+/// the proving key and R1CS for each request.
+///
+/// # Arguments
+/// * `prover` - Initialised Groth16 prover holding the disclosure circuit
+///   proving key and R1CS.
+/// * `witness_bytes` - Witness bytes produced by the circuit witness
+///   calculator.
+///
+/// # Returns
+/// Returns the compressed proof bytes and extracted public inputs.
+///
+/// # Errors
+/// Returns an error if proving fails, public input extraction fails, or the
+/// generated proof does not verify locally.
+pub fn prove_receipt_proof_with_prover(
+    prover: &Prover,
+    witness_bytes: &[u8],
+) -> Result<ProvedReceiptProof> {
     let proof_compressed = prover.prove_bytes(witness_bytes)?;
     let public_inputs = prover.extract_public_inputs(witness_bytes)?;
 
@@ -345,6 +424,75 @@ pub fn verify_receipt_proof(
     let proof_bytes = receipt.proof_compressed_bytes()?;
     let public_inputs = circuit.public_inputs_bytes(receipt)?;
     verify_proof(vk_bytes, &proof_bytes, &public_inputs)
+}Mark
+
+/// Checks that every receipt root is still known by the pool.
+///
+/// # Arguments
+/// * `receipt` - Receipt containing roots to check.
+/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
+/// * `is_known_root` - Root freshness predicate (for example, a contract call).
+///
+/// # Returns
+/// Returns `true` when all roots in the receipt are known.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid or if `is_known_root`
+/// fails for any root.
+pub fn verify_receipt_known_roots_with<F>(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+    mut is_known_root: F,
+) -> Result<bool>
+where
+    F: FnMut(Field) -> Result<bool>,
+{
+    validate_registered_receipt(receipt, expected_vk_hash)?;
+    for root in &receipt.public_inputs.roots {
+        if !is_known_root(*root)? {
+            return Ok(false);
+        }
+    }
+    Ok(true)
+}
+
+/// Builds a disclosure verification report by combining proof and root checks.
+///
+/// # Arguments
+/// * `receipt` - Disclosure receipt to verify.
+/// * `expected_vk_hash` - Verifying-key hash expected by the caller.
+/// * `verify_proof` - Proof-verification function.
+/// * `context_verified` - Result of context-hash verification.
+/// * `is_known_root` - Root freshness predicate.
+///
+/// # Returns
+/// Returns a report that keeps proof-validity and root-freshness status
+/// separate.
+///
+/// # Errors
+/// Returns an error if receipt metadata is invalid or if callbacks fail.
+pub fn verify_receipt_report_with<P, R>(
+    receipt: &DisclosureReceipt,
+    expected_vk_hash: &str,
+    mut verify_proof: P,
+    context_verified: bool,
+    mut is_known_root: R,
+) -> Result<DisclosureVerificationReport>
+where
+    P: FnMut(&DisclosureReceipt, &str) -> Result<bool>,
+    R: FnMut(Field) -> Result<bool>,
+{
+    validate_registered_receipt(receipt, expected_vk_hash)?;
+
+    let proof_verified = verify_proof(receipt, expected_vk_hash)?;
+    let known_root_status =
+        verify_receipt_known_roots_with(receipt, expected_vk_hash, &mut is_known_root)?;
+
+    Ok(DisclosureVerificationReport {
+        proof_verified,
+        context_verified,
+        known_root_status,
+    })
 }
 
 #[cfg(test)]
@@ -474,5 +622,179 @@ mod tests {
         let wrong_hash = "0x2222222222222222222222222222222222222222222222222222222222222222";
 
         assert!(validate_and_serialize_receipt_public_inputs(&receipt, wrong_hash).is_err());
+    }
+
+    #[test]
+    fn known_roots_returns_false_when_root_is_stale() -> Result<()> {
+        let receipt = valid_receipt();
+        let known = verify_receipt_known_roots_with(&receipt, VK_HASH, |_root| Ok(false))?;
+        assert!(!known);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_distinguishes_proof_from_root_freshness() -> Result<()> {
+        let receipt = valid_receipt();
+
+        // Shape validation succeeds and the injected proof checker says the
+        // proof is valid, but root freshness fails.
+        let report = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            true,
+            |_root| Ok(false),
+        )?;
+
+        assert!(report.proof_verified);
+        assert!(report.context_verified);
+        assert!(!report.known_root_status);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_short_circuits_on_invalid_metadata() {
+        let mut receipt = valid_receipt();
+        receipt.circuit.levels = 11;
+
+        let mut proof_called = false;
+        let mut root_called = false;
+
+        let result = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |_r, _vk_hash| {
+                proof_called = true;
+                Ok(true)
+            },
+            true,
+            |_root| {
+                root_called = true;
+                Ok(true)
+            },
+        );
+
+        assert!(result.is_err());
+        assert!(!proof_called);
+        assert!(!root_called);
+    }
+
+    #[test]
+    fn known_roots_returns_true_when_all_roots_are_known() -> Result<()> {
+        let receipt = valid_receipt();
+        let known = verify_receipt_known_roots_with(&receipt, VK_HASH, |_root| Ok(true))?;
+        assert!(known);
+        Ok(())
+    }
+
+    #[test]
+    fn verification_report_all_checks_pass() -> Result<()> {
+        let receipt = valid_receipt();
+
+        let report = verify_receipt_report_with(
+            &receipt,
+            VK_HASH,
+            |r, _vk_hash| {
+                r.proof_compressed_bytes()?;
+                Ok(true)
+            },
+            true,
+            |_root| Ok(true),
+        )?;
+
+        assert!(report.proof_verified);
+        assert!(report.context_verified);
+        assert!(report.known_root_status);
+        Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_is_deterministic() -> Result<()> {
+        let ctx = valid_receipt().context;
+        let a = derive_ext_context_hash(&ctx)?;
+        let b = derive_ext_context_hash(&ctx)?;
+        assert_eq!(a, b);
+        Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_is_sensitive_to_every_field() -> Result<()> {
+        let base = valid_receipt().context;
+        let base_hash = derive_ext_context_hash(&base)?;
+
+        let mut mutated = base.clone();
+        mutated.network = "mainnet".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.pool_address =
+            "CBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.authority_label = "Authority ABC".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.authority_identity_payload_hex = "0xdeadbeef".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.purpose = "aml-check".to_string();
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        mutated = base.clone();
+        mutated.context_nonce = field(99);
+        assert_ne!(derive_ext_context_hash(&mutated)?, base_hash);
+
+        Ok(())
+    }
+
+    #[test]
+    fn verify_receipt_context_succeeds_when_hash_matches() -> Result<()> {
+        let mut receipt = valid_receipt();
+        let expected = derive_ext_context_hash(&receipt.context)?;
+        receipt.public_inputs.ext_context_hash = expected;
+        assert!(verify_receipt_context(&receipt)?);
+        Ok(())
+    }
+
+    #[test]
+    fn verify_receipt_context_fails_when_hash_mismatches() -> Result<()> {
+        let receipt = valid_receipt();
+        assert!(!verify_receipt_context(&receipt)?);
+        Ok(())
+    }
+
+    #[test]
+    fn derive_ext_context_hash_rejects_invalid_context() {
+        let mut ctx = valid_receipt().context;
+        ctx.network = "".to_string();
+        assert!(derive_ext_context_hash(&ctx).is_err());
+    }
+
+    #[test]
+    fn vk_hash_hex_is_deterministic() {
+        let a = vk_hash_hex(&[1u8, 2, 3]);
+        let b = vk_hash_hex(&[1u8, 2, 3]);
+        assert_eq!(a, b);
+    }
+
+    #[test]
+    fn vk_hash_hex_is_sensitive_to_input() {
+        let a = vk_hash_hex(&[1u8, 2, 3]);
+        let b = vk_hash_hex(&[1u8, 2, 4]);
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn vk_hash_hex_format_is_valid() {
+        let h = vk_hash_hex(&[0u8; 32]);
+        assert!(h.starts_with("0x"));
+        assert_eq!(h.len(), 66); // 0x + 64 hex chars
+        assert!(h.chars().skip(2).all(|c| c.is_ascii_hexdigit()));
     }
 }

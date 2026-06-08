@@ -1448,4 +1448,310 @@ mod tests {
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let spending_sig = SpendingSignature(vec![1u8; 64]);
+        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let amount_field_le = Field::from(amount).to_le_bytes();
+        let commitment_le = crypto::compute_commitment(
+            &amount_field_le,
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 3,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+
+        let result = storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &commitment)?;
+        assert!(result.is_some());
+        let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
+        assert_eq!(got_amount, amount);
+        assert_eq!(got_blinding, blinding);
+        assert_eq!(got_leaf_index, 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let spending_sig = SpendingSignature(vec![1u8; 64]);
+        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let amount_field_le = Field::from(amount).to_le_bytes();
+        let commitment_le = crypto::compute_commitment(
+            &amount_field_le,
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 3,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+
+        // Spend the note via nullifier.
+        let leaf_index: u32 = 3;
+        let mut path_indices_le = [0u8; 32];
+        path_indices_le[..8].copy_from_slice(&(u64::from(leaf_index)).to_le_bytes());
+        let signature = crypto::compute_signature(
+            &note_keypair.private.0,
+            &commitment.to_le_bytes(),
+            &path_indices_le,
+        )?;
+        let nullifier_le =
+            crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
+        let nullifier_le: [u8; 32] = nullifier_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len())
+        })?;
+        let nullifier = Field::try_from_le_bytes(nullifier_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-null")],
+            cursor: "cur2".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
+            id: "evt-null".to_string(),
+            nullifier,
+        }])?;
+        storage.reconcile_nullifiers(100)?;
+
+        let result = storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &commitment)?;
+        assert!(result.is_none(), "spent note should not be returned");
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let spending_sig = SpendingSignature(vec![1u8; 64]);
+        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        let mut commitment_le = [0u8; 32];
+        commitment_le[0] = 1;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 0,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+
+        let wrong_commitment = Field::try_from_le_bytes([
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ])?;
+        let result =
+            storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &wrong_commitment)?;
+        assert!(result.is_none(), "wrong commitment should not match");
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_pool_commitment_leaves_ordered_returns_ordered_leaves() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
+        let leaf1 = Field::try_from_le_bytes([1u8; 32])?;
+        let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                dummy_event("evt-0"),
+                dummy_event("evt-1"),
+                dummy_event("evt-2"),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: "evt-0".to_string(),
+                commitment: leaf0,
+                index: 0,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-1".to_string(),
+                commitment: leaf1,
+                index: 1,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-2".to_string(),
+                commitment: leaf2,
+                index: 2,
+                encrypted_output: vec![],
+            },
+        ])?;
+
+        let leaves = storage.get_pool_commitment_leaves_ordered()?;
+        assert_eq!(leaves.len(), 3);
+        assert_eq!(leaves[0], leaf0);
+        assert_eq!(leaves[1], leaf1);
+        assert_eq!(leaves[2], leaf2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_pool_commitment_leaves_ordered_detects_gaps() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
+        let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-0"), dummy_event("evt-2")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: "evt-0".to_string(),
+                commitment: leaf0,
+                index: 0,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-2".to_string(),
+                commitment: leaf2,
+                index: 2,
+                encrypted_output: vec![],
+            },
+        ])?;
+
+        let err = storage
+            .get_pool_commitment_leaves_ordered()
+            .expect_err("gap should error");
+        assert!(err.to_string().contains("gap/out-of-order"));
+
+        Ok(())
+    }
 }
