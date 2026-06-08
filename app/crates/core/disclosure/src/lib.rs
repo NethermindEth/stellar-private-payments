@@ -5,7 +5,8 @@ use prover::prover::{Prover, verify_proof};
 use sha2::{Digest, Sha256};
 use types::{
     DisclosureCircuitMetadata, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
-    Field, SELECTIVE_DISCLOSURE_1_CIRCUIT,
+    Field, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
+    SELECTIVE_DISCLOSURE_1_N_NOTES,
 };
 
 /// Domain prefix for `ext_context_hash` derivation.
@@ -163,8 +164,8 @@ impl RegisteredCircuit {
 /// Circuit metadata for `selectiveDisclosure_1`.
 pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     name: SELECTIVE_DISCLOSURE_1_CIRCUIT,
-    levels: 10,
-    n_notes: 1,
+    levels: SELECTIVE_DISCLOSURE_1_LEVELS,
+    n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
         wasm: "selectiveDisclosure_1.wasm",

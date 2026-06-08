@@ -8,6 +8,12 @@ pub const DISCLOSURE_RECEIPT_VERSION: u32 = 1;
 /// Initial selective-disclosure circuit entry point.
 pub const SELECTIVE_DISCLOSURE_1_CIRCUIT: &str = "selectiveDisclosure_1";
 
+/// Merkle tree depth expected by `selectiveDisclosure_1`.
+pub const SELECTIVE_DISCLOSURE_1_LEVELS: u32 = 10;
+
+/// Number of notes disclosed by `selectiveDisclosure_1`.
+pub const SELECTIVE_DISCLOSURE_1_N_NOTES: u32 = 1;
+
 /// Compressed Groth16 proof size used by arkworks for BN254 proofs.
 pub const COMPRESSED_GROTH16_PROOF_BYTES: usize = 128;
 
@@ -258,8 +264,8 @@ mod tests {
             version: DISCLOSURE_RECEIPT_VERSION,
             circuit: DisclosureCircuitMetadata {
                 name: SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
-                levels: 10,
-                n_notes: 1,
+                levels: SELECTIVE_DISCLOSURE_1_LEVELS,
+                n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
                 vk_hash: format!("0x{}", "11".repeat(32)),
             },
             context: DisclosureContext {

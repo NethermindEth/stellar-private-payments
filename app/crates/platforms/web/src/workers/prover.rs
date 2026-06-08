@@ -12,6 +12,7 @@ use prover::{
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar::hash_ext_data_offchain;
+use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
@@ -315,8 +316,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 version: types::DISCLOSURE_RECEIPT_VERSION,
                 circuit: types::DisclosureCircuitMetadata {
                     name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
-                    levels: 10,
-                    n_notes: 1,
+                    levels: SELECTIVE_DISCLOSURE_1_LEVELS,
+                    n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
                     vk_hash: vk_hash_hex,
                 },
                 context,
@@ -329,11 +330,14 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 issued_at: js_sys::Date::new_0()
                     .to_iso_string()
                     .as_string()
-                    .unwrap_or_else(|| "2026-06-01T00:00:00Z".to_string()),
+                    .ok_or_else(|| anyhow::anyhow!("failed to get current ISO date"))?,
             };
 
             ProverWorkerResponse::Disclosure(receipt)
         }
+        // TODO: Consider extracting disclosure proof verification into a separate
+        // interface/crate. Verification is initiated by a receipt holder outside
+        // the app, while proving is app-initiated, so the responsibilities differ.
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             log::debug!("[{WORKER_NAME}] verify disclosure proof");
 

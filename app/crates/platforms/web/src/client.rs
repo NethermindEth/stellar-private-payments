@@ -1387,6 +1387,12 @@ impl WebClient {
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
 
+        // Wait for prover worker initialization before verifying, otherwise
+        // DISCLOSURE_PROVER may not be populated yet on a fresh client.
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
         // Verify proof via prover worker
         let proof_verified = match self
             .prover_request(
