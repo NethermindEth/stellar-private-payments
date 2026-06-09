@@ -12,7 +12,7 @@ jobs:
       pages: write
       id-token: write
     name: Site
-    timeout-minutes: 15
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - name: Checkout source code
