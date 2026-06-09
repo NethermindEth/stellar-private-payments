@@ -6,14 +6,14 @@ This document describes how the application manages local state, including persi
 
 **Core vs platforms**
 
-Core application logic is implemented in Rust `app/crates/core` crates which define sync and async primitives and building blocks.
+Core application logic is implemented in Rust `sdk/` crates which define sync and async primitives and building blocks.
 Platforms `app/crates/platforms` (`web`, in the future - `cli`, `mcp` etc) provide compilation target specific dependencies, setup runtime (asynchronous/threaded), ui interaction protocol (e.g. FFI/http), order of operations.
 
 Other directories in `app` directory mostly define interfaces for the `web` platform but probably can be restructured in the future to include other platforms interfaces as well.
 
 **Storage:**
 
-Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
+Local storage is implemented upon SQLite (`sdk/state/src/storage.rs`) with the schema `sdk/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
 
 ## Web platform (WASM + Web Workers)
 
@@ -113,8 +113,8 @@ flowchart LR
 **Keypair Derivation:**
 
 Keys are derived deterministically from Freighter wallet signatures:
-1. User signs message defined by the constant `SPENDING_KEY_MESSAGE` from `app/crates/core/prover/src/encryption.rs` → derives BN254 note identity keypair
-2. User signs message defined by the constant `ENCRYPTION_MESSAGE` from `app/crates/core/prover/src/encryption.rs` → derives X25519 encryption keypair
+1. User signs message defined by the constant `SPENDING_KEY_MESSAGE` from `sdk/prover/src/encryption.rs` → derives BN254 note identity keypair
+2. User signs message defined by the constant `ENCRYPTION_MESSAGE` from `sdk/prover/src/encryption.rs` → derives X25519 encryption keypair
 
 **When are signatures prompted?**
 

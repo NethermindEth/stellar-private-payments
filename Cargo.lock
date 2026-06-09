@@ -1825,7 +1825,7 @@ dependencies = [
  "pool",
  "soroban-sdk",
  "soroban-utils",
- "tx-planner",
+ "stellar-private-payments-sdk",
  "types",
  "zkhash",
 ]
@@ -4730,6 +4730,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "stellar-private-payments-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "prover",
+ "state",
+ "stellar",
+ "thiserror 2.0.18",
+ "types",
+ "witness",
+]
+
+[[package]]
 name = "stellar-strkey"
 version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5185,14 +5198,6 @@ name = "twox-hash"
 version = "2.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
-
-[[package]]
-name = "tx-planner"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.18",
- "types",
-]
 
 [[package]]
 name = "type_analysis"
@@ -5772,21 +5777,17 @@ dependencies = [
  "gloo-worker",
  "js-sys",
  "log",
- "prover",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "state",
- "stellar",
- "types",
+ "stellar-private-payments-sdk",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
- "witness",
 ]
 
 [[package]]

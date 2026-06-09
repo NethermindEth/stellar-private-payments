@@ -13,8 +13,7 @@ use client::WebClient;
 use config::Config;
 use gloo_timers::future::TimeoutFuture;
 use std::rc::Rc;
-use stellar::Indexer;
-use types::ContractConfig;
+use stellar_private_payments_sdk::{ContractConfig, chain::Indexer};
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
 
@@ -36,16 +35,15 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     console_error_panic_hook::set_once();
     wasm_log::init(wasm_log::Config::default());
     log::debug!("[MAIN THREAD] starting initialization...");
-    let contract_config: &'static ContractConfig =
-        Box::leak(Box::new(serde_json::from_str(DEPLOYMENT)?));
-    let client = WebClient::new(config.rpc_url(), contract_config)
+    let contract_config: ContractConfig = serde_json::from_str(DEPLOYMENT)?;
+    let client = WebClient::new(config.rpc_url(), contract_config.clone())
         .map_err(|e| JsError::new(&e.to_string()))?;
     client
         .ping_storage()
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    let indexer = Indexer::init(config.rpc_url(), client.clone(), contract_config)
+    let indexer = Indexer::init(config.rpc_url(), client.clone(), &contract_config)
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
     start_indexer_loop(indexer, 5_000);

@@ -5,21 +5,22 @@ use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
-use prover::{
-    crypto::asp_membership_leaf,
-    encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
-    flows::{
-        DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
-        TransferParams, WithdrawParams,
-    },
-    merkle::{MerklePrefixTree, MerkleProof},
-};
-use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
-};
 use std::cell::RefCell;
-use types::{
-    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteKeyPair, NotePublicKey,
+use stellar_private_payments_sdk::{
+    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, EncryptionPublicKey, ExtAmount,
+    Field, NoteKeyPair, NotePrivateKey, NotePublicKey,
+    storage::{
+        AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+    },
+    tx::{
+        crypto::asp_membership_leaf,
+        encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
+        flows::{
+            DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
+            TransferParams, WithdrawParams,
+        },
+        merkle::{MerklePrefixTree, MerkleProof},
+    },
 };
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
@@ -120,7 +121,7 @@ async fn init() -> Result<(), JsError> {
         return Err(JsError::new(&msg));
     }
 
-    let storage = match state::Storage::connect() {
+    let storage = match Storage::connect() {
         Ok(storage) => storage,
         Err(e) => {
             let msg = format!("Failed to open local database: {e}");
@@ -380,10 +381,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
             };
 
-            let mut withdraw_amount = types::ExtAmount::ZERO;
+            let mut withdraw_amount = ExtAmount::ZERO;
             for i in &inputs {
                 withdraw_amount = withdraw_amount
-                    .checked_add(types::ExtAmount::try_from(i.amount)?)
+                    .checked_add(ExtAmount::try_from(i.amount)?)
                     .ok_or_else(|| anyhow::anyhow!("withdraw amount overflow"))?;
             }
 
@@ -548,11 +549,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
 fn load_user_key_material(
     user_address: &str,
-) -> Result<(
-    types::NotePrivateKey,
-    NotePublicKey,
-    types::EncryptionPublicKey,
-)> {
+) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey)> {
     with_storage!(s => {
         let (note_privkey, note_pubkey, encryption_pubkey) =
             match s.get_user_keys(user_address)? {
@@ -695,7 +692,7 @@ async fn process_until_empty() -> anyhow::Result<()> {
         let mut derive = |account: &AccountKeys,
                           row: &PoolCommitmentRow|
          -> anyhow::Result<Option<DerivedUserNoteRow>> {
-            let opt = prover::notes::try_decrypt_and_derive_user_note(
+            let opt = stellar_private_payments_sdk::tx::notes::try_decrypt_and_derive_user_note(
                 &account.note_keypair,
                 &account.encryption_keypair.private,
                 &row.commitment,

@@ -1,11 +1,14 @@
 use serde::{Deserialize, Serialize};
 
-use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams};
+use stellar_private_payments_sdk::tx::flows::{
+    DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams,
+};
 pub type Address = String;
-use types::{
+use stellar_private_payments_sdk::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair,
-    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata, UserNoteSummary,
+    EncryptionPublicKey, EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair,
+    NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata,
+    UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -130,7 +133,7 @@ pub struct TransferRequest {
     pub input_commitments: Vec<Field>,
     pub output_amounts: [NoteAmount; N_OUTPUTS],
     pub recipient_note_pubkey: NotePublicKey,
-    pub recipient_encryption_pubkey: types::EncryptionPublicKey,
+    pub recipient_encryption_pubkey: EncryptionPublicKey,
     pub smt_depth: u32,
     pub tree_depth: u32,
     pub non_membership_proof: AspNonMembershipProof,
@@ -152,7 +155,7 @@ pub struct TransactRequest {
     pub input_commitments: Vec<Field>,
     pub output_amounts: [NoteAmount; N_OUTPUTS],
     pub out_recipient_note_pubkeys: [Option<NotePublicKey>; N_OUTPUTS],
-    pub out_recipient_encryption_pubkeys: [Option<types::EncryptionPublicKey>; N_OUTPUTS],
+    pub out_recipient_encryption_pubkeys: [Option<EncryptionPublicKey>; N_OUTPUTS],
     pub smt_depth: u32,
     pub tree_depth: u32,
     pub non_membership_proof: AspNonMembershipProof,

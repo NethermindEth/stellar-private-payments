@@ -17,7 +17,7 @@ use circuits::test::utils::{
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
-use tx_planner::{PlannedStep, SpendableNote, StepAction, plan};
+use stellar_private_payments_sdk::{PlannedStep, SpendableNote, StepAction, plan};
 use types::{Field, NoteAmount};
 use zkhash::{
     ark_ff::{BigInteger, PrimeField},
