@@ -47,7 +47,7 @@ use x25519_dalek::{PublicKey, StaticSecret};
 // These MUST remain constant for backwards compatibility.
 
 /// Message signed to derive both privacy keypairs.
-pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v2]";
+pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
 
 const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
 const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
@@ -85,8 +85,8 @@ pub fn derive_encryption_and_note_keypairs(
 /// ```
 ///
 /// # Arguments
-/// * `signature` - Stellar Ed25519 signature from signing "Sign to access
-///   Privacy Pool [v1]"
+/// * `signature` - Stellar Ed25519 signature from signing
+///   `KEY_DERIVATION_MESSAGE`
 ///
 /// # Returns
 /// 64 bytes: `[public_key (32), private_key (32)]`
@@ -125,8 +125,8 @@ fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<E
 /// ```
 ///
 /// # Arguments
-/// * `signature` - Stellar Ed25519 signature from signing "Privacy Pool
-///   Spending Key [v1]"
+/// * `signature` - Stellar Ed25519 signature from signing
+///   `KEY_DERIVATION_MESSAGE`
 ///
 /// # Returns
 /// 32 bytes: Note private key (BN254 scalar, little-endian)
