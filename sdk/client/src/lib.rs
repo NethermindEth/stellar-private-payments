@@ -52,6 +52,13 @@ pub mod proving {
     pub use witness::WitnessCalculator;
 }
 
+pub mod plan;
+
+pub use plan::{
+    CombinationResult, PlanError, PlannedStep, SpendableNote, StepAction, StepNote,
+    TRANSACTION_LIMIT, TransactionPlan, find_combination, plan,
+};
+
 mod client;
 
 pub use client::Client;

@@ -15,6 +15,7 @@ anyhow = { workspace = true }
 prover = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
+thiserror = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 witness = { workspace = true }
 

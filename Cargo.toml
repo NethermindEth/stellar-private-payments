@@ -1,17 +1,17 @@
 [workspace]
 members = [
-    "sdk/client",
-    "sdk/prover",
-    "sdk/state",
-    "sdk/stellar",
-    "sdk/types",
-    "sdk/witness",
     "app/crates/platforms/web",
     "circuit-keys",
     "circuits",
     "contracts/*",
     "e2e-tests",
     "poseidon2",
+    "sdk/client",
+    "sdk/prover",
+    "sdk/state",
+    "sdk/stellar",
+    "sdk/types",
+    "sdk/witness",
     "tools/ceremony-cli",
 ]
 resolver = "3"
@@ -60,12 +60,12 @@ serde = { version = "1", default-features = false, features = ["derive", "alloc"
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_bytes = { version = "0.11", default-features = false }
 serde_json = { version = "1", default-features = false }
-stellar-private-payments-sdk = { path = "sdk/client" }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "26", default-features = false, features = ["hazmat"] }
 soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "sdk/state" }
 stellar = { path = "sdk/stellar" }
+stellar-private-payments-sdk = { path = "sdk/client" }
 thiserror = { version = "2", default-features = false }
 types = { path = "sdk/types" }
 uint = { version = "0.10", default-features = false }

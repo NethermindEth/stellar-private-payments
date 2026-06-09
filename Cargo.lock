@@ -1825,6 +1825,8 @@ dependencies = [
  "pool",
  "soroban-sdk",
  "soroban-utils",
+ "stellar-private-payments-sdk",
+ "types",
  "zkhash",
 ]
 
@@ -4735,6 +4737,7 @@ dependencies = [
  "prover",
  "state",
  "stellar",
+ "thiserror 2.0.18",
  "types",
  "witness",
 ]

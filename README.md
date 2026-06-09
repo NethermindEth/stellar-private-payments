@@ -12,7 +12,7 @@
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/groups/18809039/)
 
 > [!WARNING]
-> This project is a **Proof of Concept (PoC)** and prototype implementation. It is intended for research and educational purposes only. The code has not been audited and should not be used in production environments with real assets.
+> This project is a **Work in progress (WIP)**. It is intended to serve as **a reference implementation** of privacy pools for Stellar. The code has not yet been audited and should not be used in production environments with real assets as of now. The security hardening work is planned.
 
 A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
@@ -111,9 +111,8 @@ The main transaction circuit proves:
 
 ## Limitations
 
-As a proof of concept, this implementation has several limitations:
+As a work-in-progress, this implementation has several limitations:
 
-- **Single circuit support**: Now the demo only showcases a single circuit (2 inputs, 2 outputs). Support for multiple circuits might be added in the future.
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
