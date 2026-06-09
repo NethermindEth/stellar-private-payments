@@ -1,4 +1,5 @@
-//! E2E: tx-planner multi-step spend (consolidate + final) with real proofs.
+//! E2E: tx-planner spend session multi-step spend (consolidate + final) with
+//! real proofs.
 
 use super::utils::{
     DeployedContracts, LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint,
@@ -17,14 +18,15 @@ use circuits::test::utils::{
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
 use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
-use tx_planner::{PlannedStep, SpendableNote, StepAction, plan};
-use types::{Field, NoteAmount};
+use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
+use types::{EncryptionPublicKey, Field, NoteAmount, NotePublicKey};
 use zkhash::{
     ark_ff::{BigInteger, PrimeField},
     fields::bn256::FpBN256 as Scalar,
 };
 
 const USER_SKEY: u64 = 1001;
+const POOL_ADDRESS: &str = "POOL";
 
 struct TestNote {
     input: InputNote,
@@ -80,92 +82,104 @@ fn spendable_notes(notes: &[TestNote]) -> Vec<SpendableNote> {
     notes.iter().map(|n| n.as_spendable_note()).collect()
 }
 
-fn tx_case_for_step<'a>(step: &PlannedStep, wallet: &'a [TestNote], user_pub: Scalar) -> TxCase {
-    let find_note = |wallet: &'a [TestNote], commitment: Field| -> &'a TestNote {
+fn transfer_target() -> SpendTarget {
+    SpendTarget::transfer(
+        NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000501")
+            .expect("test recipient note key"),
+        EncryptionPublicKey::parse(
+            "0x0000000000000000000000000000000000000000000000000000000000000601",
+        )
+        .expect("test recipient enc key"),
+    )
+}
+
+fn tx_case_for_transact(
+    step: &Transact,
+    consolidate: bool,
+    wallet: &[TestNote],
+    user_pub: Scalar,
+) -> TxCase {
+    let find_note = |commitment: Field| -> &TestNote {
         wallet
             .iter()
             .find(|n| n.commitment() == commitment)
             .expect("wallet note for commitment")
     };
 
-    let resolved = step
-        .resolve(&spendable_notes(wallet))
-        .expect("resolve step");
-    let inputs = resolved
+    let inputs = step
+        .input_commitments
         .iter()
-        .map(|n| find_note(wallet, n.commitment).input.clone())
+        .map(|c| find_note(*c).input.clone())
         .collect::<Vec<_>>();
 
-    match step.action {
-        StepAction::Consolidate { output } => {
-            let amount = Scalar::from(u128::from(output));
-            TxCase::new(
-                inputs,
-                vec![
-                    OutputNote {
-                        pub_key: user_pub,
-                        blinding: Scalar::from(900u64),
-                        amount,
-                    },
-                    OutputNote {
-                        pub_key: Scalar::from(0u64),
-                        blinding: Scalar::from(0u64),
-                        amount: Scalar::from(0u64),
-                    },
-                ],
-            )
-        }
-        StepAction::Final { outputs } => {
-            let send = Scalar::from(u128::from(outputs.0));
-            let change = outputs.1.map(|c| Scalar::from(u128::from(c)));
-            let (out0, out1) = match change {
-                Some(change) => (
-                    OutputNote {
-                        pub_key: Scalar::from(501u64),
-                        blinding: Scalar::from(601u64),
-                        amount: send,
-                    },
-                    OutputNote {
-                        pub_key: user_pub,
-                        blinding: Scalar::from(602u64),
-                        amount: change,
-                    },
-                ),
-                None => (
-                    OutputNote {
-                        pub_key: Scalar::from(501u64),
-                        blinding: Scalar::from(601u64),
-                        amount: send,
-                    },
-                    OutputNote {
-                        pub_key: Scalar::from(0u64),
-                        blinding: Scalar::from(0u64),
-                        amount: Scalar::from(0u64),
-                    },
-                ),
-            };
-            TxCase::new(inputs, vec![out0, out1])
-        }
+    let out0 = Scalar::from(u128::from(step.output_amounts[0]));
+    let out1 = Scalar::from(u128::from(step.output_amounts[1]));
+
+    if consolidate {
+        return TxCase::new(
+            inputs,
+            vec![
+                OutputNote {
+                    pub_key: user_pub,
+                    blinding: Scalar::from(900u64),
+                    amount: out0,
+                },
+                OutputNote {
+                    pub_key: Scalar::from(0u64),
+                    blinding: Scalar::from(0u64),
+                    amount: Scalar::from(0u64),
+                },
+            ],
+        );
     }
+
+    let outputs = if step.output_amounts[1].is_zero() {
+        vec![
+            OutputNote {
+                pub_key: Scalar::from(501u64),
+                blinding: Scalar::from(601u64),
+                amount: out0,
+            },
+            OutputNote {
+                pub_key: Scalar::from(0u64),
+                blinding: Scalar::from(0u64),
+                amount: Scalar::from(0u64),
+            },
+        ]
+    } else {
+        vec![
+            OutputNote {
+                pub_key: Scalar::from(501u64),
+                blinding: Scalar::from(601u64),
+                amount: out0,
+            },
+            OutputNote {
+                pub_key: user_pub,
+                blinding: Scalar::from(602u64),
+                amount: out1,
+            },
+        ]
+    };
+
+    TxCase::new(inputs, outputs)
 }
 
-fn update_wallet(
-    step: &PlannedStep,
+fn remove_spent_test_notes(wallet: &mut Vec<TestNote>, spent: &[Field]) {
+    wallet.retain(|n| !spent.contains(&n.commitment()));
+}
+
+fn apply_consolidate_to_harness(
+    step: &Transact,
     wallet: &mut Vec<TestNote>,
     leaves: &mut [Scalar],
     merge_leaf_index: usize,
     pool_client: &PoolContractClient,
-) -> Result<()> {
-    let StepAction::Consolidate { output } = step.action else {
-        panic!("expected consolidate step");
-    };
-    let merged_note = TestNote::new(
-        merge_leaf_index,
-        USER_SKEY,
-        900,
-        u64::try_from(u128::from(output)).expect("note amount fits in u64"),
-    );
+) {
+    let merge_amount =
+        u64::try_from(u128::from(step.output_amounts[0])).expect("note amount fits in u64");
+    let merged_note = TestNote::new(merge_leaf_index, USER_SKEY, 900, merge_amount);
     merged_note.set_in_tree(leaves);
+
     let dummy_leaf_index = merge_leaf_index
         .checked_add(1)
         .expect("merge output pair index");
@@ -178,13 +192,8 @@ fn update_wallet(
         "off-chain leaves must match pool after consolidate"
     );
 
-    let spent = step.resolve(&spendable_notes(wallet))?;
-
-    let spent: Vec<Field> = spent.iter().map(|n| n.commitment).collect();
-    wallet.retain(|n| !spent.contains(&n.commitment()));
+    remove_spent_test_notes(wallet, &step.input_commitments);
     wallet.push(merged_note);
-
-    Ok(())
 }
 
 fn run_step(
@@ -330,8 +339,7 @@ fn run_step(
     Ok(())
 }
 
-/// Wallet [2, 3, 5], spend 10 → consolidate(2+3) then final(5+5), two on-chain
-/// txs.
+/// Wallet [2, 3, 5], spend 10 → consolidate then final, two on-chain txs.
 #[test]
 #[cfg_attr(miri, ignore)]
 fn test_e2e_planned_consolidate_final() -> Result<()> {
@@ -340,20 +348,25 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
 
     let user_pub = derive_public_key(Scalar::from(USER_SKEY));
 
-    let mut wallet = vec![
+    let mut test_wallet = vec![
         TestNote::new(0, USER_SKEY, 201, 2),
         TestNote::new(1, USER_SKEY, 211, 3),
         TestNote::new(6, USER_SKEY, 221, 5),
     ];
 
-    let tx_plan = plan(NoteAmount::from(10u128), &spendable_notes(&wallet))?;
-    assert_eq!(tx_plan.len(), 2);
+    let mut session = SpendSession::setup(
+        spendable_notes(&test_wallet),
+        NoteAmount::from(10u128),
+        POOL_ADDRESS.to_string(),
+        transfer_target(),
+    )?;
+    assert_eq!(session.len(), 2);
 
     let mut leaves = prepopulated_leaves(LEVELS, 0xDEAD_BEEFu64, &[0, 1, 6], 24);
-    for note in &wallet {
+    for note in &test_wallet {
         note.set_in_tree(&mut leaves);
     }
-    // Leave empty pairs at the tail for each planned on-chain tx.
+
     let zero = U256::from_be_bytes(
         &env,
         &Bytes::from_array(
@@ -364,8 +377,7 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
             ],
         ),
     );
-    let reserved_pairs = tx_plan.len();
-    let reserved_leaves = reserved_pairs.checked_mul(2).expect("reserved leaf count");
+    let reserved_leaves = session.len().checked_mul(2).expect("reserved leaf count");
     let first_merge_leaf_index = leaves
         .len()
         .checked_sub(reserved_leaves)
@@ -384,24 +396,47 @@ fn test_e2e_planned_consolidate_final() -> Result<()> {
     let pool_client = PoolContractClient::new(&env, &contracts.pool);
 
     let mut next_merge_leaf_index = first_merge_leaf_index;
-    for (step_idx, step) in tx_plan.into_iter().enumerate() {
-        let case = tx_case_for_step(&step, &wallet, user_pub);
-        let bootstrap = (step_idx == 0).then_some(first_merge_leaf_index);
+    let mut step_count = 0usize;
+
+    while let Some(step) = session.step()? {
+        let consolidate = session.is_consolidate_step();
+        let case = tx_case_for_transact(&step, consolidate, &test_wallet, user_pub);
+        let bootstrap = (step_count == 0).then_some(first_merge_leaf_index);
         run_step(&env, &contracts, &case, &mut leaves, &ext_data, bootstrap)?;
 
-        if matches!(step.action, StepAction::Consolidate { .. }) {
-            update_wallet(
+        let output_commitments = [
+            scalar_to_field(commitment(
+                case.outputs[0].amount,
+                case.outputs[0].pub_key,
+                case.outputs[0].blinding,
+            )),
+            scalar_to_field(commitment(
+                case.outputs[1].amount,
+                case.outputs[1].pub_key,
+                case.outputs[1].blinding,
+            )),
+        ];
+
+        if consolidate {
+            apply_consolidate_to_harness(
                 &step,
-                &mut wallet,
+                &mut test_wallet,
                 &mut leaves,
                 next_merge_leaf_index,
                 &pool_client,
-            )?;
+            );
             next_merge_leaf_index = next_merge_leaf_index
                 .checked_add(2)
                 .expect("next merge leaf index");
+        } else {
+            remove_spent_test_notes(&mut test_wallet, &step.input_commitments);
         }
+
+        session.complete_step(&output_commitments)?;
+        step_count += 1;
     }
 
+    assert_eq!(step_count, 2);
+    assert!(session.is_done());
     Ok(())
 }

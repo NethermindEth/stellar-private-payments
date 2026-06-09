@@ -5781,6 +5781,7 @@ dependencies = [
  "sqlite-wasm-vfs",
  "state",
  "stellar",
+ "tx-planner",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",

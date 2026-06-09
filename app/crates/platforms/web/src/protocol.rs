@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams};
+use prover::flows::{DepositParams, N_OUTPUTS, TransactParams};
 pub type Address = String;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, ExtAmount,
@@ -34,11 +34,13 @@ pub enum StorageWorkerRequest {
     AcceptDisclaimer(Address, String),
     UserKeys(Address),
     UserNotes(Address, u32),
+    UnspentUserNotes {
+        user_address: Address,
+        pool_contract_id: Address,
+    },
     RecentPoolActivity(u32),
     RecentPubKeys(u32),
     Deposit(DepositRequest),
-    Withdraw(WithdrawRequest),
-    Transfer(TransferRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
 }
@@ -56,8 +58,6 @@ pub enum StorageWorkerResponse {
     PubKeys(Vec<PublicKeyEntry>),
     AspMembershipSync(AspMembershipSync),
     DepositParams(DepositParams),
-    WithdrawParams(WithdrawParams),
-    TransferParams(TransferParams),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
 }
@@ -66,8 +66,6 @@ pub enum StorageWorkerResponse {
 pub enum ProverWorkerRequest {
     Ping,
     Deposit(DepositParams),
-    Withdraw(WithdrawParams),
-    Transfer(TransferParams),
     Transact(TransactParams),
 }
 
@@ -76,8 +74,6 @@ pub enum ProverWorkerResponse {
     Pong,
     Error(String),
     DepositPrepared(DepositPrepared),
-    WithdrawPrepared(PreparedProverTx),
-    TransferPrepared(PreparedProverTx),
     TransactPrepared(PreparedProverTx),
 }
 
@@ -93,44 +89,6 @@ pub struct DepositRequest {
     pub aspmem_contract_id: Address,
     pub aspmem_ledger: u32,
     pub output_amounts: [NoteAmount; N_OUTPUTS],
-    pub smt_depth: u32,
-    pub tree_depth: u32,
-    pub non_membership_proof: AspNonMembershipProof,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WithdrawRequest {
-    pub user_address: Address,
-    pub membership_blinding: Field,
-    pub withdraw_recipient: Address,
-    pub pool_root: Option<Field>,
-    pub pool_next_index: u32,
-    pub pool_address: Address,
-    pub aspmem_root: Field,
-    pub aspmem_contract_id: Address,
-    pub aspmem_ledger: u32,
-    pub input_commitments: Vec<Field>,
-    pub smt_depth: u32,
-    pub tree_depth: u32,
-    pub non_membership_proof: AspNonMembershipProof,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransferRequest {
-    pub user_address: Address,
-    pub membership_blinding: Field,
-    pub pool_root: Option<Field>,
-    pub pool_next_index: u32,
-    pub pool_address: Address,
-    pub aspmem_root: Field,
-    pub aspmem_contract_id: Address,
-    pub aspmem_ledger: u32,
-    pub input_commitments: Vec<Field>,
-    pub output_amounts: [NoteAmount; N_OUTPUTS],
-    pub recipient_note_pubkey: NotePublicKey,
-    pub recipient_encryption_pubkey: types::EncryptionPublicKey,
     pub smt_depth: u32,
     pub tree_depth: u32,
     pub non_membership_proof: AspNonMembershipProof,

@@ -66,6 +66,7 @@ soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "app/crates/core/state" }
 stellar = { path = "app/crates/core/stellar" }
 thiserror = { version = "2", default-features = false }
+tx-planner = { path = "app/crates/core/tx-planner" }
 types = { path = "app/crates/core/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }

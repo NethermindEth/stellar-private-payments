@@ -8,10 +8,7 @@ use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
     crypto::asp_membership_leaf,
     encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
-    flows::{
-        DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
-        TransferParams, WithdrawParams,
-    },
+    flows::{DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
     merkle::{MerklePrefixTree, MerkleProof},
 };
 use state::{
@@ -264,6 +261,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
+        StorageWorkerRequest::UnspentUserNotes {
+            user_address,
+            pool_contract_id,
+        } => {
+            log::trace!(
+                "[{WORKER_NAME}] list all unspent notes for the account {user_address} in pool {pool_contract_id}"
+            );
+            let list = with_storage!(s =>
+                s.list_unspent_user_notes(&pool_contract_id, &user_address)?
+            )?;
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} unspent notes for the account {user_address}",
+                list.len()
+            );
+            StorageWorkerResponse::UserNotes(list)
+        }
         StorageWorkerRequest::RecentPoolActivity(limit) => {
             log::trace!("[{WORKER_NAME}] fetch recent pool activity");
             let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
@@ -335,135 +348,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             };
 
             StorageWorkerResponse::DepositParams(params)
-        }
-        StorageWorkerRequest::Withdraw(req) => {
-            log::trace!("[{WORKER_NAME}] withdraw");
-
-            if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
-                return Ok(StorageWorkerResponse::Error(
-                    "withdraw input_commitments must have length 1..=2".to_string(),
-                ));
-            }
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &req.aspmem_contract_id,
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let inputs = match build_pool_inputs(
-                &req.user_address,
-                &req.pool_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-                &req.input_commitments,
-            )? {
-                Ok(v) => v,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let mut withdraw_amount = types::ExtAmount::ZERO;
-            for i in &inputs {
-                withdraw_amount = withdraw_amount
-                    .checked_add(types::ExtAmount::try_from(i.amount)?)
-                    .ok_or_else(|| anyhow::anyhow!("withdraw amount overflow"))?;
-            }
-
-            let params = WithdrawParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                withdraw_recipient: req.withdraw_recipient,
-                withdraw_amount,
-                inputs,
-                outputs: None,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::WithdrawParams(params)
-        }
-        StorageWorkerRequest::Transfer(req) => {
-            log::trace!("[{WORKER_NAME}] transfer");
-
-            if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
-                return Ok(StorageWorkerResponse::Error(
-                    "transfer input_commitments must have length 1..=2".to_string(),
-                ));
-            }
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &req.aspmem_contract_id,
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let inputs = match build_pool_inputs(
-                &req.user_address,
-                &req.pool_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-                &req.input_commitments,
-            )? {
-                Ok(v) => v,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let outputs = (0..N_OUTPUTS)
-                .map(|i| {
-                    Ok(TransactOutput {
-                        amount: req.output_amounts[i],
-                        blinding: generate_random_blinding()?,
-                        recipient_note_pubkey: Some(req.recipient_note_pubkey.clone()),
-                        recipient_encryption_pubkey: Some(req.recipient_encryption_pubkey.clone()),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let params = TransferParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                pool_address: req.pool_address,
-                inputs,
-                outputs,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::TransferParams(params)
         }
         StorageWorkerRequest::Transact(req) => {
             log::trace!("[{WORKER_NAME}] transact");
@@ -644,11 +528,13 @@ fn build_pool_inputs(
 
     let mut out = Vec::with_capacity(input_commitments.len());
     for commitment in input_commitments {
-        let (amount, blinding, leaf_index) =
-            with_storage!(s => s.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?)?
-                .ok_or_else(|| {
-                anyhow::anyhow!("unspent note not found for commitment {}", commitment)
-            })?;
+        let Some((amount, blinding, leaf_index)) = with_storage!(s => s.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?)?
+        else {
+            log::info!(
+                "[{WORKER_NAME}] unspent note not found for commitment {commitment}; waiting for note derivation"
+            );
+            return Ok(Err(AspMembershipSync::SyncRequired(None)));
+        };
 
         let MerkleProof {
             path_elements,

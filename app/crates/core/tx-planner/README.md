@@ -38,10 +38,12 @@ At most [`TRANSACTION_LIMIT`](src/plan/combination.rs) notes (10) may be selecte
 - **One note** — one step, `Final` (send + optional change).
 - **Several notes** — `Consolidate` steps merge two inputs into one synthetic note, then the last step is `Final` (send + optional change).
 
-The executor (outside this crate) turns each step into proofs and a `transact` invocation.
+[`SpendSession`](src/execute/mod.rs) freezes the plan and wallet snapshot at `setup`. The caller loops: `step()` → prove/submit → `complete_step(output_commitments)`.
 
 ## Public API
 
-- `plan` — main entry: wallet notes + spend amount → `TransactionPlan` or `PlanError`
-- `find_combination` — coin selection only (for tests or custom wiring)
-- `TransactionPlan`, `SpendableNote`, `PlannedStep`, `StepAction`, `CombinationResult`, `PlanError`
+- `plan` — wallet notes + spend amount → `TransactionPlan` (also used for spend previews)
+- `SpendSession::setup` — plan + wallet snapshot + `SpendTarget`
+- `SpendSession::step` / `complete_step` — step loop
+- `find_combination` — coin selection only
+- `TransactionPlan`, `SpendableNote`, `PlannedStep`, `Transact`, `PlanError`, `SpendSessionError`

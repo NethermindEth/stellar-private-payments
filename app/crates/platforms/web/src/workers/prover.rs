@@ -6,7 +6,7 @@ use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
-    flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
+    flows::{TransactArtifacts, deposit, transact},
     prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
@@ -185,17 +185,6 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 ext_data: prepared.ext_data,
                 prepared: prepared.prepared,
             })
-        }
-        ProverWorkerRequest::Withdraw(params) => {
-            log::debug!("[{WORKER_NAME}] withdraw");
-            let artifacts = withdraw(params, hash_ext_data_offchain)?;
-            ProverWorkerResponse::WithdrawPrepared(prove_from_artifacts(artifacts)?)
-        }
-        ProverWorkerRequest::Transfer(params) => {
-            log::debug!("[{WORKER_NAME}] transfer");
-            let artifacts = transfer(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            ProverWorkerResponse::TransferPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
