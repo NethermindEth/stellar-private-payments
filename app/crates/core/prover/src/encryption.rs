@@ -24,10 +24,11 @@
 //!                   └── SHA-256("privacy-pool/encryption-key/v2" || sig)
 //!                              └── X25519 Encryption Keypair
 //! ```
-//! Note: the original scheme had separate signatures for spending and encryption
-//! keys. To improve UX we reduced to a single signature derivation accepting
-//! some associated risks like a user signing the message at a scam website
-//! (2 separate signatures could create a safety pause to stop and think)
+//! Note: the original scheme had separate signatures for spending and
+//! encryption keys. To improve UX we reduced to a single signature derivation
+//! accepting some associated risks like a user signing the message at a scam
+//! website (2 separate signatures could create a safety pause to stop and
+//! think)
 use crate::crypto::derive_public_key;
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
