@@ -1166,8 +1166,8 @@ mod tests {
     use super::*;
     use prover::{crypto, encryption};
     use types::{
-        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature, NoteAmount,
-        NotePublicKey, PublicKeyEvent, SpendingSignature,
+        ContractEvent, ContractsEventData, EncryptionPublicKey, KeyDerivationSignature, NoteAmount,
+        NotePublicKey, PublicKeyEvent,
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -1216,10 +1216,8 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Create an account with keypairs.
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
         storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
 
         let account_id: i64 = storage.conn.query_row(
@@ -1389,14 +1387,10 @@ mod tests {
     fn get_user_keys_returns_latest_keypair() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let (note_keypair_1, enc_keypair_1) = encryption::derive_encryption_and_note_keypairs(
-            SpendingSignature(vec![1u8; 64]),
-            EncryptionSignature(vec![2u8; 64]),
-        )?;
-        let (note_keypair_2, enc_keypair_2) = encryption::derive_encryption_and_note_keypairs(
-            SpendingSignature(vec![3u8; 64]),
-            EncryptionSignature(vec![4u8; 64]),
-        )?;
+        let (note_keypair_1, enc_keypair_1) =
+            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+        let (note_keypair_2, enc_keypair_2) =
+            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![3u8; 64]))?;
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
@@ -1422,10 +1416,8 @@ mod tests {
     fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
 
         storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
         storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;

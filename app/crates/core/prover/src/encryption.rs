@@ -1,13 +1,6 @@
 //! Cryptographic key derivation and note encryption.
 //!
-//! This module implements two key derivation schemes:
-//!
-//! 1. **Encryption Keys (X25519)**: For encrypting/decrypting note data
-//!    off-chain. Derived from Freighter signature using SHA-256.
-//!
-//! 2. **Note Identity Keys (BN254)**: For proving ownership in ZK circuits.
-//!    Also derived from Freighter signature using SHA-256 with domain
-//!    separation.
+//! This module derives both privacy keypairs from a single wallet signature.
 //!
 //! Both key types are deterministically derived from wallet signatures,
 //! ensuring users can recover all keys using only their wallet seed phrase.
@@ -23,16 +16,18 @@
 //! ```text
 //! Freighter Wallet (Ed25519)
 //!        │
-//!        ├── signMessage("Sign to access Privacy Pool [v1]")
-//!        │          │
-//!        │          └── SHA-256 → X25519 Encryption Keypair
-//!        │
-//!        └── signMessage("Privacy Pool Spending Key [v1]")
+//!        └── signMessage("Privacy Pool Key Derivation [v2]")
 //!                   │
-//!                   └── SHA-256 → BN254 Note Private Key
-//!                                      │
-//!                                      └── Poseidon2 → Note Public Key
+//!                   ├── SHA-256("privacy-pool/note-key/v2" || sig)
+//!                   │          └── BN254 Note Private Key → Poseidon2 → Note Public Key
+//!                   │
+//!                   └── SHA-256("privacy-pool/encryption-key/v2" || sig)
+//!                              └── X25519 Encryption Keypair
 //! ```
+//! Note: the original scheme had separate signatures for spending and encryption
+//! keys. To improve UX we reduced to a single signature derivation accepting
+//! some associated risks like a user signing the message at a scam website
+//! (2 separate signatures could create a safety pause to stop and think)
 use crate::crypto::derive_public_key;
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
@@ -42,26 +37,25 @@ use ark_serialize::CanonicalSerialize;
 use crypto_secretbox::{KeyInit, Nonce, XSalsa20Poly1305, aead::Aead};
 use sha2::{Digest, Sha256};
 use types::{
-    EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, EncryptionSignature, Field,
-    NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, SpendingSignature,
+    EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey, Field, KeyDerivationSignature,
+    NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
 };
 use x25519_dalek::{PublicKey, StaticSecret};
 
 // Key derivation constants.
 // These MUST remain constant for backwards compatibility.
 
-/// Message signed to derive the X25519 encryption keypair
-pub const ENCRYPTION_MESSAGE: &str = "Sign to access Privacy Pool [v1]";
+/// Message signed to derive both privacy keypairs.
+pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v2]";
 
-/// Message signed to derive the BN254 note identity keypair
-pub const SPENDING_KEY_MESSAGE: &str = "Privacy Pool Spending Key [v1]";
+const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
+const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
 
 /// Keypairs derivation
 pub fn derive_encryption_and_note_keypairs(
-    spending_signature: SpendingSignature,
-    encryption_signature: EncryptionSignature,
+    signature: KeyDerivationSignature,
 ) -> Result<(NoteKeyPair, EncryptionKeyPair)> {
-    let note_private_key = derive_note_private_key(spending_signature)?;
+    let note_private_key = derive_note_private_key(&signature)?;
     let pubkey = derive_public_key(&note_private_key.0)?;
     let note_public_key = NotePublicKey(
         pubkey
@@ -72,7 +66,7 @@ pub fn derive_encryption_and_note_keypairs(
         private: note_private_key,
         public: note_public_key,
     };
-    let encryption_keypair = derive_keypair_from_signature(encryption_signature)?;
+    let encryption_keypair = derive_keypair_from_signature(&signature)?;
     Ok((note_keypair, encryption_keypair))
 }
 
@@ -95,20 +89,17 @@ pub fn derive_encryption_and_note_keypairs(
 ///
 /// # Returns
 /// 64 bytes: `[public_key (32), private_key (32)]`
-fn derive_keypair_from_signature(signature: EncryptionSignature) -> Result<EncryptionKeyPair> {
-    let EncryptionSignature(signature) = signature;
+fn derive_keypair_from_signature(signature: &KeyDerivationSignature) -> Result<EncryptionKeyPair> {
+    let KeyDerivationSignature(signature) = signature;
     if signature.len() != 64 {
         return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
-    // Hash signature to get a 32-byte seed
-    let mut hasher = Sha256::new();
-    hasher.update(signature);
-    let seed = hasher.finalize();
+    let seed = hash_signature_with_domain(signature, ENCRYPTION_KEY_DOMAIN);
 
     // Generate X25519 keypair from seed
     let mut secret_bytes = [0u8; 32];
-    secret_bytes.copy_from_slice(&seed);
+    secret_bytes.copy_from_slice(&seed[..]);
 
     let secret = StaticSecret::from(secret_bytes);
     let public = PublicKey::from(&secret);
@@ -138,20 +129,18 @@ fn derive_keypair_from_signature(signature: EncryptionSignature) -> Result<Encry
 ///
 /// # Returns
 /// 32 bytes: Note private key (BN254 scalar, little-endian)
-fn derive_note_private_key(signature: SpendingSignature) -> Result<NotePrivateKey> {
-    let SpendingSignature(signature) = signature;
+fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePrivateKey> {
+    let KeyDerivationSignature(signature) = signature;
     if signature.len() != 64 {
         return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
     }
 
-    // Hash signature to get 32-byte key
-    // As SHA-256 might be larger than BN254 field, we apply module reduction.
-    let mut hasher = Sha256::new();
-    hasher.update(signature);
-    let key = hasher.finalize();
+    // Hash the shared signature with an explicit domain tag before reducing to
+    // the BN254 field.
+    let key = hash_signature_with_domain(signature, NOTE_KEY_DOMAIN);
 
     // Reduce to BN254 module
-    let field = Fr::from_le_bytes_mod_order(&key);
+    let field = Fr::from_le_bytes_mod_order(&key[..]);
 
     // Serialize into bytes
     let mut result = [0u8; 32];
@@ -160,6 +149,13 @@ fn derive_note_private_key(signature: SpendingSignature) -> Result<NotePrivateKe
         .expect("Serialization failed");
 
     Ok(NotePrivateKey(result))
+}
+
+fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update(signature);
+    hasher.finalize().into()
 }
 
 /// Generate a cryptographically random blinding factor for a note.
@@ -376,9 +372,9 @@ mod tests {
 
     #[test]
     fn test_derive_keypair_determinism() {
-        let signature = EncryptionSignature(vec![1u8; 64]);
-        let keys1 = derive_keypair_from_signature(signature.clone()).expect("Derivation failed");
-        let keys2 = derive_keypair_from_signature(signature).expect("Derivation failed");
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
+        let keys1 = derive_keypair_from_signature(&signature).expect("Derivation failed");
+        let keys2 = derive_keypair_from_signature(&signature).expect("Derivation failed");
         assert_eq!(keys1.private.0, keys2.private.0);
         assert_eq!(keys1.public.0, keys2.public.0);
         assert_eq!(keys1.private.0.len(), 32);
@@ -386,9 +382,18 @@ mod tests {
     }
 
     #[test]
+    fn test_domain_separation_between_note_and_encryption_keys() {
+        let signature = KeyDerivationSignature(vec![7u8; 64]);
+        let note_key = derive_note_private_key(&signature).expect("note derivation failed");
+        let enc_key =
+            derive_keypair_from_signature(&signature).expect("encryption derivation failed");
+        assert_ne!(note_key.0, enc_key.private.0);
+    }
+
+    #[test]
     fn test_encryption_roundtrip() {
-        let recipient_sig = EncryptionSignature(vec![2u8; 64]);
-        let recip_keys = derive_keypair_from_signature(recipient_sig).expect("Derivation failed");
+        let recipient_sig = KeyDerivationSignature(vec![2u8; 64]);
+        let recip_keys = derive_keypair_from_signature(&recipient_sig).expect("Derivation failed");
         let pub_key = recip_keys.public.as_ref();
         let priv_key = recip_keys.private.as_ref();
 
@@ -408,11 +413,11 @@ mod tests {
 
     #[test]
     fn test_decrypt_failure_wrong_key() {
-        let alice_sig = EncryptionSignature(vec![3u8; 64]);
-        let bob_sig = EncryptionSignature(vec![4u8; 64]);
+        let alice_sig = KeyDerivationSignature(vec![3u8; 64]);
+        let bob_sig = KeyDerivationSignature(vec![4u8; 64]);
 
-        let alice_keys = derive_keypair_from_signature(alice_sig).expect("Derivation failed");
-        let bob_keys = derive_keypair_from_signature(bob_sig).expect("Derivation failed");
+        let alice_keys = derive_keypair_from_signature(&alice_sig).expect("Derivation failed");
+        let bob_keys = derive_keypair_from_signature(&bob_sig).expect("Derivation failed");
 
         // Encrypt for Alice.
         let alice_pub = alice_keys.public.as_ref();
@@ -430,8 +435,8 @@ mod tests {
 
     #[test]
     fn test_invalid_input_lengths() {
-        let sig = EncryptionSignature(vec![5u8; 64]);
-        let keys = derive_keypair_from_signature(sig)
+        let sig = KeyDerivationSignature(vec![5u8; 64]);
+        let keys = derive_keypair_from_signature(&sig)
             .expect("Derivation failed in test_invalid_input_lengths");
         let pub_key = keys.public.as_ref();
 
@@ -446,8 +451,8 @@ mod tests {
 
     #[test]
     fn test_decrypt_output_note_roundtrip() -> Result<()> {
-        let recipient_sig = EncryptionSignature(vec![9u8; 64]);
-        let recip_keys = derive_keypair_from_signature(recipient_sig)?;
+        let recipient_sig = KeyDerivationSignature(vec![9u8; 64]);
+        let recip_keys = derive_keypair_from_signature(&recipient_sig)?;
 
         let amount = NoteAmount::from(42);
         let mut blind_le = [0u8; 32];

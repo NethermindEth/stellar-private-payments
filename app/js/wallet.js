@@ -233,21 +233,20 @@ export async function signWalletMessage(message, opts = {}) {
 }
 
 /**
- * Derives spending and encryption keys from Freighter wallet signatures.
+ * Derives spending and encryption keys from a single Freighter wallet signature.
  * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
  *
  * @param {account} string
  * @param {Object} options
  * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
  * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
- * @param {number} [options.signDelay=300] - Delay between signature requests (ms)
  * @param {boolean} [options.skipCacheCheck=false] - Skip existing-key lookup before signature prompts
  * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
  * @throws {Error} If user rejects signature requests
  */
 export async function deriveKeysFromWallet(
     account,
-    { onStatus, signOptions = {}, signDelay = 300, skipCacheCheck = false }
+    { onStatus, signOptions = {}, skipCacheCheck = false }
 ) {
     const client = getHandle().webClient;
     let data = null;
@@ -266,55 +265,27 @@ export async function deriveKeysFromWallet(
         }
     }
 
-    onStatus?.(
-        'Signature 1/2: derive spending key (proves note ownership; does not move funds)...'
-    );
+    onStatus?.('Signature: derive privacy keys (does not move funds)...');
 
-    let spendingResult;
+    let derivationResult;
     try {
-        spendingResult = await signWalletMessage(client.spendingKeyMessage(), {
+        derivationResult = await signWalletMessage(client.keyDerivationMessage(), {
             ...signOptions,
             skipEnsureReady: true,
         });
     } catch (e) {
         if (e.code === 'USER_REJECTED') {
-            throw new Error('Please approve the message signature to derive your spending key');
+            throw new Error('Please approve the message signature to derive your privacy keys');
         }
         throw e;
     }
 
-    if (!spendingResult?.signedMessage) {
-        throw new Error('Spending key signature rejected');
+    if (!derivationResult?.signedMessage) {
+        throw new Error('Key derivation signature rejected');
     }
 
-    if (signDelay > 0) {
-        await new Promise(r => setTimeout(r, signDelay));
-    }
-
-    onStatus?.(
-        'Signature 2/2: derive encryption key (decrypts incoming notes; does not move funds)...'
-    );
-
-    let encryptionResult;
-    try {
-        encryptionResult = await signWalletMessage(client.encryptionDerivationMessage(), {
-            ...signOptions,
-            skipEnsureReady: true,
-        });
-    } catch (e) {
-        if (e.code === 'USER_REJECTED') {
-            throw new Error('Please approve the message signature to derive your encryption key');
-        }
-        throw e;
-    }
-
-    if (!encryptionResult?.signedMessage) {
-        throw new Error('Encryption key signature rejected');
-    }
-
-    const spendingSigBytes = Uint8Array.from(atob(spendingResult.signedMessage), c => c.charCodeAt(0));
-    const encryptionSigBytes = Uint8Array.from(atob(encryptionResult.signedMessage), c => c.charCodeAt(0));
-    await client.deriveAndSaveUserKeys(account, spendingSigBytes, encryptionSigBytes);
+    const signatureBytes = Uint8Array.from(atob(derivationResult.signedMessage), c => c.charCodeAt(0));
+    await client.deriveAndSaveUserKeys(account, signatureBytes);
 
     data = await client.getUserKeys(account);
     return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {

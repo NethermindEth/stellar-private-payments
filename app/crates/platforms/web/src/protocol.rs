@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use prover::flows::{DepositParams, N_OUTPUTS, TransactParams, TransferParams, WithdrawParams};
 pub type Address = String;
 use types::{
-    AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair,
-    EncryptionSignature, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SpendingSignature, SyncMetadata, UserNoteSummary,
+    AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, ExtAmount,
+    ExtData, Field, KeyDerivationSignature, NoteAmount, NoteKeyPair, NotePublicKey,
+    PoolLedgerActivity, PublicKeyEntry, SyncMetadata, UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -29,7 +29,7 @@ pub enum StorageWorkerRequest {
     SyncState,
     SaveEvents(ContractsEventData),
     SaveSyncProgress(Vec<SyncMetadata>, bool),
-    DeriveSaveUserKeys(Address, SpendingSignature, EncryptionSignature),
+    DeriveSaveUserKeys(Address, KeyDerivationSignature),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     UserKeys(Address),

@@ -139,13 +139,9 @@ pub struct PoolLedgerActivity {
     pub nullifiers: u32,
 }
 
-/// Spending key signature
+/// Wallet signature used to derive both privacy keypairs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpendingSignature(pub Vec<u8>);
-
-/// Encryption key signature
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionSignature(pub Vec<u8>);
+pub struct KeyDerivationSignature(pub Vec<u8>);
 
 /// Encryption private key
 #[derive(Debug, Clone)]

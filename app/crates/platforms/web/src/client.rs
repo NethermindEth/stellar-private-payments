@@ -11,15 +11,12 @@ use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
-use prover::{
-    encryption::{ENCRYPTION_MESSAGE, SPENDING_KEY_MESSAGE},
-    flows::N_OUTPUTS,
-};
+use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
 use types::{
-    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey,
-    EncryptionSignature, ExtAmount, Field, NoteAmount, NotePublicKey, SMT_DEPTH, SpendingSignature,
+    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey, ExtAmount, Field,
+    KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -1011,28 +1008,19 @@ impl WebClient {
         )?)
     }
 
-    #[wasm_bindgen(js_name = encryptionDerivationMessage)]
-    pub fn encryption_derivation_message(&self) -> String {
-        ENCRYPTION_MESSAGE.to_string()
-    }
-
-    #[wasm_bindgen(js_name = spendingKeyMessage)]
-    pub fn spending_key_message(&self) -> String {
-        SPENDING_KEY_MESSAGE.to_string()
+    #[wasm_bindgen(js_name = keyDerivationMessage)]
+    pub fn key_derivation_message(&self) -> String {
+        KEY_DERIVATION_MESSAGE.to_string()
     }
 
     #[wasm_bindgen(js_name = deriveAndSaveUserKeys)]
     pub async fn derive_save_user_keys(
         &self,
         address: String,
-        spending_sig: Vec<u8>,
-        encryption_sig: Vec<u8>,
+        signature: Vec<u8>,
     ) -> Result<(), JsError> {
-        let req = StorageWorkerRequest::DeriveSaveUserKeys(
-            address,
-            SpendingSignature(spending_sig),
-            EncryptionSignature(encryption_sig),
-        );
+        let req =
+            StorageWorkerRequest::DeriveSaveUserKeys(address, KeyDerivationSignature(signature));
 
         match self.storage_request(req, 5_000).await? {
             StorageWorkerResponse::Saved => Ok(()),

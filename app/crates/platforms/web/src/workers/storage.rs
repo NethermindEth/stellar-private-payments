@@ -211,14 +211,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(
-            address,
-            spending_signature,
-            encryption_signature,
-        ) => {
+        StorageWorkerRequest::DeriveSaveUserKeys(address, signature) => {
             log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
             let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
+                derive_encryption_and_note_keypairs(signature)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
             log::trace!(
                 "[{WORKER_NAME}] saved notes and encryption keys for the account {address}"
