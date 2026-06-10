@@ -8,38 +8,28 @@ use types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey};
 
 use crate::plan::{PlannedStep, SpendableNote, StepAction, plan};
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum SpendKind {
-    Transfer,
-    Withdraw,
-}
-
-/// Recipient data for the final step (and validation at `setup`).
+/// Recipient data for the final step.
 #[derive(Clone, Debug)]
-pub struct SpendTarget {
-    kind: SpendKind,
-    transfer_recipient_note: Option<NotePublicKey>,
-    transfer_recipient_enc: Option<EncryptionPublicKey>,
-    withdraw_recipient: Option<String>,
+pub enum SpendTarget {
+    Transfer {
+        recipient_note: NotePublicKey,
+        recipient_enc: EncryptionPublicKey,
+    },
+    Withdraw {
+        recipient: String,
+    },
 }
 
 impl SpendTarget {
     pub fn transfer(recipient_note: NotePublicKey, recipient_enc: EncryptionPublicKey) -> Self {
-        Self {
-            kind: SpendKind::Transfer,
-            transfer_recipient_note: Some(recipient_note),
-            transfer_recipient_enc: Some(recipient_enc),
-            withdraw_recipient: None,
+        Self::Transfer {
+            recipient_note,
+            recipient_enc,
         }
     }
 
     pub fn withdraw(recipient: String) -> Self {
-        Self {
-            kind: SpendKind::Withdraw,
-            transfer_recipient_note: None,
-            transfer_recipient_enc: None,
-            withdraw_recipient: Some(recipient),
-        }
+        Self::Withdraw { recipient }
     }
 }
 
@@ -179,21 +169,10 @@ impl SpendSession {
 }
 
 fn validate_target(target: &SpendTarget) -> Result<(), SpendSessionError> {
-    match target.kind {
-        SpendKind::Transfer => {
-            if target.transfer_recipient_note.is_none() || target.transfer_recipient_enc.is_none() {
-                return Err(SpendSessionError::MissingTransferRecipient);
-            }
-        }
-        SpendKind::Withdraw => {
-            if target
-                .withdraw_recipient
-                .as_ref()
-                .is_none_or(|r| r.is_empty())
-            {
-                return Err(SpendSessionError::MissingWithdrawRecipient);
-            }
-        }
+    if let SpendTarget::Withdraw { recipient } = target
+        && recipient.is_empty()
+    {
+        return Err(SpendSessionError::MissingWithdrawRecipient);
     }
     Ok(())
 }
@@ -215,24 +194,21 @@ fn materialize_step(
             out_recipient_note_pubkeys: [None, None],
             out_recipient_encryption_pubkeys: [None, None],
         }),
-        StepAction::Final { outputs } => match target.kind {
-            SpendKind::Transfer => {
+        StepAction::Final { outputs } => match target {
+            SpendTarget::Transfer {
+                recipient_note,
+                recipient_enc,
+            } => {
                 let out1 = outputs.1.unwrap_or(NoteAmount::ZERO);
                 let (out_note_pks, out_enc_pks) = if outputs.1.is_some() {
                     (
-                        [target.transfer_recipient_note.clone(), None],
-                        [target.transfer_recipient_enc.clone(), None],
+                        [Some(recipient_note.clone()), None],
+                        [Some(recipient_enc.clone()), None],
                     )
                 } else {
                     (
-                        [
-                            target.transfer_recipient_note.clone(),
-                            target.transfer_recipient_note.clone(),
-                        ],
-                        [
-                            target.transfer_recipient_enc.clone(),
-                            target.transfer_recipient_enc.clone(),
-                        ],
+                        [Some(recipient_note.clone()), Some(recipient_note.clone())],
+                        [Some(recipient_enc.clone()), Some(recipient_enc.clone())],
                     )
                 };
                 Ok(Transact {
@@ -244,7 +220,7 @@ fn materialize_step(
                     out_recipient_encryption_pubkeys: out_enc_pks,
                 })
             }
-            SpendKind::Withdraw => {
+            SpendTarget::Withdraw { recipient } => {
                 let ext_amount = ExtAmount::try_from(outputs.0)
                     .map_err(|_| SpendSessionError::ExtAmountOverflow)?
                     .checked_neg()
@@ -253,10 +229,7 @@ fn materialize_step(
                     input_commitments,
                     output_amounts: [outputs.1.unwrap_or(NoteAmount::ZERO), NoteAmount::ZERO],
                     ext_amount,
-                    ext_recipient: target
-                        .withdraw_recipient
-                        .clone()
-                        .expect("validated at setup"),
+                    ext_recipient: recipient.clone(),
                     out_recipient_note_pubkeys: [None, None],
                     out_recipient_encryption_pubkeys: [None, None],
                 })

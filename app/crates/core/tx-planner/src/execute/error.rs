@@ -11,9 +11,6 @@ pub enum SpendSessionError {
     #[error("withdraw amount does not fit in ext_amount")]
     ExtAmountOverflow,
 
-    #[error("transfer requires recipient note and encryption keys")]
-    MissingTransferRecipient,
-
     #[error("withdraw requires a recipient address")]
     MissingWithdrawRecipient,
 }
