@@ -49,6 +49,7 @@ cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/
 
 # Static files
 cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
+cp app/disclosure.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
 
 # Distribution legal files (licenses + notices).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
@@ -64,4 +65,5 @@ command = "sh"
 command_arguments = ["-c", """
 ./app/node_modules/.bin/esbuild app/js/ui.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/ui.js --format=esm
 ./app/node_modules/.bin/esbuild app/js/admin.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/admin.js --format=esm
+./app/node_modules/.bin/esbuild app/js/disclosure.js --external:./web.js --bundle --outfile=$TRUNK_STAGING_DIR/js/disclosure.js --format=esm
 """]
