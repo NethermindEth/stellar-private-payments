@@ -13,7 +13,7 @@ use js_sys::{Array, BigInt, Function, Object, Reflect};
 use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
 use stellar::StateFetcher as CoreStateFetcher;
-use tx_planner::{SpendableNote, Transact};
+use tx_planner::Transact;
 use types::{
     AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey, ExtAmount, Field,
     KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH,
@@ -350,108 +350,6 @@ impl WebClient {
         Ok(Some(prepared))
     }
 
-    async fn prove_withdraw_inner(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        withdraw_recipient: String,
-        input_note_ids: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<PreparedProverTx>, JsError> {
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-        let input_commitments = parse_input_note_ids(
-            &input_note_ids,
-            1,
-            2,
-            "input_note_ids must have length 1..=2",
-        )?;
-
-        let wallet = self
-            .load_spendable_wallet(&pool_contract_id, &user_address)
-            .await?;
-        let withdraw_total = sum_wallet_notes(&wallet, &input_commitments)?;
-        let ext_amount = ExtAmount::try_from(withdraw_total)
-            .map_err(|e| JsError::new(&e.to_string()))?
-            .checked_neg()
-            .ok_or_else(|| JsError::new("withdraw amount overflow"))?;
-
-        let step = Transact::new(
-            input_commitments,
-            [NoteAmount::ZERO, NoteAmount::ZERO],
-            ext_amount,
-            withdraw_recipient,
-            [None, None],
-            [None, None],
-        );
-
-        self.prove_transact_inner(
-            &pool_contract_id,
-            &user_address,
-            membership_blinding,
-            &step,
-            "withdraw",
-            &on_status,
-            None,
-            None,
-        )
-        .await
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn prove_transfer_inner(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        recipient_note_key_hex: String,
-        recipient_enc_key_hex: String,
-        input_note_ids: Array,
-        output_amounts: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<PreparedProverTx>, JsError> {
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-        let input_commitments = parse_input_note_ids(
-            &input_note_ids,
-            1,
-            2,
-            "input_note_ids must have length 1..=2",
-        )?;
-        let out_amounts = parse_output_amounts(&output_amounts)?;
-
-        let recipient_note_pubkey = NotePublicKey::parse(&recipient_note_key_hex)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let recipient_enc_pubkey = EncryptionPublicKey::parse(&recipient_enc_key_hex)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        let step = Transact::new(
-            input_commitments,
-            out_amounts,
-            ExtAmount::ZERO,
-            pool_contract_id.clone(),
-            [
-                Some(recipient_note_pubkey.clone()),
-                Some(recipient_note_pubkey),
-            ],
-            [
-                Some(recipient_enc_pubkey.clone()),
-                Some(recipient_enc_pubkey),
-            ],
-        );
-
-        self.prove_transact_inner(
-            &pool_contract_id,
-            &user_address,
-            membership_blinding,
-            &step,
-            "transfer",
-            &on_status,
-            None,
-            None,
-        )
-        .await
-    }
-
     #[allow(clippy::too_many_arguments)]
     async fn prove_transact_from_js(
         &self,
@@ -670,63 +568,6 @@ impl WebClient {
                 user_address,
                 membership_blinding,
                 amount,
-                output_amounts,
-                on_status,
-            )
-            .await?;
-        match prepared {
-            None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
-        }
-    }
-
-    #[wasm_bindgen(js_name = proveWithdraw)]
-    pub async fn prove_withdraw(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        withdraw_recipient: String,
-        input_note_ids: Array,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_withdraw_inner(
-                pool_contract_id,
-                user_address,
-                membership_blinding,
-                withdraw_recipient,
-                input_note_ids,
-                on_status,
-            )
-            .await?;
-        match prepared {
-            None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
-        }
-    }
-
-    #[wasm_bindgen(js_name = proveTransfer)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn prove_transfer(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        recipient_note_key_hex: String,
-        recipient_enc_key_hex: String,
-        input_note_ids: Array,
-        output_amounts: Array,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_transfer_inner(
-                pool_contract_id,
-                user_address,
-                membership_blinding,
-                recipient_note_key_hex,
-                recipient_enc_key_hex,
-                input_note_ids,
                 output_amounts,
                 on_status,
             )
@@ -1019,26 +860,6 @@ fn parse_output_recipient_keys(
         out_enc_pks[i] = enc_pk;
     }
     Ok((out_note_pks, out_enc_pks))
-}
-
-fn sum_wallet_notes(
-    wallet: &[SpendableNote],
-    commitments: &[Field],
-) -> Result<NoteAmount, JsError> {
-    let mut total = NoteAmount::ZERO;
-    for commitment in commitments {
-        let note = wallet
-            .iter()
-            .find(|n| n.commitment == *commitment)
-            .ok_or_else(|| JsError::new("input note not found in wallet"))?;
-        total = total
-            .checked_add(note.amount)
-            .ok_or_else(|| JsError::new("input amount overflow"))?;
-    }
-    if total.is_zero() {
-        return Err(JsError::new("input notes must have positive total"));
-    }
-    Ok(total)
 }
 
 fn parse_u32_decimal(s: &str) -> Result<u32, String> {

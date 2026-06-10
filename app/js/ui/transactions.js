@@ -291,6 +291,28 @@ async function submitProvedAdvanced(ctx, proved) {
     showSubmittedToasts([txHash]);
 }
 
+function callProveTransact(ctx, {
+    extRecipient,
+    extAmount,
+    inputNoteIds,
+    outputAmounts,
+    noteKeys,
+    encKeys,
+}) {
+    return getHandle().webClient.proveTransact(
+        ctx.poolContractId,
+        ctx.userAddress,
+        ctx.membershipBlinding,
+        extRecipient,
+        extAmount,
+        inputNoteIds,
+        outputAmounts,
+        noteKeys,
+        encKeys,
+        ctx.onStatus,
+    );
+}
+
 async function runSpendFlow({
     btn,
     advancedCheckboxId,
@@ -701,15 +723,20 @@ export const Transactions = {
                         if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
                         if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
 
+                        const total = sumInputNotesStroops('withdraw-inputs');
+                        if (total <= 0n) {
+                            throw new Error('Selected notes must have a positive total');
+                        }
+
                         ctx.setLoadingText(ctx.btn, 'Proving…');
-                        const proved = await getHandle().webClient.proveWithdraw(
-                            ctx.poolContractId,
-                            ctx.userAddress,
-                            ctx.membershipBlinding,
-                            recipient,
+                        const proved = await callProveTransact(ctx, {
+                            extRecipient: recipient,
+                            extAmount: -total,
                             inputNoteIds,
-                            ctx.onStatus,
-                        );
+                            outputAmounts: [0n, 0n],
+                            noteKeys: [null, null],
+                            encKeys: [null, null],
+                        });
                         await submitProvedAdvanced(ctx, proved);
                     },
                     executeSimple: async (ctx, amountStroops, submitFn) => {
@@ -773,16 +800,14 @@ export const Transactions = {
                         const outputAmounts = collectOutputAmounts('transfer-outputs');
 
                         ctx.setLoadingText(ctx.btn, 'Proving…');
-                        const proved = await getHandle().webClient.proveTransfer(
-                            ctx.poolContractId,
-                            ctx.userAddress,
-                            ctx.membershipBlinding,
-                            recipientNoteKey,
-                            recipientEncKey,
+                        const proved = await callProveTransact(ctx, {
+                            extRecipient: ctx.poolContractId,
+                            extAmount: 0n,
                             inputNoteIds,
                             outputAmounts,
-                            ctx.onStatus,
-                        );
+                            noteKeys: [recipientNoteKey, recipientNoteKey],
+                            encKeys: [recipientEncKey, recipientEncKey],
+                        });
                         await submitProvedAdvanced(ctx, proved);
                     },
                     executeSimple: async (ctx, amountStroops, submitFn) => getHandle().webClient.executeTransfer(
@@ -852,17 +877,21 @@ export const Transactions = {
 	                const config = await getContractConfig();
                 const poolContractId = getActivePoolContractId(config);
 	                setLoadingText(btn, 'Proving…');
-	                const proved = await getHandle().webClient.proveTransact(
-	                    poolContractId,
-	                    userAddress,
-	                    membershipBlinding,
-	                    extRecipient,
-	                    extAmountStroops,
-	                    inputNoteIds,
-	                    outputAmounts,
-	                    noteKeys,
-	                    encKeys,
-	                    onStatus,
+	                const proved = await callProveTransact(
+	                    {
+	                        userAddress,
+	                        membershipBlinding,
+	                        poolContractId,
+	                        onStatus,
+	                    },
+	                    {
+	                        extRecipient,
+	                        extAmount: extAmountStroops,
+	                        inputNoteIds,
+	                        outputAmounts,
+	                        noteKeys,
+	                        encKeys,
+	                    },
 	                );
 	                if (proved == null) {
 	                    Toast.show('Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
