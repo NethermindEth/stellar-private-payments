@@ -8,7 +8,7 @@ use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
     crypto::asp_membership_leaf,
     encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
-    flows::{DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
+    flows::{N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
     merkle::{MerklePrefixTree, MerkleProof},
 };
 use state::{
@@ -300,54 +300,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let user_leaf = asp_membership_leaf(&pubkey, &membership_blinding)?;
             log::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
             StorageWorkerResponse::DeriveASPleaf(user_leaf)
-        }
-        StorageWorkerRequest::Deposit(req) => {
-            log::trace!("[{WORKER_NAME}] deposit");
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &req.aspmem_contract_id,
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let outputs = (0..N_OUTPUTS)
-                .map(|i| {
-                    Ok(TransactOutput {
-                        amount: req.output_amounts[i],
-                        blinding: generate_random_blinding()?,
-                        recipient_note_pubkey: Some(note_pubkey.clone()),
-                        recipient_encryption_pubkey: Some(encryption_pubkey.clone()),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let params = DepositParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                pool_address: req.pool_address,
-                amount: req.amount,
-                outputs,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::DepositParams(params)
         }
         StorageWorkerRequest::Transact(req) => {
             log::trace!("[{WORKER_NAME}] transact");

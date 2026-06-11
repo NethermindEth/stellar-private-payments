@@ -1,12 +1,12 @@
 use crate::protocol::{
-    DepositPrepared, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
+    PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
 };
 use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
-    flows::{TransactArtifacts, deposit, transact},
+    flows::{TransactArtifacts, transact},
     prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
@@ -174,17 +174,6 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
                 TimeoutFuture::new(50).await;
             }
-        }
-        ProverWorkerRequest::Deposit(params) => {
-            log::debug!("[{WORKER_NAME}] deposit");
-            let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            let prepared = prove_from_artifacts(transact_artifacts)?;
-            ProverWorkerResponse::DepositPrepared(DepositPrepared {
-                proof_uncompressed: prepared.proof_uncompressed,
-                ext_data: prepared.ext_data,
-                prepared: prepared.prepared,
-            })
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
