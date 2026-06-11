@@ -8,11 +8,12 @@
  */
 
 import { getHandle } from '../wasm-facade.js';
-import { submitProvedPoolTransact } from '../stellar.js';
+import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
+
 let cachedContractConfig = null;
 
 async function getContractConfig() {
@@ -216,12 +217,11 @@ function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId 
     update();
 }
 
-function makePoolSubmitFn(poolContractId, userAddress, onStatus) {
-    return proved => submitProvedPoolTransact(proved, {
+function makePoolSubmitFn(userAddress, onStatus) {
+    return proved => submitPreparedSorobanTx(proved.sorobanTx, {
         address: userAddress,
         rpcUrl: App.state.wallet.sorobanRpcUrl,
         networkPassphrase: App.state.wallet.networkPassphrase,
-        poolContractId,
     }, { onStatus });
 }
 
@@ -282,11 +282,10 @@ async function submitProvedAdvanced(ctx, proved) {
         return;
     }
     ctx.setLoadingText(ctx.btn, 'Ready to sign…');
-    const txHash = await submitProvedPoolTransact(proved, {
+    const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
         address: ctx.userAddress,
         rpcUrl: App.state.wallet.sorobanRpcUrl,
         networkPassphrase: App.state.wallet.networkPassphrase,
-        poolContractId: ctx.poolContractId,
     }, { onStatus: ctx.onStatus });
     showSubmittedToasts([txHash]);
 }
@@ -356,7 +355,7 @@ async function runSpendFlow({
     if (stepCount == null) return;
 
     setLoadingText(btn, stepCount === 1 ? 'Proving…' : `Proving (1/${stepCount})…`);
-    const submitFn = makePoolSubmitFn(poolContractId, userAddress, onStatus);
+    const submitFn = makePoolSubmitFn(userAddress, onStatus);
     const hashes = await executeSimple(ctx, amountRes.value, submitFn);
     if (hashes == null) {
         Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
@@ -684,11 +683,10 @@ export const Transactions = {
                 }
 
                 setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitProvedPoolTransact(proved, {
+                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
                     address: userAddress,
                     rpcUrl: App.state.wallet.sorobanRpcUrl,
                     networkPassphrase: App.state.wallet.networkPassphrase,
-                    poolContractId,
                 }, { onStatus });
                 showSubmittedToasts([txHash]);
             } catch (e) {
@@ -893,25 +891,18 @@ export const Transactions = {
 	                        encKeys,
 	                    },
 	                );
-	                if (proved == null) {
-	                    Toast.show('Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
-	                    return;
-	                }
+                if (proved == null) {
+                    Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
+                    return;
+                }
 
-	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
-	                    address: userAddress,
-	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: poolContractId,
-	                }, { onStatus });
-                Toast.show(
-                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
-                    'success',
-                    7000,
-                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
-                );
-                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+                setLoadingText(btn, 'Ready to sign…');
+                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
+                    address: userAddress,
+                    rpcUrl: App.state.wallet.sorobanRpcUrl,
+                    networkPassphrase: App.state.wallet.networkPassphrase,
+                }, { onStatus });
+                showSubmittedToasts([txHash]);
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
             } finally {

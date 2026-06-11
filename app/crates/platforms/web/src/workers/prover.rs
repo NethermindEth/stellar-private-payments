@@ -184,6 +184,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 proof_uncompressed: prepared.proof_uncompressed,
                 ext_data: prepared.ext_data,
                 prepared: prepared.prepared,
+                soroban_tx: Default::default(),
             })
         }
         ProverWorkerRequest::Transact(params) => {
@@ -250,6 +251,7 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
         proof_uncompressed,
         ext_data,
         prepared: prepared_public,
+        soroban_tx: Default::default(),
     })
 }
 

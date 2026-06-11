@@ -1,7 +1,7 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, ProverWorkerRequest,
-        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, PreparedTxPublic,
+        ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
     },
     workers::{prover::ProverWorker, storage::StorageWorker},
 };
@@ -12,11 +12,14 @@ use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
-use stellar::StateFetcher as CoreStateFetcher;
+use stellar::{
+    OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
+    StateFetcher as CoreStateFetcher,
+};
 use tx_planner::Transact;
 use types::{
     AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey, ExtAmount, Field,
-    KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH,
+    KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH, parse_0x_hex_32,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
@@ -90,7 +93,72 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
     }
 }
 
+impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
+    fn from(p: &PreparedTxPublic) -> Self {
+        Self {
+            root: p.pool_root,
+            input_nullifiers: p.input_nullifiers,
+            output_commitment0: p.output_commitments[0],
+            output_commitment1: p.output_commitments[1],
+            public_amount: p.public_amount,
+            ext_data_hash_be: p.ext_data_hash_be,
+            asp_membership_root: p.asp_membership_root,
+            asp_non_membership_root: p.asp_non_membership_root,
+        }
+    }
+}
+
 impl WebClient {
+    async fn prepare_pool_soroban_tx(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        proof_uncompressed: Vec<u8>,
+        ext_data: types::ExtData,
+        prepared: &PreparedTxPublic,
+    ) -> Result<PreparedSorobanTx, JsError> {
+        self.fetcher
+            .prepare_pool_transact(
+                pool_contract_id,
+                &PoolTransactInput {
+                    proof_uncompressed,
+                    ext_data,
+                    public: prepared.into(),
+                },
+                user_address,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    async fn finalize_prepared_prover_tx(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        mut prepared: PreparedProverTx,
+        on_status: &Option<Function>,
+        flow: &'static str,
+    ) -> Result<PreparedProverTx, JsError> {
+        emit_progress(
+            on_status,
+            flow,
+            "prepare_tx",
+            "Simulating transaction…",
+            None,
+            None,
+        );
+        prepared.soroban_tx = self
+            .prepare_pool_soroban_tx(
+                pool_contract_id,
+                user_address,
+                prepared.proof_uncompressed.clone(),
+                prepared.ext_data.clone(),
+                &prepared.prepared,
+            )
+            .await?;
+        Ok(prepared)
+    }
+
     pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
             storage_bridge: StorageWorker::spawner()
@@ -334,7 +402,7 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-        let prepared = match self
+        let mut prepared = match self
             .prover_request(ProverWorkerRequest::Deposit(params), 20_000)
             .await?
         {
@@ -346,6 +414,24 @@ impl WebClient {
                 )));
             }
         };
+
+        emit_progress(
+            &on_status,
+            "deposit",
+            "prepare_tx",
+            "Simulating transaction…",
+            None,
+            None,
+        );
+        prepared.soroban_tx = self
+            .prepare_pool_soroban_tx(
+                &pool_contract_id,
+                &user_address,
+                prepared.proof_uncompressed.clone(),
+                prepared.ext_data.clone(),
+                &prepared.prepared,
+            )
+            .await?;
 
         Ok(Some(prepared))
     }
@@ -439,6 +525,24 @@ impl WebClient {
         Ok(serde_wasm_bindgen::to_value(
             self.fetcher.contract_config(),
         )?)
+    }
+
+    #[wasm_bindgen(js_name = prepareRegisterPublicKeys)]
+    pub async fn prepare_register_public_keys(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        note_public_key_hex: String,
+        encryption_public_key_hex: String,
+    ) -> Result<JsValue, JsError> {
+        let note_key = parse_hex32(&note_public_key_hex, "note public key")?;
+        let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
+        let prepared = self
+            .fetcher
+            .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&prepared)?)
     }
 
     #[wasm_bindgen(js_name = keyDerivationMessage)]
@@ -867,4 +971,8 @@ fn parse_u32_decimal(s: &str) -> Result<u32, String> {
         .parse::<u64>()
         .map_err(|_| format!("invalid decimal u64: {s}"))?;
     u32::try_from(v).map_err(|_| format!("value does not fit into u32: {s}"))
+}
+
+fn parse_hex32(hex: &str, what: &str) -> Result<[u8; 32], JsError> {
+    parse_0x_hex_32(hex.trim()).map_err(|e| JsError::new(&format!("Invalid {what}: {e}")))
 }
