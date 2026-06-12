@@ -740,6 +740,16 @@ impl PoolContract {
         Ok(MerkleTreeWithHistory::get_last_root(env)?)
     }
 
+    /// Check whether a pool Merkle root is still in the recent root history.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `root` - Pool Merkle root to check
+    pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
+        Ok(MerkleTreeWithHistory::is_known_root(env, root)?)
+    }
+
     /// Update the contract administrator
     ///
     /// Transfers administrative control to a new address. Requires
