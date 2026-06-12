@@ -94,6 +94,16 @@ impl StateFetcher {
         self.config
     }
 
+    pub fn enabled_pool_for(&self, pool_contract_id: &str) -> Result<&types::PoolConfigEntry> {
+        self.config
+            .pools
+            .iter()
+            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
+            .ok_or_else(|| {
+                anyhow!("enabled pool not found in deployments config: {pool_contract_id}")
+            })
+    }
+
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
         let enabled_pools: Vec<&types::PoolConfigEntry> =
             self.config.pools.iter().filter(|p| p.enabled).collect();
@@ -104,14 +114,7 @@ impl StateFetcher {
         &self,
         pool_contract_id: &str,
     ) -> Result<ContractsStateData> {
-        let enabled_pool = self
-            .config
-            .pools
-            .iter()
-            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
-            .ok_or_else(|| {
-                anyhow!("enabled pool not found in deployments config: {pool_contract_id}")
-            })?;
+        let enabled_pool = self.enabled_pool_for(pool_contract_id)?;
         self.contracts_data(&[enabled_pool]).await
     }
 

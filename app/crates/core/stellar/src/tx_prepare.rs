@@ -28,6 +28,7 @@ impl StateFetcher {
         input: &PoolTransactInput,
         source_account: &str,
     ) -> Result<PreparedSorobanTx> {
+        self.enabled_pool_for(pool_contract_id)?;
         let proof_scval = pool_proof_to_scval(
             &input.proof_uncompressed,
             input.public.root,
@@ -70,6 +71,7 @@ impl StateFetcher {
         note_key: [u8; 32],
         encryption_key: [u8; 32],
     ) -> Result<PreparedSorobanTx> {
+        self.enabled_pool_for(pool_contract_id)?;
         let account_scval = pool_account_to_scval(source_account, encryption_key, note_key)?;
 
         let seq = self.account_sequence(source_account).await?;
