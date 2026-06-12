@@ -40,6 +40,7 @@ asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.89", default-features = false }
 cfg-if = { version = "1", default-features = false }
+circom-witness-rs = { version = "0.2.3", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
@@ -56,6 +57,7 @@ num-traits = { version = "0.2", default-features = false }
 pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+ruint = { version = "1.18", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_bytes = { version = "0.11", default-features = false }

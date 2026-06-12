@@ -32,7 +32,9 @@ use constraint_generation::{BuildConfig, build_circuit};
 use constraint_writers::ConstraintExporter;
 use program_structure::error_definition::Report;
 use regex::Regex;
+use sha2::{Digest as _, Sha256};
 use std::{
+    collections::BTreeMap,
     env, fs,
     path::{Path, PathBuf},
     process::Command,
@@ -47,12 +49,20 @@ const CURVE_ID: &str = "bn128";
 /// through the same key-generation path.
 const GROTH16_KEY_CIRCUITS: &[&str] = &["policy_tx_2_2", "selectiveDisclosure_1"];
 
+/// Circom stems that must have a checked-in graph artifact for native witness
+/// generation.
+const GRAPH_WITNESS_CIRCUITS: &[&str] = &["policy_tx_2_2"];
+
 /// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
 /// changed.
 const GROTH16_TESTDATA_SUFFIXES: &[&str] = &["_proving_key.bin", "_vk.json", "_vk_soroban.bin"];
 
 fn circuit_needs_groth16_keys(name: &str) -> bool {
     GROTH16_KEY_CIRCUITS.contains(&name)
+}
+
+fn circuit_needs_witness_graph(name: &str) -> bool {
+    GRAPH_WITNESS_CIRCUITS.contains(&name)
 }
 
 fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
@@ -87,6 +97,8 @@ fn publish_circuit_artifacts(
     circuit_name: &str,
     r1cs_file: &Path,
     wasm_file: Option<&Path>,
+    graph_file: Option<&Path>,
+    graph_manifest_file: Option<&Path>,
 ) -> Result<()> {
     let r1cs_dst = publish_dir.join(format!("{circuit_name}.r1cs"));
     copy(r1cs_file, &r1cs_dst)?;
@@ -98,7 +110,244 @@ fn publish_circuit_artifacts(
         copy(wasm_file, &wasm_dst)?;
     }
 
+    if let Some(graph_file) = graph_file
+        && graph_file.exists()
+    {
+        let graph_dst = publish_dir.join(format!("{circuit_name}.graph.bin"));
+        copy(graph_file, &graph_dst)?;
+    }
+
+    if let Some(graph_manifest_file) = graph_manifest_file
+        && graph_manifest_file.exists()
+    {
+        let graph_manifest_dst = publish_dir.join(format!("{circuit_name}.graph.manifest"));
+        copy(graph_manifest_file, &graph_manifest_dst)?;
+    }
+
     Ok(())
+}
+
+fn workspace_root(crate_dir: &Path) -> &Path {
+    crate_dir.parent().unwrap_or(crate_dir)
+}
+
+fn checked_in_graph_path(crate_dir: &Path, circuit_name: &str) -> PathBuf {
+    crate_dir
+        .join("../deployments/testnet/circuit_keys")
+        .join(format!("{circuit_name}.graph.bin"))
+}
+
+fn checked_in_graph_manifest_path(crate_dir: &Path, circuit_name: &str) -> PathBuf {
+    crate_dir
+        .join("../deployments/testnet/circuit_keys")
+        .join(format!("{circuit_name}.graph.manifest"))
+}
+
+fn required_graph_artifact(
+    crate_dir: &Path,
+    circuit_name: &str,
+    circom_file: &Path,
+    dependencies: &[PathBuf],
+) -> Result<Option<(PathBuf, PathBuf)>> {
+    if !circuit_needs_witness_graph(circuit_name) {
+        return Ok(None);
+    }
+
+    let graph_path = checked_in_graph_path(crate_dir, circuit_name);
+    let manifest_path = checked_in_graph_manifest_path(crate_dir, circuit_name);
+    println!("cargo:rerun-if-changed={}", graph_path.display());
+    println!("cargo:rerun-if-changed={}", manifest_path.display());
+    if !graph_path.exists() {
+        bail!(
+            "Missing native witness graph for {circuit_name}: {}. Run `tools/witness-graph/generate-policy-graph.sh` and commit the generated artifact.",
+            graph_path.display()
+        );
+    }
+    if !manifest_path.exists() {
+        bail!(
+            "Missing native witness graph manifest for {circuit_name}: {}. Run `tools/witness-graph/generate-policy-graph.sh` and commit the generated manifest.",
+            manifest_path.display()
+        );
+    }
+
+    verify_graph_manifest(
+        workspace_root(crate_dir),
+        circuit_name,
+        &graph_path,
+        &manifest_path,
+        circom_file,
+        dependencies,
+    )?;
+
+    Ok(Some((graph_path, manifest_path)))
+}
+
+fn verify_graph_manifest(
+    workspace_root: &Path,
+    circuit_name: &str,
+    graph_path: &Path,
+    manifest_path: &Path,
+    circom_file: &Path,
+    dependencies: &[PathBuf],
+) -> Result<()> {
+    let manifest = parse_graph_manifest(manifest_path)?;
+    let actual_graph_hash = sha256_file(graph_path)?;
+    if manifest.graph_sha256 != actual_graph_hash {
+        bail!(
+            "Native witness graph hash mismatch for {circuit_name}: manifest has {}, actual file has {}. Run `tools/witness-graph/generate-policy-graph.sh` and commit both files.",
+            manifest.graph_sha256,
+            actual_graph_hash
+        );
+    }
+
+    let expected_sources = graph_manifest_sources(workspace_root, circom_file, dependencies)?;
+    if manifest.source_sha256 != expected_sources {
+        let (missing, stale, extra) =
+            diff_manifest_sources(&manifest.source_sha256, &expected_sources);
+        bail!(
+            "Native witness graph manifest is stale for {circuit_name}: {missing} missing, {stale} changed, {extra} extra source entries. Run `tools/witness-graph/generate-policy-graph.sh` and commit the updated graph manifest."
+        );
+    }
+
+    Ok(())
+}
+
+struct GraphManifest {
+    graph_sha256: String,
+    source_sha256: BTreeMap<String, String>,
+}
+
+fn parse_graph_manifest(manifest_path: &Path) -> Result<GraphManifest> {
+    let contents = fs::read_to_string(manifest_path)
+        .with_context(|| format!("Failed to read {}", manifest_path.display()))?;
+    let mut version_seen = false;
+    let mut graph_sha256 = None;
+    let mut source_sha256 = BTreeMap::new();
+
+    for (line_no, line) in contents.lines().enumerate() {
+        let line_no = line_no
+            .checked_add(1)
+            .ok_or_else(|| anyhow!("Graph manifest line number overflow"))?;
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+
+        if trimmed == "version 1" {
+            version_seen = true;
+            continue;
+        }
+
+        if let Some(hash) = trimmed.strip_prefix("graph_sha256 ") {
+            graph_sha256 = Some(hash.trim().to_string());
+            continue;
+        }
+
+        if let Some(rest) = trimmed.strip_prefix("source_sha256 ") {
+            let (hash, path) = rest
+                .split_once(' ')
+                .ok_or_else(|| anyhow!("Invalid graph manifest line {line_no}: {trimmed}"))?;
+            source_sha256.insert(path.to_string(), hash.to_string());
+            continue;
+        }
+
+        bail!("Invalid graph manifest line {line_no}: {trimmed}");
+    }
+
+    if !version_seen {
+        bail!(
+            "Graph manifest {} is missing `version 1`",
+            manifest_path.display()
+        );
+    }
+
+    Ok(GraphManifest {
+        graph_sha256: graph_sha256.ok_or_else(|| {
+            anyhow!(
+                "Graph manifest {} is missing graph_sha256",
+                manifest_path.display()
+            )
+        })?,
+        source_sha256,
+    })
+}
+
+fn graph_manifest_sources(
+    workspace_root: &Path,
+    circom_file: &Path,
+    dependencies: &[PathBuf],
+) -> Result<BTreeMap<String, String>> {
+    let mut source_files: Vec<PathBuf> = std::iter::once(circom_file.to_path_buf())
+        .chain(dependencies.iter().cloned())
+        .chain([
+            workspace_root.join("circuits/circomlib.lock"),
+            workspace_root.join("tools/witness-graph/generate-policy-graph.sh"),
+        ])
+        .collect();
+    source_files.sort();
+    source_files.dedup();
+
+    let mut sources = BTreeMap::new();
+    for path in source_files {
+        let rel_path = relative_manifest_path(workspace_root, &path)?;
+        sources.insert(rel_path, sha256_file(&path)?);
+    }
+    Ok(sources)
+}
+
+fn diff_manifest_sources(
+    manifest: &BTreeMap<String, String>,
+    expected: &BTreeMap<String, String>,
+) -> (usize, usize, usize) {
+    let missing = expected
+        .keys()
+        .filter(|path| !manifest.contains_key(*path))
+        .count();
+    let stale = expected
+        .iter()
+        .filter(|(path, hash)| manifest.get(*path).is_some_and(|actual| actual != *hash))
+        .count();
+    let extra = manifest
+        .keys()
+        .filter(|path| !expected.contains_key(*path))
+        .count();
+    (missing, stale, extra)
+}
+
+fn relative_manifest_path(workspace_root: &Path, path: &Path) -> Result<String> {
+    let absolute = path
+        .canonicalize()
+        .with_context(|| format!("Failed to canonicalize {}", path.display()))?;
+    let relative = absolute
+        .strip_prefix(workspace_root.canonicalize()?)
+        .with_context(|| {
+            format!(
+                "Graph manifest source {} is outside workspace {}",
+                absolute.display(),
+                workspace_root.display()
+            )
+        })?;
+    Ok(relative.to_string_lossy().replace('\\', "/"))
+}
+
+fn sha256_file(path: &Path) -> Result<String> {
+    let bytes = fs::read(path).with_context(|| format!("Failed to read {}", path.display()))?;
+    let digest = Sha256::digest(&bytes);
+    Ok(hex_lower(&digest))
+}
+
+fn hex_lower(bytes: &[u8]) -> String {
+    const HEX: &[u8; 16] = b"0123456789abcdef";
+    let capacity = bytes
+        .len()
+        .checked_mul(2)
+        .expect("SHA-256 hex output capacity overflow");
+    let mut out = String::with_capacity(capacity);
+    for byte in bytes {
+        out.push(char::from(HEX[usize::from(*byte >> 4)]));
+        out.push(char::from(HEX[usize::from(*byte & 0x0f)]));
+    }
+    out
 }
 
 fn main() -> Result<()> {
@@ -220,6 +469,14 @@ fn main() -> Result<()> {
             .context("Invalid circom filename")?
             .to_string_lossy()
             .to_string();
+        let graph_artifacts =
+            required_graph_artifact(&crate_dir, &circuit_name, &circom_file, &dependencies)?;
+        let graph_file = graph_artifacts
+            .as_ref()
+            .map(|(graph_path, _)| graph_path.as_path());
+        let graph_manifest_file = graph_artifacts
+            .as_ref()
+            .map(|(_, manifest_path)| manifest_path.as_path());
 
         let wasm_path = out_dir
             .join("wasm")
@@ -248,6 +505,8 @@ fn main() -> Result<()> {
                         &circuit_name,
                         &r1cs_file,
                         Some(&wasm_path),
+                        graph_file,
+                        graph_manifest_file,
                     ) {
                         println!(
                             "cargo:warning=Failed to publish artifacts for {circuit_name}: {e}"
@@ -344,6 +603,8 @@ fn main() -> Result<()> {
             } else {
                 None
             },
+            graph_file,
+            graph_manifest_file,
         ) {
             println!("cargo:warning=Failed to publish artifacts for {circuit_name}: {e}");
         }
@@ -458,6 +719,11 @@ fn resolve_include_path(
             return Ok(Some(path.canonicalize()?));
         }
     } else {
+        let path = current_dir.join(include_path);
+        if path.exists() {
+            return Ok(Some(path.canonicalize()?));
+        }
+
         // Search in library directories
         for dir in search_dirs {
             let path = dir.join(include_path);
@@ -765,6 +1031,7 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
     {
         let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if head == locked_rev {
+            ensure_circomlib_clean(&circomlib_path)?;
             println!("cargo:warning=circomlib already at locked revision {locked_rev}");
             return Ok(());
         }
@@ -795,6 +1062,29 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         .map_err(|_| anyhow!("Error checking out circomlib dependency"))?;
     if !checkout_status.success() {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
+    }
+
+    ensure_circomlib_clean(&circomlib_path)?;
+
+    Ok(())
+}
+
+fn ensure_circomlib_clean(circomlib_path: &Path) -> Result<()> {
+    let status = Command::new("git")
+        .arg("-C")
+        .arg(circomlib_path)
+        .arg("status")
+        .arg("--porcelain")
+        .output()
+        .map_err(|_| anyhow!("Error checking circomlib working tree status"))?;
+    if !status.status.success() {
+        bail!("git status failed for circomlib dependency");
+    }
+
+    if !status.stdout.is_empty() {
+        bail!(
+            "circuits/src/circomlib has local modifications. Reset it to circuits/circomlib.lock before building so circuit artifacts and witness graph manifests are reproducible."
+        );
     }
 
     Ok(())

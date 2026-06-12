@@ -14,7 +14,9 @@ mod tests {
     use anyhow::{Context, Result, ensure};
     use num_bigint::BigInt;
     use std::{
+        cell::RefCell,
         convert::TryInto,
+        fs,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
     };
@@ -317,13 +319,10 @@ mod tests {
         load_artifacts("policy_tx_2_2")
     }
 
-    #[test]
-    #[ignore]
-    fn test_tx_1in_1out() -> Result<()> {
+    fn policy_one_in_one_out_case()
+    -> Result<(TxCase, Vec<Scalar>, Vec<MembershipTree>, Vec<NonMembership>)> {
         // One real input (in1), one dummy input (in0.amount = 0).
         // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
-        let (wasm, r1cs) = policy_artifacts()?;
-
         let case = TxCase::new(
             vec![
                 InputNote {
@@ -370,6 +369,47 @@ mod tests {
             },
         ];
 
+        Ok((case, leaves, membership_trees, keys))
+    }
+
+    fn policy_graph_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin")
+    }
+
+    fn policy_proving_key_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin")
+    }
+
+    fn inputs_to_json(inputs: &Inputs) -> Result<String> {
+        let mut object = serde_json::Map::new();
+        for (key, value) in inputs.iter() {
+            let json_value = match value {
+                crate::test::utils::circom_tester::InputValue::Single(value) => {
+                    serde_json::Value::String(value.to_string())
+                }
+                crate::test::utils::circom_tester::InputValue::Array(values) => {
+                    serde_json::Value::Array(
+                        values
+                            .iter()
+                            .map(|value| serde_json::Value::String(value.to_string()))
+                            .collect(),
+                    )
+                }
+            };
+            object.insert(key.clone(), json_value);
+        }
+
+        serde_json::to_string(&object).context("failed to serialize policy witness inputs")
+    }
+
+    #[test]
+    #[ignore]
+    fn test_tx_1in_1out() -> Result<()> {
+        let (wasm, r1cs) = policy_artifacts()?;
+        let (case, leaves, membership_trees, keys) = policy_one_in_one_out_case()?;
+
         run_case(
             &wasm,
             &r1cs,
@@ -380,6 +420,59 @@ mod tests {
             &keys,
             None::<fn(&mut Inputs)>,
         )
+    }
+
+    #[test]
+    #[ignore]
+    fn native_policy_graph_witness_proves_reference_case() -> Result<()> {
+        let (wasm, r1cs) = policy_artifacts()?;
+        let (case, leaves, membership_trees, keys) = policy_one_in_one_out_case()?;
+        let captured_inputs = RefCell::new(None);
+
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            leaves,
+            Scalar::from(0u64),
+            &membership_trees,
+            &keys,
+            Some(|inputs: &mut Inputs| {
+                captured_inputs.replace(Some(inputs.clone()));
+            }),
+        )?;
+
+        let inputs = captured_inputs
+            .into_inner()
+            .ok_or_else(|| anyhow::anyhow!("policy input capture did not run"))?;
+        let inputs_json = inputs_to_json(&inputs)?;
+        let graph_bytes = fs::read(policy_graph_path()).context("failed to read policy graph")?;
+        let r1cs_bytes = fs::read(&r1cs).context("failed to read policy R1CS")?;
+        let proving_key =
+            fs::read(policy_proving_key_path()).context("failed to read policy proving key")?;
+
+        let mut witness_calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+            .context("failed to initialize native graph witness calculator")?;
+        let witness_bytes = witness_calculator
+            .compute_witness(&inputs_json)
+            .context("native graph witness calculation failed")?;
+
+        let prover = prover::Prover::new(&proving_key, &r1cs_bytes)
+            .context("failed to initialize prover")?;
+        let proof = prover
+            .prove_bytes(&witness_bytes)
+            .context("failed to prove native graph witness")?;
+        let public_inputs = prover
+            .extract_public_inputs(&witness_bytes)
+            .context("failed to extract public inputs from graph witness")?;
+
+        ensure!(
+            prover
+                .verify(&proof, &public_inputs)
+                .context("failed to verify native graph witness proof")?,
+            "native graph witness proof did not verify"
+        );
+        Ok(())
     }
 
     #[test]
