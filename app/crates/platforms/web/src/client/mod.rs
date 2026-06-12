@@ -1,7 +1,7 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, PreparedTxPublic,
-        ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+        AdminASPRequest, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest,
+        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
     },
     workers::{prover::ProverWorker, storage::StorageWorker},
 };
@@ -16,14 +16,20 @@ use stellar::{
     OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
     StateFetcher as CoreStateFetcher,
 };
-use tx_planner::Transact;
 use types::{
-    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey, ExtAmount, Field,
-    KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH, parse_0x_hex_32,
+    ContractConfig, EncryptionPublicKey, ExtAmount, Field, KeyDerivationSignature, NoteAmount,
+    NotePublicKey, parse_0x_hex_32,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
 mod transact;
+
+fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
+    match result {
+        None => Ok(JsValue::NULL),
+        Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
+    }
+}
 
 fn emit_progress(
     on_status: &Option<Function>,
@@ -232,270 +238,6 @@ impl WebClient {
             _ => Ok(resp),
         }
     }
-
-    async fn prove_deposit_inner(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        amount: BigInt,
-        output_amounts: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<DepositPrepared>, JsError> {
-        let expected_outputs =
-            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
-        if output_amounts.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "output_amounts must have length {N_OUTPUTS}"
-            )));
-        }
-
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-
-        let amount = parse_ext_amount_decimal(&amount)?;
-        if amount <= ExtAmount::ZERO {
-            return Err(JsError::new("amount must be > 0 for deposit"));
-        }
-
-        emit_progress(
-            &on_status,
-            "deposit",
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-
-        let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
-            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
-            let v = output_amounts.get(idx);
-            let bi: BigInt = v
-                .dyn_into()
-                .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
-            *out = parse_note_amount_decimal(&bi)?;
-        }
-
-        let params = loop {
-            emit_progress(
-                &on_status,
-                "deposit",
-                "fetch_chain_state",
-                "Fetching on-chain state…",
-                None,
-                None,
-            );
-            let ContractsStateData {
-                pools,
-                asp_membership,
-                asp_non_membership,
-            } = self
-                .fetcher
-                .contracts_data_for_pool(&pool_contract_id)
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let pool = pools
-                .into_iter()
-                .next()
-                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
-            let pool_root = pool.merkle_root;
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "load_state",
-                "Loading local keys…",
-                None,
-                None,
-            );
-            let keys = match self
-                .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
-                .await?
-            {
-                StorageWorkerResponse::UserKeys(keys) => {
-                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
-                }
-                other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-            };
-            let note_pubkey: NotePublicKey = keys.note_keypair.public;
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "fetch_chain_state",
-                "Fetching ASP non-membership proof…",
-                None,
-                None,
-            );
-            let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
-                    &note_pubkey,
-                    asp_non_membership.root,
-                    SMT_DEPTH as usize,
-                    &user_address,
-                )
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let req = DepositRequest {
-                user_address: user_address.clone(),
-                membership_blinding,
-                amount,
-                pool_root,
-                pool_address: pool.contract_id,
-                aspmem_root: asp_membership.root,
-                aspmem_contract_id: asp_membership.contract_id.clone(),
-                aspmem_ledger: asp_membership.ledger,
-                output_amounts: out_amounts,
-                smt_depth: SMT_DEPTH,
-                tree_depth: pool.merkle_levels,
-                non_membership_proof,
-            };
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "load_state",
-                "Building witness inputs…",
-                None,
-                None,
-            );
-            match self
-                .storage_request(StorageWorkerRequest::Deposit(req), 5_000)
-                .await?
-            {
-                StorageWorkerResponse::DepositParams(p) => break p,
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
-                    log::warn!("[DEPOSIT] the account {user_address} should register within ASP");
-                    return Ok(None);
-                }
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
-                    log::info!("[DEPOSIT] sync is needed - waiting the indexer");
-                    emit_progress(
-                        &on_status,
-                        "deposit",
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain...")
-                        } else {
-                            "Waiting to sync ledgers from the chain...".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                    continue;
-                }
-                other => {
-                    return Err(JsError::new(&format!(
-                        "Unexpected storage worker response: {:?}",
-                        other
-                    )));
-                }
-            }
-        };
-
-        emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
-        self.ping_prover()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
-
-        let mut prepared = match self
-            .prover_request(ProverWorkerRequest::Deposit(params), 20_000)
-            .await?
-        {
-            ProverWorkerResponse::DepositPrepared(p) => p,
-            other => {
-                return Err(JsError::new(&format!(
-                    "Unexpected prover worker response: {:?}",
-                    other
-                )));
-            }
-        };
-
-        emit_progress(
-            &on_status,
-            "deposit",
-            "prepare_tx",
-            "Simulating transaction…",
-            None,
-            None,
-        );
-        prepared.soroban_tx = self
-            .prepare_pool_soroban_tx(
-                &pool_contract_id,
-                &user_address,
-                prepared.proof_uncompressed.clone(),
-                prepared.ext_data.clone(),
-                &prepared.prepared,
-            )
-            .await?;
-
-        Ok(Some(prepared))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn prove_transact_from_js(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        ext_recipient: String,
-        ext_amount: BigInt,
-        input_note_ids: Array,
-        output_amounts: Array,
-        out_recipient_note_keys_hex: Array,
-        out_recipient_enc_keys_hex: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<PreparedProverTx>, JsError> {
-        let expected_outputs =
-            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
-        if out_recipient_note_keys_hex.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "out_recipient_note_keys_hex must have length {N_OUTPUTS}"
-            )));
-        }
-        if out_recipient_enc_keys_hex.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "out_recipient_enc_keys_hex must have length {N_OUTPUTS}"
-            )));
-        }
-
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-        let ext_amount = parse_ext_amount_decimal(&ext_amount)?;
-        let input_commitments = parse_input_note_ids(
-            &input_note_ids,
-            0,
-            2,
-            "input_note_ids must have length 0..=2",
-        )?;
-        let out_amounts = parse_output_amounts(&output_amounts)?;
-        let (out_note_pks, out_enc_pks) =
-            parse_output_recipient_keys(&out_recipient_note_keys_hex, &out_recipient_enc_keys_hex)?;
-
-        let step = Transact::new(
-            input_commitments,
-            out_amounts,
-            ext_amount,
-            ext_recipient,
-            out_note_pks,
-            out_enc_pks,
-        );
-
-        self.prove_transact_inner(
-            &pool_contract_id,
-            &user_address,
-            membership_blinding,
-            &step,
-            "transact",
-            &on_status,
-            None,
-            None,
-        )
-        .await
-    }
 }
 
 #[wasm_bindgen]
@@ -656,41 +398,41 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = proveDeposit)]
-    pub async fn prove_deposit(
+    #[wasm_bindgen(js_name = executeDeposit)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_deposit(
         &self,
         pool_contract_id: String,
         user_address: String,
         membership_blinding: BigInt,
         amount: BigInt,
         output_amounts: Array,
+        submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_deposit_inner(
+        let result = self
+            .execute_deposit_inner(
                 pool_contract_id,
                 user_address,
                 membership_blinding,
                 amount,
                 output_amounts,
+                submit_fn,
                 on_status,
             )
             .await?;
-        match prepared {
-            None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
-        }
+        execute_hashes_to_js(result)
     }
 
-    #[wasm_bindgen(js_name = planSpend)]
-    pub async fn plan_spend(
+    #[wasm_bindgen(js_name = plan)]
+    pub async fn plan(
         &self,
-        user_address: String,
         pool_contract_id: String,
+        user_address: String,
         amount: BigInt,
     ) -> Result<JsValue, JsError> {
         let preview = self
-            .plan_spend_inner(pool_contract_id, user_address, amount)
+            .plan_inner(pool_contract_id, user_address, amount)
             .await?;
         Ok(serde_wasm_bindgen::to_value(&preview)?)
     }
@@ -716,7 +458,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&e.to_string()))?;
         let target = SpendTarget::transfer(recipient_note, recipient_enc);
 
-        match self
+        let result = self
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
@@ -727,11 +469,8 @@ impl WebClient {
                 submit_fn,
                 on_status,
             )
-            .await?
-        {
-            None => Ok(JsValue::NULL),
-            Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
-        }
+            .await?;
+        execute_hashes_to_js(result)
     }
 
     #[wasm_bindgen(js_name = executeWithdraw)]
@@ -750,7 +489,7 @@ impl WebClient {
 
         let target = SpendTarget::withdraw(withdraw_recipient);
 
-        match self
+        let result = self
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
@@ -761,16 +500,13 @@ impl WebClient {
                 submit_fn,
                 on_status,
             )
-            .await?
-        {
-            None => Ok(JsValue::NULL),
-            Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
-        }
+            .await?;
+        execute_hashes_to_js(result)
     }
 
-    #[wasm_bindgen(js_name = proveTransact)]
+    #[wasm_bindgen(js_name = executeTransact)]
     #[allow(clippy::too_many_arguments)]
-    pub async fn prove_transact(
+    pub async fn execute_transact_wasm(
         &self,
         pool_contract_id: String,
         user_address: String,
@@ -781,10 +517,11 @@ impl WebClient {
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
+        submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_transact_from_js(
+        let result = self
+            .execute_transact_inner(
                 pool_contract_id,
                 user_address,
                 membership_blinding,
@@ -794,13 +531,12 @@ impl WebClient {
                 output_amounts,
                 out_recipient_note_keys_hex,
                 out_recipient_enc_keys_hex,
+                submit_fn,
                 on_status,
+                "transact",
             )
             .await?;
-        match prepared {
-            None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
-        }
+        execute_hashes_to_js(result)
     }
 }
 

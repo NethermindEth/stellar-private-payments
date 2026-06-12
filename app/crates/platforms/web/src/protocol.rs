@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use prover::flows::{DepositParams, N_OUTPUTS, TransactParams};
+use prover::flows::{N_OUTPUTS, TransactParams};
 pub type Address = String;
 use stellar::PreparedSorobanTx;
 use types::{
@@ -24,6 +24,7 @@ pub struct DisclaimerStatePayload {
     pub accepted: bool,
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     Ping,
@@ -41,11 +42,11 @@ pub enum StorageWorkerRequest {
     },
     RecentPoolActivity(u32),
     RecentPubKeys(u32),
-    Deposit(DepositRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerResponse {
     Pong,
@@ -58,41 +59,23 @@ pub enum StorageWorkerResponse {
     RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
     AspMembershipSync(AspMembershipSync),
-    DepositParams(DepositParams),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ProverWorkerRequest {
     Ping,
-    Deposit(DepositParams),
     Transact(TransactParams),
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum ProverWorkerResponse {
     Pong,
     Error(String),
-    DepositPrepared(DepositPrepared),
     TransactPrepared(PreparedProverTx),
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DepositRequest {
-    pub user_address: Address,
-    pub membership_blinding: Field,
-    pub amount: ExtAmount,
-    pub pool_root: Option<Field>,
-    pub pool_address: Address,
-    pub aspmem_root: Field,
-    pub aspmem_contract_id: Address,
-    pub aspmem_ledger: u32,
-    pub output_amounts: [NoteAmount; N_OUTPUTS],
-    pub smt_depth: u32,
-    pub tree_depth: u32,
-    pub non_membership_proof: AspNonMembershipProof,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -127,21 +110,6 @@ pub struct PreparedTxPublic {
     pub ext_data_hash_be: [u8; 32],
     pub asp_membership_root: Field,
     pub asp_non_membership_root: Field,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DepositPrepared {
-    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256
-    /// bytes.
-    pub proof_uncompressed: Vec<u8>,
-    /// extData passed to the pool contract.
-    pub ext_data: ExtData,
-    /// Public inputs and derived values used to build the on-chain `Proof`
-    /// struct.
-    pub prepared: PreparedTxPublic,
-    /// Unsigned transaction + auth entries from RPC simulation.
-    pub soroban_tx: PreparedSorobanTx,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

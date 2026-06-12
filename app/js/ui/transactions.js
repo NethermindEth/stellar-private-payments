@@ -244,106 +244,60 @@ function showSubmittedToasts(hashes) {
 
 const ASP_NOT_READY_MSG = 'Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).';
 
-function spendPlanStepCount(plan) {
+function planStepCount(plan) {
     const n = plan?.stepCount ?? plan?.step_count;
     if (typeof n === 'number' && Number.isFinite(n)) return Math.trunc(n);
     if (typeof n === 'bigint') return Number(n);
     return null;
 }
 
-function spendPlanHintText(stepCount) {
+function planHintText(stepCount) {
     if (stepCount === 1) return 'Requires 1 on-chain transaction.';
     return `Requires ${stepCount} on-chain transactions.`;
 }
 
-async function fetchSpendPlanStepCount(userAddress, poolContractId, amountStroops) {
-    const plan = await getHandle().webClient.planSpend(userAddress, poolContractId, amountStroops);
-    const stepCount = spendPlanStepCount(plan);
+async function fetchPlanStepCount(poolContractId, userAddress, amountStroops) {
+    const plan = await getHandle().webClient.plan(poolContractId, userAddress, amountStroops);
+    const stepCount = planStepCount(plan);
     if (stepCount == null || stepCount < 1) {
-        throw new Error('Could not plan spend');
+        throw new Error('Could not load plan');
     }
     return stepCount;
 }
 
-async function requireSpendPlanApproval(userAddress, poolContractId, amountStroops) {
-    const stepCount = await fetchSpendPlanStepCount(userAddress, poolContractId, amountStroops);
+async function requirePlanApproval(poolContractId, userAddress, amountStroops) {
+    const stepCount = await fetchPlanStepCount(poolContractId, userAddress, amountStroops);
     if (stepCount > 1) {
         const ok = window.confirm(
-            `This spend requires ${stepCount} on-chain transactions (${stepCount} wallet approvals). Continue?`,
+            `This requires ${stepCount} on-chain transactions (${stepCount} wallet approvals). Continue?`,
         );
         if (!ok) return null;
     }
     return stepCount;
 }
 
-async function submitProvedAdvanced(ctx, proved) {
-    if (proved == null) {
-        Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
-        return;
-    }
-    ctx.setLoadingText(ctx.btn, 'Ready to sign…');
-    const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
-        address: ctx.userAddress,
-        rpcUrl: App.state.wallet.sorobanRpcUrl,
-        networkPassphrase: App.state.wallet.networkPassphrase,
-    }, { onStatus: ctx.onStatus });
-    showSubmittedToasts([txHash]);
-}
-
-function callProveTransact(ctx, {
-    extRecipient,
-    extAmount,
-    inputNoteIds,
-    outputAmounts,
-    noteKeys,
-    encKeys,
-}) {
-    return getHandle().webClient.proveTransact(
-        ctx.poolContractId,
-        ctx.userAddress,
-        ctx.membershipBlinding,
-        extRecipient,
-        extAmount,
-        inputNoteIds,
-        outputAmounts,
-        noteKeys,
-        encKeys,
-        ctx.onStatus,
-    );
-}
-
-async function runSpendFlow({
-    btn,
-    advancedCheckboxId,
-    amountInputId,
-    membershipBlindingId,
-    proveAdvanced,
-    executeSimple,
-}) {
+async function prepareExecuteContext(btn, membershipBlindingId) {
     requireWalletReady();
     const userAddress = App.state.wallet.address;
     const membershipBlinding = parseMembershipBlinding(membershipBlindingId);
-    const advanced = isAdvancedMode(advancedCheckboxId);
-
     setLoading(btn, 'Validating…');
     const onStatus = p => p?.message && setLoadingText(btn, p.message);
-    const setLoadingTextForBtn = text => setLoadingText(btn, text);
     const config = await getContractConfig();
     const poolContractId = getActivePoolContractId(config);
-    const ctx = {
+    const submitFn = makePoolSubmitFn(userAddress, onStatus);
+    const client = getHandle().webClient;
+    return {
         btn,
         userAddress,
         membershipBlinding,
         poolContractId,
+        submitFn,
         onStatus,
-        setLoadingText: setLoadingTextForBtn,
+        client,
     };
+}
 
-    if (advanced) {
-        await proveAdvanced(ctx);
-        return;
-    }
-
+async function executeFromAmount(ctx, { btn, amountInputId, run }) {
     const amountRes = tryParseXlmToStroopsBigInt(
         document.getElementById(amountInputId)?.value,
         { allowNegative: false },
@@ -351,12 +305,18 @@ async function runSpendFlow({
     if (!amountRes.ok) throw new Error(amountRes.error);
     if (amountRes.value <= 0n) throw new Error('Amount must be greater than zero');
 
-    const stepCount = await requireSpendPlanApproval(userAddress, poolContractId, amountRes.value);
-    if (stepCount == null) return;
+    const stepCount = await requirePlanApproval(
+        ctx.poolContractId,
+        ctx.userAddress,
+        amountRes.value,
+    );
+    if (stepCount == null) return undefined;
 
     setLoadingText(btn, stepCount === 1 ? 'Proving…' : `Proving (1/${stepCount})…`);
-    const submitFn = makePoolSubmitFn(userAddress, onStatus);
-    const hashes = await executeSimple(ctx, amountRes.value, submitFn);
+    return run(ctx, amountRes.value);
+}
+
+function showExecuteResult(hashes) {
     if (hashes == null) {
         Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
         return;
@@ -364,7 +324,7 @@ async function runSpendFlow({
     showSubmittedToasts(hashes);
 }
 
-function wireSpendPlanHint(amountInputId, hintId, advancedCheckboxId) {
+function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
     const input = document.getElementById(amountInputId);
     const hint = document.getElementById(hintId);
     let timer;
@@ -392,13 +352,13 @@ function wireSpendPlanHint(amountInputId, hintId, advancedCheckboxId) {
         try {
             const config = await getContractConfig();
             const poolContractId = getActivePoolContractId(config);
-            const stepCount = await fetchSpendPlanStepCount(
-                App.state.wallet.address,
+            const stepCount = await fetchPlanStepCount(
                 poolContractId,
+                App.state.wallet.address,
                 res.value,
             );
             if (hint) {
-                hint.textContent = spendPlanHintText(stepCount);
+                hint.textContent = planHintText(stepCount);
                 hint.classList.remove('hidden');
             }
         } catch {
@@ -645,10 +605,7 @@ export const Transactions = {
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
                 const advanced = isAdvancedMode('deposit-advanced-mode');
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('deposit-membership-blinding');
 
                 let amountStroops;
                 let outputAmounts;
@@ -664,32 +621,19 @@ export const Transactions = {
                     outputAmounts = [amountStroops, 0n];
                 }
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-                const config = await getContractConfig();
-                const poolContractId = getActivePoolContractId(config);
+                const ctx = await prepareExecuteContext(btn, 'deposit-membership-blinding');
                 setLoadingText(btn, 'Proving…');
-                const proved = await getHandle().webClient.proveDeposit(
-                    poolContractId,
-                    userAddress,
-                    membershipBlinding,
+                const hashes = await ctx.client.executeDeposit(
+                    ctx.poolContractId,
+                    ctx.userAddress,
+                    ctx.membershipBlinding,
                     amountStroops,
                     outputAmounts,
-                    onStatus,
+                    ctx.submitFn,
+                    ctx.onStatus,
                 );
 
-                if (proved == null) {
-                    Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
-                    return;
-                }
-
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
-                showSubmittedToasts([txHash]);
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Deposit failed', 'error', 7000);
             } finally {
@@ -705,53 +649,59 @@ export const Transactions = {
         const btn = document.getElementById('btn-withdraw');
         inputs?.addEventListener('input', updateWithdrawTotal);
         wireSpendAdvancedToggle('withdraw-advanced-mode', 'withdraw-advanced-section', 'withdraw-amount-section');
-        wireSpendPlanHint('withdraw-amount', 'withdraw-plan-hint', 'withdraw-advanced-mode');
+        wirePlanHint('withdraw-amount', 'withdraw-plan-hint', 'withdraw-advanced-mode');
         updateWithdrawTotal();
 
         btn?.addEventListener('click', async () => {
             try {
-                await runSpendFlow({
-                    btn,
-                    advancedCheckboxId: 'withdraw-advanced-mode',
-                    amountInputId: 'withdraw-amount',
-                    membershipBlindingId: 'withdraw-membership-blinding',
-                    proveAdvanced: async (ctx) => {
-                        const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
-                            || ctx.userAddress;
-                        const inputNoteIds = collectNoteIds('withdraw-inputs');
-                        if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
-                        if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                const advanced = isAdvancedMode('withdraw-advanced-mode');
+                const ctx = await prepareExecuteContext(btn, 'withdraw-membership-blinding');
+                const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
+                    || ctx.userAddress;
 
-                        const total = sumInputNotesStroops('withdraw-inputs');
-                        if (total <= 0n) {
-                            throw new Error('Selected notes must have a positive total');
-                        }
+                let hashes;
+                if (advanced) {
+                    const inputNoteIds = collectNoteIds('withdraw-inputs');
+                    if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                    if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
 
-                        ctx.setLoadingText(ctx.btn, 'Proving…');
-                        const proved = await callProveTransact(ctx, {
-                            extRecipient: recipient,
-                            extAmount: -total,
-                            inputNoteIds,
-                            outputAmounts: [0n, 0n],
-                            noteKeys: [null, null],
-                            encKeys: [null, null],
-                        });
-                        await submitProvedAdvanced(ctx, proved);
-                    },
-                    executeSimple: async (ctx, amountStroops, submitFn) => {
-                        const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
-                            || ctx.userAddress;
-                        return getHandle().webClient.executeWithdraw(
-                            ctx.poolContractId,
-                            ctx.userAddress,
-                            ctx.membershipBlinding,
+                    const total = sumInputNotesStroops('withdraw-inputs');
+                    if (total <= 0n) {
+                        throw new Error('Selected notes must have a positive total');
+                    }
+
+                    setLoadingText(btn, 'Proving…');
+                    hashes = await ctx.client.executeTransact(
+                        ctx.poolContractId,
+                        ctx.userAddress,
+                        ctx.membershipBlinding,
+                        recipient,
+                        -total,
+                        inputNoteIds,
+                        [0n, 0n],
+                        [null, null],
+                        [null, null],
+                        ctx.submitFn,
+                        ctx.onStatus,
+                    );
+                } else {
+                    hashes = await executeFromAmount(ctx, {
+                        btn,
+                        amountInputId: 'withdraw-amount',
+                        run: (c, amountStroops) => c.client.executeWithdraw(
+                            c.poolContractId,
+                            c.userAddress,
+                            c.membershipBlinding,
                             recipient,
                             amountStroops,
-                            submitFn,
-                            ctx.onStatus,
-                        );
-                    },
-                });
+                            c.submitFn,
+                            c.onStatus,
+                        ),
+                    });
+                    if (hashes === undefined) return;
+                }
+
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
             } finally {
@@ -774,7 +724,7 @@ export const Transactions = {
         inputs?.addEventListener('input', updateTransferBalance);
         outputs?.addEventListener('input', updateTransferBalance);
         wireSpendAdvancedToggle('transfer-advanced-mode', 'transfer-advanced-section', 'transfer-amount-section');
-        wireSpendPlanHint('transfer-amount', 'transfer-plan-hint', 'transfer-advanced-mode');
+        wirePlanHint('transfer-amount', 'transfer-plan-hint', 'transfer-advanced-mode');
         updateTransferBalance();
 
         btn?.addEventListener('click', async () => {
@@ -785,41 +735,51 @@ export const Transactions = {
                     throw new Error('Recipient note key + encryption key are required');
                 }
 
-                await runSpendFlow({
-                    btn,
-                    advancedCheckboxId: 'transfer-advanced-mode',
-                    amountInputId: 'transfer-amount',
-                    membershipBlindingId: 'transfer-membership-blinding',
-                    proveAdvanced: async (ctx) => {
-                        const inputNoteIds = collectNoteIds('transfer-inputs');
-                        if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
-                        if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
-                        if (!updateTransferBalance()) throw new Error('Input notes must equal output amounts');
+                const advanced = isAdvancedMode('transfer-advanced-mode');
+                const ctx = await prepareExecuteContext(btn, 'transfer-membership-blinding');
 
-                        const outputAmounts = collectOutputAmounts('transfer-outputs');
+                let hashes;
+                if (advanced) {
+                    const inputNoteIds = collectNoteIds('transfer-inputs');
+                    if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                    if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                    if (!updateTransferBalance()) throw new Error('Input notes must equal output amounts');
 
-                        ctx.setLoadingText(ctx.btn, 'Proving…');
-                        const proved = await callProveTransact(ctx, {
-                            extRecipient: ctx.poolContractId,
-                            extAmount: 0n,
-                            inputNoteIds,
-                            outputAmounts,
-                            noteKeys: [recipientNoteKey, recipientNoteKey],
-                            encKeys: [recipientEncKey, recipientEncKey],
-                        });
-                        await submitProvedAdvanced(ctx, proved);
-                    },
-                    executeSimple: async (ctx, amountStroops, submitFn) => getHandle().webClient.executeTransfer(
+                    const outputAmounts = collectOutputAmounts('transfer-outputs');
+
+                    setLoadingText(btn, 'Proving…');
+                    hashes = await ctx.client.executeTransact(
                         ctx.poolContractId,
                         ctx.userAddress,
                         ctx.membershipBlinding,
-                        amountStroops,
-                        recipientNoteKey,
-                        recipientEncKey,
-                        submitFn,
+                        ctx.poolContractId,
+                        0n,
+                        inputNoteIds,
+                        outputAmounts,
+                        [recipientNoteKey, recipientNoteKey],
+                        [recipientEncKey, recipientEncKey],
+                        ctx.submitFn,
                         ctx.onStatus,
-                    ),
-                });
+                    );
+                } else {
+                    hashes = await executeFromAmount(ctx, {
+                        btn,
+                        amountInputId: 'transfer-amount',
+                        run: (c, amountStroops) => c.client.executeTransfer(
+                            c.poolContractId,
+                            c.userAddress,
+                            c.membershipBlinding,
+                            amountStroops,
+                            recipientNoteKey,
+                            recipientEncKey,
+                            c.submitFn,
+                            c.onStatus,
+                        ),
+                    });
+                    if (hashes === undefined) return;
+                }
+
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Transfer failed', 'error', 7000);
             } finally {
@@ -857,11 +817,10 @@ export const Transactions = {
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('transact-membership-blinding');
+                const ctx = await prepareExecuteContext(btn, 'transact-membership-blinding');
                 const extAmountStroops = decimalToBaseUnitsBigInt(amount.value, { allowNegative: true });
-                const extRecipient = document.getElementById('transact-recipient')?.value?.trim() || userAddress;
+                const extRecipient = document.getElementById('transact-recipient')?.value?.trim()
+                    || ctx.userAddress;
                 if (extAmountStroops < 0n && !extRecipient) {
                     throw new Error('Withdrawal recipient is required when public amount is negative');
                 }
@@ -871,39 +830,21 @@ export const Transactions = {
                 const outputAmounts = collectOutputAmounts('transact-outputs');
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-	                const config = await getContractConfig();
-                const poolContractId = getActivePoolContractId(config);
-	                setLoadingText(btn, 'Proving…');
-	                const proved = await callProveTransact(
-	                    {
-	                        userAddress,
-	                        membershipBlinding,
-	                        poolContractId,
-	                        onStatus,
-	                    },
-	                    {
-	                        extRecipient,
-	                        extAmount: extAmountStroops,
-	                        inputNoteIds,
-	                        outputAmounts,
-	                        noteKeys,
-	                        encKeys,
-	                    },
-	                );
-                if (proved == null) {
-                    Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
-                    return;
-                }
-
-                setLoadingText(btn, 'Ready to sign…');
-                const txHash = await submitPreparedSorobanTx(proved.sorobanTx, {
-                    address: userAddress,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                }, { onStatus });
-                showSubmittedToasts([txHash]);
+                setLoadingText(btn, 'Proving…');
+                const hashes = await ctx.client.executeTransact(
+                    ctx.poolContractId,
+                    ctx.userAddress,
+                    ctx.membershipBlinding,
+                    extRecipient,
+                    extAmountStroops,
+                    inputNoteIds,
+                    outputAmounts,
+                    noteKeys,
+                    encKeys,
+                    ctx.submitFn,
+                    ctx.onStatus,
+                );
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
             } finally {
