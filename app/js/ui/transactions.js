@@ -8,11 +8,12 @@
  */
 
 import { getHandle } from '../wasm-facade.js';
-import { submitProvedPoolTransact } from '../stellar.js';
+import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
+
 let cachedContractConfig = null;
 
 async function getContractConfig() {
@@ -216,12 +217,11 @@ function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId 
     update();
 }
 
-function makePoolSubmitFn(poolContractId, userAddress, onStatus) {
-    return proved => submitProvedPoolTransact(proved, {
+function makePoolSubmitFn(userAddress, onStatus) {
+    return proved => submitPreparedSorobanTx(proved.sorobanTx, {
         address: userAddress,
         rpcUrl: App.state.wallet.sorobanRpcUrl,
         networkPassphrase: App.state.wallet.networkPassphrase,
-        poolContractId,
     }, { onStatus });
 }
 
@@ -284,7 +284,7 @@ async function prepareExecuteContext(btn, membershipBlindingId) {
     const onStatus = p => p?.message && setLoadingText(btn, p.message);
     const config = await getContractConfig();
     const poolContractId = getActivePoolContractId(config);
-    const submitFn = makePoolSubmitFn(poolContractId, userAddress, onStatus);
+    const submitFn = makePoolSubmitFn(userAddress, onStatus);
     const client = getHandle().webClient;
     return {
         btn,

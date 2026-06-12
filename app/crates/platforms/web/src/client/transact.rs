@@ -259,6 +259,9 @@ impl WebClient {
             }
         };
 
+        let prepared = self
+            .finalize_prepared_prover_tx(pool_contract_id, user_address, prepared, on_status, flow)
+            .await?;
         Ok(Some(prepared))
     }
 

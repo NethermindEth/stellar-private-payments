@@ -239,6 +239,7 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
         proof_uncompressed,
         ext_data,
         prepared: prepared_public,
+        soroban_tx: Default::default(),
     })
 }
 

@@ -1,12 +1,14 @@
 use crate::{
     conversions::{
-        scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64, scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64,
+        scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest},
+    soroban_encode::BASE_FEE,
 };
 use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, convert::TryInto, str::FromStr};
+use std::{collections::HashMap, str::FromStr};
 use stellar_strkey::ed25519;
 use stellar_xdr::{curr as xdr, curr::ReadXdr};
 use types::{
@@ -23,8 +25,8 @@ macro_rules! get_state {
 }
 
 pub struct StateFetcher {
-    client: Client,
-    config: &'static ContractConfig,
+    pub(crate) client: Client,
+    pub(crate) config: &'static ContractConfig,
 }
 
 #[derive(Clone, Debug)]
@@ -49,12 +51,15 @@ pub struct OnchainProofPublicInputs {
     pub asp_non_membership_root: Field,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct PreparedSorobanTx {
     pub tx_xdr: String,
     /// Base64-encoded XDR `SorobanAuthorizationEntry` list from simulation.
     pub auth_entries: Vec<String>,
+    /// Ledger number from `simulateTransaction` (`latestLedger`), for auth
+    /// expiration.
+    pub latest_ledger: u32,
 }
 
 impl StateFetcher {
@@ -89,6 +94,16 @@ impl StateFetcher {
         self.config
     }
 
+    pub fn enabled_pool_for(&self, pool_contract_id: &str) -> Result<&types::PoolConfigEntry> {
+        self.config
+            .pools
+            .iter()
+            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
+            .ok_or_else(|| {
+                anyhow!("enabled pool not found in deployments config: {pool_contract_id}")
+            })
+    }
+
     pub async fn all_contracts_data(&self) -> Result<ContractsStateData> {
         let enabled_pools: Vec<&types::PoolConfigEntry> =
             self.config.pools.iter().filter(|p| p.enabled).collect();
@@ -99,14 +114,7 @@ impl StateFetcher {
         &self,
         pool_contract_id: &str,
     ) -> Result<ContractsStateData> {
-        let enabled_pool = self
-            .config
-            .pools
-            .iter()
-            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
-            .ok_or_else(|| {
-                anyhow!("enabled pool not found in deployments config: {pool_contract_id}")
-            })?;
+        let enabled_pool = self.enabled_pool_for(pool_contract_id)?;
         self.contracts_data(&[enabled_pool]).await
     }
 
@@ -411,23 +419,25 @@ impl StateFetcher {
             });
         }
 
-        let tx = Self::build_find_key_simulation_tx(
-            &self.config.asp_non_membership,
+        let tx = Self::build_invoke_contract_tx_envelope(
             source_account,
-            key,
+            xdr::SequenceNumber(0),
+            BASE_FEE,
+            &self.config.asp_non_membership,
+            "find_key",
+            vec![field_to_scval_u256(key)],
+            Vec::new(),
         )?;
         let sim = self.client.simulate_transaction(&tx).await?;
 
-        let op_result = sim
-            .result
-            .or_else(|| sim.results.into_iter().next())
-            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
+        let op_result = sim.first_result()?;
 
         let retval_b64 = op_result
             .retval
+            .as_deref()
             .ok_or_else(|| anyhow!("simulateTransaction missing retval"))?;
 
-        let retval = xdr::ScVal::from_xdr_base64(&retval_b64, xdr::Limits::none())?;
+        let retval = xdr::ScVal::from_xdr_base64(retval_b64, xdr::Limits::none())?;
         let parsed = Self::parse_find_result(&retval)?;
 
         if parsed.found {
@@ -455,23 +465,7 @@ impl StateFetcher {
         })
     }
 
-    fn build_find_key_simulation_tx(
-        contract_id: &str,
-        source_account: &str,
-        key: Field,
-    ) -> Result<xdr::TransactionEnvelope> {
-        Self::build_invoke_contract_tx_envelope(
-            source_account,
-            xdr::SequenceNumber(0),
-            100,
-            contract_id,
-            "find_key",
-            vec![Self::field_to_scval_u256(key)],
-            Vec::new(),
-        )
-    }
-
-    fn build_invoke_contract_tx_envelope(
+    pub(crate) fn build_invoke_contract_tx_envelope(
         source_account: &str,
         seq_num: xdr::SequenceNumber,
         fee: u32,
@@ -516,22 +510,6 @@ impl StateFetcher {
             tx,
             signatures: xdr::VecM::default(),
         }))
-    }
-
-    fn field_to_scval_u256(v: Field) -> xdr::ScVal {
-        let be = v.to_be_bytes();
-
-        let hi_hi = u64::from_be_bytes(be[0..8].try_into().expect("U256 hi_hi slice"));
-        let hi_lo = u64::from_be_bytes(be[8..16].try_into().expect("U256 hi_lo slice"));
-        let lo_hi = u64::from_be_bytes(be[16..24].try_into().expect("U256 lo_hi slice"));
-        let lo_lo = u64::from_be_bytes(be[24..32].try_into().expect("U256 lo_lo slice"));
-
-        xdr::ScVal::U256(xdr::UInt256Parts {
-            hi_hi,
-            hi_lo,
-            lo_hi,
-            lo_lo,
-        })
     }
 
     fn parse_find_result(val: &xdr::ScVal) -> Result<ParsedFindResult> {
