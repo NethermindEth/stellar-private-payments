@@ -115,15 +115,6 @@ function baseUnitsBigIntToDecimalText(baseUnits) {
     return isNeg ? `-${out}` : out;
 }
 
-function parseMembershipBlinding(inputId) {
-    const raw = document.getElementById(inputId)?.value?.trim() || '0';
-    try {
-        return BigInt(raw);
-    } catch {
-        throw new Error(`Invalid membership blinding: ${raw}`);
-    }
-}
-
 function setLoading(btn, loadingText) {
     const btnText = btn.querySelector('.btn-text');
     const btnLoading = btn.querySelector('.btn-loading');
@@ -242,7 +233,7 @@ function showSubmittedToasts(hashes) {
     }
 }
 
-const ASP_NOT_READY_MSG = 'Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).';
+const ASP_NOT_READY_MSG = 'Cannot prepare transaction yet (ASP registration required or ASP secret is not ready yet).';
 
 function planStepCount(plan) {
     const n = plan?.stepCount ?? plan?.step_count;
@@ -276,10 +267,9 @@ async function requirePlanApproval(poolContractId, userAddress, amountStroops) {
     return stepCount;
 }
 
-async function prepareExecuteContext(btn, membershipBlindingId) {
+async function prepareExecuteContext(btn) {
     requireWalletReady();
     const userAddress = App.state.wallet.address;
-    const membershipBlinding = parseMembershipBlinding(membershipBlindingId);
     setLoading(btn, 'Validating…');
     const onStatus = p => p?.message && setLoadingText(btn, p.message);
     const config = await getContractConfig();
@@ -289,7 +279,6 @@ async function prepareExecuteContext(btn, membershipBlindingId) {
     return {
         btn,
         userAddress,
-        membershipBlinding,
         poolContractId,
         submitFn,
         onStatus,
@@ -621,12 +610,11 @@ export const Transactions = {
                     outputAmounts = [amountStroops, 0n];
                 }
 
-                const ctx = await prepareExecuteContext(btn, 'deposit-membership-blinding');
+                const ctx = await prepareExecuteContext(btn);
                 setLoadingText(btn, 'Proving…');
                 const hashes = await ctx.client.executeDeposit(
                     ctx.poolContractId,
                     ctx.userAddress,
-                    ctx.membershipBlinding,
                     amountStroops,
                     outputAmounts,
                     ctx.submitFn,
@@ -655,7 +643,7 @@ export const Transactions = {
         btn?.addEventListener('click', async () => {
             try {
                 const advanced = isAdvancedMode('withdraw-advanced-mode');
-                const ctx = await prepareExecuteContext(btn, 'withdraw-membership-blinding');
+                const ctx = await prepareExecuteContext(btn);
                 const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
                     || ctx.userAddress;
 
@@ -674,7 +662,6 @@ export const Transactions = {
                     hashes = await ctx.client.executeTransact(
                         ctx.poolContractId,
                         ctx.userAddress,
-                        ctx.membershipBlinding,
                         recipient,
                         -total,
                         inputNoteIds,
@@ -691,7 +678,6 @@ export const Transactions = {
                         run: (c, amountStroops) => c.client.executeWithdraw(
                             c.poolContractId,
                             c.userAddress,
-                            c.membershipBlinding,
                             recipient,
                             amountStroops,
                             c.submitFn,
@@ -736,7 +722,7 @@ export const Transactions = {
                 }
 
                 const advanced = isAdvancedMode('transfer-advanced-mode');
-                const ctx = await prepareExecuteContext(btn, 'transfer-membership-blinding');
+                const ctx = await prepareExecuteContext(btn);
 
                 let hashes;
                 if (advanced) {
@@ -751,7 +737,6 @@ export const Transactions = {
                     hashes = await ctx.client.executeTransact(
                         ctx.poolContractId,
                         ctx.userAddress,
-                        ctx.membershipBlinding,
                         ctx.poolContractId,
                         0n,
                         inputNoteIds,
@@ -768,7 +753,6 @@ export const Transactions = {
                         run: (c, amountStroops) => c.client.executeTransfer(
                             c.poolContractId,
                             c.userAddress,
-                            c.membershipBlinding,
                             amountStroops,
                             recipientNoteKey,
                             recipientEncKey,
@@ -817,7 +801,7 @@ export const Transactions = {
 
         btn?.addEventListener('click', async () => {
             try {
-                const ctx = await prepareExecuteContext(btn, 'transact-membership-blinding');
+                const ctx = await prepareExecuteContext(btn);
                 const extAmountStroops = decimalToBaseUnitsBigInt(amount.value, { allowNegative: true });
                 const extRecipient = document.getElementById('transact-recipient')?.value?.trim()
                     || ctx.userAddress;
@@ -834,7 +818,6 @@ export const Transactions = {
                 const hashes = await ctx.client.executeTransact(
                     ctx.poolContractId,
                     ctx.userAddress,
-                    ctx.membershipBlinding,
                     extRecipient,
                     extAmountStroops,
                     inputNoteIds,

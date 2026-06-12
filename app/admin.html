@@ -43,7 +43,7 @@
         <span id="networkChip">Network</span>
       </div>
       <div class="relative overflow-visible" id="wallet-container">
-        <button 
+        <button
           type="button"
           id="connectBtn"
           class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
@@ -61,54 +61,12 @@
     </div>
   </header>
 
-  <!-- Derive Keys Section -->
-  <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="derive-heading">
-    <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-      <div class="space-y-1">
-        <h2 id="derive-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Key Derivation</h2>
-        <p class="text-xs text-dark-400">
-          Sign a message to derive your ZK keys. These keys will be used to auto-fill the membership and non-membership forms.
-          <span class="text-brand-500">Keys persist when you switch accounts</span>, so you can derive for one user then sign with admin.
-        </p>
-      </div>
-      <div class="flex items-center gap-3">
-        <div class="text-right">
-          <p class="text-xs text-dark-500">Derived from account:</p>
-          <p id="derivedFromAccount" class="text-xs font-mono text-dark-300">--</p>
-        </div>
-        <button 
-          type="button"
-          id="deriveKeysBtn"
-          class="flex items-center gap-2 px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/>
-          </svg>
-          <span id="deriveKeysBtnText">Derive Keys</span>
-        </button>
-      </div>
-    </div>
-    
-    <!-- Derived Keys Display -->
-    <div id="derivedKeysDisplay" class="hidden mt-4 grid grid-cols-1 lg:grid-cols-2 gap-4">
-      <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-[10px] uppercase tracking-wide text-dark-400">Private Key (Spending)</span>
-          <button type="button" class="copy-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" data-target="derivedPrivateKey" title="Copy">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-          </button>
-        </div>
-        <div class="font-mono text-xs text-dark-200 break-all" id="derivedPrivateKey">--</div>
-      </div>
-      <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg">
-        <div class="flex items-center justify-between mb-2">
-          <span class="text-[10px] uppercase tracking-wide text-dark-400">Public Key (ZK)</span>
-          <button type="button" class="copy-btn p-1 text-dark-500 hover:text-brand-500 transition-colors" data-target="derivedPublicKey" title="Copy">
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h2"/></svg>
-          </button>
-        </div>
-        <div class="font-mono text-xs text-brand-400 break-all" id="derivedPublicKey">--</div>
-      </div>
+  <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="handoff-heading">
+    <div class="space-y-2">
+      <h2 id="handoff-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">User Handoff</h2>
+      <p class="text-xs text-dark-400">
+        The user must derive their ASP secret during onboarding, copy it, and send it here together with their note public key.
+      </p>
     </div>
   </section>
 
@@ -182,15 +140,11 @@
         <h2 id="membership-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Membership Leaf Builder</h2>
       </div>
       <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="privateKey">Private Key (hex or decimal)</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="privateKey" type="text" placeholder="0x..." />
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="publicKey">Public Key Override (optional)</label>
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="publicKey">User Note Public Key</label>
         <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="publicKey" type="text" placeholder="0x..." />
       </div>
       <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blinding">Blinding (hex or decimal)</label>
+        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blinding">ASP Secret (hex or decimal)</label>
         <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blinding" type="text" placeholder="0" />
       </div>
       <div class="flex flex-wrap gap-3">
@@ -202,7 +156,7 @@
         </button>
       </div>
       <div class="space-y-3">
-        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Derived Public Key</div>
+        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">User Note Public Key</div>
         <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="derivedPubKey">--</div>
       </div>
       <div class="space-y-3">
@@ -220,7 +174,7 @@
       <button class="w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="insertMembershipLeafBtn" type="button">
         Insert Membership Leaf
       </button>
-      <p class="text-xs text-dark-400">Leaf = Poseidon2(publicKey, blinding, domain=1).</p>
+      <p class="text-xs text-dark-400">Leaf = Poseidon2(note public key, ASP secret, domain=1).</p>
     </section>
 
     <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="nonmembership-heading">

@@ -1,5 +1,6 @@
 use crate::protocol::{
-    AdminASPRequest, DisclaimerStatePayload, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
+    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
@@ -7,12 +8,15 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
     crypto::asp_membership_leaf,
-    encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
+    encryption::{
+        derive_encryption_and_note_keypairs, derive_membership_blinding, generate_random_blinding,
+    },
     flows::{N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
     merkle::{MerklePrefixTree, MerkleProof},
 };
 use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys, process_events,
+    process_notes,
 };
 use std::cell::RefCell;
 use types::{
@@ -208,13 +212,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(address, signature) => {
+        StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
             log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
             let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(signature)?;
-            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
+                derive_encryption_and_note_keypairs(signature.clone())?;
+            let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
+            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
             log::trace!(
-                "[{WORKER_NAME}] saved notes and encryption keys for the account {address}"
+                "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {address}"
             );
             kick_processor();
             StorageWorkerResponse::Saved
@@ -245,11 +250,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     "[{WORKER_NAME}] not found notes and encryption keys for the account {address}"
                 );
             }
-            StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| {
-                UserKeys {
-                    note_keypair,
-                    encryption_keypair,
-                }
+            StorageWorkerResponse::UserKeys(opt.map(|keys| UserKeys {
+                note_keypair: PublicNoteKeyPair {
+                    public: keys.note_keypair.public,
+                },
+                encryption_keypair: PublicEncryptionKeyPair {
+                    public: keys.encryption_keypair.public,
+                },
+            }))
+        }
+        StorageWorkerRequest::AspSecret(address) => {
+            log::trace!("[{WORKER_NAME}] fetch ASP secret for the account {address}");
+            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
+                membership_blinding: keys.membership_blinding,
             }))
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
@@ -310,13 +324,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 ));
             }
 
-            let (note_privkey, note_pubkey, encryption_pubkey) =
+            let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
                 load_user_key_material(&req.user_address)?;
 
             let membership_proof = match build_membership_proof(
                 &req.aspmem_contract_id,
                 &note_pubkey,
-                req.membership_blinding,
+                membership_blinding,
                 req.aspmem_root,
                 req.aspmem_ledger,
                 req.tree_depth,
@@ -384,26 +398,32 @@ fn load_user_key_material(
     types::NotePrivateKey,
     NotePublicKey,
     types::EncryptionPublicKey,
+    Field,
 )> {
     with_storage!(s => {
-        let (note_privkey, note_pubkey, encryption_pubkey) =
+        let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
             match s.get_user_keys(user_address)? {
-                Some((
-                    NoteKeyPair {
-                        private,
-                        public: note_pub,
-                    },
-                    EncryptionKeyPair {
-                        public: enc_pub, ..
-                    },
-                )) => (private, note_pub, enc_pub),
+                Some(StoredUserKeys {
+                    note_keypair:
+                        NoteKeyPair {
+                            private,
+                            public: note_pub,
+                        },
+                    encryption_keypair: EncryptionKeyPair { public: enc_pub, .. },
+                    membership_blinding,
+                }) => (private, note_pub, enc_pub, membership_blinding),
                 None => {
                     anyhow::bail!(
-                        "address {user_address} should generate note and encryption keys first"
+                        "address {user_address} should generate privacy keys and ASP secret first"
                     );
                 }
             };
-        Ok::<_, anyhow::Error>((note_privkey, note_pubkey, encryption_pubkey))
+        Ok::<_, anyhow::Error>((
+            note_privkey,
+            note_pubkey,
+            encryption_pubkey,
+            membership_blinding,
+        ))
     })?
 }
 
