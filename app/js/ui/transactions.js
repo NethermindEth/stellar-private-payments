@@ -485,6 +485,7 @@ function updateTransferBalance() {
     const isBalanced =
         outputsValid && inputsTotalStroops !== 0n && inputsTotalStroops === outputsTotalStroops && shouldShow;
     setEqValidity(eq, isBalanced, shouldShow);
+    return isBalanced;
 }
 
 function updateTransactBalance() {
