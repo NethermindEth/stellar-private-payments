@@ -30,6 +30,14 @@ pub struct AccountKeys {
     pub account_id: i64,
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUserKeys {
+    pub note_keypair: NoteKeyPair,
+    pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
 }
 
 #[derive(Debug, Clone)]
@@ -157,14 +165,15 @@ impl Storage {
         Ok(metadata)
     }
 
-    pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
+    pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
         self.conn
             .query_row(
                 "SELECT
                 encryption_private_key,
                 encryption_public_key,
                 note_private_key,
-                note_public_key
+                note_public_key,
+                membership_blinding
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
                 WHERE accounts.address = ?1
@@ -176,17 +185,19 @@ impl Storage {
                     let enc_pub: EncryptionPublicKey = row.get(1)?;
                     let note_priv: NotePrivateKey = row.get(2)?;
                     let note_pub: NotePublicKey = row.get(3)?;
+                    let membership_blinding: Field = row.get(4)?;
 
-                    Ok((
-                        NoteKeyPair {
+                    Ok(StoredUserKeys {
+                        note_keypair: NoteKeyPair {
                             private: note_priv,
                             public: note_pub,
                         },
-                        EncryptionKeyPair {
+                        encryption_keypair: EncryptionKeyPair {
                             private: enc_priv,
                             public: enc_pub,
                         },
-                    ))
+                        membership_blinding,
+                    })
                 },
             )
             .optional()
@@ -198,6 +209,7 @@ impl Storage {
         account_address: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
     ) -> Result<()> {
         let tx = self
             .conn
@@ -212,13 +224,15 @@ impl Storage {
                 encryption_public_key,
                 note_private_key,
                 note_public_key,
+                membership_blinding,
                 account_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 &encryption_keypair.private,
                 &encryption_keypair.public,
                 &note_keypair.private,
                 &note_keypair.public,
+                membership_blinding,
                 account_id,
             ],
         )
@@ -841,7 +855,8 @@ impl Storage {
                 k.encryption_private_key,
                 k.encryption_public_key,
                 k.note_private_key,
-                k.note_public_key
+                k.note_public_key,
+                k.membership_blinding
              FROM accounts a
              JOIN (
                 SELECT account_id, MAX(id) AS max_id
@@ -859,6 +874,7 @@ impl Storage {
             let enc_pub: EncryptionPublicKey = row.get(2)?;
             let note_priv: NotePrivateKey = row.get(3)?;
             let note_pub: NotePublicKey = row.get(4)?;
+            let membership_blinding: Field = row.get(5)?;
 
             Ok(AccountKeys {
                 account_id,
@@ -870,6 +886,7 @@ impl Storage {
                     private: enc_priv,
                     public: enc_pub,
                 },
+                membership_blinding,
             })
         })?;
 
@@ -1261,9 +1278,16 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Create an account with keypairs.
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let account_id: i64 = storage.conn.query_row(
             "SELECT id FROM accounts WHERE address = ?1",
@@ -1432,27 +1456,39 @@ mod tests {
     fn get_user_keys_returns_latest_keypair() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
+        let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
+        let signature_2 = KeyDerivationSignature(vec![3u8; 64]);
         let (note_keypair_1, enc_keypair_1) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature_1.clone())?;
         let (note_keypair_2, enc_keypair_2) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![3u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature_2.clone())?;
+        let membership_blinding_1 =
+            encryption::derive_membership_blinding(&signature_1, "testnet")?;
+        let membership_blinding_2 =
+            encryption::derive_membership_blinding(&signature_2, "testnet")?;
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_1,
             &enc_keypair_1,
+            &membership_blinding_1,
         )?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_2,
             &enc_keypair_2,
+            &membership_blinding_2,
         )?;
 
-        let (got_note, got_enc) = storage
+        let keys = storage
             .get_user_keys("GTESTACCOUNT")?
             .expect("expected keypairs to exist");
-        assert_eq!(got_note.public.0, note_keypair_2.public.0);
-        assert_eq!(got_enc.public.0, enc_keypair_2.public.0);
+        assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
+        assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
+        assert_eq!(
+            keys.membership_blinding.to_le_bytes(),
+            membership_blinding_2.to_le_bytes()
+        );
 
         Ok(())
     }
@@ -1461,11 +1497,23 @@ mod tests {
     fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
 
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let count: i64 = storage.conn.query_row(
             "SELECT COUNT(*) FROM accounts WHERE address = ?1",

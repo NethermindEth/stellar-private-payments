@@ -3,16 +3,34 @@ use serde::{Deserialize, Serialize};
 use prover::flows::{N_OUTPUTS, TransactParams};
 pub type Address = String;
 use types::{
-    AspMembershipSync, AspNonMembershipProof, ContractsEventData, EncryptionKeyPair, ExtAmount,
-    ExtData, Field, KeyDerivationSignature, NoteAmount, NoteKeyPair, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SyncMetadata, UserNoteSummary,
+    AspMembershipSync, AspNonMembershipProof, ContractsEventData, ExtAmount, ExtData, Field,
+    KeyDerivationSignature, NoteAmount, NotePublicKey, PoolLedgerActivity, PublicKeyEntry,
+    SyncMetadata, UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct PublicNoteKeyPair {
+    pub public: types::NotePublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicEncryptionKeyPair {
+    pub public: types::EncryptionPublicKey,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct UserKeys {
-    pub note_keypair: NoteKeyPair,
-    pub encryption_keypair: EncryptionKeyPair,
+    pub note_keypair: PublicNoteKeyPair,
+    pub encryption_keypair: PublicEncryptionKeyPair,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AspSecret {
+    pub membership_blinding: Field,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -30,10 +48,11 @@ pub enum StorageWorkerRequest {
     SyncState,
     SaveEvents(ContractsEventData),
     SaveSyncProgress(Vec<SyncMetadata>, bool),
-    DeriveSaveUserKeys(Address, KeyDerivationSignature),
+    DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
     UserKeys(Address),
+    AspSecret(Address),
     UserNotes(Address, u32),
     UnspentUserNotes {
         user_address: Address,
@@ -54,6 +73,7 @@ pub enum StorageWorkerResponse {
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
     UserKeys(Option<UserKeys>),
+    AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
     RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
@@ -81,7 +101,6 @@ pub enum ProverWorkerResponse {
 #[serde(rename_all = "camelCase")]
 pub struct TransactRequest {
     pub user_address: Address,
-    pub membership_blinding: Field,
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,
     pub pool_address: Address,

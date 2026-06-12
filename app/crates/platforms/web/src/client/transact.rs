@@ -2,9 +2,9 @@
 //! `executeTransfer`, `executeWithdraw`).
 
 use super::{
-    WebClient, emit_progress, parse_ext_amount_decimal, parse_field_bigint_numeric,
-    parse_input_note_ids, parse_note_amount_decimal, parse_output_amounts,
-    parse_output_recipient_keys, parse_u32_decimal,
+    WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
+    parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
+    parse_u32_decimal,
 };
 use crate::protocol::{
     PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
@@ -25,7 +25,6 @@ use wasm_bindgen_futures::JsFuture;
 struct ExecuteCtx {
     pool_contract_id: String,
     user_address: String,
-    membership_blinding: Field,
     submit_fn: Function,
     on_status: Option<Function>,
 }
@@ -83,7 +82,6 @@ impl WebClient {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-        membership_blinding: Field,
         step: &Transact,
         flow: &'static str,
         on_status: &Option<Function>,
@@ -169,7 +167,6 @@ impl WebClient {
 
             let req = TransactRequest {
                 user_address: user_address.to_string(),
-                membership_blinding,
                 pool_root,
                 pool_next_index,
                 pool_address: pool.contract_id,
@@ -322,7 +319,6 @@ impl WebClient {
             .prove_transact_inner(
                 &ctx.pool_contract_id,
                 &ctx.user_address,
-                ctx.membership_blinding,
                 step,
                 flow,
                 &ctx.on_status,
@@ -381,7 +377,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         ext_recipient: String,
         ext_amount: BigInt,
         input_note_ids: Array,
@@ -405,7 +400,6 @@ impl WebClient {
             )));
         }
 
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let ext_amount = parse_ext_amount_decimal(&ext_amount)?;
         let input_commitments = parse_input_note_ids(
             &input_note_ids,
@@ -429,7 +423,6 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            membership_blinding,
             submit_fn,
             on_status,
         };
@@ -441,13 +434,11 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         output_amounts: Array,
         submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let ext_amount = parse_ext_amount_decimal(&amount)?;
         if ext_amount <= ExtAmount::ZERO {
             return Err(JsError::new("amount must be > 0 for deposit"));
@@ -483,7 +474,6 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            membership_blinding,
             submit_fn,
             on_status,
         };
@@ -515,14 +505,12 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         target: SpendTarget,
         flow: &'static str,
         submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
             return Err(JsError::new("amount must be > 0"));
@@ -531,7 +519,6 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            membership_blinding,
             submit_fn,
             on_status,
         };

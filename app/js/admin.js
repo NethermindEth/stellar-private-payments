@@ -1,6 +1,6 @@
 import { contract } from '@stellar/stellar-sdk';
 import { initializeWasm, getHandle } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, deriveKeysFromWallet, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
+import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -10,13 +10,6 @@ const walletChip = document.getElementById('walletChip');
 const connectBtn = document.getElementById('connectBtn');
 const refreshBtn = document.getElementById('refreshBtn');
 
-// Key derivation elements
-const deriveKeysBtn = document.getElementById('deriveKeysBtn');
-const deriveKeysBtnText = document.getElementById('deriveKeysBtnText');
-const derivedFromAccount = document.getElementById('derivedFromAccount');
-const derivedKeysDisplay = document.getElementById('derivedKeysDisplay');
-const derivedPrivateKeyEl = document.getElementById('derivedPrivateKey');
-const derivedPublicKeyEl = document.getElementById('derivedPublicKey');
 const toastContainer = document.getElementById('toast-container');
 const toastTemplate = document.getElementById('tpl-toast');
 
@@ -29,7 +22,6 @@ const membershipNextIndexEl = document.getElementById('membershipNextIndex');
 const nonMembershipRootEl = document.getElementById('nonMembershipRoot');
 
 // Membership leaf builder inputs
-const privateKeyInput = document.getElementById('privateKey');
 const publicKeyInput = document.getElementById('publicKey');
 const blindingInput = document.getElementById('blinding');
 const computeMembershipLeafBtn = document.getElementById('computeMembershipLeafBtn');
@@ -65,12 +57,6 @@ const state = {
   cryptoReady: false,
   adminInsertOnly: null,
   computedMembershipLeaf: null,
-  // Derived keys (persist across account changes)
-  derivedKeys: {
-    sourceAccount: null,
-    privateKeyHex: null,
-    publicKeyHex: null,
-  },
 };
 
 const statusBaseClass = statusEl ? statusEl.className : '';
@@ -229,85 +215,6 @@ async function ensureCryptoReady() {
   }
 }
 
-// Derive ZK keys from wallet signature
-async function deriveKeys() {
-  try {
-    ensureWalletConnected();
-    await ensureCryptoReady();
-
-    setStatus('Sign message to derive keys...', 'info');
-    deriveKeysBtnText.textContent = 'Signing...';
-    deriveKeysBtn.disabled = true;
-
-    const { privKey, pubKey, ...rest } = await deriveKeysFromWallet(state.address, {
-          onStatus: log
-        }
-    );
-
-    const privateKeyHex = privKey;
-    const publicKeyHex = pubKey;
-
-    // Store in state (persists across account changes)
-    state.derivedKeys = {
-      sourceAccount: state.address,
-      privateKeyHex,
-      publicKeyHex
-    };
-
-    // Update UI
-    updateDerivedKeysDisplay();
-    autofillKeys();
-
-    setStatus('Keys derived successfully', 'ok');
-    showToast('Keys derived and auto-filled!', 'success');
-    log(`Keys derived for account: ${shortAddress(state.address)}`);
-    log(`Public Key: ${publicKeyHex}`);
-  } catch (err) {
-    setStatus('Key derivation failed', 'error');
-    showToast(err.message, 'error');
-    log(`Key derivation error: ${err.message}`);
-  } finally {
-    deriveKeysBtnText.textContent = 'Derive Keys';
-    deriveKeysBtn.disabled = false;
-  }
-}
-
-// Update the derived keys display section
-function updateDerivedKeysDisplay() {
-  if (!state.derivedKeys.privateKeyHex) {
-    derivedKeysDisplay.classList.add('hidden');
-    derivedFromAccount.textContent = '--';
-    return;
-  }
-
-  derivedKeysDisplay.classList.remove('hidden');
-  derivedFromAccount.textContent = shortAddress(state.derivedKeys.sourceAccount);
-  derivedPrivateKeyEl.textContent = state.derivedKeys.privateKeyHex;
-  derivedPublicKeyEl.textContent = state.derivedKeys.publicKeyHex;
-}
-
-// Auto-fill the membership and non-membership input fields with derived keys
-function autofillKeys() {
-  if (!state.derivedKeys.publicKeyHex) return;
-
-  // Auto-fill membership leaf builder
-  if (privateKeyInput) {
-    privateKeyInput.value = state.derivedKeys.privateKeyHex;
-  }
-  if (publicKeyInput) {
-    publicKeyInput.value = state.derivedKeys.publicKeyHex;
-  }
-
-  // Auto-fill non-membership (blocked key = public key)
-  if (blockedKeyInput) {
-    blockedKeyInput.value = state.derivedKeys.publicKeyHex;
-    // Trigger sync if "value equals key" is checked
-    syncNonMembershipValue();
-  }
-
-  log('Auto-filled keys in membership and non-membership forms');
-}
-
 // -----------------------------
 // Wallet & network actions
 // -----------------------------
@@ -339,10 +246,6 @@ async function connect() {
     log(`Wallet connected: ${address}`);
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
-    // If no keys derived yet, prompt to derive
-    if (!state.derivedKeys.privateKeyHex) {
-      log('Tip: Click "Derive Keys" to generate ZK keys for this account');
-    }
   } catch (err) {
     if (err.code === 'USER_REJECTED') {
       setStatus('Connection cancelled', 'info');
@@ -398,18 +301,11 @@ async function computeMembershipLeaf() {
     }
 
     const publicOverride = parseBigIntInput(publicKeyInput.value, 'Public key');
-    const privateValue = parseBigIntInput(privateKeyInput.value, 'Private key');
-
-    let pubKey = null;
-      if (publicOverride !== null) {
-      pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
-    } else if (privateValue !== null) {
-      let { privKeyBytes, pubKey, ...rest} = await deriveKeysFromWallet(state.derivedKeys.sourceAccount, {
-          onStatus: log
-      });
-    } else {
-      throw new Error('Provide a private key or a public key override');
+    if (publicOverride === null) {
+      throw new Error('User note public key is required');
     }
+
+    const pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
     const client = getHandle().webClient;
     const leafHex = await client.deriveAspUserLeaf(blindingValue, pubKey);
     const leafDec = BigInt(leafHex).toString();
@@ -590,9 +486,6 @@ connectBtn.addEventListener('click', () => {
 refreshBtn.addEventListener('click', () => {
   refreshState();
 });
-deriveKeysBtn.addEventListener('click', () => {
-  deriveKeys();
-});
 computeMembershipLeafBtn.addEventListener('click', () => {
   computeMembershipLeaf();
 });
@@ -616,22 +509,6 @@ valueSameCheckbox.addEventListener('change', () => {
 });
 blockedKeyInput.addEventListener('input', () => {
   syncNonMembershipValue();
-});
-
-// Copy button handlers for derived keys display
-document.querySelectorAll('#derivedKeysDisplay .copy-btn').forEach(btn => {
-  btn.addEventListener('click', async () => {
-    const targetId = btn.dataset.target;
-    const targetEl = document.getElementById(targetId);
-    if (targetEl && targetEl.textContent !== '--') {
-      try {
-        await navigator.clipboard.writeText(targetEl.textContent);
-        showToast('Copied to clipboard!', 'success');
-      } catch {
-        showToast('Failed to copy', 'error');
-      }
-    }
-  });
 });
 
 async function init() {

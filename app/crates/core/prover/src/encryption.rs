@@ -49,8 +49,9 @@ use x25519_dalek::{PublicKey, StaticSecret};
 /// Message signed to derive both privacy keypairs.
 pub const KEY_DERIVATION_MESSAGE: &str = "Privacy Pool Key Derivation [v1]";
 
-const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v2";
-const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v2";
+const NOTE_KEY_DOMAIN: &[u8] = b"privacy-pool/note-key/v1";
+const ENCRYPTION_KEY_DOMAIN: &[u8] = b"privacy-pool/encryption-key/v1";
+const MEMBERSHIP_BLINDING_DOMAIN: &[u8] = b"privacy-pool/asp-secret/v1";
 
 /// Keypairs derivation
 pub fn derive_encryption_and_note_keypairs(
@@ -69,6 +70,31 @@ pub fn derive_encryption_and_note_keypairs(
     };
     let encryption_keypair = derive_keypair_from_signature(&signature)?;
     Ok((note_keypair, encryption_keypair))
+}
+
+/// Deterministically derive the account-scoped ASP membership blinding from
+/// the wallet signature plus a stable network context.
+pub fn derive_membership_blinding(
+    signature: &KeyDerivationSignature,
+    network_context: &str,
+) -> Result<Field> {
+    let KeyDerivationSignature(signature) = signature;
+    if signature.len() != 64 {
+        return Err(anyhow!("Signature must be 64 bytes (Ed25519)"));
+    }
+
+    let key = hash_signature_with_domain_and_context(
+        signature,
+        MEMBERSHIP_BLINDING_DOMAIN,
+        network_context.as_bytes(),
+    );
+    let field = Fr::from_le_bytes_mod_order(&key);
+
+    let mut result = [0u8; 32];
+    field
+        .serialize_compressed(&mut result[..])
+        .expect("Serialization failed");
+    Field::try_from_le_bytes(result)
 }
 
 /// Encryption key derivation (X25519). Used for off-chain note
@@ -155,6 +181,20 @@ fn derive_note_private_key(signature: &KeyDerivationSignature) -> Result<NotePri
 fn hash_signature_with_domain(signature: &[u8], domain: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
     hasher.update(domain);
+    hasher.update(signature);
+    hasher.finalize().into()
+}
+
+fn hash_signature_with_domain_and_context(
+    signature: &[u8],
+    domain: &[u8],
+    context: &[u8],
+) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update([0u8]);
+    hasher.update(context);
+    hasher.update([0u8]);
     hasher.update(signature);
     hasher.finalize().into()
 }
@@ -389,6 +429,31 @@ mod tests {
         let enc_key =
             derive_keypair_from_signature(&signature).expect("encryption derivation failed");
         assert_ne!(note_key.0, enc_key.private.0);
+    }
+
+    #[test]
+    fn test_membership_blinding_is_deterministic_per_network() {
+        let signature = KeyDerivationSignature(vec![8u8; 64]);
+        let first = derive_membership_blinding(&signature, "testnet").expect("derivation failed");
+        let second = derive_membership_blinding(&signature, "testnet").expect("derivation failed");
+        assert_eq!(first.to_le_bytes(), second.to_le_bytes());
+    }
+
+    #[test]
+    fn test_membership_blinding_changes_across_networks() {
+        let signature = KeyDerivationSignature(vec![8u8; 64]);
+        let testnet = derive_membership_blinding(&signature, "testnet").expect("derivation failed");
+        let mainnet = derive_membership_blinding(&signature, "mainnet").expect("derivation failed");
+        assert_ne!(testnet.to_le_bytes(), mainnet.to_le_bytes());
+    }
+
+    #[test]
+    fn test_membership_blinding_changes_across_signatures() {
+        let first = derive_membership_blinding(&KeyDerivationSignature(vec![8u8; 64]), "testnet")
+            .expect("derivation failed");
+        let second = derive_membership_blinding(&KeyDerivationSignature(vec![9u8; 64]), "testnet")
+            .expect("derivation failed");
+        assert_ne!(first.to_le_bytes(), second.to_le_bytes());
     }
 
     #[test]
