@@ -258,9 +258,20 @@ export const AddressBook = {
         row.querySelector('.ab-notekey').title = String(noteKey);
         row.querySelector('.ab-enckey').textContent = Utils.truncateHex(String(encryptionKey), 10, 8);
         row.querySelector('.ab-enckey').title = String(encryptionKey);
-        row.querySelector('.ab-date').textContent = record._self
-            ? (record.registeredOnchain === false ? 'You, not registered onchain' : (ledger ? `You, ledger ${ledger}` : 'You'))
-            : (ledger ? `Ledger ${ledger}` : '');
+        const dateEl = row.querySelector('.ab-date');
+        if (ledger && !(record._self && record.registeredOnchain === false)) {
+            const a = document.createElement('a');
+            a.href = `https://stellar.expert/explorer/testnet/ledger/${ledger}`;
+            a.target = '_blank';
+            a.rel = 'noopener noreferrer';
+            a.className = 'hover:text-brand-400 transition-colors inline-flex items-center gap-1';
+            a.innerHTML = `${record._self ? `You, ledger ${ledger}` : `Ledger ${ledger}`} <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>`;
+            dateEl.replaceChildren(a);
+        } else {
+            dateEl.textContent = record._self
+                ? (record.registeredOnchain === false ? 'You, not registered onchain' : 'You')
+                : '';
+        }
 
         row.querySelector('.copy-address-btn')?.addEventListener('click', () => Utils.copyToClipboard(address));
         row.querySelector('.copy-notekey-btn')?.addEventListener('click', () => Utils.copyToClipboard(String(noteKey)));
