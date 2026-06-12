@@ -23,7 +23,7 @@ function needsWalletAuthEntry(entry, address) {
     return Address.fromScAddress(addrAuth.address()).toString() === address;
 }
 
-async function signPreparedAuthEntry(entryXdr, { address, networkPassphrase, rpcUrl, latestLedger, server }) {
+async function signPreparedAuthEntry(entryXdr, { address, networkPassphrase, latestLedger, server }) {
     const entry = xdr.SorobanAuthorizationEntry.fromXDR(entryXdr, 'base64');
     if (!needsWalletAuthEntry(entry, address)) {
         return entryXdr;
@@ -73,7 +73,7 @@ function patchAuthEntries(txXdr, signedAuthEntries) {
 }
 
 /**
- * @param {{txXdr: string, authEntries: string[]}} prepared
+ * @param {{txXdr: string, authEntries: string[], latestLedger?: number}} prepared
  * @param {{address: string, rpcUrl: string, networkPassphrase: string}} ctx
  * @returns {Promise<string>} transaction hash
  */
@@ -117,7 +117,6 @@ export async function submitPreparedSorobanTx(prepared, ctx, opts = {}) {
             await signPreparedAuthEntry(entryXdr, {
                 address,
                 networkPassphrase,
-                rpcUrl,
                 latestLedger,
                 server,
             }),
