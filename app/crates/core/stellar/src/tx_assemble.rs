@@ -107,10 +107,12 @@ fn assemble_soroban_transaction(
         return Err(anyhow!("expected invokeHostFunction operation"));
     };
 
-    let existing_auth = invoke.auth.to_vec();
-    if existing_auth.is_empty() {
-        invoke.auth = xdr::VecM::try_from(auth_entries)?;
+    if !invoke.auth.is_empty() {
+        return Err(anyhow!(
+            "invoke operation already has auth entries; expected empty auth before assembly"
+        ));
     }
+    invoke.auth = xdr::VecM::try_from(auth_entries)?;
 
     tx.operations = xdr::VecM::try_from(vec![xdr::Operation {
         source_account: op.source_account,
