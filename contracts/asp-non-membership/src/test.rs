@@ -73,6 +73,59 @@ fn test_update_leaf() {
 }
 
 #[test]
+fn test_update_leaf_same_value_keeps_root_openable() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    env.mock_all_auths();
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+
+    client.insert_leaf(&key, &value);
+    let root_before = client.get_root();
+
+    client.update_leaf(&key, &value);
+
+    assert_eq!(client.get_root(), root_before);
+
+    let result = client.find_key(&key);
+    assert!(result.found);
+    assert_eq!(result.found_value, value);
+}
+
+#[test]
+fn test_update_leaf_same_value_keeps_deeper_tree_openable() {
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    env.mock_all_auths();
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+
+    let key1 = U256::from_u32(&env, 1u32);
+    let value1 = U256::from_u32(&env, 42u32);
+    let key2 = U256::from_u32(&env, 2u32);
+    let value2 = U256::from_u32(&env, 324u32);
+
+    client.insert_leaf(&key1, &value1);
+    client.insert_leaf(&key2, &value2);
+    let root_before = client.get_root();
+
+    client.update_leaf(&key1, &value1);
+
+    assert_eq!(client.get_root(), root_before);
+
+    let result1 = client.find_key(&key1);
+    assert!(result1.found);
+    assert_eq!(result1.found_value, value1);
+
+    let result2 = client.find_key(&key2);
+    assert!(result2.found);
+    assert_eq!(result2.found_value, value2);
+}
+
+#[test]
 fn test_insert_multiple_keys() {
     let env = test_env();
     let admin = Address::generate(&env);

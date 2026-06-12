@@ -171,6 +171,16 @@ impl ASPNonMembership {
         poseidon2_compress(env, left, right)
     }
 
+    fn remove_node_if_changed(
+        store: &soroban_sdk::storage::Persistent,
+        old_hash: &U256,
+        new_hash: &U256,
+    ) {
+        if old_hash != new_hash {
+            store.remove(&DataKey::Node(old_hash.clone()));
+        }
+    }
+
     /// Split a key into 256 bits from LSB to MSB
     ///
     /// Extracts the binary representation of a key for tree path traversal.
@@ -628,7 +638,9 @@ impl ASPNonMembership {
     ///
     /// Changes the value associated with an existing key. Recomputes all nodes
     /// along the path from the leaf to the root, removing old nodes and
-    /// creating new ones. Requires admin authorization.
+    /// creating new ones. If the new value matches the existing value, the
+    /// update is treated as a no-op and no event is emitted. Requires admin
+    /// authorization.
     ///
     /// # Arguments
     ///
@@ -638,8 +650,8 @@ impl ASPNonMembership {
     ///
     /// # Returns
     ///
-    /// Returns `Ok(())` on success, emitting a `LeafUpdatedEvent` with the new
-    /// root.
+    /// Returns `Ok(())` on success. Emits a `LeafUpdatedEvent` with the new
+    /// root when the stored value changes.
     ///
     /// # Errors
     ///
@@ -662,6 +674,11 @@ impl ASPNonMembership {
         if !find_result.found {
             return Err(Error::KeyNotFound);
         }
+
+        if new_value == find_result.found_value {
+            return Ok(());
+        }
+
         // Update the leaf
         let old_leaf_hash = Self::hash_leaf(&env, key.clone(), find_result.found_value.clone());
         let new_leaf_hash = Self::hash_leaf(&env, key.clone(), new_value.clone());
@@ -675,7 +692,7 @@ impl ASPNonMembership {
         store.set(&DataKey::Node(new_leaf_hash.clone()), &leaf_node);
 
         // Remove old leaf
-        store.remove(&DataKey::Node(old_leaf_hash.clone()));
+        Self::remove_node_if_changed(&store, &old_leaf_hash, &new_leaf_hash);
 
         // Rebuild path from leaf to root (process siblings in reverse)
         let mut current_hash = new_leaf_hash;
@@ -707,7 +724,7 @@ impl ASPNonMembership {
             store.set(&DataKey::Node(current_hash.clone()), &internal_node);
 
             // Remove old internal node
-            store.remove(&DataKey::Node(old_current_hash.clone()));
+            Self::remove_node_if_changed(&store, &old_current_hash, &current_hash);
         }
 
         // Update root
