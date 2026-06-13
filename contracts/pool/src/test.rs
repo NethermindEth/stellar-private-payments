@@ -175,6 +175,7 @@ fn pool_constructor_sets_state() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn merkle_init_only_once() {
     let env = test_env();
     // As MerkleTreeWithHistory is now a module
@@ -284,6 +285,7 @@ fn merkle_insert_fails_when_full() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn merkle_init_rejects_zero_levels() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -310,6 +312,7 @@ fn merkle_init_rejects_zero_levels() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_unknown_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -358,6 +361,7 @@ fn transact_rejects_unknown_root() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_ext_hash() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -406,6 +410,7 @@ fn transact_rejects_bad_ext_hash() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_public_amount() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -455,6 +460,7 @@ fn transact_rejects_bad_public_amount() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_nullifier() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -507,6 +513,7 @@ fn transact_rejects_non_canonical_nullifier() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_output_commitment() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -558,6 +565,7 @@ fn transact_rejects_non_canonical_output_commitment() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_does_not_reject_boundary_canonical_public_input() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
