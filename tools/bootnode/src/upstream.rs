@@ -26,7 +26,11 @@ impl UpstreamClient {
         self.rpc_call("getEvents", params).await
     }
 
-    async fn rpc_call(&self, method: &'static str, params: serde_json::Value) -> Result<serde_json::Value> {
+    async fn rpc_call(
+        &self,
+        method: &'static str,
+        params: serde_json::Value,
+    ) -> Result<serde_json::Value> {
         let payload = json!({
             "jsonrpc": "2.0",
             "id": 1,
@@ -52,4 +56,3 @@ impl UpstreamClient {
             .ok_or_else(|| anyhow::anyhow!("upstream response missing result field for {method}"))
     }
 }
-

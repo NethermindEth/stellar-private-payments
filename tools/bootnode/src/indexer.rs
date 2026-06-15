@@ -1,4 +1,4 @@
-use crate::{AppState, jsonrpc, storage};
+use crate::{AppState, deployment, jsonrpc, storage};
 use metrics::{counter, gauge};
 use serde_json::Value;
 use std::time::Instant;
@@ -20,15 +20,20 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
 
     // Update tip.
     let latest = state.upstream.get_latest_ledger().await?;
-    let tip_sequence = latest
-        .get("sequence")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| anyhow::anyhow!("upstream getLatestLedger missing sequence"))? as u32;
-    state.tip_ledger.store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
-    gauge!("bootnode_tip_ledger").set(tip_sequence as f64);
+    let tip_sequence = u32::try_from(
+        latest
+            .get("sequence")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("upstream getLatestLedger missing sequence"))?,
+    )
+    .map_err(|_| anyhow::anyhow!("upstream getLatestLedger sequence exceeds u32"))?;
+    state
+        .tip_ledger
+        .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
+    gauge!("bootnode_tip_ledger").set(f64::from(tip_sequence));
     storage::update_tip(&state.db, tip_sequence).await?;
 
-    let deployment = stellar::deployment_config()?;
+    let deployment = deployment::deployment_config()?;
     let contract_ids = stellar::contract_ids_for_indexer(&deployment);
 
     let kv = storage::load_kv(&state.db).await?;
@@ -53,7 +58,7 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
             .last()
             .and_then(|e| e.get("ledger"))
             .and_then(|v| v.as_u64())
-            .map(|v| v as u32);
+            .and_then(|v| u32::try_from(v).ok());
 
         storage::insert_get_events_page(
             &state.db,
@@ -77,21 +82,20 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
         if events.is_empty() {
             if let Some(cursor) = cursor.as_deref() {
                 storage::mark_caught_up(&state.db, cursor, latest_ledger).await?;
-                gauge!("bootnode_last_fully_indexed_ledger").set(latest_ledger as f64);
+                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(latest_ledger));
             }
             break;
         }
     }
 
     counter!("bootnode_indexer_rounds_total").increment(1);
-    metrics::histogram!("bootnode_indexer_round_duration_seconds").record(t0.elapsed().as_secs_f64());
+    metrics::histogram!("bootnode_indexer_round_duration_seconds")
+        .record(t0.elapsed().as_secs_f64());
 
     Ok(())
 }
 
-fn parse_get_events_result(
-    result: &Value,
-) -> anyhow::Result<(String, Vec<Value>, u32, u32)> {
+fn parse_get_events_result(result: &Value) -> anyhow::Result<(String, Vec<Value>, u32, u32)> {
     let cursor = result
         .get("cursor")
         .and_then(|v| v.as_str())
@@ -102,14 +106,19 @@ fn parse_get_events_result(
         .and_then(|v| v.as_array())
         .ok_or_else(|| anyhow::anyhow!("getEvents result missing events"))?
         .clone();
-    let latest_ledger = result
-        .get("latestLedger")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| anyhow::anyhow!("getEvents result missing latestLedger"))? as u32;
-    let oldest_ledger = result
-        .get("oldestLedger")
-        .and_then(|v| v.as_u64())
-        .ok_or_else(|| anyhow::anyhow!("getEvents result missing oldestLedger"))? as u32;
+    let latest_ledger = u32::try_from(
+        result
+            .get("latestLedger")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("getEvents result missing latestLedger"))?,
+    )
+    .map_err(|_| anyhow::anyhow!("getEvents latestLedger exceeds u32"))?;
+    let oldest_ledger = u32::try_from(
+        result
+            .get("oldestLedger")
+            .and_then(|v| v.as_u64())
+            .ok_or_else(|| anyhow::anyhow!("getEvents result missing oldestLedger"))?,
+    )
+    .map_err(|_| anyhow::anyhow!("getEvents oldestLedger exceeds u32"))?;
     Ok((cursor, events, latest_ledger, oldest_ledger))
 }
-

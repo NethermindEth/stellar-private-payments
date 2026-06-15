@@ -1,7 +1,7 @@
 use crate::config::Config;
 use anyhow::Result;
-use opentelemetry_otlp::WithExportConfig;
 use opentelemetry::trace::TracerProvider as _;
+use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{Resource, trace as sdktrace};
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};

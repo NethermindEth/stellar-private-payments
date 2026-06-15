@@ -5,7 +5,11 @@ use url::Url;
 
 /// Bootnode configuration.
 #[derive(Debug, Clone, Parser)]
-#[command(name = "bootnode", version, about = "Bootnode RPC cache for PoolStellar indexer")]
+#[command(
+    name = "bootnode",
+    version,
+    about = "Bootnode RPC cache for PoolStellar indexer"
+)]
 pub(crate) struct Config {
     /// Bind address for the main HTTPS listener.
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
@@ -86,7 +90,11 @@ pub(crate) struct Config {
     pub(crate) otel_otlp_endpoint: Option<String>,
 
     /// OpenTelemetry service name.
-    #[arg(long, env = "BOOTNODE_OTEL_SERVICE_NAME", default_value = "poolstellar-bootnode")]
+    #[arg(
+        long,
+        env = "BOOTNODE_OTEL_SERVICE_NAME",
+        default_value = "poolstellar-bootnode"
+    )]
     pub(crate) otel_service_name: String,
 
     /// Trace sampling ratio (0.0..=1.0).
@@ -125,6 +133,7 @@ impl Config {
         Ok(cfg)
     }
 
+    #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn cutoff_ledgers(&self) -> u32 {
         let seconds = self
             .redirect_days
@@ -132,7 +141,6 @@ impl Config {
             .saturating_mul(60)
             .saturating_mul(60);
         let denom = self.ledger_seconds.max(1);
-        seconds / denom
+        seconds.saturating_div(denom)
     }
 }
-

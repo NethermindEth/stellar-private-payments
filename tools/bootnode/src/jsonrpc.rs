@@ -81,10 +81,7 @@ pub(crate) fn make_get_events_params(
 ) -> Value {
     let mut filters = serde_json::Map::new();
     filters.insert("type".to_string(), Value::String("contract".to_string()));
-    filters.insert(
-        "topics".to_string(),
-        json!([[ "**" ]]),
-    );
+    filters.insert("topics".to_string(), json!([["**"]]));
     filters.insert("contractIds".to_string(), json!(contract_ids));
 
     let mut pagination = serde_json::Map::new();
@@ -104,4 +101,3 @@ pub(crate) fn make_get_events_params(
 
     params
 }
-

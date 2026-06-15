@@ -68,8 +68,8 @@ pub(crate) async fn load_kv(pool: &Pool) -> Result<KvState> {
 
     Ok(KvState {
         last_cursor,
-        last_fully_indexed_ledger: last_fully_indexed_ledger.max(0) as u32,
-        tip_ledger: tip_ledger.max(0) as u32,
+        last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0)).unwrap_or(0),
+        tip_ledger: u32::try_from(tip_ledger.max(0)).unwrap_or(0),
     })
 }
 
@@ -78,7 +78,7 @@ pub(crate) async fn update_tip(pool: &Pool, tip: u32) -> Result<()> {
     client
         .execute(
             "UPDATE bootnode_kv SET tip_ledger = $1, updated_at = now() WHERE id = 1",
-            &[&(tip as i64)],
+            &[&i64::from(tip)],
         )
         .await?;
     Ok(())
@@ -106,12 +106,13 @@ SET last_cursor = $1,
     updated_at = now()
 WHERE id = 1
 "#,
-            &[&cursor, &(latest_ledger as i64)],
+            &[&cursor, &i64::from(latest_ledger)],
         )
         .await?;
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) async fn insert_get_events_page(
     pool: &Pool,
     cursor_in: Option<&str>,
@@ -135,13 +136,13 @@ ON CONFLICT DO NOTHING
 "#,
             &[
                 &cursor_in,
-                &start_ledger.map(|v| v as i64),
+                &start_ledger.map(i64::from),
                 &Json(request),
                 &Json(result),
                 &cursor_out,
-                &last_event_ledger.map(|v| v as i64),
-                &(latest_ledger as i64),
-                &(oldest_ledger as i64),
+                &last_event_ledger.map(i64::from),
+                &i64::from(latest_ledger),
+                &i64::from(oldest_ledger),
             ],
         )
         .await?;
@@ -154,7 +155,7 @@ INSERT INTO cursor_ledger_map (cursor, ledger)
 VALUES ($1, $2)
 ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
 "#,
-                &[&cursor_out, &(ledger as i64)],
+                &[&cursor_out, &i64::from(ledger)],
             )
             .await?;
     }
@@ -165,11 +166,14 @@ ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
 pub(crate) async fn lookup_cursor_ledger(pool: &Pool, cursor: &str) -> Result<Option<u32>> {
     let client = pool.get().await?;
     let row = client
-        .query_opt("SELECT ledger FROM cursor_ledger_map WHERE cursor = $1", &[&cursor])
+        .query_opt(
+            "SELECT ledger FROM cursor_ledger_map WHERE cursor = $1",
+            &[&cursor],
+        )
         .await?;
     Ok(row.map(|r| {
         let v: i32 = r.get(0);
-        v.max(0) as u32
+        u32::try_from(v.max(0)).unwrap_or(0)
     }))
 }
 
@@ -198,7 +202,7 @@ pub(crate) async fn get_cached_get_events_by_start_ledger(
     let row = client
         .query_opt(
             "SELECT result FROM rpc_cache_get_events WHERE cursor_in IS NULL AND start_ledger = $1 LIMIT 1",
-            &[&(start_ledger as i64)],
+            &[&i64::from(start_ledger)],
         )
         .await?;
     Ok(row.map(|r| {

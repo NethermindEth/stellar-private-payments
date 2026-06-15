@@ -1,4 +1,4 @@
-use crate::{AppState, jsonrpc, storage};
+use crate::{AppState, deployment, jsonrpc, storage};
 use axum::{
     Router,
     body::Bytes,
@@ -9,8 +9,10 @@ use axum::{
 };
 use metrics::{counter, gauge, histogram};
 use serde::Serialize;
-use std::{sync::atomic::Ordering, time::Instant};
-use std::sync::Arc;
+use std::{
+    sync::{Arc, atomic::Ordering},
+    time::Instant,
+};
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
     cors::{Any, CorsLayer},
@@ -97,7 +99,7 @@ async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
         .cache(DirCache::new(state.cfg.acme_cache_dir.clone()));
 
     if let Some(dir) = state.cfg.acme_directory_url.clone() {
-        acme = acme.directory(dir.to_string());
+        acme = acme.directory(dir.as_str());
     }
 
     let acme_state = acme.state();
@@ -140,7 +142,7 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
 
     // Consider unhealthy if we haven't indexed within a full redirect window.
     let cutoff = state.cfg.cutoff_ledgers();
-    if tip > 0 && kv.last_fully_indexed_ledger + cutoff < tip {
+    if tip > 0 && kv.last_fully_indexed_ledger.saturating_add(cutoff) < tip {
         return (StatusCode::SERVICE_UNAVAILABLE, "indexer behind");
     }
 
@@ -186,9 +188,17 @@ async fn handle_jsonrpc(
 
     let dt = t0.elapsed().as_secs_f64();
     histogram!("bootnode_request_duration_seconds").record(dt);
-    histogram!("bootnode_request_body_bytes").record(bytes.len() as f64);
+    histogram!("bootnode_request_body_bytes").record(
+        u32::try_from(bytes.len())
+            .map(f64::from)
+            .unwrap_or(f64::from(u32::MAX)),
+    );
     if content_len > 0 {
-        histogram!("bootnode_request_content_length_bytes").record(content_len as f64);
+        histogram!("bootnode_request_content_length_bytes").record(
+            u32::try_from(content_len)
+                .map(f64::from)
+                .unwrap_or(f64::from(u32::MAX)),
+        );
     }
 
     match resp {
@@ -201,7 +211,10 @@ async fn handle_jsonrpc(
     }
 }
 
-async fn handle_get_latest_ledger(state: &AppState, id: serde_json::Value) -> anyhow::Result<Response> {
+async fn handle_get_latest_ledger(
+    state: &AppState,
+    id: serde_json::Value,
+) -> anyhow::Result<Response> {
     let result = state.upstream.get_latest_ledger().await?;
     Ok(json_response(StatusCode::OK, &jsonrpc::ok(id, result)))
 }
@@ -211,7 +224,7 @@ async fn handle_get_events(
     id: serde_json::Value,
     params: &serde_json::Value,
 ) -> anyhow::Result<Response> {
-    let deployment = stellar::deployment_config()?;
+    let deployment = deployment::deployment_config()?;
     let allowed_ids = stellar::contract_ids_for_indexer(&deployment);
 
     let parsed = match parse_get_events_params(params) {
@@ -263,7 +276,8 @@ async fn handle_get_events(
             StatusCode::OK,
             &jsonrpc::cache_miss(id, "cache miss; indexer may still be catching up"),
         );
-        resp.headers_mut().insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
+        resp.headers_mut()
+            .insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
         return Ok(resp);
     };
 
@@ -286,7 +300,11 @@ fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
         Ok(v) => v,
         Err(_) => b"{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"serialization failed\"}}".to_vec(),
     };
-    histogram!("bootnode_response_body_bytes").record(body.len() as f64);
+    histogram!("bootnode_response_body_bytes").record(
+        u32::try_from(body.len())
+            .map(f64::from)
+            .unwrap_or(f64::from(u32::MAX)),
+    );
 
     let mut resp = Response::new(axum::body::Body::from(body));
     *resp.status_mut() = status;
@@ -299,24 +317,36 @@ fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
 
 #[derive(Debug, Clone)]
 enum ParsedGetEvents {
-    StartLedger { start_ledger: u32, limit: Option<u32> },
-    Cursor { cursor: String, limit: Option<u32> },
+    StartLedger {
+        start_ledger: u32,
+        limit: Option<u32>,
+    },
+    Cursor {
+        cursor: String,
+        limit: Option<u32>,
+    },
 }
 
 fn parse_get_events_params(params: &serde_json::Value) -> anyhow::Result<ParsedGetEvents> {
-    let start_ledger = params.get("startLedger").and_then(|v| v.as_u64()).map(|v| v as u32);
+    let start_ledger = params
+        .get("startLedger")
+        .and_then(|v| v.as_u64())
+        .and_then(|v| u32::try_from(v).ok());
     let pagination = params.get("pagination").and_then(|v| v.as_object());
     let limit = pagination
         .and_then(|p| p.get("limit"))
         .and_then(|v| v.as_u64())
-        .map(|v| v as u32);
+        .and_then(|v| u32::try_from(v).ok());
     let cursor = pagination
         .and_then(|p| p.get("cursor"))
         .and_then(|v| v.as_str())
         .map(|s| s.to_string());
 
     match (start_ledger, cursor) {
-        (Some(start_ledger), None) => Ok(ParsedGetEvents::StartLedger { start_ledger, limit }),
+        (Some(start_ledger), None) => Ok(ParsedGetEvents::StartLedger {
+            start_ledger,
+            limit,
+        }),
         (None, Some(cursor)) => Ok(ParsedGetEvents::Cursor { cursor, limit }),
         _ => anyhow::bail!("getEvents params must include either startLedger or pagination.cursor"),
     }
@@ -325,7 +355,9 @@ fn parse_get_events_params(params: &serde_json::Value) -> anyhow::Result<ParsedG
 fn is_allowed_filters(params: &serde_json::Value, allowed_contract_ids: &[String]) -> bool {
     let filters = params.get("filters").and_then(|v| v.as_array());
     let Some(filters) = filters else { return false };
-    let Some(first) = filters.first().and_then(|v| v.as_object()) else { return false };
+    let Some(first) = filters.first().and_then(|v| v.as_object()) else {
+        return false;
+    };
 
     if let Some(t) = first.get("type").and_then(|v| v.as_str()) {
         if t != "contract" {
@@ -336,12 +368,14 @@ fn is_allowed_filters(params: &serde_json::Value, allowed_contract_ids: &[String
     }
 
     let topics = first.get("topics");
-    if topics != Some(&serde_json::json!([[ "**" ]])) {
+    if topics != Some(&serde_json::json!([["**"]])) {
         return false;
     }
 
     let contract_ids = first.get("contractIds").and_then(|v| v.as_array());
-    let Some(contract_ids) = contract_ids else { return false };
+    let Some(contract_ids) = contract_ids else {
+        return false;
+    };
     let mut got: Vec<&str> = contract_ids.iter().filter_map(|v| v.as_str()).collect();
     got.sort_unstable();
     let mut want: Vec<&str> = allowed_contract_ids.iter().map(|s| s.as_str()).collect();

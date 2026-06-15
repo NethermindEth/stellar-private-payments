@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 mod config;
+mod deployment;
 mod http_server;
 mod indexer;
 mod jsonrpc;
