@@ -457,7 +457,7 @@ mod tests {
             .compute_witness(&inputs_json)
             .context("native graph witness calculation failed")?;
 
-        let prover = prover::Prover::new(&proving_key, &r1cs_bytes)
+        let prover = prover::prover::Prover::new(&proving_key, &r1cs_bytes)
             .context("failed to initialize prover")?;
         let proof = prover
             .prove_bytes(&witness_bytes)

@@ -39,6 +39,7 @@ use core::ops::AddAssign;
 /// runtime.
 struct CircomReduction;
 
+#[allow(clippy::arithmetic_side_effects)]
 impl R1CSToQAP for CircomReduction {
     #[allow(clippy::type_complexity)]
     fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(
