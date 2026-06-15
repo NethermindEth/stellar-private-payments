@@ -416,18 +416,7 @@ impl StateFetcher {
             source_account,
             key,
         )?;
-        let sim = self.client.simulate_transaction(&tx).await?;
-
-        let op_result = sim
-            .result
-            .or_else(|| sim.results.into_iter().next())
-            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
-
-        let retval_b64 = op_result
-            .retval
-            .ok_or_else(|| anyhow!("simulateTransaction missing retval"))?;
-
-        let retval = xdr::ScVal::from_xdr_base64(&retval_b64, xdr::Limits::none())?;
+        let retval = self.simulate_single_retval(&tx).await?;
         let parsed = Self::parse_find_result(&retval)?;
 
         if parsed.found {
@@ -455,6 +444,45 @@ impl StateFetcher {
         })
     }
 
+    /// Checks whether a pool Merkle root is still known by the deployed pool.
+    ///
+    /// # Arguments
+    /// * `root` - Pool Merkle root to check.
+    ///
+    /// # Returns
+    /// Returns `true` when the root is in the pool root-history window.
+    ///
+    /// # Errors
+    /// Returns an error if the simulation fails or the contract returns a
+    /// non-boolean value.
+    pub async fn is_pool_known_root(&self, root: Field) -> Result<bool> {
+        let tx = Self::build_is_known_root_simulation_tx(
+            &self.config.pool,
+            &self.config.deployer,
+            root,
+        )?;
+        let retval = self.simulate_single_retval(&tx).await?;
+        Ok(scval_to_bool(&retval)?)
+    }
+
+    async fn simulate_single_retval(&self, tx: &xdr::TransactionEnvelope) -> Result<xdr::ScVal> {
+        let sim = self.client.simulate_transaction(tx).await?;
+
+        let op_result = sim
+            .result
+            .or_else(|| sim.results.into_iter().next())
+            .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
+
+        let retval_b64 = op_result
+            .retval
+            .ok_or_else(|| anyhow!("simulateTransaction missing retval"))?;
+
+        Ok(xdr::ScVal::from_xdr_base64(
+            &retval_b64,
+            xdr::Limits::none(),
+        )?)
+    }
+
     fn build_find_key_simulation_tx(
         contract_id: &str,
         source_account: &str,
@@ -467,6 +495,22 @@ impl StateFetcher {
             contract_id,
             "find_key",
             vec![Self::field_to_scval_u256(key)],
+            Vec::new(),
+        )
+    }
+
+    fn build_is_known_root_simulation_tx(
+        contract_id: &str,
+        source_account: &str,
+        root: Field,
+    ) -> Result<xdr::TransactionEnvelope> {
+        Self::build_invoke_contract_tx_envelope(
+            source_account,
+            xdr::SequenceNumber(0),
+            100,
+            contract_id,
+            "is_known_root",
+            vec![Self::field_to_scval_u256(root)],
             Vec::new(),
         )
     }
