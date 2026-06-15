@@ -10,9 +10,12 @@ use circom_witness_rs::{Graph, HashSignalInfo};
 use num_bigint::{BigInt, Sign};
 use ruint::aliases::U256;
 // These are part of the reduced STD that is browser compatible
-use std::collections::HashSet;
-use std::sync::Arc;
-use std::{collections::HashMap, string::String, vec::Vec};
+use std::{
+    collections::{HashMap, HashSet},
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 
 /// BN254 scalar field modulus
 const BN254_FIELD_MODULUS: &str =
@@ -39,7 +42,6 @@ enum WitnessBackend {
 
 impl WitnessCalculator {
     /// Create a witness calculator from graph and R1CS bytes.
-    ///
     pub fn new(graph_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
         Self::from_graph(graph_bytes, r1cs_bytes)
     }
