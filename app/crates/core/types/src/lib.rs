@@ -16,19 +16,43 @@ pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
     pub admin: String,
-    /// Ledger sequence at (or immediately before) contract deployment.
+    /// Address of ASP membership deployed contract
+    pub asp_membership: String,
+    /// Address of ASP nonmembership deployed contract
+    pub asp_non_membership: String,
+    /// Address of verifier deployed contract
+    pub verifier: String,
+    /// Pool deployments (one per supported asset/token).
+    pub pools: Vec<PoolConfigEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolConfigEntry {
+    pub pool_contract_id: String,
+    pub token_contract_id: String,
+    /// Ledger sequence at (or immediately before) pool deployment.
     ///
     /// Used as a stable cold-start anchor for fresh local DBs so the indexer
-    /// can reconstruct the pool and ASP membership trees from events.
+    /// can reconstruct the pool tree from events.
     pub deployment_ledger: u32,
-    // Address of ASP membership deployed contract
-    pub asp_membership: String,
-    // Address of ASP nonmembership deployed contract
-    pub asp_non_membership: String,
-    pub verifier: String,
-    // Address of Pool deployed contract
-    pub pool: String,
-    pub initialized: bool,
+    pub enabled: bool,
+    pub asset: AssetDescriptor,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", tag = "kind")]
+pub enum AssetDescriptor {
+    Native,
+    /// Classic Stellar asset (CODE:ISSUER).
+    Classic {
+        code: String,
+        issuer: String,
+    },
+    /// Token contract address (Soroban contract id).
+    Contract {
+        contract_id: String,
+    },
 }
 
 /// ASP membership proof data needed by the circuit.
@@ -115,13 +139,9 @@ pub struct PoolLedgerActivity {
     pub nullifiers: u32,
 }
 
-/// Spending key signature
+/// Wallet signature used to derive both privacy keypairs
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SpendingSignature(pub Vec<u8>);
-
-/// Encryption key signature
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EncryptionSignature(pub Vec<u8>);
+pub struct KeyDerivationSignature(pub Vec<u8>);
 
 /// Encryption private key
 #[derive(Debug, Clone)]

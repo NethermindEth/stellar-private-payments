@@ -43,33 +43,29 @@ fn bn254_modulus_u256() -> U256 {
 /// Amount that appears inside encrypted notes.
 ///
 /// This is always non-negative and is currently constrained to what fits in the
-/// encrypted note plaintext format (u64, stored as 8 little-endian bytes).
+/// encrypted note plaintext format (u128, stored as 16 little-endian bytes).
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct NoteAmount(u64);
+pub struct NoteAmount(u128);
 
 impl NoteAmount {
-    /// Maximum representable note amount (stored as `u64` stroops internally).
-    pub const MAX: NoteAmount = NoteAmount(u64::MAX);
+    /// Maximum representable note amount (stored as `u128` token base units
+    /// internally).
+    pub const MAX: NoteAmount = NoteAmount(u128::MAX);
     /// Unit amount.
     pub const ONE: NoteAmount = NoteAmount(1);
     /// Zero amount.
     pub const ZERO: NoteAmount = NoteAmount(0);
-
-    /// Returns the underlying stroops value.
-    pub const fn as_u64(self) -> u64 {
-        self.0
-    }
 
     /// Returns true if this amount is zero.
     pub const fn is_zero(self) -> bool {
         self.0 == 0
     }
 
-    /// Returns this amount as 8 little-endian bytes (stroops).
+    /// Returns this amount as 16 little-endian bytes (stroops).
     ///
     /// This matches the current note encryption plaintext format:
-    /// `amount (8 bytes LE) || blinding (32 bytes)`.
-    pub const fn to_le_bytes(self) -> [u8; 8] {
+    /// `amount (16 bytes LE) || blinding (32 bytes)`.
+    pub const fn to_le_bytes(self) -> [u8; 16] {
         self.0.to_le_bytes()
     }
 
@@ -90,13 +86,13 @@ impl fmt::Display for NoteAmount {
     }
 }
 
-impl From<u64> for NoteAmount {
-    fn from(value: u64) -> Self {
+impl From<u128> for NoteAmount {
+    fn from(value: u128) -> Self {
         NoteAmount(value)
     }
 }
 
-impl From<NoteAmount> for u64 {
+impl From<NoteAmount> for u128 {
     fn from(value: NoteAmount) -> Self {
         value.0
     }
@@ -106,7 +102,7 @@ impl FromStr for NoteAmount {
     type Err = anyhow::Error;
 
     fn from_str(s: &str) -> Result<Self> {
-        Ok(NoteAmount(s.parse::<u64>().map_err(|e| anyhow!(e))?))
+        Ok(NoteAmount(s.parse::<u128>().map_err(|e| anyhow!(e))?))
     }
 }
 
@@ -115,7 +111,7 @@ impl TryFrom<ExtAmount> for NoteAmount {
 
     fn try_from(value: ExtAmount) -> Result<Self> {
         let v =
-            u64::try_from(value.0).map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
+            u128::try_from(value.0).map_err(|_| anyhow!("NoteAmount out of range: {}", value.0))?;
         Ok(NoteAmount(v))
     }
 }
@@ -170,7 +166,7 @@ impl Serialize for NoteAmount {
 impl<'de> Deserialize<'de> for NoteAmount {
     fn deserialize<D: Deserializer<'de>>(deserializer: D) -> core::result::Result<Self, D::Error> {
         let s = String::deserialize(deserializer)?;
-        let v = s.parse::<u64>().map_err(serde::de::Error::custom)?;
+        let v = s.parse::<u128>().map_err(serde::de::Error::custom)?;
         Ok(NoteAmount(v))
     }
 }
@@ -185,6 +181,8 @@ impl<'de> Deserialize<'de> for NoteAmount {
 pub struct ExtAmount(i128);
 
 impl ExtAmount {
+    /// Maximum representable external amount.
+    pub const MAX: ExtAmount = ExtAmount(i128::MAX);
     /// Unit amount.
     pub const ONE: ExtAmount = ExtAmount(1);
     /// Zero amount.
@@ -223,9 +221,11 @@ impl From<i128> for ExtAmount {
     }
 }
 
-impl From<NoteAmount> for ExtAmount {
-    fn from(value: NoteAmount) -> Self {
-        ExtAmount(i128::from(value.0))
+impl TryFrom<NoteAmount> for ExtAmount {
+    type Error = anyhow::Error;
+
+    fn try_from(value: NoteAmount) -> Result<Self> {
+        Ok(ExtAmount(i128::try_from(value.0)?))
     }
 }
 
@@ -549,11 +549,10 @@ mod tests {
     #[test]
     fn note_amount_zero_min_max() -> Result<()> {
         let z = NoteAmount(0);
-        assert_eq!(z.as_u64(), 0);
         assert_eq!(z.to_string(), "0");
-        assert_eq!(z.to_le_bytes(), [0u8; 8]);
+        assert_eq!(z.to_le_bytes(), [0u8; 16]);
 
-        let min = NoteAmount(u64::MIN);
+        let min = NoteAmount(u128::MIN);
         assert_eq!(min, z);
 
         let max = NoteAmount::MAX;
@@ -568,15 +567,15 @@ mod tests {
     fn note_amount_try_from_ext_amount_range() -> Result<()> {
         assert_eq!(NoteAmount::try_from(ExtAmount(0))?, NoteAmount::ZERO);
         assert_eq!(
-            NoteAmount::try_from(ExtAmount::from(NoteAmount::MAX))?,
-            NoteAmount::MAX
+            ExtAmount::try_from(NoteAmount::try_from(ExtAmount::MAX)?)?,
+            ExtAmount::MAX
         );
 
         assert!(NoteAmount::try_from(ExtAmount(-1)).is_err());
-
-        let max_ext = ExtAmount::from(NoteAmount::MAX);
-        let too_big = max_ext.checked_add(ExtAmount::ONE).expect("i128 add");
-        assert!(NoteAmount::try_from(too_big).is_err());
+        assert_eq!(
+            NoteAmount::try_from(ExtAmount::MAX)? + NoteAmount::try_from(ExtAmount::MAX)?,
+            NoteAmount::from(i128::MAX as u128 + i128::MAX as u128)
+        );
         Ok(())
     }
 
@@ -669,8 +668,8 @@ mod tests {
         // NoteAmount always maps directly.
         let n0 = Field::from(NoteAmount(0));
         assert_eq!(U256::from(n0), U256::from(0u64));
-        let nmax = Field::from(NoteAmount(u64::MAX));
-        assert_eq!(U256::from(nmax), U256::from(u64::MAX));
+        let nmax = Field::from(NoteAmount::MAX);
+        assert_eq!(U256::from(nmax), U256::from(u128::MAX));
 
         // ExtAmount maps signed values into the field.
         let p = Field::modulus();
@@ -704,28 +703,16 @@ mod tests {
     fn rusqlite_conversions_work() -> Result<()> {
         use rusqlite::types::{FromSql, ToSql, Value, ValueRef};
 
-        // NoteAmount as INTEGER.
+        // NoteAmount as TEXT.
         let n = NoteAmount(42);
         let out = n.to_sql()?;
         match out {
-            rusqlite::types::ToSqlOutput::Owned(Value::Integer(i)) => {
-                let parsed = NoteAmount::column_result(ValueRef::Integer(i))?;
+            rusqlite::types::ToSqlOutput::Owned(Value::Text(i)) => {
+                let parsed = NoteAmount::column_result(ValueRef::Text(i.as_bytes()))?;
                 assert_eq!(parsed, n);
             }
             _ => return Err(anyhow!("unexpected ToSql output for NoteAmount")),
         }
-
-        // NoteAmount i64 boundary.
-        let n_i64_max = NoteAmount(i64::MAX as u64);
-        let out = n_i64_max.to_sql()?;
-        match out {
-            rusqlite::types::ToSqlOutput::Owned(Value::Integer(i)) => {
-                assert_eq!(i, i64::MAX);
-            }
-            _ => return Err(anyhow!("unexpected ToSql output for NoteAmount(i64::MAX)")),
-        }
-        let n_over = NoteAmount((i64::MAX as u64) + 1);
-        assert!(n_over.to_sql().is_err());
 
         // Field as BLOB(32).
         let f = Field::try_from(ExtAmount(-1))?;
@@ -756,24 +743,17 @@ mod rusqlite_impls {
 
     impl ToSql for NoteAmount {
         fn to_sql(&self) -> rusqlite::Result<ToSqlOutput<'_>> {
-            // SQLite INTEGER is signed i64; note amounts are expected to fit within i64 for
-            // XLM stroops.
-            let v: i64 = i64::try_from(self.0).map_err(|_| {
-                rusqlite::Error::ToSqlConversionFailure(Box::new(FromSqlError::OutOfRange(0)))
-            })?;
-            Ok(ToSqlOutput::Owned(Value::Integer(v)))
+            Ok(ToSqlOutput::Owned(Value::Text(self.0.to_string())))
         }
     }
 
     impl FromSql for NoteAmount {
         fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
             match value {
-                ValueRef::Integer(i) => {
-                    if i < 0 {
-                        return Err(FromSqlError::OutOfRange(i));
-                    }
-                    let value = u64::try_from(i).map_err(|_| FromSqlError::OutOfRange(i))?;
-                    Ok(NoteAmount(value))
+                ValueRef::Text(t) => {
+                    let s = core::str::from_utf8(t).map_err(|_| FromSqlError::InvalidType)?;
+                    let v: u128 = s.parse().map_err(|_| FromSqlError::InvalidType)?;
+                    Ok(NoteAmount(v))
                 }
                 _ => Err(FromSqlError::InvalidType),
             }

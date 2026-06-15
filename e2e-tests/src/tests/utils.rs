@@ -42,6 +42,23 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
 
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+pub fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 /// Returns the path to the pre-generated proving key for the policy_tx_2_2
 /// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
 fn proving_key_path() -> std::path::PathBuf {

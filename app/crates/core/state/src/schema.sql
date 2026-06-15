@@ -8,10 +8,18 @@
 -- - User processing: derived chain state is scanned/decrypted into per-account `user_notes`,
 --   with scan progress tracked in the scan-state tables.
 
+-- Contracts known to this local database.
+--
+-- Storage is event-driven: contracts are inserted on first observation.
+CREATE TABLE contracts (
+    contract_id INTEGER PRIMARY KEY,
+    address TEXT NOT NULL UNIQUE
+);
+
 -- Stores the last RPC cursor used by the indexer.
--- Singleton table enforced by `id CHECK (id = 1)`.
+-- Per-contract table keyed by contract_id.
 CREATE TABLE indexing_metadata (
-    id INTEGER PRIMARY KEY CHECK (id = 1), -- Forces only one row
+    contract_id INTEGER PRIMARY KEY,
     -- RPC pagination cursor (opaque).
     last_cursor TEXT,
     -- Latest ledger that the indexer has fully caught up to.
@@ -19,12 +27,9 @@ CREATE TABLE indexing_metadata (
     -- This only advances when the indexer has proven catch-up by fetching an empty
     -- events page for the current cursor. It is used for "are we synced?"
     -- preconditions (e.g. proving membership at the current tip).
-    last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0
+    last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
-
--- Ensure the singleton row exists on fresh DBs.
-INSERT OR IGNORE INTO indexing_metadata (id, last_cursor, last_fully_indexed_ledger)
-VALUES (1, NULL, 0);
 
 -- Append-only log of raw contract events fetched from RPC.
 --
@@ -35,9 +40,10 @@ CREATE TABLE raw_contract_events (
     id TEXT PRIMARY KEY,
     -- Ledger sequence that emitted this event.
     ledger INTEGER NOT NULL,
-    contract_id TEXT NOT NULL,
+    contract_id INTEGER NOT NULL,
     topics TEXT NOT NULL,
-    value TEXT NOT NULL
+    value TEXT NOT NULL,
+    FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 CREATE INDEX idx_raw_contract_events_ledger_id ON raw_contract_events(ledger, id);
 
@@ -81,7 +87,7 @@ CREATE TABLE pool_nullifiers (
 CREATE TABLE pool_commitments (
     id INTEGER PRIMARY KEY,
     commitment BLOB NOT NULL UNIQUE CHECK (length(commitment) = 32),
-    leaf_index INTEGER NOT NULL UNIQUE,
+    leaf_index INTEGER NOT NULL,
     encrypted_output BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that emitted this commitment.
     event_id  TEXT NOT NULL UNIQUE,
@@ -93,11 +99,11 @@ CREATE TABLE pool_commitments (
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
 -- be recovered by joining on the raw event.
 CREATE TABLE public_keys (
-    owner TEXT PRIMARY KEY,
+    owner TEXT NOT NULL,
     encryption_key BLOB NOT NULL,
     note_key BLOB NOT NULL,
     -- Foreign key to `raw_contract_events.id` for the event that registered these keys.
-    event_id  TEXT NOT NULL UNIQUE,
+    event_id  TEXT NOT NULL PRIMARY KEY,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
@@ -128,7 +134,7 @@ CREATE TABLE user_notes (
     -- Nullifier computed locally from note secrets; matched against on-chain nullifiers.
     expected_nullifier BLOB NOT NULL CHECK (length(expected_nullifier) = 32),
     blinding BLOB NOT NULL CHECK (length(blinding) = 32),
-    amount INTEGER NOT NULL,
+    amount TEXT NOT NULL,
 
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE,
     FOREIGN KEY (commitment_id) REFERENCES pool_commitments(id) ON DELETE CASCADE,
@@ -142,31 +148,23 @@ CREATE INDEX idx_user_notes_unspent_expected_nullifier
 --
 -- Tracks how far each account has progressed when scanning commitments for decryptable notes.
 CREATE TABLE account_commitment_scan (
-    account_id INTEGER PRIMARY KEY,
+    pool_contract_id INTEGER NOT NULL,
+    account_id INTEGER NOT NULL,
     last_commitment_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (pool_contract_id, account_id),
+    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 
--- Global nullifier scan high-water mark (pool_nullifiers.id).
+-- Per-pool nullifier scan high-water mark (pool_nullifiers.id).
 --
 -- Tracks how far reconciliation has progressed when matching on-chain nullifiers against
 -- `user_notes.expected_nullifier`.
 CREATE TABLE nullifier_scan_state (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    last_nullifier_id INTEGER NOT NULL DEFAULT 0
+    pool_contract_id INTEGER PRIMARY KEY,
+    last_nullifier_id INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (pool_contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
-
-INSERT OR IGNORE INTO nullifier_scan_state (id, last_nullifier_id) VALUES (1, 0);
-
--- Round-robin scheduler for commitment scanning fairness across accounts.
---
--- Maintains which account should be scanned first on the next scan pass.
-CREATE TABLE notes_scan_scheduler (
-    id INTEGER PRIMARY KEY CHECK (id = 1),
-    next_account_offset INTEGER NOT NULL DEFAULT 0
-);
-
-INSERT OR IGNORE INTO notes_scan_scheduler (id, next_account_offset) VALUES (1, 0);
 
 -- Terms & Conditions (disclaimer) acceptances per account and disclaimer hash.
 --

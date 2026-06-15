@@ -1892,6 +1892,8 @@ dependencies = [
  "pool",
  "soroban-sdk",
  "soroban-utils",
+ "tx-planner",
+ "types",
  "zkhash",
 ]
 
@@ -5274,6 +5276,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
+name = "tx-planner"
+version = "0.1.0"
+dependencies = [
+ "thiserror 2.0.18",
+ "types",
+]
+
+[[package]]
 name = "type_analysis"
 version = "2.2.3"
 source = "git+https://github.com/iden3/circom?tag=v2.2.3#ad44e915a12bb047b05745c2884aad9cc8326bc6"
@@ -5860,6 +5870,7 @@ dependencies = [
  "sqlite-wasm-vfs",
  "state",
  "stellar",
+ "tx-planner",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",

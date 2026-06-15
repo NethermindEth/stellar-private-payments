@@ -29,8 +29,7 @@ pub(crate) mod serde_0x_hex_32 {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractsStateData {
-    pub network: String,
-    pub pool: PoolInfo,
+    pub pools: Vec<PoolInfo>,
     pub asp_membership: AspMembership,
     pub asp_non_membership: AspNonMembership,
 }
@@ -141,10 +140,12 @@ pub struct ContractsEventData {
     pub latest_ledger: u32,
 }
 
-/// Per-network sync state.
+/// Per-pool sync state.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SyncMetadata {
+    /// Pool contract id (C...).
+    pub contract_id: String,
     /// Sync cursor.
     pub cursor: String,
     /// Last synced ledger.

@@ -51,6 +51,8 @@ pub enum Error {
     NotInitialized = 11,
     /// Arithmetic overflow occurred
     Overflow = 12,
+    /// Public input is not canonical in the BN254 scalar field
+    NonCanonicalPublicInput = 13,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -391,6 +393,37 @@ impl PoolContract {
         Ok(())
     }
 
+    /// Reject values outside the canonical BN254 scalar-field range.
+    ///
+    /// `Bn254Fr::from_bytes` expects field elements, so any `U256` that will be
+    /// converted into a verifier public input must be checked before
+    /// conversion.
+    fn validate_bn256_public_input(value: &U256, modulus: &U256) -> Result<(), Error> {
+        if value >= modulus {
+            return Err(Error::NonCanonicalPublicInput);
+        }
+
+        Ok(())
+    }
+
+    /// Validate every `U256` field that contributes to the verifier's public
+    /// input vector. The transaction path checks `ext_data_hash` against
+    /// `hash_ext_data` before proof verification, so this covers the remaining
+    /// public-input values.
+    fn validate_bn256_public_inputs(proof: &Proof, modulus: &U256) -> Result<(), Error> {
+        Self::validate_bn256_public_input(&proof.root, modulus)?;
+        Self::validate_bn256_public_input(&proof.public_amount, modulus)?;
+        for nullifier in proof.input_nullifiers.iter() {
+            Self::validate_bn256_public_input(&nullifier, modulus)?;
+        }
+        Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
+        Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
+        Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
+        Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
+
+        Ok(())
+    }
+
     /// Verify a zero-knowledge proof
     ///
     /// # Arguments
@@ -408,6 +441,7 @@ impl PoolContract {
         }
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
+        Self::validate_bn256_public_inputs(proof, &bn256_modulus(env))?;
 
         // Public inputs must match the order declared by the policy circuit:
         // [root, public_amount, ext_data_hash, input_nullifiers,

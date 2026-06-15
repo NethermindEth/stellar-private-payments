@@ -411,12 +411,12 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
         const title = document.createElement('h3');
         title.className = 'text-base font-semibold text-dark-100';
-        title.textContent = 'Derive privacy keys (2 signatures)';
+        title.textContent = 'Derive privacy keys (1 signature)';
         wrap.appendChild(title);
 
         const p1 = document.createElement('p');
         p1.textContent =
-            'We ask Freighter to sign two messages. These signatures derive your privacy keys locally (spending key + encryption key). This does not move funds.';
+            'We ask Freighter to sign one message. That signature derives your privacy keys locally (spending key + encryption key). This does not move funds.';
         wrap.appendChild(p1);
 
         const p2 = document.createElement('p');
@@ -451,7 +451,6 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
                                 setButtonLoading?.(msg);
                             },
                             signOptions: { address },
-                            signDelay: 300,
                             skipCacheCheck: true,
                         });
                         keys = {

@@ -240,8 +240,7 @@ async function deriveKeys() {
     deriveKeysBtn.disabled = true;
 
     const { privKey, pubKey, ...rest } = await deriveKeysFromWallet(state.address, {
-          onStatus: log,
-          signDelay: 300
+          onStatus: log
         }
     );
 
@@ -361,10 +360,9 @@ async function refreshState() {
     setStatus('Loading contract state...', 'info');
     const client = getHandle().webClient;
 
-    const [membershipState, nonMembershipState] = await Promise.all([
-      client.aspMembershipContractState(),
-      client.aspNonmembershipContractState(),
-    ]);
+    const state = await client.aspState();
+    const membershipState = state.aspMembership;
+    const nonMembershipState = state.aspNonMembership;
 
     if (membershipContractInput) {
       membershipContractInput.value = membershipState.contractId;
@@ -407,8 +405,7 @@ async function computeMembershipLeaf() {
       pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
     } else if (privateValue !== null) {
       let { privKeyBytes, pubKey, ...rest} = await deriveKeysFromWallet(state.derivedKeys.sourceAccount, {
-          onStatus: log,
-          signDelay: 300
+          onStatus: log
       });
     } else {
       throw new Error('Provide a private key or a public key override');

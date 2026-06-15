@@ -11,8 +11,8 @@
 //!
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
-//! The script also generates Groth16 proving and verification
-//! keys for the main circuit (policy_tx_2_2) and outputs them to
+//! The script also generates Groth16 proving and verification keys for selected
+//! entry-point circuits (see `GROTH16_KEY_CIRCUITS` below) and outputs them to
 //! `testdata/`.
 //!
 //! The output directory is exposed as en environment variable
@@ -41,6 +41,19 @@ use std::{
 use type_analysis::check_types::check_types;
 
 const CURVE_ID: &str = "bn128";
+
+/// Circom stems whose Groth16 artifacts live under `testdata/`
+/// (`{stem}_proving_key.bin`, etc.). Append here when wiring a new entry-point
+/// through the same key-generation path.
+const GROTH16_KEY_CIRCUITS: &[&str] = &["policy_tx_2_2", "selectiveDisclosure_1"];
+
+/// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
+/// changed.
+const GROTH16_TESTDATA_SUFFIXES: &[&str] = &["_proving_key.bin", "_vk.json", "_vk_soroban.bin"];
+
+fn circuit_needs_groth16_keys(name: &str) -> bool {
+    GROTH16_KEY_CIRCUITS.contains(&name)
+}
 
 fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
     let workspace_root = crate_dir.parent().unwrap_or(crate_dir);
@@ -113,18 +126,14 @@ fn main() -> Result<()> {
 
     // Rerun if testdata key files are missing or changed
     let testdata_dir = crate_dir.join("../testdata");
-    println!(
-        "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_tx_2_2_proving_key.bin").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_tx_2_2_vk.json").display()
-    );
-    println!(
-        "cargo:rerun-if-changed={}",
-        testdata_dir.join("policy_tx_2_2_vk_soroban.bin").display()
-    );
+    for stem in GROTH16_KEY_CIRCUITS {
+        for suffix in GROTH16_TESTDATA_SUFFIXES {
+            println!(
+                "cargo:rerun-if-changed={}",
+                testdata_dir.join(format!("{stem}{suffix}")).display()
+            );
+        }
+    }
 
     // === CIRCOMLIB DEPENDENCY ===
     // Import circomlib library (only if not already present) and pin it to the
@@ -253,8 +262,9 @@ fn main() -> Result<()> {
                     );
                 }
 
-                // Still check if we need to generate keys for policy_tx_2_2
-                if circuit_name == "policy_tx_2_2" && wasm_path.exists() {
+                // Still check if we need to generate keys for circuits that ship PK/VK under
+                // testdata/
+                if circuit_needs_groth16_keys(circuit_name.as_str()) && wasm_path.exists() {
                     match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
                         Ok(_) => {}
                         Err(e) => {
@@ -339,8 +349,8 @@ fn main() -> Result<()> {
         }
 
         // === GROTH16 Proving/Verifying key generation ===
-        // For now we only generate keys for the policy_tx_2_2 circuit.
-        if circuit_name == "policy_tx_2_2" {
+        // policy_tx_2_2 and selectiveDisclosure_1 (must match `*.circom` file stem).
+        if circuit_needs_groth16_keys(circuit_name.as_str()) {
             if !wasm_success {
                 bail!(
                     "Skipping key generation for {} - WASM compilation failed",
@@ -1052,7 +1062,8 @@ fn check_keys_need_generation(
 ///
 /// * `crate_dir` - The circuits crate directory
 /// * `out_dir` - The output directory containing WASM files
-/// * `circuit_name` - Name of the circuit (e.g., "policy_tx_2_2")
+/// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2`,
+///   `selectiveDisclosure_1`)
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
 ///
 /// # Returns

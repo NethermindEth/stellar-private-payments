@@ -376,7 +376,9 @@ export const Wallet = {
             setBtnText('Registering…');
 
             const config = await getHandle().webClient.contractConfig();
-            const poolContractId = config?.pool;
+            const pools = Array.isArray(config?.pools) ? config.pools : [];
+            const selectedPool = pools.find(p => p?.enabled) || pools[0];
+            const poolContractId = selectedPool?.poolContractId;
             if (!poolContractId) throw new Error('Pool contract ID not available');
 
             const hash = await submitPublicKeyRegistration(
