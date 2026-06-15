@@ -2,8 +2,7 @@
 //!
 //! Handles loading proving keys and generating ZK proofs from witness data.
 //!
-//! We cannot use ark_circom directly because it depends on
-//! wasmer which doesn't work in browser WASM. Instead, we:
+//! We avoid `ark-circom` here because it depends on Wasmer. Instead, we:
 //! 1. Load the proving key
 //! 2. Parse the R1CS file to get constraint matrices (see r1cs.rs)
 //! 3. Accept pre-computed witness bytes from the JS witness calculator
@@ -17,9 +16,12 @@ use crate::{
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
-use ark_circom::CircomReduction;
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
-use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
+use ark_groth16::{
+    PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey,
+    r1cs_to_qap::{LibsnarkReduction, R1CSToQAP, evaluate_constraint},
+};
+use ark_poly::EvaluationDomain;
 use ark_relations::{
     gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable},
     lc,
@@ -28,6 +30,114 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
+
+/// QAP reduction used by snarkjs/Circom proving keys.
+///
+/// This mirrors the small `CircomReduction` adapter from `circom-compat`
+/// without importing the rest of that crate and its Wasmer witness runtime.
+struct CircomReduction;
+
+impl R1CSToQAP for CircomReduction {
+    #[allow(clippy::type_complexity)]
+    fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(
+        cs: ConstraintSystemRef<F>,
+        t: &F,
+    ) -> Result<(Vec<F>, Vec<F>, Vec<F>, F, usize, usize), SynthesisError> {
+        LibsnarkReduction::instance_map_with_evaluation::<F, D>(cs, t)
+    }
+
+    fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F>>(
+        matrices: &[Vec<Vec<(F, usize)>>],
+        num_inputs: usize,
+        num_constraints: usize,
+        full_assignment: &[F],
+    ) -> Result<Vec<F>, SynthesisError> {
+        let domain_len = num_constraints
+            .checked_add(num_inputs)
+            .ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+        let domain = D::new(domain_len).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+        let domain_size = domain.size();
+
+        let mut a = ark_std::vec![F::ZERO; domain_size];
+        let mut b = ark_std::vec![F::ZERO; domain_size];
+
+        for (((a_i, b_i), at_i), bt_i) in a[..num_constraints]
+            .iter_mut()
+            .zip(&mut b[..num_constraints])
+            .zip(&matrices[0])
+            .zip(&matrices[1])
+        {
+            *a_i = evaluate_constraint(at_i, full_assignment);
+            *b_i = evaluate_constraint(bt_i, full_assignment);
+        }
+
+        {
+            let start = num_constraints;
+            let end = start
+                .checked_add(num_inputs)
+                .ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+            a[start..end].clone_from_slice(&full_assignment[..num_inputs]);
+        }
+
+        let mut c = ark_std::vec![F::ZERO; domain_size];
+        for ((c_i, &a_i), &b_i) in c[..num_constraints].iter_mut().zip(&a).zip(&b) {
+            *c_i = a_i * b_i;
+        }
+
+        domain.ifft_in_place(&mut a);
+        domain.ifft_in_place(&mut b);
+
+        let double_domain_size = domain_size
+            .checked_mul(2)
+            .ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+        let domain_double =
+            D::new(double_domain_size).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+        let root_of_unity = domain_double.element(1);
+
+        D::distribute_powers_and_mul_by_const(&mut a, root_of_unity, F::ONE);
+        D::distribute_powers_and_mul_by_const(&mut b, root_of_unity, F::ONE);
+
+        domain.fft_in_place(&mut a);
+        domain.fft_in_place(&mut b);
+
+        let mut ab = domain.mul_polynomials_in_evaluation_domain(&a, &b);
+        drop(a);
+        drop(b);
+
+        domain.ifft_in_place(&mut c);
+        D::distribute_powers_and_mul_by_const(&mut c, root_of_unity, F::ONE);
+        domain.fft_in_place(&mut c);
+
+        for (ab_i, c_i) in ab.iter_mut().zip(c) {
+            *ab_i -= &c_i;
+        }
+
+        Ok(ab)
+    }
+
+    fn h_query_scalars<F: PrimeField, D: EvaluationDomain<F>>(
+        max_power: usize,
+        t: F,
+        _: F,
+        delta_inverse: F,
+    ) -> Result<Vec<F>, SynthesisError> {
+        let scalars_len = max_power
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(1))
+            .ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+        let mut scalars = (0..scalars_len)
+            .map(|i| {
+                let power =
+                    u64::try_from(i).map_err(|_| SynthesisError::PolynomialDegreeTooLarge)?;
+                Ok(delta_inverse * t.pow([power]))
+            })
+            .collect::<Result<Vec<_>, SynthesisError>>()?;
+        let domain = D::new(scalars.len()).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
+
+        domain.ifft_in_place(&mut scalars);
+        Ok(scalars.into_iter().skip(1).step_by(2).collect())
+    }
+}
 
 // Soroban-compatible encoding helpers.
 // Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering, while arkworks

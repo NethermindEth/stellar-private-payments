@@ -4151,14 +4151,13 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
- "ark-circom",
  "ark-ff 0.6.0",
  "ark-groth16",
+ "ark-poly 0.6.0",
  "ark-relations 0.6.0",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
- "circuits",
  "crypto_secretbox",
  "getrandom 0.2.17",
  "serde",
@@ -6707,13 +6706,12 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "ark-bn254 0.5.0",
- "ark-circom",
  "ark-ff 0.5.0",
  "circom-witness-rs",
+ "getrandom 0.2.17",
  "num-bigint",
  "ruint",
  "serde_json",
- "wasmer",
 ]
 
 [[package]]

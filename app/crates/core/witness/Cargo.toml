@@ -9,22 +9,19 @@ description = "Circom witness generation for browser WASM and native graph runti
 
 [dependencies]
 anyhow = { workspace = true }
+ark-bn254-05 = { package = "ark-bn254", version = "0.5", default-features = false }
+ark-ff-05 = { package = "ark-ff", version = "0.5", default-features = false }
+circom-witness-rs = { workspace = true }
 
 # BigInt support for input parsing
 num-bigint = { workspace = true }
+ruint = { workspace = true }
 
 # JSON parsing
 serde_json = { workspace = true, default-features = false, features = ["alloc", "std"] }
 
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-ark-bn254-05 = { package = "ark-bn254", version = "0.5", default-features = false }
-ark-ff-05 = { package = "ark-ff", version = "0.5", default-features = false }
-circom-witness-rs = { workspace = true }
-ruint = { workspace = true }
-
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-ark-circom = { workspace = true }
-wasmer = { workspace = true, features = ["js", "js-default"] }
+getrandom = { workspace = true, features = ["js"] }
 
 [lints]
 workspace = true

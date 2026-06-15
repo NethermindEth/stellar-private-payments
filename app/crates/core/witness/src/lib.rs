@@ -1,27 +1,18 @@
 //! Circom witness generation.
 //!
-//! Browser builds use `ark-circom` and Wasmer. Native builds use a
-//! pre-generated `circom-witness-rs` graph while preserving the JSON input
-//! format and witness byte layout consumed by the prover.
+//! Browser and native builds use a pre-generated `circom-witness-rs` graph
+//! while preserving the JSON input format and witness byte layout consumed by
+//! the prover.
 
 use anyhow::{Context as _, Result, anyhow};
-#[cfg(target_arch = "wasm32")]
-use ark_circom::WitnessCalculator as ArkWitnessCalculator;
-#[cfg(not(target_arch = "wasm32"))]
 use ark_ff_05::{AdditiveGroup as _, BigInteger as _, Field as _, PrimeField as _};
-#[cfg(not(target_arch = "wasm32"))]
 use circom_witness_rs::{Graph, HashSignalInfo};
 use num_bigint::{BigInt, Sign};
-#[cfg(not(target_arch = "wasm32"))]
 use ruint::aliases::U256;
 // These are part of the reduced STD that is browser compatible
-#[cfg(not(target_arch = "wasm32"))]
 use std::collections::HashSet;
-#[cfg(not(target_arch = "wasm32"))]
 use std::sync::Arc;
 use std::{collections::HashMap, string::String, vec::Vec};
-#[cfg(target_arch = "wasm32")]
-use wasmer::{Module, Store};
 
 /// BN254 scalar field modulus
 const BN254_FIELD_MODULUS: &str =
@@ -43,56 +34,21 @@ pub struct WitnessCalculator {
 }
 
 enum WitnessBackend {
-    #[cfg(target_arch = "wasm32")]
-    Wasmer {
-        store: Store,
-        calculator: ArkWitnessCalculator,
-    },
-    #[cfg(not(target_arch = "wasm32"))]
     Graph(Graph),
 }
 
 impl WitnessCalculator {
-    /// Create a browser witness calculator from circuit WASM and R1CS bytes
+    /// Create a witness calculator from graph and R1CS bytes.
     ///
-    /// # Arguments
-    /// * `circuit_wasm` - The compiled circuit WASM bytes
-    /// * `r1cs_bytes` - The R1CS constraint system bytes
-    #[cfg(target_arch = "wasm32")]
-    pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
-        let circuit_shape = parse_circuit_shape(r1cs_bytes)?;
-
-        // Create wasmer store and load circuit module from bytes
-        let mut store = Store::default();
-        let module = Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
-
-        // Create witness calculator from module
-        let calculator = ArkWitnessCalculator::from_module(&mut store, module)
-            .map_err(|e| anyhow::anyhow!("Failed to init witness calc: {e}"))?;
-
-        Ok(Self {
-            backend: WitnessBackend::Wasmer { store, calculator },
-            witness_size: circuit_shape.witness_size,
-            num_public_inputs: circuit_shape.num_public_inputs,
-        })
-    }
-
-    /// Create a native witness calculator from graph and R1CS bytes.
-    ///
-    /// Native callers pass the generated `*.graph.bin` artifact as the witness
-    /// program. Browser callers pass the Circom WASM to the `wasm32`
-    /// constructor above.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(graph_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
         Self::from_graph(graph_bytes, r1cs_bytes)
     }
 
-    /// Create a native witness calculator from a serialized witness graph and
+    /// Create a witness calculator from a serialized witness graph and
     /// matching R1CS bytes.
     ///
     /// The graph supplies the execution plan; the R1CS supplies the witness and
     /// public-input sizing expected by the prover.
-    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_graph(graph_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Self> {
         let circuit_shape = parse_circuit_shape(r1cs_bytes)?;
         let graph = circom_witness_rs::init_graph(graph_bytes)
@@ -129,30 +85,8 @@ impl WitnessCalculator {
         }
 
         match &mut self.backend {
-            #[cfg(target_arch = "wasm32")]
-            WitnessBackend::Wasmer { store, calculator } => {
-                let witness = calculator
-                    .calculate_witness(store, inputs_hashmap, false)
-                    .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
-
-                Ok(witness_to_bytes(&witness))
-            }
-            #[cfg(not(target_arch = "wasm32"))]
             WitnessBackend::Graph(graph) => {
-                let witness_inputs = inputs_hashmap_to_u256(inputs_hashmap)?;
-                validate_graph_inputs(&witness_inputs, graph)?;
-                let witness = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    circom_witness_rs::calculate_witness(
-                        witness_inputs,
-                        graph,
-                        Some(&native_black_box_functions()),
-                    )
-                }))
-                .map_err(|_| anyhow!("Witness graph calculation panicked after input validation"))?
-                .map_err(|e| anyhow!("Witness graph calculation failed: {e}"))?;
-                ensure_witness_len(&witness, self.witness_size)?;
-
-                Ok(witness_u256_to_bytes(&witness))
+                compute_graph_witness_bytes(inputs_hashmap, graph, self.witness_size)
             }
         }
     }
@@ -310,7 +244,6 @@ fn bn254_field_modulus_le_bytes() -> [u8; 32] {
     padded
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn inputs_hashmap_to_u256(
     inputs: HashMap<String, Vec<BigInt>>,
 ) -> Result<HashMap<String, Vec<U256>>> {
@@ -327,7 +260,6 @@ fn inputs_hashmap_to_u256(
         .collect()
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn bigint_to_u256(value: BigInt) -> Result<U256> {
     if value.sign() == Sign::Minus {
         anyhow::bail!("field element is negative");
@@ -348,7 +280,6 @@ fn bigint_to_u256(value: BigInt) -> Result<U256> {
     Ok(U256::from_le_bytes(padded))
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn validate_graph_shape(graph: &Graph, expected_witness_size: u32) -> Result<()> {
     let expected_witness_size =
         usize::try_from(expected_witness_size).context("R1CS witness size does not fit usize")?;
@@ -389,7 +320,6 @@ fn validate_graph_shape(graph: &Graph, expected_witness_size: u32) -> Result<()>
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn validate_graph_inputs(inputs: &HashMap<String, Vec<U256>>, graph: &Graph) -> Result<()> {
     let metadata_by_hash: HashMap<u64, &HashSignalInfo> = graph
         .input_mapping
@@ -428,7 +358,6 @@ fn validate_graph_inputs(inputs: &HashMap<String, Vec<U256>>, graph: &Graph) -> 
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn ensure_witness_len(witness: &[U256], expected_witness_size: u32) -> Result<()> {
     let expected_witness_size =
         usize::try_from(expected_witness_size).context("R1CS witness size does not fit usize")?;
@@ -443,7 +372,6 @@ fn ensure_witness_len(witness: &[U256], expected_witness_size: u32) -> Result<()
     Ok(())
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn fnv1a(input: &str) -> u64 {
     let mut hash: u64 = 0xCBF29CE484222325;
     for byte in input.bytes() {
@@ -453,8 +381,7 @@ fn fnv1a(input: &str) -> u64 {
     hash
 }
 
-#[cfg(not(target_arch = "wasm32"))]
-fn native_black_box_functions() -> HashMap<String, circom_witness_rs::BlackBoxFunction> {
+fn graph_black_box_functions() -> HashMap<String, circom_witness_rs::BlackBoxFunction> {
     let mut bbfs: HashMap<String, circom_witness_rs::BlackBoxFunction> = HashMap::new();
     bbfs.insert(
         "bbf_inv".to_string(),
@@ -475,12 +402,32 @@ fn native_black_box_functions() -> HashMap<String, circom_witness_rs::BlackBoxFu
     bbfs
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn fr_to_u256(value: ark_bn254_05::Fr) -> U256 {
     let bytes = value.into_bigint().to_bytes_le();
     let mut padded = [0u8; 32];
     padded[..bytes.len()].copy_from_slice(&bytes);
     U256::from_le_bytes(padded)
+}
+
+fn compute_graph_witness_bytes(
+    inputs_hashmap: HashMap<String, Vec<BigInt>>,
+    graph: &Graph,
+    witness_size: u32,
+) -> Result<Vec<u8>> {
+    let witness_inputs = inputs_hashmap_to_u256(inputs_hashmap)?;
+    validate_graph_inputs(&witness_inputs, graph)?;
+    let witness = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        circom_witness_rs::calculate_witness(
+            witness_inputs,
+            graph,
+            Some(&graph_black_box_functions()),
+        )
+    }))
+    .map_err(|_| anyhow!("Witness graph calculation panicked after input validation"))?
+    .map_err(|e| anyhow!("Witness graph calculation failed: {e}"))?;
+    ensure_witness_len(&witness, witness_size)?;
+
+    Ok(witness_u256_to_bytes(&witness))
 }
 
 /// Check if a JSON value is an array containing only primitives.
@@ -658,7 +605,7 @@ fn flatten_pure_array(
 }
 
 /// Convert witness to Little-Endian bytes (32 bytes per element)
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(test)]
 fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         witness
@@ -697,7 +644,6 @@ fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
     bytes
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn witness_u256_to_bytes(witness: &[U256]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         witness
@@ -718,7 +664,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn r1cs_shape_parser_reads_header_without_wasmer_dependencies() {
+    fn r1cs_shape_parser_reads_header_without_witness_runtime_dependencies() {
         let shape = parse_circuit_shape(&r1cs_header_bytes(3, 1))
             .expect("minimal R1CS header should parse");
 
@@ -759,11 +705,11 @@ mod tests {
     #[test]
     fn graph_witness_bytes_match_existing_little_endian_layout() {
         let graph_witness = vec![U256::from(1), U256::from(0x1234_u64)];
-        let wasmer_witness = vec![BigInt::from(1), BigInt::from(0x1234_u64)];
+        let legacy_witness = vec![BigInt::from(1), BigInt::from(0x1234_u64)];
 
         assert_eq!(
             witness_u256_to_bytes(&graph_witness),
-            witness_to_bytes(&wasmer_witness)
+            witness_to_bytes(&legacy_witness)
         );
     }
 

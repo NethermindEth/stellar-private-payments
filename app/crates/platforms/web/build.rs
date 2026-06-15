@@ -60,21 +60,21 @@ fn main() {
         );
     }
 
-    let wasm_path = circuits_out.join("policy_tx_2_2.wasm");
+    let graph_path = circuits_out.join("policy_tx_2_2.graph.bin");
     let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
 
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed={}", proving_key_path.display());
-    println!("cargo:rerun-if-changed={}", wasm_path.display());
+    println!("cargo:rerun-if-changed={}", graph_path.display());
     println!("cargo:rerun-if-changed={}", r1cs_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
     let proving_key_bytes = read_file(&proving_key_path);
-    let wasm_bytes = read_file(&wasm_path);
+    let graph_bytes = read_file(&graph_path);
     let r1cs_bytes = read_file(&r1cs_path);
 
     let proving_key_hash = sha256(&proving_key_bytes);
-    let wasm_hash = sha256(&wasm_bytes);
+    let graph_hash = sha256(&graph_bytes);
     let r1cs_hash = sha256(&r1cs_bytes);
 
     let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
@@ -86,18 +86,18 @@ fn main() {
 // Do not edit manually.
 
 pub const EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256: [u8; 32] = {proving_key_hash};
-pub const EXPECTED_POLICY_TX_2_2_WASM_SHA256: [u8; 32] = {wasm_hash};
+pub const EXPECTED_POLICY_TX_2_2_GRAPH_SHA256: [u8; 32] = {graph_hash};
 pub const EXPECTED_POLICY_TX_2_2_R1CS_SHA256: [u8; 32] = {r1cs_hash};
 
 pub const EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN: usize = {proving_key_len};
-pub const EXPECTED_POLICY_TX_2_2_WASM_LEN: usize = {wasm_len};
+pub const EXPECTED_POLICY_TX_2_2_GRAPH_LEN: usize = {graph_len};
 pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
 ",
         proving_key_hash = fmt_u8_array(&proving_key_hash),
-        wasm_hash = fmt_u8_array(&wasm_hash),
+        graph_hash = fmt_u8_array(&graph_hash),
         r1cs_hash = fmt_u8_array(&r1cs_hash),
         proving_key_len = proving_key_bytes.len(),
-        wasm_len = wasm_bytes.len(),
+        graph_len = graph_bytes.len(),
         r1cs_len = r1cs_bytes.len(),
     );
 
