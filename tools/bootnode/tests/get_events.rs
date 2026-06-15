@@ -14,7 +14,8 @@ fn sample_filters(ids: &[&str]) -> serde_json::Value {
 #[test]
 fn parse_start_ledger() {
     let params = json!({"startLedger": 42, "pagination": {"limit": 100}});
-    let parsed = get_events::parse_get_events_params(&params).unwrap();
+    let parsed =
+        get_events::parse_get_events_params(&params).expect("startLedger params should parse");
     assert_eq!(parsed.start_ledger, Some(42));
     assert!(parsed.cursor.is_none());
     assert_eq!(parsed.limit, Some(100));
@@ -23,7 +24,7 @@ fn parse_start_ledger() {
 #[test]
 fn parse_cursor() {
     let params = json!({"pagination": {"cursor": "abc", "limit": 50}});
-    let parsed = get_events::parse_get_events_params(&params).unwrap();
+    let parsed = get_events::parse_get_events_params(&params).expect("cursor params should parse");
     assert!(parsed.start_ledger.is_none());
     assert_eq!(parsed.cursor.as_deref(), Some("abc"));
     assert_eq!(parsed.limit, Some(50));
@@ -66,7 +67,8 @@ fn parse_upstream_result() {
         "latestLedger": 99,
         "oldestLedger": 1
     });
-    let (cursor, events, latest, oldest) = get_events::parse_get_events_result(&result).unwrap();
+    let (cursor, events, latest, oldest) =
+        get_events::parse_get_events_result(&result).expect("valid getEvents result should parse");
     assert_eq!(cursor, "next");
     assert_eq!(events.len(), 1);
     assert_eq!(latest, 99);

@@ -18,8 +18,9 @@ use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
 use tokio::task::JoinHandle;
 
+/// Shared runtime state for HTTP handlers and the background indexer.
 #[derive(Clone)]
-pub struct AppState {
+pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
     pub(crate) db: deadpool_postgres::Pool,
     pub(crate) upstream: upstream::UpstreamClient,
@@ -27,50 +28,60 @@ pub struct AppState {
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
 }
 
-pub async fn build_state(
-    cfg: Arc<Config>,
-    prom_handle: metrics_exporter_prometheus::PrometheusHandle,
-) -> Result<AppState> {
-    let pg_cfg: tokio_postgres::Config = cfg
-        .database_url
-        .parse()
-        .context("failed to parse DATABASE_URL")?;
-    let mgr = deadpool_postgres::Manager::new(pg_cfg, tokio_postgres::NoTls);
-    let db = deadpool_postgres::Pool::builder(mgr)
-        .max_size(cfg.db_max_connections as usize)
-        .build()
-        .expect("pool build cannot fail");
-
-    storage::init_db(&db).await?;
-
-    let tip_ledger = Arc::new(AtomicU32::new(0));
-    let upstream = upstream::UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
-
-    Ok(AppState {
-        cfg,
-        db,
-        upstream,
-        tip_ledger,
-        prom_handle,
-    })
+pub struct Bootnode {
+    state: AppState,
 }
 
-pub async fn serve(state: AppState) -> Result<()> {
-    let mut indexer_task: JoinHandle<()> = tokio::spawn(indexer::run_indexer(state.clone()));
-    let mut server_task: JoinHandle<Result<()>> = tokio::spawn(http_server::run_http(state));
+impl Bootnode {
+    pub async fn setup(
+        cfg: Config,
+        prom_handle: metrics_exporter_prometheus::PrometheusHandle,
+    ) -> Result<Self> {
+        let cfg = Arc::new(cfg);
+        let pg_cfg: tokio_postgres::Config = cfg
+            .database_url
+            .parse()
+            .context("failed to parse DATABASE_URL")?;
+        let mgr = deadpool_postgres::Manager::new(pg_cfg, tokio_postgres::NoTls);
+        let db = deadpool_postgres::Pool::builder(mgr)
+            .max_size(cfg.db_max_connections as usize)
+            .build()
+            .expect("pool build cannot fail");
 
-    tokio::select! {
-        res = &mut server_task => {
-            indexer_task.abort();
-            res??;
-        }
-        _ = &mut indexer_task => {
-            anyhow::bail!("indexer task exited unexpectedly");
-        }
-        _ = tokio::signal::ctrl_c() => {
-            tracing::info!("received ctrl-c, shutting down");
-        }
+        storage::init_db(&db).await?;
+
+        let tip_ledger = Arc::new(AtomicU32::new(0));
+        let upstream = upstream::UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
+
+        Ok(Self {
+            state: AppState {
+                cfg,
+                db,
+                upstream,
+                tip_ledger,
+                prom_handle,
+            },
+        })
     }
 
-    Ok(())
+    pub async fn serve(self) -> Result<()> {
+        let state = self.state;
+        let mut indexer_task = tokio::spawn(indexer::run_indexer(state.clone()));
+        let mut server_task = tokio::spawn(http_server::run_http(state));
+
+        tokio::select! {
+            res = &mut server_task => {
+                indexer_task.abort();
+                res??;
+            }
+            _ = &mut indexer_task => {
+                anyhow::bail!("indexer task exited unexpectedly");
+            }
+            _ = tokio::signal::ctrl_c() => {
+                tracing::info!("received ctrl-c, shutting down");
+            }
+        }
+
+        Ok(())
+    }
 }
