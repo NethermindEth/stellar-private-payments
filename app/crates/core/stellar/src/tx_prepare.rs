@@ -121,7 +121,33 @@ mod tests {
     use stellar_xdr::curr::{Limits, ReadXdr, WriteXdr};
     use types::ContractConfig;
 
-    const DEPLOYMENT: &str = include_str!("../../../../../deployments/testnet/deployments.json");
+    const TEST_CONFIG_JSON: &str = r#"{
+        "network": "test",
+        "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "pools": [{
+            "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "deploymentLedger": 1,
+            "enabled": true,
+            "asset": {"kind": "native"}
+        }]
+    }"#;
+
+    fn test_pool_contract_id() -> String {
+        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        config
+            .pools
+            .iter()
+            .find(|p| p.enabled)
+            .or_else(|| config.pools.first())
+            .expect("pool in test config")
+            .pool_contract_id
+            .clone()
+    }
 
     struct MockRpc {
         seq: xdr::SequenceNumber,
@@ -173,15 +199,7 @@ mod tests {
         note_key: [u8; 32],
         encryption_key: [u8; 32],
     ) -> Result<PreparedSorobanTx> {
-        let config: ContractConfig = serde_json::from_str(DEPLOYMENT).expect("config");
-        let pool_id = config
-            .pools
-            .iter()
-            .find(|p| p.enabled)
-            .or_else(|| config.pools.first())
-            .expect("pool in test deployment")
-            .pool_contract_id
-            .clone();
+        let pool_id = test_pool_contract_id();
         let account_scval = pool_account_to_scval(source_account, encryption_key, note_key)?;
         let raw = StateFetcher::build_invoke_contract_tx_envelope(
             source_account,
@@ -250,15 +268,7 @@ mod tests {
     fn prepare_pool_transact_builds_transact_invoke() {
         let pk = ed25519::PublicKey([8u8; 32]);
         let source = pk.to_string();
-        let config: ContractConfig = serde_json::from_str(DEPLOYMENT).expect("config");
-        let pool_id = config
-            .pools
-            .iter()
-            .find(|p| p.enabled)
-            .or_else(|| config.pools.first())
-            .expect("pool in test deployment")
-            .pool_contract_id
-            .clone();
+        let pool_id = test_pool_contract_id();
         let mock = MockRpc::new(3, fixture_sim("100"));
 
         let proof_uncompressed = vec![0u8; 256];
