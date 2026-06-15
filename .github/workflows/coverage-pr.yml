@@ -33,7 +33,7 @@ jobs:
         with:
           tool: cargo-llvm-cov
       - name: Build circuit artifacts (required by web)
-        run: cargo build -p circuits
+        run: BUILD_TESTS=1 cargo build -p circuits
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
@@ -104,7 +104,7 @@ jobs:
 
       - name: Build circuit artifacts (required by web) (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        run: cargo build -p circuits
+        run: BUILD_TESTS=1 cargo build -p circuits
 
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}

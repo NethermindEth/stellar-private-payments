@@ -25,6 +25,7 @@ mod tests {
     const LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
+    type PolicyReferenceCase = (TxCase, Vec<Scalar>, Vec<MembershipTree>, Vec<NonMembership>);
 
     pub struct MembershipTree {
         pub leaves: [Scalar; 1 << LEVELS],
@@ -319,8 +320,7 @@ mod tests {
         load_artifacts("policy_tx_2_2")
     }
 
-    fn policy_one_in_one_out_case()
-    -> Result<(TxCase, Vec<Scalar>, Vec<MembershipTree>, Vec<NonMembership>)> {
+    fn policy_one_in_one_out_case() -> Result<PolicyReferenceCase> {
         // One real input (in1), one dummy input (in0.amount = 0).
         // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
         let case = TxCase::new(
