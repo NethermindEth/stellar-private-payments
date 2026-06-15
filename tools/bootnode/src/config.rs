@@ -10,7 +10,7 @@ use url::Url;
     version,
     about = "Bootnode RPC cache for PoolStellar indexer"
 )]
-pub(crate) struct Config {
+pub struct Config {
     /// Bind address for the main HTTPS listener.
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
     pub(crate) bind: SocketAddr,
@@ -103,7 +103,7 @@ pub(crate) struct Config {
 }
 
 impl Config {
-    pub(crate) fn parse_and_validate() -> Result<Self> {
+    pub fn parse_and_validate() -> Result<Self> {
         let cfg = Self::parse();
 
         if cfg.insecure_http {
@@ -135,12 +135,17 @@ impl Config {
 
     #[allow(clippy::arithmetic_side_effects)]
     pub(crate) fn cutoff_ledgers(&self) -> u32 {
-        let seconds = self
-            .redirect_days
-            .saturating_mul(24)
-            .saturating_mul(60)
-            .saturating_mul(60);
-        let denom = self.ledger_seconds.max(1);
-        seconds.saturating_div(denom)
+        cutoff_ledgers(self.redirect_days, self.ledger_seconds)
     }
+}
+
+/// Redirect-window size in ledgers (tip minus this = redirect threshold).
+#[allow(clippy::arithmetic_side_effects)]
+pub fn cutoff_ledgers(redirect_days: u32, ledger_seconds: u32) -> u32 {
+    let seconds = redirect_days
+        .saturating_mul(24)
+        .saturating_mul(60)
+        .saturating_mul(60);
+    let denom = ledger_seconds.max(1);
+    seconds.saturating_div(denom)
 }

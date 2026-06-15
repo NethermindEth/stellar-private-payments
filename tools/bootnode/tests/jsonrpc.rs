@@ -13,7 +13,10 @@ fn ok_wraps_result() {
 fn error_codes() {
     let id = json!(1);
     assert_eq!(jsonrpc::method_not_found(id.clone()).error.code, -32601);
-    assert_eq!(jsonrpc::invalid_params(id.clone(), "bad").error.code, -32602);
+    assert_eq!(
+        jsonrpc::invalid_params(id.clone(), "bad").error.code,
+        -32602
+    );
     assert_eq!(jsonrpc::cache_miss(id, "miss").error.code, -32004);
     assert_eq!(jsonrpc::parse_error("bad json").error.code, -32700);
 }

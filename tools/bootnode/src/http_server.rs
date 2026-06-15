@@ -1,4 +1,4 @@
-use crate::{AppState, deployment, jsonrpc, storage};
+use crate::{AppState, deployment, get_events, jsonrpc, storage};
 use axum::{
     Router,
     body::Bytes,
@@ -227,7 +227,7 @@ async fn handle_get_events(
     let deployment = deployment::deployment_config()?;
     let allowed_ids = stellar::contract_ids_for_indexer(&deployment);
 
-    let parsed = match parse_get_events_params(params) {
+    let parsed = match get_events::parse_get_events_params(params) {
         Ok(v) => v,
         Err(_) => {
             return Ok(json_response(
@@ -236,7 +236,7 @@ async fn handle_get_events(
             ));
         }
     };
-    if !is_allowed_filters(params, &allowed_ids) {
+    if !get_events::is_allowed_filters(params, &allowed_ids) {
         return Ok(json_response(
             StatusCode::OK,
             &jsonrpc::invalid_params(id, "unsupported filters"),
@@ -246,11 +246,10 @@ async fn handle_get_events(
     let tip = state.tip_ledger.load(Ordering::Relaxed);
     let cutoff_ledger = tip.saturating_sub(state.cfg.cutoff_ledgers());
 
-    let effective = match &parsed {
-        ParsedGetEvents::StartLedger { start_ledger, .. } => Some(*start_ledger),
-        ParsedGetEvents::Cursor { cursor, .. } => {
-            storage::lookup_cursor_ledger(&state.db, cursor).await?
-        }
+    let effective = match (parsed.start_ledger, parsed.cursor.as_deref()) {
+        (Some(start_ledger), None) => Some(start_ledger),
+        (None, Some(cursor)) => storage::lookup_cursor_ledger(&state.db, cursor).await?,
+        _ => None,
     };
 
     if let Some(effective) = effective
@@ -261,13 +260,14 @@ async fn handle_get_events(
     }
 
     // Serve from cache.
-    let cached = match parsed {
-        ParsedGetEvents::StartLedger { start_ledger, .. } => {
+    let cached = match (parsed.start_ledger, parsed.cursor) {
+        (Some(start_ledger), None) => {
             storage::get_cached_get_events_by_start_ledger(&state.db, start_ledger).await?
         }
-        ParsedGetEvents::Cursor { cursor, .. } => {
+        (None, Some(cursor)) => {
             storage::get_cached_get_events_by_cursor(&state.db, &cursor).await?
         }
+        _ => None,
     };
 
     let Some(result) = cached else {
@@ -313,72 +313,4 @@ fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
         HeaderValue::from_static("application/json"),
     );
     resp
-}
-
-#[derive(Debug, Clone)]
-enum ParsedGetEvents {
-    StartLedger {
-        start_ledger: u32,
-        limit: Option<u32>,
-    },
-    Cursor {
-        cursor: String,
-        limit: Option<u32>,
-    },
-}
-
-fn parse_get_events_params(params: &serde_json::Value) -> anyhow::Result<ParsedGetEvents> {
-    let start_ledger = params
-        .get("startLedger")
-        .and_then(|v| v.as_u64())
-        .and_then(|v| u32::try_from(v).ok());
-    let pagination = params.get("pagination").and_then(|v| v.as_object());
-    let limit = pagination
-        .and_then(|p| p.get("limit"))
-        .and_then(|v| v.as_u64())
-        .and_then(|v| u32::try_from(v).ok());
-    let cursor = pagination
-        .and_then(|p| p.get("cursor"))
-        .and_then(|v| v.as_str())
-        .map(|s| s.to_string());
-
-    match (start_ledger, cursor) {
-        (Some(start_ledger), None) => Ok(ParsedGetEvents::StartLedger {
-            start_ledger,
-            limit,
-        }),
-        (None, Some(cursor)) => Ok(ParsedGetEvents::Cursor { cursor, limit }),
-        _ => anyhow::bail!("getEvents params must include either startLedger or pagination.cursor"),
-    }
-}
-
-fn is_allowed_filters(params: &serde_json::Value, allowed_contract_ids: &[String]) -> bool {
-    let filters = params.get("filters").and_then(|v| v.as_array());
-    let Some(filters) = filters else { return false };
-    let Some(first) = filters.first().and_then(|v| v.as_object()) else {
-        return false;
-    };
-
-    if let Some(t) = first.get("type").and_then(|v| v.as_str()) {
-        if t != "contract" {
-            return false;
-        }
-    } else {
-        return false;
-    }
-
-    let topics = first.get("topics");
-    if topics != Some(&serde_json::json!([["**"]])) {
-        return false;
-    }
-
-    let contract_ids = first.get("contractIds").and_then(|v| v.as_array());
-    let Some(contract_ids) = contract_ids else {
-        return false;
-    };
-    let mut got: Vec<&str> = contract_ids.iter().filter_map(|v| v.as_str()).collect();
-    got.sort_unstable();
-    let mut want: Vec<&str> = allowed_contract_ids.iter().map(|s| s.as_str()).collect();
-    want.sort_unstable();
-    got == want
 }

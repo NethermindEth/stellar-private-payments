@@ -1,19 +1,15 @@
-//! Bootnode service that caches a minimal subset of Stellar JSON-RPC calls
-//! (`getEvents`, `getLatestLedger`) for the PoolStellar indexer.
-//!
-//! The server is intended to bridge RPC retention windows by serving historical
-//! `getEvents` pages from a Postgres cache, and safely redirecting clients back
-//! to an upstream RPC once their requested cursor/start ledger is within the
-//! retention window buffer.
+//! Bootnode library — core service logic and integration-test surface.
 #![forbid(unsafe_code)]
 
-mod config;
+pub mod config;
+pub mod get_events;
+pub mod jsonrpc;
+pub mod metrics;
+pub mod otel;
+
 mod deployment;
 mod http_server;
 mod indexer;
-mod jsonrpc;
-mod metrics;
-mod otel;
 mod storage;
 mod upstream;
 
@@ -23,23 +19,18 @@ use std::sync::{Arc, atomic::AtomicU32};
 use tokio::task::JoinHandle;
 
 #[derive(Clone)]
-struct AppState {
-    cfg: Arc<Config>,
-    db: deadpool_postgres::Pool,
-    upstream: upstream::UpstreamClient,
-    tip_ledger: Arc<AtomicU32>,
-    prom_handle: metrics_exporter_prometheus::PrometheusHandle,
+pub struct AppState {
+    pub(crate) cfg: Arc<Config>,
+    pub(crate) db: deadpool_postgres::Pool,
+    pub(crate) upstream: upstream::UpstreamClient,
+    pub(crate) tip_ledger: Arc<AtomicU32>,
+    pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
 }
 
-#[tokio::main]
-async fn main() -> Result<()> {
-    let cfg = Arc::new(Config::parse_and_validate()?);
-
-    let _otel_guard = otel::init_telemetry(&cfg)?;
-    metrics::init_metrics()?;
-
-    let prom_handle = metrics::install_prometheus_recorder()?;
-
+pub async fn build_state(
+    cfg: Arc<Config>,
+    prom_handle: metrics_exporter_prometheus::PrometheusHandle,
+) -> Result<AppState> {
     let pg_cfg: tokio_postgres::Config = cfg
         .database_url
         .parse()
@@ -55,14 +46,16 @@ async fn main() -> Result<()> {
     let tip_ledger = Arc::new(AtomicU32::new(0));
     let upstream = upstream::UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
 
-    let state = AppState {
-        cfg: cfg.clone(),
-        db: db.clone(),
-        upstream: upstream.clone(),
-        tip_ledger: tip_ledger.clone(),
+    Ok(AppState {
+        cfg,
+        db,
+        upstream,
+        tip_ledger,
         prom_handle,
-    };
+    })
+}
 
+pub async fn serve(state: AppState) -> Result<()> {
     let mut indexer_task: JoinHandle<()> = tokio::spawn(indexer::run_indexer(state.clone()));
     let mut server_task: JoinHandle<Result<()>> = tokio::spawn(http_server::run_http(state));
 
@@ -72,8 +65,6 @@ async fn main() -> Result<()> {
             res??;
         }
         _ = &mut indexer_task => {
-            // Indexer is designed to be resilient and should not exit.
-            // If it does, stop the server to avoid serving stale data.
             anyhow::bail!("indexer task exited unexpectedly");
         }
         _ = tokio::signal::ctrl_c() => {

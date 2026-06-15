@@ -6,7 +6,7 @@ use opentelemetry_sdk::{Resource, trace as sdktrace};
 use std::time::Duration;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
-pub(crate) struct TelemetryGuard {
+pub struct TelemetryGuard {
     provider: sdktrace::SdkTracerProvider,
 }
 
@@ -16,7 +16,7 @@ impl Drop for TelemetryGuard {
     }
 }
 
-pub(crate) fn init_telemetry(cfg: &Config) -> Result<Option<TelemetryGuard>> {
+pub fn init_telemetry(cfg: &Config) -> Result<Option<TelemetryGuard>> {
     let env_filter = tracing_subscriber::EnvFilter::try_from_default_env()
         .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
 

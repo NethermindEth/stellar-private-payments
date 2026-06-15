@@ -1,8 +1,8 @@
-use crate::{AppState, deployment, jsonrpc, storage};
+use crate::{AppState, deployment, get_events, jsonrpc, storage};
 use metrics::{counter, gauge};
 use serde_json::Value;
 use std::time::Instant;
-use tokio::time::{sleep, Duration};
+use tokio::time::{Duration, sleep};
 
 pub(crate) async fn run_indexer(state: AppState) {
     loop {
@@ -54,7 +54,8 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
         );
         let result = state.upstream.get_events(params.clone()).await?;
 
-        let (cursor_out, events, latest_ledger, oldest_ledger) = parse_get_events_result(&result)?;
+        let (cursor_out, events, latest_ledger, oldest_ledger) =
+            get_events::parse_get_events_result(&result)?;
         let last_event_ledger = events
             .last()
             .and_then(|e| e.get("ledger"))
@@ -94,32 +95,4 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
         .record(t0.elapsed().as_secs_f64());
 
     Ok(())
-}
-
-fn parse_get_events_result(result: &Value) -> anyhow::Result<(String, Vec<Value>, u32, u32)> {
-    let cursor = result
-        .get("cursor")
-        .and_then(|v| v.as_str())
-        .ok_or_else(|| anyhow::anyhow!("getEvents result missing cursor"))?
-        .to_string();
-    let events = result
-        .get("events")
-        .and_then(|v| v.as_array())
-        .ok_or_else(|| anyhow::anyhow!("getEvents result missing events"))?
-        .clone();
-    let latest_ledger = u32::try_from(
-        result
-            .get("latestLedger")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| anyhow::anyhow!("getEvents result missing latestLedger"))?,
-    )
-    .map_err(|_| anyhow::anyhow!("getEvents latestLedger exceeds u32"))?;
-    let oldest_ledger = u32::try_from(
-        result
-            .get("oldestLedger")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| anyhow::anyhow!("getEvents result missing oldestLedger"))?,
-    )
-    .map_err(|_| anyhow::anyhow!("getEvents oldestLedger exceeds u32"))?;
-    Ok((cursor, events, latest_ledger, oldest_ledger))
 }

@@ -6,9 +6,13 @@ repository.workspace = true
 license.workspace = true
 publish.workspace = true
 
+[lib]
+name = "bootnode"
+path = "src/lib.rs"
+
 [[bin]]
 name = "bootnode"
-path = "src/main.rs"
+path = "bin/bootnode.rs"
 
 [dependencies]
 anyhow.workspace = true
@@ -38,6 +42,9 @@ tracing-opentelemetry = "0.29.0"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
 types.workspace = true
 url = "2.5.4"
+
+[dev-dependencies]
+serde_json.workspace = true
 
 [lints]
 workspace = true
