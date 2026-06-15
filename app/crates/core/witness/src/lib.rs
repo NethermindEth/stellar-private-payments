@@ -423,21 +423,7 @@ fn bbf_inv_operand(args: &[ark_bn254_05::Fr]) -> ark_bn254_05::Fr {
         "bbf_inv expects 1 or 2 argument(s), got {}",
         args.len()
     );
-    if args.len() == 1 {
-        return args[0];
-    }
-
-    let first = fr_to_u256(args[0]);
-    let second = fr_to_u256(args[1]);
-    if is_boolean_u256(first) && !is_boolean_u256(second) {
-        args[1]
-    } else {
-        args[0]
-    }
-}
-
-fn is_boolean_u256(value: U256) -> bool {
-    value == U256::ZERO || value == U256::from(1u64)
+    args[0]
 }
 
 fn expect_black_box_arity(name: &str, args: &[ark_bn254_05::Fr], expected: usize) {
@@ -1087,11 +1073,14 @@ mod tests {
     #[test]
     fn graph_inverse_black_box_accepts_graph_dependency_forms() {
         let value = ark_bn254_05::Fr::from(7u64);
-        let guard = ark_bn254_05::Fr::from(1u64);
+        let placeholder = ark_bn254_05::Fr::from(42u64);
 
         assert_eq!(bbf_inv_operand(&[value]), value);
-        assert_eq!(bbf_inv_operand(&[value, value]), value);
-        assert_eq!(bbf_inv_operand(&[guard, value]), value);
+        assert_eq!(bbf_inv_operand(&[value, placeholder]), value);
+        assert_eq!(
+            bbf_inv_operand(&[ark_bn254_05::Fr::from(1u64), placeholder]),
+            ark_bn254_05::Fr::from(1u64)
+        );
     }
 
     fn r1cs_header_bytes(num_wires: u32, num_pub_in: u32) -> Vec<u8> {
