@@ -2,16 +2,17 @@ use crate::{AppState, deployment, jsonrpc, storage};
 use metrics::{counter, gauge};
 use serde_json::Value;
 use std::time::Instant;
+use tokio::time::{sleep, Duration};
 
 pub(crate) async fn run_indexer(state: AppState) {
     loop {
         if let Err(e) = run_round(&state).await {
             tracing::error!(error = %e, "indexer round failed");
             counter!("bootnode_indexer_round_errors_total").increment(1);
-            tokio::time::sleep(std::time::Duration::from_millis(2_000)).await;
+            sleep(Duration::from_millis(2_000)).await;
             continue;
         }
-        tokio::time::sleep(std::time::Duration::from_millis(state.cfg.indexer_sleep_ms)).await;
+        sleep(Duration::from_millis(state.cfg.indexer_sleep_ms)).await;
     }
 }
 
