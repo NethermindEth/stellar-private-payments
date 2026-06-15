@@ -447,17 +447,26 @@ impl StateFetcher {
     /// Checks whether a pool Merkle root is still known by the deployed pool.
     ///
     /// # Arguments
+    /// * `pool_contract_id` - Contract id of the enabled pool to query.
     /// * `root` - Pool Merkle root to check.
     ///
     /// # Returns
     /// Returns `true` when the root is in the pool root-history window.
     ///
     /// # Errors
-    /// Returns an error if the simulation fails or the contract returns a
-    /// non-boolean value.
-    pub async fn is_pool_known_root(&self, root: Field) -> Result<bool> {
+    /// Returns an error if the pool is not an enabled deployment, the
+    /// simulation fails, or the contract returns a non-boolean value.
+    pub async fn is_pool_known_root(&self, pool_contract_id: &str, root: Field) -> Result<bool> {
+        let pool = self
+            .config
+            .pools
+            .iter()
+            .find(|p| p.enabled && p.pool_contract_id == pool_contract_id)
+            .ok_or_else(|| {
+                anyhow!("enabled pool not found in deployments config: {pool_contract_id}")
+            })?;
         let tx = Self::build_is_known_root_simulation_tx(
-            &self.config.pool,
+            &pool.pool_contract_id,
             &self.config.deployer,
             root,
         )?;
