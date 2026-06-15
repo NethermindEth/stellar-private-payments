@@ -14,10 +14,10 @@ path = "src/main.rs"
 anyhow.workspace = true
 axum = "0.8.9"
 axum-server = "0.7.3"
-clap = { version = "4.5.40", features = ["derive", "env"] }
+clap.workspace = true
 deadpool-postgres = "0.14.1"
 futures.workspace = true
-http = "1.0.0"
+http.workspace = true
 metrics = "0.24.2"
 metrics-exporter-prometheus = "0.16.2"
 opentelemetry = "0.28.0"
