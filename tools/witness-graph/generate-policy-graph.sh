@@ -7,6 +7,7 @@ manifest_file=${out_file%.graph.bin}.graph.manifest
 work_dir="$repo_root/target/witness-graph-builder"
 graph_src_dir="$work_dir/circuits-src"
 manifest_work_file="$work_dir/policy_tx_2_2.graph.manifest"
+patched_witness_rs_dir="$work_dir/vendor/circom-witness-rs"
 circomlib_dir="$graph_src_dir/circomlib"
 comparators_file="$circomlib_dir/circuits/comparators.circom"
 bitify_file="$circomlib_dir/circuits/bitify.circom"
@@ -35,6 +36,58 @@ fn main() -> eyre::Result<()> {
 }
 EOF
 
+prepare_patched_witness_builder() {
+    (
+        cd "$work_dir"
+        cargo fetch
+    )
+
+    crate_src=$(
+        find "${CARGO_HOME:-$HOME/.cargo}/registry/src" \
+            -path "*/circom-witness-rs-0.2.3" \
+            -type d \
+            -print \
+            -quit
+    )
+    if [ -z "$crate_src" ]; then
+        echo "circom-witness-rs 0.2.3 source not found after cargo fetch" >&2
+        exit 1
+    fi
+
+    rm -rf "$patched_witness_rs_dir"
+    mkdir -p "$(dirname -- "$patched_witness_rs_dir")"
+    cp -R "$crate_src" "$patched_witness_rs_dir"
+
+    # Match circuits/build.rs, which builds R1CS/WASM with reduced
+    # simplification. circom-witness-rs defaults its graph builder to --O2.
+    python3 - "$patched_witness_rs_dir/build.rs" <<'PY'
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+content = path.read_text()
+old = '.arg("--O2");'
+new = '.arg("--O1");'
+if old not in content:
+    raise SystemExit("expected circom-witness-rs build.rs to pass --O2")
+path.write_text(content.replace(old, new))
+PY
+
+    cat > "$work_dir/Cargo.toml" <<'EOF'
+[package]
+name = "policy-witness-graph-builder"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+circom-witness-rs = { path = "vendor/circom-witness-rs", default-features = false, features = ["build-witness"] }
+eyre = "0.6"
+
+[workspace]
+EOF
+}
+
 if ! command -v circom >/dev/null 2>&1; then
     echo "circom is required on PATH to generate the witness graph" >&2
     exit 1
@@ -44,6 +97,8 @@ if ! command -v python3 >/dev/null 2>&1; then
     echo "python3 is required to generate the witness graph manifest" >&2
     exit 1
 fi
+
+prepare_patched_witness_builder
 
 locked_rev=$(tr -d '\r\n' < "$repo_root/circuits/circomlib.lock")
 
