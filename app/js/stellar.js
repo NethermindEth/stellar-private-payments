@@ -104,7 +104,7 @@ export async function submitPreparedSorobanTx(prepared, ctx, opts = {}) {
         needsWalletAuthEntry(xdr.SorobanAuthorizationEntry.fromXDR(entryXdr, 'base64'), address),
     ).length;
 
-    const server = new rpc.Server(rpcUrl, { allowHttp: rpcUrl.startsWith('http://') });
+    const server = new rpc.Server(rpcUrl);
 
     const signedAuthEntries = [];
     let walletAuthStep = 0;
