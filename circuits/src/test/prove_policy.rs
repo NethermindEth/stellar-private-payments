@@ -542,10 +542,27 @@ mod tests {
             .compute_witness(&inputs_json)
             .context("native graph witness calculation failed")?;
 
-        ensure!(
-            wasmer_witness_bytes == graph_witness_bytes,
-            "native graph witness bytes differ from Wasmer witness bytes"
-        );
+        if wasmer_witness_bytes != graph_witness_bytes {
+            let first_diff = wasmer_witness_bytes
+                .chunks_exact(32)
+                .zip(graph_witness_bytes.chunks_exact(32))
+                .position(|(wasmer, graph)| wasmer != graph)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("native graph witness byte length differs from Wasmer witness")
+                })?;
+            let wasmer_value = BigInt::from_bytes_le(
+                num_bigint::Sign::Plus,
+                &wasmer_witness_bytes[first_diff * 32..][..32],
+            );
+            let graph_value = BigInt::from_bytes_le(
+                num_bigint::Sign::Plus,
+                &graph_witness_bytes[first_diff * 32..][..32],
+            );
+            ensure!(
+                false,
+                "native graph witness bytes differ from Wasmer witness bytes at element {first_diff}: Wasmer={wasmer_value}, graph={graph_value}"
+            );
+        }
         println!(
             "BENCH witness_elements={} witness_bytes={} input_json_bytes={}",
             wasmer_witness.len(),
