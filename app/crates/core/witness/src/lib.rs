@@ -313,6 +313,10 @@ fn validate_graph_shape(graph: &Graph, expected_witness_size: u32) -> Result<()>
             );
         }
 
+        if input.hash == 0 {
+            continue;
+        }
+
         if let Some(previous) = seen_hashes.insert(input.hash, input) {
             anyhow::bail!(
                 "Witness graph contains duplicate input hash {} for signal IDs {} and {}",
@@ -330,6 +334,7 @@ fn validate_graph_inputs(inputs: &HashMap<String, Vec<U256>>, graph: &Graph) -> 
     let metadata_by_hash: HashMap<u64, &HashSignalInfo> = graph
         .input_mapping
         .iter()
+        .filter(|input| input.hash != 0)
         .map(|input| (input.hash, input))
         .collect();
     let mut provided_hashes = HashSet::with_capacity(inputs.len());
@@ -352,7 +357,7 @@ fn validate_graph_inputs(inputs: &HashMap<String, Vec<U256>>, graph: &Graph) -> 
         }
     }
 
-    for input in &graph.input_mapping {
+    for input in graph.input_mapping.iter().filter(|input| input.hash != 0) {
         if !provided_hashes.contains(&input.hash) {
             anyhow::bail!(
                 "Missing circuit input with witness graph hash {}",
@@ -803,6 +808,42 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("Witness graph output size 1 does not match R1CS witness size 2"),
+            "{err:#}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn graph_shape_allows_unnamed_hash_zero_placeholders() {
+        let mut graph = graph_with_amount_input();
+        graph.input_mapping.push(HashSignalInfo::default());
+        graph.input_mapping.push(HashSignalInfo::default());
+
+        validate_graph_shape(&graph, 1)
+            .expect("unnamed hash-zero placeholders are valid graph metadata");
+        let mut inputs = HashMap::new();
+        inputs.insert("amount".to_string(), vec![U256::from(7)]);
+
+        validate_graph_inputs(&inputs, &graph)
+            .expect("unnamed hash-zero placeholders are not required JSON inputs");
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn graph_shape_rejects_duplicate_named_hashes() {
+        let mut graph = graph_with_amount_input();
+        graph.input_mapping.push(HashSignalInfo {
+            hash: fnv1a("amount"),
+            signalid: 0,
+            signalsize: 1,
+        });
+
+        let err = validate_graph_shape(&graph, 1)
+            .expect_err("duplicate named graph input hashes must fail at construction");
+
+        assert!(
+            err.to_string()
+                .contains("Witness graph contains duplicate input hash"),
             "{err:#}"
         );
     }
