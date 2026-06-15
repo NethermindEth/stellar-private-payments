@@ -28,7 +28,7 @@ jobs:
           tool: cargo-llvm-cov
       - name: Build circuit artifacts (required by web)
         run: BUILD_TESTS=1 cargo build -p circuits
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+      - run: BUILD_TESTS=1 cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload branch coverage artifact
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
