@@ -319,34 +319,18 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             log::debug!("[{WORKER_NAME}] verify disclosure proof");
 
-            // Validate receipt metadata and circuit registration
+            // Early metadata validation for clear error messages. The actual
+            // VK-byte trust binding lives inside disclosure::verify_receipt_proof.
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
-            // Extract proof bytes and public inputs from receipt
-            let proof_bytes = receipt.proof_compressed_bytes()?;
-            let public_inputs = disclosure::validate_and_serialize_receipt_public_inputs(
-                &receipt,
-                &expected_vk_hash,
-            )?;
-
-            // Verify that the embedded VK matches the expected hash before
-            // verifying the proof against it.
             let proof_verified = DISCLOSURE_PROVER.with(|cell| {
                 let borrow = cell.borrow();
                 let prover = borrow
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
 
-                let actual_vk_hash = disclosure::vk_hash_hex(&prover.get_verifying_key()?);
-                if actual_vk_hash != expected_vk_hash {
-                    return Err(anyhow::anyhow!(
-                        "VK hash mismatch: prover has {}, receipt expects {}",
-                        actual_vk_hash,
-                        expected_vk_hash
-                    ));
-                }
-
-                prover.verify(&proof_bytes, &public_inputs)
+                let vk_bytes = prover.get_verifying_key()?;
+                disclosure::verify_receipt_proof(&receipt, &vk_bytes, &expected_vk_hash)
             })?;
 
             ProverWorkerResponse::DisclosureProofVerified(proof_verified)
