@@ -12,7 +12,8 @@ Notes:
   browser and native witness generation.
 - The policy browser prover fetches the generated graph and R1CS artifacts at
   runtime. Circom WASM artifacts may still be produced by circuit tooling and
-  reference tests, but they are no longer the policy witness runtime path.
+  reference tests, but they are no longer staged or used by the policy browser
+  witness runtime path.
 - Changing these keys requires redeploying the on-chain verifier and any
   dependent contracts.
 

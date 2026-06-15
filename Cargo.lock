@@ -1160,6 +1160,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "type_analysis",
+ "wasmer",
  "wast",
  "witness",
  "zkhash",

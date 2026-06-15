@@ -29,7 +29,6 @@ mkdir -p "$TRUNK_STAGING_DIR/circuits"
 #
 # `circuits/build.rs` publishes to:
 #   target/circuits-artifacts/<profile>/{name}.r1cs
-#   target/circuits-artifacts/<profile>/{name}.wasm
 #   target/circuits-artifacts/<profile>/{name}.graph.bin
 #   target/circuits-artifacts/<profile>/{name}.graph.manifest
 #
@@ -49,7 +48,6 @@ if [ ! -d "$CIRCUIT_OUT" ]; then
 fi
 
 cp "$CIRCUIT_OUT"/*.r1cs "$TRUNK_STAGING_DIR/circuits/"
-cp "$CIRCUIT_OUT"/*.wasm "$TRUNK_STAGING_DIR/circuits/"
 cp "$CIRCUIT_OUT"/*.graph.bin "$TRUNK_STAGING_DIR/circuits/"
 cp "$CIRCUIT_OUT"/*.graph.manifest "$TRUNK_STAGING_DIR/circuits/"
 
