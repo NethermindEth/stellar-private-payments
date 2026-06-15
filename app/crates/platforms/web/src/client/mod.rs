@@ -298,8 +298,11 @@ impl WebClient {
         address: String,
         signature: Vec<u8>,
     ) -> Result<(), JsError> {
-        let req =
-            StorageWorkerRequest::DeriveSaveUserKeys(address, KeyDerivationSignature(signature));
+        let req = StorageWorkerRequest::DeriveSaveUserKeys(
+            address,
+            KeyDerivationSignature(signature),
+            self.fetcher.contract_config().network.clone(),
+        );
 
         match self.storage_request(req, 5_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
@@ -337,6 +340,16 @@ impl WebClient {
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::UserKeys(keys) => Ok(serde_wasm_bindgen::to_value(&keys)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getASPSecret)]
+    pub async fn get_asp_secret(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::AspSecret(address);
+
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::AspSecret(secret) => Ok(serde_wasm_bindgen::to_value(&secret)?),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
@@ -404,7 +417,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         output_amounts: Array,
         submit_fn: Function,
@@ -414,7 +426,6 @@ impl WebClient {
             .execute_deposit_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 output_amounts,
                 submit_fn,
@@ -443,7 +454,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         recipient_note_key_hex: String,
         recipient_enc_key_hex: String,
@@ -462,7 +472,6 @@ impl WebClient {
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 target,
                 "transfer",
@@ -479,7 +488,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         withdraw_recipient: String,
         amount: BigInt,
         submit_fn: Function,
@@ -493,7 +501,6 @@ impl WebClient {
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 target,
                 "withdraw",
@@ -510,7 +517,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         ext_recipient: String,
         ext_amount: BigInt,
         input_note_ids: Array,
@@ -524,7 +530,6 @@ impl WebClient {
             .execute_transact_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 ext_recipient,
                 ext_amount,
                 input_note_ids,

@@ -63,6 +63,7 @@ CREATE TABLE keypairs (
     encryption_public_key BLOB NOT NULL,
     note_private_key BLOB NOT NULL,
     note_public_key BLOB NOT NULL,
+    membership_blinding BLOB NOT NULL,
     account_id INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );

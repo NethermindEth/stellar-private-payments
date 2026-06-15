@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "app/crates/core/disclosure",
     "app/crates/core/prover",
     "app/crates/core/state",
     "app/crates/core/stellar",
@@ -45,6 +46,7 @@ circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
+disclosure = { path = "app/crates/core/disclosure" }
 futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }

@@ -233,15 +233,26 @@ function renderStepContent(htmlOrNode) {
     if (htmlOrNode) content.appendChild(htmlOrNode);
 }
 
+async function copyText(value) {
+    if (!value) return false;
+    try {
+        await navigator.clipboard.writeText(value);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
     const client = getHandle().webClient;
     if (!address) throw new Error('Wallet address required for onboarding');
 
     const disclaimerState = await client.getDisclaimerState(address);
     const existingKeys = await client.getUserKeys(address);
+    const existingAspSecret = await client.getASPSecret(address);
 
     const needsDisclaimer = !disclaimerState?.accepted;
-    const needsKeys = !existingKeys;
+    const needsKeys = !existingKeys || !existingAspSecret?.membershipBlinding;
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
@@ -250,12 +261,11 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
     if (!needsDisclaimer && !needsStorageStep && !needsKeys) {
         return {
-            privKey: existingKeys.noteKeypair.private,
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: {
                 publicKey: existingKeys.encryptionKeypair.public,
-                privateKey: existingKeys.encryptionKeypair.private,
             },
+            aspSecret: existingAspSecret.membershipBlinding,
         };
     }
 
@@ -411,12 +421,12 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
         const title = document.createElement('h3');
         title.className = 'text-base font-semibold text-dark-100';
-        title.textContent = 'Derive privacy keys (1 signature)';
+        title.textContent = 'Derive privacy keys + ASP secret (1 signature)';
         wrap.appendChild(title);
 
         const p1 = document.createElement('p');
         p1.textContent =
-            'We ask Freighter to sign one message. That signature derives your privacy keys locally (spending key + encryption key). This does not move funds.';
+            'We ask Freighter to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.';
         wrap.appendChild(p1);
 
         const p2 = document.createElement('p');
@@ -454,11 +464,73 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
                             skipCacheCheck: true,
                         });
                         keys = {
-                            noteKeypair: { private: derived.privKey, public: derived.pubKey },
+                            noteKeypair: { public: derived.pubKey },
                             encryptionKeypair: derived.encryptionKeypair,
+                            aspSecret: derived.aspSecret,
                         };
-                        abort.signal.removeEventListener('abort', onAbort);
-                        resolve();
+
+                        const aspWrap = document.createElement('div');
+                        aspWrap.className = 'space-y-3 text-sm text-dark-300';
+
+                        const aspIntro = document.createElement('p');
+                        aspIntro.className = 'text-xs text-dark-500';
+                        aspIntro.textContent = 'Step 3/3 · Save your ASP registration details.';
+                        aspWrap.appendChild(aspIntro);
+
+                        const aspTitle = document.createElement('h3');
+                        aspTitle.className = 'text-base font-semibold text-dark-100';
+                        aspTitle.textContent = 'Copy your note public key + ASP secret';
+                        aspWrap.appendChild(aspTitle);
+
+                        const aspBody = document.createElement('p');
+                        aspBody.textContent = 'Send both values to your ASP provider so they can register your note public key.';
+                        aspWrap.appendChild(aspBody);
+
+                        const noteKeyLabel = document.createElement('p');
+                        noteKeyLabel.className = 'text-xs font-medium uppercase tracking-wide text-dark-500';
+                        noteKeyLabel.textContent = 'Note public key';
+                        aspWrap.appendChild(noteKeyLabel);
+
+                        const noteKeyValue = document.createElement('div');
+                        noteKeyValue.className = 'px-3 py-2 bg-dark-950 border border-dark-800 rounded-lg font-mono text-xs text-dark-200 break-all';
+                        noteKeyValue.textContent = derived.pubKey;
+                        aspWrap.appendChild(noteKeyValue);
+
+                        const aspSecretLabel = document.createElement('p');
+                        aspSecretLabel.className = 'text-xs font-medium uppercase tracking-wide text-dark-500';
+                        aspSecretLabel.textContent = 'ASP secret';
+                        aspWrap.appendChild(aspSecretLabel);
+
+                        const aspValue = document.createElement('div');
+                        aspValue.className = 'px-3 py-2 bg-dark-950 border border-dark-800 rounded-lg font-mono text-xs text-brand-400 break-all';
+                        aspValue.textContent = derived.aspSecret;
+                        aspWrap.appendChild(aspValue);
+
+                        const aspHint = document.createElement('p');
+                        aspHint.className = 'text-xs text-dark-500';
+                        aspHint.textContent = 'Keep these values handy until the ASP provider confirms your membership leaf has been inserted.';
+                        aspWrap.appendChild(aspHint);
+
+                        renderStepContent(aspWrap);
+
+                        const copyBtn = makeButton({
+                            text: 'Copy ASP details',
+                            variant: 'secondary',
+                            onClick: async () => {
+                                const copied = await copyText(`Note public key: ${derived.pubKey}\nASP secret: ${derived.aspSecret}`);
+                                setError(copied ? '' : 'Failed to copy ASP registration details');
+                                if (copied) copyBtn.textContent = 'Copied';
+                            },
+                        });
+                        const continueBtn = makeButton({
+                            text: 'Continue',
+                            variant: 'primary',
+                            onClick: () => {
+                                abort.signal.removeEventListener('abort', onAbort);
+                                resolve();
+                            },
+                        });
+                        renderActions([copyBtn, continueBtn]);
                     } catch (e) {
                         deriveBtn.disabled = false;
                         setError(e?.message || 'Failed to derive privacy keys');
@@ -479,12 +551,12 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
     const final = keys || (await client.getUserKeys(address));
     if (!final) throw new Error('Privacy keys not available');
 
+    const finalAspSecret = keys?.aspSecret ? { membershipBlinding: keys.aspSecret } : await client.getASPSecret(address);
     return {
-        privKey: final.noteKeypair.private,
         pubKey: final.noteKeypair.public,
         encryptionKeypair: {
             publicKey: final.encryptionKeypair.public,
-            privateKey: final.encryptionKeypair.private,
         },
+        aspSecret: finalAspSecret?.membershipBlinding || null,
     };
 }
