@@ -16,7 +16,7 @@ use anyhow::{Context, Result};
 use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
 
-use self::upstream::UpstreamClient;
+use self::{indexer::Indexer, upstream::UpstreamClient};
 
 pub struct Bootnode {
     state: AppState,
@@ -66,7 +66,7 @@ impl Bootnode {
 
     pub async fn serve(self) -> Result<()> {
         let state = self.state;
-        let mut indexer_task = tokio::spawn(indexer::run_indexer(state.clone()));
+        let mut indexer_task = tokio::spawn(Indexer::new(state.clone()).run());
         let mut server_task = tokio::spawn(http_server::run_http(state));
 
         tokio::select! {
