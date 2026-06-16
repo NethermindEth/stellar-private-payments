@@ -8,7 +8,6 @@ use stellar::GetEventsResponse;
 struct State {
     last_cursor: Option<String>,
     last_fully_indexed_ledger: u32,
-    ledger_tip: u32,
     cache_by_cursor_in: HashMap<String, GetEventsResponse>,
     cache_by_start_ledger: HashMap<u32, GetEventsResponse>,
     cursor_ledger_map: HashMap<String, u32>,
@@ -21,6 +20,16 @@ pub struct Memory {
 impl Memory {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    fn with_state<R>(&self, f: impl FnOnce(&State) -> R) -> R {
+        let state = self.state.lock().expect("memory storage mutex poisoned");
+        f(&state)
+    }
+
+    fn with_state_mut<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
+        let mut state = self.state.lock().expect("memory storage mutex poisoned");
+        f(&mut state)
     }
 }
 
@@ -39,73 +48,60 @@ impl StorageBackend for Memory {
     }
 
     async fn load_kv(&self) -> Result<KvState> {
-        let state = self.state.lock().expect("memory storage mutex poisoned");
-        Ok(KvState {
+        Ok(self.with_state(|state| KvState {
             last_cursor: state.last_cursor.clone(),
             last_fully_indexed_ledger: state.last_fully_indexed_ledger,
-            ledger_tip: state.ledger_tip,
-        })
-    }
-
-    async fn update_ledger_tip(&self, tip: u32) -> Result<()> {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
-        state.ledger_tip = tip;
-        Ok(())
+        }))
     }
 
     async fn update_cursor(&self, cursor: &str) -> Result<()> {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
-        state.last_cursor = Some(cursor.to_owned());
+        self.with_state_mut(|state| state.last_cursor = Some(cursor.to_owned()));
         Ok(())
     }
 
     async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()> {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
-        state.last_fully_indexed_ledger = ledger;
+        self.with_state_mut(|state| state.last_fully_indexed_ledger = ledger);
         Ok(())
     }
 
     async fn store_get_events_page(&self, page: InsertGetEventsPage<'_>) -> Result<()> {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
-
-        if let Some(cursor_in) = page.cursor_in {
-            state
-                .cache_by_cursor_in
-                .insert(cursor_in.to_owned(), page.result.clone());
-        } else if let Some(start_ledger) = page.start_ledger {
-            state
-                .cache_by_start_ledger
-                .insert(start_ledger, page.result.clone());
-        }
-
+        self.with_state_mut(|state| {
+            if let Some(cursor_in) = page.cursor_in {
+                state
+                    .cache_by_cursor_in
+                    .insert(cursor_in.to_owned(), page.result.clone());
+            } else if let Some(start_ledger) = page.start_ledger {
+                state
+                    .cache_by_start_ledger
+                    .insert(start_ledger, page.result.clone());
+            }
+        });
         Ok(())
     }
 
     async fn upsert_cursor_ledger(&self, cursor: &str, ledger: u32) -> Result<()> {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
-        state.cursor_ledger_map.insert(cursor.to_owned(), ledger);
+        self.with_state_mut(|state| {
+            state.cursor_ledger_map.insert(cursor.to_owned(), ledger);
+        });
         Ok(())
     }
 
     async fn lookup_cursor_ledger(&self, cursor: &str) -> Result<Option<u32>> {
-        let state = self.state.lock().expect("memory storage mutex poisoned");
-        Ok(state.cursor_ledger_map.get(cursor).copied())
+        Ok(self.with_state(|state| state.cursor_ledger_map.get(cursor).copied()))
     }
 
     async fn get_cached_get_events_by_cursor(
         &self,
         cursor: &str,
     ) -> Result<Option<GetEventsResponse>> {
-        let state = self.state.lock().expect("memory storage mutex poisoned");
-        Ok(state.cache_by_cursor_in.get(cursor).cloned())
+        Ok(self.with_state(|state| state.cache_by_cursor_in.get(cursor).cloned()))
     }
 
     async fn get_cached_get_events_by_start_ledger(
         &self,
         start_ledger: u32,
     ) -> Result<Option<GetEventsResponse>> {
-        let state = self.state.lock().expect("memory storage mutex poisoned");
-        Ok(state.cache_by_start_ledger.get(&start_ledger).cloned())
+        Ok(self.with_state(|state| state.cache_by_start_ledger.get(&start_ledger).cloned()))
     }
 }
 
@@ -163,12 +159,10 @@ mod tests {
             .insert_get_events_page(sample_page(None, Some(10), "next", &result))
             .await
             .expect("insert should succeed");
-        storage.update_cursor("next").await.expect("update cursor");
         storage
             .mark_caught_up("next", 100)
             .await
             .expect("mark caught up");
-        storage.update_ledger_tip(101).await.expect("update tip");
 
         let cached = storage
             .get_cached_get_events_by_start_ledger(10)
@@ -180,7 +174,6 @@ mod tests {
         let kv = storage.load_kv().await.expect("load kv");
         assert_eq!(kv.last_cursor.as_deref(), Some("next"));
         assert_eq!(kv.last_fully_indexed_ledger, 100);
-        assert_eq!(kv.ledger_tip, 101);
 
         assert_eq!(
             storage

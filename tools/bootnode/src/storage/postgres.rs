@@ -91,31 +91,18 @@ impl StorageBackend for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip FROM bootnode_kv WHERE id = 1",
+                "SELECT last_cursor, last_fully_indexed_ledger FROM bootnode_kv WHERE id = 1",
                 &[],
             )
             .await?;
 
         let last_cursor: Option<String> = row.get(0);
         let last_fully_indexed_ledger: i32 = row.get(1);
-        let ledger_tip: i32 = row.get(2);
 
         Ok(KvState {
             last_cursor,
             last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0)).unwrap_or(0),
-            ledger_tip: u32::try_from(ledger_tip.max(0)).unwrap_or(0),
         })
-    }
-
-    async fn update_ledger_tip(&self, tip: u32) -> Result<()> {
-        let client = self.pool.get().await?;
-        client
-            .execute(
-                "UPDATE bootnode_kv SET ledger_tip = $1, updated_at = now() WHERE id = 1",
-                &[&i64::from(tip)],
-            )
-            .await?;
-        Ok(())
     }
 
     async fn update_cursor(&self, cursor: &str) -> Result<()> {

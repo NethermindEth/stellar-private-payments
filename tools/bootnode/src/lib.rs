@@ -15,7 +15,7 @@ mod upstream;
 use anyhow::Result;
 use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
-use storage::{Storage, StorageBackend};
+use storage::StorageBackend;
 
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
@@ -29,10 +29,12 @@ pub struct Bootnode {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
-    pub(crate) storage: Storage,
+    pub(crate) storage: Arc<dyn StorageBackend>,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
+    pub(crate) contract_ids: Arc<Vec<String>>,
+    pub(crate) min_pool_ledger: u32,
 }
 
 impl Bootnode {
@@ -42,18 +44,19 @@ impl Bootnode {
         prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
-        let storage = Storage::new(storage);
-
-        let ledger_tip = Arc::new(AtomicU32::new(0));
-        let upstream = UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
+        let deployment = deployment::deployment_config()?;
+        let contract_ids = Arc::new(stellar::contract_ids_for_indexer(&deployment));
+        let min_pool_ledger = stellar::min_pool_ledger_for_indexer(&deployment)?;
 
         Ok(Self {
             state: AppState {
+                upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
+                ledger_tip: Arc::new(AtomicU32::new(0)),
                 cfg,
                 storage,
-                upstream,
-                ledger_tip,
                 prom_handle,
+                contract_ids,
+                min_pool_ledger,
             },
         })
     }

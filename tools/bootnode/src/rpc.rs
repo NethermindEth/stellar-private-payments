@@ -1,4 +1,4 @@
-use crate::{AppState, deployment};
+use crate::AppState;
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
@@ -37,14 +37,8 @@ pub struct BootnodeRpc {
 
 impl BootnodeRpc {
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
-        let deployment = deployment::deployment_config().map_err(|e| {
-            counter!("bootnode_handler_errors_total").increment(1);
-            internal_error(e)
-        })?;
-        let allowed_ids = stellar::contract_ids_for_indexer(&deployment);
-
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
-        if !params.is_allowed_filters(&allowed_ids) {
+        if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
             return Err(invalid_params("unsupported filters"));
         }
 
@@ -72,19 +66,14 @@ impl BootnodeRpc {
             return Err(retention_handoff(cutoff_ledger));
         }
 
-        let cached = match (parsed.start_ledger, parsed.cursor) {
+        let cached = match (parsed.start_ledger, parsed.cursor.as_deref()) {
             (Some(start_ledger), None) => {
                 self.state
                     .storage
                     .get_cached_get_events_by_start_ledger(start_ledger)
                     .await
             }
-            (None, Some(cursor)) => {
-                self.state
-                    .storage
-                    .get_cached_get_events_by_cursor(&cursor)
-                    .await
-            }
+            (None, Some(cursor)) => self.state.storage.get_cached_get_events_by_cursor(cursor).await,
             _ => Ok(None),
         }
         .map_err(|e| {

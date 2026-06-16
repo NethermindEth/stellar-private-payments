@@ -1,4 +1,4 @@
-use crate::{AppState, deployment, storage::InsertGetEventsPage};
+use crate::{AppState, storage::InsertGetEventsPage};
 use metrics::{counter, gauge};
 use std::time::Instant;
 use stellar::GetEventsParams;
@@ -34,22 +34,17 @@ impl Indexer {
             .ledger_tip
             .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
         gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
-        self.state.storage.update_ledger_tip(tip_sequence).await?;
-
-        let deployment = deployment::deployment_config()?;
-        let contract_ids = stellar::contract_ids_for_indexer(&deployment);
 
         let kv = self.state.storage.load_kv().await?;
-        let mut cursor: Option<String> = kv.last_cursor;
+        let mut cursor = kv.last_cursor;
 
-        let mut start_ledger: Option<u32> = None;
-        if cursor.is_none() {
-            start_ledger = Some(stellar::min_pool_ledger_for_indexer(&deployment)?);
-        }
+        let mut start_ledger = cursor
+            .is_none()
+            .then_some(self.state.min_pool_ledger);
 
         for _page in 0..self.state.cfg.max_pages_per_round {
             let params = GetEventsParams::for_contracts(
-                &contract_ids,
+                self.state.contract_ids.as_ref(),
                 start_ledger,
                 cursor.as_deref(),
                 self.state.cfg.page_size,
@@ -73,22 +68,23 @@ impl Indexer {
                 })
                 .await?;
 
-            self.state.storage.update_cursor(&cursor_out).await?;
-
             cursor = Some(cursor_out);
             start_ledger = None;
 
             if result.events.is_empty() {
-                if let Some(cursor) = cursor.as_deref() {
-                    self.state
-                        .storage
-                        .mark_caught_up(cursor, result.latest_ledger)
-                        .await?;
-                    gauge!("bootnode_last_fully_indexed_ledger")
-                        .set(f64::from(result.latest_ledger));
-                }
+                self.state
+                    .storage
+                    .mark_caught_up(cursor.as_deref().expect("cursor set"), result.latest_ledger)
+                    .await?;
+                gauge!("bootnode_last_fully_indexed_ledger")
+                    .set(f64::from(result.latest_ledger));
                 break;
             }
+
+            self.state
+                .storage
+                .update_cursor(cursor.as_deref().expect("cursor set"))
+                .await?;
         }
 
         counter!("bootnode_indexer_rounds_total").increment(1);
