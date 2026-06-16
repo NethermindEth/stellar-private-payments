@@ -534,7 +534,9 @@ fn coalesce_bus_input(
     }
 
     for key in consumed_keys {
-        inputs.remove(&key);
+        if !graph_has_input(graph, &key) {
+            inputs.remove(&key);
+        }
     }
     Ok(())
 }
@@ -964,6 +966,51 @@ mod tests {
                 .contains("Conflicting grouped and expanded inputs for `nonMembershipProofs`"),
             "{err:#}"
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn policy_bus_coalescing_keeps_required_aliases_when_equivalent() {
+        let graph = Graph {
+            nodes: vec![circom_witness_rs::graph::Node::Input(0)],
+            signals: vec![0],
+            input_mapping: vec![
+                HashSignalInfo {
+                    hash: fnv1a("nonMembershipProofs"),
+                    signalid: 0,
+                    signalsize: 14,
+                },
+                HashSignalInfo {
+                    hash: fnv1a("nonMembershipProofs[0][0].key"),
+                    signalid: 0,
+                    signalsize: 1,
+                },
+            ],
+        };
+        let mut inputs = non_membership_flattened_inputs();
+        inputs.insert(
+            "nonMembershipProofs".to_string(),
+            (1u64..=14).map(U256::from).collect(),
+        );
+
+        coalesce_policy_bus_inputs(&mut inputs, &graph).expect("equivalent aliases are valid");
+
+        assert_eq!(
+            inputs.get("nonMembershipProofs").expect("grouped bus"),
+            &(1u64..=14).map(U256::from).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            inputs
+                .get("nonMembershipProofs[0][0].key")
+                .expect("required alias"),
+            &vec![U256::from(1)]
+        );
+        assert!(
+            !inputs.contains_key("nonMembershipProofs[0][0].siblings"),
+            "aliases not required by graph metadata should be removed"
+        );
+        validate_graph_inputs(&inputs, &graph)
+            .expect("equivalent grouped and required alias inputs should validate");
     }
 
     #[cfg(not(target_arch = "wasm32"))]
