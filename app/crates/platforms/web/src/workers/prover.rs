@@ -1,12 +1,12 @@
 use crate::protocol::{
-    DepositPrepared, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
+    PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
 };
 use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
-    flows::{TransactArtifacts, deposit, transact, transfer, withdraw},
+    flows::{TransactArtifacts, transact},
     prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
@@ -233,28 +233,6 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 TimeoutFuture::new(50).await;
             }
         }
-        ProverWorkerRequest::Deposit(params) => {
-            log::debug!("[{WORKER_NAME}] deposit");
-            let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            let prepared = prove_from_artifacts(transact_artifacts)?;
-            ProverWorkerResponse::DepositPrepared(DepositPrepared {
-                proof_uncompressed: prepared.proof_uncompressed,
-                ext_data: prepared.ext_data,
-                prepared: prepared.prepared,
-            })
-        }
-        ProverWorkerRequest::Withdraw(params) => {
-            log::debug!("[{WORKER_NAME}] withdraw");
-            let artifacts = withdraw(params, hash_ext_data_offchain)?;
-            ProverWorkerResponse::WithdrawPrepared(prove_from_artifacts(artifacts)?)
-        }
-        ProverWorkerRequest::Transfer(params) => {
-            log::debug!("[{WORKER_NAME}] transfer");
-            let artifacts = transfer(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            ProverWorkerResponse::TransferPrepared(prove_from_artifacts(artifacts)?)
-        }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
             let artifacts = transact(params, hash_ext_data_offchain)?;
@@ -346,8 +324,10 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             // Extract proof bytes and public inputs from receipt
             let proof_bytes = receipt.proof_compressed_bytes()?;
-            let public_inputs =
-                disclosure::receipt_public_inputs_bytes(&receipt, &expected_vk_hash)?;
+            let public_inputs = disclosure::validate_and_serialize_receipt_public_inputs(
+                &receipt,
+                &expected_vk_hash,
+            )?;
 
             // Verify that the embedded VK matches the expected hash before
             // verifying the proof against it.

@@ -159,14 +159,14 @@ fn bigint_to_be_32<B: BigInteger>(value: B) -> [u8; 32] {
     out
 }
 
-fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
+pub fn g1_to_soroban_bytes(p: &G1Affine) -> [u8; 64] {
     let mut out = [0u8; 64];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.into_bigint()));
     out[32..].copy_from_slice(&bigint_to_be_32(p.y.into_bigint()));
     out
 }
 
-fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
+pub fn g2_to_soroban_bytes(p: &G2Affine) -> [u8; 128] {
     let mut out = [0u8; 128];
     out[..32].copy_from_slice(&bigint_to_be_32(p.x.c1.into_bigint()));
     out[32..64].copy_from_slice(&bigint_to_be_32(p.x.c0.into_bigint()));
@@ -271,19 +271,18 @@ mod tests {
     use std::{
         fs,
         path::{Path, PathBuf},
-        time::{SystemTime, UNIX_EPOCH},
+        sync::atomic::{AtomicUsize, Ordering},
     };
+
+    static COUNTER: AtomicUsize = AtomicUsize::new(0);
 
     fn unique_test_dir(prefix: &str) -> Result<PathBuf> {
         let mut dir = std::env::temp_dir();
-        let nanos = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_nanos();
+        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
         dir.push(format!(
             "circuit_keys_{prefix}_{}_{}",
             std::process::id(),
-            nanos
+            count
         ));
         fs::create_dir(&dir)?;
         Ok(dir)
@@ -299,6 +298,7 @@ mod tests {
         Ok(names)
     }
 
+    #[cfg_attr(miri, ignore = "Filesystem I/O not supported under Miri isolation")]
     #[test]
     fn atomic_write_replaces_contents_and_cleans_up_temp() -> Result<()> {
         let dir = unique_test_dir("atomic_write")?;

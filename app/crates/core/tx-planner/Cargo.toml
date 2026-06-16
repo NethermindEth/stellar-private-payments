@@ -1,0 +1,15 @@
+[package]
+name = "tx-planner"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Transaction planning for private pool operations"
+
+[dependencies]
+thiserror = { workspace = true }
+types = { workspace = true }
+
+[lints]
+workspace = true

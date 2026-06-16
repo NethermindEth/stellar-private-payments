@@ -7,7 +7,7 @@
 //! It bridges the gap between the different crates and versions.
 use super::utils::{
     LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint, deploy_contracts,
-    generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, u256_to_scalar,
+    generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, test_env, u256_to_scalar,
     wrap_groth16_proof,
 };
 use anyhow::Result;
@@ -20,25 +20,8 @@ use circuits::test::utils::{
     transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
 use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
-use soroban_sdk::{Address, Bytes, Env, I256, U256, Vec as SorobanVec, testutils::Address as _};
+use soroban_sdk::{Address, Bytes, I256, U256, Vec as SorobanVec, testutils::Address as _};
 use zkhash::fields::bn256::FpBN256 as Scalar;
-
-/// Create a test environment that disables snapshot writing under Miri.
-/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
-/// uses for test snapshots.
-fn test_env() -> Env {
-    #[cfg(miri)]
-    {
-        use soroban_sdk::testutils::EnvTestConfig;
-        Env::new_with_config(EnvTestConfig {
-            capture_snapshot_at_drop: false,
-        })
-    }
-    #[cfg(not(miri))]
-    {
-        Env::default()
-    }
-}
 
 /// Full E2E test: Generate a real proof, deploy contracts, and call transact
 /// which verifies the zk-proof
@@ -151,7 +134,7 @@ fn test_e2e_transact_with_real_proof() -> Result<()> {
     assert!(result.verified, "Proof should verify locally");
     // Deploy contracts. Including the verifier with the real verification key
     env.mock_all_auths();
-    let contracts = deploy_contracts(&env, &result.vk);
+    let contracts = deploy_contracts(&env);
     println!("Contracts deployed!");
 
     // Sync on-chain state with off-chain proof data

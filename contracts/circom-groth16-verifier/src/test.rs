@@ -50,9 +50,9 @@ fn fr_from_ark(env: &Env, value: ArkFr) -> Bn254Fr {
 
 fn groth16_proof_from_ark(env: &Env, proof: &Proof<Bn254>) -> Groth16Proof {
     Groth16Proof {
-        a: G1Affine::from_array(env, &g1_bytes_from_ark(proof.a)),
-        b: G2Affine::from_array(env, &g2_bytes_from_ark(proof.b)),
-        c: G1Affine::from_array(env, &g1_bytes_from_ark(proof.c)),
+        a: G1Affine::from_bytes(BytesN::from_array(env, &g1_bytes_from_ark(proof.a))),
+        b: G2Affine::from_bytes(BytesN::from_array(env, &g2_bytes_from_ark(proof.b))),
+        c: G1Affine::from_bytes(BytesN::from_array(env, &g1_bytes_from_ark(proof.c))),
     }
 }
 
@@ -128,20 +128,18 @@ fn test_env() -> Env {
 fn verifies_valid_proof() {
     let env = test_env();
     let (vk_bytes, proof, public_inputs, _) = build_test(&env);
-    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
-    let client = CircomGroth16VerifierClient::new(&env, &contract_id);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
 
-    let result = client.try_verify(&proof, &public_inputs);
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, public_inputs);
 
-    assert_eq!(result, Ok(Ok(true)));
+    assert_eq!(result, Ok(true));
 }
 
 #[test]
 fn rejects_wrong_public_input_length() {
     let env = test_env();
     let (vk_bytes, proof, _public_inputs, inputs) = build_test(&env);
-    let contract_id = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
-    let client = CircomGroth16VerifierClient::new(&env, &contract_id);
+    let vk = verification_key_from_bytes(&env, &vk_bytes);
 
     // Provide too few public inputs (length 5 instead of 11)
     let mut short_inputs: Vec<Bn254Fr> = Vec::new(&env);
@@ -149,11 +147,8 @@ fn rejects_wrong_public_input_length() {
         short_inputs.push_back(fr_from_ark(&env, *value));
     }
 
-    let result = client.try_verify(&proof, &short_inputs);
-    assert!(matches!(
-        result,
-        Err(Ok(Groth16Error::MalformedPublicInputs))
-    ));
+    let result = CircomGroth16Verifier::verify_with_vk(&env, &vk, proof, short_inputs);
+    assert!(matches!(result, Err(Groth16Error::MalformedPublicInputs)));
 }
 
 #[test]

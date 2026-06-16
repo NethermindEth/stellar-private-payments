@@ -21,6 +21,14 @@ async function getContractConfig() {
     return cachedContractConfig;
 }
 
+function getActivePoolContractId(config) {
+    const pools = Array.isArray(config?.pools) ? config.pools : [];
+    const selected = pools.find(p => p?.enabled) || pools[0];
+    const poolContractId = selected?.poolContractId;
+    if (!poolContractId) throw new Error("Pool contract ID not available");
+    return poolContractId;
+}
+
 function noteAmountToStroopsBigInt(amount) {
     if (amount == null) return 0n;
     if (typeof amount === 'bigint') return amount;
@@ -40,7 +48,12 @@ function noteAmountToStroopsBigInt(amount) {
     return 0n;
 }
 
-const STROOPS_PER_XLM = 10_000_000n;
+let TOKEN_DECIMALS = 7;
+let TOKEN_SYMBOL = "XLM";
+
+function baseUnitsPerToken() {
+    return 10n ** BigInt(TOKEN_DECIMALS);
+}
 
 function tryParseXlmToStroopsBigInt(xlmText, { allowNegative = false } = {}) {
     const raw = xlmText == null ? '' : String(xlmText);
@@ -69,12 +82,12 @@ function tryParseXlmToStroopsBigInt(xlmText, { allowNegative = false } = {}) {
     let fracVal = 0n;
     try {
         intVal = intPart ? BigInt(intPart) : 0n;
-        fracVal = fracPart ? BigInt(fracPart.padEnd(7, '0')) : 0n;
+        fracVal = fracPart ? BigInt(fracPart.padEnd(TOKEN_DECIMALS, '0')) : 0n;
     } catch {
         return { ok: false, error: 'Invalid amount.' };
     }
 
-    const abs = intVal * STROOPS_PER_XLM + fracVal;
+    const abs = intVal * baseUnitsPerToken() + fracVal;
     const isNegative = signChar === '-';
     if (isNegative && !allowNegative && abs !== 0n) {
         return { ok: false, error: 'Amount must be non-negative.' };
@@ -83,32 +96,23 @@ function tryParseXlmToStroopsBigInt(xlmText, { allowNegative = false } = {}) {
     return { ok: true, value: isNegative ? -abs : abs };
 }
 
-function xlmToStroopsBigInt(xlm, opts) {
-    const res = tryParseXlmToStroopsBigInt(xlm, opts);
+function decimalToBaseUnitsBigInt(amount, opts) {
+    const res = tryParseXlmToStroopsBigInt(amount, opts);
     if (!res.ok) throw new Error(res.error);
     return res.value;
 }
 
-function stroopsBigIntToXlmText(stroops) {
-    let v = typeof stroops === 'bigint' ? stroops : 0n;
+function baseUnitsBigIntToDecimalText(baseUnits) {
+    let v = typeof baseUnits === 'bigint' ? baseUnits : 0n;
     const isNeg = v < 0n;
     if (isNeg) v = -v;
 
-    const absStr = v.toString().padStart(8, '0');
-    const intPart = absStr.slice(0, -7);
-    const fracRaw = absStr.slice(-7);
+    const absStr = v.toString().padStart(TOKEN_DECIMALS + 1, '0');
+    const intPart = absStr.slice(0, -TOKEN_DECIMALS);
+    const fracRaw = absStr.slice(-TOKEN_DECIMALS);
     const frac = fracRaw.replace(/0+$/, '');
     const out = frac ? `${intPart}.${frac}` : intPart;
     return isNeg ? `-${out}` : out;
-}
-
-function parseMembershipBlinding(inputId) {
-    const raw = document.getElementById(inputId)?.value?.trim() || '0';
-    try {
-        return BigInt(raw);
-    } catch {
-        throw new Error(`Invalid membership blinding: ${raw}`);
-    }
 }
 
 function setLoading(btn, loadingText) {
@@ -160,7 +164,7 @@ function collectNoteIds(containerId) {
 function collectOutputAmounts(containerId) {
     const out = [];
     document.querySelectorAll(`#${containerId} .output-amount`).forEach(input => {
-        out.push(xlmToStroopsBigInt(input.value, { allowNegative: false }));
+        out.push(decimalToBaseUnitsBigInt(input.value, { allowNegative: false }));
     });
     while (out.length < N_OUTPUTS) out.push(0n);
     return out.slice(0, N_OUTPUTS);
@@ -182,6 +186,182 @@ function collectAdvancedRecipients(containerId) {
 
 function txLink(hash) {
     return `https://stellar.expert/explorer/testnet/tx/${hash}`;
+}
+
+function isAdvancedMode(checkboxId) {
+    return document.getElementById(checkboxId)?.checked ?? false;
+}
+
+function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId = null) {
+    const cb = document.getElementById(checkboxId);
+    const advancedSection = document.getElementById(advancedSectionId);
+    const amountSection = amountSectionId ? document.getElementById(amountSectionId) : null;
+    const update = () => {
+        const advanced = !!cb?.checked;
+        advancedSection?.classList.toggle('hidden', !advanced);
+        if (amountSection) {
+            amountSection.classList.toggle('hidden', advanced);
+        }
+    };
+    cb?.addEventListener('change', update);
+    update();
+}
+
+function makePoolSubmitFn(poolContractId, userAddress, onStatus) {
+    return proved => submitProvedPoolTransact(proved, {
+        address: userAddress,
+        rpcUrl: App.state.wallet.sorobanRpcUrl,
+        networkPassphrase: App.state.wallet.networkPassphrase,
+        poolContractId,
+    }, { onStatus });
+}
+
+function showSubmittedToasts(hashes) {
+    if (!Array.isArray(hashes) || hashes.length === 0) return;
+    const lastHash = hashes[hashes.length - 1];
+    const message = hashes.length === 1
+        ? `Submitted: ${Utils.truncateHex(lastHash, 10, 8)}`
+        : `Submitted ${hashes.length} transactions. Last: ${Utils.truncateHex(lastHash, 10, 8)}`;
+    Toast.show(
+        message,
+        'success',
+        7000,
+        { linkUrl: txLink(lastHash), linkAriaLabel: 'Open in Stellar Expert' },
+    );
+    for (const txHash of hashes) {
+        App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+    }
+}
+
+const ASP_NOT_READY_MSG = 'Cannot prepare transaction yet (ASP registration required or ASP secret is not ready yet).';
+
+function planStepCount(plan) {
+    const n = plan?.stepCount ?? plan?.step_count;
+    if (typeof n === 'number' && Number.isFinite(n)) return Math.trunc(n);
+    if (typeof n === 'bigint') return Number(n);
+    return null;
+}
+
+function planHintText(stepCount) {
+    if (stepCount === 1) return 'Requires 1 on-chain transaction.';
+    return `Requires ${stepCount} on-chain transactions.`;
+}
+
+async function fetchPlanStepCount(poolContractId, userAddress, amountStroops) {
+    const plan = await getHandle().webClient.plan(poolContractId, userAddress, amountStroops);
+    const stepCount = planStepCount(plan);
+    if (stepCount == null || stepCount < 1) {
+        throw new Error('Could not load plan');
+    }
+    return stepCount;
+}
+
+async function requirePlanApproval(poolContractId, userAddress, amountStroops) {
+    const stepCount = await fetchPlanStepCount(poolContractId, userAddress, amountStroops);
+    if (stepCount > 1) {
+        const ok = window.confirm(
+            `This requires ${stepCount} on-chain transactions (${stepCount} wallet approvals). Continue?`,
+        );
+        if (!ok) return null;
+    }
+    return stepCount;
+}
+
+async function prepareExecuteContext(btn) {
+    requireWalletReady();
+    const userAddress = App.state.wallet.address;
+    setLoading(btn, 'Validating…');
+    const onStatus = p => p?.message && setLoadingText(btn, p.message);
+    const config = await getContractConfig();
+    const poolContractId = getActivePoolContractId(config);
+    const submitFn = makePoolSubmitFn(poolContractId, userAddress, onStatus);
+    const client = getHandle().webClient;
+    return {
+        btn,
+        userAddress,
+        poolContractId,
+        submitFn,
+        onStatus,
+        client,
+    };
+}
+
+async function executeFromAmount(ctx, { btn, amountInputId, run }) {
+    const amountRes = tryParseXlmToStroopsBigInt(
+        document.getElementById(amountInputId)?.value,
+        { allowNegative: false },
+    );
+    if (!amountRes.ok) throw new Error(amountRes.error);
+    if (amountRes.value <= 0n) throw new Error('Amount must be greater than zero');
+
+    const stepCount = await requirePlanApproval(
+        ctx.poolContractId,
+        ctx.userAddress,
+        amountRes.value,
+    );
+    if (stepCount == null) return undefined;
+
+    setLoadingText(btn, stepCount === 1 ? 'Proving…' : `Proving (1/${stepCount})…`);
+    return run(ctx, amountRes.value);
+}
+
+function showExecuteResult(hashes) {
+    if (hashes == null) {
+        Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
+        return;
+    }
+    showSubmittedToasts(hashes);
+}
+
+function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
+    const input = document.getElementById(amountInputId);
+    const hint = document.getElementById(hintId);
+    let timer;
+
+    const hide = () => {
+        if (!hint) return;
+        hint.textContent = '';
+        hint.classList.add('hidden');
+    };
+
+    const update = async () => {
+        if (isAdvancedMode(advancedCheckboxId)) {
+            hide();
+            return;
+        }
+        if (!App.state.wallet.connected || !App.state.wallet.address) {
+            hide();
+            return;
+        }
+        const res = tryParseXlmToStroopsBigInt(input?.value, { allowNegative: false });
+        if (!res.ok || res.value <= 0n) {
+            hide();
+            return;
+        }
+        try {
+            const config = await getContractConfig();
+            const poolContractId = getActivePoolContractId(config);
+            const stepCount = await fetchPlanStepCount(
+                poolContractId,
+                App.state.wallet.address,
+                res.value,
+            );
+            if (hint) {
+                hint.textContent = planHintText(stepCount);
+                hint.classList.remove('hidden');
+            }
+        } catch {
+            hide();
+        }
+    };
+
+    input?.addEventListener('input', () => {
+        clearTimeout(timer);
+        timer = setTimeout(update, 400);
+    });
+    document.getElementById(advancedCheckboxId)?.addEventListener('change', update);
+    App.events.addEventListener('wallet:ready', update);
+    App.events.addEventListener('notes:updated', update);
 }
 
 function sumInputNotesStroops(containerId) {
@@ -223,7 +403,7 @@ function updateWithdrawTotal() {
     const inputs = document.getElementById('withdraw-inputs');
     if (!totalEl || !inputs) return;
     const totalStroops = sumInputNotesStroops('withdraw-inputs');
-    totalEl.textContent = `${stroopsBigIntToXlmText(totalStroops)} XLM`;
+    totalEl.textContent = `${baseUnitsBigIntToDecimalText(totalStroops)} ${TOKEN_SYMBOL}`;
 }
 
 function updateTransferBalance() {
@@ -247,13 +427,14 @@ function updateTransferBalance() {
         outputsTotalStroops += r.value;
     });
 
-    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
-    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
+    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${baseUnitsBigIntToDecimalText(inputsTotalStroops)}`;
+    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${baseUnitsBigIntToDecimalText(outputsTotalStroops)}`;
 
     const shouldShow = inputsTotalStroops !== 0n || outputsTotalStroops !== 0n || outputsAnyNonEmpty;
     const isBalanced =
         outputsValid && inputsTotalStroops !== 0n && inputsTotalStroops === outputsTotalStroops && shouldShow;
     setEqValidity(eq, isBalanced, shouldShow);
+    return isBalanced;
 }
 
 function updateTransactBalance() {
@@ -282,11 +463,11 @@ function updateTransactBalance() {
     });
 
     const publicText = publicValid
-        ? `${publicStroops >= 0n ? '+' : ''}${stroopsBigIntToXlmText(publicStroops)}`
+        ? `${publicStroops >= 0n ? '+' : ''}${baseUnitsBigIntToDecimalText(publicStroops)}`
         : 'Invalid';
-    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${stroopsBigIntToXlmText(inputsTotalStroops)}`;
+    eq.querySelector('[data-eq="inputs"]').textContent = `Inputs: ${baseUnitsBigIntToDecimalText(inputsTotalStroops)}`;
     eq.querySelector('[data-eq="public"]').textContent = `Public: ${publicText}`;
-    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${stroopsBigIntToXlmText(outputsTotalStroops)}`;
+    eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${baseUnitsBigIntToDecimalText(outputsTotalStroops)}`;
 
     const publicAnyNonEmpty = !!(amountEl.value && amountEl.value.trim());
     const shouldShow =
@@ -363,10 +544,10 @@ export const Transactions = {
     },
 
     _wireDeposit() {
-        const slider = document.getElementById('deposit-slider');
         const amount = document.getElementById('deposit-amount');
         const outputs = document.getElementById('deposit-outputs');
         const btn = document.getElementById('btn-deposit');
+        wireSpendAdvancedToggle('deposit-advanced-mode', 'deposit-advanced-section');
 
         const updateBalance = () => {
             const eq = document.getElementById('deposit-balance');
@@ -391,10 +572,10 @@ export const Transactions = {
             });
 
             eq.querySelector('[data-eq="input"]').textContent = `Deposit: ${
-                depositRes.ok ? stroopsBigIntToXlmText(depositRes.value) : 'Invalid'
+                depositRes.ok ? baseUnitsBigIntToDecimalText(depositRes.value) : 'Invalid'
             }`;
             eq.querySelector('[data-eq="outputs"]').textContent = `Outputs: ${
-                outputsValid ? stroopsBigIntToXlmText(outputsTotalStroops) : 'Invalid'
+                outputsValid ? baseUnitsBigIntToDecimalText(outputsTotalStroops) : 'Invalid'
             }`;
 
             const shouldShow = depositAnyNonEmpty || outputsAnyNonEmpty;
@@ -404,84 +585,43 @@ export const Transactions = {
                 outputsValid &&
                 depositRes.value > 0n &&
                 depositRes.value === outputsTotalStroops;
-            const status = eq.querySelector('[data-eq="status"]');
-            if (shouldShow) {
-                if (isBalanced) {
-                    status.innerHTML = '<svg class="w-5 h-5 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>';
-                    eq.classList.remove('border-red-500/50', 'bg-red-500/5');
-                    eq.classList.add('border-emerald-500/50', 'bg-emerald-500/5');
-                } else {
-                    status.innerHTML = '<svg class="w-5 h-5 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
-                    eq.classList.add('border-red-500/50', 'bg-red-500/5');
-                    eq.classList.remove('border-emerald-500/50', 'bg-emerald-500/5');
-                }
-            } else {
-                status.innerHTML = '';
-                eq.classList.remove('border-red-500/50', 'bg-red-500/5', 'border-emerald-500/50', 'bg-emerald-500/5');
-            }
+            setEqValidity(eq, isBalanced, shouldShow);
             return isBalanced;
         };
 
-        slider?.addEventListener('input', () => {
-            if (amount) amount.value = slider.value;
-            updateBalance();
-        });
-        amount?.addEventListener('input', () => {
-            if (slider) slider.value = String(Math.min(Math.max(0, Number(amount.value || 0)), 1000));
-            updateBalance();
-        });
+        amount?.addEventListener('input', updateBalance);
         outputs?.addEventListener('input', updateBalance);
-
-        document.querySelectorAll('[data-target="deposit-amount"]').forEach(spinnerBtn => {
-            spinnerBtn.addEventListener('click', () => {
-                const input = document.getElementById('deposit-amount');
-                const val = parseFloat(input.value) || 0;
-                input.value = spinnerBtn.classList.contains('spinner-up') ? String(val + 1) : String(Math.max(0, val - 1));
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-            });
-        });
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
-                if (!updateBalance()) throw new Error('Deposit amount must equal sum of outputs');
+                const advanced = isAdvancedMode('deposit-advanced-mode');
 
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('deposit-membership-blinding');
-                const amountStroops = xlmToStroopsBigInt(amount.value, { allowNegative: false });
-                const outputAmounts = collectOutputAmounts('deposit-outputs');
+                let amountStroops;
+                let outputAmounts;
+                if (advanced) {
+                    if (!updateBalance()) throw new Error('Deposit amount must equal sum of outputs');
+                    amountStroops = decimalToBaseUnitsBigInt(amount.value, { allowNegative: false });
+                    outputAmounts = collectOutputAmounts('deposit-outputs');
+                } else {
+                    const amountRes = tryParseXlmToStroopsBigInt(amount?.value, { allowNegative: false });
+                    if (!amountRes.ok) throw new Error(amountRes.error);
+                    if (amountRes.value <= 0n) throw new Error('Amount must be greater than zero');
+                    amountStroops = amountRes.value;
+                    outputAmounts = [amountStroops, 0n];
+                }
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-	                setLoadingText(btn, 'Proving…');
-	                const proved = await getHandle().webClient.proveDeposit(
-	                    userAddress,
-	                    membershipBlinding,
-	                    amountStroops,
-	                    outputAmounts,
-	                    onStatus,
-	                );
-
-	                if (proved == null) {
-	                    Toast.show('Cannot prepare deposit yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
-	                    return;
-	                }
-
-	                const config = await getContractConfig();
-	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
-	                    address: userAddress,
-	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
-	                }, { onStatus });
-                Toast.show(
-                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
-                    'success',
-                    7000,
-                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                const ctx = await prepareExecuteContext(btn);
+                setLoadingText(btn, 'Proving…');
+                const hashes = await ctx.client.executeDeposit(
+                    ctx.poolContractId,
+                    ctx.userAddress,
+                    amountStroops,
+                    outputAmounts,
+                    ctx.submitFn,
+                    ctx.onStatus,
                 );
-                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Deposit failed', 'error', 7000);
             } finally {
@@ -496,48 +636,58 @@ export const Transactions = {
         const inputs = document.getElementById('withdraw-inputs');
         const btn = document.getElementById('btn-withdraw');
         inputs?.addEventListener('input', updateWithdrawTotal);
+        wireSpendAdvancedToggle('withdraw-advanced-mode', 'withdraw-advanced-section', 'withdraw-amount-section');
+        wirePlanHint('withdraw-amount', 'withdraw-plan-hint', 'withdraw-advanced-mode');
         updateWithdrawTotal();
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('withdraw-membership-blinding');
-                const recipient = document.getElementById('withdraw-recipient')?.value?.trim() || userAddress;
-                const inputNoteIds = collectNoteIds('withdraw-inputs');
-                if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
-                if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                const advanced = isAdvancedMode('withdraw-advanced-mode');
+                const ctx = await prepareExecuteContext(btn);
+                const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
+                    || ctx.userAddress;
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-	                setLoadingText(btn, 'Proving…');
-	                const proved = await getHandle().webClient.proveWithdraw(
-	                    userAddress,
-	                    membershipBlinding,
-	                    recipient,
-	                    inputNoteIds,
-	                    onStatus,
-	                );
-	                if (proved == null) {
-	                    Toast.show('Cannot prepare withdraw yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
-	                    return;
-	                }
+                let hashes;
+                if (advanced) {
+                    const inputNoteIds = collectNoteIds('withdraw-inputs');
+                    if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                    if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
 
-	                const config = await getContractConfig();
-	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
-	                    address: userAddress,
-	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
-	                }, { onStatus });
-                Toast.show(
-                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
-                    'success',
-                    7000,
-                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
-                );
-                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+                    const total = sumInputNotesStroops('withdraw-inputs');
+                    if (total <= 0n) {
+                        throw new Error('Selected notes must have a positive total');
+                    }
+
+                    setLoadingText(btn, 'Proving…');
+                    hashes = await ctx.client.executeTransact(
+                        ctx.poolContractId,
+                        ctx.userAddress,
+                        recipient,
+                        -total,
+                        inputNoteIds,
+                        [0n, 0n],
+                        [null, null],
+                        [null, null],
+                        ctx.submitFn,
+                        ctx.onStatus,
+                    );
+                } else {
+                    hashes = await executeFromAmount(ctx, {
+                        btn,
+                        amountInputId: 'withdraw-amount',
+                        run: (c, amountStroops) => c.client.executeWithdraw(
+                            c.poolContractId,
+                            c.userAddress,
+                            recipient,
+                            amountStroops,
+                            c.submitFn,
+                            c.onStatus,
+                        ),
+                    });
+                    if (hashes === undefined) return;
+                }
+
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
             } finally {
@@ -559,53 +709,61 @@ export const Transactions = {
 
         inputs?.addEventListener('input', updateTransferBalance);
         outputs?.addEventListener('input', updateTransferBalance);
+        wireSpendAdvancedToggle('transfer-advanced-mode', 'transfer-advanced-section', 'transfer-amount-section');
+        wirePlanHint('transfer-amount', 'transfer-plan-hint', 'transfer-advanced-mode');
         updateTransferBalance();
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('transfer-membership-blinding');
                 const recipientNoteKey = document.getElementById('transfer-recipient-key')?.value?.trim();
                 const recipientEncKey = document.getElementById('transfer-recipient-enc-key')?.value?.trim();
-                if (!recipientNoteKey || !recipientEncKey) throw new Error('Recipient note key + encryption key are required');
-                const inputNoteIds = collectNoteIds('transfer-inputs');
-                if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
-                if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
-                const outputAmounts = collectOutputAmounts('transfer-outputs');
+                if (!recipientNoteKey || !recipientEncKey) {
+                    throw new Error('Recipient note key + encryption key are required');
+                }
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-	                setLoadingText(btn, 'Proving…');
-	                const proved = await getHandle().webClient.proveTransfer(
-	                    userAddress,
-	                    membershipBlinding,
-	                    recipientNoteKey,
-	                    recipientEncKey,
-	                    inputNoteIds,
-	                    outputAmounts,
-	                    onStatus,
-	                );
-	                if (proved == null) {
-	                    Toast.show('Cannot prepare transfer yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
-	                    return;
-	                }
+                const advanced = isAdvancedMode('transfer-advanced-mode');
+                const ctx = await prepareExecuteContext(btn);
 
-	                const config = await getContractConfig();
-	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
-	                    address: userAddress,
-	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
-	                }, { onStatus });
-                Toast.show(
-                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
-                    'success',
-                    7000,
-                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
-                );
-                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+                let hashes;
+                if (advanced) {
+                    const inputNoteIds = collectNoteIds('transfer-inputs');
+                    if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
+                    if (inputNoteIds.length > 2) throw new Error('At most 2 input notes are supported');
+                    if (!updateTransferBalance()) throw new Error('Input notes must equal output amounts');
+
+                    const outputAmounts = collectOutputAmounts('transfer-outputs');
+
+                    setLoadingText(btn, 'Proving…');
+                    hashes = await ctx.client.executeTransact(
+                        ctx.poolContractId,
+                        ctx.userAddress,
+                        ctx.poolContractId,
+                        0n,
+                        inputNoteIds,
+                        outputAmounts,
+                        [recipientNoteKey, recipientNoteKey],
+                        [recipientEncKey, recipientEncKey],
+                        ctx.submitFn,
+                        ctx.onStatus,
+                    );
+                } else {
+                    hashes = await executeFromAmount(ctx, {
+                        btn,
+                        amountInputId: 'transfer-amount',
+                        run: (c, amountStroops) => c.client.executeTransfer(
+                            c.poolContractId,
+                            c.userAddress,
+                            amountStroops,
+                            recipientNoteKey,
+                            recipientEncKey,
+                            c.submitFn,
+                            c.onStatus,
+                        ),
+                    });
+                    if (hashes === undefined) return;
+                }
+
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Transfer failed', 'error', 7000);
             } finally {
@@ -643,11 +801,10 @@ export const Transactions = {
 
         btn?.addEventListener('click', async () => {
             try {
-                requireWalletReady();
-                const userAddress = App.state.wallet.address;
-                const membershipBlinding = parseMembershipBlinding('transact-membership-blinding');
-                const extAmountStroops = xlmToStroopsBigInt(amount.value, { allowNegative: true });
-                const extRecipient = document.getElementById('transact-recipient')?.value?.trim() || userAddress;
+                const ctx = await prepareExecuteContext(btn);
+                const extAmountStroops = decimalToBaseUnitsBigInt(amount.value, { allowNegative: true });
+                const extRecipient = document.getElementById('transact-recipient')?.value?.trim()
+                    || ctx.userAddress;
                 if (extAmountStroops < 0n && !extRecipient) {
                     throw new Error('Withdrawal recipient is required when public amount is negative');
                 }
@@ -657,40 +814,20 @@ export const Transactions = {
                 const outputAmounts = collectOutputAmounts('transact-outputs');
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
-                setLoading(btn, 'Validating…');
-                const onStatus = p => p?.message && setLoadingText(btn, p.message);
-	                setLoadingText(btn, 'Proving…');
-	                const proved = await getHandle().webClient.proveTransact(
-	                    userAddress,
-	                    membershipBlinding,
-	                    extRecipient,
-	                    extAmountStroops,
-	                    inputNoteIds,
-	                    outputAmounts,
-	                    noteKeys,
-	                    encKeys,
-	                    onStatus,
-	                );
-	                if (proved == null) {
-	                    Toast.show('Cannot prepare transaction yet (ASP registration required or membership blinding is incorrect).', 'error', 7000);
-	                    return;
-	                }
-
-	                const config = await getContractConfig();
-	                setLoadingText(btn, 'Ready to sign…');
-	                const txHash = await submitProvedPoolTransact(proved, {
-	                    address: userAddress,
-	                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-	                    networkPassphrase: App.state.wallet.networkPassphrase,
-	                    poolContractId: config?.pool,
-	                }, { onStatus });
-                Toast.show(
-                    `Submitted: ${Utils.truncateHex(txHash, 10, 8)}`,
-                    'success',
-                    7000,
-                    { linkUrl: txLink(txHash), linkAriaLabel: 'Open in Stellar Expert' }
+                setLoadingText(btn, 'Proving…');
+                const hashes = await ctx.client.executeTransact(
+                    ctx.poolContractId,
+                    ctx.userAddress,
+                    extRecipient,
+                    extAmountStroops,
+                    inputNoteIds,
+                    outputAmounts,
+                    noteKeys,
+                    encKeys,
+                    ctx.submitFn,
+                    ctx.onStatus,
                 );
-                App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+                showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
             } finally {

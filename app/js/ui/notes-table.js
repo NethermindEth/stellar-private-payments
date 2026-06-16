@@ -24,11 +24,11 @@ export const NotesTable = {
                     b.classList.toggle('text-dark-50', isActive);
                     b.classList.toggle('text-dark-400', !isActive);
                 });
-                
+
                 this.render();
             });
         });
-        
+
         this.render();
 
         App.events.addEventListener('wallet:ready', () => {
@@ -95,7 +95,7 @@ export const NotesTable = {
             this._refreshing = false;
         }
     },
-    
+
     render() {
         const tbody = document.getElementById('notes-tbody');
         const empty = document.getElementById('empty-notes');
@@ -107,8 +107,7 @@ export const NotesTable = {
         let notes = [...App.state.notes];
         if (this.filter === 'unspent') notes = notes.filter(n => !n.spent);
         if (this.filter === 'spent') notes = notes.filter(n => n.spent);
-        notes.sort((a, b) => (b.leafIndex ?? 0) - (a.leafIndex ?? 0));
-        
+
         if (notes.length === 0) {
             empty.classList.remove('hidden');
             empty.classList.add('flex');

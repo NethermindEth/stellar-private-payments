@@ -19,7 +19,7 @@ const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
 /// use this exact function to stay in sync.
 pub fn vk_hash_hex(vk_bytes: &[u8]) -> String {
     let mut hasher = Sha256::new();
-    hasher.update(vk_bytes);is_known_root
+    hasher.update(vk_bytes);
     let digest = hasher.finalize();
     format!("0x{}", hex::encode(digest))
 }
@@ -105,7 +105,7 @@ pub struct RegisteredCircuit {
     pub levels: u32,
     /// Number of note disclosures represented by the circuit.
     pub n_notes: u32,
-    /// Public input order used by the wis_known_rootitness and verifier.
+    /// Public input order used by the witness and verifier.
     pub public_inputs_order: &'static [&'static str],
     /// Artifact file names used by build, web, and CLI callers.
     pub artifacts: CircuitArtifacts,
@@ -424,7 +424,7 @@ pub fn verify_receipt_proof(
     let proof_bytes = receipt.proof_compressed_bytes()?;
     let public_inputs = circuit.public_inputs_bytes(receipt)?;
     verify_proof(vk_bytes, &proof_bytes, &public_inputs)
-}Mark
+}
 
 /// Checks that every receipt root is still known by the pool.
 ///

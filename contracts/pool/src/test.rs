@@ -1,10 +1,10 @@
 use crate::{
-    ExtData, PoolContract, PoolContractClient, Proof,
+    Error, ExtData, PoolContract, PoolContractClient, Proof,
     merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
-use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof, VerificationKeyBytes};
+use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -75,24 +75,6 @@ fn mk_mock_groth16_proof(env: &Env) -> Groth16Proof {
     }
 }
 
-fn dummy_vk_bytes(env: &Env) -> VerificationKeyBytes {
-    let alpha = BytesN::from_array(env, &[0u8; 64]);
-    let beta = BytesN::from_array(env, &[0u8; 128]);
-    let gamma = BytesN::from_array(env, &[0u8; 128]);
-    let delta = BytesN::from_array(env, &[0u8; 128]);
-    let mut ic = Vec::new(env);
-    for _ in 0..12 {
-        ic.push_back(BytesN::from_array(env, &[0u8; 64]));
-    }
-    VerificationKeyBytes {
-        alpha,
-        beta,
-        gamma,
-        delta,
-        ic,
-    }
-}
-
 /// Helper struct to hold all test setup
 struct TestSetup {
     admin: Address,
@@ -118,7 +100,7 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     let asp_non_membership_client = ASPNonMembershipClient::new(env, &asp_non_membership_address);
 
     // Register CircomGroth16Verifier contract
-    let verifier_address = env.register(CircomGroth16Verifier, (dummy_vk_bytes(env),));
+    let verifier_address = env.register(CircomGroth16Verifier, ());
 
     TestSetup {
         admin,
@@ -493,4 +475,160 @@ fn transact_rejects_bad_public_amount() {
     };
 
     assert!(pool.try_transact(&proof, &ext, &sender).is_err());
+}
+
+#[test]
+fn transact_rejects_non_canonical_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum_deposit_amount = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            maximum_deposit_amount.clone(),
+            levels,
+        ),
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = pool.get_root();
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(&env),
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            let non_canonical_nullifier = bn256_modulus(&env);
+            v.push_back(non_canonical_nullifier);
+            v
+        },
+        output_commitment0: U256::from_u32(&env, 0x07),
+        output_commitment1: U256::from_u32(&env, 0x08),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
+    };
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+fn transact_rejects_non_canonical_output_commitment() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum_deposit_amount = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            maximum_deposit_amount.clone(),
+            levels,
+        ),
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = pool.get_root();
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(&env),
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            v.push_back(U256::from_u32(&env, 0xEE));
+            v
+        },
+        output_commitment0: bn256_modulus(&env),
+        output_commitment1: U256::from_u32(&env, 0x08),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
+    };
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+fn transact_does_not_reject_boundary_canonical_public_input() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let maximum_deposit_amount = U256::from_u32(&env, 1000);
+    let levels = 3u32;
+    let pool_id = env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            maximum_deposit_amount.clone(),
+            levels,
+        ),
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let root = pool.get_root();
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+
+    let asp_membership_root = setup.asp_membership_client.get_root();
+    let asp_non_membership_root = setup.asp_non_membership_client.get_root();
+    let one = U256::from_u32(&env, 1);
+
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(&env),
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(&env);
+            let canonical_boundary_nullifier = bn256_modulus(&env).sub(&one);
+            v.push_back(canonical_boundary_nullifier);
+            v
+        },
+        output_commitment0: bn256_modulus(&env).sub(&one),
+        output_commitment1: U256::from_u32(&env, 0x08),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
+    };
+
+    assert!(!matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
 }

@@ -105,7 +105,7 @@ pub fn g2_bytes_from_ark(p: ArkG2Affine) -> [u8; 128] {
 ///
 /// # Arguments
 /// * `env` - The Soroban environment
-/// * `vk` - The ark-groth16 VerifyingKey<Bn254>
+/// * `vk` - The ark-groth16 `VerifyingKey<Bn254>`
 ///
 /// # Returns
 /// A VerificationKeyBytes struct suitable for use with the

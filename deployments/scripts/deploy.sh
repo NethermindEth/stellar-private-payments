@@ -4,8 +4,6 @@
 
 set -euo pipefail
 
-# Helpers
-
 die() { echo "deploy.sh: $*" >&2; exit 1; }
 need() { command -v "$1" >/dev/null 2>&1 || die "missing '$1'"; }
 step() { echo "==> $*" >&2; }
@@ -15,7 +13,7 @@ usage() {
 Usage: deploy.sh <network> [OPTIONS]
 
 Deploys and runs constructors for the ASP membership, ASP non-membership,
-Circom Groth16 verifier, and Pool contracts.
+Circom Groth16 verifier, and one or more Pool contracts.
 
 Arguments:
   network               Network name from Stellar CLI config (e.g. testnet, futurenet)
@@ -23,12 +21,16 @@ Arguments:
 Options:
   --deployer NAME       Stellar identity or secret key used to deploy (required)
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
-  --token ADDRESS       Token contract address for the pool (defaults to native XLM)
+  --token ADDRESS       Legacy single-pool token contract address (cannot be mixed with --pool)
+  --pool SPEC           Pool spec (repeatable):
+                        contract:<TOKEN_CONTRACT_ID>
+                        native:<TOKEN_CONTRACT_ID>
+                        classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
-  --vk-json JSON        VerificationKeyBytes JSON for circom verifier constructor
-  --vk-file PATH        JSON file containing VerificationKeyBytes
+  --vk-json JSON        Verification key as a JSON string (snarkjs or repo format)
+  --vk-file PATH        Path to a verification key JSON file
   --skip-init           Deploy only, do not call constructors
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
@@ -36,19 +38,20 @@ Options:
 Examples:
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
-    --token CB... \
+    --vk-file ceremony/verification_key.json \
+    --pool native:CB... \
+    --pool contract:CC... \
+    --pool classic:USDC:G...:CD... \
     --asp-levels 8 \
     --pool-levels 8 \
-    --max-deposit 1000000000 \
-    --vk-file ./vk.json
+    --max-deposit 1000000000
 
 Notes:
-  - VerificationKeyBytes must match the contract type:
-    {"alpha":"...","beta":"...","gamma":"...","delta":"...","ic":["..."]}
-  - Use --vk-json to pass the JSON inline or --vk-file to read it from disk.
-  - snarkjs-style vk.json files are converted automatically.
-  - If --token is omitted, defaults to the Soroban native XLM contract for the selected network.
+  - Provide --vk-file or --vk-json to embed the verification key and build the
+    verifier contract automatically. Omit both only if the verifier WASM was
+    already built via scripts/build-verifier-with-vk.sh.
   - Deployment output is written to deployments/<network>/deployments.json.
+  - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
 }
@@ -63,6 +66,7 @@ shift || true
 DEPLOYER=""
 ADMIN=""
 TOKEN=""
+POOL_SPECS=()
 ASP_LEVELS=""
 POOL_LEVELS=""
 MAX_DEPOSIT=""
@@ -76,6 +80,7 @@ while [[ $# -gt 0 ]]; do
     --deployer) DEPLOYER="$2"; shift 2 ;;
     --admin) ADMIN="$2"; shift 2 ;;
     --token) TOKEN="$2"; shift 2 ;;
+    --pool) POOL_SPECS+=("$2"); shift 2 ;;
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
     --max-deposit) MAX_DEPOSIT="$2"; shift 2 ;;
@@ -92,10 +97,6 @@ done
 need stellar
 
 [[ -n "$DEPLOYER" ]] || die "--deployer is required"
-# If no token is provided, default to the Soroban native asset contract for XLM on this network.
-if [[ -z "$TOKEN" ]]; then
-  TOKEN="$(stellar contract id asset --asset native --network "$NETWORK")"
-fi
 [[ -n "$ASP_LEVELS" ]] || die "--asp-levels is required"
 [[ -n "$POOL_LEVELS" ]] || die "--pool-levels is required"
 [[ -n "$MAX_DEPOSIT" ]] || die "--max-deposit is required"
@@ -104,39 +105,21 @@ if [[ -n "$VK_JSON" && -n "$VK_FILE" ]]; then
   die "use only one of --vk-json or --vk-file"
 fi
 
-if [[ "$SKIP_INIT" != "true" ]]; then
-  if [[ -n "$VK_FILE" ]]; then
-    [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
-    VK_JSON="$(tr -d '\n' < "$VK_FILE")"
-  fi
-  [[ -n "$VK_JSON" ]] || die "verification key required (use --vk-json or --vk-file)"
-  if [[ "$VK_JSON" == *"vk_alpha_1"* ]]; then
-    need python3
-    VK_JSON="$(python3 -c 'import json,sys
-data = json.load(sys.stdin)
-def to_hex32(v):
-    n = int(v)
-    return n.to_bytes(32, "big").hex()
-def g1_bytes(pt):
-    return to_hex32(pt[0]) + to_hex32(pt[1])
-def g2_bytes(pt):
-    # snarkjs format uses [real, imag] for Fq2 components.
-    x_re, x_im = pt[0]
-    y_re, y_im = pt[1]
-    return to_hex32(x_im) + to_hex32(x_re) + to_hex32(y_im) + to_hex32(y_re)
-out = {
-    "alpha": g1_bytes(data["vk_alpha_1"]),
-    "beta": g2_bytes(data["vk_beta_2"]),
-    "gamma": g2_bytes(data["vk_gamma_2"]),
-    "delta": g2_bytes(data["vk_delta_2"]),
-    "ic": [g1_bytes(p) for p in data["IC"]],
-}
-print(json.dumps(out, separators=(",", ":")))' <<<"$VK_JSON")"
-  fi
-fi
-
 if [[ "$NETWORK" == "mainnet" && "$YES" != "true" ]]; then
   die "mainnet requires --yes"
+fi
+
+if [[ -n "$TOKEN" && ${#POOL_SPECS[@]} -gt 0 ]]; then
+  die "cannot mix --token with --pool"
+fi
+
+if [[ -n "$TOKEN" ]]; then
+  POOL_SPECS+=("native:$TOKEN")
+fi
+if [[ ${#POOL_SPECS[@]} -eq 0 ]]; then
+  NATIVE_TOKEN_ID="$(stellar contract id asset --asset native --network "$NETWORK" 2>/dev/null || true)"
+  [[ -n "$NATIVE_TOKEN_ID" ]] || die "failed to resolve native XLM token contract id for network '$NETWORK'"
+  POOL_SPECS+=("native:$NATIVE_TOKEN_ID")
 fi
 
 resolve_address() {
@@ -170,15 +153,24 @@ get_latest_ledger_seq() {
   echo "$seq"
 }
 
-# Used as a stable cold-start anchor so fresh local DBs can index from contract deployment.
-DEPLOYMENT_LEDGER="$(get_latest_ledger_seq)"
-
 step "build contracts"
 mkdir -p "$WASM_DIR"
-for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+for pkg in asp-membership asp-non-membership pool; do
   stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
     --package "$pkg" >/dev/null
 done
+
+if [[ -n "$VK_FILE" || -n "$VK_JSON" ]]; then
+  if [[ -n "$VK_FILE" ]]; then
+    [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
+    "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" "$VK_FILE" --out-dir "$WASM_DIR"
+  else
+    TMP_VK="$(mktemp --suffix=.json)"
+    printf '%s' "$VK_JSON" > "$TMP_VK"
+    "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" "$TMP_VK" --out-dir "$WASM_DIR"
+    rm -f "$TMP_VK"
+  fi
+fi
 
 ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
 ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
@@ -206,6 +198,42 @@ deploy_contract() {
   echo "$id"
 }
 
+parse_pool_spec() {
+  local spec="$1"
+  local kind token code issuer rest
+  kind="${spec%%:*}"
+  rest="${spec#*:}"
+
+  case "$kind" in
+    contract)
+      token="$rest"
+      [[ -n "$token" ]] || die "invalid pool spec '$spec': missing token contract id"
+      printf '%s\n' "$token"
+      printf '%s\n' "{\"kind\":\"contract\",\"contractId\":\"$token\"}"
+      ;;
+    native)
+      token="$rest"
+      [[ -n "$token" ]] || die "invalid pool spec '$spec': missing native token contract id"
+      printf '%s\n' "$token"
+      printf '%s\n' "{\"kind\":\"native\"}"
+      ;;
+    classic)
+      code="${rest%%:*}"
+      rest="${rest#*:}"
+      issuer="${rest%%:*}"
+      token="${rest#*:}"
+      if [[ -z "$code" || -z "$issuer" || -z "$token" || "$token" == "$rest" ]]; then
+        die "invalid pool spec '$spec': expected classic:<CODE>:<ISSUER>:<TOKEN_CONTRACT_ID>"
+      fi
+      printf '%s\n' "$token"
+      printf '%s\n' "{\"kind\":\"classic\",\"code\":\"$code\",\"issuer\":\"$issuer\"}"
+      ;;
+    *)
+      die "invalid pool spec '$spec': expected contract:<id> | native:<id> | classic:<code>:<issuer>:<id>"
+      ;;
+  esac
+}
+
 step "deploy asp-membership"
 if [[ "$SKIP_INIT" != "true" ]]; then
   ASP_MEMBERSHIP_ID="$(deploy_contract asp-membership "$ASP_MEMBERSHIP_WASM" --admin "$ADMIN_ADDR" --levels "$ASP_LEVELS")"
@@ -221,23 +249,37 @@ else
 fi
 
 step "deploy circom-groth16-verifier"
-if [[ "$SKIP_INIT" != "true" ]]; then
-  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM" --vk "$VK_JSON")"
-else
-  VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
-fi
+VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
 
-step "deploy pool"
-if [[ "$SKIP_INIT" != "true" ]]; then
-  POOL_ID="$(deploy_contract pool "$POOL_WASM" \
-    --admin "$ADMIN_ADDR" --token "$TOKEN" --verifier "$VERIFIER_ID" \
-    --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
-    --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS")"
-else
-  POOL_ID="$(deploy_contract pool "$POOL_WASM")"
-fi
+POOL_IDS=()
+POOL_TOKEN_IDS=()
+POOL_ASSET_JSONS=()
+POOL_DEPLOYMENT_LEDGERS=()
 
-cat >&2 <<EOF
+for spec in "${POOL_SPECS[@]}"; do
+  mapfile -t parsed < <(parse_pool_spec "$spec")
+  token_id="${parsed[0]}"
+  asset_json="${parsed[1]}"
+
+  pool_deployment_ledger="$(get_latest_ledger_seq)"
+  step "deploy pool for spec '$spec'"
+  if [[ "$SKIP_INIT" != "true" ]]; then
+    pool_id="$(deploy_contract pool "$POOL_WASM" \
+      --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$VERIFIER_ID" \
+      --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
+      --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS")"
+  else
+    pool_id="$(deploy_contract pool "$POOL_WASM")"
+  fi
+
+  POOL_IDS+=("$pool_id")
+  POOL_TOKEN_IDS+=("$token_id")
+  POOL_ASSET_JSONS+=("$asset_json")
+  POOL_DEPLOYMENT_LEDGERS+=("$pool_deployment_ledger")
+done
+
+{
+  cat >&2 <<__DEPLOY_SUMMARY__
 
   ┌─────────────────────────────────────────────────────────────────┐
   │                    ✅ DEPLOYMENT SUCCESSFUL                      │
@@ -250,16 +292,27 @@ Deployment complete
   ASP membership:      $ASP_MEMBERSHIP_ID
   ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
   Verifier:            $VERIFIER_ID
-  Pool:                $POOL_ID
+  Pools deployed:      ${#POOL_IDS[@]}
   Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
-EOF
+__DEPLOY_SUMMARY__
+  for i in "${!POOL_IDS[@]}"; do
+    printf '  Pool[%s]:            %s\n' "$i" "${POOL_IDS[$i]}" >&2
+  done
+}
 
-DEPLOY_JSON="$(printf '{"network":"%s","deployer":"%s","admin":"%s","deployment_ledger":%s,"asp_membership":"%s","asp_non_membership":"%s","verifier":"%s","pool":"%s","initialized":%s}\n' \
-  "$NETWORK" "$DEPLOYER_ADDR" "$ADMIN_ADDR" "$DEPLOYMENT_LEDGER" "$ASP_MEMBERSHIP_ID" "$ASP_NON_MEMBERSHIP_ID" "$VERIFIER_ID" "$POOL_ID" \
-  "$([[ "$SKIP_INIT" == "true" ]] && echo false || echo true)")"
+pools_json="["
+for i in "${!POOL_IDS[@]}"; do
+  entry="{\"poolContractId\":\"${POOL_IDS[$i]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$i]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$i]},\"enabled\":true,\"asset\":${POOL_ASSET_JSONS[$i]}}"
+  if [[ "$i" -gt 0 ]]; then
+    pools_json+=","
+  fi
+  pools_json+="$entry"
+done
+pools_json+="]"
 
-# Write deployment summary to a file for easy reuse.
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"verifier\":\"$VERIFIER_ID\",\"pools\":$pools_json}"
+
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"
-printf '%s' "$DEPLOY_JSON" > "$DEPLOYMENTS_DIR/deployments.json"
-printf '%s' "$DEPLOY_JSON"
+printf '%s\n' "$DEPLOY_JSON" > "$DEPLOYMENTS_DIR/deployments.json"
+printf '%s\n' "$DEPLOY_JSON"

@@ -8,8 +8,11 @@
 [![Coverage](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Telegram](https://img.shields.io/badge/Telegram-2CA5E0?style=flat&logo=telegram&logoColor=white)](https://t.me/stellar_privacy)
+[![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/groups/18809039/)
 
-> **Disclaimer**: This project is a **Proof of Concept (PoC)** and prototype implementation. It is intended for research and educational purposes only. The code has not been audited and should not be used in production environments with real assets.
+> [!WARNING]
+> This project is a **Work in progress (WIP)**. It is intended to serve as **a reference implementation** of privacy pools for Stellar. The code has not yet been audited and should not be used in production environments with real assets as of now. The security hardening work is planned.
 
 A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
@@ -47,7 +50,7 @@ If you want to try it out:
     ```bash
       make serve
     ```
-    Open `http://localhost:8080` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
+    Open `http://localhost:8000` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
     You might need to delete the browser cache from previous runs. Go to `Application` -> `Clear storage`.
 
 
@@ -55,19 +58,18 @@ If you want to try it out:
     ```bash
     stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
     ```
-    Or, directly access `http://localhost:8080/admin.html` and use the UI to add public keys.
+    Or, directly access `http://localhost:8000/admin.html` and use the UI to add public keys.
     Please note that the admin UI allows deriving keys for ANY account.
     But insertion MUST be signed by the ASP admin account.
     You can add your Freighter account to your Stellar-cli keys with `stellar keys add <NAME_FOR_ACCOUNT> --seed-phrase`.
     This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
 
 
-4. Go back to `http://localhost:8080` and try it out!
+4. Go back to `http://localhost:8000` and try it out!
 
 ### Architecture Overview
 
 #### Transaction Flow
-![Deposit Page](assets/demo-001.png)
 
 1. **Deposit**: User deposits tokens into the pool, creating a commitment (UTXO). No input notes are spent, creates output notes.
 2. **Withdraw**: User proves ownership of commitments and withdraws tokens. Inputs notes are spent, no output notes are created.
@@ -75,7 +77,6 @@ If you want to try it out:
 4. **Transact**: Enables advanced users with experience on privacy-preserving protocols to generate their own transactions. Spending, creating and transferring notes at will.
 
 #### ASP Admin Page
-![ASP Admin Page](assets/demo-002.png)
 
 This is the administrative control panel for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
 
@@ -83,11 +84,12 @@ This is the administrative control panel for managing the **Association Set Prov
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
 3. **Derive keys** for accounts - Generate derived keys for any account (though insertion must be signed by the ASP admin account)
 
-This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8080/admin.html`
+This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8000/admin.html`
 
 The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
 
-> **WARNING:** Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
+> [!WARNING]
+> Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
 
 
 #### Zero-Knowledge Circuits
@@ -109,11 +111,9 @@ The main transaction circuit proves:
 
 ## Limitations
 
-As a proof of concept, this implementation has several limitations:
+As a work-in-progress, this implementation has several limitations:
 
-- **Single circuit support**: Now the demo only showcases a single circuit (2 inputs, 2 outputs). Support for multiple circuits might be added in the future.
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
-- **Decimal support**: Demo supports Stroops, so it should be able to handle XLM deposits with decimal amounts (up to 7 decimal digits).
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
 - **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them. In future versions cloud sync maybe introduced. Also clearing the app site data permanently deletes the app database with app-derived keys and notes.

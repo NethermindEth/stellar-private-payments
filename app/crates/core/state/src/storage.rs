@@ -30,6 +30,14 @@ pub struct AccountKeys {
     pub account_id: i64,
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUserKeys {
+    pub note_keypair: NoteKeyPair,
+    pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
 }
 
 #[derive(Debug, Clone)]
@@ -71,28 +79,14 @@ impl Storage {
             )?;
 
             for event in &data.events {
+                let event_contract_id = Self::get_or_create_contract_id(&tx, &event.contract_id)?;
                 stmt.execute(params![
                     event.id,
                     event.ledger,
-                    event.contract_id,
+                    event_contract_id,
                     event.topics.join(","),
                     event.value
                 ])?;
-            }
-
-            if data.events.is_empty() {
-                tx.execute(
-                    "INSERT OR REPLACE INTO indexing_metadata (id, last_cursor, last_fully_indexed_ledger)
-                     VALUES (1, ?1, ?2)",
-                    params![data.cursor, data.latest_ledger],
-                )?;
-            } else {
-                tx.execute(
-                    "UPDATE indexing_metadata
-                     SET last_cursor = ?1
-                     WHERE id = 1",
-                    params![data.cursor],
-                )?;
             }
         }
         tx.commit()?;
@@ -105,40 +99,81 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_sync_metadata(&self) -> Result<Option<types::SyncMetadata>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT last_fully_indexed_ledger, last_cursor
-             FROM indexing_metadata
-             WHERE id = 1",
-        )?;
+    pub fn save_sync_progress(
+        &mut self,
+        metadata: &[types::SyncMetadata],
+        fully_indexed: bool,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        for entry in metadata {
+            let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id)?;
+            tx.execute(
+                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
+                 VALUES (?1, ?2, 0)
+                 ON CONFLICT(contract_id) DO NOTHING",
+                params![contract_id, entry.cursor],
+            )?;
 
-        let status = stmt
-            .query_row([], |row| {
-                let ledger_i64: i64 = row.get(0)?;
-                let last_ledger = col_u32(ledger_i64, 0)?;
-                let cursor: Option<String> = row.get(1)?;
-                Ok(cursor.map(|cursor| types::SyncMetadata {
-                    last_ledger,
-                    cursor,
-                }))
-            })
-            .optional()
-            .context("Failed to query indexing_metadata")?;
-
-        match status {
-            Some(v) => Ok(v),
-            None => anyhow::bail!("indexing_metadata singleton row (id=1) is missing"),
+            if fully_indexed {
+                tx.execute(
+                    "UPDATE indexing_metadata
+                     SET last_cursor = ?2, last_fully_indexed_ledger = ?3
+                     WHERE contract_id = ?1",
+                    params![contract_id, entry.cursor, entry.last_ledger],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE indexing_metadata
+                     SET last_cursor = ?2
+                     WHERE contract_id = ?1",
+                    params![contract_id, entry.cursor],
+                )?;
+            }
         }
+
+        tx.commit()?;
+        Ok(())
     }
 
-    pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
+    pub fn get_sync_metadata(&self) -> Result<Vec<types::SyncMetadata>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT c.address, m.last_fully_indexed_ledger, m.last_cursor
+             FROM indexing_metadata m
+             JOIN contracts c ON c.contract_id = m.contract_id
+             ORDER BY m.contract_id",
+        )?;
+
+        let rows = stmt.query_map([], |row| {
+            let contract_id: String = row.get(0)?;
+            let ledger_i64: i64 = row.get(1)?;
+            let last_ledger = col_u32(ledger_i64, 1)?;
+            let cursor: Option<String> = row.get(2)?;
+            Ok(cursor.map(|cursor| types::SyncMetadata {
+                contract_id,
+                last_ledger,
+                cursor,
+            }))
+        })?;
+
+        let mut metadata = Vec::new();
+        for row in rows {
+            if let Some(entry) = row? {
+                metadata.push(entry);
+            }
+        }
+
+        Ok(metadata)
+    }
+
+    pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
         self.conn
             .query_row(
                 "SELECT
                 encryption_private_key,
                 encryption_public_key,
                 note_private_key,
-                note_public_key
+                note_public_key,
+                membership_blinding
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
                 WHERE accounts.address = ?1
@@ -150,17 +185,19 @@ impl Storage {
                     let enc_pub: EncryptionPublicKey = row.get(1)?;
                     let note_priv: NotePrivateKey = row.get(2)?;
                     let note_pub: NotePublicKey = row.get(3)?;
+                    let membership_blinding: Field = row.get(4)?;
 
-                    Ok((
-                        NoteKeyPair {
+                    Ok(StoredUserKeys {
+                        note_keypair: NoteKeyPair {
                             private: note_priv,
                             public: note_pub,
                         },
-                        EncryptionKeyPair {
+                        encryption_keypair: EncryptionKeyPair {
                             private: enc_priv,
                             public: enc_pub,
                         },
-                    ))
+                        membership_blinding,
+                    })
                 },
             )
             .optional()
@@ -172,6 +209,7 @@ impl Storage {
         account_address: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
     ) -> Result<()> {
         let tx = self
             .conn
@@ -186,13 +224,15 @@ impl Storage {
                 encryption_public_key,
                 note_private_key,
                 note_public_key,
+                membership_blinding,
                 account_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 &encryption_keypair.private,
                 &encryption_keypair.public,
                 &note_keypair.private,
                 &note_keypair.public,
+                membership_blinding,
                 account_id,
             ],
         )
@@ -278,6 +318,21 @@ impl Storage {
         Ok(id)
     }
 
+    fn get_or_create_contract_id(tx: &rusqlite::Transaction, address: &str) -> Result<i64> {
+        let id: i64 = tx
+            .query_row(
+                "INSERT INTO contracts (address)
+                 VALUES (?1)
+                 ON CONFLICT(address) DO UPDATE SET address = excluded.address
+                 RETURNING contract_id",
+                params![address],
+                |row| row.get(0),
+            )
+            .context("failed to get or create contract id")?;
+
+        Ok(id)
+    }
+
     /// Returns $limit public keys ordered by ledger descending.
     /// for an address book
     pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
@@ -340,6 +395,51 @@ impl Storage {
         Ok(out)
     }
 
+    /// All unspent notes for `address` in `pool_contract_id` (newest first).
+    pub fn list_unspent_user_notes(
+        &self,
+        pool_contract_id: &str,
+        address: &str,
+    ) -> Result<Vec<UserNoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                n.id,
+                n.amount,
+                c.leaf_index,
+                r.ledger
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pool ON pool.contract_id = r.contract_id
+             WHERE a.address = ?1 AND pool.address = ?2 AND n.nullifier_id IS NULL
+             ORDER BY r.ledger DESC",
+        )?;
+
+        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
+            let id: Field = row.get(0)?;
+            let amount: NoteAmount = row.get(1)?;
+            let leaf_index_i64: i64 = row.get(2)?;
+            let leaf_index = col_u32(leaf_index_i64, 2)?;
+            let created_at_ledger_i64: i64 = row.get(3)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+
+            Ok(UserNoteSummary {
+                id,
+                amount,
+                leaf_index,
+                created_at_ledger,
+                spent: false,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// Returns recent pool activity grouped by ledger (newest first).
     pub fn get_recent_pool_activity(&self, limit_ledgers: u32) -> Result<Vec<PoolLedgerActivity>> {
         let mut stmt = self.conn.prepare(
@@ -389,14 +489,17 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_pool_commitment_leaves_ordered(&self) -> Result<Vec<Field>> {
+    pub fn get_pool_commitment_leaves_ordered(&self, pool_contract_id: &str) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index, commitment
-             FROM pool_commitments
-             ORDER BY leaf_index ASC",
+            "SELECT pc.leaf_index, pc.commitment
+             FROM pool_commitments pc
+             JOIN raw_contract_events r ON r.id = pc.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
+             ORDER BY pc.leaf_index ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![pool_contract_id], |row| {
             let idx: i64 = row.get(0)?;
             let idx = col_u32(idx, 0)?;
             let commitment: Field = row.get(1)?;
@@ -429,32 +532,35 @@ impl Storage {
     /// Returns `(amount, blinding, leaf_index)` when found and unspent.
     pub fn get_unspent_user_note_by_commitment(
         &self,
+        pool_contract_id: &str,
         account_address: &str,
         commitment: &Field,
     ) -> Result<Option<(NoteAmount, Field, u32)>> {
         let mut stmt = self.conn.prepare(
-            "SELECT n.amount, n.blinding, c.leaf_index
+            "SELECT n.amount, n.blinding, pc.leaf_index
              FROM user_notes n
              JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
-             WHERE a.address = ?1
-               AND c.commitment = ?2
+             JOIN pool_commitments pc ON pc.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = pc.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE a.address = ?2
+               AND c.address = ?1
+               AND pc.commitment = ?3
                AND n.nullifier_id IS NULL
              LIMIT 1",
         )?;
 
         let row = stmt
-            .query_row(params![account_address, commitment], |row| {
-                let amount_i64: i64 = row.get(0)?;
-                let amount_u64: u64 = amount_i64
-                    .try_into()
-                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(0, amount_i64))?;
-                let amount = NoteAmount::from(amount_u64);
-                let blinding: Field = row.get(1)?;
-                let leaf_index_i64: i64 = row.get(2)?;
-                let leaf_index = col_u32(leaf_index_i64, 2)?;
-                Ok((amount, blinding, leaf_index))
-            })
+            .query_row(
+                params![pool_contract_id, account_address, commitment],
+                |row| {
+                    let amount: NoteAmount = row.get(0)?;
+                    let blinding: Field = row.get(1)?;
+                    let leaf_index_i64: i64 = row.get(2)?;
+                    let leaf_index = col_u32(leaf_index_i64, 2)?;
+                    Ok((amount, blinding, leaf_index))
+                },
+            )
             .optional()
             .context("Failed to query unspent user note by commitment")?;
 
@@ -509,7 +615,7 @@ impl Storage {
             let mut stmt = tx.prepare(
                 "INSERT INTO public_keys (owner, encryption_key, note_key, event_id)
                     VALUES (?1, ?2, ?3, ?4)
-                    ON CONFLICT(owner) DO NOTHING",
+                    ON CONFLICT(event_id) DO NOTHING",
             )?;
 
             for event in events {
@@ -564,13 +670,18 @@ impl Storage {
     ///   inconsistent at the same ledger (mismatched networks/corruption).
     pub fn check_asp_membership_precondition(
         &self,
+        asp_membership_contract_id: &str,
         user_leaf: &Field,
         current_root: &Field,
         current_ledger: u32,
     ) -> Result<AspMembershipSync> {
         // The indexer sync metadata is authoritative for "how far we've indexed", even
         // if there were no ASP events in recent ledgers.
-        let Some(sync_meta) = self.get_sync_metadata()? else {
+        let sync_meta = self
+            .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == asp_membership_contract_id);
+        let Some(sync_meta) = sync_meta else {
             return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
@@ -596,12 +707,14 @@ impl Storage {
             "SELECT l.root, r.ledger
              FROM asp_membership_leaves l
              JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
              ORDER BY l.leaf_index DESC
              LIMIT 1",
         )?;
 
         let last: Option<(Field, u32)> = stmt
-            .query_row([], |row| {
+            .query_row(params![asp_membership_contract_id], |row| {
                 let root: Field = row.get(0)?;
                 let ledger_i64: i64 = row.get(1)?;
                 let ledger = col_u32(ledger_i64, 1)?;
@@ -628,14 +741,18 @@ impl Storage {
         }
 
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index
-             FROM asp_membership_leaves
-             WHERE leaf = ?1
+            "SELECT l.leaf_index
+             FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE l.leaf = ?1 AND c.address = ?2
              LIMIT 1",
         )?;
 
         let user_leaf_index: Option<u32> = stmt
-            .query_row(params![user_leaf], |row| row.get(0))
+            .query_row(params![user_leaf, asp_membership_contract_id], |row| {
+                row.get(0)
+            })
             .optional()
             .context("Failed to query asp_membership_leaves user leaf existence")?;
 
@@ -652,14 +769,20 @@ impl Storage {
     ///
     /// Errors if there are gaps/out-of-order indices, because Merkle
     /// reconstruction would be ambiguous/incorrect.
-    pub fn get_all_asp_membership_leaves_ordered(&self) -> Result<Vec<Field>> {
+    pub fn get_all_asp_membership_leaves_ordered(
+        &self,
+        asp_membership_contract_id: &str,
+    ) -> Result<Vec<Field>> {
         let mut stmt = self.conn.prepare(
-            "SELECT leaf_index, leaf
-             FROM asp_membership_leaves
-             ORDER BY leaf_index ASC",
+            "SELECT l.leaf_index, l.leaf
+             FROM asp_membership_leaves l
+             JOIN raw_contract_events r ON r.id = l.event_id
+             JOIN contracts c ON c.contract_id = r.contract_id
+             WHERE c.address = ?1
+             ORDER BY l.leaf_index ASC",
         )?;
 
-        let rows = stmt.query_map([], |row| {
+        let rows = stmt.query_map(params![asp_membership_contract_id], |row| {
             let idx: i64 = row.get(0)?;
             let idx = col_u32(idx, 0)?;
             let leaf: Field = row.get(1)?;
@@ -690,15 +813,16 @@ impl Storage {
     /// Unprocessed raw events fetch
     pub fn get_unprocessed_events(&self, limit: u32) -> Result<Vec<ContractEvent>> {
         let mut stmt = self.conn.prepare(
-            "SELECT r.id, r.ledger, r.contract_id, r.topics, r.value
+            "SELECT r.id, r.ledger, c.address, r.topics, r.value
                 FROM raw_contract_events r
-                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
-                LEFT JOIN pool_commitments c ON r.id = c.event_id
+                JOIN contracts c ON c.contract_id = r.contract_id
+                LEFT JOIN pool_commitments pc ON r.id = pc.event_id
                 LEFT JOIN public_keys p ON r.id = p.event_id
                 LEFT JOIN asp_membership_leaves l ON r.id = l.event_id
-                WHERE n.event_id IS NULL
-                AND c.event_id IS NULL
+                LEFT JOIN pool_nullifiers n ON r.id = n.event_id
+                WHERE pc.event_id IS NULL
                 AND p.event_id IS NULL
+                AND n.event_id IS NULL
                 AND l.event_id IS NULL
                 ORDER BY r.ledger ASC, r.id ASC
                 LIMIT ?1",
@@ -731,7 +855,8 @@ impl Storage {
                 k.encryption_private_key,
                 k.encryption_public_key,
                 k.note_private_key,
-                k.note_public_key
+                k.note_public_key,
+                k.membership_blinding
              FROM accounts a
              JOIN (
                 SELECT account_id, MAX(id) AS max_id
@@ -749,6 +874,7 @@ impl Storage {
             let enc_pub: EncryptionPublicKey = row.get(2)?;
             let note_priv: NotePrivateKey = row.get(3)?;
             let note_pub: NotePublicKey = row.get(4)?;
+            let membership_blinding: Field = row.get(5)?;
 
             Ok(AccountKeys {
                 account_id,
@@ -760,6 +886,7 @@ impl Storage {
                     private: enc_priv,
                     public: enc_pub,
                 },
+                membership_blinding,
             })
         })?;
 
@@ -778,87 +905,257 @@ impl Storage {
         total_limit: u32,
         derive: &mut DeriveNoteFn<'_>,
     ) -> Result<bool> {
+        const ACCOUNT_CHUNK: u32 = 4;
+
         let accounts = self.get_accounts_with_latest_keypairs()?;
         if accounts.is_empty() || total_limit == 0 {
             return Ok(false);
         }
 
-        let tx = self.conn.transaction()?;
+        let pool_ids: Vec<i64> = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT r.contract_id
+                 FROM pool_commitments c
+                 JOIN raw_contract_events r ON r.id = c.event_id
+                 ORDER BY r.contract_id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<core::result::Result<Vec<i64>, _>>()?;
 
-        // Ensure scheduler row exists.
-        tx.execute(
-            "INSERT OR IGNORE INTO notes_scan_scheduler (id, next_account_offset)
-             VALUES (1, 0)",
-            [],
-        )?;
-
-        let n = accounts.len();
-        let n_i64 = i64::try_from(n).expect("accounts len fits i64");
-        let mut offset: i64 = tx.query_row(
-            "SELECT next_account_offset FROM notes_scan_scheduler WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
-        offset = offset.rem_euclid(n_i64);
-        let offset_usize = usize::try_from(offset).expect("offset fits usize");
-
-        // Histogram allocation: `total_limit` tokens distributed in RR order from
-        // `offset`.
-        let mut counts: Vec<u32> = vec![0; n];
-        for i in 0..total_limit {
-            let i_usize = usize::try_from(i)
-                .map_err(|_| anyhow::anyhow!("scan limit exceeds platform usize"))?;
-            let idx = offset_usize.wrapping_add(i_usize).rem_euclid(n);
-            counts[idx] = counts[idx].saturating_add(1);
+        if pool_ids.is_empty() {
+            return Ok(false);
         }
 
-        // Ensure scan cursors exist for all accounts.
-        for a in &accounts {
-            tx.execute(
-                "INSERT OR IGNORE INTO account_commitment_scan (account_id, last_commitment_id)
-                 VALUES (?1, 0)",
-                params![a.account_id],
-            )?;
+        let pool_count_u32 =
+            u32::try_from(pool_ids.len()).map_err(|_| anyhow::anyhow!("pool count exceeds u32"))?;
+        let base_quota = if pool_count_u32 == 0 {
+            0
+        } else if total_limit >= pool_count_u32 {
+            total_limit
+                .checked_div(pool_count_u32)
+                .expect("pool count is not zero")
+        } else {
+            log::warn!(
+                "pool count {pool_count_u32} exceeds total limit {total_limit} of commitments to scan"
+            );
+            1
+        };
+
+        let mut quotas = vec![base_quota; pool_ids.len()];
+        let assigned = base_quota.saturating_mul(pool_count_u32);
+        let mut remainder = total_limit.saturating_sub(assigned);
+        let mut next_pool = 0usize;
+        while remainder > 0 {
+            quotas[next_pool] = quotas[next_pool].saturating_add(1);
+            remainder = remainder.saturating_sub(1);
+            next_pool = (next_pool
+                .checked_add(1)
+                .expect("next_pool shouldn't overflow"))
+            .checked_rem(pool_ids.len())
+            .expect("pool ids is not zero");
         }
 
-        let mut did_progress = false;
+        let mut did_any_progress = false;
 
-        for (idx, quota) in counts.into_iter().enumerate() {
-            if quota == 0 {
+        for (pool_idx, pool_contract_id) in pool_ids.iter().enumerate() {
+            let mut pool_quota = quotas[pool_idx];
+            if pool_quota == 0 {
                 continue;
             }
-            let account = &accounts[idx];
 
-            let last_commitment_id: i64 = tx.query_row(
-                "SELECT last_commitment_id
-                 FROM account_commitment_scan
-                 WHERE account_id = ?1",
-                params![account.account_id],
+            let tx = self.conn.transaction()?;
+
+            for account in &accounts {
+                tx.execute(
+                    "INSERT OR IGNORE INTO account_commitment_scan (pool_contract_id, account_id, last_commitment_id)
+                     VALUES (?1, ?2, 0)",
+                    params![pool_contract_id, account.account_id],
+                )?;
+            }
+
+            let mut did_progress_in_pool = false;
+
+            while pool_quota > 0 {
+                let mut progressed_this_cycle = false;
+
+                for account in &accounts {
+                    if pool_quota == 0 {
+                        break;
+                    }
+
+                    let last_commitment_id: i64 = tx.query_row(
+                        "SELECT last_commitment_id
+                         FROM account_commitment_scan
+                         WHERE pool_contract_id = ?1 AND account_id = ?2",
+                        params![pool_contract_id, account.account_id],
+                        |row| row.get(0),
+                    )?;
+
+                    let quota = pool_quota.min(ACCOUNT_CHUNK);
+                    let commitments: Vec<PoolCommitmentRow> = {
+                        let mut stmt = tx.prepare(
+                            "SELECT c.id, c.commitment, c.leaf_index, c.encrypted_output
+                             FROM pool_commitments c
+                             JOIN raw_contract_events r ON r.id = c.event_id
+                             WHERE r.contract_id = ?1 AND c.id > ?2
+                             ORDER BY c.id ASC
+                             LIMIT ?3",
+                        )?;
+
+                        let rows = stmt.query_map(
+                            params![pool_contract_id, last_commitment_id, quota],
+                            |row| {
+                                let commitment_id: i64 = row.get(0)?;
+                                let commitment: Field = row.get(1)?;
+                                let leaf_index_i64: i64 = row.get(2)?;
+                                let leaf_index = col_u32(leaf_index_i64, 2)?;
+                                let encrypted_output: Vec<u8> = row.get(3)?;
+                                Ok(PoolCommitmentRow {
+                                    commitment_id,
+                                    commitment,
+                                    leaf_index,
+                                    encrypted_output,
+                                })
+                            },
+                        )?;
+
+                        let mut out = Vec::new();
+                        for r in rows {
+                            out.push(r?);
+                        }
+                        out
+                    };
+
+                    if commitments.is_empty() {
+                        continue;
+                    }
+
+                    progressed_this_cycle = true;
+                    did_progress_in_pool = true;
+
+                    let mut max_scanned_id = last_commitment_id;
+                    let scanned_count = u32::try_from(commitments.len())
+                        .map_err(|_| anyhow::anyhow!("commitments batch length exceeds u32"))?;
+
+                    for row in commitments {
+                        if row.commitment_id > max_scanned_id {
+                            max_scanned_id = row.commitment_id;
+                        }
+
+                        let Some(derived) = derive(account, &row)? else {
+                            continue;
+                        };
+
+                        let nullifier_id: Option<i64> = tx
+                            .query_row(
+                                "SELECT n.id
+                                 FROM pool_nullifiers n
+                                 JOIN raw_contract_events r ON r.id = n.event_id
+                                 WHERE r.contract_id = ?1 AND n.nullifier = ?2
+                                 LIMIT 1",
+                                params![pool_contract_id, derived.expected_nullifier],
+                                |r| r.get(0),
+                            )
+                            .optional()?;
+
+                        tx.execute(
+                            "INSERT OR IGNORE INTO user_notes (
+                                id,
+                                account_id,
+                                commitment_id,
+                                nullifier_id,
+                                expected_nullifier,
+                                blinding,
+                                amount
+                            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                            params![
+                                row.commitment,
+                                account.account_id,
+                                row.commitment_id,
+                                nullifier_id,
+                                derived.expected_nullifier,
+                                derived.blinding,
+                                derived.amount.to_string()
+                            ],
+                        )?;
+                    }
+
+                    tx.execute(
+                        "UPDATE account_commitment_scan
+                         SET last_commitment_id = ?1
+                         WHERE pool_contract_id = ?2 AND account_id = ?3",
+                        params![max_scanned_id, pool_contract_id, account.account_id],
+                    )?;
+
+                    pool_quota = pool_quota.saturating_sub(scanned_count);
+                }
+
+                if !progressed_this_cycle {
+                    break;
+                }
+            }
+
+            tx.commit()?;
+            did_any_progress |= did_progress_in_pool;
+        }
+
+        Ok(did_any_progress)
+    }
+
+    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
+        if limit == 0 {
+            return Ok(false);
+        }
+
+        let pool_ids: Vec<i64> = self
+            .conn
+            .prepare(
+                "SELECT DISTINCT r.contract_id
+                 FROM pool_nullifiers n
+                 JOIN raw_contract_events r ON r.id = n.event_id
+                 ORDER BY r.contract_id",
+            )?
+            .query_map([], |row| row.get(0))?
+            .collect::<core::result::Result<Vec<i64>, _>>()?;
+
+        if pool_ids.is_empty() {
+            return Ok(false);
+        }
+
+        let mut did_any = false;
+
+        for pool_contract_id in pool_ids {
+            let tx = self.conn.transaction()?;
+
+            tx.execute(
+                "INSERT OR IGNORE INTO nullifier_scan_state (pool_contract_id, last_nullifier_id)
+                 VALUES (?1, 0)",
+                params![pool_contract_id],
+            )?;
+
+            let last_nullifier_id: i64 = tx.query_row(
+                "SELECT last_nullifier_id FROM nullifier_scan_state WHERE pool_contract_id = ?1",
+                params![pool_contract_id],
                 |row| row.get(0),
             )?;
 
-            let commitments: Vec<PoolCommitmentRow> = {
+            let nullifiers: Vec<(i64, Field)> = {
                 let mut stmt = tx.prepare(
-                    "SELECT id, commitment, leaf_index, encrypted_output
-                     FROM pool_commitments
-                     WHERE id > ?1
-                     ORDER BY id ASC
-                     LIMIT ?2",
+                    "SELECT n.id, n.nullifier
+                     FROM pool_nullifiers n
+                     JOIN raw_contract_events r ON r.id = n.event_id
+                     WHERE r.contract_id = ?1 AND n.id > ?2
+                     ORDER BY n.id ASC
+                     LIMIT ?3",
                 )?;
 
-                let rows = stmt.query_map(params![last_commitment_id, quota], |row| {
-                    let commitment_id: i64 = row.get(0)?;
-                    let commitment: Field = row.get(1)?;
-                    let leaf_index_i64: i64 = row.get(2)?;
-                    let leaf_index = col_u32(leaf_index_i64, 2)?;
-                    let encrypted_output: Vec<u8> = row.get(3)?;
-                    Ok(PoolCommitmentRow {
-                        commitment_id,
-                        commitment,
-                        leaf_index,
-                        encrypted_output,
-                    })
-                })?;
+                let rows =
+                    stmt.query_map(params![pool_contract_id, last_nullifier_id, limit], |row| {
+                        let id: i64 = row.get(0)?;
+                        let nullifier: Field = row.get(1)?;
+                        Ok((id, nullifier))
+                    })?;
 
                 let mut out = Vec::new();
                 for r in rows {
@@ -867,144 +1164,42 @@ impl Storage {
                 out
             };
 
-            let mut max_scanned_id = last_commitment_id;
-            for row in commitments {
-                if row.commitment_id > max_scanned_id {
-                    max_scanned_id = row.commitment_id;
+            let mut max_id = last_nullifier_id;
+
+            for (nullifier_id, nullifier) in nullifiers {
+                did_any = true;
+                if nullifier_id > max_id {
+                    max_id = nullifier_id;
                 }
 
-                let Some(derived) = derive(account, &row)? else {
-                    continue;
-                };
-
-                let nullifier_id: Option<i64> = tx
-                    .query_row(
-                        "SELECT id FROM pool_nullifiers WHERE nullifier = ?1 LIMIT 1",
-                        params![derived.expected_nullifier],
-                        |r| r.get(0),
-                    )
-                    .optional()?;
-
                 tx.execute(
-                    "INSERT OR IGNORE INTO user_notes (
-                        id,
-                        account_id,
-                        commitment_id,
-                        nullifier_id,
-                        expected_nullifier,
-                        blinding,
-                        amount
-                    ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                    params![
-                        row.commitment,
-                        account.account_id,
-                        row.commitment_id,
-                        nullifier_id,
-                        derived.expected_nullifier,
-                        derived.blinding,
-                        derived.amount
-                    ],
+                    "UPDATE user_notes
+                     SET nullifier_id = ?1
+                     WHERE nullifier_id IS NULL
+                       AND expected_nullifier = ?2
+                       AND EXISTS (
+                           SELECT 1
+                           FROM pool_commitments c
+                           JOIN raw_contract_events r ON r.id = c.event_id
+                           WHERE c.id = user_notes.commitment_id
+                             AND r.contract_id = ?3
+                       )",
+                    params![nullifier_id, nullifier, pool_contract_id],
                 )?;
             }
 
-            if max_scanned_id > last_commitment_id {
+            if max_id > last_nullifier_id {
                 tx.execute(
-                    "UPDATE account_commitment_scan
-                     SET last_commitment_id = ?1
-                     WHERE account_id = ?2",
-                    params![max_scanned_id, account.account_id],
+                    "UPDATE nullifier_scan_state
+                     SET last_nullifier_id = ?1
+                     WHERE pool_contract_id = ?2",
+                    params![max_id, pool_contract_id],
                 )?;
-                did_progress = true;
-            }
-        }
-
-        // Advance scheduler offset to continue after the last assigned token.
-        let step = i64::from(total_limit).rem_euclid(n_i64);
-        let next_offset = offset.wrapping_add(step).rem_euclid(n_i64);
-        tx.execute(
-            "UPDATE notes_scan_scheduler
-             SET next_account_offset = ?1
-             WHERE id = 1",
-            params![next_offset],
-        )?;
-
-        // If there's remaining work for any account, keep the processing loop alive.
-        let has_pending: bool = tx
-            .query_row(
-                "SELECT 1
-                 FROM account_commitment_scan s
-                 WHERE EXISTS (SELECT 1 FROM keypairs k WHERE k.account_id = s.account_id)
-                   AND EXISTS (SELECT 1 FROM pool_commitments c WHERE c.id > s.last_commitment_id)
-                 LIMIT 1",
-                [],
-                |_| Ok(true),
-            )
-            .optional()?
-            .unwrap_or(false);
-
-        tx.commit()?;
-        Ok(did_progress || has_pending)
-    }
-
-    /// Reconcile new pool nullifiers against `user_notes.expected_nullifier`,
-    /// updating `user_notes.nullifier_id` for matching notes.
-    pub fn reconcile_nullifiers(&mut self, limit: u32) -> Result<bool> {
-        let tx = self.conn.transaction()?;
-
-        let last_nullifier_id: i64 = tx.query_row(
-            "SELECT last_nullifier_id FROM nullifier_scan_state WHERE id = 1",
-            [],
-            |row| row.get(0),
-        )?;
-
-        let nullifiers: Vec<(i64, Field)> = {
-            let mut stmt = tx.prepare(
-                "SELECT id, nullifier
-                 FROM pool_nullifiers
-                 WHERE id > ?1
-                 ORDER BY id ASC
-                 LIMIT ?2",
-            )?;
-
-            let rows = stmt.query_map(params![last_nullifier_id, limit], |row| {
-                let id: i64 = row.get(0)?;
-                let nullifier: Field = row.get(1)?;
-                Ok((id, nullifier))
-            })?;
-
-            let mut out = Vec::new();
-            for r in rows {
-                out.push(r?);
-            }
-            out
-        };
-
-        let mut max_id = last_nullifier_id;
-        let mut did_any = false;
-
-        for (nullifier_id, nullifier) in nullifiers {
-            did_any = true;
-            if nullifier_id > max_id {
-                max_id = nullifier_id;
             }
 
-            tx.execute(
-                "UPDATE user_notes
-                 SET nullifier_id = ?1
-                 WHERE nullifier_id IS NULL
-                   AND expected_nullifier = ?2",
-                params![nullifier_id, nullifier],
-            )?;
+            tx.commit()?;
         }
 
-        if max_id > last_nullifier_id {
-            tx.execute(
-                "UPDATE nullifier_scan_state SET last_nullifier_id = ?1 WHERE id = 1",
-                params![max_id],
-            )?;
-        }
-
-        tx.commit()?;
         Ok(did_any)
     }
 }
@@ -1033,8 +1228,8 @@ mod tests {
     use super::*;
     use prover::{crypto, encryption};
     use types::{
-        ContractEvent, ContractsEventData, EncryptionPublicKey, EncryptionSignature,
-        LeafAddedEvent, NoteAmount, NotePublicKey, PublicKeyEvent, SpendingSignature,
+        ContractEvent, ContractsEventData, EncryptionPublicKey, KeyDerivationSignature, NoteAmount,
+        NotePublicKey, PublicKeyEvent,
     };
 
     fn dummy_event(id: &str) -> ContractEvent {
@@ -1083,11 +1278,16 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Create an account with keypairs.
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let account_id: i64 = storage.conn.query_row(
             "SELECT id FROM accounts WHERE address = ?1",
@@ -1209,9 +1409,19 @@ mod tests {
             latest_ledger: 10,
             events: vec![dummy_event("evt-1")],
         })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: "c1".to_string(),
+                last_ledger: 10,
+            }],
+            false,
+        )?;
 
         let meta = storage
             .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c1");
         assert_eq!(meta.last_ledger, 0);
@@ -1222,9 +1432,19 @@ mod tests {
             latest_ledger: 123,
             events: vec![],
         })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: "c2".to_string(),
+                last_ledger: 123,
+            }],
+            true,
+        )?;
 
         let meta = storage
             .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c2");
         assert_eq!(meta.last_ledger, 123);
@@ -1236,31 +1456,39 @@ mod tests {
     fn get_user_keys_returns_latest_keypair() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let (note_keypair_1, enc_keypair_1) = encryption::derive_encryption_and_note_keypairs(
-            SpendingSignature(vec![1u8; 64]),
-            EncryptionSignature(vec![2u8; 64]),
-        )?;
-        let (note_keypair_2, enc_keypair_2) = encryption::derive_encryption_and_note_keypairs(
-            SpendingSignature(vec![3u8; 64]),
-            EncryptionSignature(vec![4u8; 64]),
-        )?;
+        let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
+        let signature_2 = KeyDerivationSignature(vec![3u8; 64]);
+        let (note_keypair_1, enc_keypair_1) =
+            encryption::derive_encryption_and_note_keypairs(signature_1.clone())?;
+        let (note_keypair_2, enc_keypair_2) =
+            encryption::derive_encryption_and_note_keypairs(signature_2.clone())?;
+        let membership_blinding_1 =
+            encryption::derive_membership_blinding(&signature_1, "testnet")?;
+        let membership_blinding_2 =
+            encryption::derive_membership_blinding(&signature_2, "testnet")?;
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_1,
             &enc_keypair_1,
+            &membership_blinding_1,
         )?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_2,
             &enc_keypair_2,
+            &membership_blinding_2,
         )?;
 
-        let (got_note, got_enc) = storage
+        let keys = storage
             .get_user_keys("GTESTACCOUNT")?
             .expect("expected keypairs to exist");
-        assert_eq!(got_note.public.0, note_keypair_2.public.0);
-        assert_eq!(got_enc.public.0, enc_keypair_2.public.0);
+        assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
+        assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
+        assert_eq!(
+            keys.membership_blinding.to_le_bytes(),
+            membership_blinding_2.to_le_bytes()
+        );
 
         Ok(())
     }
@@ -1269,13 +1497,23 @@ mod tests {
     fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
 
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let count: i64 = storage.conn.query_row(
             "SELECT COUNT(*) FROM accounts WHERE address = ?1",
@@ -1343,8 +1581,19 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_ledger: current_ledger,
+            }],
+            true,
+        )?;
 
-        let status = storage.check_asp_membership_precondition(&leaf, &root_new, current_ledger)?;
+        // Root matches the last stored root: this should NOT require syncing
+        // even if the last ASP leaf was emitted earlier than the current tip.
+        let status =
+            storage.check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)?;
         assert!(matches!(
             status,
             AspMembershipSync::SyncRequired(Some(gap)) if gap == current_ledger - last_leaf_ledger
@@ -1394,9 +1643,17 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_ledger: current_ledger,
+            }],
+            true,
+        )?;
 
         let err = storage
-            .check_asp_membership_precondition(&leaf, &root_new, current_ledger)
+            .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
             .expect_err("root mismatch at same ledger should be an error");
         assert!(err.to_string().contains("asp membership root mismatch"));
         Ok(())
@@ -1441,10 +1698,17 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_ledger: current_ledger,
+            }],
+            true,
+        )?;
 
-        // Root matches the last stored root: this should NOT require syncing
-        // even if the last ASP leaf was emitted earlier than the current tip.
-        let status = storage.check_asp_membership_precondition(&leaf, &root, current_ledger)?;
+        let status =
+            storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
         Ok(())
     }
@@ -1453,11 +1717,16 @@ mod tests {
     fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -1508,7 +1777,8 @@ mod tests {
         };
         assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
 
-        let result = storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &commitment)?;
+        let result =
+            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
         assert!(result.is_some());
         let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
         assert_eq!(got_amount, amount);
@@ -1522,11 +1792,16 @@ mod tests {
     fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -1604,7 +1879,8 @@ mod tests {
         }])?;
         storage.reconcile_nullifiers(100)?;
 
-        let result = storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &commitment)?;
+        let result =
+            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
         assert!(result.is_none(), "spent note should not be returned");
 
         Ok(())
@@ -1614,11 +1890,16 @@ mod tests {
     fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        let spending_sig = SpendingSignature(vec![1u8; 64]);
-        let encryption_sig = EncryptionSignature(vec![2u8; 64]);
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(spending_sig, encryption_sig)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let amount = NoteAmount::from(5);
         let mut blinding_le = [0u8; 32];
@@ -1666,8 +1947,11 @@ mod tests {
             2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 0,
         ])?;
-        let result =
-            storage.get_unspent_user_note_by_commitment("GTESTACCOUNT", &wrong_commitment)?;
+        let result = storage.get_unspent_user_note_by_commitment(
+            "CPOOL",
+            "GTESTACCOUNT",
+            &wrong_commitment,
+        )?;
         assert!(result.is_none(), "wrong commitment should not match");
 
         Ok(())
@@ -1711,7 +1995,7 @@ mod tests {
             },
         ])?;
 
-        let leaves = storage.get_pool_commitment_leaves_ordered()?;
+        let leaves = storage.get_pool_commitment_leaves_ordered("CPOOL")?;
         assert_eq!(leaves.len(), 3);
         assert_eq!(leaves[0], leaf0);
         assert_eq!(leaves[1], leaf1);
@@ -1748,7 +2032,7 @@ mod tests {
         ])?;
 
         let err = storage
-            .get_pool_commitment_leaves_ordered()
+            .get_pool_commitment_leaves_ordered("CPOOL")
             .expect_err("gap should error");
         assert!(err.to_string().contains("gap/out-of-order"));
 

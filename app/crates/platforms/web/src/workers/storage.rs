@@ -1,6 +1,6 @@
 use crate::protocol::{
-    AdminASPRequest, DisclaimerStatePayload, DisclosureInputs, StorageWorkerRequest,
-    StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
+    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
@@ -8,19 +8,20 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
     crypto::asp_membership_leaf,
-    encryption::{derive_encryption_and_note_keypairs, generate_random_blinding},
-    flows::{
-        DepositParams, N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams,
-        TransferParams, WithdrawParams,
+    encryption::{
+        derive_encryption_and_note_keypairs, derive_membership_blinding, generate_random_blinding,
     },
+    flows::{N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
     merkle::{MerklePrefixTree, MerklePrefixTreeBuilt, MerkleProof},
 };
 use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys, process_events,
+    process_notes,
 };
 use std::cell::RefCell;
 use types::{
-    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteKeyPair, NotePublicKey,
+    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteAmount, NoteKeyPair,
+    NotePublicKey,
 };
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
@@ -204,17 +205,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::DeriveSaveUserKeys(
-            address,
-            spending_signature,
-            encryption_signature,
-        ) => {
+        StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed) => {
+            log::trace!(
+                "[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}",
+                metadata.len()
+            );
+            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
             log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
             let (note_keypair, encryption_keypair) =
-                derive_encryption_and_note_keypairs(spending_signature, encryption_signature)?;
-            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair)?)?;
+                derive_encryption_and_note_keypairs(signature.clone())?;
+            let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
+            with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
             log::trace!(
-                "[{WORKER_NAME}] saved notes and encryption keys for the account {address}"
+                "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {address}"
             );
             kick_processor();
             StorageWorkerResponse::Saved
@@ -245,11 +251,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     "[{WORKER_NAME}] not found notes and encryption keys for the account {address}"
                 );
             }
-            StorageWorkerResponse::UserKeys(opt.map(|(note_keypair, encryption_keypair)| {
-                UserKeys {
-                    note_keypair,
-                    encryption_keypair,
-                }
+            StorageWorkerResponse::UserKeys(opt.map(|keys| UserKeys {
+                note_keypair: PublicNoteKeyPair {
+                    public: keys.note_keypair.public,
+                },
+                encryption_keypair: PublicEncryptionKeyPair {
+                    public: keys.encryption_keypair.public,
+                },
+            }))
+        }
+        StorageWorkerRequest::AspSecret(address) => {
+            log::trace!("[{WORKER_NAME}] fetch ASP secret for the account {address}");
+            let opt = with_storage!(s => s.get_user_keys(&address)?)?;
+            StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
+                membership_blinding: keys.membership_blinding,
             }))
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
@@ -257,6 +272,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
             log::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {address}",
+                list.len()
+            );
+            StorageWorkerResponse::UserNotes(list)
+        }
+        StorageWorkerRequest::UnspentUserNotes {
+            user_address,
+            pool_contract_id,
+        } => {
+            log::trace!(
+                "[{WORKER_NAME}] list all unspent notes for the account {user_address} in pool {pool_contract_id}"
+            );
+            let list = with_storage!(s =>
+                s.list_unspent_user_notes(&pool_contract_id, &user_address)?
+            )?;
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} unspent notes for the account {user_address}",
                 list.len()
             );
             StorageWorkerResponse::UserNotes(list)
@@ -285,17 +316,21 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let pool_root = req
                 .pool_root
                 .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-            let (note_privkey, _note_pubkey, _encryption_pubkey) =
+            let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
                 load_user_key_material(&req.user_address)?;
 
-            let tree =
-                match build_validated_pool_tree(req.pool_next_index, req.tree_depth, pool_root)? {
-                    Ok(tree) => tree,
-                    Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-                };
+            let tree = match build_validated_pool_tree(
+                &req.pool_address,
+                req.pool_next_index,
+                req.tree_depth,
+                pool_root,
+            )? {
+                Ok(tree) => tree,
+                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
+            };
 
             let (amount, blinding, leaf_index) = with_storage!(
-                s => s.get_unspent_user_note_by_commitment(&req.user_address, &req.selected_commitment)?
+                s => s.get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, &req.selected_commitment)?
             )?
             .ok_or_else(|| {
                 anyhow::anyhow!(
@@ -330,178 +365,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             log::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
             StorageWorkerResponse::DeriveASPleaf(user_leaf)
         }
-        StorageWorkerRequest::Deposit(req) => {
-            log::trace!("[{WORKER_NAME}] deposit");
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let outputs = (0..N_OUTPUTS)
-                .map(|i| {
-                    Ok(TransactOutput {
-                        amount_stroops: req.output_amounts[i],
-                        blinding: generate_random_blinding()?,
-                        recipient_note_pubkey: Some(note_pubkey.clone()),
-                        recipient_encryption_pubkey: Some(encryption_pubkey.clone()),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let params = DepositParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                pool_address: req.pool_address,
-                amount_stroops: req.amount_stroops,
-                outputs,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::DepositParams(params)
-        }
-        StorageWorkerRequest::Withdraw(req) => {
-            log::trace!("[{WORKER_NAME}] withdraw");
-
-            if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
-                return Ok(StorageWorkerResponse::Error(
-                    "withdraw input_commitments must have length 1..=2".to_string(),
-                ));
-            }
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let inputs = match build_pool_inputs(
-                &req.user_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-                &req.input_commitments,
-            )? {
-                Ok(v) => v,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let mut withdraw_amount = types::ExtAmount::ZERO;
-            for i in &inputs {
-                withdraw_amount = withdraw_amount
-                    .checked_add(types::ExtAmount::from(i.amount_stroops))
-                    .ok_or_else(|| anyhow::anyhow!("withdraw amount overflow"))?;
-            }
-
-            let params = WithdrawParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                withdraw_recipient: req.withdraw_recipient,
-                withdraw_amount_stroops: withdraw_amount,
-                inputs,
-                outputs: None,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::WithdrawParams(params)
-        }
-        StorageWorkerRequest::Transfer(req) => {
-            log::trace!("[{WORKER_NAME}] transfer");
-
-            if req.input_commitments.is_empty() || req.input_commitments.len() > 2 {
-                return Ok(StorageWorkerResponse::Error(
-                    "transfer input_commitments must have length 1..=2".to_string(),
-                ));
-            }
-
-            let (note_privkey, note_pubkey, encryption_pubkey) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &note_pubkey,
-                req.membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let inputs = match build_pool_inputs(
-                &req.user_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-                &req.input_commitments,
-            )? {
-                Ok(v) => v,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let outputs = (0..N_OUTPUTS)
-                .map(|i| {
-                    Ok(TransactOutput {
-                        amount_stroops: req.output_amounts[i],
-                        blinding: generate_random_blinding()?,
-                        recipient_note_pubkey: Some(req.recipient_note_pubkey.clone()),
-                        recipient_encryption_pubkey: Some(req.recipient_encryption_pubkey.clone()),
-                    })
-                })
-                .collect::<Result<Vec<_>>>()?;
-
-            let params = TransferParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                pool_address: req.pool_address,
-                inputs,
-                outputs,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::TransferParams(params)
-        }
         StorageWorkerRequest::Transact(req) => {
             log::trace!("[{WORKER_NAME}] transact");
 
@@ -511,12 +374,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 ));
             }
 
-            let (note_privkey, note_pubkey, encryption_pubkey) =
+            let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
                 load_user_key_material(&req.user_address)?;
 
             let membership_proof = match build_membership_proof(
+                &req.aspmem_contract_id,
                 &note_pubkey,
-                req.membership_blinding,
+                membership_blinding,
                 req.aspmem_root,
                 req.aspmem_ledger,
                 req.tree_depth,
@@ -531,6 +395,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
 
             let inputs = match build_pool_inputs(
                 &req.user_address,
+                &req.pool_address,
                 req.pool_next_index,
                 req.tree_depth,
                 pool_root,
@@ -550,7 +415,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                     )));
                 }
                 outputs.push(TransactOutput {
-                    amount_stroops: req.output_amounts[i],
+                    amount: req.output_amounts[i],
                     blinding: generate_random_blinding()?,
                     recipient_note_pubkey: note_pk,
                     recipient_encryption_pubkey: enc_pk,
@@ -583,30 +448,37 @@ fn load_user_key_material(
     types::NotePrivateKey,
     NotePublicKey,
     types::EncryptionPublicKey,
+    Field,
 )> {
     with_storage!(s => {
-        let (note_privkey, note_pubkey, encryption_pubkey) =
+        let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
             match s.get_user_keys(user_address)? {
-                Some((
-                    NoteKeyPair {
-                        private,
-                        public: note_pub,
-                    },
-                    EncryptionKeyPair {
-                        public: enc_pub, ..
-                    },
-                )) => (private, note_pub, enc_pub),
+                Some(StoredUserKeys {
+                    note_keypair:
+                        NoteKeyPair {
+                            private,
+                            public: note_pub,
+                        },
+                    encryption_keypair: EncryptionKeyPair { public: enc_pub, .. },
+                    membership_blinding,
+                }) => (private, note_pub, enc_pub, membership_blinding),
                 None => {
                     anyhow::bail!(
-                        "address {user_address} should generate note and encryption keys first"
+                        "address {user_address} should generate privacy keys and ASP secret first"
                     );
                 }
             };
-        Ok::<_, anyhow::Error>((note_privkey, note_pubkey, encryption_pubkey))
+        Ok::<_, anyhow::Error>((
+            note_privkey,
+            note_pubkey,
+            encryption_pubkey,
+            membership_blinding,
+        ))
     })?
 }
 
 fn build_membership_proof(
+    aspmem_contract_id: &str,
     note_pubkey: &NotePublicKey,
     membership_blinding: Field,
     aspmem_root: Field,
@@ -615,6 +487,7 @@ fn build_membership_proof(
 ) -> Result<std::result::Result<AspMembershipProof, AspMembershipSync>> {
     let user_leaf = asp_membership_leaf(note_pubkey, &membership_blinding)?;
     let user_leaf_index = match with_storage!(s => s.check_asp_membership_precondition(
+        aspmem_contract_id,
         &user_leaf,
         &aspmem_root,
         aspmem_ledger
@@ -627,7 +500,7 @@ fn build_membership_proof(
     };
 
     let asp_membership_merkle_tree_leaves =
-        with_storage!(s => s.get_all_asp_membership_leaves_ordered()?)?;
+        with_storage!(s => s.get_all_asp_membership_leaves_ordered(aspmem_contract_id)?)?;
     let aspmembership_tree =
         MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
     let MerkleProof {
@@ -648,6 +521,7 @@ fn build_membership_proof(
 
 fn build_pool_inputs(
     user_address: &str,
+    pool_address: &str,
     pool_next_index: u32,
     tree_depth: u32,
     expected_pool_root: Field,
@@ -657,25 +531,39 @@ fn build_pool_inputs(
         return Ok(Ok(Vec::new()));
     }
 
-    let tree = match build_validated_pool_tree(pool_next_index, tree_depth, expected_pool_root)? {
+    let tree = match build_validated_pool_tree(
+        pool_address,
+        pool_next_index,
+        tree_depth,
+        expected_pool_root,
+    )? {
         Ok(tree) => tree,
         Err(status) => return Ok(Err(status)),
     };
 
     let mut out = Vec::with_capacity(input_commitments.len());
     for commitment in input_commitments {
-        out.push(build_pool_input_note(user_address, commitment, &tree)?);
+        let Some((amount, blinding, leaf_index)) = with_storage!(s => s.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?)?
+        else {
+            log::info!(
+                "[{WORKER_NAME}] unspent note not found for commitment {commitment}; waiting for note derivation"
+            );
+            return Ok(Err(AspMembershipSync::SyncRequired(None)));
+        };
+
+        out.push(build_pool_input_note(amount, blinding, leaf_index, &tree)?);
     }
 
     Ok(Ok(out))
 }
 
 fn build_validated_pool_tree(
+    pool_address: &str,
     pool_next_index: u32,
     tree_depth: u32,
     expected_pool_root: Field,
 ) -> Result<std::result::Result<MerklePrefixTreeBuilt, AspMembershipSync>> {
-    let leaves = with_storage!(s => s.get_pool_commitment_leaves_ordered()?)?;
+    let leaves = with_storage!(s => s.get_pool_commitment_leaves_ordered(pool_address)?)?;
 
     if leaves.len() != pool_next_index as usize {
         log::info!(
@@ -696,16 +584,11 @@ fn build_validated_pool_tree(
 }
 
 fn build_pool_input_note(
-    user_address: &str,
-    commitment: &Field,
+    amount: NoteAmount,
+    blinding: Field,
+    leaf_index: u32,
     tree: &MerklePrefixTreeBuilt,
 ) -> Result<TransactInputNote> {
-    let (amount, blinding, leaf_index) =
-        with_storage!(s => s.get_unspent_user_note_by_commitment(user_address, commitment)?)?
-            .ok_or_else(|| {
-                anyhow::anyhow!("unspent note not found for commitment {}", commitment)
-            })?;
-
     let MerkleProof {
         path_elements,
         path_indices,
@@ -713,7 +596,7 @@ fn build_pool_input_note(
     } = tree.proof(leaf_index)?;
 
     Ok(TransactInputNote {
-        amount_stroops: amount,
+        amount,
         blinding,
         merkle_path_elements: path_elements,
         merkle_path_indices: path_indices,

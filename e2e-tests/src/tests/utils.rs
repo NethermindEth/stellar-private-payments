@@ -1,8 +1,6 @@
 //! Utility functions and types for end-to-end tests
 
 use anyhow::Result;
-use ark_bn254::Bn254;
-use ark_groth16::VerifyingKey;
 use asp_membership::ASPMembership;
 use asp_non_membership::ASPNonMembership;
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
@@ -21,10 +19,9 @@ use soroban_sdk::{
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
-use soroban_utils::{
-    g1_bytes_from_ark, g2_bytes_from_ark,
-    utils::{MockToken, vk_bytes_from_ark},
-};
+
+use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
+
 use zkhash::{
     ark_ff::{BigInteger, PrimeField, Zero},
     fields::bn256::FpBN256 as Scalar,
@@ -44,6 +41,23 @@ pub const ASP_MEMBERSHIP_LEVELS: u32 = 10;
 
 /// Maximum deposit amount allowed per transaction
 pub const MAX_DEPOSIT: u32 = 1_000_000;
+
+/// Create a test environment that disables snapshot writing under Miri.
+/// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
+/// uses for test snapshots.
+pub fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
 
 /// Returns the path to the pre-generated proving key for the policy_tx_2_2
 /// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
@@ -69,24 +83,22 @@ pub struct DeployedContracts {
 /// Deploy all contracts required for E2E testing
 ///
 /// Deploys and runs constructors for the Pool, ASP Membership, ASP
-/// Non-Membership, and Groth16 Verifier contracts with the provided
-/// verification key.
+/// Non-Membership, and Groth16 Verifier contracts.  The verifier uses the
+/// verification key embedded at compile time via `VERIFIER_VK_JSON`.
 ///
 /// # Arguments
 ///
 /// * `env` - The Soroban environment
-/// * `vk` - The Groth16 verification key for proof verification
 ///
 /// # Returns
 ///
 /// A `DeployedContracts` struct containing all deployed contract addresses
-pub fn deploy_contracts(env: &Env, vk: &VerifyingKey<Bn254>) -> DeployedContracts {
+pub fn deploy_contracts(env: &Env) -> DeployedContracts {
     let admin = Address::generate(env);
 
     let token_address = env.register(MockToken, ());
 
-    let vk_bytes = vk_bytes_from_ark(env, vk);
-    let verifier_address = env.register(CircomGroth16Verifier, (vk_bytes.clone(),));
+    let verifier_address = env.register(CircomGroth16Verifier, ());
 
     let asp_membership = env.register(ASPMembership, (admin.clone(), ASP_MEMBERSHIP_LEVELS));
 
