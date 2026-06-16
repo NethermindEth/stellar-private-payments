@@ -4,7 +4,7 @@ use bootnode::{
     metrics,
     storage::{InsertGetEventsPage, Storage},
 };
-use std::{path::PathBuf, sync::Arc};
+use std::sync::Arc;
 use stellar::{GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
 use types::ContractConfig;
 
@@ -15,11 +15,7 @@ fn test_config() -> Config {
         bind: "127.0.0.1:40404".parse().expect("bind"),
         upstream_rpc_url: "http://127.0.0.1:9".parse().expect("upstream"),
         dev: true,
-        insecure_http: true,
-        domain: None,
-        acme_email: None,
-        acme_cache_dir: PathBuf::from("/tmp/bootnode-test-acme"),
-        acme_directory_url: None,
+        tls: None,
         redirect_days: 5,
         ledger_seconds: 5,
         indexer_sleep_ms: 60_000,
@@ -27,10 +23,7 @@ fn test_config() -> Config {
         page_size: 300,
         rate_limit_rps: 1_000,
         rate_limit_burst: 1_000,
-        otel_enabled: false,
-        otel_otlp_endpoint: None,
-        otel_service_name: "bootnode-test".into(),
-        otel_sample_ratio: 0.0,
+        otel: None,
     }
 }
 

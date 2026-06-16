@@ -1,5 +1,10 @@
 use anyhow::{Context, Result, bail};
-use bootnode::{Bootnode, Postgres, config::Config, metrics, otel, storage::Storage};
+use bootnode::{
+    Bootnode, Postgres,
+    config::{Config, OtelConfig, TlsConfig},
+    metrics, otel,
+    storage::Storage,
+};
 use clap::Parser;
 use std::{net::SocketAddr, path::PathBuf, sync::Arc};
 use url::Url;
@@ -121,7 +126,7 @@ impl Cli {
                 .context("--acme-email is required for HTTPS/ACME mode")?;
         }
 
-        if !(0.0..=1.0).contains(&self.otel_sample_ratio) {
+        if self.otel_enabled && !(0.0..=1.0).contains(&self.otel_sample_ratio) {
             bail!("--otel-sample-ratio must be within 0.0..=1.0");
         }
 
@@ -133,15 +138,36 @@ impl Cli {
     }
 
     fn into_config(self) -> Config {
+        let tls = match (self.insecure_http, self.domain, self.acme_email) {
+            (true, ..) => None,
+            (false, Some(domain), Some(acme_email)) => Some(TlsConfig {
+                domain,
+                acme_email,
+                acme_cache_dir: self.acme_cache_dir,
+                acme_directory_url: self.acme_directory_url,
+            }),
+            (false, ..) => {
+                unreachable!(
+                    "--domain and --acme-email are required when --insecure-http is not set"
+                )
+            }
+        };
+
+        let otel = if self.otel_enabled {
+            Some(OtelConfig {
+                otlp_endpoint: self.otel_otlp_endpoint,
+                service_name: self.otel_service_name,
+                sample_ratio: self.otel_sample_ratio,
+            })
+        } else {
+            None
+        };
+
         Config {
             bind: self.bind,
             upstream_rpc_url: self.upstream_rpc_url,
             dev: self.dev,
-            insecure_http: self.insecure_http,
-            domain: self.domain,
-            acme_email: self.acme_email,
-            acme_cache_dir: self.acme_cache_dir,
-            acme_directory_url: self.acme_directory_url,
+            tls,
             redirect_days: self.redirect_days,
             ledger_seconds: self.ledger_seconds,
             indexer_sleep_ms: self.indexer_sleep_ms,
@@ -149,10 +175,7 @@ impl Cli {
             page_size: self.page_size,
             rate_limit_rps: self.rate_limit_rps,
             rate_limit_burst: self.rate_limit_burst,
-            otel_enabled: self.otel_enabled,
-            otel_otlp_endpoint: self.otel_otlp_endpoint,
-            otel_service_name: self.otel_service_name,
-            otel_sample_ratio: self.otel_sample_ratio,
+            otel,
         }
     }
 

@@ -25,16 +25,16 @@ pub fn init_telemetry(cfg: &Config) -> Result<Option<TelemetryGuard>> {
         .with_thread_ids(true)
         .with_thread_names(true);
 
-    if !cfg.otel_enabled {
+    let Some(otel) = cfg.otel.as_ref() else {
         tracing_subscriber::registry()
             .with(env_filter)
             .with(fmt_layer)
             .init();
         return Ok(None);
-    }
+    };
 
-    let endpoint = cfg
-        .otel_otlp_endpoint
+    let endpoint = otel
+        .otlp_endpoint
         .clone()
         .unwrap_or_else(|| "http://localhost:4317".to_string());
 
@@ -45,12 +45,12 @@ pub fn init_telemetry(cfg: &Config) -> Result<Option<TelemetryGuard>> {
         .build()?;
 
     let resource = Resource::builder()
-        .with_service_name(cfg.otel_service_name.clone())
+        .with_service_name(otel.service_name.clone())
         .build();
 
     let provider = sdktrace::SdkTracerProvider::builder()
         .with_resource(resource)
-        .with_sampler(sdktrace::Sampler::TraceIdRatioBased(cfg.otel_sample_ratio))
+        .with_sampler(sdktrace::Sampler::TraceIdRatioBased(otel.sample_ratio))
         .with_batch_exporter(exporter)
         .build();
 

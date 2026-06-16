@@ -2,15 +2,30 @@ use std::{net::SocketAddr, path::PathBuf};
 use url::Url;
 
 #[derive(Debug, Clone)]
+pub struct TlsConfig {
+    /// Domain name used for ACME (TLS-ALPN-01).
+    pub domain: String,
+    /// ACME account contact email.
+    pub acme_email: String,
+    /// ACME cache directory (cert/account cache).
+    pub acme_cache_dir: PathBuf,
+    /// ACME directory URL (LetsEncrypt staging/prod).
+    pub acme_directory_url: Option<Url>,
+}
+
+#[derive(Debug, Clone)]
+pub struct OtelConfig {
+    pub otlp_endpoint: Option<String>,
+    pub service_name: String,
+    pub sample_ratio: f64,
+}
+
+#[derive(Debug, Clone)]
 pub struct Config {
     pub bind: SocketAddr,
     pub upstream_rpc_url: Url,
     pub dev: bool,
-    pub insecure_http: bool,
-    pub domain: Option<String>,
-    pub acme_email: Option<String>,
-    pub acme_cache_dir: PathBuf,
-    pub acme_directory_url: Option<Url>,
+    pub tls: Option<TlsConfig>,
     pub redirect_days: u32,
     pub ledger_seconds: u32,
     pub indexer_sleep_ms: u64,
@@ -18,10 +33,7 @@ pub struct Config {
     pub page_size: u32,
     pub rate_limit_rps: u32,
     pub rate_limit_burst: u32,
-    pub otel_enabled: bool,
-    pub otel_otlp_endpoint: Option<String>,
-    pub otel_service_name: String,
-    pub otel_sample_ratio: f64,
+    pub otel: Option<OtelConfig>,
 }
 
 impl Config {

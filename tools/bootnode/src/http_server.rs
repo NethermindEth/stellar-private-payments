@@ -88,7 +88,7 @@ impl HttpServer {
                 HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
             ));
 
-        let router = if state.cfg.insecure_http {
+        let router = if state.cfg.tls.is_none() {
             router
         } else {
             router.layer(SetResponseHeaderLayer::overriding(
@@ -97,9 +97,9 @@ impl HttpServer {
             ))
         };
 
-        tracing::info!(bind = %state.cfg.bind, insecure_http = state.cfg.insecure_http, "starting server");
+        tracing::info!(bind = %state.cfg.bind, tls = state.cfg.tls.is_some(), "starting server");
 
-        if state.cfg.insecure_http {
+        if state.cfg.tls.is_none() {
             let listener = tokio::net::TcpListener::bind(state.cfg.bind).await?;
             axum::serve(
                 listener,
@@ -122,22 +122,17 @@ struct RpcState {
 async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
     use rustls_acme::{AcmeConfig, caches::DirCache};
 
-    let domain = state
+    let tls = state
         .cfg
-        .domain
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("domain missing"))?;
-    let email = state
-        .cfg
-        .acme_email
-        .clone()
-        .ok_or_else(|| anyhow::anyhow!("acme email missing"))?;
+        .tls
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("tls config missing"))?;
 
-    let mut acme = AcmeConfig::new([domain])
-        .contact_push(format!("mailto:{email}"))
-        .cache(DirCache::new(state.cfg.acme_cache_dir.clone()));
+    let mut acme = AcmeConfig::new([&tls.domain])
+        .contact_push(format!("mailto:{}", tls.acme_email))
+        .cache(DirCache::new(tls.acme_cache_dir.clone()));
 
-    if let Some(dir) = state.cfg.acme_directory_url.clone() {
+    if let Some(dir) = tls.acme_directory_url.clone() {
         acme = acme.directory(dir.as_str());
     }
 
