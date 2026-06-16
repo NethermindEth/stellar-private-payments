@@ -76,14 +76,6 @@ struct LeafInsertedEvent {
     root: U256,
 }
 
-#[contractevent(topics = ["LeafUpdated"])]
-struct LeafUpdatedEvent {
-    key: U256,
-    old_value: U256,
-    new_value: U256,
-    root: U256,
-}
-
 #[contractevent(topics = ["LeafDeleted"])]
 struct LeafDeletedEvent {
     key: U256,
@@ -618,107 +610,6 @@ impl ASPNonMembership {
         LeafDeletedEvent {
             key: key.clone(),
             root: rt_new,
-        }
-        .publish(&env);
-
-        Ok(())
-    }
-
-    /// Update a key-value pair in the tree
-    ///
-    /// Changes the value associated with an existing key. Recomputes all nodes
-    /// along the path from the leaf to the root, removing old nodes and
-    /// creating new ones. Requires admin authorization.
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `key` - Key to update
-    /// * `new_value` - New value to associate with the key
-    ///
-    /// # Returns
-    ///
-    /// Returns `Ok(())` on success, emitting a `LeafUpdatedEvent` with the new
-    /// root.
-    ///
-    /// # Errors
-    ///
-    /// * `Error::KeyNotFound` - Key does not exist in the tree or database
-    ///   operations failed
-    pub fn update_leaf(env: Env, key: U256, new_value: U256) -> Result<(), Error> {
-        let store = env.storage().persistent();
-        let admin: Address = store.get(&DataKey::Admin).ok_or(Error::NotInitialized)?;
-        admin.require_auth();
-        let root: U256 = store
-            .get(&DataKey::Root)
-            .unwrap_or(U256::from_u32(&env, 0u32));
-
-        // Compute key bits once
-        let key_bits = Self::split_bits(&env, &key);
-
-        // Find the key
-        let find_result = Self::find_key_internal(&env, &store, &key, &key_bits, &root, 0u32)?;
-
-        if !find_result.found {
-            return Err(Error::KeyNotFound);
-        }
-        // Update the leaf
-        let old_leaf_hash = Self::hash_leaf(&env, key.clone(), find_result.found_value.clone());
-        let new_leaf_hash = Self::hash_leaf(&env, key.clone(), new_value.clone());
-        // Update leaf node
-        let leaf_node = vec![
-            &env,
-            U256::from_u32(&env, 1u32),
-            key.clone(),
-            new_value.clone(),
-        ];
-        store.set(&DataKey::Node(new_leaf_hash.clone()), &leaf_node);
-
-        // Remove old leaf
-        store.remove(&DataKey::Node(old_leaf_hash.clone()));
-
-        // Rebuild path from leaf to root (process siblings in reverse)
-        let mut current_hash = new_leaf_hash;
-        let mut old_current_hash = old_leaf_hash;
-
-        let siblings_len = find_result.siblings.len();
-        for level_idx in 0..siblings_len {
-            let level = siblings_len.saturating_sub(1).saturating_sub(level_idx); // Reverse: process from leaf to root
-            let sibling = find_result.siblings.get(level).ok_or(Error::KeyNotFound)?;
-            let bit = key_bits.get(level).ok_or(Error::KeyNotFound)?;
-
-            let (left_hash, right_hash) = if bit {
-                (sibling.clone(), current_hash)
-            } else {
-                (current_hash, sibling.clone())
-            };
-
-            let (old_left_hash, old_right_hash) = if bit {
-                (sibling.clone(), old_current_hash)
-            } else {
-                (old_current_hash, sibling.clone())
-            };
-
-            current_hash = Self::hash_internal(&env, left_hash.clone(), right_hash.clone());
-            old_current_hash = Self::hash_internal(&env, old_left_hash, old_right_hash);
-
-            // Update internal node
-            let internal_node = vec![&env, left_hash, right_hash];
-            store.set(&DataKey::Node(current_hash.clone()), &internal_node);
-
-            // Remove old internal node
-            store.remove(&DataKey::Node(old_current_hash.clone()));
-        }
-
-        // Update root
-        store.set(&DataKey::Root, &current_hash);
-
-        // Emit event
-        LeafUpdatedEvent {
-            key: key.clone(),
-            old_value: find_result.found_value,
-            new_value: new_value.clone(),
-            root: current_hash,
         }
         .publish(&env);
 
