@@ -3,9 +3,9 @@
 
 pub mod config;
 pub mod get_events;
-pub mod jsonrpc;
 pub mod metrics;
 pub mod otel;
+pub mod rpc;
 
 mod deployment;
 mod http_server;

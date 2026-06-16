@@ -1,24 +1,25 @@
-use crate::{AppState, deployment, get_events, jsonrpc, storage};
+use crate::{AppState, rpc, storage};
 use axum::{
     Router,
-    body::Bytes,
+    body::Body,
     extract::State,
-    http::{HeaderMap, HeaderValue, StatusCode, header},
+    http::{HeaderValue, Request, StatusCode, header},
     response::{IntoResponse, Response},
     routing::{get, post},
 };
-use metrics::{counter, gauge, histogram};
-use serde::Serialize;
-use std::{
-    sync::{Arc, atomic::Ordering},
-    time::Instant,
-};
+use http_body_util::BodyExt;
+use jsonrpsee::server::{BatchRequestConfig, Server, ServerConfig, TowerService, stop_channel};
+use metrics::{gauge, histogram};
+use std::{sync::Arc, time::Instant};
+use tower::Service;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
     cors::{Any, CorsLayer},
     set_header::SetResponseHeaderLayer,
     trace::TraceLayer,
 };
+
+type RpcService = TowerService<tower::layer::util::Identity, tower::layer::util::Identity>;
 
 pub(crate) async fn run_http(state: AppState) -> anyhow::Result<()> {
     let governor_conf = GovernorConfigBuilder::default()
@@ -32,11 +33,28 @@ pub(crate) async fn run_http(state: AppState) -> anyhow::Result<()> {
         .allow_methods(Any)
         .allow_headers(Any);
 
+    let (stop_handle, _server_handle) = stop_channel();
+    let methods = rpc::build_rpc_module(state.clone());
+    let server_cfg = ServerConfig::builder()
+        .http_only()
+        .max_request_body_size(1024 * 1024)
+        .set_batch_request_config(BatchRequestConfig::Disabled)
+        .build();
+    let rpc_svc = Arc::new(
+        Server::builder()
+            .set_config(server_cfg)
+            .to_service_builder()
+            .build(methods, stop_handle),
+    );
+
     let router = Router::new()
-        .route("/", post(handle_jsonrpc))
         .route("/healthz", get(healthz))
         .route("/metrics", get(metrics))
-        .with_state(state.clone())
+        .route("/", post(handle_rpc))
+        .with_state(RpcState {
+            app: state.clone(),
+            rpc: rpc_svc,
+        })
         .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
         .layer(cors)
         .layer(TraceLayer::new_for_http())
@@ -80,6 +98,12 @@ pub(crate) async fn run_http(state: AppState) -> anyhow::Result<()> {
     run_https_acme(state, router).await
 }
 
+#[derive(Clone)]
+struct RpcState {
+    app: AppState,
+    rpc: Arc<RpcService>,
+}
+
 async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
     use rustls_acme::{AcmeConfig, caches::DirCache};
 
@@ -113,12 +137,14 @@ async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn metrics(State(state): State<AppState>) -> impl IntoResponse {
-    state.prom_handle.render()
+async fn metrics(State(state): State<RpcState>) -> impl IntoResponse {
+    state.app.prom_handle.render()
 }
 
-async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
-    match state.db.get().await {
+async fn healthz(State(state): State<RpcState>) -> impl IntoResponse {
+    use std::sync::atomic::Ordering;
+
+    match state.app.db.get().await {
         Ok(client) => {
             if let Err(e) = client.query_one("SELECT 1", &[]).await {
                 tracing::warn!(error = %e, "healthz: db query failed");
@@ -131,8 +157,8 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
         }
     }
 
-    let tip = state.ledger_tip.load(Ordering::Relaxed);
-    let kv = match storage::load_kv(&state.db).await {
+    let tip = state.app.ledger_tip.load(Ordering::Relaxed);
+    let kv = match storage::load_kv(&state.app.db).await {
         Ok(kv) => kv,
         Err(e) => {
             tracing::warn!(error = %e, "healthz: failed to load kv");
@@ -141,7 +167,7 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
     };
 
     // Unhealthy if the indexer is more than one handoff window behind tip.
-    let cutoff = state.cfg.cutoff_ledgers();
+    let cutoff = state.app.cfg.cutoff_ledgers();
     if tip > 0 && kv.last_fully_indexed_ledger.saturating_add(cutoff) < tip {
         return (StatusCode::SERVICE_UNAVAILABLE, "indexer behind");
     }
@@ -149,13 +175,10 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
     (StatusCode::OK, "ok")
 }
 
-async fn handle_jsonrpc(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-    bytes: Bytes,
-) -> Response {
+async fn handle_rpc(State(state): State<RpcState>, req: Request<Body>) -> Response {
     let t0 = Instant::now();
-    let content_len = headers
+    let content_len = req
+        .headers()
         .get(header::CONTENT_LENGTH)
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok())
@@ -163,147 +186,41 @@ async fn handle_jsonrpc(
 
     gauge!("bootnode_inflight_requests").increment(1.0);
 
-    let req: jsonrpc::JsonRpcRequest = match serde_json::from_slice(&bytes) {
-        Ok(v) => v,
-        Err(e) => {
-            gauge!("bootnode_inflight_requests").decrement(1.0);
-            counter!("bootnode_json_parse_errors_total").increment(1);
-            let err = jsonrpc::parse_error(format!("invalid jsonrpc request: {e}"));
-            return json_response(StatusCode::OK, &err);
-        }
-    };
-
-    let id = req.id.clone().unwrap_or_else(jsonrpc::null_id);
-
-    let resp = match req.method.as_str() {
-        "getLatestLedger" => handle_get_latest_ledger(&state, id.clone()).await,
-        "getEvents" => handle_get_events(&state, id.clone(), &req.params).await,
-        _ => Ok(json_response(
-            StatusCode::OK,
-            &jsonrpc::method_not_found(id.clone()),
-        )),
-    };
+    let mut rpc = state.rpc.as_ref().clone();
+    let result = rpc.call(req).await;
 
     gauge!("bootnode_inflight_requests").decrement(1.0);
-
-    let dt = t0.elapsed().as_secs_f64();
-    histogram!("bootnode_request_duration_seconds").record(dt);
-    histogram!("bootnode_request_body_bytes").record(
-        u32::try_from(bytes.len())
-            .map(f64::from)
-            .unwrap_or(f64::from(u32::MAX)),
-    );
+    histogram!("bootnode_request_duration_seconds").record(t0.elapsed().as_secs_f64());
     if content_len > 0 {
-        histogram!("bootnode_request_content_length_bytes").record(
-            u32::try_from(content_len)
-                .map(f64::from)
-                .unwrap_or(f64::from(u32::MAX)),
-        );
-    }
-
-    match resp {
-        Ok(r) => r,
-        Err(e) => {
-            counter!("bootnode_handler_errors_total").increment(1);
-            let err = jsonrpc::internal_error(id, e.to_string());
-            json_response(StatusCode::OK, &err)
-        }
-    }
-}
-
-async fn handle_get_latest_ledger(
-    state: &AppState,
-    id: serde_json::Value,
-) -> anyhow::Result<Response> {
-    let result = state.upstream.get_latest_ledger().await?;
-    Ok(json_response(StatusCode::OK, &jsonrpc::ok(id, result)))
-}
-
-async fn handle_get_events(
-    state: &AppState,
-    id: serde_json::Value,
-    params: &serde_json::Value,
-) -> anyhow::Result<Response> {
-    let deployment = deployment::deployment_config()?;
-    let allowed_ids = stellar::contract_ids_for_indexer(&deployment);
-
-    let parsed = match get_events::parse_get_events_params(params) {
-        Ok(v) => v,
-        Err(_) => {
-            return Ok(json_response(
-                StatusCode::OK,
-                &jsonrpc::invalid_params(id, "invalid getEvents params"),
-            ));
-        }
-    };
-    if !get_events::is_allowed_filters(params, &allowed_ids) {
-        return Ok(json_response(
-            StatusCode::OK,
-            &jsonrpc::invalid_params(id, "unsupported filters"),
-        ));
-    }
-
-    let tip = state.ledger_tip.load(Ordering::Relaxed);
-    let cutoff_ledger = tip.saturating_sub(state.cfg.cutoff_ledgers());
-
-    let effective = match (parsed.start_ledger, parsed.cursor.as_deref()) {
-        (Some(start_ledger), None) => Some(start_ledger),
-        (None, Some(cursor)) => storage::lookup_cursor_ledger(&state.db, cursor).await?,
-        _ => None,
-    };
-
-    if let Some(effective) = effective
-        && effective >= cutoff_ledger
-    {
-        counter!("bootnode_handoffs_total").increment(1);
-        return Ok(json_response(
-            StatusCode::OK,
-            &jsonrpc::retention_handoff(id, cutoff_ledger),
-        ));
-    }
-
-    // Serve from cache.
-    let cached = match (parsed.start_ledger, parsed.cursor) {
-        (Some(start_ledger), None) => {
-            storage::get_cached_get_events_by_start_ledger(&state.db, start_ledger).await?
-        }
-        (None, Some(cursor)) => {
-            storage::get_cached_get_events_by_cursor(&state.db, &cursor).await?
-        }
-        _ => None,
-    };
-
-    let Some(result) = cached else {
-        counter!("bootnode_cache_misses_total").increment(1);
-        let mut resp = json_response(
-            StatusCode::OK,
-            &jsonrpc::cache_miss(id, "cache miss; indexer may still be catching up"),
-        );
-        resp.headers_mut()
-            .insert(header::RETRY_AFTER, HeaderValue::from_static("30"));
-        return Ok(resp);
-    };
-
-    counter!("bootnode_cache_hits_total").increment(1);
-    Ok(json_response(StatusCode::OK, &jsonrpc::ok(id, result)))
-}
-
-fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
-    let body = match serde_json::to_vec(value) {
-        Ok(v) => v,
-        Err(_) => b"{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"serialization failed\"}}".to_vec(),
-    };
-    histogram!("bootnode_response_body_bytes").record(
-        u32::try_from(body.len())
+        let bytes = u32::try_from(content_len)
             .map(f64::from)
-            .unwrap_or(f64::from(u32::MAX)),
-    );
+            .unwrap_or(f64::from(u32::MAX));
+        histogram!("bootnode_request_body_bytes").record(bytes);
+        histogram!("bootnode_request_content_length_bytes").record(bytes);
+    }
 
-    let mut resp = Response::new(axum::body::Body::from(body));
-    *resp.status_mut() = status;
-    resp.headers_mut().insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/json"),
-    );
-    resp
+    match result {
+        Ok(response) => {
+            let (parts, body) = response.into_parts();
+            match body.collect().await {
+                Ok(collected) => {
+                    let bytes = collected.to_bytes();
+                    histogram!("bootnode_response_body_bytes").record(
+                        u32::try_from(bytes.len())
+                            .map(f64::from)
+                            .unwrap_or(f64::from(u32::MAX)),
+                    );
+                    Response::from_parts(parts, Body::from(bytes))
+                }
+                Err(err) => {
+                    tracing::warn!(error = %err, "failed to read rpc response body for metrics");
+                    Response::from_parts(parts, Body::empty())
+                }
+            }
+        }
+        Err(err) => {
+            tracing::error!(error = %err, "json-rpc service error");
+            (StatusCode::INTERNAL_SERVER_ERROR, "json-rpc service error").into_response()
+        }
+    }
 }

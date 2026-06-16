@@ -1,6 +1,5 @@
-use crate::{AppState, deployment, get_events, jsonrpc, storage};
+use crate::{AppState, deployment, get_events, storage};
 use metrics::{counter, gauge};
-use serde_json::Value;
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
 
@@ -46,7 +45,7 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
     }
 
     for _page in 0..state.cfg.max_pages_per_round {
-        let params = jsonrpc::make_get_events_params(
+        let params = get_events::make_get_events_params(
             &contract_ids,
             start_ledger,
             cursor.as_deref(),
