@@ -501,6 +501,9 @@ fn coalesce_bus_input(
     let mut consumed_keys = Vec::new();
     for (key, value) in inputs.iter() {
         if let Some((first, second, field)) = parse_bus_field_key(key, bus_name) {
+            if !field_order.contains(&field) {
+                anyhow::bail!("Unknown expanded bus field `{bus_name}[{first}][{second}].{field}`");
+            }
             consumed_keys.push(key.clone());
             by_index
                 .entry((first, second))
@@ -1090,6 +1093,34 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("Missing `membershipProofs[0][0].blinding`"),
+            "{err:#}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn policy_bus_coalescing_rejects_unknown_expanded_fields() {
+        let graph = Graph {
+            nodes: vec![circom_witness_rs::graph::Node::Input(0)],
+            signals: vec![0],
+            input_mapping: vec![HashSignalInfo {
+                hash: fnv1a("nonMembershipProofs"),
+                signalid: 0,
+                signalsize: 14,
+            }],
+        };
+        let mut inputs = non_membership_flattened_inputs();
+        inputs.insert(
+            "nonMembershipProofs[0][0].unexpected".to_string(),
+            vec![U256::from(15)],
+        );
+
+        let err = coalesce_policy_bus_inputs(&mut inputs, &graph)
+            .expect_err("unknown expanded bus fields must not be silently discarded");
+
+        assert!(
+            err.to_string()
+                .contains("Unknown expanded bus field `nonMembershipProofs[0][0].unexpected`"),
             "{err:#}"
         );
     }

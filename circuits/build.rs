@@ -48,6 +48,14 @@ const CURVE_ID: &str = "bn128";
 const EXPECTED_GRAPH_CIRCOM_VERSION: &str = "2.2.3";
 const EXPECTED_GRAPH_BUILDER_LOCK_SHA256: &str =
     "e5405413f79ac57b0d92952c1dd8f737e609e9a2e93ac950466d8a9ae5c30d67";
+const R1CS_CIRCOM_PACKAGES: &[&str] = &[
+    "compiler",
+    "constraint_generation",
+    "constraint_writers",
+    "parser",
+    "program_structure",
+    "type_analysis",
+];
 
 /// Circom stems whose Groth16 artifacts live under `testdata/`
 /// (`{stem}_proving_key.bin`, etc.). Append here when wiring a new entry-point
@@ -327,8 +335,11 @@ fn graph_manifest_sources(
     let mut source_files: Vec<PathBuf> = std::iter::once(circom_file.to_path_buf())
         .chain(dependencies.iter().cloned())
         .chain([
+            workspace_root.join("Cargo.lock"),
+            workspace_root.join("circuits/Cargo.toml"),
             workspace_root.join("circuits/circomlib.lock"),
             workspace_root.join("circuits/build.rs"),
+            workspace_root.join("circuits/build_support.rs"),
             workspace_root.join("tools/witness-graph/generate-policy-graph.sh"),
         ])
         .collect();
@@ -404,7 +415,9 @@ fn main() -> Result<()> {
     );
     // === PATH SETUP ===
     let crate_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR")?);
+    let workspace_root = workspace_root(&crate_dir);
     let src_dir = crate_dir.join("src");
+    let compiler_version = verify_r1cs_circom_versions()?;
 
     // Put build artifacts under OUT_DIR/circuits
     let out_dir = PathBuf::from(env::var("OUT_DIR")?).join("circuits");
@@ -418,6 +431,12 @@ fn main() -> Result<()> {
     // Expose the path to your runtime/tests
     println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed=build_support.rs");
+    println!("cargo:rerun-if-changed=Cargo.toml");
+    println!(
+        "cargo:rerun-if-changed={}",
+        workspace_root.join("Cargo.lock").display()
+    );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
 
@@ -487,9 +506,7 @@ fn main() -> Result<()> {
         // === PARSE CIRCUIT ===
         let (mut program_archive, report_warns) = parser::run_parser(
             circom_file.to_string_lossy().to_string(),
-            parse_circom_version("compiler")
-                .expect("Could not parse Circom compiler version")
-                .as_str(),
+            compiler_version.as_str(),
             vec![],
             &prime,
             flag_no_init,
@@ -916,6 +933,26 @@ fn parse_circom_version(package_name: &str) -> Option<String> {
     }
 
     None
+}
+
+fn verify_r1cs_circom_versions() -> Result<String> {
+    let mut compiler_version = None;
+
+    for package_name in R1CS_CIRCOM_PACKAGES {
+        let version = parse_circom_version(package_name).with_context(|| {
+            format!("Could not parse Circom package version for {package_name}")
+        })?;
+        if version != EXPECTED_GRAPH_CIRCOM_VERSION {
+            bail!(
+                "R1CS Circom package {package_name} uses version {version}, expected {EXPECTED_GRAPH_CIRCOM_VERSION}. Keep the Rust Circom compiler inputs aligned with the checked-in witness graph."
+            );
+        }
+        if *package_name == "compiler" {
+            compiler_version = Some(version);
+        }
+    }
+
+    compiler_version.context("Could not parse Circom compiler version")
 }
 
 /// Imports the circomlib dependency without adding any Javascript dependency.

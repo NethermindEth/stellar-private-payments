@@ -173,8 +173,11 @@ while stack:
 sources = sorted(
     deps
     + [
+        repo_root / "Cargo.lock",
+        repo_root / "circuits/Cargo.toml",
         repo_root / "circuits/circomlib.lock",
         repo_root / "circuits/build.rs",
+        repo_root / "circuits/build_support.rs",
         repo_root / "tools/witness-graph/generate-policy-graph.sh",
     ],
     key=lambda path: str(path),
