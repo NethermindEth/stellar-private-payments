@@ -17,7 +17,7 @@ use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
 use storage::{Storage, StorageBackend};
 
-use self::{indexer::Indexer, upstream::UpstreamClient};
+use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
 pub use storage::Postgres;
 
@@ -38,11 +38,11 @@ pub(crate) struct AppState {
 impl Bootnode {
     pub async fn setup(
         cfg: Config,
-        backend: Arc<dyn StorageBackend>,
+        storage: Arc<dyn StorageBackend>,
         prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
-        let storage = Storage::new(backend);
+        let storage = Storage::new(storage);
 
         let ledger_tip = Arc::new(AtomicU32::new(0));
         let upstream = UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
@@ -61,7 +61,7 @@ impl Bootnode {
     pub async fn serve(self) -> Result<()> {
         let state = self.state;
         let mut indexer_task = tokio::spawn(Indexer::new(state.clone()).run());
-        let mut server_task = tokio::spawn(http_server::run_http(state));
+        let mut server_task = tokio::spawn(HttpServer::new(state).run());
 
         tokio::select! {
             res = &mut server_task => {

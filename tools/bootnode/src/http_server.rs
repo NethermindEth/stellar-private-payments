@@ -21,81 +21,92 @@ use tower_http::{
 
 type RpcService = TowerService<tower::layer::util::Identity, tower::layer::util::Identity>;
 
-pub(crate) async fn run_http(state: AppState) -> anyhow::Result<()> {
-    let governor_conf = GovernorConfigBuilder::default()
-        .per_second(state.cfg.rate_limit_rps.into())
-        .burst_size(state.cfg.rate_limit_burst)
-        .finish()
-        .expect("governor config is valid");
+pub(crate) struct HttpServer {
+    state: AppState,
+}
 
-    let cors = CorsLayer::new()
-        .allow_origin(Any)
-        .allow_methods(Any)
-        .allow_headers(Any);
-
-    let (stop_handle, _server_handle) = stop_channel();
-    let methods = rpc::build_rpc_module(state.clone());
-    let server_cfg = ServerConfig::builder()
-        .http_only()
-        .max_request_body_size(1024 * 1024)
-        .set_batch_request_config(BatchRequestConfig::Disabled)
-        .build();
-    let rpc_svc = Arc::new(
-        Server::builder()
-            .set_config(server_cfg)
-            .to_service_builder()
-            .build(methods, stop_handle),
-    );
-
-    let router = Router::new()
-        .route("/healthz", get(healthz))
-        .route("/metrics", get(metrics))
-        .route("/", post(handle_rpc))
-        .with_state(RpcState {
-            app: state.clone(),
-            rpc: rpc_svc,
-        })
-        .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
-        .layer(cors)
-        .layer(TraceLayer::new_for_http())
-        .layer(GovernorLayer {
-            config: Arc::new(governor_conf),
-        })
-        .layer(SetResponseHeaderLayer::overriding(
-            header::X_CONTENT_TYPE_OPTIONS,
-            HeaderValue::from_static("nosniff"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::X_FRAME_OPTIONS,
-            HeaderValue::from_static("DENY"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::REFERRER_POLICY,
-            HeaderValue::from_static("no-referrer"),
-        ))
-        .layer(SetResponseHeaderLayer::overriding(
-            header::CONTENT_SECURITY_POLICY,
-            HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
-        ));
-
-    let router = if state.cfg.insecure_http {
-        router
-    } else {
-        router.layer(SetResponseHeaderLayer::overriding(
-            header::STRICT_TRANSPORT_SECURITY,
-            HeaderValue::from_static("max-age=31536000; includeSubDomains"),
-        ))
-    };
-
-    tracing::info!(bind = %state.cfg.bind, insecure_http = state.cfg.insecure_http, "starting server");
-
-    if state.cfg.insecure_http {
-        let listener = tokio::net::TcpListener::bind(state.cfg.bind).await?;
-        axum::serve(listener, router).await?;
-        return Ok(());
+impl HttpServer {
+    pub(crate) fn new(state: AppState) -> Self {
+        Self { state }
     }
 
-    run_https_acme(state, router).await
+    pub(crate) async fn run(self) -> anyhow::Result<()> {
+        let state = self.state;
+        let governor_conf = GovernorConfigBuilder::default()
+            .per_second(state.cfg.rate_limit_rps.into())
+            .burst_size(state.cfg.rate_limit_burst)
+            .finish()
+            .expect("governor config is valid");
+
+        let cors = CorsLayer::new()
+            .allow_origin(Any)
+            .allow_methods(Any)
+            .allow_headers(Any);
+
+        let (stop_handle, _server_handle) = stop_channel();
+        let methods = rpc::build_rpc_module(state.clone());
+        let server_cfg = ServerConfig::builder()
+            .http_only()
+            .max_request_body_size(1024 * 1024)
+            .set_batch_request_config(BatchRequestConfig::Disabled)
+            .build();
+        let rpc_svc = Arc::new(
+            Server::builder()
+                .set_config(server_cfg)
+                .to_service_builder()
+                .build(methods, stop_handle),
+        );
+
+        let router = Router::new()
+            .route("/healthz", get(healthz))
+            .route("/metrics", get(metrics))
+            .route("/", post(handle_rpc))
+            .with_state(RpcState {
+                app: state.clone(),
+                rpc: rpc_svc,
+            })
+            .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
+            .layer(cors)
+            .layer(TraceLayer::new_for_http())
+            .layer(GovernorLayer {
+                config: Arc::new(governor_conf),
+            })
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_CONTENT_TYPE_OPTIONS,
+                HeaderValue::from_static("nosniff"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::X_FRAME_OPTIONS,
+                HeaderValue::from_static("DENY"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::REFERRER_POLICY,
+                HeaderValue::from_static("no-referrer"),
+            ))
+            .layer(SetResponseHeaderLayer::overriding(
+                header::CONTENT_SECURITY_POLICY,
+                HeaderValue::from_static("default-src 'none'; frame-ancestors 'none'"),
+            ));
+
+        let router = if state.cfg.insecure_http {
+            router
+        } else {
+            router.layer(SetResponseHeaderLayer::overriding(
+                header::STRICT_TRANSPORT_SECURITY,
+                HeaderValue::from_static("max-age=31536000; includeSubDomains"),
+            ))
+        };
+
+        tracing::info!(bind = %state.cfg.bind, insecure_http = state.cfg.insecure_http, "starting server");
+
+        if state.cfg.insecure_http {
+            let listener = tokio::net::TcpListener::bind(state.cfg.bind).await?;
+            axum::serve(listener, router).await?;
+            return Ok(());
+        }
+
+        run_https_acme(state, router).await
+    }
 }
 
 #[derive(Clone)]
