@@ -73,7 +73,12 @@ impl BootnodeRpc {
                     .get_cached_get_events_by_start_ledger(start_ledger)
                     .await
             }
-            (None, Some(cursor)) => self.state.storage.get_cached_get_events_by_cursor(cursor).await,
+            (None, Some(cursor)) => {
+                self.state
+                    .storage
+                    .get_cached_get_events_by_cursor(cursor)
+                    .await
+            }
             _ => Ok(None),
         }
         .map_err(|e| {

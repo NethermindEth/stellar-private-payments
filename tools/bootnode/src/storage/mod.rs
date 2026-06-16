@@ -1,7 +1,7 @@
-mod memory;
+mod in_memory;
 mod postgres;
 
-pub use memory::Memory;
+pub use in_memory::InMemory;
 pub use postgres::Postgres;
 
 use anyhow::Result;
@@ -26,7 +26,7 @@ pub struct InsertGetEventsPage<'a> {
 }
 
 #[async_trait]
-pub trait StorageBackend: Send + Sync {
+pub trait Storage: Send + Sync {
     async fn ping(&self) -> Result<()>;
     async fn load_kv(&self) -> Result<KvState>;
     async fn update_cursor(&self, cursor: &str) -> Result<()>;

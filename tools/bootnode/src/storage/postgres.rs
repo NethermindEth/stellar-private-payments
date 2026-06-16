@@ -1,4 +1,4 @@
-use super::{InsertGetEventsPage, KvState, StorageBackend};
+use super::{InsertGetEventsPage, KvState, Storage};
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use deadpool_postgres::Pool;
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS cursor_ledger_map (
 }
 
 #[async_trait]
-impl StorageBackend for Postgres {
+impl Storage for Postgres {
     async fn ping(&self) -> Result<()> {
         let client = self.pool.get().await?;
         client.query_one("SELECT 1", &[]).await?;

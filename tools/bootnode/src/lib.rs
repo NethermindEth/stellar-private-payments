@@ -15,11 +15,11 @@ mod upstream;
 use anyhow::Result;
 use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
-use storage::StorageBackend;
+use storage::Storage;
 
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
-pub use storage::{Memory, Postgres};
+pub use storage::{InMemory, Postgres};
 
 pub struct Bootnode {
     state: AppState,
@@ -29,7 +29,7 @@ pub struct Bootnode {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
-    pub(crate) storage: Arc<dyn StorageBackend>,
+    pub(crate) storage: Arc<dyn Storage>,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
@@ -40,7 +40,7 @@ pub(crate) struct AppState {
 impl Bootnode {
     pub async fn setup(
         cfg: Config,
-        storage: Arc<dyn StorageBackend>,
+        storage: Arc<dyn Storage>,
         prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);

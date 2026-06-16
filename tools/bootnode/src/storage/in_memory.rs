@@ -1,4 +1,4 @@
-use super::{InsertGetEventsPage, KvState, StorageBackend};
+use super::{InsertGetEventsPage, KvState, Storage};
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{collections::HashMap, sync::Mutex};
@@ -13,27 +13,27 @@ struct State {
     cursor_ledger_map: HashMap<String, u32>,
 }
 
-pub struct Memory {
+pub struct InMemory {
     state: Mutex<State>,
 }
 
-impl Memory {
+impl InMemory {
     pub fn new() -> Self {
         Self::default()
     }
 
     fn with_state<R>(&self, f: impl FnOnce(&State) -> R) -> R {
-        let state = self.state.lock().expect("memory storage mutex poisoned");
+        let state = self.state.lock().expect("in-memory storage mutex poisoned");
         f(&state)
     }
 
     fn with_state_mut<R>(&self, f: impl FnOnce(&mut State) -> R) -> R {
-        let mut state = self.state.lock().expect("memory storage mutex poisoned");
+        let mut state = self.state.lock().expect("in-memory storage mutex poisoned");
         f(&mut state)
     }
 }
 
-impl Default for Memory {
+impl Default for InMemory {
     fn default() -> Self {
         Self {
             state: Mutex::new(State::default()),
@@ -42,7 +42,7 @@ impl Default for Memory {
 }
 
 #[async_trait]
-impl StorageBackend for Memory {
+impl Storage for InMemory {
     async fn ping(&self) -> Result<()> {
         Ok(())
     }
@@ -152,7 +152,7 @@ mod tests {
 
     #[tokio::test]
     async fn cache_round_trip_and_kv_updates() {
-        let storage = Memory::new();
+        let storage = InMemory::new();
         let result = sample_response("next", 100);
 
         storage
@@ -186,7 +186,7 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_insert_is_ignored() {
-        let storage = Memory::new();
+        let storage = InMemory::new();
         let first = sample_response("first", 1);
         let second = sample_response("second", 2);
 
