@@ -112,6 +112,48 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 ---
 
+## Runbook
+
+### For note owners: generating a receipt
+
+1. Open the main app and connect your Freighter wallet on Testnet.
+2. Scroll to **Your Notes** and find an unspent note you want to disclose.
+3. Click **Disclose** in the note's Actions column. This opens `/disclosure.html?commitment=0x<note-commitment>` with the note preselected.
+4. Enter the context requested by the authority:
+   - **Authority label** — e.g. the company or regulator name.
+   - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.
+   - **Purpose** — e.g. `kyc-review`, `aml-check`.
+   - **Context nonce** — use the **Random** button for a fresh anti-replay nonce.
+5. Click **Generate Disclosure Receipt** and wait for the proof to finish.
+6. Download or copy the receipt JSON and send it to the authority.
+
+> Keep a copy of the receipt. The authority needs the exact JSON file to verify it.
+
+### For authorities: verifying a receipt walletlessly
+
+1. Open `/disclosure.html?verify=1` (or click **Verify** in the main app header).
+2. No wallet is required. The page initializes against the Testnet RPC automatically.
+3. Upload the receipt JSON or paste it into the import area and click **Load Receipt**.
+4. Confirm the **Expected VK hash** field matches the canonical hash published above. If you pin a different disclosure key, click **Override** and enter your hash.
+5. Review the receipt context summary to ensure it describes the attestation you requested.
+6. Click **Verify Receipt**.
+7. Read the three independent checks:
+   - **Proof valid** — the cryptography is correct.
+   - **Context valid** — the authority/purpose/nonce context was not altered.
+   - **Root fresh** — the note's root is still in the pool's on-chain history.
+8. Trust the receipt **only when all three checks are green** and the **Fully verified** badge appears.
+
+### Interpreting partial failures
+
+| Result | Meaning | Action |
+|---|---|---|
+| Proof green, Context red | The proof is mathematically valid, but the context was tampered with after generation. | Reject the receipt and ask the owner to regenerate it with the correct context. |
+| Proof green, Context green, Root red | The proof and context are intact, but the receipt is stale (root rolled out of history) or points to the wrong pool. | Ask the owner to generate a fresh receipt against the current pool root. |
+| Proof red | The proof is forged, corrupted, or verified against the wrong key. | Reject the receipt and confirm the expected VK hash. |
+| Any check "could not be completed" | Network or RPC failure prevented that check. | Retry; do not treat inconclusive checks as passes. |
+
+---
+
 ## The Three Verification Checks
 
 A receipt is trustworthy **only when all three checks pass**. Each check can fail independently, and each failure has a distinct meaning.
