@@ -27,29 +27,17 @@ impl Postgres {
         client
             .batch_execute(
                 r#"
-CREATE TABLE IF NOT EXISTS bootnode_kv (
+CREATE TABLE IF NOT EXISTS indexer_state (
   id SMALLINT PRIMARY KEY,
   last_cursor TEXT,
   last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
   ledger_tip INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO bootnode_kv (id) VALUES (1)
+INSERT INTO indexer_state (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
 
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = current_schema()
-      AND table_name = 'bootnode_kv'
-      AND column_name = 'tip_ledger'
-  ) THEN
-    ALTER TABLE bootnode_kv RENAME COLUMN tip_ledger TO ledger_tip;
-  END IF;
-END $$;
-
-CREATE TABLE IF NOT EXISTS rpc_cache_get_events (
+CREATE TABLE IF NOT EXISTS get_events_pages (
   id BIGSERIAL PRIMARY KEY,
   cursor_in TEXT,
   start_ledger INTEGER,
@@ -61,17 +49,15 @@ CREATE TABLE IF NOT EXISTS rpc_cache_get_events (
   oldest_ledger INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS rpc_cache_get_events_cursor_in_uniq
-  ON rpc_cache_get_events(cursor_in) WHERE cursor_in IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS rpc_cache_get_events_start_ledger_uniq
-  ON rpc_cache_get_events(start_ledger) WHERE cursor_in IS NULL;
-CREATE INDEX IF NOT EXISTS rpc_cache_get_events_latest_ledger_idx
-  ON rpc_cache_get_events(latest_ledger);
-
-CREATE TABLE IF NOT EXISTS cursor_ledger_map (
-  cursor TEXT PRIMARY KEY,
-  ledger INTEGER NOT NULL
-);
+CREATE UNIQUE INDEX IF NOT EXISTS get_events_pages_cursor_in_uniq
+  ON get_events_pages(cursor_in) WHERE cursor_in IS NOT NULL;
+CREATE UNIQUE INDEX IF NOT EXISTS get_events_pages_start_ledger_uniq
+  ON get_events_pages(start_ledger) WHERE cursor_in IS NULL;
+CREATE INDEX IF NOT EXISTS get_events_pages_latest_ledger_idx
+  ON get_events_pages(latest_ledger);
+CREATE INDEX IF NOT EXISTS get_events_pages_cursor_out_ledger_idx
+  ON get_events_pages(cursor_out)
+  WHERE last_event_ledger IS NOT NULL;
 "#,
             )
             .await?;
@@ -91,7 +77,7 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "SELECT last_cursor, last_fully_indexed_ledger FROM bootnode_kv WHERE id = 1",
+                "SELECT last_cursor, last_fully_indexed_ledger FROM indexer_state WHERE id = 1",
                 &[],
             )
             .await?;
@@ -110,7 +96,7 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         client
             .execute(
-                "UPDATE bootnode_kv SET last_cursor = $1, updated_at = now() WHERE id = 1",
+                "UPDATE indexer_state SET last_cursor = $1, updated_at = now() WHERE id = 1",
                 &[&cursor],
             )
             .await?;
@@ -122,7 +108,7 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         client
             .execute(
-                "UPDATE bootnode_kv SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
+                "UPDATE indexer_state SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
                 &[&ledger],
             )
             .await?;
@@ -151,7 +137,7 @@ impl Storage for Postgres {
         client
             .execute(
                 r#"
-INSERT INTO rpc_cache_get_events
+INSERT INTO get_events_pages
   (cursor_in, start_ledger, request, result, cursor_out, last_event_ledger, latest_ledger, oldest_ledger)
 VALUES
   ($1, $2, $3, $4, $5, $6, $7, $8)
@@ -171,36 +157,25 @@ VALUES
         Ok(())
     }
 
-    async fn upsert_cursor_ledger(&self, cursor: &str, ledger: u32) -> Result<()> {
-        let ledger = i32::try_from(ledger).context("ledger exceeds postgres INTEGER range")?;
-        let client = self.pool.get().await?;
-        client
-            .execute(
-                r#"
-INSERT INTO cursor_ledger_map (cursor, ledger)
-VALUES ($1, $2)
-ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
-"#,
-                &[&cursor, &ledger],
-            )
-            .await?;
-        Ok(())
-    }
-
-    async fn lookup_cursor_ledger(&self, cursor: &str) -> Result<Option<u32>> {
+    async fn lookup_last_event_ledger_for_cursor(&self, cursor: &str) -> Result<Option<u32>> {
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT ledger FROM cursor_ledger_map WHERE cursor = $1",
+                r#"
+SELECT last_event_ledger FROM get_events_pages
+WHERE cursor_out = $1 AND last_event_ledger IS NOT NULL
+LIMIT 1
+"#,
                 &[&cursor],
             )
             .await?;
-        Ok(row
-            .map(|r| {
-                let v: i32 = r.get(0);
-                u32::try_from(v.max(0)).context("cursor ledger exceeds u32 range")
-            })
-            .transpose()?)
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let ledger: i32 = row.get(0);
+        Ok(Some(
+            u32::try_from(ledger.max(0)).context("last_event_ledger exceeds u32 range")?,
+        ))
     }
 
     async fn get_cached_get_events_by_cursor(
@@ -210,7 +185,7 @@ ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM rpc_cache_get_events WHERE cursor_in = $1 LIMIT 1",
+                "SELECT result FROM get_events_pages WHERE cursor_in = $1 LIMIT 1",
                 &[&cursor],
             )
             .await?;
@@ -229,7 +204,7 @@ ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM rpc_cache_get_events WHERE cursor_in IS NULL AND start_ledger = $1 LIMIT 1",
+                "SELECT result FROM get_events_pages WHERE cursor_in IS NULL AND start_ledger = $1 LIMIT 1",
                 &[&start_ledger],
             )
             .await?;

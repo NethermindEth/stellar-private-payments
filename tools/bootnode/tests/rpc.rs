@@ -7,7 +7,7 @@ use bootnode::{
 };
 use serde_json::json;
 use std::sync::{Arc, OnceLock};
-use stellar::{GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
+use stellar::{Event, GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
 use types::ContractConfig;
 
 fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
@@ -88,6 +88,22 @@ async fn spawn_bootnode(storage: Arc<InMemory>, port: u16) -> tokio::task::JoinH
     })
 }
 
+fn sample_event() -> Event {
+    Event {
+        event_type: "contract".into(),
+        ledger: 2_999_000,
+        ledger_closed_at: "2024-01-01T00:00:00Z".into(),
+        contract_id: contract_ids().into_iter().next().expect("pool id"),
+        id: "event-1".into(),
+        operation_index: None,
+        transaction_index: None,
+        tx_hash: None,
+        is_successful_contract_call: None,
+        topic: vec![],
+        value: "00".into(),
+    }
+}
+
 #[tokio::test]
 async fn cached_get_events() {
     const PORT: u16 = 40404;
@@ -97,7 +113,7 @@ async fn cached_get_events() {
     let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
     let cached = GetEventsResponse {
         cursor: "cursor-out".into(),
-        events: vec![],
+        events: vec![sample_event()],
         latest_ledger: 3_000_000,
         latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
         oldest_ledger: 2_997_687,
@@ -112,7 +128,7 @@ async fn cached_get_events() {
             request: &request,
             result: &cached,
             cursor_out: "cursor-out",
-            last_event_ledger: None,
+            last_event_ledger: Some(2_999_000),
             latest_ledger: cached.latest_ledger,
             oldest_ledger: cached.oldest_ledger,
         })
@@ -143,35 +159,30 @@ async fn handoff_get_events() {
 
     let ids = contract_ids();
     let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
-    let cached = GetEventsResponse {
-        cursor: "cursor-out".into(),
-        events: vec![],
+
+    let storage = Arc::new(InMemory::new());
+    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+    let prev = GetEventsResponse {
+        cursor: "cursor-in".into(),
+        events: vec![sample_event()],
         latest_ledger: 3_000_000,
         latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
         oldest_ledger: 2_997_687,
         oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
     };
-
-    let storage = Arc::new(InMemory::new());
     storage
         .insert_get_events_page(InsertGetEventsPage {
-            cursor_in: Some("cursor-in"),
-            start_ledger: None,
-            request: &request,
-            result: &cached,
-            cursor_out: "cursor-out",
-            last_event_ledger: None,
-            latest_ledger: cached.latest_ledger,
-            oldest_ledger: cached.oldest_ledger,
+            cursor_in: None,
+            start_ledger: Some(2_997_687),
+            request: &prev_request,
+            result: &prev,
+            cursor_out: "cursor-in",
+            last_event_ledger: Some(2_999_000),
+            latest_ledger: prev.latest_ledger,
+            oldest_ledger: prev.oldest_ledger,
         })
         .await
-        .expect("seed cache");
-    // Handoff resolves the incoming cursor; insert_get_events_page only maps
-    // cursor-out.
-    storage
-        .upsert_cursor_ledger("cursor-in", 2_999_000)
-        .await
-        .expect("map incoming cursor");
+        .expect("seed previous page for handoff cursor");
 
     let server = spawn_bootnode(storage, PORT).await;
 

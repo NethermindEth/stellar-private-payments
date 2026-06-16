@@ -10,7 +10,7 @@ struct State {
     last_fully_indexed_ledger: u32,
     cache_by_cursor_in: HashMap<String, GetEventsResponse>,
     cache_by_start_ledger: HashMap<u32, GetEventsResponse>,
-    cursor_ledger_map: HashMap<String, u32>,
+    ledger_by_cursor_out: HashMap<String, u32>,
 }
 
 pub struct InMemory {
@@ -64,6 +64,17 @@ impl Storage for InMemory {
         Ok(())
     }
 
+    async fn lookup_last_event_ledger_for_cursor(&self, cursor: &str) -> Result<Option<u32>> {
+        Ok(self.with_state(|state| state.ledger_by_cursor_out.get(cursor).copied()))
+    }
+
+    async fn get_cached_get_events_by_cursor(
+        &self,
+        cursor: &str,
+    ) -> Result<Option<GetEventsResponse>> {
+        Ok(self.with_state(|state| state.cache_by_cursor_in.get(cursor).cloned()))
+    }
+
     async fn store_get_events_page(&self, page: InsertGetEventsPage<'_>) -> Result<()> {
         self.with_state_mut(|state| {
             if let Some(cursor_in) = page.cursor_in {
@@ -75,26 +86,13 @@ impl Storage for InMemory {
                     .cache_by_start_ledger
                     .insert(start_ledger, page.result.clone());
             }
+            if let Some(ledger) = page.last_event_ledger {
+                state
+                    .ledger_by_cursor_out
+                    .insert(page.cursor_out.to_owned(), ledger);
+            }
         });
         Ok(())
-    }
-
-    async fn upsert_cursor_ledger(&self, cursor: &str, ledger: u32) -> Result<()> {
-        self.with_state_mut(|state| {
-            state.cursor_ledger_map.insert(cursor.to_owned(), ledger);
-        });
-        Ok(())
-    }
-
-    async fn lookup_cursor_ledger(&self, cursor: &str) -> Result<Option<u32>> {
-        Ok(self.with_state(|state| state.cursor_ledger_map.get(cursor).copied()))
-    }
-
-    async fn get_cached_get_events_by_cursor(
-        &self,
-        cursor: &str,
-    ) -> Result<Option<GetEventsResponse>> {
-        Ok(self.with_state(|state| state.cache_by_cursor_in.get(cursor).cloned()))
     }
 
     async fn get_cached_get_events_by_start_ledger(
@@ -139,10 +137,26 @@ mod tests {
         }
     }
 
+    fn sample_event() -> stellar::Event {
+        stellar::Event {
+            event_type: "contract".into(),
+            ledger: 42,
+            ledger_closed_at: "2024-01-01T00:00:00Z".into(),
+            contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".into(),
+            id: "event-1".into(),
+            operation_index: None,
+            transaction_index: None,
+            tx_hash: None,
+            is_successful_contract_call: None,
+            topic: vec![],
+            value: "00".into(),
+        }
+    }
+
     fn sample_response(cursor: &str, latest_ledger: u32) -> GetEventsResponse {
         GetEventsResponse {
             cursor: cursor.to_string(),
-            events: vec![],
+            events: vec![sample_event()],
             latest_ledger,
             latest_ledger_close_time: "2024-01-01T00:00:00Z".to_string(),
             oldest_ledger: 1,
@@ -175,13 +189,11 @@ mod tests {
         assert_eq!(kv.last_cursor.as_deref(), Some("next"));
         assert_eq!(kv.last_fully_indexed_ledger, 100);
 
-        assert_eq!(
-            storage
-                .lookup_cursor_ledger("next")
-                .await
-                .expect("lookup cursor ledger"),
-            Some(42)
-        );
+        let last_event_ledger = storage
+            .lookup_last_event_ledger_for_cursor("next")
+            .await
+            .expect("lookup last event ledger");
+        assert_eq!(last_event_ledger, Some(42));
     }
 
     #[tokio::test]

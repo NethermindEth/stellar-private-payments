@@ -45,41 +45,61 @@ impl BootnodeRpc {
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);
         let cutoff_ledger = tip.saturating_sub(self.state.cfg.cutoff_ledgers());
 
-        let effective = match (parsed.start_ledger, parsed.cursor.as_deref()) {
+        let handoff_ledger = match (parsed.start_ledger, parsed.cursor.as_deref()) {
             (Some(start_ledger), None) => Some(start_ledger),
-            (None, Some(cursor)) => self
-                .state
-                .storage
-                .lookup_cursor_ledger(cursor)
-                .await
-                .map_err(|e| {
-                    counter!("bootnode_handler_errors_total").increment(1);
-                    internal_error(e)
-                })?,
+            (None, Some(cursor)) => {
+                let last_event_ledger = self
+                    .state
+                    .storage
+                    .lookup_last_event_ledger_for_cursor(cursor)
+                    .await
+                    .map_err(|e| {
+                        counter!("bootnode_handler_errors_total").increment(1);
+                        internal_error(e)
+                    })?;
+
+                if let Some(last_event_ledger) = last_event_ledger
+                    && last_event_ledger >= cutoff_ledger
+                {
+                    counter!("bootnode_handoffs_total").increment(1);
+                    return Err(retention_handoff(cutoff_ledger));
+                }
+
+                let Some(result) = self
+                    .state
+                    .storage
+                    .get_cached_get_events_by_cursor(cursor)
+                    .await
+                    .map_err(|e| {
+                        counter!("bootnode_handler_errors_total").increment(1);
+                        internal_error(e)
+                    })?
+                else {
+                    counter!("bootnode_cache_misses_total").increment(1);
+                    return Err(cache_miss("cache miss; indexer may still be catching up"));
+                };
+
+                counter!("bootnode_cache_hits_total").increment(1);
+                return Ok(result);
+            }
             _ => None,
         };
 
-        if let Some(effective) = effective
-            && effective >= cutoff_ledger
+        if let Some(handoff_ledger) = handoff_ledger
+            && handoff_ledger >= cutoff_ledger
         {
             counter!("bootnode_handoffs_total").increment(1);
             return Err(retention_handoff(cutoff_ledger));
         }
 
-        let cached = match (parsed.start_ledger, parsed.cursor.as_deref()) {
-            (Some(start_ledger), None) => {
+        let cached = match parsed.start_ledger {
+            Some(start_ledger) => {
                 self.state
                     .storage
                     .get_cached_get_events_by_start_ledger(start_ledger)
                     .await
             }
-            (None, Some(cursor)) => {
-                self.state
-                    .storage
-                    .get_cached_get_events_by_cursor(cursor)
-                    .await
-            }
-            _ => Ok(None),
+            None => Ok(None),
         }
         .map_err(|e| {
             counter!("bootnode_handler_errors_total").increment(1);

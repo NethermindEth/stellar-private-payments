@@ -52,19 +52,21 @@ impl Indexer {
             let cursor_out = result.cursor.clone();
             let last_event_ledger = result.events.last().map(|event| event.ledger);
 
-            self.state
-                .storage
-                .insert_get_events_page(InsertGetEventsPage {
-                    cursor_in: cursor.as_deref(),
-                    start_ledger,
-                    request: &params,
-                    result: &result,
-                    cursor_out: &cursor_out,
-                    last_event_ledger,
-                    latest_ledger: result.latest_ledger,
-                    oldest_ledger: result.oldest_ledger,
-                })
-                .await?;
+            if !result.events.is_empty() {
+                self.state
+                    .storage
+                    .insert_get_events_page(InsertGetEventsPage {
+                        cursor_in: cursor.as_deref(),
+                        start_ledger,
+                        request: &params,
+                        result: &result,
+                        cursor_out: &cursor_out,
+                        last_event_ledger,
+                        latest_ledger: result.latest_ledger,
+                        oldest_ledger: result.oldest_ledger,
+                    })
+                    .await?;
+            }
 
             cursor = Some(cursor_out);
             start_ledger = None;
