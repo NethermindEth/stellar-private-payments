@@ -11,11 +11,23 @@ CREATE TABLE IF NOT EXISTS bootnode_kv (
   id SMALLINT PRIMARY KEY,
   last_cursor TEXT,
   last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
-  tip_ledger INTEGER NOT NULL DEFAULT 0,
+  ledger_tip INTEGER NOT NULL DEFAULT 0,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO bootnode_kv (id) VALUES (1)
 ON CONFLICT (id) DO NOTHING;
+
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = current_schema()
+      AND table_name = 'bootnode_kv'
+      AND column_name = 'tip_ledger'
+  ) THEN
+    ALTER TABLE bootnode_kv RENAME COLUMN tip_ledger TO ledger_tip;
+  END IF;
+END $$;
 
 CREATE TABLE IF NOT EXISTS rpc_cache_get_events (
   id BIGSERIAL PRIMARY KEY,
@@ -50,34 +62,34 @@ CREATE TABLE IF NOT EXISTS cursor_ledger_map (
 pub(crate) struct KvState {
     pub(crate) last_cursor: Option<String>,
     pub(crate) last_fully_indexed_ledger: u32,
-    pub(crate) tip_ledger: u32,
+    pub(crate) ledger_tip: u32,
 }
 
 pub(crate) async fn load_kv(pool: &Pool) -> Result<KvState> {
     let client = pool.get().await?;
     let row = client
         .query_one(
-            "SELECT last_cursor, last_fully_indexed_ledger, tip_ledger FROM bootnode_kv WHERE id = 1",
+            "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip FROM bootnode_kv WHERE id = 1",
             &[],
         )
         .await?;
 
     let last_cursor: Option<String> = row.get(0);
     let last_fully_indexed_ledger: i32 = row.get(1);
-    let tip_ledger: i32 = row.get(2);
+    let ledger_tip: i32 = row.get(2);
 
     Ok(KvState {
         last_cursor,
         last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0)).unwrap_or(0),
-        tip_ledger: u32::try_from(tip_ledger.max(0)).unwrap_or(0),
+        ledger_tip: u32::try_from(ledger_tip.max(0)).unwrap_or(0),
     })
 }
 
-pub(crate) async fn update_tip(pool: &Pool, tip: u32) -> Result<()> {
+pub(crate) async fn update_ledger_tip(pool: &Pool, tip: u32) -> Result<()> {
     let client = pool.get().await?;
     client
         .execute(
-            "UPDATE bootnode_kv SET tip_ledger = $1, updated_at = now() WHERE id = 1",
+            "UPDATE bootnode_kv SET ledger_tip = $1, updated_at = now() WHERE id = 1",
             &[&i64::from(tip)],
         )
         .await?;

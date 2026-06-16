@@ -16,20 +16,21 @@ mod upstream;
 use anyhow::{Context, Result};
 use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
-use tokio::task::JoinHandle;
+
+use self::upstream::UpstreamClient;
+
+pub struct Bootnode {
+    state: AppState,
+}
 
 /// Shared runtime state for HTTP handlers and the background indexer.
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
     pub(crate) db: deadpool_postgres::Pool,
-    pub(crate) upstream: upstream::UpstreamClient,
-    pub(crate) tip_ledger: Arc<AtomicU32>,
+    pub(crate) upstream: UpstreamClient,
+    pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
-}
-
-pub struct Bootnode {
-    state: AppState,
 }
 
 impl Bootnode {
@@ -50,15 +51,15 @@ impl Bootnode {
 
         storage::init_db(&db).await?;
 
-        let tip_ledger = Arc::new(AtomicU32::new(0));
-        let upstream = upstream::UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
+        let ledger_tip = Arc::new(AtomicU32::new(0));
+        let upstream = UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
 
         Ok(Self {
             state: AppState {
                 cfg,
                 db,
                 upstream,
-                tip_ledger,
+                ledger_tip,
                 prom_handle,
             },
         })

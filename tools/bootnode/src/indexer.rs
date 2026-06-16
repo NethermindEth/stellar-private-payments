@@ -29,10 +29,10 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
     )
     .map_err(|_| anyhow::anyhow!("upstream getLatestLedger sequence exceeds u32"))?;
     state
-        .tip_ledger
+        .ledger_tip
         .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
-    gauge!("bootnode_tip_ledger").set(f64::from(tip_sequence));
-    storage::update_tip(&state.db, tip_sequence).await?;
+    gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
+    storage::update_ledger_tip(&state.db, tip_sequence).await?;
 
     let deployment = deployment::deployment_config()?;
     let contract_ids = stellar::contract_ids_for_indexer(&deployment);

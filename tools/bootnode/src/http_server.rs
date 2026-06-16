@@ -131,7 +131,7 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
         }
     }
 
-    let tip = state.tip_ledger.load(Ordering::Relaxed);
+    let tip = state.ledger_tip.load(Ordering::Relaxed);
     let kv = match storage::load_kv(&state.db).await {
         Ok(kv) => kv,
         Err(e) => {
@@ -243,7 +243,7 @@ async fn handle_get_events(
         ));
     }
 
-    let tip = state.tip_ledger.load(Ordering::Relaxed);
+    let tip = state.ledger_tip.load(Ordering::Relaxed);
     let cutoff_ledger = tip.saturating_sub(state.cfg.cutoff_ledgers());
 
     let effective = match (parsed.start_ledger, parsed.cursor.as_deref()) {
