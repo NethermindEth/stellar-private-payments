@@ -101,7 +101,8 @@ impl Storage for Postgres {
 
         Ok(KvState {
             last_cursor,
-            last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0)).unwrap_or(0),
+            last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0))
+                .context("last_fully_indexed_ledger exceeds u32 range")?,
         })
     }
 
@@ -117,17 +118,35 @@ impl Storage for Postgres {
     }
 
     async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()> {
+        let ledger = i32::try_from(ledger).context("ledger exceeds postgres INTEGER range")?;
         let client = self.pool.get().await?;
         client
             .execute(
                 "UPDATE bootnode_kv SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
-                &[&i64::from(ledger)],
+                &[&ledger],
             )
             .await?;
         Ok(())
     }
 
     async fn store_get_events_page(&self, page: InsertGetEventsPage<'_>) -> Result<()> {
+        let start_ledger: Option<i32> = page
+            .start_ledger
+            .map(|ledger| {
+                i32::try_from(ledger).context("start_ledger exceeds postgres INTEGER range")
+            })
+            .transpose()?;
+        let last_event_ledger: Option<i32> = page
+            .last_event_ledger
+            .map(|ledger| {
+                i32::try_from(ledger).context("last_event_ledger exceeds postgres INTEGER range")
+            })
+            .transpose()?;
+        let latest_ledger = i32::try_from(page.latest_ledger)
+            .context("latest_ledger exceeds postgres INTEGER range")?;
+        let oldest_ledger = i32::try_from(page.oldest_ledger)
+            .context("oldest_ledger exceeds postgres INTEGER range")?;
+
         let client = self.pool.get().await?;
         client
             .execute(
@@ -139,13 +158,13 @@ VALUES
 "#,
                 &[
                     &page.cursor_in,
-                    &page.start_ledger.map(i64::from),
+                    &start_ledger,
                     &Json(page.request),
                     &Json(page.result),
                     &page.cursor_out,
-                    &page.last_event_ledger.map(i64::from),
-                    &i64::from(page.latest_ledger),
-                    &i64::from(page.oldest_ledger),
+                    &last_event_ledger,
+                    &latest_ledger,
+                    &oldest_ledger,
                 ],
             )
             .await?;
@@ -153,6 +172,7 @@ VALUES
     }
 
     async fn upsert_cursor_ledger(&self, cursor: &str, ledger: u32) -> Result<()> {
+        let ledger = i32::try_from(ledger).context("ledger exceeds postgres INTEGER range")?;
         let client = self.pool.get().await?;
         client
             .execute(
@@ -161,7 +181,7 @@ INSERT INTO cursor_ledger_map (cursor, ledger)
 VALUES ($1, $2)
 ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
 "#,
-                &[&cursor, &i64::from(ledger)],
+                &[&cursor, &ledger],
             )
             .await?;
         Ok(())
@@ -175,10 +195,12 @@ ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
                 &[&cursor],
             )
             .await?;
-        Ok(row.map(|r| {
-            let v: i32 = r.get(0);
-            u32::try_from(v.max(0)).unwrap_or(0)
-        }))
+        Ok(row
+            .map(|r| {
+                let v: i32 = r.get(0);
+                u32::try_from(v.max(0)).context("cursor ledger exceeds u32 range")
+            })
+            .transpose()?)
     }
 
     async fn get_cached_get_events_by_cursor(
@@ -202,11 +224,13 @@ ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
         &self,
         start_ledger: u32,
     ) -> Result<Option<GetEventsResponse>> {
+        let start_ledger =
+            i32::try_from(start_ledger).context("start_ledger exceeds postgres INTEGER range")?;
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
                 "SELECT result FROM rpc_cache_get_events WHERE cursor_in IS NULL AND start_ledger = $1 LIMIT 1",
-                &[&i64::from(start_ledger)],
+                &[&start_ledger],
             )
             .await?;
         Ok(row.map(|r| {

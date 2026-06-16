@@ -23,7 +23,7 @@ services:
       BOOTNODE_DOMAIN: example.com
       BOOTNODE_ACME_EMAIL: you@example.com
       BOOTNODE_ACME_CACHE_DIR: /acme-cache
-      BOOTNODE_OTEL_ENABLED: "0"
+      BOOTNODE_OTEL_ENABLED: "false"
     ports:
       - "443:443"
     volumes:
