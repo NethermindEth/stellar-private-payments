@@ -13,5 +13,9 @@ pub use ext_data_hash::hash_ext_data_offchain;
 pub use indexer::{
     ContractDataStorage, Indexer, contract_ids_for_indexer, min_pool_ledger_for_indexer,
 };
-pub use rpc::{GetTransactionResponse, SendTransactionResponse};
+pub use rpc::{
+    ContractEventFilter, Event, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
+    GetTransactionResponse, PaginationParams, ParsedGetEvents, SendTransactionResponse,
+    TopicFilter,
+};
 pub use tx_prepare::PoolTransactInput;

@@ -1,6 +1,7 @@
-use crate::{AppState, deployment, get_events, storage};
+use crate::{AppState, deployment, storage};
 use metrics::{counter, gauge};
 use std::time::Instant;
+use stellar::GetEventsParams;
 use tokio::time::{Duration, sleep};
 
 pub(crate) async fn run_indexer(state: AppState) {
@@ -18,15 +19,8 @@ pub(crate) async fn run_indexer(state: AppState) {
 async fn run_round(state: &AppState) -> anyhow::Result<()> {
     let t0 = Instant::now();
 
-    // Update tip.
     let latest = state.upstream.get_latest_ledger().await?;
-    let tip_sequence = u32::try_from(
-        latest
-            .get("sequence")
-            .and_then(|v| v.as_u64())
-            .ok_or_else(|| anyhow::anyhow!("upstream getLatestLedger missing sequence"))?,
-    )
-    .map_err(|_| anyhow::anyhow!("upstream getLatestLedger sequence exceeds u32"))?;
+    let tip_sequence = latest.sequence;
     state
         .ledger_tip
         .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
@@ -45,7 +39,7 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
     }
 
     for _page in 0..state.cfg.max_pages_per_round {
-        let params = get_events::make_get_events_params(
+        let params = GetEventsParams::for_contracts(
             &contract_ids,
             start_ledger,
             cursor.as_deref(),
@@ -53,13 +47,8 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
         );
         let result = state.upstream.get_events(params.clone()).await?;
 
-        let (cursor_out, events, latest_ledger, oldest_ledger) =
-            get_events::parse_get_events_result(&result)?;
-        let last_event_ledger = events
-            .last()
-            .and_then(|e| e.get("ledger"))
-            .and_then(|v| v.as_u64())
-            .and_then(|v| u32::try_from(v).ok());
+        let cursor_out = result.cursor.clone();
+        let last_event_ledger = result.events.last().map(|event| event.ledger);
 
         storage::insert_get_events_page(
             &state.db,
@@ -69,8 +58,8 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
             &result,
             &cursor_out,
             last_event_ledger,
-            latest_ledger,
-            oldest_ledger,
+            result.latest_ledger,
+            result.oldest_ledger,
         )
         .await?;
 
@@ -79,11 +68,10 @@ async fn run_round(state: &AppState) -> anyhow::Result<()> {
         cursor = Some(cursor_out);
         start_ledger = None;
 
-        // Consider ourselves caught up when events are empty for the current cursor.
-        if events.is_empty() {
+        if result.events.is_empty() {
             if let Some(cursor) = cursor.as_deref() {
-                storage::mark_caught_up(&state.db, cursor, latest_ledger).await?;
-                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(latest_ledger));
+                storage::mark_caught_up(&state.db, cursor, result.latest_ledger).await?;
+                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(result.latest_ledger));
             }
             break;
         }

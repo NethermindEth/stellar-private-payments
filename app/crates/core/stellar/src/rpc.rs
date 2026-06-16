@@ -85,6 +85,107 @@ pub struct GetLatestLedgerResponse {
 pub type SegmentFilter = String;
 pub type TopicFilter = Vec<SegmentFilter>;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GetEventsParams {
+    #[serde(default)]
+    pub filters: Vec<ContractEventFilter>,
+    #[serde(default)]
+    pub pagination: PaginationParams,
+    #[serde(rename = "startLedger", default)]
+    pub start_ledger: Option<u32>,
+    #[serde(rename = "endLedger", default)]
+    pub end_ledger: Option<u32>,
+    #[serde(rename = "xdrFormat", default)]
+    pub xdr_format: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ContractEventFilter {
+    #[serde(rename = "type")]
+    pub filter_type: String,
+    pub topics: Vec<TopicFilter>,
+    #[serde(rename = "contractIds")]
+    pub contract_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PaginationParams {
+    #[serde(default)]
+    pub limit: Option<u32>,
+    #[serde(default)]
+    pub cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParsedGetEvents {
+    pub start_ledger: Option<u32>,
+    pub cursor: Option<String>,
+    pub limit: Option<u32>,
+}
+
+impl GetEventsParams {
+    pub fn parsed(&self) -> anyhow::Result<ParsedGetEvents> {
+        match (self.start_ledger, self.pagination.cursor.as_deref()) {
+            (Some(_), Some(_)) => anyhow::bail!(
+                "getEvents params must include either startLedger or pagination.cursor, not both"
+            ),
+            (None, None) => anyhow::bail!(
+                "getEvents params must include either startLedger or pagination.cursor"
+            ),
+            _ => Ok(ParsedGetEvents {
+                start_ledger: self.start_ledger,
+                cursor: self.pagination.cursor.clone(),
+                limit: self.pagination.limit,
+            }),
+        }
+    }
+
+    pub fn is_allowed_filters(&self, allowed_contract_ids: &[String]) -> bool {
+        let Some(first) = self.filters.first() else {
+            return false;
+        };
+
+        if first.filter_type != "contract" {
+            return false;
+        }
+
+        if first.topics != [vec!["**".to_string()]] {
+            return false;
+        }
+
+        let mut got: Vec<&str> = first.contract_ids.iter().map(String::as_str).collect();
+        got.sort_unstable();
+        let mut want: Vec<&str> = allowed_contract_ids.iter().map(String::as_str).collect();
+        want.sort_unstable();
+        got == want
+    }
+
+    pub fn for_contracts(
+        contract_ids: &[String],
+        start_ledger: Option<u32>,
+        cursor: Option<&str>,
+        limit: u32,
+    ) -> Self {
+        Self {
+            filters: vec![ContractEventFilter {
+                filter_type: "contract".to_string(),
+                topics: vec![vec!["**".to_string()]],
+                contract_ids: contract_ids.to_vec(),
+            }],
+            pagination: PaginationParams {
+                limit: Some(limit),
+                cursor: cursor.map(str::to_owned),
+            },
+            start_ledger,
+            end_ledger: None,
+            xdr_format: None,
+        }
+    }
+}
+
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum EventType {
@@ -706,11 +807,128 @@ fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
 
     #[test]
     fn parsing_range_error() {
         let msg = "startLedger must be within the ledger range: 1936296 - 2057255";
         assert_eq!(Some((1936296, 2057255)), parse_ledger_range(msg));
+    }
+
+    #[test]
+    fn for_contracts_shape() {
+        let ids = vec!["CABC".to_string(), "CDEF".to_string()];
+        let params = GetEventsParams::for_contracts(&ids, Some(100), Some("cursor-1"), 300);
+
+        assert_eq!(params.start_ledger, Some(100));
+        assert_eq!(params.pagination.limit, Some(300));
+        assert_eq!(params.pagination.cursor.as_deref(), Some("cursor-1"));
+        assert_eq!(params.filters[0].filter_type, "contract");
+        assert_eq!(params.filters[0].topics, vec![vec!["**".to_string()]]);
+        assert_eq!(params.filters[0].contract_ids, ids);
+    }
+
+    #[test]
+    fn for_contracts_serializes_to_stellar_shape() {
+        let params = GetEventsParams::for_contracts(&["CA".to_string()], Some(1), None, 10);
+        let value = serde_json::to_value(params).expect("params should serialize");
+        let roundtrip: GetEventsParams =
+            serde_json::from_value(value).expect("params should deserialize");
+        assert_eq!(roundtrip.start_ledger, Some(1));
+    }
+
+    #[test]
+    fn parsed_start_ledger() {
+        let params: GetEventsParams =
+            serde_json::from_value(json!({"startLedger": 42, "pagination": {"limit": 100}}))
+                .expect("params should deserialize");
+        let parsed = params.parsed().expect("startLedger params should parse");
+        assert_eq!(parsed.start_ledger, Some(42));
+        assert!(parsed.cursor.is_none());
+        assert_eq!(parsed.limit, Some(100));
+    }
+
+    #[test]
+    fn parsed_cursor() {
+        let params: GetEventsParams =
+            serde_json::from_value(json!({"pagination": {"cursor": "abc", "limit": 50}}))
+                .expect("params should deserialize");
+        let parsed = params.parsed().expect("cursor params should parse");
+        assert!(parsed.start_ledger.is_none());
+        assert_eq!(parsed.cursor.as_deref(), Some("abc"));
+        assert_eq!(parsed.limit, Some(50));
+    }
+
+    #[test]
+    fn parsed_rejects_ambiguous_params() {
+        let both: GetEventsParams =
+            serde_json::from_value(json!({"startLedger": 1, "pagination": {"cursor": "x"}}))
+                .expect("params should deserialize");
+        assert!(both.parsed().is_err());
+
+        let neither: GetEventsParams = serde_json::from_value(json!({"pagination": {"limit": 10}}))
+            .expect("params should deserialize");
+        assert!(neither.parsed().is_err());
+    }
+
+    fn sample_filters(ids: &[&str]) -> GetEventsParams {
+        serde_json::from_value(json!({
+            "filters": [{
+                "type": "contract",
+                "topics": [["**"]],
+                "contractIds": ids
+            }]
+        }))
+        .expect("filters should deserialize")
+    }
+
+    #[test]
+    fn is_allowed_filters_match_exact_contract_set() {
+        let allowed = vec!["CB".to_string(), "CA".to_string()];
+        let params = sample_filters(&["CA", "CB"]);
+        assert!(params.is_allowed_filters(&allowed));
+    }
+
+    #[test]
+    fn is_allowed_filters_reject_wrong_contract_ids_or_topics() {
+        let allowed = vec!["CA".to_string()];
+        assert!(!sample_filters(&["CA", "CB"]).is_allowed_filters(&allowed));
+        let params: GetEventsParams = serde_json::from_value(json!({
+            "filters": [{"type": "contract", "topics": [["deposit"]], "contractIds": ["CA"]}]
+        }))
+        .expect("params should deserialize");
+        assert!(!params.is_allowed_filters(&allowed));
+    }
+
+    #[test]
+    fn get_events_response_parses_upstream_shape() {
+        let result = json!({
+            "cursor": "next",
+            "events": [{
+                "type": "contract",
+                "ledger": 10,
+                "ledgerClosedAt": "2024-01-01T00:00:00Z",
+                "contractId": "CABC",
+                "id": "1",
+                "topic": ["deposit"],
+                "value": "00"
+            }],
+            "latestLedger": 99,
+            "latestLedgerCloseTime": "2024-01-01T00:00:00Z",
+            "oldestLedger": 1,
+            "oldestLedgerCloseTime": "2024-01-01T00:00:00Z"
+        });
+        let parsed: GetEventsResponse =
+            serde_json::from_value(result).expect("valid getEvents result should parse");
+        assert_eq!(parsed.cursor, "next");
+        assert_eq!(parsed.events.len(), 1);
+        assert_eq!(parsed.latest_ledger, 99);
+        assert_eq!(parsed.oldest_ledger, 1);
+    }
+
+    #[test]
+    fn get_events_response_requires_fields() {
+        assert!(serde_json::from_value::<GetEventsResponse>(json!({})).is_err());
     }
 
     #[cfg(target_arch = "wasm32")]

@@ -1,13 +1,16 @@
-use crate::{AppState, deployment, get_events, storage};
-use get_events::{ContractEventFilter, PaginationParams};
+use crate::{AppState, deployment, storage};
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
     types::{ErrorObject, error::ErrorObjectOwned},
 };
 use metrics::counter;
-use serde_json::{Value, json};
+use serde_json::json;
 use std::sync::atomic::Ordering;
+use stellar::{
+    ContractEventFilter, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
+    PaginationParams,
+};
 
 pub const CACHE_MISS_CODE: i32 = -32_004;
 pub const RETENTION_HANDOFF_CODE: i32 = -32_005;
@@ -15,7 +18,7 @@ pub const RETENTION_HANDOFF_CODE: i32 = -32_005;
 #[rpc(server)]
 pub trait BootnodeApi {
     #[method(name = "getLatestLedger")]
-    async fn get_latest_ledger(&self) -> RpcResult<Value>;
+    async fn get_latest_ledger(&self) -> RpcResult<GetLatestLedgerResponse>;
 
     #[method(name = "getEvents", param_kind = map)]
     async fn get_events(
@@ -23,7 +26,9 @@ pub trait BootnodeApi {
         filters: Vec<ContractEventFilter>,
         pagination: PaginationParams,
         #[argument(rename = "startLedger")] start_ledger: Option<u32>,
-    ) -> RpcResult<Value>;
+        #[argument(rename = "endLedger")] end_ledger: Option<u32>,
+        #[argument(rename = "xdrFormat")] xdr_format: Option<String>,
+    ) -> RpcResult<GetEventsResponse>;
 }
 
 pub struct BootnodeRpc {
@@ -31,17 +36,14 @@ pub struct BootnodeRpc {
 }
 
 impl BootnodeRpc {
-    async fn get_events_handler(&self, params: &get_events::GetEventsParams) -> RpcResult<Value> {
+    async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let deployment = deployment::deployment_config().map_err(|e| {
             counter!("bootnode_handler_errors_total").increment(1);
             internal_error(e)
         })?;
         let allowed_ids = stellar::contract_ids_for_indexer(&deployment);
 
-        let parsed = match params.parsed() {
-            Ok(v) => v,
-            Err(()) => return Err(invalid_params("invalid getEvents params")),
-        };
+        let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(&allowed_ids) {
             return Err(invalid_params("unsupported filters"));
         }
@@ -93,7 +95,7 @@ impl BootnodeRpc {
 
 #[async_trait]
 impl BootnodeApiServer for BootnodeRpc {
-    async fn get_latest_ledger(&self) -> RpcResult<Value> {
+    async fn get_latest_ledger(&self) -> RpcResult<GetLatestLedgerResponse> {
         self.state.upstream.get_latest_ledger().await.map_err(|e| {
             counter!("bootnode_handler_errors_total").increment(1);
             internal_error(e)
@@ -105,12 +107,23 @@ impl BootnodeApiServer for BootnodeRpc {
         filters: Vec<ContractEventFilter>,
         pagination: PaginationParams,
         start_ledger: Option<u32>,
-    ) -> RpcResult<Value> {
-        let params = get_events::GetEventsParams {
+        end_ledger: Option<u32>,
+        xdr_format: Option<String>,
+    ) -> RpcResult<GetEventsResponse> {
+        let params = GetEventsParams {
             filters,
             pagination,
             start_ledger,
+            end_ledger,
+            xdr_format,
         };
+        // Bootnode intentionally supports a narrow subset of getEvents.
+        if params.end_ledger.is_some() {
+            return Err(invalid_params("endLedger is not supported by bootnode"));
+        }
+        if params.xdr_format.is_some() {
+            return Err(invalid_params("xdrFormat is not supported by bootnode"));
+        }
         self.get_events_handler(&params).await
     }
 }

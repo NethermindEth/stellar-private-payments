@@ -1,5 +1,6 @@
 use anyhow::Result;
 use deadpool_postgres::Pool;
+use stellar::{GetEventsParams, GetEventsResponse};
 use tokio_postgres::types::Json;
 
 pub(crate) async fn init_db(pool: &Pool) -> Result<()> {
@@ -129,8 +130,8 @@ pub(crate) async fn insert_get_events_page(
     pool: &Pool,
     cursor_in: Option<&str>,
     start_ledger: Option<u32>,
-    request: &serde_json::Value,
-    result: &serde_json::Value,
+    request: &GetEventsParams,
+    result: &GetEventsResponse,
     cursor_out: &str,
     last_event_ledger: Option<u32>,
     latest_ledger: u32,
@@ -192,7 +193,7 @@ pub(crate) async fn lookup_cursor_ledger(pool: &Pool, cursor: &str) -> Result<Op
 pub(crate) async fn get_cached_get_events_by_cursor(
     pool: &Pool,
     cursor: &str,
-) -> Result<Option<serde_json::Value>> {
+) -> Result<Option<GetEventsResponse>> {
     let client = pool.get().await?;
     let row = client
         .query_opt(
@@ -201,7 +202,7 @@ pub(crate) async fn get_cached_get_events_by_cursor(
         )
         .await?;
     Ok(row.map(|r| {
-        let Json(v): Json<serde_json::Value> = r.get(0);
+        let Json(v): Json<GetEventsResponse> = r.get(0);
         v
     }))
 }
@@ -209,7 +210,7 @@ pub(crate) async fn get_cached_get_events_by_cursor(
 pub(crate) async fn get_cached_get_events_by_start_ledger(
     pool: &Pool,
     start_ledger: u32,
-) -> Result<Option<serde_json::Value>> {
+) -> Result<Option<GetEventsResponse>> {
     let client = pool.get().await?;
     let row = client
         .query_opt(
@@ -218,7 +219,7 @@ pub(crate) async fn get_cached_get_events_by_start_ledger(
         )
         .await?;
     Ok(row.map(|r| {
-        let Json(v): Json<serde_json::Value> = r.get(0);
+        let Json(v): Json<GetEventsResponse> = r.get(0);
         v
     }))
 }

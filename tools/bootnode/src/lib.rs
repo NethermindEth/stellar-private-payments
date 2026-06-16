@@ -2,7 +2,6 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
-pub mod get_events;
 pub mod metrics;
 pub mod otel;
 pub mod rpc;
