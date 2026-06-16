@@ -2,17 +2,24 @@ use bootnode::{
     Bootnode, InMemory,
     config::Config,
     metrics,
+    rpc::RETENTION_HANDOFF_CODE,
     storage::{InsertGetEventsPage, Storage},
 };
-use std::sync::Arc;
+use serde_json::json;
+use std::sync::{Arc, OnceLock};
 use stellar::{GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
 use types::ContractConfig;
 
-const BASE: &str = "http://127.0.0.1:40404";
+fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
+    static HANDLE: OnceLock<metrics_exporter_prometheus::PrometheusHandle> = OnceLock::new();
+    HANDLE
+        .get_or_init(|| metrics::install_prometheus_recorder().expect("prometheus"))
+        .clone()
+}
 
-fn test_config() -> Config {
+fn test_config(port: u16) -> Config {
     Config {
-        bind: "127.0.0.1:40404".parse().expect("bind"),
+        bind: format!("127.0.0.1:{port}").parse().expect("bind"),
         upstream_rpc_url: "http://127.0.0.1:9".parse().expect("upstream"),
         dev: true,
         tls: None,
@@ -35,10 +42,10 @@ fn contract_ids() -> Vec<String> {
     stellar::contract_ids_for_indexer(&deployment)
 }
 
-async fn wait_ready(client: &reqwest::Client) {
+async fn wait_ready(client: &reqwest::Client, base: &str) {
     for _ in 0..50 {
         if client
-            .get(format!("{BASE}/healthz"))
+            .get(format!("{base}/healthz"))
             .send()
             .await
             .is_ok_and(|r| r.status().is_success())
@@ -50,9 +57,41 @@ async fn wait_ready(client: &reqwest::Client) {
     panic!("server not ready");
 }
 
+async fn post_get_events(
+    client: &reqwest::Client,
+    base: &str,
+    params: GetEventsParams,
+) -> JsonRpcResponse<GetEventsResponse> {
+    let body = JsonRpcRequest {
+        jsonrpc: "2.0",
+        id: 1,
+        method: "getEvents",
+        params,
+    };
+    client
+        .post(base)
+        .json(&body)
+        .send()
+        .await
+        .expect("post")
+        .json()
+        .await
+        .expect("json body")
+}
+
+async fn spawn_bootnode(storage: Arc<InMemory>, port: u16) -> tokio::task::JoinHandle<()> {
+    let bootnode = Bootnode::setup(test_config(port), storage, prom_handle())
+        .await
+        .expect("setup");
+    tokio::spawn(async move {
+        let _ = bootnode.serve().await;
+    })
+}
+
 #[tokio::test]
 async fn cached_get_events() {
-    let prom = metrics::install_prometheus_recorder().expect("prometheus");
+    const PORT: u16 = 40404;
+    let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
     let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
@@ -80,31 +119,12 @@ async fn cached_get_events() {
         .await
         .expect("seed cache");
 
-    let bootnode = Bootnode::setup(test_config(), storage, prom)
-        .await
-        .expect("setup");
-    let server = tokio::spawn(async move {
-        let _ = bootnode.serve().await;
-    });
+    let server = spawn_bootnode(storage, PORT).await;
 
     let client = reqwest::Client::new();
-    wait_ready(&client).await;
+    wait_ready(&client, &base).await;
 
-    let body = JsonRpcRequest {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getEvents",
-        params: request,
-    };
-    let response: JsonRpcResponse<GetEventsResponse> = client
-        .post(BASE)
-        .json(&body)
-        .send()
-        .await
-        .expect("post")
-        .json()
-        .await
-        .expect("json body");
+    let response = post_get_events(&client, &base, request).await;
 
     server.abort();
 
@@ -114,4 +134,66 @@ async fn cached_get_events() {
         response.error
     );
     assert_eq!(response.result.expect("result").cursor, "cursor-out");
+}
+
+#[tokio::test]
+async fn handoff_get_events() {
+    const PORT: u16 = 40405;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let cached = GetEventsResponse {
+        cursor: "cursor-out".into(),
+        events: vec![],
+        latest_ledger: 3_000_000,
+        latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+        oldest_ledger: 2_997_687,
+        oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+    };
+
+    let storage = Arc::new(InMemory::new());
+    storage
+        .insert_get_events_page(InsertGetEventsPage {
+            cursor_in: Some("cursor-in"),
+            start_ledger: None,
+            request: &request,
+            result: &cached,
+            cursor_out: "cursor-out",
+            last_event_ledger: None,
+            latest_ledger: cached.latest_ledger,
+            oldest_ledger: cached.oldest_ledger,
+        })
+        .await
+        .expect("seed cache");
+    // Handoff resolves the incoming cursor; insert_get_events_page only maps
+    // cursor-out.
+    storage
+        .upsert_cursor_ledger("cursor-in", 2_999_000)
+        .await
+        .expect("map incoming cursor");
+
+    let server = spawn_bootnode(storage, PORT).await;
+
+    let client = reqwest::Client::new();
+    wait_ready(&client, &base).await;
+
+    let response = post_get_events(&client, &base, request).await;
+
+    server.abort();
+
+    assert!(
+        response.result.is_none(),
+        "unexpected result: {:?}",
+        response.result
+    );
+    let err = response.error.expect("expected handoff error");
+    assert_eq!(err.code, i64::from(RETENTION_HANDOFF_CODE));
+    assert_eq!(
+        err.data,
+        Some(json!({
+            "reason": "retention_threshold",
+            "fromLedger": 0,
+        }))
+    );
 }
