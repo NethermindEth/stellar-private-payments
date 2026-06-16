@@ -22,6 +22,8 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
     JsonRpc { code: i64, message: String },
+    #[error("bootnode handoff at ledger {from_ledger}")]
+    RetentionHandoff { from_ledger: u32 },
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -68,6 +70,8 @@ struct JsonRpcResponse<T> {
 struct JsonRpcErrorResponse {
     code: i64,
     message: String,
+    #[serde(default)]
+    data: Option<serde_json::Value>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
@@ -311,6 +315,19 @@ impl Client {
         let resp = request.await?;
 
         if let Some(err) = resp.error {
+            if err.code == -32005 {
+                let from_ledger = err
+                    .data
+                    .as_ref()
+                    .and_then(|d| d.get("fromLedger"))
+                    .and_then(|v| v.as_u64())
+                    .and_then(|v| u32::try_from(v).ok())
+                    .ok_or_else(|| Error::JsonRpc {
+                        code: err.code,
+                        message: "handoff missing fromLedger".into(),
+                    })?;
+                return Err(Error::RetentionHandoff { from_ledger });
+            }
             return Err(Error::JsonRpc {
                 code: err.code,
                 message: err.message,

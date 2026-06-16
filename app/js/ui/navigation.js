@@ -61,7 +61,7 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
               <ul class="list-disc pl-5 space-y-1 text-dark-300">
                 <li>The bootnode can omit, censor, or serve incorrect historical event data.</li>
                 <li>The bootnode operator can observe your IP address and request timing.</li>
-                <li>Near the chain tip, the bootnode will redirect requests to your upstream RPC.</li>
+                <li>Near the chain tip, the indexer continues on your wallet RPC.</li>
               </ul>
               <p class="text-xs text-dark-400">Learn more: <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="docs/bootnode.html" target="_blank" rel="noreferrer noopener">Bootnode docs</a></p>
             </div>

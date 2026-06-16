@@ -17,8 +17,20 @@ fn error_codes() {
         jsonrpc::invalid_params(id.clone(), "bad").error.code,
         -32602
     );
-    assert_eq!(jsonrpc::cache_miss(id, "miss").error.code, -32004);
+    assert_eq!(
+        jsonrpc::cache_miss(id, "miss").error.code,
+        jsonrpc::CACHE_MISS_CODE
+    );
     assert_eq!(jsonrpc::parse_error("bad json").error.code, -32700);
+}
+
+#[test]
+fn retention_handoff_shape() {
+    let resp = jsonrpc::retention_handoff(json!(1), 42_000);
+    let data = resp.error.data.as_ref().expect("expected rep with data");
+    assert_eq!(resp.error.code, jsonrpc::RETENTION_HANDOFF_CODE);
+    assert_eq!(data["fromLedger"], 42_000);
+    assert_eq!(data["reason"], "retention_threshold");
 }
 
 #[test]

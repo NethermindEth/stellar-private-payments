@@ -1,14 +1,22 @@
 use crate::rpc::{Client, Error as RpcError};
 use anyhow::{Result, anyhow};
-use std::collections::HashSet;
+use std::{cell::Cell, collections::HashSet};
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
 const PAGE_SIZE: usize = 300;
 const MAX_PAGES_PER_ROUND: usize = 10;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SyncPhase {
+    Rpc,
+    Bootnode,
+}
+
 pub struct Indexer<S: ContractDataStorage> {
-    client: Client,
+    rpc: Client,
+    bootnode: Option<Client>,
+    phase: Cell<SyncPhase>,
     storage: S,
     contract_ids: Vec<String>,
     min_pool_ledger: u32,
@@ -36,42 +44,67 @@ pub fn min_pool_ledger_for_indexer(config: &ContractConfig) -> Result<u32> {
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
-        let client = Client::new(rpc_url)?;
-
+    pub async fn init(
+        rpc_url: &str,
+        bootnode_url: Option<&str>,
+        storage: S,
+        config: &'static ContractConfig,
+    ) -> Result<Self> {
+        let rpc = Client::new(rpc_url)?;
         let min_pool_ledger = min_pool_ledger_for_indexer(config)?;
-
-        // Retention-window check: if the RPC cannot serve events back to the deployment
-        // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
-        // trees.
         let contract_ids = contract_ids_for_indexer(config);
-        match client
+
+        match rpc
             .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
             .await
         {
-            Ok(_) => {}
+            Ok(_) => Ok(Self {
+                rpc,
+                bootnode: None,
+                phase: Cell::new(SyncPhase::Rpc),
+                storage,
+                contract_ids,
+                min_pool_ledger,
+            }),
             Err(RpcError::RpcSyncGap(oldest)) => {
-                return Err(anyhow!(
-                    "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
+                let Some(bootnode_url) = bootnode_url else {
+                    return Err(anyhow!(
+                        "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
 Your RPC node {rpc_url} oldest available ledger is {oldest}. \
 Indexing requires events back to the pool deployment ledger {0}. \
 Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
-                    min_pool_ledger
-                ));
+                        min_pool_ledger
+                    ));
+                };
+                let bootnode = Client::new(bootnode_url)?;
+                bootnode
+                    .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
+                    .await?;
+                Ok(Self {
+                    rpc,
+                    bootnode: Some(bootnode),
+                    phase: Cell::new(SyncPhase::Bootnode),
+                    storage,
+                    contract_ids,
+                    min_pool_ledger,
+                })
             }
-            Err(e) => return Err(e.into()),
+            Err(e) => Err(e.into()),
         }
+    }
 
-        Ok(Self {
-            client,
-            storage,
-            contract_ids,
-            min_pool_ledger,
-        })
+    fn events_client(&self) -> &Client {
+        match self.phase.get() {
+            SyncPhase::Bootnode => self
+                .bootnode
+                .as_ref()
+                .expect("bootnode phase requires bootnode client"),
+            SyncPhase::Rpc => &self.rpc,
+        }
     }
 
     pub async fn fetch_contract_events(&self) -> Result<()> {
-        let network_tip = self.client.get_latest_ledger().await?.sequence;
+        let network_tip = self.events_client().get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
             self.contract_ids.iter().map(String::as_str).collect();
@@ -80,7 +113,7 @@ Please use a fresher contracts deployment / a different RPC which stores events 
             .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
             .collect();
 
-        let start_ledger = active_sync
+        let mut start_ledger = active_sync
             .iter()
             .map(|meta| meta.last_ledger)
             .min()
@@ -115,13 +148,33 @@ Please use a fresher contracts deployment / a different RPC which stores events 
 
         for page in 0..MAX_PAGES_PER_ROUND {
             log::trace!(
-                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
+                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}, phase={:?}",
+                self.phase.get()
             );
 
-            let (new_cursor, events, latest_ledger) = self
-                .client
-                .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor)
-                .await?;
+            let (new_cursor, events, latest_ledger) = match self
+                .events_client()
+                .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor.clone())
+                .await
+            {
+                Err(RpcError::RetentionHandoff { from_ledger }) => {
+                    if self.phase.get() != SyncPhase::Bootnode {
+                        return Err(anyhow!(
+                            "unexpected bootnode handoff at ledger {from_ledger}"
+                        ));
+                    }
+                    log::info!(
+                        "[INDEXER] bootnode archive complete at ledger {from_ledger}, resuming on main RPC"
+                    );
+                    self.phase.set(SyncPhase::Rpc);
+                    start_ledger = from_ledger;
+                    self.rpc
+                        .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, None)
+                        .await?
+                }
+                Ok(v) => v,
+                Err(e) => return Err(e.into()),
+            };
 
             let new_cursor = new_cursor
                 .clone()

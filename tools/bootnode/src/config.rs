@@ -15,7 +15,7 @@ pub struct Config {
     #[arg(long, env = "BOOTNODE_BIND", default_value = "0.0.0.0:443")]
     pub(crate) bind: SocketAddr,
 
-    /// Upstream Stellar RPC endpoint to index from and redirect to.
+    /// Upstream Stellar RPC endpoint used by the background indexer.
     #[arg(long, env = "BOOTNODE_UPSTREAM_RPC_URL")]
     pub(crate) upstream_rpc_url: Url,
 

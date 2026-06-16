@@ -24,10 +24,15 @@ pub struct JsonRpcErrorResponse {
     pub error: JsonRpcErrorObject,
 }
 
+pub const CACHE_MISS_CODE: i64 = -32004;
+pub const RETENTION_HANDOFF_CODE: i64 = -32005;
+
 #[derive(Debug, Serialize)]
 pub struct JsonRpcErrorObject {
     pub code: i64,
     pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 pub fn ok(id: Value, result: Value) -> JsonRpcResponse {
@@ -45,6 +50,7 @@ pub fn err(id: Value, code: i64, message: impl Into<String>) -> JsonRpcErrorResp
         error: JsonRpcErrorObject {
             code,
             message: message.into(),
+            data: None,
         },
     }
 }
@@ -66,7 +72,22 @@ pub(crate) fn internal_error(id: Value, msg: impl Into<String>) -> JsonRpcErrorR
 }
 
 pub fn cache_miss(id: Value, msg: impl Into<String>) -> JsonRpcErrorResponse {
-    err(id, -32004, msg)
+    err(id, CACHE_MISS_CODE, msg)
+}
+
+pub fn retention_handoff(id: Value, from_ledger: u32) -> JsonRpcErrorResponse {
+    JsonRpcErrorResponse {
+        jsonrpc: "2.0",
+        id,
+        error: JsonRpcErrorObject {
+            code: RETENTION_HANDOFF_CODE,
+            message: "Continue syncing on your RPC endpoint".into(),
+            data: Some(json!({
+                "reason": "retention_threshold",
+                "fromLedger": from_ledger,
+            })),
+        },
+    }
 }
 
 pub fn parse_error(msg: impl Into<String>) -> JsonRpcErrorResponse {

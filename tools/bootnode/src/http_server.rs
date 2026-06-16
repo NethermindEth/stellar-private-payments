@@ -140,7 +140,7 @@ async fn healthz(State(state): State<AppState>) -> impl IntoResponse {
         }
     };
 
-    // Consider unhealthy if we haven't indexed within a full redirect window.
+    // Unhealthy if the indexer is more than one handoff window behind tip.
     let cutoff = state.cfg.cutoff_ledgers();
     if tip > 0 && kv.last_fully_indexed_ledger.saturating_add(cutoff) < tip {
         return (StatusCode::SERVICE_UNAVAILABLE, "indexer behind");
@@ -255,8 +255,11 @@ async fn handle_get_events(
     if let Some(effective) = effective
         && effective >= cutoff_ledger
     {
-        counter!("bootnode_redirects_total").increment(1);
-        return Ok(redirect_307(state.cfg.upstream_rpc_url.as_str()));
+        counter!("bootnode_handoffs_total").increment(1);
+        return Ok(json_response(
+            StatusCode::OK,
+            &jsonrpc::retention_handoff(id, cutoff_ledger),
+        ));
     }
 
     // Serve from cache.
@@ -283,16 +286,6 @@ async fn handle_get_events(
 
     counter!("bootnode_cache_hits_total").increment(1);
     Ok(json_response(StatusCode::OK, &jsonrpc::ok(id, result)))
-}
-
-fn redirect_307(location: &str) -> Response {
-    let mut resp = Response::new(axum::body::Body::empty());
-    *resp.status_mut() = StatusCode::TEMPORARY_REDIRECT;
-    resp.headers_mut().insert(
-        header::LOCATION,
-        HeaderValue::from_str(location).unwrap_or_else(|_| HeaderValue::from_static("")),
-    );
-    resp
 }
 
 fn json_response<T: Serialize>(status: StatusCode, value: &T) -> Response {
