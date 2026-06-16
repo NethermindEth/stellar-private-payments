@@ -19,7 +19,7 @@ use storage::{Storage, StorageBackend};
 
 use self::{http_server::HttpServer, indexer::Indexer, upstream::UpstreamClient};
 
-pub use storage::Postgres;
+pub use storage::{Memory, Postgres};
 
 pub struct Bootnode {
     state: AppState,

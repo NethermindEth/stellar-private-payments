@@ -129,24 +129,18 @@ impl StorageBackend for Postgres {
         Ok(())
     }
 
-    async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {
+    async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()> {
         let client = self.pool.get().await?;
         client
             .execute(
-                r#"
-UPDATE bootnode_kv
-SET last_cursor = $1,
-    last_fully_indexed_ledger = $2,
-    updated_at = now()
-WHERE id = 1
-"#,
-                &[&cursor, &i64::from(latest_ledger)],
+                "UPDATE bootnode_kv SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
+                &[&i64::from(ledger)],
             )
             .await?;
         Ok(())
     }
 
-    async fn insert_get_events_page(&self, page: InsertGetEventsPage<'_>) -> Result<()> {
+    async fn store_get_events_page(&self, page: InsertGetEventsPage<'_>) -> Result<()> {
         let client = self.pool.get().await?;
         client
             .execute(
@@ -155,7 +149,6 @@ INSERT INTO rpc_cache_get_events
   (cursor_in, start_ledger, request, result, cursor_out, last_event_ledger, latest_ledger, oldest_ledger)
 VALUES
   ($1, $2, $3, $4, $5, $6, $7, $8)
-ON CONFLICT DO NOTHING
 "#,
                 &[
                     &page.cursor_in,
@@ -169,20 +162,21 @@ ON CONFLICT DO NOTHING
                 ],
             )
             .await?;
+        Ok(())
+    }
 
-        if let Some(ledger) = page.last_event_ledger {
-            client
-                .execute(
-                    r#"
+    async fn upsert_cursor_ledger(&self, cursor: &str, ledger: u32) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                r#"
 INSERT INTO cursor_ledger_map (cursor, ledger)
 VALUES ($1, $2)
 ON CONFLICT (cursor) DO UPDATE SET ledger = EXCLUDED.ledger
 "#,
-                    &[&page.cursor_out, &i64::from(ledger)],
-                )
-                .await?;
-        }
-
+                &[&cursor, &i64::from(ledger)],
+            )
+            .await?;
         Ok(())
     }
 
