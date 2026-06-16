@@ -1,4 +1,4 @@
-use crate::{AppState, deployment, storage};
+use crate::{AppState, deployment, storage::InsertGetEventsPage};
 use metrics::{counter, gauge};
 use std::time::Instant;
 use stellar::GetEventsParams;
@@ -34,12 +34,12 @@ impl Indexer {
             .ledger_tip
             .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
         gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
-        storage::update_ledger_tip(&self.state.db, tip_sequence).await?;
+        self.state.storage.update_ledger_tip(tip_sequence).await?;
 
         let deployment = deployment::deployment_config()?;
         let contract_ids = stellar::contract_ids_for_indexer(&deployment);
 
-        let kv = storage::load_kv(&self.state.db).await?;
+        let kv = self.state.storage.load_kv().await?;
         let mut cursor: Option<String> = kv.last_cursor;
 
         let mut start_ledger: Option<u32> = None;
@@ -59,27 +59,31 @@ impl Indexer {
             let cursor_out = result.cursor.clone();
             let last_event_ledger = result.events.last().map(|event| event.ledger);
 
-            storage::insert_get_events_page(
-                &self.state.db,
-                cursor.as_deref(),
-                start_ledger,
-                &params,
-                &result,
-                &cursor_out,
-                last_event_ledger,
-                result.latest_ledger,
-                result.oldest_ledger,
-            )
-            .await?;
+            self.state
+                .storage
+                .insert_get_events_page(InsertGetEventsPage {
+                    cursor_in: cursor.as_deref(),
+                    start_ledger,
+                    request: &params,
+                    result: &result,
+                    cursor_out: &cursor_out,
+                    last_event_ledger,
+                    latest_ledger: result.latest_ledger,
+                    oldest_ledger: result.oldest_ledger,
+                })
+                .await?;
 
-            storage::update_cursor(&self.state.db, &cursor_out).await?;
+            self.state.storage.update_cursor(&cursor_out).await?;
 
             cursor = Some(cursor_out);
             start_ledger = None;
 
             if result.events.is_empty() {
                 if let Some(cursor) = cursor.as_deref() {
-                    storage::mark_caught_up(&self.state.db, cursor, result.latest_ledger).await?;
+                    self.state
+                        .storage
+                        .mark_caught_up(cursor, result.latest_ledger)
+                        .await?;
                     gauge!("bootnode_last_fully_indexed_ledger")
                         .set(f64::from(result.latest_ledger));
                 }

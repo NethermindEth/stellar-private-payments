@@ -1,4 +1,4 @@
-use crate::{AppState, rpc, storage};
+use crate::{AppState, rpc};
 use axum::{
     Router,
     body::Body,
@@ -144,21 +144,13 @@ async fn metrics(State(state): State<RpcState>) -> impl IntoResponse {
 async fn healthz(State(state): State<RpcState>) -> impl IntoResponse {
     use std::sync::atomic::Ordering;
 
-    match state.app.db.get().await {
-        Ok(client) => {
-            if let Err(e) = client.query_one("SELECT 1", &[]).await {
-                tracing::warn!(error = %e, "healthz: db query failed");
-                return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable");
-            }
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "healthz: db pool unavailable");
-            return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable");
-        }
+    if let Err(e) = state.app.storage.ping().await {
+        tracing::warn!(error = %e, "healthz: db unavailable");
+        return (StatusCode::SERVICE_UNAVAILABLE, "db unavailable");
     }
 
     let tip = state.app.ledger_tip.load(Ordering::Relaxed);
-    let kv = match storage::load_kv(&state.app.db).await {
+    let kv = match state.app.storage.load_kv().await {
         Ok(kv) => kv,
         Err(e) => {
             tracing::warn!(error = %e, "healthz: failed to load kv");

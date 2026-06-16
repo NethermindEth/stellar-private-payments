@@ -16,6 +16,7 @@ path = "bin/bootnode.rs"
 
 [dependencies]
 anyhow.workspace = true
+async-trait.workspace = true
 axum = "0.8.9"
 axum-server = "0.7.3"
 clap.workspace = true

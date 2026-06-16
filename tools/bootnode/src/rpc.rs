@@ -1,4 +1,4 @@
-use crate::{AppState, deployment, storage};
+use crate::{AppState, deployment};
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
@@ -53,7 +53,10 @@ impl BootnodeRpc {
 
         let effective = match (parsed.start_ledger, parsed.cursor.as_deref()) {
             (Some(start_ledger), None) => Some(start_ledger),
-            (None, Some(cursor)) => storage::lookup_cursor_ledger(&self.state.db, cursor)
+            (None, Some(cursor)) => self
+                .state
+                .storage
+                .lookup_cursor_ledger(cursor)
                 .await
                 .map_err(|e| {
                     counter!("bootnode_handler_errors_total").increment(1);
@@ -71,10 +74,16 @@ impl BootnodeRpc {
 
         let cached = match (parsed.start_ledger, parsed.cursor) {
             (Some(start_ledger), None) => {
-                storage::get_cached_get_events_by_start_ledger(&self.state.db, start_ledger).await
+                self.state
+                    .storage
+                    .get_cached_get_events_by_start_ledger(start_ledger)
+                    .await
             }
             (None, Some(cursor)) => {
-                storage::get_cached_get_events_by_cursor(&self.state.db, &cursor).await
+                self.state
+                    .storage
+                    .get_cached_get_events_by_cursor(&cursor)
+                    .await
             }
             _ => Ok(None),
         }

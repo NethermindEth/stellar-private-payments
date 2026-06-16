@@ -5,18 +5,21 @@ pub mod config;
 pub mod metrics;
 pub mod otel;
 pub mod rpc;
+pub mod storage;
 
 mod deployment;
 mod http_server;
 mod indexer;
-mod storage;
 mod upstream;
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use config::Config;
 use std::sync::{Arc, atomic::AtomicU32};
+use storage::{Storage, StorageBackend};
 
 use self::{indexer::Indexer, upstream::UpstreamClient};
+
+pub use storage::Postgres;
 
 pub struct Bootnode {
     state: AppState,
@@ -26,7 +29,7 @@ pub struct Bootnode {
 #[derive(Clone)]
 pub(crate) struct AppState {
     pub(crate) cfg: Arc<Config>,
-    pub(crate) db: deadpool_postgres::Pool,
+    pub(crate) storage: Storage,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
@@ -35,20 +38,11 @@ pub(crate) struct AppState {
 impl Bootnode {
     pub async fn setup(
         cfg: Config,
+        backend: Arc<dyn StorageBackend>,
         prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
-        let pg_cfg: tokio_postgres::Config = cfg
-            .database_url
-            .parse()
-            .context("failed to parse DATABASE_URL")?;
-        let mgr = deadpool_postgres::Manager::new(pg_cfg, tokio_postgres::NoTls);
-        let db = deadpool_postgres::Pool::builder(mgr)
-            .max_size(cfg.db_max_connections as usize)
-            .build()
-            .expect("pool build cannot fail");
-
-        storage::init_db(&db).await?;
+        let storage = Storage::new(backend);
 
         let ledger_tip = Arc::new(AtomicU32::new(0));
         let upstream = UpstreamClient::new(cfg.upstream_rpc_url.clone())?;
@@ -56,7 +50,7 @@ impl Bootnode {
         Ok(Self {
             state: AppState {
                 cfg,
-                db,
+                storage,
                 upstream,
                 ledger_tip,
                 prom_handle,
