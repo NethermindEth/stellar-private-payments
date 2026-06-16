@@ -1,9 +1,9 @@
 use crate::rpc::Error;
 use core::ops::Shl;
-use std::collections::HashMap;
+use std::{collections::HashMap, convert::TryInto};
 use stellar_strkey::ed25519;
-use stellar_xdr::curr::{self as xdr, ReadXdr};
-use types::{ContractEvent, U256};
+use stellar_xdr::curr::{self as xdr, Int256Parts, ReadXdr};
+use types::{ContractEvent, Field, U256};
 
 /// Helper to convert ScVal Address to G... or C... string
 pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
@@ -37,10 +37,52 @@ pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
         Ok(sc_bytes.0.to_vec())
     } else {
         Err(Error::UnexpectedScVal(format!(
-            "Expected ScVal::Bytes for encrypted_output, found: {:?}",
-            val
+            "Expected ScVal::Bytes, found: {val:?}"
         )))
     }
+}
+
+/// Encodes a BN254 field element as Soroban `ScVal::U256`.
+pub fn field_to_scval_u256(v: Field) -> xdr::ScVal {
+    let be = v.to_be_bytes();
+
+    let hi_hi = u64::from_be_bytes(be[0..8].try_into().expect("U256 hi_hi slice"));
+    let hi_lo = u64::from_be_bytes(be[8..16].try_into().expect("U256 hi_lo slice"));
+    let lo_hi = u64::from_be_bytes(be[16..24].try_into().expect("U256 lo_lo slice"));
+    let lo_lo = u64::from_be_bytes(be[24..32].try_into().expect("U256 lo_lo slice"));
+
+    xdr::ScVal::U256(xdr::UInt256Parts {
+        hi_hi,
+        hi_lo,
+        lo_hi,
+        lo_lo,
+    })
+}
+
+/// Encodes `i128` as Soroban `ScVal::I256` (two's-complement XDR layout).
+pub fn i128_to_i256_scval(n: i128) -> xdr::ScVal {
+    let hi = if n < 0 { -1i64 } else { 0i64 };
+    let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
+    let bytes = n.to_be_bytes();
+    let lo_hi = u64::from_be_bytes(bytes[0..8].try_into().expect("i128 lo_hi slice"));
+    let lo_lo = u64::from_be_bytes(bytes[8..16].try_into().expect("i128 lo_lo slice"));
+    xdr::ScVal::I256(Int256Parts {
+        hi_hi: hi,
+        hi_lo,
+        lo_hi,
+        lo_lo,
+    })
+}
+
+/// Encodes bytes as Soroban `ScVal::Bytes`.
+pub fn bytes_to_scval(bytes: impl AsRef<[u8]>) -> Result<xdr::ScVal, Error> {
+    Ok(xdr::ScVal::Bytes(
+        bytes
+            .as_ref()
+            .to_vec()
+            .try_into()
+            .map_err(|_| Error::UnexpectedScVal("bytes too long for ScVal::Bytes".into()))?,
+    ))
 }
 
 /// Helper to convert Soroban `U256` parts into a `types::U256`.
@@ -170,4 +212,18 @@ pub fn parse_event_metadata(event: ContractEvent) -> Result<ParsedContractEvent,
         topics,
         values,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use types::{Field, U256};
+
+    #[test]
+    fn field_u256_scval_roundtrip() {
+        let field = Field(U256::from(0xDEAD_BEEF_u64));
+        let sc = field_to_scval_u256(field);
+        let back = scval_to_u256(&sc).expect("decode u256");
+        assert_eq!(back, field.0);
+    }
 }
