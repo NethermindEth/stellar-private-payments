@@ -41,3 +41,24 @@ pub fn cutoff_ledgers(redirect_days: u32, ledger_seconds: u32) -> u32 {
     let denom = ledger_seconds.max(1);
     seconds.saturating_div(denom)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::cutoff_ledgers;
+
+    #[test]
+    fn five_day_default_cutoff() {
+        // 5 days at 5s/ledger
+        assert_eq!(cutoff_ledgers(5, 5), 86_400);
+    }
+
+    #[test]
+    fn zero_ledger_seconds_falls_back_to_one() {
+        assert_eq!(cutoff_ledgers(1, 0), 86_400);
+    }
+
+    #[test]
+    fn custom_window() {
+        assert_eq!(cutoff_ledgers(2, 10), 17_280);
+    }
+}

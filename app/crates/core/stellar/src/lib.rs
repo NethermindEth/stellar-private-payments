@@ -15,7 +15,7 @@ pub use indexer::{
 };
 pub use rpc::{
     ContractEventFilter, Event, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
-    GetTransactionResponse, PaginationParams, ParsedGetEvents, SendTransactionResponse,
-    TopicFilter,
+    GetTransactionResponse, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcResponse,
+    PaginationParams, ParsedGetEvents, SendTransactionResponse, TopicFilter,
 };
 pub use tx_prepare::PoolTransactInput;

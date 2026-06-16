@@ -10,7 +10,7 @@ use axum::{
 use http_body_util::BodyExt;
 use jsonrpsee::server::{BatchRequestConfig, Server, ServerConfig, TowerService, stop_channel};
 use metrics::{gauge, histogram};
-use std::{sync::Arc, time::Instant};
+use std::{net::SocketAddr, sync::Arc, time::Instant};
 use tower::Service;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::{
@@ -101,7 +101,11 @@ impl HttpServer {
 
         if state.cfg.insecure_http {
             let listener = tokio::net::TcpListener::bind(state.cfg.bind).await?;
-            axum::serve(listener, router).await?;
+            axum::serve(
+                listener,
+                router.into_make_service_with_connect_info::<SocketAddr>(),
+            )
+            .await?;
             return Ok(());
         }
 
@@ -143,7 +147,7 @@ async fn run_https_acme(state: AppState, router: Router) -> anyhow::Result<()> {
 
     axum_server::bind(state.cfg.bind)
         .acceptor(acceptor)
-        .serve(router.into_make_service())
+        .serve(router.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
     Ok(())
 }

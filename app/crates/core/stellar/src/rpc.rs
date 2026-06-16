@@ -53,25 +53,25 @@ pub enum Error {
 
 // JSON-RPC Plumbing
 #[derive(Serialize)]
-struct JsonRpcRequest<T> {
-    jsonrpc: &'static str,
-    id: u64,
-    method: &'static str,
-    params: T,
+pub struct JsonRpcRequest<T> {
+    pub jsonrpc: &'static str,
+    pub id: u64,
+    pub method: &'static str,
+    pub params: T,
 }
 
-#[derive(Deserialize)]
-struct JsonRpcResponse<T> {
-    result: Option<T>,
-    error: Option<JsonRpcErrorResponse>,
+#[derive(Deserialize, Debug)]
+pub struct JsonRpcResponse<T> {
+    pub result: Option<T>,
+    pub error: Option<JsonRpcErrorResponse>,
 }
 
-#[derive(Deserialize)]
-struct JsonRpcErrorResponse {
-    code: i64,
-    message: String,
+#[derive(Deserialize, Debug)]
+pub struct JsonRpcErrorResponse {
+    pub code: i64,
+    pub message: String,
     #[serde(default)]
-    data: Option<serde_json::Value>,
+    pub data: Option<serde_json::Value>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]

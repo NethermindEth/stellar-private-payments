@@ -61,6 +61,7 @@ num-traits = { version = "0.2", default-features = false }
 pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_bytes = { version = "0.11", default-features = false }
@@ -71,6 +72,7 @@ soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "app/crates/core/state" }
 stellar = { path = "app/crates/core/stellar" }
 thiserror = { version = "2", default-features = false }
+tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tx-planner = { path = "app/crates/core/tx-planner" }
 types = { path = "app/crates/core/types" }
 uint = { version = "0.10", default-features = false }
