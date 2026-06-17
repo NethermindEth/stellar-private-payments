@@ -16,6 +16,21 @@ members = [
     "tools/bootnode",
     "tools/ceremony-cli",
 ]
+default-members = [
+    "app/crates/core/disclosure",
+    "app/crates/core/prover",
+    "app/crates/core/state",
+    "app/crates/core/stellar",
+    "app/crates/core/tx-planner",
+    "app/crates/core/types",
+    "app/crates/core/witness",
+    "app/crates/platforms/web",
+    "circuit-keys",
+    "circuits",
+    "contracts/*",
+    "e2e-tests",
+    "poseidon2",
+]
 resolver = "3"
 
 [workspace.package]
