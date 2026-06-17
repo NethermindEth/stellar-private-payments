@@ -17,34 +17,33 @@ path = "bin/bootnode.rs"
 [dependencies]
 anyhow.workspace = true
 async-trait.workspace = true
-axum = "0.8.9"
+axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1", "json"] }
 axum-server = "0.7.3"
 clap.workspace = true
 deadpool-postgres = "0.14.1"
-futures.workspace = true
 http.workspace = true
 http-body-util = "0.1.3"
 jsonrpsee = { version = "0.26.0", default-features = false, features = ["server", "macros"] }
-metrics = "0.24.2"
-metrics-exporter-prometheus = "0.16.2"
-opentelemetry = "0.28.0"
-opentelemetry-otlp = { version = "0.28.0", features = ["grpc-tonic"] }
-opentelemetry_sdk = { version = "0.28.0", features = ["rt-tokio"] }
+metrics = "0.24.6"
+metrics-exporter-prometheus = { version = "0.16.2", default-features = false }
+opentelemetry = { version = "0.28.0", default-features = false, features = ["trace"] }
+opentelemetry-otlp = { version = "0.28.0", default-features = false, features = ["grpc-tonic", "trace"] }
+opentelemetry_sdk = { version = "0.28.0", default-features = false, features = ["rt-tokio", "trace"] }
 reqwest.workspace = true
 rustls-acme = { version = "0.13.0", default-features = false, features = ["axum", "ring"] }
 serde = { workspace = true, features = ["derive"] }
 serde_json.workspace = true
 stellar.workspace = true
 tokio.workspace = true
-tokio-postgres = { version = "0.7.12", features = ["with-serde_json-1"] }
-tower = "0.5.2"
-tower-http = { version = "0.6.6", features = ["cors", "set-header", "trace", "request-id"] }
+tokio-postgres = { version = "0.7.18", features = ["with-serde_json-1"] }
+tower = "0.5.3"
+tower-http = { version = "0.6.11", features = ["cors", "set-header", "trace"] }
 tower_governor = "0.7.0"
-tracing = "0.1.41"
-tracing-opentelemetry = "0.29.0"
-tracing-subscriber = { version = "0.3.19", features = ["env-filter", "fmt", "json"] }
+tracing = "0.1.44"
+tracing-opentelemetry = { version = "0.29.0", default-features = false }
+tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
 types.workspace = true
-url = "2.5.4"
+url = "2.5.8"
 
 [dev-dependencies]
 serde_json.workspace = true
