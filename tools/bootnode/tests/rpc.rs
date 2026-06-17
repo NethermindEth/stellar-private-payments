@@ -89,19 +89,16 @@ async fn spawn_bootnode(storage: Arc<InMemory>, port: u16) -> tokio::task::JoinH
 }
 
 fn sample_event() -> Event {
-    Event {
-        event_type: "contract".into(),
-        ledger: 2_999_000,
-        ledger_closed_at: "2024-01-01T00:00:00Z".into(),
-        contract_id: contract_ids().into_iter().next().expect("pool id"),
-        id: "event-1".into(),
-        operation_index: None,
-        transaction_index: None,
-        tx_hash: None,
-        is_successful_contract_call: None,
-        topic: vec![],
-        value: "00".into(),
-    }
+    serde_json::from_value(json!({
+        "type": "contract",
+        "ledger": 2_999_000,
+        "ledgerClosedAt": "2024-01-01T00:00:00Z",
+        "contractId": contract_ids().into_iter().next().expect("pool id"),
+        "id": "event-1",
+        "topic": [],
+        "value": "00",
+    }))
+    .expect("sample event")
 }
 
 #[tokio::test]

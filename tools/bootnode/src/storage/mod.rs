@@ -9,9 +9,9 @@ use async_trait::async_trait;
 use stellar::{GetEventsParams, GetEventsResponse};
 
 #[derive(Debug, Clone)]
-pub(crate) struct KvState {
-    pub(crate) last_cursor: Option<String>,
-    pub(crate) last_fully_indexed_ledger: u32,
+pub struct KvState {
+    pub last_cursor: Option<String>,
+    pub last_fully_indexed_ledger: u32,
 }
 
 pub struct InsertGetEventsPage<'a> {

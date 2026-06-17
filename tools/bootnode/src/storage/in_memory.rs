@@ -106,6 +106,7 @@ impl Storage for InMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use stellar::{GetEventsParams, GetEventsResponse};
 
     fn sample_page<'a>(
@@ -138,19 +139,16 @@ mod tests {
     }
 
     fn sample_event() -> stellar::Event {
-        stellar::Event {
-            event_type: "contract".into(),
-            ledger: 42,
-            ledger_closed_at: "2024-01-01T00:00:00Z".into(),
-            contract_id: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM".into(),
-            id: "event-1".into(),
-            operation_index: None,
-            transaction_index: None,
-            tx_hash: None,
-            is_successful_contract_call: None,
-            topic: vec![],
-            value: "00".into(),
-        }
+        serde_json::from_value(json!({
+            "type": "contract",
+            "ledger": 42,
+            "ledgerClosedAt": "2024-01-01T00:00:00Z",
+            "contractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD2KM",
+            "id": "event-1",
+            "topic": [],
+            "value": "00",
+        }))
+        .expect("sample event")
     }
 
     fn sample_response(cursor: &str, latest_ledger: u32) -> GetEventsResponse {
