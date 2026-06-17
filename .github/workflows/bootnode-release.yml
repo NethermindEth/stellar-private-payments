@@ -31,12 +31,13 @@ jobs:
           tool: cross
 
       - name: Build
-        run: cross build -p bootnode --release --target ${{ matrix.target }}
+        working-directory: tools/bootnode
+        run: cross build --release --target ${{ matrix.target }}
 
       - name: Package
         run: |
           mkdir -p dist
-          BIN="target/${{ matrix.target }}/release/bootnode"
+          BIN="tools/bootnode/target/${{ matrix.target }}/release/bootnode"
           test -f "$BIN"
           tar -C "$(dirname "$BIN")" -czf "dist/bootnode-${{ matrix.target }}.tar.gz" bootnode
           sha256sum "dist/bootnode-${{ matrix.target }}.tar.gz" > "dist/bootnode-${{ matrix.target }}.tar.gz.sha256"

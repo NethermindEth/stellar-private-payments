@@ -10,8 +10,9 @@ It caches historical `getEvents` pages into Postgres (starting at the compiled-i
 ## Local development (HTTP, loopback only)
 
 ```bash
+cargo build --manifest-path tools/bootnode/Cargo.toml
 export DATABASE_URL='postgres://postgres:postgres@127.0.0.1:5432/bootnode'
-bootnode --dev --insecure-http --bind 127.0.0.1:8080 --upstream-rpc-url https://soroban-testnet.stellar.org --database-url "$DATABASE_URL"
+./tools/bootnode/target/debug/bootnode --dev --insecure-http --bind 127.0.0.1:8080 --upstream-rpc-url https://soroban-testnet.stellar.org --database-url "$DATABASE_URL"
 ```
 
 ## Production (HTTPS + ACME)
