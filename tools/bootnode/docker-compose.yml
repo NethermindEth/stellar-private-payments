@@ -9,13 +9,20 @@ services:
       - "5432:5432"
     volumes:
       - bootnode_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d bootnode"]
+      interval: 1s
+      timeout: 2s
+      retries: 20
+      start_period: 2s
 
   bootnode:
     build:
       context: ../..
       dockerfile: tools/bootnode/Dockerfile
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://postgres:postgres@postgres:5432/bootnode
       BOOTNODE_UPSTREAM_RPC_URL: https://soroban-testnet.stellar.org
