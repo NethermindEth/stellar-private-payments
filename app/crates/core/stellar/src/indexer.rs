@@ -70,9 +70,8 @@ impl<S: ContractDataStorage> Indexer<S> {
                 let Some(bootnode_url) = bootnode_url else {
                     return Err(anyhow!(
                         "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
-Your RPC node {rpc_url} oldest available ledger is {oldest}. \
-Indexing requires events back to the pool deployment ledger {0}. \
-Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
+Your RPC node retains events only back to ledger {oldest}, but indexing requires {0}. \
+Use a different RPC, a fresher deployment, or configure a bootnode.",
                         min_pool_ledger
                     ));
                 };
