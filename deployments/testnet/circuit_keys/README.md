@@ -23,7 +23,7 @@ Files:
 
 **Canonical `vk_hash`:** `0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af`
 
-This hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`), not the SHA-256 of the JSON file. The same value is pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`. For the full derivation steps and file checksums, see `wip/212-213-vk-hash-computation.md`.
+This hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`), not the SHA-256 of the JSON file. The same value is pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`. For the full derivation steps and file checksums.
 
 **Operational note:** Disclosure proof verification is entirely off-chain. Rotating this key requires rebuilding the web app and updating the pinned `vk_hash` in the UI/docs; it does **not** require a pool contract redeploy.
 
