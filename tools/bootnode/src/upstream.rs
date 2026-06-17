@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
 use stellar::{GetEventsParams, GetEventsResponse, GetLatestLedgerResponse};
@@ -45,9 +45,11 @@ impl UpstreamClient {
             .post(self.base_url.clone())
             .json(&payload)
             .send()
-            .await?
+            .await
+            .with_context(|| format!("upstream {method} request to {}", self.base_url))?
             .json()
-            .await?;
+            .await
+            .context("failed to decode upstream JSON response")?;
 
         if let Some(err) = resp.get("error") {
             anyhow::bail!("upstream jsonrpc error: {err}");
