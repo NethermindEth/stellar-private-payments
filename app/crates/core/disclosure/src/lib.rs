@@ -812,8 +812,8 @@ mod tests {
             .expect_err("mismatched vk_bytes should fail");
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("VK hash mismatch"),
-            "expected VK hash mismatch error, got: {msg}"
+            msg.contains("Verifying key hash mismatch"),
+            "expected verifying key hash mismatch error, got: {msg}"
         );
         assert!(
             !msg.contains("circuit metadata mismatch"),
@@ -839,8 +839,8 @@ mod tests {
             .expect_err("dummy vk_bytes should fail proof verification");
         let msg = format!("{err:#}");
         assert!(
-            !msg.contains("VK hash mismatch"),
-            "matching hash should not trigger VK hash mismatch: {msg}"
+            !msg.contains("Verifying key hash mismatch"),
+            "matching hash should not trigger verifying key hash mismatch: {msg}"
         );
         assert!(
             msg.contains("Failed to load VK") || msg.contains("Failed to load proof"),
