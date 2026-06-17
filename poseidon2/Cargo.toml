@@ -15,16 +15,10 @@ asm = ["ark-ff/asm"]
 
 [dependencies]
 ark-ff = { workspace = true }
-ark-std = { workspace = true }
 cfg-if = { workspace = true }
 hex = { workspace = true }
 lazy_static = "1.5"
 rand = "0.8"
-sha2 = { workspace = true }
-[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-getrandom = { workspace = true, features = ["std"] }
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { workspace = true, features = ["js"] }
 
 [profile.release]
 # Enable link-time optimization, eliminates more code and inlines across crate boundaries.

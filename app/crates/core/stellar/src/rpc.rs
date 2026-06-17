@@ -288,12 +288,16 @@ pub struct ContractDataBulkRequest<'a> {
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
     pub auth: Vec<String>,
+    /// Legacy RPC field; may be absent on newer RPC servers.
     #[serde(default)]
     pub retval: Option<String>,
+    /// Current RPC field for read-only simulation results.
+    #[serde(default)]
+    pub xdr: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]

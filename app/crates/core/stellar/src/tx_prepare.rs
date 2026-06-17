@@ -189,6 +189,7 @@ mod tests {
         sim.results.push(SimulateHostFunctionResult {
             auth: vec![],
             retval: None,
+            ..Default::default()
         });
         sim
     }

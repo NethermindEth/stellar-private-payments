@@ -797,4 +797,54 @@ mod tests {
         assert_eq!(h.len(), 66); // 0x + 64 hex chars
         assert!(h.chars().skip(2).all(|c| c.is_ascii_hexdigit()));
     }
+
+    #[test]
+    fn verify_receipt_proof_rejects_mismatched_vk_hash_before_receipt_validation() {
+        // Corrupt the receipt so that metadata validation would fail if it were
+        // reached first. The VK-hash guard must fire before receipt validation.
+        let mut receipt = valid_receipt();
+        receipt.circuit.levels = 11;
+
+        let vk_bytes = [1u8, 2, 3];
+        let expected_vk_hash = VK_HASH;
+
+        let err = verify_receipt_proof(&receipt, &vk_bytes, expected_vk_hash)
+            .expect_err("mismatched vk_bytes should fail");
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("Verifying key hash mismatch"),
+            "expected verifying key hash mismatch error, got: {msg}"
+        );
+        assert!(
+            !msg.contains("circuit metadata mismatch"),
+            "VK-hash guard should run before receipt metadata validation: {msg}"
+        );
+    }
+
+    #[test]
+    fn verify_receipt_proof_delegates_to_underlying_verifier_when_hash_matches() {
+        let mut receipt = valid_receipt();
+        let vk_bytes = [1u8, 2, 3];
+        let expected_vk_hash = vk_hash_hex(&vk_bytes);
+
+        // Align the receipt metadata with the expected hash so that the
+        // metadata check passes and we reach the underlying verifier.
+        receipt.circuit.vk_hash = expected_vk_hash.clone();
+
+        // The VK hash matches, so the function proceeds to public-input
+        // serialization and then to the underlying verify_proof. The dummy
+        // vk_bytes are not a valid compressed verifying key, so the error must
+        // come from the verifier, not from the VK-hash guard.
+        let err = verify_receipt_proof(&receipt, &vk_bytes, &expected_vk_hash)
+            .expect_err("dummy vk_bytes should fail proof verification");
+        let msg = format!("{err:#}");
+        assert!(
+            !msg.contains("Verifying key hash mismatch"),
+            "matching hash should not trigger verifying key hash mismatch: {msg}"
+        );
+        assert!(
+            msg.contains("Failed to load VK") || msg.contains("Failed to load proof"),
+            "expected underlying verifier error, got: {msg}"
+        );
+    }
 }

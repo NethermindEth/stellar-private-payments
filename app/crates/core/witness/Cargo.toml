@@ -13,9 +13,6 @@ anyhow = { workspace = true }
 # Arkworks
 ark-bn254 = { workspace = true }
 ark-circom = { workspace = true }
-ark-ff = { workspace = true }
-ark-std = { workspace = true }
-getrandom = { workspace = true }
 
 # BigInt support for input parsing
 num-bigint = { workspace = true }

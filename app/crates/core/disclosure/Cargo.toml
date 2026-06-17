@@ -14,8 +14,5 @@ prover = { workspace = true }
 sha2 = { workspace = true }
 types = { workspace = true }
 
-[dev-dependencies]
-serde_json = { workspace = true, features = ["alloc"] }
-
 [lints]
 workspace = true

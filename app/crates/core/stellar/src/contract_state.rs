@@ -484,9 +484,12 @@ impl StateFetcher {
             .or_else(|| sim.results.into_iter().next())
             .ok_or_else(|| anyhow!("simulateTransaction returned no op results"))?;
 
+        // Newer RPC servers return read-only results in `xdr` instead of the
+        // legacy `retval` field. Try `retval` first for backwards compatibility.
         let retval_b64 = op_result
             .retval
-            .ok_or_else(|| anyhow!("simulateTransaction missing retval"))?;
+            .or(op_result.xdr)
+            .ok_or_else(|| anyhow!("simulateTransaction missing retval and xdr"))?;
 
         Ok(xdr::ScVal::from_xdr_base64(
             &retval_b64,
