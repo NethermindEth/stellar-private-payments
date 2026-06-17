@@ -77,18 +77,20 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "SELECT last_cursor, last_fully_indexed_ledger FROM indexer_state WHERE id = 1",
+                "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip FROM indexer_state WHERE id = 1",
                 &[],
             )
             .await?;
 
         let last_cursor: Option<String> = row.get(0);
         let last_fully_indexed_ledger: i32 = row.get(1);
+        let ledger_tip: i32 = row.get(2);
 
         Ok(KvState {
             last_cursor,
             last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0))
                 .context("last_fully_indexed_ledger exceeds u32 range")?,
+            ledger_tip: u32::try_from(ledger_tip.max(0)).context("ledger_tip exceeds u32 range")?,
         })
     }
 
@@ -110,6 +112,19 @@ impl Storage for Postgres {
             .execute(
                 "UPDATE indexer_state SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
                 &[&ledger],
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn set_ledger_tip(&self, ledger_tip: u32) -> Result<()> {
+        let ledger_tip =
+            i32::try_from(ledger_tip).context("ledger_tip exceeds postgres INTEGER range")?;
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE indexer_state SET ledger_tip = $1, updated_at = now() WHERE id = 1",
+                &[&ledger_tip],
             )
             .await?;
         Ok(())

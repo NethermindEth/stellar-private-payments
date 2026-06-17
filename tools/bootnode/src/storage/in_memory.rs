@@ -8,6 +8,7 @@ use stellar::GetEventsResponse;
 struct State {
     last_cursor: Option<String>,
     last_fully_indexed_ledger: u32,
+    ledger_tip: u32,
     cache_by_cursor_in: HashMap<String, GetEventsResponse>,
     cache_by_start_ledger: HashMap<u32, GetEventsResponse>,
     ledger_by_cursor_out: HashMap<String, u32>,
@@ -51,6 +52,7 @@ impl Storage for InMemory {
         Ok(self.with_state(|state| KvState {
             last_cursor: state.last_cursor.clone(),
             last_fully_indexed_ledger: state.last_fully_indexed_ledger,
+            ledger_tip: state.ledger_tip,
         }))
     }
 
@@ -61,6 +63,11 @@ impl Storage for InMemory {
 
     async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()> {
         self.with_state_mut(|state| state.last_fully_indexed_ledger = ledger);
+        Ok(())
+    }
+
+    async fn set_ledger_tip(&self, ledger_tip: u32) -> Result<()> {
+        self.with_state_mut(|state| state.ledger_tip = ledger_tip);
         Ok(())
     }
 
@@ -192,6 +199,15 @@ mod tests {
             .await
             .expect("lookup last event ledger");
         assert_eq!(last_event_ledger, Some(42));
+    }
+
+    #[tokio::test]
+    async fn ledger_tip_persists_in_kv() {
+        let storage = InMemory::new();
+        storage.set_ledger_tip(3_000_000).await.expect("set tip");
+
+        let kv = storage.load_kv().await.expect("load kv");
+        assert_eq!(kv.ledger_tip, 3_000_000);
     }
 
     #[tokio::test]

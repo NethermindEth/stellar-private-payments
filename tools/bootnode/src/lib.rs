@@ -47,11 +47,13 @@ impl Bootnode {
         let deployment = deployment::deployment_config()?;
         let contract_ids = Arc::new(stellar::contract_ids_for_indexer(&deployment));
         let min_pool_ledger = stellar::min_pool_ledger_for_indexer(&deployment)?;
+        let kv = storage.load_kv().await?;
+        let ledger_tip = cfg.initial_ledger_tip.max(kv.ledger_tip);
 
         Ok(Self {
             state: AppState {
                 upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
-                ledger_tip: Arc::new(AtomicU32::new(cfg.initial_ledger_tip)),
+                ledger_tip: Arc::new(AtomicU32::new(ledger_tip)),
                 cfg,
                 storage,
                 prom_handle,

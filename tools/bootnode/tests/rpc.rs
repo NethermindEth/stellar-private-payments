@@ -205,7 +205,7 @@ async fn handoff_get_events() {
     );
 }
 
-// restart with a warm cache, but the background indexer hasn’t set ledger_tip yet
+// restart with warm cache and persisted ledger_tip; indexer hasn't run yet
 #[tokio::test]
 async fn request_on_warm_cache() {
     const PORT: u16 = 40406;
@@ -236,11 +236,30 @@ async fn request_on_warm_cache() {
         })
         .await
         .expect("seed cache");
+    storage
+        .set_ledger_tip(NETWORK_TIP)
+        .await
+        .expect("seed persisted tip");
+    storage
+        .mark_caught_up("cursor-out", NETWORK_TIP)
+        .await
+        .expect("seed indexer progress");
 
     let server = spawn_bootnode(storage, test_config(PORT, 0)).await;
 
     let client = reqwest::Client::new();
     wait_listening(&client, &base).await;
+
+    let health = client
+        .get(format!("{base}/healthz"))
+        .send()
+        .await
+        .expect("healthz");
+    assert_eq!(
+        health.status(),
+        200,
+        "warm restart should hydrate ledger_tip"
+    );
 
     let response = post_get_events(&client, &base, request).await;
 
@@ -277,4 +296,3 @@ async fn request_on_cold_cache() {
     assert_eq!(err.code, i64::from(CACHE_MISS_CODE));
     assert_eq!(err.message, "bootnode warming up; retry later");
 }
-

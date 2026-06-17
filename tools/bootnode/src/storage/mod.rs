@@ -12,6 +12,7 @@ use stellar::{GetEventsParams, GetEventsResponse};
 pub struct KvState {
     pub last_cursor: Option<String>,
     pub last_fully_indexed_ledger: u32,
+    pub ledger_tip: u32,
 }
 
 pub struct InsertGetEventsPage<'a> {
@@ -31,6 +32,7 @@ pub trait Storage: Send + Sync {
     async fn load_kv(&self) -> Result<KvState>;
     async fn update_cursor(&self, cursor: &str) -> Result<()>;
     async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()>;
+    async fn set_ledger_tip(&self, ledger_tip: u32) -> Result<()>;
     async fn lookup_last_event_ledger_for_cursor(&self, cursor: &str) -> Result<Option<u32>>;
     async fn get_cached_get_events_by_cursor(
         &self,

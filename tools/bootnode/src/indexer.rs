@@ -34,6 +34,7 @@ impl Indexer {
             .ledger_tip
             .store(tip_sequence, std::sync::atomic::Ordering::Relaxed);
         gauge!("bootnode_ledger_tip").set(f64::from(tip_sequence));
+        self.state.storage.set_ledger_tip(tip_sequence).await?;
 
         let kv = self.state.storage.load_kv().await?;
         let mut cursor = kv.last_cursor;
