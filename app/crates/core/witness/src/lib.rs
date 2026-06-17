@@ -516,6 +516,8 @@ fn coalesce_bus_input(
         return Ok(());
     }
 
+    validate_policy_bus_indices(graph, bus_name, field_order, &by_index)?;
+
     let mut coalesced = Vec::new();
     for ((first, second), fields) in by_index {
         for field in field_order {
@@ -544,6 +546,67 @@ fn coalesce_bus_input(
     Ok(())
 }
 
+fn validate_policy_bus_indices(
+    graph: &Graph,
+    bus_name: &str,
+    field_order: &[&str],
+    by_index: &BTreeMap<(usize, usize), HashMap<String, Vec<U256>>>,
+) -> Result<()> {
+    let first_fields = by_index
+        .values()
+        .next()
+        .expect("caller only validates non-empty bus inputs");
+    let mut entry_width = 0usize;
+    for field in field_order {
+        let values = first_fields
+            .get(*field)
+            .with_context(|| format!("Missing `{bus_name}[0][0].{field}` for grouped bus input"))?;
+        entry_width = entry_width
+            .checked_add(values.len())
+            .ok_or_else(|| anyhow!("Grouped bus entry width overflows usize"))?;
+    }
+    if entry_width == 0 {
+        anyhow::bail!("Grouped bus `{bus_name}` entry width is zero");
+    }
+
+    let grouped_width = graph_input_width(graph, bus_name)
+        .with_context(|| format!("Missing grouped graph input `{bus_name}`"))?;
+    if grouped_width % entry_width != 0 {
+        anyhow::bail!(
+            "Grouped bus `{bus_name}` width {grouped_width} is not a multiple of expanded entry width {entry_width}"
+        );
+    }
+    let expected_entries = grouped_width
+        .checked_div(entry_width)
+        .expect("entry width is non-zero");
+    if by_index.len() != expected_entries {
+        anyhow::bail!(
+            "Grouped bus `{bus_name}` has {} expanded entrie(s), expected {}",
+            by_index.len(),
+            expected_entries
+        );
+    }
+
+    for (offset, (first, second)) in by_index.keys().enumerate() {
+        if *first != offset || *second != 0 {
+            anyhow::bail!(
+                "Invalid expanded bus index `{bus_name}[{first}][{second}]`; expected `{bus_name}[{offset}][0]`"
+            );
+        }
+    }
+
+    Ok(())
+}
+
+fn graph_input_width(graph: &Graph, name: &str) -> Option<usize> {
+    let hash = fnv1a(name);
+    graph
+        .input_mapping
+        .iter()
+        .find(|input| input.hash == hash)
+        .and_then(|input| usize::try_from(input.signalsize).ok())
+}
+
 fn graph_has_input(graph: &Graph, name: &str) -> bool {
     let hash = fnv1a(name);
     graph.input_mapping.iter().any(|input| input.hash == hash)
@@ -564,7 +627,8 @@ fn parse_bracket_index(input: &str) -> Option<(usize, &str)> {
     let input = input.strip_prefix('[')?;
     let end = input.find(']')?;
     let index = input[..end].parse().ok()?;
-    Some((index, &input[end + 1..]))
+    let rest_start = end.checked_add(1)?;
+    Some((index, &input[rest_start..]))
 }
 
 fn panic_payload_message(payload: Box<dyn std::any::Any + Send>) -> String {
@@ -1126,6 +1190,61 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn policy_bus_coalescing_rejects_shifted_single_entry_index() {
+        let graph = Graph {
+            nodes: vec![circom_witness_rs::graph::Node::Input(0)],
+            signals: vec![0],
+            input_mapping: vec![HashSignalInfo {
+                hash: fnv1a("nonMembershipProofs"),
+                signalid: 0,
+                signalsize: 14,
+            }],
+        };
+        let mut inputs = non_membership_flattened_inputs();
+        shift_non_membership_index(&mut inputs, 0, 1);
+
+        let err = coalesce_policy_bus_inputs(&mut inputs, &graph)
+            .expect_err("shifted bus indices must not be silently compacted");
+
+        assert!(
+            err.to_string().contains(
+                "Invalid expanded bus index `nonMembershipProofs[1][0]`; expected `nonMembershipProofs[0][0]`"
+            ),
+            "{err:#}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn policy_bus_coalescing_rejects_sparse_multi_entry_index() {
+        let graph = Graph {
+            nodes: vec![circom_witness_rs::graph::Node::Input(0)],
+            signals: vec![0],
+            input_mapping: vec![HashSignalInfo {
+                hash: fnv1a("nonMembershipProofs"),
+                signalid: 0,
+                signalsize: 28,
+            }],
+        };
+        let mut second = non_membership_flattened_inputs();
+        shift_non_membership_index(&mut second, 0, 99);
+
+        let mut inputs = non_membership_flattened_inputs();
+        inputs.extend(second);
+
+        let err = coalesce_policy_bus_inputs(&mut inputs, &graph)
+            .expect_err("sparse bus indices must not be silently compacted");
+
+        assert!(
+            err.to_string().contains(
+                "Invalid expanded bus index `nonMembershipProofs[99][0]`; expected `nonMembershipProofs[1][0]`"
+            ),
+            "{err:#}"
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn non_membership_flattened_inputs() -> HashMap<String, Vec<U256>> {
         let mut inputs = HashMap::new();
         inputs.insert(
@@ -1149,6 +1268,30 @@ mod tests {
             vec![U256::from(12)],
         );
         inputs
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn shift_non_membership_index(
+        inputs: &mut HashMap<String, Vec<U256>>,
+        from_first: usize,
+        to_first: usize,
+    ) {
+        let from_prefix = format!("nonMembershipProofs[{from_first}][0].");
+        let to_prefix = format!("nonMembershipProofs[{to_first}][0].");
+        let moved = inputs
+            .keys()
+            .filter_map(|key| {
+                key.strip_prefix(&from_prefix)
+                    .map(|field| (key.clone(), format!("{to_prefix}{field}")))
+            })
+            .collect::<Vec<_>>();
+
+        for (from, to) in moved {
+            let value = inputs
+                .remove(&from)
+                .expect("source key was collected from the input map");
+            inputs.insert(to, value);
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
