@@ -42,7 +42,6 @@ cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
-clap = { version = "4.6.1", features = ["derive", "env"] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 contract-types = { path = "contracts/types" }
 disclosure = { path = "app/crates/core/disclosure" }
@@ -50,13 +49,11 @@ futures = { version = "0.3.32", default-features = false, features = ["async-awa
 getrandom = { version = "0.2", default-features = false }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
-http = "1.4.0"
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
 pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
@@ -67,7 +64,6 @@ soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "app/crates/core/state" }
 stellar = { path = "app/crates/core/stellar" }
 thiserror = { version = "2", default-features = false }
-tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tx-planner = { path = "app/crates/core/tx-planner" }
 types = { path = "app/crates/core/types" }
 uint = { version = "0.10", default-features = false }

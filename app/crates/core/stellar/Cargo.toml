@@ -6,14 +6,11 @@ repository.workspace = true
 license.workspace = true
 publish.workspace = true
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { workspace = true }
-
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 futures = { workspace = true, features = ["executor"] }
-http.workspace = true
+http = "1.4.0"
 log = { workspace = true }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 serde = { workspace = true }
@@ -24,6 +21,9 @@ stellar-strkey = "0.0.16"
 stellar-xdr = { version = "26.0.0", features = ["curr", "serde", "base64"] }
 thiserror = { workspace = true }
 types = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 contract-types = { workspace = true }
