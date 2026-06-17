@@ -14,7 +14,6 @@ hex = { workspace = true }
 log = { workspace = true }
 rusqlite = { workspace = true }
 rusqlite_migration = { version = "2.5.0", default-features = false }
-serde = { workspace = true }
 stellar = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 

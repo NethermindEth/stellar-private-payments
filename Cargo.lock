@@ -818,16 +818,12 @@ dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
  "ark-circom",
- "ark-ff 0.6.0",
  "ark-groth16",
  "ark-serialize 0.6.0",
  "circuit-keys",
  "clap",
  "getrandom 0.2.17",
  "glob",
- "num-bigint",
- "serde",
- "serde_json",
  "shlex",
  "zeroize",
 ]
@@ -942,7 +938,6 @@ dependencies = [
  "parser",
  "program_structure",
  "regex",
- "serde_json",
  "type_analysis",
  "wast",
  "zkhash",
@@ -1778,7 +1773,6 @@ dependencies = [
  "anyhow",
  "hex",
  "prover",
- "serde_json",
  "sha2 0.11.0",
  "types",
 ]
@@ -1826,9 +1820,6 @@ name = "e2e-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "ark-groth16",
  "asp-membership",
  "asp-non-membership",
  "circom-groth16-verifier",
@@ -4262,16 +4253,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "serde_bytes"
-version = "0.11.19"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a5d440709e79d88e51ac01c4b72fc6cb7314017bb7da9eeff678aa94c10e3ea8"
-dependencies = [
- "serde",
- "serde_core",
-]
-
-[[package]]
 name = "serde_core"
 version = "1.0.228"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4638,7 +4619,6 @@ name = "soroban-utils"
 version = "0.1.0"
 dependencies = [
  "ark-bn254 0.6.0",
- "ark-ec 0.6.0",
  "ark-ff 0.6.0",
  "ark-groth16",
  "contract-types",
@@ -4719,7 +4699,6 @@ dependencies = [
  "prover",
  "rusqlite",
  "rusqlite_migration",
- "serde",
  "sha2 0.11.0",
  "stellar",
  "types",
@@ -5245,7 +5224,6 @@ dependencies = [
  "hex",
  "rusqlite",
  "serde",
- "serde_bytes",
  "serde_json",
  "uint",
 ]
@@ -6128,9 +6106,6 @@ dependencies = [
  "anyhow",
  "ark-bn254 0.6.0",
  "ark-circom",
- "ark-ff 0.6.0",
- "ark-std 0.6.0",
- "getrandom 0.2.17",
  "num-bigint",
  "serde_json",
  "wasmer",
@@ -6284,13 +6259,10 @@ name = "zkhash"
 version = "0.2.0"
 dependencies = [
  "ark-ff 0.6.0",
- "ark-std 0.6.0",
  "cfg-if",
- "getrandom 0.2.17",
  "hex",
  "lazy_static",
  "rand",
- "sha2 0.11.0",
 ]
 
 [[package]]
