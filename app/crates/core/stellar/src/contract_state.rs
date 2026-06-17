@@ -393,7 +393,7 @@ impl StateFetcher {
     ///   padded to `smt_depth`
     /// - otherwise calls `asp_non_membership.find_key(key)`, pads shorter
     ///   sibling paths to `smt_depth`, and rejects paths deeper than the
-    ///   circuit can verify
+    ///   configured policy SMT depth
     pub async fn get_nonmembership_proof(
         &self,
         note_pubkey: &NotePublicKey,
@@ -427,7 +427,16 @@ impl StateFetcher {
             key,
         )?;
         let retval = self.simulate_single_retval(&tx).await?;
-        let parsed = Self::parse_find_result(&retval)?;
+        Self::nonmembership_proof_from_find_result(&retval, key, non_membership_root, smt_depth)
+    }
+
+    fn nonmembership_proof_from_find_result(
+        retval: &xdr::ScVal,
+        key: Field,
+        non_membership_root: Field,
+        smt_depth: usize,
+    ) -> Result<AspNonMembershipProof> {
+        let parsed = Self::parse_find_result(retval)?;
 
         if parsed.found {
             return Err(anyhow!(
@@ -655,7 +664,7 @@ impl StateFetcher {
 fn fit_non_membership_siblings(mut siblings: Vec<Field>, smt_depth: usize) -> Result<Vec<Field>> {
     if siblings.len() > smt_depth {
         return Err(anyhow!(
-            "ASP non-membership proof has {} sibling(s), but the policy circuit supports {}",
+            "ASP non-membership proof has {} sibling(s), but the configured policy SMT depth is {}",
             siblings.len(),
             smt_depth
         ));
@@ -672,6 +681,37 @@ mod tests {
 
     fn field(v: u64) -> Field {
         Field(U256::from(v))
+    }
+
+    fn sc_symbol(name: &str) -> xdr::ScVal {
+        xdr::ScVal::Symbol(xdr::ScSymbol(name.try_into().expect("symbol")))
+    }
+
+    fn sc_map_entry(name: &str, val: xdr::ScVal) -> xdr::ScMapEntry {
+        xdr::ScMapEntry {
+            key: sc_symbol(name),
+            val,
+        }
+    }
+
+    fn find_result_scval(found: bool, siblings: Vec<Field>) -> xdr::ScVal {
+        let siblings = xdr::ScVec::try_from(
+            siblings
+                .into_iter()
+                .map(field_to_scval_u256)
+                .collect::<Vec<_>>(),
+        )
+        .expect("siblings");
+        let entries = xdr::ScMap(
+            vec![
+                sc_map_entry("found", xdr::ScVal::Bool(found)),
+                sc_map_entry("siblings", xdr::ScVal::Vec(Some(siblings))),
+            ]
+            .try_into()
+            .expect("find result map"),
+        );
+
+        xdr::ScVal::Map(Some(entries))
     }
 
     #[test]
@@ -696,9 +736,20 @@ mod tests {
             .expect_err("over-depth proofs must not be truncated");
 
         assert!(
-            err.to_string().contains(
-                "ASP non-membership proof has 3 sibling(s), but the policy circuit supports 2"
-            ),
+            err.to_string().contains("ASP non-membership proof has 3 sibling(s), but the configured policy SMT depth is 2"),
+            "{err:#}"
+        );
+    }
+
+    #[test]
+    fn non_membership_proof_rejects_over_depth_find_result() {
+        let retval = find_result_scval(false, vec![field(1), field(2), field(3)]);
+        let err =
+            StateFetcher::nonmembership_proof_from_find_result(&retval, field(9), field(10), 2)
+                .expect_err("over-depth parsed FindResult must be rejected");
+
+        assert!(
+            err.to_string().contains("ASP non-membership proof has 3 sibling(s), but the configured policy SMT depth is 2"),
             "{err:#}"
         );
     }
