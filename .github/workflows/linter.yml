@@ -25,6 +25,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+    
+      - name: Install cargo-shear
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cargo-shear@1.11.2
+      - name: Check for unused dependencies
+        run: cargo shear
+
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           toolchain: stable
