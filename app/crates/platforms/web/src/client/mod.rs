@@ -284,7 +284,6 @@ impl WebClient {
     #[wasm_bindgen(js_name = prepareRegisterPublicKeys)]
     pub async fn prepare_register_public_keys(
         &self,
-        pool_contract_id: String,
         user_address: String,
         note_public_key_hex: String,
         encryption_public_key_hex: String,
@@ -293,7 +292,7 @@ impl WebClient {
         let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
         let prepared = self
             .fetcher
-            .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
+            .prepare_register(&user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
         Ok(serde_wasm_bindgen::to_value(&prepared)?)

@@ -54,6 +54,7 @@ num-bigint = { version = "0.4.6", default-features = false, features = ["serde"]
 num-integer = { version = "0.1.46", default-features = false }
 pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
+public-key-registry = { path = "contracts/public-key-registry" }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }

@@ -7,7 +7,7 @@ use types::ExtData;
 use crate::{
     contract_state::{OnchainProofPublicInputs, PreparedSorobanTx, StateFetcher},
     soroban_encode::{
-        BASE_FEE, pool_account_to_scval, pool_ext_data_to_scval, pool_proof_to_scval,
+        BASE_FEE, pool_ext_data_to_scval, pool_proof_to_scval, register_account_to_scval,
     },
 };
 
@@ -62,24 +62,22 @@ impl StateFetcher {
         PreparedSorobanTx::from_simulation(&raw, &sim)
     }
 
-    /// Simulates `register` and returns unsigned XDR + auth entries for the
-    /// wallet.
+    /// Simulates `register` on the configured public key registry contract and
+    /// returns unsigned XDR + auth entries for the wallet.
     pub async fn prepare_register(
         &self,
-        pool_contract_id: &str,
         source_account: &str,
         note_key: [u8; 32],
         encryption_key: [u8; 32],
     ) -> Result<PreparedSorobanTx> {
-        self.enabled_pool_for(pool_contract_id)?;
-        let account_scval = pool_account_to_scval(source_account, encryption_key, note_key)?;
+        let account_scval = register_account_to_scval(source_account, encryption_key, note_key)?;
 
         let seq = self.account_sequence(source_account).await?;
         let raw = Self::build_invoke_contract_tx_envelope(
             source_account,
             seq,
             BASE_FEE,
-            pool_contract_id,
+            &self.config.public_key_registry,
             "register",
             vec![account_scval],
             Vec::new(),
@@ -128,6 +126,7 @@ mod tests {
         "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "pools": [{
             "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
             "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
@@ -200,13 +199,13 @@ mod tests {
         note_key: [u8; 32],
         encryption_key: [u8; 32],
     ) -> Result<PreparedSorobanTx> {
-        let pool_id = test_pool_contract_id();
-        let account_scval = pool_account_to_scval(source_account, encryption_key, note_key)?;
+        let config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON).expect("test config");
+        let account_scval = register_account_to_scval(source_account, encryption_key, note_key)?;
         let raw = StateFetcher::build_invoke_contract_tx_envelope(
             source_account,
             next_sequence(mock.seq.clone())?,
             BASE_FEE,
-            &pool_id,
+            &config.public_key_registry,
             "register",
             vec![account_scval],
             Vec::new(),

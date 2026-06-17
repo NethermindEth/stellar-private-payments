@@ -101,7 +101,7 @@ CREATE TABLE pool_commitments (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
--- An address book of registered public keys in the pool contract for sending private transfers
+-- An address book of registered public keys emitted by the public key registry contract
 --
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
 -- be recovered by joining on the raw event.

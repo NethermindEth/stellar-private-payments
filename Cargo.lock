@@ -3808,6 +3808,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "public-key-registry"
+version = "0.1.0"
+dependencies = [
+ "contract-types",
+ "soroban-sdk",
+]
+
+[[package]]
 name = "quote"
 version = "1.0.45"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4774,6 +4782,7 @@ dependencies = [
  "http",
  "log",
  "pool",
+ "public-key-registry",
  "reqwest",
  "serde",
  "serde-aux",

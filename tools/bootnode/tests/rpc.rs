@@ -57,7 +57,7 @@ fn contract_ids() -> Vec<String> {
         "../../../deployments/testnet/deployments.json"
     ))
     .expect("deployments json");
-    deployment.pools_and_membership_contract_ids()
+    deployment.all_contract_ids()
 }
 
 async fn wait_listening(client: &reqwest::Client, base: &str) {

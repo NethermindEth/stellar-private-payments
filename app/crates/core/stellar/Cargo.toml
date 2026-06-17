@@ -28,6 +28,7 @@ gloo-timers = { workspace = true }
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 contract-types = { workspace = true }
 pool = { workspace = true }
+public-key-registry = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
