@@ -8,7 +8,7 @@ const PAGE_SIZE: usize = 300;
 const MAX_PAGES_PER_ROUND: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum SyncPhase {
+pub enum SyncPhase {
     Rpc,
     Bootnode,
 }
@@ -100,6 +100,10 @@ Use a different RPC, a fresher deployment, or configure a bootnode.",
                 .expect("bootnode phase requires bootnode client"),
             SyncPhase::Rpc => &self.rpc,
         }
+    }
+
+    pub fn sync_phase(&self) -> SyncPhase {
+        self.phase.get()
     }
 
     pub async fn fetch_contract_events(&self) -> Result<()> {
@@ -243,5 +247,218 @@ impl From<crate::rpc::Event> for ContractEvent {
             topics: topic,
             value,
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::cell::RefCell;
+    use wiremock::{
+        Mock, MockServer, ResponseTemplate,
+        matchers::{body_string_contains, method},
+    };
+
+    const TEST_CONFIG_JSON: &str = r#"{
+        "network": "test",
+        "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+        "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+        "pools": [{
+            "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+            "deploymentLedger": 1,
+            "enabled": true,
+            "asset": {"kind": "native"}
+        }]
+    }"#;
+
+    const HANDOFF_LEDGER: u32 = 2_999_000;
+    const RPC_EVENT_ID: &str = "rpc-event-1";
+
+    fn test_config() -> &'static ContractConfig {
+        Box::leak(Box::new(
+            serde_json::from_str(TEST_CONFIG_JSON).expect("test config"),
+        ))
+    }
+
+    fn json_rpc_ok(result: serde_json::Value) -> serde_json::Value {
+        json!({ "jsonrpc": "2.0", "id": 1, "result": result })
+    }
+
+    fn latest_ledger_response(sequence: u32) -> serde_json::Value {
+        json_rpc_ok(json!({
+            "id": "test-ledger",
+            "protocolVersion": 23,
+            "sequence": sequence,
+        }))
+    }
+
+    fn get_events_page(
+        cursor: &str,
+        events: serde_json::Value,
+        latest_ledger: u32,
+    ) -> serde_json::Value {
+        json_rpc_ok(json!({
+            "cursor": cursor,
+            "events": events,
+            "latestLedger": latest_ledger,
+            "latestLedgerCloseTime": "2024-01-01T00:00:00Z",
+            "oldestLedger": 1,
+            "oldestLedgerCloseTime": "2024-01-01T00:00:00Z",
+        }))
+    }
+
+    fn handoff_response() -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32005,
+                "message": "bootnode archive complete",
+                "data": { "fromLedger": HANDOFF_LEDGER },
+            }
+        })
+    }
+
+    fn rpc_sync_gap_response() -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "error": {
+                "code": -32602,
+                "message": "startLedger must be within the ledger range: 100 - 3000000",
+            }
+        })
+    }
+
+    struct RecordingStorage<'a> {
+        batches: &'a RefCell<Vec<ContractsEventData>>,
+    }
+
+    #[async_trait::async_trait(?Send)]
+    impl ContractDataStorage for RecordingStorage<'_> {
+        async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
+            Ok(vec![])
+        }
+
+        async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
+            self.batches.borrow_mut().push(batch);
+            Ok(())
+        }
+
+        async fn save_sync_progress(
+            &self,
+            _metadata: Vec<SyncMetadata>,
+            _fully_indexed: bool,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+    }
+
+    async fn mount_bootnode_mocks(server: &MockServer) {
+        Mock::given(method("POST"))
+            .and(body_string_contains("getLatestLedger"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(latest_ledger_response(3_000_000)),
+            )
+            .mount(server)
+            .await;
+
+        // init probe, then fetch handoff — both are getEvents from deployment ledger.
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "probe-cursor",
+                json!([]),
+                3_000_000,
+            )))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(handoff_response()))
+            .mount(server)
+            .await;
+    }
+
+    async fn mount_rpc_mocks(server: &MockServer, pool_contract_id: &str) {
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains("\"startLedger\":1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rpc_sync_gap_response()))
+            .expect(1)
+            .mount(server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains(format!(
+                "\"startLedger\":{HANDOFF_LEDGER}"
+            )))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "rpc-cursor",
+                json!([{
+                    "type": "contract",
+                    "ledger": HANDOFF_LEDGER,
+                    "ledgerClosedAt": "2024-01-01T00:00:00Z",
+                    "contractId": pool_contract_id,
+                    "id": RPC_EVENT_ID,
+                    "topic": ["deposit"],
+                    "value": "00",
+                }]),
+                3_000_000,
+            )))
+            .mount(server)
+            .await;
+
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains("rpc-cursor"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "rpc-cursor-done",
+                json!([]),
+                3_000_000,
+            )))
+            .mount(server)
+            .await;
+    }
+
+    #[tokio::test]
+    async fn bootnode_handoff() {
+        let config = test_config();
+        let pool_contract_id = config.pools[0].pool_contract_id.clone();
+
+        let bootnode = MockServer::start().await;
+        mount_bootnode_mocks(&bootnode).await;
+
+        let rpc = MockServer::start().await;
+        mount_rpc_mocks(&rpc, &pool_contract_id).await;
+
+        let batches = RefCell::new(Vec::new());
+        let storage = RecordingStorage { batches: &batches };
+        let indexer = Indexer::init(&rpc.uri(), Some(&bootnode.uri()), storage, config)
+            .await
+            .expect("indexer");
+        assert_eq!(indexer.sync_phase(), SyncPhase::Bootnode);
+
+        indexer
+            .fetch_contract_events()
+            .await
+            .expect("fetch should succeed after handoff");
+        assert_eq!(indexer.sync_phase(), SyncPhase::Rpc);
+
+        let batches = batches.borrow();
+        assert_eq!(batches.len(), 2);
+        assert_eq!(batches[0].events.len(), 1);
+        assert_eq!(batches[0].events[0].id, RPC_EVENT_ID);
+        assert_eq!(batches[0].cursor, "rpc-cursor");
+        assert!(batches[1].events.is_empty());
     }
 }

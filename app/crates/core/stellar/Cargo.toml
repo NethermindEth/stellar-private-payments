@@ -29,6 +29,8 @@ gloo-timers = { workspace = true }
 contract-types = { workspace = true }
 pool = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
+tokio = { version = "1", features = ["macros", "rt"] }
+wiremock = "0.6"
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = { workspace = true }
