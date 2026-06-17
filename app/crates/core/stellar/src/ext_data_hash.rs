@@ -2,10 +2,10 @@ use anyhow::Result;
 use core::ops::Rem;
 use sha3::{Digest, Keccak256};
 use std::convert::TryInto;
-use stellar_xdr::curr::{
-    Int256Parts, Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr,
-};
+use stellar_xdr::curr::{Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr};
 use types::{BN254_MODULUS_BE, ExtData, U256};
+
+use crate::conversions::i128_to_i256_scval;
 
 // please refer to hash_ext_data in contracts/pool/src/pool.rs
 pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
@@ -62,19 +62,4 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
 
     // 6. Convert to 32-byte big-endian array.
     Ok(reduced.to_big_endian())
-}
-
-/// Correctly maps i128 to Soroban's I256 XDR representation
-fn i128_to_i256_scval(n: i128) -> ScVal {
-    let hi = if n < 0 { -1i64 } else { 0i64 };
-    let hi_lo = u64::from_be_bytes(hi.to_be_bytes());
-    let bytes = n.to_be_bytes();
-    let lo_hi = u64::from_be_bytes(bytes[0..8].try_into().expect("i128 lo_hi slice"));
-    let lo_lo = u64::from_be_bytes(bytes[8..16].try_into().expect("i128 lo_lo slice"));
-    ScVal::I256(Int256Parts {
-        hi_hi: hi,
-        hi_lo,
-        lo_hi,
-        lo_lo,
-    })
 }

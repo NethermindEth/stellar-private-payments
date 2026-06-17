@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 
 use prover::flows::{N_OUTPUTS, TransactParams};
 pub type Address = String;
+use stellar::PreparedSorobanTx;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
     ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
@@ -170,6 +171,8 @@ pub struct PreparedProverTx {
     /// Public inputs and derived values used to build the on-chain `Proof`
     /// struct.
     pub prepared: PreparedTxPublic,
+    /// Unsigned transaction + auth entries from RPC simulation.
+    pub soroban_tx: PreparedSorobanTx,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

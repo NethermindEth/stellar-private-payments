@@ -174,11 +174,11 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
 }
 
 /**
- * Request the user to sign a Soroban auth entry via Freighter.
+ * Request the user to sign a Soroban auth preimage via Freighter.
  *
- * Ensures wallet access, then returns the signed auth entry.
+ * Takes HashIdPreimage XDR (base64); returns raw signature bytes for authorizeEntry.
  *
- * @param {string} entryXdr - Unsigned auth entry XDR (base64).
+ * @param {string} entryXdr - Authorization preimage XDR (base64).
  * @param {Object} opts - Optional signing context.
  * @param {string} [opts.networkPassphrase] - Network passphrase for signing.
  * @param {string} [opts.address] - Specific account to sign with.
