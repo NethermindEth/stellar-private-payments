@@ -183,7 +183,7 @@ pub struct ContractDataBulkRequest<'a> {
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
     pub auth: Vec<String>,

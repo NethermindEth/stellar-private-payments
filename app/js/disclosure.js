@@ -480,15 +480,20 @@ export function mountGenerate(container) {
     if (stage) {
       progressArea.classList.remove('hidden');
       const isError = !!error;
-      progressArea.innerHTML = `
-        <div class="flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}">
-          ${isError ? '' : '<span class="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></span>'}
-          <span>${escapeHtml(message)}</span>
-        </div>
-      `;
+      const wrap = document.createElement('div');
+      wrap.className = `flex items-center gap-2 text-sm ${isError ? 'text-rose-300' : 'text-dark-300'}`;
+      if (!isError) {
+        const spinner = document.createElement('span');
+        spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+        wrap.appendChild(spinner);
+      }
+      const msg = document.createElement('span');
+      msg.textContent = message;
+      wrap.appendChild(msg);
+      progressArea.replaceChildren(wrap);
     } else {
       progressArea.classList.add('hidden');
-      progressArea.innerHTML = '';
+      progressArea.replaceChildren();
     }
   };
 
@@ -547,7 +552,7 @@ export function mountGenerate(container) {
       resultArea.classList.add('hidden');
       resultArea.innerHTML = '';
       progressArea.classList.add('hidden');
-      progressArea.innerHTML = '';
+      progressArea.replaceChildren();
       // Re-enable form
       generateBtn.disabled = false;
       generateBtn.textContent = 'Generate Disclosure Receipt';
@@ -611,6 +616,14 @@ function escapeHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+function getActivePoolContractId(config) {
+  const pools = Array.isArray(config?.pools) ? config.pools : [];
+  const selected = pools.find((p) => p?.enabled) || pools[0];
+  const poolContractId = selected?.poolContractId;
+  if (!poolContractId) throw new Error('Pool contract ID not available');
+  return poolContractId;
+}
+
 async function generateReceipt(form) {
   const onStatus = (obj) => {
     const stage = obj?.stage || '';
@@ -618,16 +631,23 @@ async function generateReceipt(form) {
     const progressArea = document.getElementById('generate-progress');
     if (progressArea) {
       progressArea.classList.remove('hidden');
-      progressArea.innerHTML = `
-        <div class="flex items-center gap-2 text-sm text-dark-300">
-          <span class="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></span>
-          <span>${escapeHtml(message)}</span>
-        </div>
-      `;
+      const wrap = document.createElement('div');
+      wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
+      const spinner = document.createElement('span');
+      spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+      wrap.appendChild(spinner);
+      const msg = document.createElement('span');
+      msg.textContent = message;
+      wrap.appendChild(msg);
+      progressArea.replaceChildren(wrap);
     }
   };
 
+  const config = await getHandle().webClient.contractConfig();
+  const poolContractId = getActivePoolContractId(config);
+
   const receipt = await getHandle().webClient.generateSelectiveDisclosure(
+    poolContractId,
     state.address,
     state.selectedNote.id,
     form.authority,

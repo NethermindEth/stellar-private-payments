@@ -247,6 +247,7 @@ mod tests {
         sim.results.push(crate::rpc::SimulateHostFunctionResult {
             auth: vec![],
             retval: None,
+            ..Default::default()
         });
 
         let assembled = assemble_soroban_transaction(&raw, &sim).expect("assemble");
@@ -276,6 +277,7 @@ mod tests {
         sim.results.push(crate::rpc::SimulateHostFunctionResult {
             auth: vec![auth_b64.clone()],
             retval: None,
+            ..Default::default()
         });
 
         let assembled = assemble_soroban_transaction(&raw, &sim).expect("assemble");
