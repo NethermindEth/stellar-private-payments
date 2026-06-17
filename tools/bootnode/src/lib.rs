@@ -51,7 +51,7 @@ impl Bootnode {
         Ok(Self {
             state: AppState {
                 upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
-                ledger_tip: Arc::new(AtomicU32::new(0)),
+                ledger_tip: Arc::new(AtomicU32::new(cfg.initial_ledger_tip)),
                 cfg,
                 storage,
                 prom_handle,

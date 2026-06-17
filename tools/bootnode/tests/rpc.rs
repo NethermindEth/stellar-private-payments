@@ -2,13 +2,16 @@ use bootnode::{
     Bootnode, InMemory,
     config::Config,
     metrics,
-    rpc::RETENTION_HANDOFF_CODE,
+    rpc::{CACHE_MISS_CODE, RETENTION_HANDOFF_CODE},
     storage::{InsertGetEventsPage, Storage},
 };
 use serde_json::json;
 use std::sync::{Arc, OnceLock};
 use stellar::{Event, GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
 use types::ContractConfig;
+
+const NETWORK_TIP: u32 = 3_000_000;
+const HANDOFF_FROM_LEDGER: u32 = NETWORK_TIP - 86_400;
 
 fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
     static HANDLE: OnceLock<metrics_exporter_prometheus::PrometheusHandle> = OnceLock::new();
@@ -17,7 +20,7 @@ fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
         .clone()
 }
 
-fn test_config(port: u16) -> Config {
+fn test_config(port: u16, initial_ledger_tip: u32) -> Config {
     Config {
         bind: format!("127.0.0.1:{port}").parse().expect("bind"),
         upstream_rpc_url: "http://127.0.0.1:9".parse().expect("upstream"),
@@ -31,6 +34,7 @@ fn test_config(port: u16) -> Config {
         rate_limit_rps: 1_000,
         rate_limit_burst: 1_000,
         otel: None,
+        initial_ledger_tip,
     }
 }
 
@@ -42,19 +46,14 @@ fn contract_ids() -> Vec<String> {
     stellar::contract_ids_for_indexer(&deployment)
 }
 
-async fn wait_ready(client: &reqwest::Client, base: &str) {
+async fn wait_listening(client: &reqwest::Client, base: &str) {
     for _ in 0..50 {
-        if client
-            .get(format!("{base}/healthz"))
-            .send()
-            .await
-            .is_ok_and(|r| r.status().is_success())
-        {
+        if client.get(format!("{base}/healthz")).send().await.is_ok() {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
-    panic!("server not ready");
+    panic!("server not listening");
 }
 
 async fn post_get_events(
@@ -79,8 +78,8 @@ async fn post_get_events(
         .expect("json body")
 }
 
-async fn spawn_bootnode(storage: Arc<InMemory>, port: u16) -> tokio::task::JoinHandle<()> {
-    let bootnode = Bootnode::setup(test_config(port), storage, prom_handle())
+async fn spawn_bootnode(storage: Arc<InMemory>, config: Config) -> tokio::task::JoinHandle<()> {
+    let bootnode = Bootnode::setup(config, storage, prom_handle())
         .await
         .expect("setup");
     tokio::spawn(async move {
@@ -111,7 +110,7 @@ async fn cached_get_events() {
     let cached = GetEventsResponse {
         cursor: "cursor-out".into(),
         events: vec![sample_event()],
-        latest_ledger: 3_000_000,
+        latest_ledger: NETWORK_TIP,
         latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
         oldest_ledger: 2_997_687,
         oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
@@ -132,10 +131,10 @@ async fn cached_get_events() {
         .await
         .expect("seed cache");
 
-    let server = spawn_bootnode(storage, PORT).await;
+    let server = spawn_bootnode(storage, test_config(PORT, NETWORK_TIP)).await;
 
     let client = reqwest::Client::new();
-    wait_ready(&client, &base).await;
+    wait_listening(&client, &base).await;
 
     let response = post_get_events(&client, &base, request).await;
 
@@ -162,7 +161,7 @@ async fn handoff_get_events() {
     let prev = GetEventsResponse {
         cursor: "cursor-in".into(),
         events: vec![sample_event()],
-        latest_ledger: 3_000_000,
+        latest_ledger: NETWORK_TIP,
         latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
         oldest_ledger: 2_997_687,
         oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
@@ -181,10 +180,10 @@ async fn handoff_get_events() {
         .await
         .expect("seed previous page for handoff cursor");
 
-    let server = spawn_bootnode(storage, PORT).await;
+    let server = spawn_bootnode(storage, test_config(PORT, NETWORK_TIP)).await;
 
     let client = reqwest::Client::new();
-    wait_ready(&client, &base).await;
+    wait_listening(&client, &base).await;
 
     let response = post_get_events(&client, &base, request).await;
 
@@ -201,7 +200,81 @@ async fn handoff_get_events() {
         err.data,
         Some(json!({
             "reason": "retention_threshold",
-            "fromLedger": 0,
+            "fromLedger": HANDOFF_FROM_LEDGER,
         }))
     );
 }
+
+// restart with a warm cache, but the background indexer hasn’t set ledger_tip yet
+#[tokio::test]
+async fn request_on_warm_cache() {
+    const PORT: u16 = 40406;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let cached = GetEventsResponse {
+        cursor: "cursor-out".into(),
+        events: vec![sample_event()],
+        latest_ledger: NETWORK_TIP,
+        latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+        oldest_ledger: 2_997_687,
+        oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+    };
+
+    let storage = Arc::new(InMemory::new());
+    storage
+        .insert_get_events_page(InsertGetEventsPage {
+            cursor_in: Some("cursor-in"),
+            start_ledger: None,
+            request: &request,
+            result: &cached,
+            cursor_out: "cursor-out",
+            last_event_ledger: Some(2_999_000),
+            latest_ledger: cached.latest_ledger,
+            oldest_ledger: cached.oldest_ledger,
+        })
+        .await
+        .expect("seed cache");
+
+    let server = spawn_bootnode(storage, test_config(PORT, 0)).await;
+
+    let client = reqwest::Client::new();
+    wait_listening(&client, &base).await;
+
+    let response = post_get_events(&client, &base, request).await;
+
+    server.abort();
+
+    assert!(
+        response.error.is_none(),
+        "unexpected error: {:?}",
+        response.error
+    );
+    assert_eq!(response.result.expect("result").cursor, "cursor-out");
+}
+
+// client arrives before the indexer has run and asks for data that isn’t cached
+#[tokio::test]
+async fn request_on_cold_cache() {
+    const PORT: u16 = 40407;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+
+    let server = spawn_bootnode(Arc::new(InMemory::new()), test_config(PORT, 0)).await;
+
+    let client = reqwest::Client::new();
+    wait_listening(&client, &base).await;
+
+    let response = post_get_events(&client, &base, request).await;
+
+    server.abort();
+
+    assert!(response.result.is_none());
+    let err = response.error.expect("expected warming-up error");
+    assert_eq!(err.code, i64::from(CACHE_MISS_CODE));
+    assert_eq!(err.message, "bootnode warming up; retry later");
+}
+

@@ -34,6 +34,7 @@ pub struct Config {
     pub rate_limit_rps: u32,
     pub rate_limit_burst: u32,
     pub otel: Option<OtelConfig>,
+    pub initial_ledger_tip: u32,
 }
 
 impl Config {

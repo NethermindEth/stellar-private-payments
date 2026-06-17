@@ -176,6 +176,7 @@ impl Cli {
             rate_limit_rps: self.rate_limit_rps,
             rate_limit_burst: self.rate_limit_burst,
             otel,
+            initial_ledger_tip: 0,
         }
     }
 

@@ -160,6 +160,10 @@ async fn healthz(State(state): State<RpcState>) -> impl IntoResponse {
     }
 
     let tip = state.app.ledger_tip.load(Ordering::Relaxed);
+    if tip == 0 {
+        return (StatusCode::SERVICE_UNAVAILABLE, "warming up");
+    }
+
     let kv = match state.app.storage.load_kv().await {
         Ok(kv) => kv,
         Err(e) => {
