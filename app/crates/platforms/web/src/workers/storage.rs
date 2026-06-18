@@ -206,12 +206,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed) => {
+        StorageWorkerRequest::SaveSyncProgress(metadata) => {
             log::trace!(
-                "[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}",
+                "[{WORKER_NAME}] saving bulk sync progress for {} contracts",
                 metadata.len()
             );
-            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            with_storage_mut!(s => s.save_sync_progress(&metadata)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ClearIndexingCursors => {
+            log::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
+            with_storage_mut!(s => s.clear_indexing_cursors()?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {

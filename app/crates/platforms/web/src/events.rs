@@ -1,11 +1,10 @@
 use crate::client::WebClient;
 use gloo_timers::future::TimeoutFuture;
-use std::rc::Rc;
-use stellar::{Client, Indexer, RpcError};
+use stellar::{Indexer, RpcError};
 use types::ContractConfig;
 
 const INDEXER_INTERVAL_MS: u32 = 5_000;
-/// Bootnode JSON-RPC code: archive complete, continue on the wallet RPC.
+/// Bootnode JSON-RPC code: historical range complete, continue on the wallet RPC.
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
 
 fn is_retention_handoff(err: &RpcError) -> bool {
@@ -18,6 +17,20 @@ fn is_retention_handoff(err: &RpcError) -> bool {
     )
 }
 
+fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<RpcError>(),
+        Some(RpcError::RpcSyncGap(_))
+    )
+}
+
+fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
+    matches!(
+        err.downcast_ref::<RpcError>(),
+        Some(rpc_err) if is_retention_handoff(rpc_err)
+    )
+}
+
 pub(crate) async fn events_listener(
     rpc_url: String,
     bootnode_url: Option<String>,
@@ -26,93 +39,83 @@ pub(crate) async fn events_listener(
 ) {
     log::debug!("[EVENTS] listening");
 
-    let contract_ids = config.pools_and_membership_contract_ids();
-    let min_deployment_ledger = match config.min_deployment_ledger() {
-        Ok(v) => v,
-        Err(e) => {
-            log::error!("[EVENTS] invalid deployment config: {e}");
-            return;
-        }
-    };
+    if config.min_deployment_ledger().is_err() {
+        log::error!("[EVENTS] invalid deployment config: at least one pool should be enabled");
+        return;
+    }
 
-    // Try main RPC; on sync gap, connect to bootnode.
-    let rpc = match Client::new(&rpc_url) {
-        Ok(c) => c,
-        Err(e) => {
-            log::error!("[EVENTS] invalid RPC URL: {e}");
-            return;
-        }
-    };
-
-    let mut on_bootnode = false;
-    let connect_url = match rpc
-        .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
-        .await
-    {
-        Ok(_) => rpc_url.clone(),
-        Err(RpcError::RpcSyncGap(oldest)) => {
+    let indexer = match Indexer::init(&rpc_url, storage.clone(), config).await {
+        // rpc ok
+        Ok(indexer) => indexer,
+        // sync-gap, try bootnode
+        Err(e) if is_rpc_sync_gap(&e) => {
             let Some(ref bootnode) = bootnode_url else {
                 log::error!(
-                    "[EVENTS] RPC_SYNC_GAP oldest={oldest} deployment={min_deployment_ledger} rpc={rpc_url}\n\
-Your RPC node retains events only back to ledger {oldest}, but indexing requires {min_deployment_ledger}. \
+                    "[EVENTS] RPC sync gap: {e}\n\
 Use a different RPC, a fresher deployment, or configure a bootnode."
                 );
                 return;
             };
-            log::info!(
-                "[EVENTS] wallet RPC sync gap (oldest={oldest}, need={min_deployment_ledger}), trying bootnode"
-            );
-            let bootnode_client = match Client::new(bootnode) {
-                Ok(c) => c,
+
+            log::info!("[EVENTS] wallet RPC sync gap, trying bootnode");
+            if let Err(e) = storage.clear_indexing_cursors().await {
+                log::error!("[EVENTS] failed to clear indexing cursors: {e:?}");
+                return;
+            }
+
+            let bootnode_indexer = match Indexer::init(bootnode, storage.clone(), config).await {
+                Ok(indexer) => Some(indexer),
+                Err(e) if is_retention_handoff_err(&e) => {
+                    log::info!("[EVENTS] bootnode handoff, resuming on wallet RPC");
+                    None
+                }
                 Err(e) => {
-                    log::error!("[EVENTS] invalid bootnode URL: {e}");
+                    log::error!("[EVENTS] bootnode init failed: {e}");
                     return;
                 }
             };
-            if let Err(e) = bootnode_client
-                .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
-                .await
-            {
-                log::error!("[EVENTS] bootnode probe failed: {e}");
-                return;
-            }
-            on_bootnode = true;
-            bootnode.clone()
-        }
-        Err(e) => {
-            log::error!("[EVENTS] RPC probe failed: {e}");
-            return;
-        }
-    };
 
-    let mut indexer = match Indexer::init(&connect_url, storage.clone(), config).await {
-        Ok(indexer) => Rc::new(indexer),
+            // fetch bootnode events
+            if let Some(indexer) = bootnode_indexer {
+                loop {
+                    match indexer.fetch_contract_events().await {
+                        Ok(()) => {}
+                        Err(e) if e
+                            .downcast_ref::<RpcError>()
+                            .is_some_and(is_retention_handoff) =>
+                        {
+                            log::info!("[EVENTS] bootnode handoff, resuming on wallet RPC");
+                            if let Err(e) = storage.clear_indexing_cursors().await {
+                                log::error!("[EVENTS] failed to clear indexing cursors: {e:?}");
+                                continue;
+                            }
+                            break;
+                        }
+                        Err(e) => log::error!("[EVENTS] bootnode round failed: {e}"),
+                    }
+                    TimeoutFuture::new(INDEXER_INTERVAL_MS).await;
+                }
+            }
+
+            // back to rpc
+            match Indexer::init(&rpc_url, storage.clone(), config).await {
+                Ok(indexer) => indexer,
+                Err(e) => {
+                    log::error!("[EVENTS] wallet RPC init failed: {e}");
+                    return;
+                }
+            }
+        }
         Err(e) => {
             log::error!("[EVENTS] init failed: {e}");
             return;
         }
     };
 
+    // main rpc event listening loop
     loop {
         match indexer.fetch_contract_events().await {
             Ok(()) => {}
-            Err(e) if on_bootnode => {
-                if let Some(rpc_err) = e.downcast_ref::<RpcError>()
-                    && is_retention_handoff(rpc_err)
-                {
-                    log::info!("[EVENTS] bootnode handoff, resuming on main RPC");
-                    indexer = match Indexer::init(&rpc_url, storage.clone(), config).await {
-                        Ok(indexer) => Rc::new(indexer),
-                        Err(e) => {
-                            log::error!("[EVENTS] main RPC init failed: {e}");
-                            return;
-                        }
-                    };
-                    on_bootnode = false;
-                    continue;
-                }
-                log::error!("[EVENTS] bootnode round failed: {e}");
-            }
             Err(e) => log::error!("[EVENTS] round failed: {e}"),
         }
         TimeoutFuture::new(INDEXER_INTERVAL_MS).await;
@@ -123,8 +126,8 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
 mod tests {
     use super::*;
     use serde_json::json;
-    use std::cell::RefCell;
-    use stellar::ContractDataStorage;
+    use std::{cell::RefCell, rc::Rc};
+    use stellar::{Client, ContractDataStorage};
     use types::{ContractsEventData, SyncMetadata};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
@@ -258,6 +261,16 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
+            .and(body_string_contains("\"startLedger\":2999000"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "bootnode-cursor",
+                json!([]),
+                3_000_000,
+            )))
+            .mount(&bootnode)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
             .and(body_string_contains("bootnode-cursor"))
             .respond_with(ResponseTemplate::new(200).set_body_json(handoff_response()))
             .mount(&bootnode)
@@ -275,17 +288,7 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
-            .and(body_string_contains("\"startLedger\":1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
-                "bootnode-cursor",
-                json!([]),
-                3_000_000,
-            )))
-            .mount(&wallet)
-            .await;
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .and(body_string_contains("bootnode-cursor"))
+            .and(body_string_contains("\"startLedger\":2999000"))
             .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
                 "rpc-cursor",
                 json!([{
@@ -318,6 +321,15 @@ mod tests {
             sync: Rc<RefCell<Vec<SyncMetadata>>>,
         }
 
+        impl RecordingStorage {
+            fn clear_indexing_cursors(&self) {
+                let mut sync = self.sync.borrow_mut();
+                for entry in sync.iter_mut() {
+                    entry.cursor.clear();
+                }
+            }
+        }
+
         #[async_trait::async_trait(?Send)]
         impl ContractDataStorage for RecordingStorage {
             async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
@@ -332,7 +344,6 @@ mod tests {
             async fn save_sync_progress(
                 &self,
                 metadata: Vec<SyncMetadata>,
-                _fully_indexed: bool,
             ) -> anyhow::Result<()> {
                 *self.sync.borrow_mut() = metadata;
                 Ok(())
@@ -362,6 +373,7 @@ mod tests {
             "expected handoff, got {err:?}"
         );
 
+        storage.clear_indexing_cursors();
         let wallet_indexer = Indexer::init(&wallet.uri(), storage, config)
             .await
             .expect("wallet indexer");

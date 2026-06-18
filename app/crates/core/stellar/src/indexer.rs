@@ -20,21 +20,28 @@ impl<S: ContractDataStorage> Indexer<S> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.pools_and_membership_contract_ids();
 
-        // Retention-window check: if the RPC cannot serve events back to the deployment
-        // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
-        // trees.
+        let existing_sync = storage.get_sync_state().await?;
+        let active_contract_ids: HashSet<&str> =
+            contract_ids.iter().map(String::as_str).collect();
+        let active_sync: Vec<_> = existing_sync
+            .into_iter()
+            .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
+            .collect();
+
+        let probe_ledger = active_sync
+            .iter()
+            .map(|meta| meta.last_ledger)
+            .filter(|ledger| *ledger > 0)
+            .min()
+            .unwrap_or(min_pool_ledger);
+
         match client
-            .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
+            .get_contract_events(&contract_ids, probe_ledger, 1, None)
             .await
         {
             Ok(_) => {}
             Err(RpcError::RpcSyncGap(oldest)) => {
-                return Err(anyhow!(
-                    "Your RPC node {rpc_url} oldest available ledger is {oldest}. \
-Indexing requires events back to the pool deployment ledger {0}. \
-Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
-                    min_pool_ledger
-                ));
+                return Err(RpcError::RpcSyncGap(oldest).into());
             }
             Err(e) => return Err(e.into()),
         }
@@ -78,10 +85,12 @@ Please use a fresher contracts deployment / a different RPC which stores events 
 
         let unique_cursors: HashSet<&str> = active_sync
             .iter()
-            .map(|meta| meta.cursor.as_str())
+            .filter_map(|meta| (!meta.cursor.is_empty()).then_some(meta.cursor.as_str()))
             .collect();
         let mut cursor = if unique_cursors.len() <= 1 {
-            active_sync.first().map(|meta| meta.cursor.clone())
+            active_sync
+                .first()
+                .and_then(|meta| (!meta.cursor.is_empty()).then(|| meta.cursor.clone()))
         } else {
             log::warn!(
                 "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
@@ -104,6 +113,11 @@ Please use a fresher contracts deployment / a different RPC which stores events 
                 .clone()
                 .ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
             let is_empty = events.is_empty();
+            let progress_ledger = if is_empty {
+                latest_ledger
+            } else {
+                events.iter().map(|event| event.ledger).max().unwrap_or(latest_ledger)
+            };
 
             self.storage
                 .save_events_batch(ContractsEventData {
@@ -120,10 +134,9 @@ Please use a fresher contracts deployment / a different RPC which stores events 
                         .map(|contract_id| SyncMetadata {
                             contract_id: contract_id.clone(),
                             cursor: new_cursor.clone(),
-                            last_ledger: latest_ledger,
+                            last_ledger: progress_ledger,
                         })
                         .collect(),
-                    is_empty,
                 )
                 .await?;
 
@@ -148,7 +161,6 @@ pub trait ContractDataStorage {
     async fn save_sync_progress(
         &self,
         metadata: Vec<SyncMetadata>,
-        fully_indexed: bool,
     ) -> anyhow::Result<()>;
 }
 impl From<crate::rpc::Event> for ContractEvent {

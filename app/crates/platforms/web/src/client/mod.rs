@@ -247,6 +247,16 @@ impl WebClient {
         }
     }
 
+    pub(crate) async fn clear_indexing_cursors(&self) -> Result<(), JsError> {
+        match self
+            .storage_request(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     async fn prover_request(
         &self,
         req: ProverWorkerRequest,
@@ -821,15 +831,11 @@ impl stellar::ContractDataStorage for WebClient {
     async fn save_sync_progress(
         &self,
         metadata: Vec<types::SyncMetadata>,
-        fully_indexed: bool,
     ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(
-                metadata,
-                fully_indexed,
-            )),
+            bridge.run(StorageWorkerRequest::SaveSyncProgress(metadata)),
         )
         .await?;
         match resp {

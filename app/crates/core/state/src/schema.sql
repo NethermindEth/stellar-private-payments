@@ -22,11 +22,12 @@ CREATE TABLE indexing_metadata (
     contract_id INTEGER PRIMARY KEY,
     -- RPC pagination cursor (opaque).
     last_cursor TEXT,
-    -- Latest ledger that the indexer has fully caught up to.
+    -- Highest ledger reached by the indexer for this contract.
     --
-    -- This only advances when the indexer has proven catch-up by fetching an empty
-    -- events page for the current cursor. It is used for "are we synced?"
-    -- preconditions (e.g. proving membership at the current tip).
+    -- During catch-up this tracks the max event ledger in the latest saved page.
+    -- When a fetch round ends on an empty page it is set to the network tip,
+    -- indicating pagination is complete. Used for resume-by-ledger (after RPC
+    -- handoff) and sync preconditions (e.g. proving membership at the tip).
     last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
