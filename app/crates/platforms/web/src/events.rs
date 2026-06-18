@@ -4,7 +4,8 @@ use stellar::{Indexer, RpcError};
 use types::ContractConfig;
 
 const INDEXER_INTERVAL_MS: u32 = 5_000;
-/// Bootnode JSON-RPC code: historical range complete, continue on the wallet RPC.
+/// Bootnode JSON-RPC code: historical range complete, continue on the wallet
+/// RPC.
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
 
 fn is_retention_handoff(err: &RpcError) -> bool {
@@ -100,9 +101,9 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
                 loop {
                     match indexer.fetch_contract_events().await {
                         Ok(()) => {}
-                        Err(e) if e
-                            .downcast_ref::<RpcError>()
-                            .is_some_and(is_retention_handoff) =>
+                        Err(e)
+                            if e.downcast_ref::<RpcError>()
+                                .is_some_and(is_retention_handoff) =>
                         {
                             log::info!("[EVENTS] bootnode handoff, resuming on wallet RPC");
                             if let Err(e) = storage.clear_indexing_cursors().await {
@@ -361,10 +362,7 @@ mod tests {
                 Ok(())
             }
 
-            async fn save_sync_progress(
-                &self,
-                metadata: Vec<SyncMetadata>,
-            ) -> anyhow::Result<()> {
+            async fn save_sync_progress(&self, metadata: Vec<SyncMetadata>) -> anyhow::Result<()> {
                 *self.sync.borrow_mut() = metadata;
                 Ok(())
             }

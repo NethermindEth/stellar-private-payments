@@ -348,10 +348,7 @@ impl WebClient {
 
     #[wasm_bindgen(js_name = setBootnodeConfig)]
     pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
-        let req = StorageWorkerRequest::SetBootnodeConfig {
-            enabled: true,
-            url,
-        };
+        let req = StorageWorkerRequest::SetBootnodeConfig { enabled: true, url };
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
@@ -816,10 +813,7 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_sync_progress(
-        &self,
-        metadata: Vec<types::SyncMetadata>,
-    ) -> anyhow::Result<()> {
+    async fn save_sync_progress(&self, metadata: Vec<types::SyncMetadata>) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,

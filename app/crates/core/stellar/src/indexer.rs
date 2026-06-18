@@ -21,8 +21,7 @@ impl<S: ContractDataStorage> Indexer<S> {
         let contract_ids = config.pools_and_membership_contract_ids();
 
         let existing_sync = storage.get_sync_state().await?;
-        let active_contract_ids: HashSet<&str> =
-            contract_ids.iter().map(String::as_str).collect();
+        let active_contract_ids: HashSet<&str> = contract_ids.iter().map(String::as_str).collect();
         let active_sync: Vec<_> = existing_sync
             .into_iter()
             .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
@@ -116,7 +115,11 @@ impl<S: ContractDataStorage> Indexer<S> {
             let progress_ledger = if is_empty {
                 latest_ledger
             } else {
-                events.iter().map(|event| event.ledger).max().unwrap_or(latest_ledger)
+                events
+                    .iter()
+                    .map(|event| event.ledger)
+                    .max()
+                    .unwrap_or(latest_ledger)
             };
 
             self.storage
@@ -158,10 +161,7 @@ pub trait ContractDataStorage {
     /// Sends a batch of events to be saved and waits for confirmation.
     async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()>;
 
-    async fn save_sync_progress(
-        &self,
-        metadata: Vec<SyncMetadata>,
-    ) -> anyhow::Result<()>;
+    async fn save_sync_progress(&self, metadata: Vec<SyncMetadata>) -> anyhow::Result<()>;
 }
 impl From<crate::rpc::Event> for ContractEvent {
     fn from(val: crate::rpc::Event) -> Self {
