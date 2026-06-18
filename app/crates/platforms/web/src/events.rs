@@ -25,20 +25,23 @@ pub(crate) fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
     )
 }
 
-/// Probes whether the RPC can serve the indexer's resume range
-pub(crate) async fn rpc_sync_check(
+/// Probes wallet RPC retention; returns a bootnode URL when one is needed and
+/// consented.
+pub(crate) async fn bootnode_check(
     rpc_url: &str,
     storage: WebClient,
     config: &'static ContractConfig,
     bootnode_url: Option<&str>,
-) -> Result<(), anyhow::Error> {
-    match Indexer::init(rpc_url, storage, config).await {
-        Ok(_) => Ok(()),
+) -> Result<Option<String>, anyhow::Error> {
+    match Indexer::init(rpc_url, storage.clone(), config).await {
+        Ok(_) => Ok(None),
         Err(e) if is_rpc_sync_gap(&e) => {
-            if bootnode_url.is_none() {
-                Err(anyhow::anyhow!("RPC_SYNC_GAP: {e}"))
-            } else {
-                Ok(())
+            let url = bootnode_url
+                .map(str::to_string)
+                .or(storage.stored_bootnode_url().await);
+            match url {
+                Some(url) => Ok(Some(url)),
+                None => Err(anyhow::anyhow!("RPC_SYNC_GAP: {e}")),
             }
         }
         Err(e) => Err(e),
