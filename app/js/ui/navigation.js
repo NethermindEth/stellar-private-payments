@@ -17,66 +17,33 @@ function isRpcSyncGapError(message) {
 }
 
 function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
-    const existing = document.getElementById('bootnode-consent-modal');
-    if (existing) existing.remove();
+    const modal = document.getElementById('bootnode-consent-modal');
+    const urlInput = document.getElementById('bootnode-consent-url');
+    const errorEl = document.getElementById('bootnode-consent-error');
+    const acceptBtn = document.getElementById('bootnode-consent-accept');
+    const cancelBtn = document.getElementById('bootnode-consent-cancel');
+    const closeBtn = document.getElementById('bootnode-consent-close');
+    const rpcUrlEl = document.getElementById('bootnode-consent-rpc-url');
+    const detailsEl = document.getElementById('bootnode-consent-details');
 
-    const overlay = document.createElement('div');
-    overlay.id = 'bootnode-consent-modal';
-    overlay.className = 'fixed inset-0 z-50';
-    overlay.innerHTML = `
-      <div class="absolute inset-0 bg-black/70"></div>
-      <div class="relative min-h-full flex items-center justify-center p-4">
-        <div class="w-full max-w-2xl bg-dark-900 border border-dark-700 rounded-xl shadow-xl">
-          <div class="px-5 py-4 border-b border-dark-700 flex items-center justify-between gap-3">
-            <h2 class="text-lg font-semibold text-dark-100">Use bootnode to recover history?</h2>
-            <button id="bootnode-consent-close" type="button" class="p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Close">
-              <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-            </button>
-          </div>
-          <div class="px-5 py-4 space-y-3 text-sm text-dark-200">
-            <p>Your current RPC node cannot serve historical events back to the contract deployment ledger (RPC retention window).</p>
-            <div class="p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-2">
-              <p class="text-dark-100 font-semibold">Trust assumptions</p>
-              <ul class="list-disc pl-5 space-y-1 text-dark-300">
-                <li>The bootnode can omit, censor, or serve incorrect historical event data.</li>
-                <li>The bootnode operator can observe your IP address and request timing.</li>
-                <li>Near the chain tip, the indexer continues on your wallet RPC.</li>
-              </ul>
-              <p class="text-xs text-dark-400">Learn more: <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="docs/bootnode.html" target="_blank" rel="noreferrer noopener">Bootnode docs</a></p>
-            </div>
-            <label class="block text-xs text-dark-400">Bootnode URL (indexer only)</label>
-            <input id="bootnode-consent-url" type="text" class="w-full px-3 py-2 bg-dark-700 border border-dark-600 rounded font-mono text-xs text-dark-100 focus:outline-none focus:border-brand-500" />
-            <p class="text-xs text-dark-500 break-words">Wallet RPC (unchanged): <span class="font-mono">${rpcUrl || ''}</span></p>
-            <details class="text-xs text-dark-500">
-              <summary class="cursor-pointer select-none">Show technical details</summary>
-              <pre class="mt-2 p-3 bg-dark-950 border border-dark-800 rounded whitespace-pre-wrap break-words">${(errorMessage || '').replaceAll('<', '&lt;')}</pre>
-            </details>
-            <p id="bootnode-consent-error" class="hidden text-xs text-red-400"></p>
-          </div>
-          <div class="px-5 py-4 border-t border-dark-700 flex flex-col sm:flex-row gap-3 sm:justify-end">
-            <button id="bootnode-consent-cancel" type="button" class="px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors">Cancel</button>
-            <button id="bootnode-consent-accept" type="button" class="px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors">Use bootnode</button>
-          </div>
-        </div>
-      </div>
-    `;
+    if (!modal || !urlInput || !acceptBtn || !cancelBtn || !closeBtn || !errorEl) {
+        throw new Error('Bootnode consent modal is missing from the page');
+    }
 
-    document.body.appendChild(overlay);
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+    urlInput.value = defaultUrl || '';
+    if (rpcUrlEl) rpcUrlEl.textContent = rpcUrl || '';
+    if (detailsEl) detailsEl.textContent = errorMessage || '';
 
-    const urlInput = overlay.querySelector('#bootnode-consent-url');
-    const errorEl = overlay.querySelector('#bootnode-consent-error');
-    const acceptBtn = overlay.querySelector('#bootnode-consent-accept');
-    const cancelBtn = overlay.querySelector('#bootnode-consent-cancel');
-    const closeBtn = overlay.querySelector('#bootnode-consent-close');
-
-    if (urlInput) urlInput.value = defaultUrl || '';
+    modal.classList.remove('hidden');
 
     return new Promise((resolve) => {
         const cleanup = () => {
-            acceptBtn?.removeEventListener('click', onAccept);
-            cancelBtn?.removeEventListener('click', onCancel);
-            closeBtn?.removeEventListener('click', onCancel);
-            overlay.remove();
+            acceptBtn.removeEventListener('click', onAccept);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            modal.classList.add('hidden');
         };
 
         const onCancel = () => {
@@ -85,21 +52,19 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
         };
 
         const onAccept = () => {
-            const url = (urlInput?.value || '').trim();
+            const url = (urlInput.value || '').trim();
             if (!url.startsWith('https://')) {
-                if (errorEl) {
-                    errorEl.textContent = 'Bootnode URL must start with https://';
-                    errorEl.classList.remove('hidden');
-                }
+                errorEl.textContent = 'Bootnode URL must start with https://';
+                errorEl.classList.remove('hidden');
                 return;
             }
             cleanup();
             resolve({ accepted: true, url });
         };
 
-        acceptBtn?.addEventListener('click', onAccept);
-        cancelBtn?.addEventListener('click', onCancel);
-        closeBtn?.addEventListener('click', onCancel);
+        acceptBtn.addEventListener('click', onAccept);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
     });
 }
 
