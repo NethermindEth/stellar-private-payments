@@ -4783,10 +4783,8 @@ dependencies = [
  "stellar-strkey 0.0.16",
  "stellar-xdr",
  "thiserror 2.0.18",
- "tokio",
  "types",
  "wasm-bindgen-test",
- "wiremock",
 ]
 
 [[package]]
@@ -5867,12 +5865,14 @@ dependencies = [
  "sqlite-wasm-vfs",
  "state",
  "stellar",
+ "tokio",
  "tx-planner",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
+ "wiremock",
  "witness",
 ]
 

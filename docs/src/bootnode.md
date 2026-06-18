@@ -32,7 +32,7 @@ Handoff response shape:
 }
 ```
 
-The app indexer treats `-32002` as handoff and resumes on the configured RPC at `fromLedger`.
+The web platform orchestrator treats `-32002` as an archive handoff and resumes on the wallet RPC at `fromLedger`.
 
 ## Trust assumptions
 

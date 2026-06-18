@@ -1,92 +1,35 @@
-use crate::rpc::{Client, Error as RpcError};
+use crate::rpc::Client;
 use anyhow::{Result, anyhow};
-use std::{cell::Cell, collections::HashSet};
+use std::collections::HashSet;
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
 const PAGE_SIZE: usize = 300;
 const MAX_PAGES_PER_ROUND: usize = 10;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum SyncPhase {
-    Rpc,
-    Bootnode,
-}
-
 pub struct Indexer<S: ContractDataStorage> {
-    rpc: Client,
-    bootnode: Option<Client>,
-    phase: Cell<SyncPhase>,
+    client: Client,
     storage: S,
     contract_ids: Vec<String>,
     min_deployment_ledger: u32,
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(
-        rpc_url: &str,
-        bootnode_url: Option<&str>,
-        storage: S,
-        config: &'static ContractConfig,
-    ) -> Result<Self> {
-        let rpc = Client::new(rpc_url)?;
-        let min_deployment_ledger = config.min_deployment_ledger()?;
-        let contract_ids = config.pools_and_membership_contract_ids();
-
-        match rpc
-            .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
-            .await
-        {
-            Ok(_) => Ok(Self {
-                rpc,
-                bootnode: None,
-                phase: Cell::new(SyncPhase::Rpc),
-                storage,
-                contract_ids,
-                min_deployment_ledger,
-            }),
-            Err(RpcError::RpcSyncGap(oldest)) => {
-                let Some(bootnode_url) = bootnode_url else {
-                    return Err(anyhow!(
-                        "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
-Your RPC node retains events only back to ledger {oldest}, but indexing requires {0}. \
-Use a different RPC, a fresher deployment, or configure a bootnode.",
-                        min_deployment_ledger
-                    ));
-                };
-                let bootnode = Client::new(bootnode_url)?;
-                bootnode
-                    .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
-                    .await?;
-                Ok(Self {
-                    rpc,
-                    bootnode: Some(bootnode),
-                    phase: Cell::new(SyncPhase::Bootnode),
-                    storage,
-                    contract_ids,
-                    min_deployment_ledger,
-                })
-            }
-            Err(e) => Err(e.into()),
-        }
+    pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
+        Ok(Self {
+            client: Client::new(rpc_url)?,
+            storage,
+            contract_ids: config.pools_and_membership_contract_ids(),
+            min_deployment_ledger: config.min_deployment_ledger()?,
+        })
     }
 
-    fn events_client(&self) -> &Client {
-        match self.phase.get() {
-            SyncPhase::Bootnode => self
-                .bootnode
-                .as_ref()
-                .expect("bootnode phase requires bootnode client"),
-            SyncPhase::Rpc => &self.rpc,
-        }
-    }
-
-    pub fn sync_phase(&self) -> SyncPhase {
-        self.phase.get()
-    }
-
-    pub async fn fetch_contract_events(&self) -> Result<()> {
-        let network_tip = self.events_client().get_latest_ledger().await?.sequence;
+    /// Fetch and persist contract events.
+    ///
+    /// When `start_ledger_override` is `Some`, paging begins at that ledger
+    /// with no cursor.
+    pub async fn fetch_contract_events(&self, start_ledger_override: Option<u32>) -> Result<()> {
+        let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
             self.contract_ids.iter().map(String::as_str).collect();
@@ -95,18 +38,21 @@ Use a different RPC, a fresher deployment, or configure a bootnode.",
             .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
             .collect();
 
-        let mut start_ledger = active_sync
-            .iter()
-            .map(|meta| meta.last_ledger)
-            .min()
-            .unwrap_or(self.min_deployment_ledger);
+        let start_ledger = start_ledger_override.unwrap_or_else(|| {
+            active_sync
+                .iter()
+                .map(|meta| meta.last_ledger)
+                .min()
+                .unwrap_or(self.min_deployment_ledger)
+        });
 
-        if active_sync
-            .iter()
-            .map(|meta| meta.last_ledger)
-            .collect::<HashSet<_>>()
-            .len()
-            > 1
+        if start_ledger_override.is_none()
+            && active_sync
+                .iter()
+                .map(|meta| meta.last_ledger)
+                .collect::<HashSet<_>>()
+                .len()
+                > 1
         {
             log::warn!(
                 "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_ledger={start_ledger}",
@@ -114,49 +60,33 @@ Use a different RPC, a fresher deployment, or configure a bootnode.",
             );
         }
 
-        let unique_cursors: HashSet<&str> = active_sync
-            .iter()
-            .map(|meta| meta.cursor.as_str())
-            .collect();
-        let mut cursor = if unique_cursors.len() <= 1 {
-            active_sync.first().map(|meta| meta.cursor.clone())
-        } else {
-            log::warn!(
-                "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
-                active_sync.len()
-            );
+        let mut cursor = if start_ledger_override.is_some() {
             None
+        } else {
+            let unique_cursors: HashSet<&str> = active_sync
+                .iter()
+                .map(|meta| meta.cursor.as_str())
+                .collect();
+            if unique_cursors.len() <= 1 {
+                active_sync.first().map(|meta| meta.cursor.clone())
+            } else {
+                log::warn!(
+                    "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
+                    active_sync.len()
+                );
+                None
+            }
         };
 
         for page in 0..MAX_PAGES_PER_ROUND {
             log::trace!(
-                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}, phase={:?}",
-                self.phase.get()
+                "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
 
-            let (new_cursor, events, latest_ledger) = match self
-                .events_client()
+            let (new_cursor, events, latest_ledger) = self
+                .client
                 .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor.clone())
-                .await
-            {
-                Err(RpcError::RetentionHandoff { from_ledger }) => {
-                    if self.phase.get() != SyncPhase::Bootnode {
-                        return Err(anyhow!(
-                            "unexpected bootnode handoff at ledger {from_ledger}"
-                        ));
-                    }
-                    log::info!(
-                        "[INDEXER] bootnode archive complete at ledger {from_ledger}, resuming on main RPC"
-                    );
-                    self.phase.set(SyncPhase::Rpc);
-                    start_ledger = from_ledger;
-                    self.rpc
-                        .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, None)
-                        .await?
-                }
-                Ok(v) => v,
-                Err(e) => return Err(e.into()),
-            };
+                .await?;
 
             let new_cursor = new_cursor
                 .clone()
@@ -226,218 +156,5 @@ impl From<crate::rpc::Event> for ContractEvent {
             topics: topic,
             value,
         }
-    }
-}
-
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests {
-    use super::*;
-    use serde_json::json;
-    use std::cell::RefCell;
-    use wiremock::{
-        Mock, MockServer, ResponseTemplate,
-        matchers::{body_string_contains, method},
-    };
-
-    const TEST_CONFIG_JSON: &str = r#"{
-        "network": "test",
-        "deployer": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-        "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-        "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-        "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-        "pools": [{
-            "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-            "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-            "deploymentLedger": 1,
-            "enabled": true,
-            "asset": {"kind": "native"}
-        }]
-    }"#;
-
-    const HANDOFF_LEDGER: u32 = 2_999_000;
-    const RPC_EVENT_ID: &str = "rpc-event-1";
-
-    fn test_config() -> &'static ContractConfig {
-        Box::leak(Box::new(
-            serde_json::from_str(TEST_CONFIG_JSON).expect("test config"),
-        ))
-    }
-
-    fn json_rpc_ok(result: serde_json::Value) -> serde_json::Value {
-        json!({ "jsonrpc": "2.0", "id": 1, "result": result })
-    }
-
-    fn latest_ledger_response(sequence: u32) -> serde_json::Value {
-        json_rpc_ok(json!({
-            "id": "test-ledger",
-            "protocolVersion": 23,
-            "sequence": sequence,
-        }))
-    }
-
-    fn get_events_page(
-        cursor: &str,
-        events: serde_json::Value,
-        latest_ledger: u32,
-    ) -> serde_json::Value {
-        json_rpc_ok(json!({
-            "cursor": cursor,
-            "events": events,
-            "latestLedger": latest_ledger,
-            "latestLedgerCloseTime": "2024-01-01T00:00:00Z",
-            "oldestLedger": 1,
-            "oldestLedgerCloseTime": "2024-01-01T00:00:00Z",
-        }))
-    }
-
-    fn handoff_response() -> serde_json::Value {
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32002,
-                "message": "bootnode archive complete",
-                "data": { "fromLedger": HANDOFF_LEDGER },
-            }
-        })
-    }
-
-    fn rpc_sync_gap_response() -> serde_json::Value {
-        json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "error": {
-                "code": -32602,
-                "message": "startLedger must be within the ledger range: 100 - 3000000",
-            }
-        })
-    }
-
-    struct RecordingStorage<'a> {
-        batches: &'a RefCell<Vec<ContractsEventData>>,
-    }
-
-    #[async_trait::async_trait(?Send)]
-    impl ContractDataStorage for RecordingStorage<'_> {
-        async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
-            Ok(vec![])
-        }
-
-        async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
-            self.batches.borrow_mut().push(batch);
-            Ok(())
-        }
-
-        async fn save_sync_progress(
-            &self,
-            _metadata: Vec<SyncMetadata>,
-            _fully_indexed: bool,
-        ) -> anyhow::Result<()> {
-            Ok(())
-        }
-    }
-
-    async fn mount_bootnode_mocks(server: &MockServer) {
-        Mock::given(method("POST"))
-            .and(body_string_contains("getLatestLedger"))
-            .respond_with(
-                ResponseTemplate::new(200).set_body_json(latest_ledger_response(3_000_000)),
-            )
-            .mount(server)
-            .await;
-
-        // init probe, then fetch handoff — both are getEvents from deployment ledger.
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
-                "probe-cursor",
-                json!([]),
-                3_000_000,
-            )))
-            .up_to_n_times(1)
-            .expect(1)
-            .mount(server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(handoff_response()))
-            .mount(server)
-            .await;
-    }
-
-    async fn mount_rpc_mocks(server: &MockServer, pool_contract_id: &str) {
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .and(body_string_contains("\"startLedger\":1"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(rpc_sync_gap_response()))
-            .expect(1)
-            .mount(server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .and(body_string_contains(format!(
-                "\"startLedger\":{HANDOFF_LEDGER}"
-            )))
-            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
-                "rpc-cursor",
-                json!([{
-                    "type": "contract",
-                    "ledger": HANDOFF_LEDGER,
-                    "ledgerClosedAt": "2024-01-01T00:00:00Z",
-                    "contractId": pool_contract_id,
-                    "id": RPC_EVENT_ID,
-                    "topic": ["deposit"],
-                    "value": "00",
-                }]),
-                3_000_000,
-            )))
-            .mount(server)
-            .await;
-
-        Mock::given(method("POST"))
-            .and(body_string_contains("getEvents"))
-            .and(body_string_contains("rpc-cursor"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
-                "rpc-cursor-done",
-                json!([]),
-                3_000_000,
-            )))
-            .mount(server)
-            .await;
-    }
-
-    #[tokio::test]
-    async fn bootnode_handoff() {
-        let config = test_config();
-        let pool_contract_id = config.pools[0].pool_contract_id.clone();
-
-        let bootnode = MockServer::start().await;
-        mount_bootnode_mocks(&bootnode).await;
-
-        let rpc = MockServer::start().await;
-        mount_rpc_mocks(&rpc, &pool_contract_id).await;
-
-        let batches = RefCell::new(Vec::new());
-        let storage = RecordingStorage { batches: &batches };
-        let indexer = Indexer::init(&rpc.uri(), Some(&bootnode.uri()), storage, config)
-            .await
-            .expect("indexer");
-        assert_eq!(indexer.sync_phase(), SyncPhase::Bootnode);
-
-        indexer
-            .fetch_contract_events()
-            .await
-            .expect("fetch should succeed after handoff");
-        assert_eq!(indexer.sync_phase(), SyncPhase::Rpc);
-
-        let batches = batches.borrow();
-        assert_eq!(batches.len(), 2);
-        assert_eq!(batches[0].events.len(), 1);
-        assert_eq!(batches[0].events[0].id, RPC_EVENT_ID);
-        assert_eq!(batches[0].cursor, "rpc-cursor");
-        assert!(batches[1].events.is_empty());
     }
 }

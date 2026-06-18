@@ -10,10 +10,11 @@ mod tx_prepare;
 pub use contract_state::{OnchainProofPublicInputs, PreparedSorobanTx, StateFetcher};
 pub use conversions::*;
 pub use ext_data_hash::hash_ext_data_offchain;
-pub use indexer::{ContractDataStorage, Indexer, SyncPhase};
+pub use indexer::{ContractDataStorage, Indexer};
 pub use rpc::{
-    ContractEventFilter, Event, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
-    GetTransactionResponse, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcResponse,
-    PaginationParams, ParsedGetEvents, SendTransactionResponse, TopicFilter,
+    BOOTNODE_HANDOFF_CODE, Client, ContractEventFilter, Error as RpcError, Event, GetEventsParams,
+    GetEventsResponse, GetLatestLedgerResponse, GetTransactionResponse, JsonRpcErrorResponse,
+    JsonRpcRequest, JsonRpcResponse, PaginationParams, ParsedGetEvents, SendTransactionResponse,
+    TopicFilter,
 };
 pub use tx_prepare::PoolTransactInput;

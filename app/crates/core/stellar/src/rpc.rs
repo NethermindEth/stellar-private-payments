@@ -14,6 +14,10 @@ use stellar_xdr::curr::{
     LedgerKey, LedgerKeyAccount, Limits, PublicKey, ReadXdr, Uint256, WriteXdr,
 };
 
+/// `-32002`: bootnode JSON-RPC code telling the client to resume on its wallet
+/// RPC. See `docs/src/bootnode.md`.
+pub const BOOTNODE_HANDOFF_CODE: i32 = -32_002;
+
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error(transparent)]
@@ -21,10 +25,11 @@ pub enum Error {
     #[error("network error: {0}")]
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
-    JsonRpc { code: i64, message: String },
-    /// Bootnode `getEvents` handoff (`-32002`).
-    #[error("bootnode handoff at ledger {from_ledger}")]
-    RetentionHandoff { from_ledger: u32 },
+    JsonRpc {
+        code: i64,
+        message: String,
+        data: Option<serde_json::Value>,
+    },
     #[error("xdr processing error: {0}")]
     Xdr(#[from] XdrError),
     #[error("invalid rpc url: {0}")]
@@ -41,6 +46,8 @@ pub enum Error {
     UnexpectedScVal(String),
     #[error("RPC sync gap - the oldest ledger is: {0:?}")]
     RpcSyncGap(u32),
+    #[error("bootnode handoff - continue on wallet RPC from ledger {0}")]
+    RpcHandoff(u32),
     #[error("invalid latestLedger value: {0}")]
     InvalidLatestLedger(i64),
     #[error("missing required contract keys for {contract_id}: {missing_keys:?}")]
@@ -421,23 +428,10 @@ impl Client {
         let resp = request.await?;
 
         if let Some(err) = resp.error {
-            // Bootnode retention handoff (`-32002`) — see docs/src/bootnode.md.
-            if err.code == -32_002 {
-                let from_ledger = err
-                    .data
-                    .as_ref()
-                    .and_then(|d| d.get("fromLedger"))
-                    .and_then(|v| v.as_u64())
-                    .and_then(|v| u32::try_from(v).ok())
-                    .ok_or_else(|| Error::JsonRpc {
-                        code: err.code,
-                        message: "handoff missing fromLedger".into(),
-                    })?;
-                return Err(Error::RetentionHandoff { from_ledger });
-            }
             return Err(Error::JsonRpc {
                 code: err.code,
                 message: err.message,
+                data: err.data,
             });
         }
 
@@ -469,10 +463,21 @@ impl Client {
         {
             Ok(r) => r,
             Err(e) => {
-                if let Error::JsonRpc { message, .. } = &e
-                    && let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
+                if let Error::JsonRpc {
+                    code,
+                    message,
+                    data,
+                } = &e
                 {
-                    return Err(Error::RpcSyncGap(range.0));
+                    if *code == i64::from(BOOTNODE_HANDOFF_CODE)
+                        && let Some(from_ledger) = parse_handoff_ledger(data)
+                    {
+                        return Err(Error::RpcHandoff(from_ledger));
+                    }
+                    if let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
+                    {
+                        return Err(Error::RpcSyncGap(range.0));
+                    }
                 }
                 return Err(e);
             }
@@ -761,6 +766,7 @@ impl Client {
                     "sendTransaction failed: {}",
                     resp.error_result_xdr.unwrap_or_default()
                 ),
+                data: None,
             });
         }
         Ok(resp)
@@ -796,6 +802,13 @@ where
 
 // helper to parse "startLedger must be within the ledger range: 1936296 -
 // 2057255" from the RPC message
+fn parse_handoff_ledger(data: &Option<serde_json::Value>) -> Option<u32> {
+    data.as_ref()?
+        .get("fromLedger")?
+        .as_u64()
+        .and_then(|v| u32::try_from(v).ok())
+}
+
 fn parse_ledger_range(message: &str) -> Option<(u32, u32)> {
     let parts: Vec<&str> = message.split(":").collect();
     if parts.len() != 2 {

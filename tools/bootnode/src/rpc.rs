@@ -12,12 +12,14 @@ use stellar::{
     PaginationParams,
 };
 
-/// `-32004`: bootnode-specific JSON-RPC error when a requested `getEvents` page is not cached yet.
+/// `-32004`: bootnode-specific JSON-RPC error when a requested `getEvents` page
+/// is not cached yet.
 ///
 /// Clients should retry with backoff.
 pub const CACHE_MISS_CODE: i32 = -32_004;
 
-/// `-32002`: bootnode-specific JSON-RPC error telling the client to resume on its main RPC.
+/// `-32002`: bootnode-specific JSON-RPC error telling the client to resume on
+/// its main RPC.
 ///
 /// Returned when the requested range is within the retention handoff window.
 /// (jsonrpsee reserves `-32005` for batch-not-supported.)
