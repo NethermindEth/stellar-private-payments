@@ -1,7 +1,6 @@
-use crate::{AppState, storage::InsertGetEventsPage};
+use crate::{AppState, messages::GetEventsParams, storage::InsertGetEventsPage};
 use metrics::{counter, gauge};
 use std::time::Instant;
-use stellar::GetEventsParams;
 use tokio::time::{Duration, sleep};
 
 pub(crate) struct Indexer {

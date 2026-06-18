@@ -2,6 +2,7 @@
 #![forbid(unsafe_code)]
 
 pub mod config;
+pub mod messages;
 pub mod metrics;
 pub mod otel;
 pub mod rpc;

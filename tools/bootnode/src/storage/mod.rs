@@ -4,9 +4,9 @@ mod postgres;
 pub use in_memory::InMemory;
 pub use postgres::Postgres;
 
+use crate::messages::{GetEventsParams, GetEventsResponse};
 use anyhow::Result;
 use async_trait::async_trait;
-use stellar::{GetEventsParams, GetEventsResponse};
 
 #[derive(Debug, Clone)]
 pub struct KvState {

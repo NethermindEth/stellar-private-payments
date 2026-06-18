@@ -1,8 +1,8 @@
 use super::{InsertGetEventsPage, KvState, Storage};
+use crate::messages::GetEventsResponse;
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use deadpool_postgres::Pool;
-use stellar::GetEventsResponse;
 use tokio_postgres::types::Json;
 
 pub struct Postgres {

@@ -1,17 +1,31 @@
 use bootnode::{
     Bootnode, InMemory,
     config::Config,
+    messages::{Event, GetEventsParams, GetEventsResponse},
     metrics,
     rpc::{CACHE_MISS_CODE, RETENTION_HANDOFF_CODE},
     storage::{InsertGetEventsPage, Storage},
 };
+use serde::Deserialize;
 use serde_json::json;
 use std::sync::{Arc, OnceLock};
-use stellar::{Event, GetEventsParams, GetEventsResponse, JsonRpcRequest, JsonRpcResponse};
 use types::ContractConfig;
 
 const NETWORK_TIP: u32 = 3_000_000;
 const HANDOFF_FROM_LEDGER: u32 = NETWORK_TIP - 86_400;
+
+#[derive(Deserialize)]
+struct JsonRpcEnvelope<T> {
+    result: Option<T>,
+    error: Option<JsonRpcErr>,
+}
+
+#[derive(Deserialize, Debug, PartialEq)]
+struct JsonRpcErr {
+    code: i64,
+    message: String,
+    data: Option<serde_json::Value>,
+}
 
 fn prom_handle() -> metrics_exporter_prometheus::PrometheusHandle {
     static HANDLE: OnceLock<metrics_exporter_prometheus::PrometheusHandle> = OnceLock::new();
@@ -60,13 +74,13 @@ async fn post_get_events(
     client: &reqwest::Client,
     base: &str,
     params: GetEventsParams,
-) -> JsonRpcResponse<GetEventsResponse> {
-    let body = JsonRpcRequest {
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getEvents",
-        params,
-    };
+) -> JsonRpcEnvelope<GetEventsResponse> {
+    let body = json!({
+        "jsonrpc": "2.0",
+        "id": 1,
+        "method": "getEvents",
+        "params": params,
+    });
     client
         .post(base)
         .json(&body)

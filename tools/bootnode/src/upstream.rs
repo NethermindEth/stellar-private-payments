@@ -1,7 +1,7 @@
+use crate::messages::{GetEventsParams, GetEventsResponse, GetLatestLedgerResponse};
 use anyhow::{Context, Result};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::json;
-use stellar::{GetEventsParams, GetEventsResponse, GetLatestLedgerResponse};
 use url::Url;
 
 #[derive(Clone)]

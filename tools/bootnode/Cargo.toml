@@ -32,7 +32,6 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "rus
 rustls-acme = { version = "0.13.0", default-features = false, features = ["axum", "ring"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde_json = { version = "1", default-features = false }
-stellar = { path = "../../app/crates/core/stellar", version = "0.1.0" }
 tokio = { version = "1.45.1", features = ["macros", "rt-multi-thread", "signal", "time"] }
 tokio-postgres = { version = "0.7.18", features = ["with-serde_json-1"] }
 tower = "0.5.3"
@@ -45,8 +44,8 @@ types = { path = "../../app/crates/core/types", version = "0.1.0" }
 url = "2.5.8"
 
 [dev-dependencies]
+serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false }
-stellar = { path = "../../app/crates/core/stellar", version = "0.1.0" }
 types = { path = "../../app/crates/core/types", version = "0.1.0" }
 
 [lints.rust]

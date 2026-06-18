@@ -1,4 +1,4 @@
-use crate::rpc::Client;
+use crate::rpc::{Client, Error as RpcError};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
@@ -11,24 +11,43 @@ pub struct Indexer<S: ContractDataStorage> {
     client: Client,
     storage: S,
     contract_ids: Vec<String>,
-    min_deployment_ledger: u32,
+    min_pool_ledger: u32,
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
     pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
+        let client = Client::new(rpc_url)?;
+        let min_pool_ledger = config.min_deployment_ledger()?;
+        let contract_ids = config.pools_and_membership_contract_ids();
+
+        // Retention-window check: if the RPC cannot serve events back to the deployment
+        // ledger, onboarding on a fresh DB will fail to reconstruct Merkle
+        // trees.
+        match client
+            .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
+            .await
+        {
+            Ok(_) => {}
+            Err(RpcError::RpcSyncGap(oldest)) => {
+                return Err(anyhow!(
+                    "Your RPC node {rpc_url} oldest available ledger is {oldest}. \
+Indexing requires events back to the pool deployment ledger {0}. \
+Please use a fresher contracts deployment / a different RPC which stores events up to ledger {0}.",
+                    min_pool_ledger
+                ));
+            }
+            Err(e) => return Err(e.into()),
+        }
+
         Ok(Self {
-            client: Client::new(rpc_url)?,
+            client,
             storage,
-            contract_ids: config.pools_and_membership_contract_ids(),
-            min_deployment_ledger: config.min_deployment_ledger()?,
+            contract_ids,
+            min_pool_ledger,
         })
     }
 
-    /// Fetch and persist contract events.
-    ///
-    /// When `start_ledger_override` is `Some`, paging begins at that ledger
-    /// with no cursor.
-    pub async fn fetch_contract_events(&self, start_ledger_override: Option<u32>) -> Result<()> {
+    pub async fn fetch_contract_events(&self) -> Result<()> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
@@ -38,21 +57,18 @@ impl<S: ContractDataStorage> Indexer<S> {
             .filter(|meta| active_contract_ids.contains(meta.contract_id.as_str()))
             .collect();
 
-        let start_ledger = start_ledger_override.unwrap_or_else(|| {
-            active_sync
-                .iter()
-                .map(|meta| meta.last_ledger)
-                .min()
-                .unwrap_or(self.min_deployment_ledger)
-        });
+        let start_ledger = active_sync
+            .iter()
+            .map(|meta| meta.last_ledger)
+            .min()
+            .unwrap_or(self.min_pool_ledger);
 
-        if start_ledger_override.is_none()
-            && active_sync
-                .iter()
-                .map(|meta| meta.last_ledger)
-                .collect::<HashSet<_>>()
-                .len()
-                > 1
+        if active_sync
+            .iter()
+            .map(|meta| meta.last_ledger)
+            .collect::<HashSet<_>>()
+            .len()
+            > 1
         {
             log::warn!(
                 "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_ledger={start_ledger}",
@@ -60,22 +76,18 @@ impl<S: ContractDataStorage> Indexer<S> {
             );
         }
 
-        let mut cursor = if start_ledger_override.is_some() {
-            None
+        let unique_cursors: HashSet<&str> = active_sync
+            .iter()
+            .map(|meta| meta.cursor.as_str())
+            .collect();
+        let mut cursor = if unique_cursors.len() <= 1 {
+            active_sync.first().map(|meta| meta.cursor.clone())
         } else {
-            let unique_cursors: HashSet<&str> = active_sync
-                .iter()
-                .map(|meta| meta.cursor.as_str())
-                .collect();
-            if unique_cursors.len() <= 1 {
-                active_sync.first().map(|meta| meta.cursor.clone())
-            } else {
-                log::warn!(
-                    "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
-                    active_sync.len()
-                );
-                None
-            }
+            log::warn!(
+                "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
+                active_sync.len()
+            );
+            None
         };
 
         for page in 0..MAX_PAGES_PER_ROUND {
@@ -85,7 +97,7 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             let (new_cursor, events, latest_ledger) = self
                 .client
-                .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor.clone())
+                .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor)
                 .await?;
 
             let new_cursor = new_cursor

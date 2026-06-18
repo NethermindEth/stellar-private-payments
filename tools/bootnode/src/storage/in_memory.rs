@@ -1,8 +1,8 @@
 use super::{InsertGetEventsPage, KvState, Storage};
+use crate::messages::GetEventsResponse;
 use anyhow::Result;
 use async_trait::async_trait;
 use std::{collections::HashMap, sync::Mutex};
-use stellar::GetEventsResponse;
 
 #[derive(Default)]
 struct State {
@@ -113,8 +113,8 @@ impl Storage for InMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::messages::{Event, GetEventsParams, GetEventsResponse, PaginationParams};
     use serde_json::json;
-    use stellar::{GetEventsParams, GetEventsResponse};
 
     fn sample_page<'a>(
         cursor_in: Option<&'a str>,
@@ -124,7 +124,7 @@ mod tests {
     ) -> InsertGetEventsPage<'a> {
         static REQUEST: GetEventsParams = GetEventsParams {
             filters: vec![],
-            pagination: stellar::PaginationParams {
+            pagination: PaginationParams {
                 limit: None,
                 cursor: None,
             },
@@ -145,7 +145,7 @@ mod tests {
         }
     }
 
-    fn sample_event() -> stellar::Event {
+    fn sample_event() -> Event {
         serde_json::from_value(json!({
             "type": "contract",
             "ledger": 42,

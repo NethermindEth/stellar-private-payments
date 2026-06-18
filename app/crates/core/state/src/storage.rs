@@ -307,23 +307,19 @@ impl Storage {
 
     pub fn get_bootnode_config(&self) -> Result<BootnodeConfig> {
         self.conn
-            .query_row(
-                "SELECT enabled, url FROM bootnode_config WHERE id = 1",
-                [],
-                |row| {
-                    Ok(BootnodeConfig {
-                        enabled: row.get::<_, i64>(0)? != 0,
-                        url: row.get(1)?,
-                    })
-                },
-            )
+            .query_row("SELECT enabled, url FROM bootnode_config", [], |row| {
+                Ok(BootnodeConfig {
+                    enabled: row.get::<_, i64>(0)? != 0,
+                    url: row.get(1)?,
+                })
+            })
             .context("failed to query bootnode config")
     }
 
     pub fn set_bootnode_config(&mut self, enabled: bool, url: &str) -> Result<()> {
         self.conn
             .execute(
-                "UPDATE bootnode_config SET enabled = ?1, url = ?2 WHERE id = 1",
+                "UPDATE bootnode_config SET enabled = ?1, url = ?2",
                 params![i64::from(enabled), url],
             )
             .context("failed to update bootnode config")?;

@@ -5,6 +5,18 @@ use stellar::{Client, Indexer, RpcError};
 use types::ContractConfig;
 
 const INDEXER_INTERVAL_MS: u32 = 5_000;
+/// Bootnode JSON-RPC code: archive complete, continue on the wallet RPC.
+const RETENTION_HANDOFF_CODE: i64 = -32_002;
+
+fn is_retention_handoff(err: &RpcError) -> bool {
+    matches!(
+        err,
+        RpcError::JsonRpc {
+            code: RETENTION_HANDOFF_CODE,
+            ..
+        }
+    )
+}
 
 pub(crate) async fn events_listener(
     rpc_url: String,
@@ -41,12 +53,15 @@ pub(crate) async fn events_listener(
         Err(RpcError::RpcSyncGap(oldest)) => {
             let Some(ref bootnode) = bootnode_url else {
                 log::error!(
-                    "RPC_SYNC_GAP oldest={oldest} deployment={min_deployment_ledger} rpc={rpc_url}\n\
+                    "[EVENTS] RPC_SYNC_GAP oldest={oldest} deployment={min_deployment_ledger} rpc={rpc_url}\n\
 Your RPC node retains events only back to ledger {oldest}, but indexing requires {min_deployment_ledger}. \
 Use a different RPC, a fresher deployment, or configure a bootnode."
                 );
                 return;
             };
+            log::info!(
+                "[EVENTS] wallet RPC sync gap (oldest={oldest}, need={min_deployment_ledger}), trying bootnode"
+            );
             let bootnode_client = match Client::new(bootnode) {
                 Ok(c) => c,
                 Err(e) => {
@@ -78,16 +93,14 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
         }
     };
 
-    let mut resume_at: Option<u32> = None;
-
     loop {
-        match indexer.fetch_contract_events(resume_at.take()).await {
+        match indexer.fetch_contract_events().await {
             Ok(()) => {}
-            Err(e) if on_bootnode => match e.downcast_ref::<RpcError>() {
-                Some(RpcError::RpcHandoff(from_ledger)) => {
-                    log::info!(
-                        "[EVENTS] bootnode handoff at ledger {from_ledger}, resuming on main RPC"
-                    );
+            Err(e) if on_bootnode => {
+                if let Some(rpc_err) = e.downcast_ref::<RpcError>()
+                    && is_retention_handoff(rpc_err)
+                {
+                    log::info!("[EVENTS] bootnode handoff, resuming on main RPC");
                     indexer = match Indexer::init(&rpc_url, storage.clone(), config).await {
                         Ok(indexer) => Rc::new(indexer),
                         Err(e) => {
@@ -96,11 +109,10 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
                         }
                     };
                     on_bootnode = false;
-                    resume_at = Some(*from_ledger);
                     continue;
                 }
-                _ => log::error!("[EVENTS] bootnode round failed: {e}"),
-            },
+                log::error!("[EVENTS] bootnode round failed: {e}");
+            }
             Err(e) => log::error!("[EVENTS] round failed: {e}"),
         }
         TimeoutFuture::new(INDEXER_INTERVAL_MS).await;
@@ -112,12 +124,14 @@ mod tests {
     use super::*;
     use serde_json::json;
     use std::cell::RefCell;
-    use stellar::{BOOTNODE_HANDOFF_CODE, ContractDataStorage, Indexer, RpcError};
+    use stellar::ContractDataStorage;
     use types::{ContractsEventData, SyncMetadata};
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{body_string_contains, method},
     };
+
+    const RPC_EVENT_ID: &str = "rpc-event-1";
 
     const TEST_CONFIG_JSON: &str = r#"{
         "network": "test",
@@ -135,11 +149,10 @@ mod tests {
         }]
     }"#;
 
-    const HANDOFF_LEDGER: u32 = 2_999_000;
-    const RPC_EVENT_ID: &str = "rpc-event-1";
-
-    fn test_config() -> ContractConfig {
-        serde_json::from_str(TEST_CONFIG_JSON).expect("test config")
+    fn test_config() -> &'static ContractConfig {
+        Box::leak(Box::new(
+            serde_json::from_str(TEST_CONFIG_JSON).expect("test config"),
+        ))
     }
 
     fn json_rpc_ok(result: serde_json::Value) -> serde_json::Value {
@@ -166,9 +179,9 @@ mod tests {
             "jsonrpc": "2.0",
             "id": 1,
             "error": {
-                "code": BOOTNODE_HANDOFF_CODE,
+                "code": RETENTION_HANDOFF_CODE,
                 "message": "Continue syncing on your RPC endpoint",
-                "data": { "fromLedger": HANDOFF_LEDGER },
+                "data": { "fromLedger": 2_999_000 },
             }
         })
     }
@@ -185,7 +198,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_contract_events_maps_handoff_jsonrpc_to_rpc_handoff() {
+    async fn get_contract_events_surfaces_handoff_as_jsonrpc_error() {
         let server = MockServer::start().await;
         Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
@@ -198,7 +211,7 @@ mod tests {
             .get_contract_events(&["CA".to_string()], 1, 1, None)
             .await
             .expect_err("handoff should fail");
-        assert!(matches!(err, RpcError::RpcHandoff(HANDOFF_LEDGER)));
+        assert!(is_retention_handoff(&err));
     }
 
     #[tokio::test]
@@ -220,7 +233,7 @@ mod tests {
 
     #[tokio::test]
     async fn bootnode_handoff_round_trip() {
-        let config = Box::leak(Box::new(test_config()));
+        let config = test_config();
         let pool_contract_id = config.pools[0].pool_contract_id.clone();
 
         let bootnode = MockServer::start().await;
@@ -235,6 +248,17 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
+            .and(body_string_contains("\"startLedger\":1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "bootnode-cursor",
+                json!([]),
+                3_000_000,
+            )))
+            .mount(&bootnode)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains("bootnode-cursor"))
             .respond_with(ResponseTemplate::new(200).set_body_json(handoff_response()))
             .mount(&bootnode)
             .await;
@@ -251,14 +275,22 @@ mod tests {
             .await;
         Mock::given(method("POST"))
             .and(body_string_contains("getEvents"))
-            .and(body_string_contains(format!(
-                "\"startLedger\":{HANDOFF_LEDGER}"
+            .and(body_string_contains("\"startLedger\":1"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
+                "bootnode-cursor",
+                json!([]),
+                3_000_000,
             )))
+            .mount(&wallet)
+            .await;
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .and(body_string_contains("bootnode-cursor"))
             .respond_with(ResponseTemplate::new(200).set_body_json(get_events_page(
                 "rpc-cursor",
                 json!([{
                     "type": "contract",
-                    "ledger": HANDOFF_LEDGER,
+                    "ledger": 2_999_000,
                     "ledgerClosedAt": "2024-01-01T00:00:00Z",
                     "contractId": pool_contract_id,
                     "id": RPC_EVENT_ID,
@@ -283,12 +315,13 @@ mod tests {
         #[derive(Clone)]
         struct RecordingStorage {
             batches: Rc<RefCell<Vec<ContractsEventData>>>,
+            sync: Rc<RefCell<Vec<SyncMetadata>>>,
         }
 
         #[async_trait::async_trait(?Send)]
         impl ContractDataStorage for RecordingStorage {
             async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
-                Ok(vec![])
+                Ok(self.sync.borrow().clone())
             }
 
             async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
@@ -298,15 +331,21 @@ mod tests {
 
             async fn save_sync_progress(
                 &self,
-                _metadata: Vec<SyncMetadata>,
+                metadata: Vec<SyncMetadata>,
                 _fully_indexed: bool,
             ) -> anyhow::Result<()> {
+                *self.sync.borrow_mut() = metadata;
                 Ok(())
             }
         }
 
         let storage = RecordingStorage {
             batches: Rc::new(RefCell::new(Vec::new())),
+            sync: Rc::new(RefCell::new(vec![SyncMetadata {
+                contract_id: pool_contract_id.clone(),
+                cursor: "bootnode-cursor".into(),
+                last_ledger: 2_999_000,
+            }])),
         };
         let batches = Rc::clone(&storage.batches);
 
@@ -314,19 +353,20 @@ mod tests {
             .await
             .expect("bootnode indexer");
         let err = bootnode_indexer
-            .fetch_contract_events(None)
+            .fetch_contract_events()
             .await
             .expect_err("bootnode should hand off");
-        let from_ledger = match err.downcast_ref::<RpcError>() {
-            Some(RpcError::RpcHandoff(ledger)) => *ledger,
-            other => panic!("expected RpcHandoff, got {other:?}"),
-        };
+        assert!(
+            err.downcast_ref::<RpcError>()
+                .is_some_and(is_retention_handoff),
+            "expected handoff, got {err:?}"
+        );
 
         let wallet_indexer = Indexer::init(&wallet.uri(), storage, config)
             .await
             .expect("wallet indexer");
         wallet_indexer
-            .fetch_contract_events(Some(from_ledger))
+            .fetch_contract_events()
             .await
             .expect("wallet fetch");
 

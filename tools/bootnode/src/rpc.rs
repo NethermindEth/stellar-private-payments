@@ -1,4 +1,10 @@
-use crate::AppState;
+use crate::{
+    AppState,
+    messages::{
+        ContractEventFilter, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
+        PaginationParams,
+    },
+};
 use jsonrpsee::{
     core::{RpcResult, async_trait},
     proc_macros::rpc,
@@ -7,10 +13,6 @@ use jsonrpsee::{
 use metrics::counter;
 use serde_json::json;
 use std::sync::atomic::Ordering;
-use stellar::{
-    ContractEventFilter, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
-    PaginationParams,
-};
 
 /// `-32004`: bootnode-specific JSON-RPC error when a requested `getEvents` page
 /// is not cached yet.
