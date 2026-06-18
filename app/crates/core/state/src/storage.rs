@@ -306,10 +306,9 @@ impl Storage {
     }
 
     pub fn get_bootnode_config(&self) -> Result<BootnodeConfig> {
-        let row = self
-            .conn
+        self.conn
             .query_row(
-                "SELECT enabled, url FROM bootnode_config LIMIT 1",
+                "SELECT enabled, url FROM bootnode_config WHERE id = 1",
                 [],
                 |row| {
                     Ok(BootnodeConfig {
@@ -318,28 +317,16 @@ impl Storage {
                     })
                 },
             )
-            .optional()
-            .context("failed to query bootnode config")?;
-
-        Ok(row.unwrap_or(BootnodeConfig {
-            enabled: false,
-            url: String::new(),
-        }))
+            .context("failed to query bootnode config")
     }
 
     pub fn set_bootnode_config(&mut self, enabled: bool, url: &str) -> Result<()> {
-        let tx = self
-            .conn
-            .transaction()
-            .context("failed to start transaction")?;
-        tx.execute("DELETE FROM bootnode_config", [])
-            .context("failed to clear bootnode config")?;
-        tx.execute(
-            "INSERT INTO bootnode_config (enabled, url) VALUES (?1, ?2)",
-            params![i64::from(enabled), url],
-        )
-        .context("failed to insert bootnode config")?;
-        tx.commit().context("failed to commit transaction")?;
+        self.conn
+            .execute(
+                "UPDATE bootnode_config SET enabled = ?1, url = ?2 WHERE id = 1",
+                params![i64::from(enabled), url],
+            )
+            .context("failed to update bootnode config")?;
         Ok(())
     }
 

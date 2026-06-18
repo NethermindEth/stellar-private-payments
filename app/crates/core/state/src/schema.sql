@@ -181,6 +181,8 @@ CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaime
 
 -- Client-wide bootnode opt-in for indexer historical event recovery.
 CREATE TABLE bootnode_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
   enabled INTEGER NOT NULL DEFAULT 0,
   url TEXT NOT NULL DEFAULT ''
 );
+INSERT INTO bootnode_config (id) VALUES (1);
