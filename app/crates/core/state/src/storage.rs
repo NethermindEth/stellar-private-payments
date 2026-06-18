@@ -105,18 +105,36 @@ impl Storage {
         Ok(())
     }
 
-    pub fn save_sync_progress(&mut self, metadata: &[types::SyncMetadata]) -> Result<()> {
+    pub fn save_sync_progress(
+        &mut self,
+        metadata: &[types::SyncMetadata],
+        fully_indexed: bool,
+    ) -> Result<()> {
         let tx = self.conn.transaction()?;
         for entry in metadata {
             let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id)?;
             tx.execute(
-                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_indexed_ledger)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(contract_id) DO UPDATE SET
-                     last_cursor = excluded.last_cursor,
-                     last_indexed_ledger = excluded.last_indexed_ledger",
-                params![contract_id, entry.cursor, entry.last_ledger],
+                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_indexed_ledger, last_fully_indexed_ledger)
+                 VALUES (?1, ?2, ?3, 0)
+                 ON CONFLICT(contract_id) DO NOTHING",
+                params![contract_id, entry.cursor, entry.last_indexed_ledger],
             )?;
+
+            if fully_indexed {
+                tx.execute(
+                    "UPDATE indexing_metadata
+                     SET last_cursor = ?2, last_indexed_ledger = ?3, last_fully_indexed_ledger = ?3
+                     WHERE contract_id = ?1",
+                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
+                )?;
+            } else {
+                tx.execute(
+                    "UPDATE indexing_metadata
+                     SET last_cursor = ?2, last_indexed_ledger = ?3
+                     WHERE contract_id = ?1",
+                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
+                )?;
+            }
         }
 
         tx.commit()?;
@@ -133,7 +151,7 @@ impl Storage {
 
     pub fn get_sync_metadata(&self) -> Result<Vec<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.address, m.last_indexed_ledger, m.last_cursor
+            "SELECT c.address, m.last_indexed_ledger, m.last_fully_indexed_ledger, m.last_cursor
              FROM indexing_metadata m
              JOIN contracts c ON c.contract_id = m.contract_id
              ORDER BY m.contract_id",
@@ -141,12 +159,15 @@ impl Storage {
 
         let rows = stmt.query_map([], |row| {
             let contract_id: String = row.get(0)?;
-            let ledger_i64: i64 = row.get(1)?;
-            let last_ledger = col_u32(ledger_i64, 1)?;
-            let cursor: Option<String> = row.get(2)?;
+            let indexed_ledger_i64: i64 = row.get(1)?;
+            let last_indexed_ledger = col_u32(indexed_ledger_i64, 1)?;
+            let fully_indexed_ledger_i64: i64 = row.get(2)?;
+            let last_fully_indexed_ledger = col_u32(fully_indexed_ledger_i64, 2)?;
+            let cursor: Option<String> = row.get(3)?;
             Ok(types::SyncMetadata {
                 contract_id,
-                last_ledger,
+                last_indexed_ledger,
+                last_fully_indexed_ledger,
                 cursor: cursor.unwrap_or_default(),
             })
         })?;
@@ -700,15 +721,15 @@ impl Storage {
             return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
-        if current_ledger > sync_meta.last_ledger {
-            let gap = current_ledger.saturating_sub(sync_meta.last_ledger);
+        if current_ledger > sync_meta.last_fully_indexed_ledger {
+            let gap = current_ledger.saturating_sub(sync_meta.last_fully_indexed_ledger);
             return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
-        if current_ledger < sync_meta.last_ledger {
+        if current_ledger < sync_meta.last_fully_indexed_ledger {
             anyhow::bail!(
                 "indexer metadata is ahead of chain tip: local={}, chain={}",
-                sync_meta.last_ledger,
+                sync_meta.last_fully_indexed_ledger,
                 current_ledger
             );
         }
@@ -742,7 +763,8 @@ impl Storage {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
 
-        // current_ledger == last_ledger: require root match and leaf existence.
+        // current_ledger == last_fully_indexed_ledger: require root match and leaf
+        // existence.
         if *current_root != last_root {
             // If the root at the chain tip doesn't match the last stored root
             // but our last stored leaf is from an earlier ledger, we may have
@@ -1422,11 +1444,15 @@ mod tests {
             latest_ledger: 10,
             events: vec![dummy_event("evt-1")],
         })?;
-        storage.save_sync_progress(&[types::SyncMetadata {
-            contract_id: "CPOOL".to_string(),
-            cursor: "c1".to_string(),
-            last_ledger: 10,
-        }])?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: "c1".to_string(),
+                last_indexed_ledger: 10,
+                last_fully_indexed_ledger: 0,
+            }],
+            false,
+        )?;
 
         let meta = storage
             .get_sync_metadata()?
@@ -1434,18 +1460,23 @@ mod tests {
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c1");
-        assert_eq!(meta.last_ledger, 10);
+        assert_eq!(meta.last_indexed_ledger, 10);
+        assert_eq!(meta.last_fully_indexed_ledger, 0);
 
         storage.save_events_batch(&ContractsEventData {
             cursor: "c2".to_string(),
             latest_ledger: 123,
             events: vec![],
         })?;
-        storage.save_sync_progress(&[types::SyncMetadata {
-            contract_id: "CPOOL".to_string(),
-            cursor: "c2".to_string(),
-            last_ledger: 123,
-        }])?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CPOOL".to_string(),
+                cursor: "c2".to_string(),
+                last_indexed_ledger: 123,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
 
         let meta = storage
             .get_sync_metadata()?
@@ -1453,7 +1484,8 @@ mod tests {
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c2");
-        assert_eq!(meta.last_ledger, 123);
+        assert_eq!(meta.last_indexed_ledger, 123);
+        assert_eq!(meta.last_fully_indexed_ledger, 123);
 
         storage.clear_indexing_cursors()?;
         let meta = storage
@@ -1462,7 +1494,8 @@ mod tests {
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert!(meta.cursor.is_empty());
-        assert_eq!(meta.last_ledger, 123);
+        assert_eq!(meta.last_indexed_ledger, 123);
+        assert_eq!(meta.last_fully_indexed_ledger, 123);
 
         Ok(())
     }
@@ -1596,11 +1629,15 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
-        storage.save_sync_progress(&[types::SyncMetadata {
-            contract_id: "CASP".to_string(),
-            cursor: "cur-tip".to_string(),
-            last_ledger: current_ledger,
-        }])?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
 
         // Root matches the last stored root: this should NOT require syncing
         // even if the last ASP leaf was emitted earlier than the current tip.
@@ -1655,11 +1692,15 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
-        storage.save_sync_progress(&[types::SyncMetadata {
-            contract_id: "CASP".to_string(),
-            cursor: "cur-tip".to_string(),
-            last_ledger: current_ledger,
-        }])?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
 
         let err = storage
             .check_asp_membership_precondition("CASP", &leaf, &root_new, current_ledger)
@@ -1707,11 +1748,15 @@ mod tests {
             latest_ledger: current_ledger,
             events: vec![],
         })?;
-        storage.save_sync_progress(&[types::SyncMetadata {
-            contract_id: "CASP".to_string(),
-            cursor: "cur-tip".to_string(),
-            last_ledger: current_ledger,
-        }])?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
 
         let status =
             storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;

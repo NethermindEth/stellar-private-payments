@@ -55,7 +55,10 @@ pub enum StorageWorkerRequest {
     Ping,
     SyncState,
     SaveEvents(ContractsEventData),
-    SaveSyncProgress(Vec<SyncMetadata>),
+    SaveSyncProgress {
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    },
     ClearIndexingCursors,
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),

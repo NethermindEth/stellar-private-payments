@@ -825,11 +825,18 @@ impl stellar::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_sync_progress(&self, metadata: Vec<types::SyncMetadata>) -> anyhow::Result<()> {
+    async fn save_sync_progress(
+        &self,
+        metadata: Vec<types::SyncMetadata>,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(metadata)),
+            bridge.run(StorageWorkerRequest::SaveSyncProgress {
+                metadata,
+                fully_indexed,
+            }),
         )
         .await?;
         match resp {

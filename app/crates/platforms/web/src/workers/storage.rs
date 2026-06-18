@@ -206,12 +206,15 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::SaveSyncProgress(metadata) => {
+        StorageWorkerRequest::SaveSyncProgress {
+            metadata,
+            fully_indexed,
+        } => {
             log::trace!(
-                "[{WORKER_NAME}] saving bulk sync progress for {} contracts",
+                "[{WORKER_NAME}] saving bulk sync progress for {} contracts (fully_indexed={fully_indexed})",
                 metadata.len()
             );
-            with_storage_mut!(s => s.save_sync_progress(&metadata)?)?;
+            with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClearIndexingCursors => {

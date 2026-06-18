@@ -365,7 +365,11 @@ mod tests {
                 Ok(())
             }
 
-            async fn save_sync_progress(&self, metadata: Vec<SyncMetadata>) -> anyhow::Result<()> {
+            async fn save_sync_progress(
+                &self,
+                metadata: Vec<SyncMetadata>,
+                _fully_indexed: bool,
+            ) -> anyhow::Result<()> {
                 *self.sync.borrow_mut() = metadata;
                 Ok(())
             }
@@ -376,7 +380,8 @@ mod tests {
             sync: Rc::new(RefCell::new(vec![SyncMetadata {
                 contract_id: pool_contract_id.clone(),
                 cursor: "bootnode-cursor".into(),
-                last_ledger: 2_999_000,
+                last_indexed_ledger: 2_999_000,
+                last_fully_indexed_ledger: 0,
             }])),
         };
         let batches = Rc::clone(&storage.batches);

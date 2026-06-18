@@ -29,7 +29,7 @@ impl<S: ContractDataStorage> Indexer<S> {
 
         let probe_ledger = active_sync
             .iter()
-            .map(|meta| meta.last_ledger)
+            .map(|meta| meta.last_indexed_ledger)
             .filter(|ledger| *ledger > 0)
             .min()
             .unwrap_or(min_pool_ledger);
@@ -65,19 +65,19 @@ impl<S: ContractDataStorage> Indexer<S> {
 
         let start_ledger = active_sync
             .iter()
-            .map(|meta| meta.last_ledger)
+            .map(|meta| meta.last_indexed_ledger)
             .min()
             .unwrap_or(self.min_pool_ledger);
 
         if active_sync
             .iter()
-            .map(|meta| meta.last_ledger)
+            .map(|meta| meta.last_indexed_ledger)
             .collect::<HashSet<_>>()
             .len()
             > 1
         {
             log::warn!(
-                "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_ledger={start_ledger}",
+                "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_indexed_ledger={start_ledger}",
                 active_sync.len()
             );
         }
@@ -137,9 +137,11 @@ impl<S: ContractDataStorage> Indexer<S> {
                         .map(|contract_id| SyncMetadata {
                             contract_id: contract_id.clone(),
                             cursor: new_cursor.clone(),
-                            last_ledger: progress_ledger,
+                            last_indexed_ledger: progress_ledger,
+                            last_fully_indexed_ledger: 0,
                         })
                         .collect(),
+                    is_empty,
                 )
                 .await?;
 
@@ -161,7 +163,11 @@ pub trait ContractDataStorage {
     /// Sends a batch of events to be saved and waits for confirmation.
     async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()>;
 
-    async fn save_sync_progress(&self, metadata: Vec<SyncMetadata>) -> anyhow::Result<()>;
+    async fn save_sync_progress(
+        &self,
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()>;
 }
 impl From<crate::rpc::Event> for ContractEvent {
     fn from(val: crate::rpc::Event) -> Self {
