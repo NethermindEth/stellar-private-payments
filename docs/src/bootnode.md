@@ -6,9 +6,33 @@ The **bootnode** is a narrow, public service that:
 
 - Implements only `getEvents` and `getLatestLedger` (JSON-RPC compatible request/response shape).
 - Caches historical `getEvents` pages from the contract deployment ledger onward.
-- Once a request is safely within the retention window buffer (currently **tip − 5 days**), returns a JSON-RPC **handoff** error (`-32005`) with `fromLedger` so the app indexer continues on the user's configured main RPC.
+- Once a request is safely within the retention window buffer (currently **tip − 5 days**), returns a JSON-RPC **handoff** error (`-32002`) with `fromLedger` so the app indexer continues on the user's configured main RPC.
 
 The app uses the bootnode **only for the indexer** (event ingestion). Wallet RPC usage for transaction submission / contract state reads is separate. The bootnode does not redirect HTTP clients; handoff is signaled in the JSON-RPC response.
+
+## Bootnode-specific JSON-RPC errors
+
+`getEvents` may return two application-defined error codes (in addition to standard JSON-RPC errors such as `-32602` invalid params):
+
+| Code | Meaning | Client action |
+|------|---------|---------------|
+| `-32004` | **Cache miss** — the requested page is not cached yet. | Retry with backoff. Message is `"bootnode warming up; retry later"` while the service has no ledger tip yet, or `"cache miss; indexer may still be catching up"` when the background indexer has not reached that page. |
+| `-32002` | **Retention handoff** — the requested range is within the retention window; bootnode archive is complete for this sync. | Stop using the bootnode and continue `getEvents` on the wallet's main RPC from `error.data.fromLedger`. |
+
+Handoff response shape:
+
+```json
+{
+  "code": -32002,
+  "message": "Continue syncing on your RPC endpoint",
+  "data": {
+    "reason": "retention_threshold",
+    "fromLedger": 2913600
+  }
+}
+```
+
+The app indexer treats `-32002` as handoff and resumes on the configured RPC at `fromLedger`.
 
 ## Trust assumptions
 

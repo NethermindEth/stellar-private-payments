@@ -5,7 +5,7 @@ Bootnode is a narrow HTTPS JSON-RPC service that supports only:
 - `getEvents`
 - `getLatestLedger`
 
-It caches historical `getEvents` pages into Postgres (starting at the compiled-in deployment ledger). Once a request is safely within the retention window buffer (tip − 5 days by default), it returns a JSON-RPC handoff error (`-32005` with `fromLedger`) so the app indexer resumes on the user's configured main RPC.
+It caches historical `getEvents` pages into Postgres (starting at the compiled-in deployment ledger). Once a request is safely within the retention window buffer (tip − 5 days by default), it returns a JSON-RPC handoff error (`-32002` with `fromLedger`) so the app indexer resumes on the user's configured main RPC.
 
 ## Local development (HTTP, loopback only)
 

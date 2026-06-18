@@ -12,8 +12,16 @@ use stellar::{
     PaginationParams,
 };
 
+/// `-32004`: bootnode-specific JSON-RPC error when a requested `getEvents` page is not cached yet.
+///
+/// Clients should retry with backoff.
 pub const CACHE_MISS_CODE: i32 = -32_004;
-pub const RETENTION_HANDOFF_CODE: i32 = -32_005;
+
+/// `-32002`: bootnode-specific JSON-RPC error telling the client to resume on its main RPC.
+///
+/// Returned when the requested range is within the retention handoff window.
+/// (jsonrpsee reserves `-32005` for batch-not-supported.)
+pub const RETENTION_HANDOFF_CODE: i32 = -32_002;
 
 #[rpc(server)]
 pub trait BootnodeApi {
@@ -44,11 +52,11 @@ impl BootnodeRpc {
     //    startLedger only                  cursor only
     //           │                               │
     //    tip known & ledger              tip known & cursor's
-    //    >= cutoff? ──yes──► -32005       last event ledger
+    //    >= cutoff? ──yes──► handoff       last event ledger
     //    handoff          handoff              >= cutoff?
     //           │no                             │yes
     //           ▼                               ▼
-    //    cache by startLedger              -32005 handoff
+    //    cache by startLedger              handoff
     //           │                               │no
     //    ┌──────┴──────┐                        ▼
     //   hit           miss              cache by cursor

@@ -296,7 +296,7 @@ mod tests {
             "jsonrpc": "2.0",
             "id": 1,
             "error": {
-                "code": -32005,
+                "code": -32002,
                 "message": "bootnode archive complete",
                 "data": { "fromLedger": HANDOFF_LEDGER },
             }

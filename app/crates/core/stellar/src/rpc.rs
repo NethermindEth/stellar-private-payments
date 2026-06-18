@@ -22,6 +22,7 @@ pub enum Error {
     Reqwest(#[from] reqwest::Error),
     #[error("jsonrpc error: {code} - {message}")]
     JsonRpc { code: i64, message: String },
+    /// Bootnode `getEvents` handoff (`-32002`).
     #[error("bootnode handoff at ledger {from_ledger}")]
     RetentionHandoff { from_ledger: u32 },
     #[error("xdr processing error: {0}")]
@@ -420,7 +421,8 @@ impl Client {
         let resp = request.await?;
 
         if let Some(err) = resp.error {
-            if err.code == -32005 {
+            // Bootnode retention handoff (`-32002`) — see docs/src/bootnode.md.
+            if err.code == -32_002 {
                 let from_ledger = err
                     .data
                     .as_ref()
