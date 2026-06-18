@@ -12,7 +12,7 @@ const DEPLOYMENT: &str = include_str!("../../../../../deployments/testnet/deploy
 
 use client::WebClient;
 use config::Config;
-use events::events_listener;
+use events::{events_listener, rpc_sync_check};
 use types::ContractConfig;
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
@@ -44,10 +44,19 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    let bootnode_url = client.resolve_bootnode_url(config.bootnode_url()).await?;
+    // check rpc, if sync-gap use trigger bootnode consent modal UI
+    rpc_sync_check(
+        config.rpc_url(),
+        client.clone(),
+        contract_config,
+        config.bootnode_url(),
+    )
+    .await
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
     spawn_local(events_listener(
         config.rpc_url().to_string(),
-        bootnode_url,
+        config.bootnode_url().map(str::to_string),
         client.clone(),
         contract_config,
     ));

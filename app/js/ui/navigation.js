@@ -13,7 +13,8 @@ import { runOnboardingWizard } from './onboarding-wizard.js';
 const DEFAULT_BOOTNODE_URL_TESTNET = 'https://bootnode.testnet.poolstellar.org';
 
 function isRpcSyncGapError(message) {
-    return typeof message === 'string' && message.startsWith('RPC_SYNC_GAP');
+    return typeof message === 'string'
+        && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
 }
 
 function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {

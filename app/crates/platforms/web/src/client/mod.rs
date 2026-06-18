@@ -223,30 +223,6 @@ impl WebClient {
         }
     }
 
-    pub(crate) async fn resolve_bootnode_url(
-        &self,
-        override_url: Option<&str>,
-    ) -> Result<Option<String>, JsError> {
-        if let Some(url) = override_url {
-            let req = StorageWorkerRequest::SetBootnodeConfig {
-                enabled: true,
-                url: url.to_string(),
-            };
-            match self.storage_request(req, 2_000).await? {
-                StorageWorkerResponse::Saved => Ok(Some(url.to_string())),
-                other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-            }
-        } else {
-            let req = StorageWorkerRequest::BootnodeConfig;
-            match self.storage_request(req, 2_000).await? {
-                StorageWorkerResponse::BootnodeConfig(config) => {
-                    Ok((config.enabled && !config.url.is_empty()).then_some(config.url))
-                }
-                other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-            }
-        }
-    }
-
     pub(crate) async fn clear_indexing_cursors(&self) -> Result<(), JsError> {
         match self
             .storage_request(StorageWorkerRequest::ClearIndexingCursors, 2_000)

@@ -17,11 +17,31 @@ fn is_retention_handoff(err: &RpcError) -> bool {
     )
 }
 
-fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
+pub(crate) fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
     matches!(
         err.downcast_ref::<RpcError>(),
         Some(RpcError::RpcSyncGap(_))
     )
+}
+
+/// Probes whether the RPC can serve the indexer's resume range
+pub(crate) async fn rpc_sync_check(
+    rpc_url: &str,
+    storage: WebClient,
+    config: &'static ContractConfig,
+    bootnode_url: Option<&str>,
+) -> Result<(), anyhow::Error> {
+    match Indexer::init(rpc_url, storage, config).await {
+        Ok(_) => Ok(()),
+        Err(e) if is_rpc_sync_gap(&e) => {
+            if bootnode_url.is_none() {
+                Err(anyhow::anyhow!("RPC_SYNC_GAP: {e}"))
+            } else {
+                Ok(())
+            }
+        }
+        Err(e) => Err(e),
+    }
 }
 
 fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
