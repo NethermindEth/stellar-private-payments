@@ -44,9 +44,10 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
         .ping_storage()
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
+    let bootnode_url = client.resolve_bootnode_url(config.bootnode_url()).await?;
     let indexer = Indexer::init(
         config.rpc_url(),
-        config.bootnode_url(),
+        bootnode_url.as_deref(),
         client.clone(),
         contract_config,
     )

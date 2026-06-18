@@ -10,28 +10,7 @@ import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
-const BOOTNODE_ENABLED_KEY = 'poolstellar_bootnode_enabled';
-const BOOTNODE_URL_KEY = 'poolstellar_bootnode_url';
 const DEFAULT_BOOTNODE_URL_TESTNET = 'https://bootnode.testnet.poolstellar.org';
-
-function getBootnodeSettings() {
-    try {
-        const enabled = window.localStorage.getItem(BOOTNODE_ENABLED_KEY) === '1';
-        const url = window.localStorage.getItem(BOOTNODE_URL_KEY) || DEFAULT_BOOTNODE_URL_TESTNET;
-        return { enabled, url };
-    } catch {
-        return { enabled: false, url: DEFAULT_BOOTNODE_URL_TESTNET };
-    }
-}
-
-function setBootnodeSettings({ enabled, url }) {
-    try {
-        window.localStorage.setItem(BOOTNODE_ENABLED_KEY, enabled ? '1' : '0');
-        if (url) window.localStorage.setItem(BOOTNODE_URL_KEY, url);
-    } catch {
-        // ignore
-    }
-}
 
 function isRpcSyncGapError(message) {
     return typeof message === 'string' && message.startsWith('RPC_SYNC_GAP');
@@ -284,22 +263,19 @@ export const Wallet = {
 
             setButtonLoading('Loading WASM...');
             try {
-                const bootnode = getBootnodeSettings();
-                await initializeWasm(rpcUrl, bootnode.enabled ? bootnode.url : null);
+                await initializeWasm(rpcUrl);
             } catch (e) {
                 let msg = e?.message || 'Failed to initialize WASM';
-                const bootnode = getBootnodeSettings();
 
                 // Retention-window bootstrap: offer an opt-in bootnode for the indexer only.
-                if (isRpcSyncGapError(msg) && !bootnode.enabled) {
+                if (isRpcSyncGapError(msg)) {
                     try {
                         const modal = await showBootnodeConsentModal({
-                            defaultUrl: bootnode.url,
+                            defaultUrl: DEFAULT_BOOTNODE_URL_TESTNET,
                             rpcUrl,
                             errorMessage: msg,
                         });
                         if (modal?.accepted && modal?.url) {
-                            setBootnodeSettings({ enabled: true, url: modal.url });
                             setButtonLoading('Loading WASM (bootnode)...');
                             await initializeWasm(rpcUrl, modal.url);
                             msg = null;

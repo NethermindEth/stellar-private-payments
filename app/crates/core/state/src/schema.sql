@@ -178,3 +178,9 @@ CREATE TABLE disclaimer_acceptances (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaimer_hash);
+
+-- Client-wide bootnode opt-in for indexer historical event recovery.
+CREATE TABLE bootnode_config (
+  enabled INTEGER NOT NULL DEFAULT 0,
+  url TEXT NOT NULL DEFAULT ''
+);

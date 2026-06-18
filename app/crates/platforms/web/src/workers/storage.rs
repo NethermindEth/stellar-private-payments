@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
-    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, BootnodeConfigPayload, DisclaimerStatePayload, DisclosureInputs,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
@@ -237,6 +238,19 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex) => {
             log::trace!("[{WORKER_NAME}] accept disclaimer for account {address}");
             with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::BootnodeConfig => {
+            log::trace!("[{WORKER_NAME}] fetch bootnode config");
+            let config = with_storage!(s => s.get_bootnode_config()?)?;
+            StorageWorkerResponse::BootnodeConfig(BootnodeConfigPayload {
+                enabled: config.enabled,
+                url: config.url,
+            })
+        }
+        StorageWorkerRequest::SetBootnodeConfig { enabled, url } => {
+            log::trace!("[{WORKER_NAME}] set bootnode config enabled={enabled}");
+            with_storage_mut!(s => s.set_bootnode_config(enabled, &url)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {
