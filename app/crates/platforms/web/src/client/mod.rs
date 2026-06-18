@@ -346,6 +346,18 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = setBootnodeConfig)]
+    pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::SetBootnodeConfig {
+            enabled: true,
+            url,
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getUserKeys)]
     pub async fn get_user_keys(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::UserKeys(address);

@@ -244,6 +244,11 @@ export const Wallet = {
                         if (modal?.accepted && modal?.url) {
                             setButtonLoading('Loading WASM (bootnode)...');
                             await initializeWasm(rpcUrl, modal.url);
+                            try {
+                                await getHandle().webClient.setBootnodeConfig(modal.url);
+                            } catch (saveErr) {
+                                console.debug('[Bootnode] failed to persist config:', saveErr);
+                            }
                             msg = null;
                         }
                     } catch (modalErr) {

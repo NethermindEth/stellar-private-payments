@@ -110,11 +110,11 @@ impl Storage {
         for entry in metadata {
             let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id)?;
             tx.execute(
-                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
+                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_indexed_ledger)
                  VALUES (?1, ?2, ?3)
                  ON CONFLICT(contract_id) DO UPDATE SET
                      last_cursor = excluded.last_cursor,
-                     last_fully_indexed_ledger = excluded.last_fully_indexed_ledger",
+                     last_indexed_ledger = excluded.last_indexed_ledger",
                 params![contract_id, entry.cursor, entry.last_ledger],
             )?;
         }
@@ -133,7 +133,7 @@ impl Storage {
 
     pub fn get_sync_metadata(&self) -> Result<Vec<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.address, m.last_fully_indexed_ledger, m.last_cursor
+            "SELECT c.address, m.last_indexed_ledger, m.last_cursor
              FROM indexing_metadata m
              JOIN contracts c ON c.contract_id = m.contract_id
              ORDER BY m.contract_id",

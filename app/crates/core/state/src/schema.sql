@@ -28,7 +28,7 @@ CREATE TABLE indexing_metadata (
     -- When a fetch round ends on an empty page it is set to the network tip,
     -- indicating pagination is complete. Used for resume-by-ledger (after RPC
     -- handoff) and sync preconditions (e.g. proving membership at the tip).
-    last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
+    last_indexed_ledger INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
 );
 
