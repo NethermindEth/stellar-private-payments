@@ -19,28 +19,7 @@ pub struct Indexer<S: ContractDataStorage> {
     phase: Cell<SyncPhase>,
     storage: S,
     contract_ids: Vec<String>,
-    min_pool_ledger: u32,
-}
-
-/// Contract IDs indexed by the app (enabled pools + ASP membership).
-pub fn contract_ids_for_indexer(config: &ContractConfig) -> Vec<String> {
-    config
-        .pools
-        .iter()
-        .filter_map(|p| p.enabled.then_some(p.pool_contract_id.clone()))
-        .chain(std::iter::once(config.asp_membership.clone()))
-        .collect()
-}
-
-/// Earliest deployment ledger among enabled pools.
-pub fn min_pool_ledger_for_indexer(config: &ContractConfig) -> Result<u32> {
-    config
-        .pools
-        .iter()
-        .filter(|p| p.enabled)
-        .map(|p| p.deployment_ledger)
-        .min()
-        .ok_or_else(|| anyhow!("at least one pool should be enabled"))
+    min_deployment_ledger: u32,
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
@@ -51,11 +30,11 @@ impl<S: ContractDataStorage> Indexer<S> {
         config: &'static ContractConfig,
     ) -> Result<Self> {
         let rpc = Client::new(rpc_url)?;
-        let min_pool_ledger = min_pool_ledger_for_indexer(config)?;
-        let contract_ids = contract_ids_for_indexer(config);
+        let min_deployment_ledger = config.min_deployment_ledger()?;
+        let contract_ids = config.pools_and_membership_contract_ids();
 
         match rpc
-            .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
+            .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
             .await
         {
             Ok(_) => Ok(Self {
@@ -64,7 +43,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                 phase: Cell::new(SyncPhase::Rpc),
                 storage,
                 contract_ids,
-                min_pool_ledger,
+                min_deployment_ledger,
             }),
             Err(RpcError::RpcSyncGap(oldest)) => {
                 let Some(bootnode_url) = bootnode_url else {
@@ -72,12 +51,12 @@ impl<S: ContractDataStorage> Indexer<S> {
                         "RPC_SYNC_GAP oldest={oldest} deployment={0} rpc={rpc_url}\n\
 Your RPC node retains events only back to ledger {oldest}, but indexing requires {0}. \
 Use a different RPC, a fresher deployment, or configure a bootnode.",
-                        min_pool_ledger
+                        min_deployment_ledger
                     ));
                 };
                 let bootnode = Client::new(bootnode_url)?;
                 bootnode
-                    .get_contract_events(&contract_ids, min_pool_ledger, 1, None)
+                    .get_contract_events(&contract_ids, min_deployment_ledger, 1, None)
                     .await?;
                 Ok(Self {
                     rpc,
@@ -85,7 +64,7 @@ Use a different RPC, a fresher deployment, or configure a bootnode.",
                     phase: Cell::new(SyncPhase::Bootnode),
                     storage,
                     contract_ids,
-                    min_pool_ledger,
+                    min_deployment_ledger,
                 })
             }
             Err(e) => Err(e.into()),
@@ -120,7 +99,7 @@ Use a different RPC, a fresher deployment, or configure a bootnode.",
             .iter()
             .map(|meta| meta.last_ledger)
             .min()
-            .unwrap_or(self.min_pool_ledger);
+            .unwrap_or(self.min_deployment_ledger);
 
         if active_sync
             .iter()

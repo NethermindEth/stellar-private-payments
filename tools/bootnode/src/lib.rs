@@ -34,7 +34,7 @@ pub(crate) struct AppState {
     pub(crate) ledger_tip: Arc<AtomicU32>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
-    pub(crate) min_pool_ledger: u32,
+    pub(crate) min_deployment_ledger: u32,
 }
 
 impl Bootnode {
@@ -45,8 +45,8 @@ impl Bootnode {
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
         let deployment = deployment::deployment_config()?;
-        let contract_ids = Arc::new(stellar::contract_ids_for_indexer(&deployment));
-        let min_pool_ledger = stellar::min_pool_ledger_for_indexer(&deployment)?;
+        let contract_ids = Arc::new(deployment.pools_and_membership_contract_ids());
+        let min_deployment_ledger = deployment.min_deployment_ledger()?;
         let kv = storage.load_kv().await?;
         let ledger_tip = cfg.initial_ledger_tip.max(kv.ledger_tip);
 
@@ -58,7 +58,7 @@ impl Bootnode {
                 storage,
                 prom_handle,
                 contract_ids,
-                min_pool_ledger,
+                min_deployment_ledger,
             },
         })
     }

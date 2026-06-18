@@ -10,9 +10,7 @@ mod tx_prepare;
 pub use contract_state::{OnchainProofPublicInputs, PreparedSorobanTx, StateFetcher};
 pub use conversions::*;
 pub use ext_data_hash::hash_ext_data_offchain;
-pub use indexer::{
-    ContractDataStorage, Indexer, SyncPhase, contract_ids_for_indexer, min_pool_ledger_for_indexer,
-};
+pub use indexer::{ContractDataStorage, Indexer, SyncPhase};
 pub use rpc::{
     ContractEventFilter, Event, GetEventsParams, GetEventsResponse, GetLatestLedgerResponse,
     GetTransactionResponse, JsonRpcErrorResponse, JsonRpcRequest, JsonRpcResponse,

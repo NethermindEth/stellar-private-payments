@@ -43,7 +43,7 @@ fn contract_ids() -> Vec<String> {
         "../../../deployments/testnet/deployments.json"
     ))
     .expect("deployments json");
-    stellar::contract_ids_for_indexer(&deployment)
+    deployment.pools_and_membership_contract_ids()
 }
 
 async fn wait_listening(client: &reqwest::Client, base: &str) {

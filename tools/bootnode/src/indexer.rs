@@ -39,7 +39,7 @@ impl Indexer {
         let kv = self.state.storage.load_kv().await?;
         let mut cursor = kv.last_cursor;
 
-        let mut start_ledger = cursor.is_none().then_some(self.state.min_pool_ledger);
+        let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
 
         for _page in 0..self.state.cfg.max_pages_per_round {
             let params = GetEventsParams::for_contracts(

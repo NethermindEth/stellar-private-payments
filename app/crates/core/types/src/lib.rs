@@ -188,6 +188,28 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     Ok(out)
 }
 
+impl ContractConfig {
+    pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
+        self.pools.iter().filter(|p| p.enabled)
+    }
+
+    /// Contract IDs for enabled pools and ASP membership.
+    pub fn pools_and_membership_contract_ids(&self) -> Vec<String> {
+        self.enabled_pools()
+            .map(|p| p.pool_contract_id.clone())
+            .chain(std::iter::once(self.asp_membership.clone()))
+            .collect()
+    }
+
+    /// Earliest deployment ledger among enabled pools.
+    pub fn min_deployment_ledger(&self) -> Result<u32> {
+        self.enabled_pools()
+            .map(|p| p.deployment_ledger)
+            .min()
+            .ok_or_else(|| anyhow!("at least one pool should be enabled"))
+    }
+}
+
 impl EncryptionPublicKey {
     /// Parse a `0x`-prefixed (or raw) 32-byte hex string.
     pub fn parse(s: &str) -> Result<Self> {
