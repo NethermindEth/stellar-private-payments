@@ -423,7 +423,6 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
     if (needsNotificationsStep) {
         setStepState('notifications', 'current');
-        setNotificationsPrompted();
         renderStepContent(`
             <div class="space-y-3 text-sm text-dark-300">
                 <p class="text-xs text-dark-500">Step 3/4 · Optional, but recommended.</p>
@@ -447,6 +446,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
                 text: 'Not now',
                 variant: 'secondary',
                 onClick: () => {
+                    setNotificationsPrompted();
                     abort.signal.removeEventListener('abort', onAbort);
                     resolve();
                 },
@@ -465,6 +465,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
                         if (permission === 'granted') {
                             await registerServiceWorker();
                         }
+                        setNotificationsPrompted();
                         abort.signal.removeEventListener('abort', onAbort);
                         resolve();
                     } catch (e) {

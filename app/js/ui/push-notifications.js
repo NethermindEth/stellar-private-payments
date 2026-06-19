@@ -17,8 +17,8 @@ export function getNotificationsPrompted() {
 export function setNotificationsPrompted() {
     try {
         window.localStorage.setItem(NOTIFICATIONS_PROMPTED_FLAG, '1');
-    } catch {
-        // ignore
+    } catch (e) {
+        console.error('[PushNotifications] setNotificationsPrompted failed:', e);
     }
 }
 
