@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS indexer_state (
   last_cursor TEXT,
   last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
   ledger_tip INTEGER NOT NULL DEFAULT 0,
+  in_sync BOOLEAN NOT NULL DEFAULT false,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 INSERT INTO indexer_state (id) VALUES (1)
@@ -77,7 +78,7 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip FROM indexer_state WHERE id = 1",
+                "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip, in_sync FROM indexer_state WHERE id = 1",
                 &[],
             )
             .await?;
@@ -85,12 +86,14 @@ impl Storage for Postgres {
         let last_cursor: Option<String> = row.get(0);
         let last_fully_indexed_ledger: i32 = row.get(1);
         let ledger_tip: i32 = row.get(2);
+        let in_sync: bool = row.get(3);
 
         Ok(KvState {
             last_cursor,
             last_fully_indexed_ledger: u32::try_from(last_fully_indexed_ledger.max(0))
                 .context("last_fully_indexed_ledger exceeds u32 range")?,
             ledger_tip: u32::try_from(ledger_tip.max(0)).context("ledger_tip exceeds u32 range")?,
+            in_sync,
         })
     }
 
@@ -125,6 +128,17 @@ impl Storage for Postgres {
             .execute(
                 "UPDATE indexer_state SET ledger_tip = $1, updated_at = now() WHERE id = 1",
                 &[&ledger_tip],
+            )
+            .await?;
+        Ok(())
+    }
+
+    async fn set_in_sync(&self, in_sync: bool) -> Result<()> {
+        let client = self.pool.get().await?;
+        client
+            .execute(
+                "UPDATE indexer_state SET in_sync = $1, updated_at = now() WHERE id = 1",
+                &[&in_sync],
             )
             .await?;
         Ok(())

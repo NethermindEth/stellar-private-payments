@@ -9,6 +9,7 @@ struct State {
     last_cursor: Option<String>,
     last_fully_indexed_ledger: u32,
     ledger_tip: u32,
+    in_sync: bool,
     cache_by_cursor_in: HashMap<String, GetEventsResponse>,
     cache_by_start_ledger: HashMap<u32, GetEventsResponse>,
     ledger_by_cursor_out: HashMap<String, u32>,
@@ -53,6 +54,7 @@ impl Storage for InMemory {
             last_cursor: state.last_cursor.clone(),
             last_fully_indexed_ledger: state.last_fully_indexed_ledger,
             ledger_tip: state.ledger_tip,
+            in_sync: state.in_sync,
         }))
     }
 
@@ -68,6 +70,11 @@ impl Storage for InMemory {
 
     async fn set_ledger_tip(&self, ledger_tip: u32) -> Result<()> {
         self.with_state_mut(|state| state.ledger_tip = ledger_tip);
+        Ok(())
+    }
+
+    async fn set_in_sync(&self, in_sync: bool) -> Result<()> {
+        self.with_state_mut(|state| state.in_sync = in_sync);
         Ok(())
     }
 
@@ -193,6 +200,7 @@ mod tests {
         let kv = storage.load_kv().await.expect("load kv");
         assert_eq!(kv.last_cursor.as_deref(), Some("next"));
         assert_eq!(kv.last_fully_indexed_ledger, 100);
+        assert!(kv.in_sync);
 
         let last_event_ledger = storage
             .lookup_last_event_ledger_for_cursor("next")

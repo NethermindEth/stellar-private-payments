@@ -53,6 +53,7 @@ impl Indexer {
             let last_event_ledger = result.events.last().map(|event| event.ledger);
 
             if !result.events.is_empty() {
+                self.state.storage.set_in_sync(false).await?;
                 self.state
                     .storage
                     .insert_get_events_page(InsertGetEventsPage {

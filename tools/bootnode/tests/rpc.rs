@@ -310,3 +310,65 @@ async fn request_on_cold_cache() {
     assert_eq!(err.code, i64::from(CACHE_MISS_CODE));
     assert_eq!(err.message, "bootnode warming up; retry later");
 }
+
+#[tokio::test]
+async fn handoff_when_in_sync() {
+    const PORT: u16 = 40408;
+    let base = format!("http://127.0.0.1:{PORT}");
+
+    let ids = contract_ids();
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+
+    let storage = Arc::new(InMemory::new());
+    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+    let prev = GetEventsResponse {
+        cursor: "cursor-in".into(),
+        events: vec![sample_event()],
+        latest_ledger: NETWORK_TIP,
+        latest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+        oldest_ledger: 2_997_687,
+        oldest_ledger_close_time: "2024-01-01T00:00:00Z".into(),
+    };
+    let last_event_ledger = HANDOFF_FROM_LEDGER - 200;
+    storage
+        .insert_get_events_page(InsertGetEventsPage {
+            cursor_in: None,
+            start_ledger: Some(2_997_687),
+            request: &prev_request,
+            result: &prev,
+            cursor_out: "cursor-in",
+            last_event_ledger: Some(last_event_ledger),
+            latest_ledger: prev.latest_ledger,
+            oldest_ledger: prev.oldest_ledger,
+        })
+        .await
+        .expect("seed previous page for in-sync handoff");
+    storage
+        .mark_caught_up("cursor-in", NETWORK_TIP)
+        .await
+        .expect("indexer reached empty terminal page");
+
+    let server = spawn_bootnode(storage, test_config(PORT, NETWORK_TIP)).await;
+
+    let client = reqwest::Client::new();
+    wait_listening(&client, &base).await;
+
+    let response = post_get_events(&client, &base, request).await;
+
+    server.abort();
+
+    assert!(
+        response.result.is_none(),
+        "unexpected result: {:?}",
+        response.result
+    );
+    let err = response.error.expect("expected handoff error");
+    assert_eq!(err.code, i64::from(RETENTION_HANDOFF_CODE));
+    assert_eq!(
+        err.data,
+        Some(json!({
+            "reason": "retention_threshold",
+            "fromLedger": HANDOFF_FROM_LEDGER,
+        }))
+    );
+}

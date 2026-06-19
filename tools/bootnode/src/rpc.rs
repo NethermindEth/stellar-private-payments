@@ -57,19 +57,21 @@ impl BootnodeRpc {
     //           │                               │
     //    tip known & ledger              tip known & cursor's
     //    >= cutoff? ──yes──► handoff       last event ledger
-    //    handoff          handoff              >= cutoff?
-    //           │no                             │yes
-    //           ▼                               ▼
+    //           │no                             >= cutoff?
+    //           ▼                               │yes
     //    cache by startLedger              handoff
     //           │                               │no
     //    ┌──────┴──────┐                        ▼
     //   hit           miss              cache by cursor
     //    │             │                        │
     //    ▼             ▼                  ┌─────┴─────┐
-    //  200 OK     -32004 miss            hit         miss
-    //             (warming up             │           │
-    //              if tip==0)             ▼           ▼
-    //                                   200 OK     -32004 miss
+    //  200 OK        in_sync?            hit         miss
+    //                │yes   │no           │           │
+    //                ▼      ▼             ▼           ▼
+    //             handoff   -32004      200 OK      in_sync?
+    //             (tip==0: -32004 warming up)       │yes   │no
+    //                                               ▼      ▼
+    //                                            handoff  -32004
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
@@ -111,8 +113,9 @@ impl BootnodeRpc {
                         internal_error(e)
                     })?
                 else {
-                    counter!("bootnode_cache_misses_total").increment(1);
-                    return Err(cache_miss_for_tip(tip));
+                    return self
+                        .cache_miss_or_handoff(tip, tip_known, cutoff_ledger)
+                        .await;
                 };
 
                 counter!("bootnode_cache_hits_total").increment(1);
@@ -144,12 +147,44 @@ impl BootnodeRpc {
         })?;
 
         let Some(result) = cached else {
-            counter!("bootnode_cache_misses_total").increment(1);
-            return Err(cache_miss_for_tip(tip));
+            return self
+                .cache_miss_or_handoff(tip, tip_known, cutoff_ledger)
+                .await;
         };
 
         counter!("bootnode_cache_hits_total").increment(1);
         Ok(result)
+    }
+
+    async fn cache_miss_or_handoff(
+        &self,
+        tip: u32,
+        tip_known: bool,
+        cutoff_ledger: u32,
+    ) -> RpcResult<GetEventsResponse> {
+        if !tip_known {
+            counter!("bootnode_cache_misses_total").increment(1);
+            return Err(cache_miss_for_tip(tip));
+        }
+
+        let in_sync = self
+            .state
+            .storage
+            .load_kv()
+            .await
+            .map_err(|e| {
+                counter!("bootnode_handler_errors_total").increment(1);
+                internal_error(e)
+            })?
+            .in_sync;
+
+        if in_sync {
+            counter!("bootnode_handoffs_total").increment(1);
+            return Err(retention_handoff(cutoff_ledger));
+        }
+
+        counter!("bootnode_cache_misses_total").increment(1);
+        Err(cache_miss_for_tip(tip))
     }
 }
 
