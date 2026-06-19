@@ -1,5 +1,6 @@
 mod client;
 mod config;
+mod events;
 mod protocol;
 pub mod workers;
 
@@ -11,9 +12,7 @@ const DEPLOYMENT: &str = include_str!("../../../../../deployments/testnet/deploy
 
 use client::WebClient;
 use config::Config;
-use gloo_timers::future::TimeoutFuture;
-use std::rc::Rc;
-use stellar::Indexer;
+use events::{bootnode_check, events_listener};
 use types::ContractConfig;
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
@@ -45,29 +44,21 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    let indexer = Indexer::init(config.rpc_url(), client.clone(), contract_config)
-        .await
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    start_indexer_loop(indexer, 5_000);
+    let bootnode_url = bootnode_check(
+        config.rpc_url(),
+        client.clone(),
+        contract_config,
+        config.bootnode_url(),
+    )
+    .await
+    .map_err(|e| JsError::new(&e.to_string()))?;
+
+    spawn_local(events_listener(
+        config.rpc_url().to_string(),
+        bootnode_url,
+        client.clone(),
+        contract_config,
+    ));
     log::debug!("[MAIN THREAD] initialized");
     Ok(MainThreadHandle { client })
-}
-
-fn start_indexer_loop(indexer: Indexer<WebClient>, interval_ms: u32) {
-    let indexer = Rc::new(indexer);
-
-    let indexer_cloned = Rc::clone(&indexer);
-    spawn_local(async move {
-        log::debug!("[INDEXER] looping");
-
-        // Fetch events in rounds (internal indexer loop with termination conditions)
-        // or at least 5s (ledger time)
-        loop {
-            if let Err(e) = indexer_cloned.fetch_contract_events().await {
-                log::error!("[INDEXER] round failed: {e}");
-            }
-
-            TimeoutFuture::new(interval_ms).await;
-        }
-    });
 }

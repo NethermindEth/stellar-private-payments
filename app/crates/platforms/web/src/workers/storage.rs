@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
-    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, BootnodeConfigPayload, DisclaimerStatePayload, DisclosureInputs,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
@@ -205,12 +206,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             kick_processor();
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::SaveSyncProgress(metadata, fully_indexed) => {
+        StorageWorkerRequest::SaveSyncProgress {
+            metadata,
+            fully_indexed,
+        } => {
             log::trace!(
-                "[{WORKER_NAME}] saving bulk sync progress for {} contracts, fully={fully_indexed}",
+                "[{WORKER_NAME}] saving bulk sync progress for {} contracts (fully_indexed={fully_indexed})",
                 metadata.len()
             );
             with_storage_mut!(s => s.save_sync_progress(&metadata, fully_indexed)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ClearIndexingCursors => {
+            log::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
+            with_storage_mut!(s => s.clear_indexing_cursors()?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
@@ -237,6 +246,19 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex) => {
             log::trace!("[{WORKER_NAME}] accept disclaimer for account {address}");
             with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::BootnodeConfig => {
+            log::trace!("[{WORKER_NAME}] fetch bootnode config");
+            let config = with_storage!(s => s.get_bootnode_config()?)?;
+            StorageWorkerResponse::BootnodeConfig(BootnodeConfigPayload {
+                enabled: config.enabled,
+                url: config.url,
+            })
+        }
+        StorageWorkerRequest::SetBootnodeConfig { enabled, url } => {
+            log::trace!("[{WORKER_NAME}] set bootnode config enabled={enabled}");
+            with_storage_mut!(s => s.set_bootnode_config(enabled, &url)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {

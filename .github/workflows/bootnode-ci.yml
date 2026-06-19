@@ -1,0 +1,73 @@
+name: Bootnode CI
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "tools/bootnode/**"
+      - ".github/workflows/bootnode-ci.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "tools/bootnode/**"
+      - ".github/workflows/bootnode-ci.yml"
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUSTFLAGS: "-Dwarnings"
+
+jobs:
+  bootnode:
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: tools/bootnode
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+          components: clippy
+
+      - name: Install cargo-shear
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cargo-shear@1.11.2
+
+      - name: Check for unused dependencies
+        run: cargo shear
+
+      - name: Install nightly rustfmt
+        run: rustup toolchain install nightly --component rustfmt --profile minimal
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          workspaces: tools/bootnode
+
+      - name: Install cargo-deny
+        run: which cargo-deny || cargo install cargo-deny --locked --version 0.18.9
+
+      - name: Dependency audit
+        run: cargo deny check --config ../../deny.toml
+
+      - name: Fmt
+        run: cargo +nightly fmt --all -- --check --config-path ../../rustfmt.toml
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Build
+        run: cargo build
+
+      - name: Test
+        run: cargo test

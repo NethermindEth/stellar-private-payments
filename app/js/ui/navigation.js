@@ -10,6 +10,63 @@ import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
+function isRpcSyncGapError(message) {
+    return typeof message === 'string'
+        && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
+}
+
+function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
+    const modal = document.getElementById('bootnode-consent-modal');
+    const urlInput = document.getElementById('bootnode-consent-url');
+    const errorEl = document.getElementById('bootnode-consent-error');
+    const acceptBtn = document.getElementById('bootnode-consent-accept');
+    const cancelBtn = document.getElementById('bootnode-consent-cancel');
+    const closeBtn = document.getElementById('bootnode-consent-close');
+    const rpcUrlEl = document.getElementById('bootnode-consent-rpc-url');
+    const detailsEl = document.getElementById('bootnode-consent-details');
+
+    if (!modal || !urlInput || !acceptBtn || !cancelBtn || !closeBtn || !errorEl) {
+        throw new Error('Bootnode consent modal is missing from the page');
+    }
+
+    errorEl.classList.add('hidden');
+    errorEl.textContent = '';
+    urlInput.value = defaultUrl || '';
+    if (rpcUrlEl) rpcUrlEl.textContent = rpcUrl || '';
+    if (detailsEl) detailsEl.textContent = errorMessage || '';
+
+    modal.classList.remove('hidden');
+
+    return new Promise((resolve) => {
+        const cleanup = () => {
+            acceptBtn.removeEventListener('click', onAccept);
+            cancelBtn.removeEventListener('click', onCancel);
+            closeBtn.removeEventListener('click', onCancel);
+            modal.classList.add('hidden');
+        };
+
+        const onCancel = () => {
+            cleanup();
+            resolve({ accepted: false, url: null });
+        };
+
+        const onAccept = () => {
+            const url = (urlInput.value || '').trim();
+            if (!url.startsWith('https://')) {
+                errorEl.textContent = 'Bootnode URL must start with https://';
+                errorEl.classList.remove('hidden');
+                return;
+            }
+            cleanup();
+            resolve({ accepted: true, url });
+        };
+
+        acceptBtn.addEventListener('click', onAccept);
+        cancelBtn.addEventListener('click', onCancel);
+        closeBtn.addEventListener('click', onCancel);
+    });
+}
+
 /**
  * Updates the disabled state of all submit buttons and disclaimers based on wallet connection.
  * @param {boolean} connected
@@ -172,15 +229,41 @@ export const Wallet = {
             try {
                 await initializeWasm(rpcUrl);
             } catch (e) {
-                // Always toast init failures (even on auto-connect) because it's actionable.
-                const msg = e?.message || 'Failed to initialize WASM';
-                const now = Date.now();
-                const last = this._lastInitError || { msg: null, at: 0 };
-                if (msg !== last.msg || (now - last.at) > 20_000) {
-                    Toast.show(msg, 'error', 20_000);
-                    this._lastInitError = { msg, at: now };
+                let msg = e?.message || 'Failed to initialize WASM';
+
+                // Retention-window bootstrap: offer an opt-in bootnode for the indexer only.
+                if (isRpcSyncGapError(msg)) {
+                    try {
+                        const modal = await showBootnodeConsentModal({
+                            defaultUrl: '',
+                            rpcUrl,
+                            errorMessage: msg,
+                        });
+                        if (modal?.accepted && modal?.url) {
+                            setButtonLoading('Loading WASM (bootnode)...');
+                            await initializeWasm(rpcUrl, modal.url);
+                            try {
+                                await getHandle().webClient.setBootnodeConfig(modal.url);
+                            } catch (saveErr) {
+                                console.debug('[Bootnode] failed to persist config:', saveErr);
+                            }
+                            msg = null;
+                        }
+                    } catch (modalErr) {
+                        console.debug('[Bootnode] consent flow failed:', modalErr);
+                    }
                 }
-                throw e;
+
+                if (msg) {
+                    // Always toast init failures (even on auto-connect) because it's actionable.
+                    const now = Date.now();
+                    const last = this._lastInitError || { msg: null, at: 0 };
+                    if (msg !== last.msg || (now - last.at) > 20_000) {
+                        Toast.show(msg, 'error', 20_000);
+                        this._lastInitError = { msg, at: now };
+                    }
+                    throw e;
+                }
             }
 
             setButtonLoading('Onboarding…');

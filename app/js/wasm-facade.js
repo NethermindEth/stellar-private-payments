@@ -2,11 +2,11 @@ import init, { mainThread, Config } from './web.js';
 
 let handle = null;
 
-export async function initializeWasm(rpcUrl) {
+export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
     if (handle) return handle; // Prevent double initialization
 
     await init();
-    const config = new Config(rpcUrl);
+    const config = new Config(rpcUrl, bootnodeUrl || undefined);
     handle = await mainThread(config);
 
     return handle;

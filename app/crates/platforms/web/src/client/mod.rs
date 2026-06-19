@@ -223,6 +223,16 @@ impl WebClient {
         }
     }
 
+    pub(crate) async fn clear_indexing_cursors(&self) -> Result<(), JsError> {
+        match self
+            .storage_request(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     async fn prover_request(
         &self,
         req: ProverWorkerRequest,
@@ -330,6 +340,27 @@ impl WebClient {
         disclaimer_hash_hex: String,
     ) -> Result<(), JsError> {
         let req = StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex);
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+        match self
+            .storage_request(StorageWorkerRequest::BootnodeConfig, 2_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
+                (config.enabled && !config.url.is_empty()).then_some(config.url)
+            }
+            _ => None,
+        }
+    }
+
+    #[wasm_bindgen(js_name = setBootnodeConfig)]
+    pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::SetBootnodeConfig { enabled: true, url };
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
@@ -802,10 +833,10 @@ impl stellar::ContractDataStorage for WebClient {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(
+            bridge.run(StorageWorkerRequest::SaveSyncProgress {
                 metadata,
                 fully_indexed,
-            )),
+            }),
         )
         .await?;
         match resp {

@@ -148,8 +148,10 @@ pub struct SyncMetadata {
     pub contract_id: String,
     /// Sync cursor.
     pub cursor: String,
-    /// Last synced ledger.
-    pub last_ledger: u32,
+    /// Highest ledger seen in saved pages (resume watermark).
+    pub last_indexed_ledger: u32,
+    /// Ledger through which catch-up is proven (empty page at tip).
+    pub last_fully_indexed_ledger: u32,
 }
 
 /// ASP membership sync state.

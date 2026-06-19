@@ -42,16 +42,32 @@ pub struct DisclaimerStatePayload {
     pub accepted: bool,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BootnodeConfigPayload {
+    pub enabled: bool,
+    pub url: String,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
     Ping,
     SyncState,
     SaveEvents(ContractsEventData),
-    SaveSyncProgress(Vec<SyncMetadata>, bool),
+    SaveSyncProgress {
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    },
+    ClearIndexingCursors,
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
+    BootnodeConfig,
+    SetBootnodeConfig {
+        enabled: bool,
+        url: String,
+    },
     UserKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
@@ -74,6 +90,7 @@ pub enum StorageWorkerResponse {
     Saved,
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
+    BootnodeConfig(BootnodeConfigPayload),
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
