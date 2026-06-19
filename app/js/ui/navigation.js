@@ -10,8 +10,6 @@ import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
-const DEFAULT_BOOTNODE_URL_TESTNET = 'https://bootnode.testnet.poolstellar.org';
-
 function isRpcSyncGapError(message) {
     return typeof message === 'string'
         && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
@@ -237,7 +235,7 @@ export const Wallet = {
                 if (isRpcSyncGapError(msg)) {
                     try {
                         const modal = await showBootnodeConsentModal({
-                            defaultUrl: DEFAULT_BOOTNODE_URL_TESTNET,
+                            defaultUrl: '',
                             rpcUrl,
                             errorMessage: msg,
                         });
