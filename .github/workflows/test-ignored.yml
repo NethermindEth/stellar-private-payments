@@ -30,6 +30,6 @@ jobs:
       - name: Build circuit artifacts
         run: cargo build -p circuits
       - name: Build
-        run: BUILD_TESTS=1 cargo test --workspace --no-run
+        run: BUILD_TESTS=1 cargo test --release --workspace --no-run
       - name: Run tests
-        run: cargo test --workspace -- --ignored
+        run: cargo test --release --workspace -- --ignored
