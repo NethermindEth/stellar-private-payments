@@ -1,0 +1,18 @@
+[package]
+name = "disclosure"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Selective disclosure receipt validation and circuit metadata"
+
+[dependencies]
+anyhow = { workspace = true }
+hex = { workspace = true }
+prover = { workspace = true }
+sha2 = { workspace = true }
+types = { workspace = true }
+
+[lints]
+workspace = true

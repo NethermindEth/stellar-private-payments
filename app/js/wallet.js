@@ -174,11 +174,11 @@ export async function signWalletTransaction(transactionXdr, opts = {}) {
 }
 
 /**
- * Request the user to sign a Soroban auth entry via Freighter.
+ * Request the user to sign a Soroban auth preimage via Freighter.
  *
- * Ensures wallet access, then returns the signed auth entry.
+ * Takes HashIdPreimage XDR (base64); returns raw signature bytes for authorizeEntry.
  *
- * @param {string} entryXdr - Unsigned auth entry XDR (base64).
+ * @param {string} entryXdr - Authorization preimage XDR (base64).
  * @param {Object} opts - Optional signing context.
  * @param {string} [opts.networkPassphrase] - Network passphrase for signing.
  * @param {string} [opts.address] - Specific account to sign with.
@@ -241,7 +241,7 @@ export async function signWalletMessage(message, opts = {}) {
  * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
  * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
  * @param {boolean} [options.skipCacheCheck=false] - Skip existing-key lookup before signature prompts
- * @returns {Promise<{privKeyBytes: Uint8Array, pubKeyBytes: Uint8Array, encryptionKeypair: Object}>}
+ * @returns {Promise<{pubKey: string, encryptionKeypair: {publicKey: string}, aspSecret: string}>}
  * @throws {Error} If user rejects signature requests
  */
 export async function deriveKeysFromWallet(
@@ -250,22 +250,23 @@ export async function deriveKeysFromWallet(
 ) {
     const client = getHandle().webClient;
     let data = null;
+    let aspSecret = null;
     if (!skipCacheCheck) {
         data = await client.getUserKeys(account);
-        if (data) {
-            onStatus?.('Loaded privacy keys from local storage');
+        aspSecret = await client.getASPSecret(account);
+        if (data && aspSecret?.membershipBlinding) {
+            onStatus?.('Loaded privacy keys and ASP secret from local storage');
             return {
-                privKey: data.noteKeypair.private,
                 pubKey: data.noteKeypair.public,
                 encryptionKeypair: {
                     publicKey: data.encryptionKeypair.public,
-                    privateKey: data.encryptionKeypair.private,
                 },
+                aspSecret: aspSecret.membershipBlinding,
             };
         }
     }
 
-    onStatus?.('Signature: derive privacy keys (does not move funds)...');
+    onStatus?.('Signature: derive privacy keys and ASP secret (does not move funds)...');
 
     let derivationResult;
     try {
@@ -275,7 +276,7 @@ export async function deriveKeysFromWallet(
         });
     } catch (e) {
         if (e.code === 'USER_REJECTED') {
-            throw new Error('Please approve the message signature to derive your privacy keys');
+            throw new Error('Please approve the message signature to derive your privacy keys and ASP secret');
         }
         throw e;
     }
@@ -288,9 +289,16 @@ export async function deriveKeysFromWallet(
     await client.deriveAndSaveUserKeys(account, signatureBytes);
 
     data = await client.getUserKeys(account);
-    return { privKey: data.noteKeypair.private, pubKey: data.noteKeypair.public, encryptionKeypair: {
-            publicKey: data.encryptionKeypair.public,
-            privateKey: data.encryptionKeypair.private,
-        } };
+    aspSecret = await client.getASPSecret(account);
+    if (!data || !aspSecret?.membershipBlinding) {
+        throw new Error('Derived privacy keys or ASP secret are unavailable');
+    }
 
+    return {
+        pubKey: data.noteKeypair.public,
+        encryptionKeypair: {
+            publicKey: data.encryptionKeypair.public,
+        },
+        aspSecret: aspSecret.membershipBlinding,
+    };
 }

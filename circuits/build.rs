@@ -83,6 +83,11 @@ fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
     let target_dir = env::var_os("CARGO_TARGET_DIR")
         .map(PathBuf::from)
         .unwrap_or_else(|| workspace_root.join("target"));
+    let target_dir = if target_dir.is_absolute() {
+        target_dir
+    } else {
+        workspace_root.join(target_dir)
+    };
     let profile = env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
     Ok(target_dir.join("circuits-artifacts").join(profile))
 }

@@ -5,6 +5,8 @@
 //! layout consumed by the prover.
 
 use anyhow::{Context as _, Result, anyhow};
+use ark_bn254::Fr;
+use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
 use ark_ff_05::{AdditiveGroup as _, BigInteger as _, Field as _, PrimeField as _};
 use circom_witness_rs::{Graph, HashSignalInfo};
 use num_bigint::{BigInt, Sign};
@@ -12,10 +14,12 @@ use ruint::aliases::U256;
 // These are part of the reduced STD that is browser compatible
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
+    io::Cursor,
     string::String,
     sync::Arc,
     vec::Vec,
 };
+use wasmer::{Module, Store};
 
 /// BN254 scalar field modulus
 const BN254_FIELD_MODULUS: &str =
@@ -38,12 +42,24 @@ pub struct WitnessCalculator {
 
 enum WitnessBackend {
     Graph(Graph),
+    Wasm {
+        store: Store,
+        calculator: ArkWitnessCalculator,
+    },
 }
 
 impl WitnessCalculator {
-    /// Create a witness calculator from graph and R1CS bytes.
-    pub fn new(graph_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
-        Self::from_graph(graph_bytes, r1cs_bytes)
+    /// Create a witness calculator from a graph or Circom WASM artifact.
+    ///
+    /// Policy transaction proving uses a generated graph artifact. Selective
+    /// disclosure currently still uses the legacy Circom WASM witness artifact,
+    /// so this constructor dispatches by artifact magic for compatibility.
+    pub fn new(artifact_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
+        if artifact_bytes.starts_with(b"\0asm") {
+            Self::from_wasm(artifact_bytes, r1cs_bytes)
+        } else {
+            Self::from_graph(artifact_bytes, r1cs_bytes)
+        }
     }
 
     /// Create a witness calculator from a serialized witness graph and
@@ -61,6 +77,27 @@ impl WitnessCalculator {
             backend: WitnessBackend::Graph(graph),
             witness_size: circuit_shape.witness_size,
             num_public_inputs: circuit_shape.num_public_inputs,
+        })
+    }
+
+    /// Create a witness calculator from a Circom WASM artifact and matching
+    /// R1CS bytes.
+    pub fn from_wasm(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<Self> {
+        let cursor = Cursor::new(r1cs_bytes);
+        let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor).context("Failed to parse R1CS")?;
+
+        let witness_size = r1cs_file.header.n_wires;
+        let num_public_inputs = r1cs_file.header.n_pub_in;
+
+        let mut store = Store::default();
+        let module = Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
+        let calculator = ArkWitnessCalculator::from_module(&mut store, module)
+            .map_err(|e| anyhow!("Failed to init witness calc: {e}"))?;
+
+        Ok(Self {
+            backend: WitnessBackend::Wasm { store, calculator },
+            witness_size,
+            num_public_inputs,
         })
     }
 
@@ -89,6 +126,12 @@ impl WitnessCalculator {
         match &mut self.backend {
             WitnessBackend::Graph(graph) => {
                 compute_graph_witness_bytes(inputs_hashmap, graph, self.witness_size)
+            }
+            WitnessBackend::Wasm { store, calculator } => {
+                let witness = calculator
+                    .calculate_witness(store, inputs_hashmap, false)
+                    .map_err(|e| anyhow!("Witness calculation failed: {e}"))?;
+                Ok(witness_to_bytes(&witness))
             }
         }
     }
@@ -752,7 +795,6 @@ fn flatten_pure_array(
 }
 
 /// Convert witness to Little-Endian bytes (32 bytes per element)
-#[cfg(test)]
 fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         witness

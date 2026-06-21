@@ -22,10 +22,16 @@ CREATE TABLE indexing_metadata (
     contract_id INTEGER PRIMARY KEY,
     -- RPC pagination cursor (opaque).
     last_cursor TEXT,
+    -- Highest ledger reached by the indexer for this contract.
+    --
+    -- Updated every saved page (max event ledger, or network tip on an empty
+    -- page). Used for resume-by-ledger after RPC handoff when cursors are
+    -- cleared.
+    last_indexed_ledger INTEGER NOT NULL DEFAULT 0,
     -- Latest ledger that the indexer has fully caught up to.
     --
-    -- This only advances when the indexer has proven catch-up by fetching an empty
-    -- events page for the current cursor. It is used for "are we synced?"
+    -- Only advances when the indexer has proven catch-up by fetching an empty
+    -- events page for the current cursor. Used for "are we synced?"
     -- preconditions (e.g. proving membership at the current tip).
     last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (contract_id) REFERENCES contracts(contract_id) ON DELETE CASCADE
@@ -63,6 +69,7 @@ CREATE TABLE keypairs (
     encryption_public_key BLOB NOT NULL,
     note_private_key BLOB NOT NULL,
     note_public_key BLOB NOT NULL,
+    membership_blinding BLOB NOT NULL,
     account_id INTEGER,
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
@@ -177,3 +184,11 @@ CREATE TABLE disclaimer_acceptances (
     FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE CASCADE
 );
 CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaimer_hash);
+
+-- Client-wide bootnode opt-in for indexer historical event recovery.
+CREATE TABLE bootnode_config (
+  id INTEGER PRIMARY KEY CHECK (id = 1),
+  enabled INTEGER NOT NULL DEFAULT 0,
+  url TEXT NOT NULL DEFAULT ''
+);
+INSERT INTO bootnode_config (id) VALUES (1);

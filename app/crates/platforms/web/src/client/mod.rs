@@ -1,7 +1,8 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DepositPrepared, DepositRequest, PreparedProverTx, ProverWorkerRequest,
-        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+        AdminASPRequest, DisclosureInputsRequest, DisclosureProverRequest, PreparedProverTx,
+        PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
+        StorageWorkerResponse,
     },
     workers::{prover::ProverWorker, storage::StorageWorker},
 };
@@ -12,15 +13,25 @@ use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
-use stellar::StateFetcher as CoreStateFetcher;
-use tx_planner::Transact;
+use stellar::{
+    OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
+    StateFetcher as CoreStateFetcher,
+};
 use types::{
-    AspMembershipSync, ContractConfig, ContractsStateData, EncryptionPublicKey, ExtAmount, Field,
-    KeyDerivationSignature, NoteAmount, NotePublicKey, SMT_DEPTH,
+    AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
+    EncryptionPublicKey, ExtAmount, Field, KeyDerivationSignature, NoteAmount, NotePublicKey,
+    parse_0x_hex_32,
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
 mod transact;
+
+fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
+    match result {
+        None => Ok(JsValue::NULL),
+        Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
+    }
+}
 
 fn emit_progress(
     on_status: &Option<Function>,
@@ -90,7 +101,72 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
     }
 }
 
+impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
+    fn from(p: &PreparedTxPublic) -> Self {
+        Self {
+            root: p.pool_root,
+            input_nullifiers: p.input_nullifiers,
+            output_commitment0: p.output_commitments[0],
+            output_commitment1: p.output_commitments[1],
+            public_amount: p.public_amount,
+            ext_data_hash_be: p.ext_data_hash_be,
+            asp_membership_root: p.asp_membership_root,
+            asp_non_membership_root: p.asp_non_membership_root,
+        }
+    }
+}
+
 impl WebClient {
+    async fn prepare_pool_soroban_tx(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        proof_uncompressed: Vec<u8>,
+        ext_data: types::ExtData,
+        prepared: &PreparedTxPublic,
+    ) -> Result<PreparedSorobanTx, JsError> {
+        self.fetcher
+            .prepare_pool_transact(
+                pool_contract_id,
+                &PoolTransactInput {
+                    proof_uncompressed,
+                    ext_data,
+                    public: prepared.into(),
+                },
+                user_address,
+            )
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    async fn finalize_prepared_prover_tx(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        mut prepared: PreparedProverTx,
+        on_status: &Option<Function>,
+        flow: &'static str,
+    ) -> Result<PreparedProverTx, JsError> {
+        emit_progress(
+            on_status,
+            flow,
+            "prepare_tx",
+            "Simulating transaction…",
+            None,
+            None,
+        );
+        prepared.soroban_tx = self
+            .prepare_pool_soroban_tx(
+                pool_contract_id,
+                user_address,
+                prepared.proof_uncompressed.clone(),
+                prepared.ext_data.clone(),
+                &prepared.prepared,
+            )
+            .await?;
+        Ok(prepared)
+    }
+
     pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
             storage_bridge: StorageWorker::spawner()
@@ -147,6 +223,16 @@ impl WebClient {
         }
     }
 
+    pub(crate) async fn clear_indexing_cursors(&self) -> Result<(), JsError> {
+        match self
+            .storage_request(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     async fn prover_request(
         &self,
         req: ProverWorkerRequest,
@@ -163,252 +249,6 @@ impl WebClient {
             ProverWorkerResponse::Error(e) => Err(JsError::new(&e)),
             _ => Ok(resp),
         }
-    }
-
-    async fn prove_deposit_inner(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        amount: BigInt,
-        output_amounts: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<DepositPrepared>, JsError> {
-        let expected_outputs =
-            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
-        if output_amounts.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "output_amounts must have length {N_OUTPUTS}"
-            )));
-        }
-
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-
-        let amount = parse_ext_amount_decimal(&amount)?;
-        if amount <= ExtAmount::ZERO {
-            return Err(JsError::new("amount must be > 0 for deposit"));
-        }
-
-        emit_progress(
-            &on_status,
-            "deposit",
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-
-        let mut out_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-        for (i, out) in out_amounts.iter_mut().enumerate().take(N_OUTPUTS) {
-            let idx = u32::try_from(i).map_err(|_| JsError::new("output index exceeds u32"))?;
-            let v = output_amounts.get(idx);
-            let bi: BigInt = v
-                .dyn_into()
-                .map_err(|_| JsError::new("output_amounts must be BigInt[]"))?;
-            *out = parse_note_amount_decimal(&bi)?;
-        }
-
-        let params = loop {
-            emit_progress(
-                &on_status,
-                "deposit",
-                "fetch_chain_state",
-                "Fetching on-chain state…",
-                None,
-                None,
-            );
-            let ContractsStateData {
-                pools,
-                asp_membership,
-                asp_non_membership,
-            } = self
-                .fetcher
-                .contracts_data_for_pool(&pool_contract_id)
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let pool = pools
-                .into_iter()
-                .next()
-                .ok_or_else(|| JsError::new("the pool data is not fetched"))?;
-            let pool_root = pool.merkle_root;
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "load_state",
-                "Loading local keys…",
-                None,
-                None,
-            );
-            let keys = match self
-                .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
-                .await?
-            {
-                StorageWorkerResponse::UserKeys(keys) => {
-                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
-                }
-                other => return Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-            };
-            let note_pubkey: NotePublicKey = keys.note_keypair.public;
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "fetch_chain_state",
-                "Fetching ASP non-membership proof…",
-                None,
-                None,
-            );
-            let non_membership_proof = self
-                .fetcher
-                .get_nonmembership_proof(
-                    &note_pubkey,
-                    asp_non_membership.root,
-                    SMT_DEPTH as usize,
-                    &user_address,
-                )
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let req = DepositRequest {
-                user_address: user_address.clone(),
-                membership_blinding,
-                amount,
-                pool_root,
-                pool_address: pool.contract_id,
-                aspmem_root: asp_membership.root,
-                aspmem_contract_id: asp_membership.contract_id.clone(),
-                aspmem_ledger: asp_membership.ledger,
-                output_amounts: out_amounts,
-                smt_depth: SMT_DEPTH,
-                tree_depth: pool.merkle_levels,
-                non_membership_proof,
-            };
-
-            emit_progress(
-                &on_status,
-                "deposit",
-                "load_state",
-                "Building witness inputs…",
-                None,
-                None,
-            );
-            match self
-                .storage_request(StorageWorkerRequest::Deposit(req), 5_000)
-                .await?
-            {
-                StorageWorkerResponse::DepositParams(p) => break p,
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
-                    log::warn!("[DEPOSIT] the account {user_address} should register within ASP");
-                    return Ok(None);
-                }
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
-                    log::info!("[DEPOSIT] sync is needed - waiting the indexer");
-                    emit_progress(
-                        &on_status,
-                        "deposit",
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain...")
-                        } else {
-                            "Waiting to sync ledgers from the chain...".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                    continue;
-                }
-                other => {
-                    return Err(JsError::new(&format!(
-                        "Unexpected storage worker response: {:?}",
-                        other
-                    )));
-                }
-            }
-        };
-
-        emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
-        self.ping_prover()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
-
-        let prepared = match self
-            .prover_request(ProverWorkerRequest::Deposit(params), 20_000)
-            .await?
-        {
-            ProverWorkerResponse::DepositPrepared(p) => p,
-            other => {
-                return Err(JsError::new(&format!(
-                    "Unexpected prover worker response: {:?}",
-                    other
-                )));
-            }
-        };
-
-        Ok(Some(prepared))
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn prove_transact_from_js(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        membership_blinding: BigInt,
-        ext_recipient: String,
-        ext_amount: BigInt,
-        input_note_ids: Array,
-        output_amounts: Array,
-        out_recipient_note_keys_hex: Array,
-        out_recipient_enc_keys_hex: Array,
-        on_status: Option<Function>,
-    ) -> Result<Option<PreparedProverTx>, JsError> {
-        let expected_outputs =
-            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
-        if out_recipient_note_keys_hex.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "out_recipient_note_keys_hex must have length {N_OUTPUTS}"
-            )));
-        }
-        if out_recipient_enc_keys_hex.length() != expected_outputs {
-            return Err(JsError::new(&format!(
-                "out_recipient_enc_keys_hex must have length {N_OUTPUTS}"
-            )));
-        }
-
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
-        let ext_amount = parse_ext_amount_decimal(&ext_amount)?;
-        let input_commitments = parse_input_note_ids(
-            &input_note_ids,
-            0,
-            2,
-            "input_note_ids must have length 0..=2",
-        )?;
-        let out_amounts = parse_output_amounts(&output_amounts)?;
-        let (out_note_pks, out_enc_pks) =
-            parse_output_recipient_keys(&out_recipient_note_keys_hex, &out_recipient_enc_keys_hex)?;
-
-        let step = Transact::new(
-            input_commitments,
-            out_amounts,
-            ext_amount,
-            ext_recipient,
-            out_note_pks,
-            out_enc_pks,
-        );
-
-        self.prove_transact_inner(
-            &pool_contract_id,
-            &user_address,
-            membership_blinding,
-            &step,
-            "transact",
-            &on_status,
-            None,
-            None,
-        )
-        .await
     }
 }
 
@@ -441,6 +281,24 @@ impl WebClient {
         )?)
     }
 
+    #[wasm_bindgen(js_name = prepareRegisterPublicKeys)]
+    pub async fn prepare_register_public_keys(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        note_public_key_hex: String,
+        encryption_public_key_hex: String,
+    ) -> Result<JsValue, JsError> {
+        let note_key = parse_hex32(&note_public_key_hex, "note public key")?;
+        let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
+        let prepared = self
+            .fetcher
+            .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&prepared)?)
+    }
+
     #[wasm_bindgen(js_name = keyDerivationMessage)]
     pub fn key_derivation_message(&self) -> String {
         KEY_DERIVATION_MESSAGE.to_string()
@@ -452,8 +310,11 @@ impl WebClient {
         address: String,
         signature: Vec<u8>,
     ) -> Result<(), JsError> {
-        let req =
-            StorageWorkerRequest::DeriveSaveUserKeys(address, KeyDerivationSignature(signature));
+        let req = StorageWorkerRequest::DeriveSaveUserKeys(
+            address,
+            KeyDerivationSignature(signature),
+            self.fetcher.contract_config().network.clone(),
+        );
 
         match self.storage_request(req, 5_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
@@ -485,12 +346,43 @@ impl WebClient {
         }
     }
 
+    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+        match self
+            .storage_request(StorageWorkerRequest::BootnodeConfig, 2_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
+                (config.enabled && !config.url.is_empty()).then_some(config.url)
+            }
+            _ => None,
+        }
+    }
+
+    #[wasm_bindgen(js_name = setBootnodeConfig)]
+    pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::SetBootnodeConfig { enabled: true, url };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getUserKeys)]
     pub async fn get_user_keys(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::UserKeys(address);
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::UserKeys(keys) => Ok(serde_wasm_bindgen::to_value(&keys)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getASPSecret)]
+    pub async fn get_asp_secret(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::AspSecret(address);
+
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::AspSecret(secret) => Ok(serde_wasm_bindgen::to_value(&secret)?),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
@@ -552,41 +444,39 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = proveDeposit)]
-    pub async fn prove_deposit(
+    #[wasm_bindgen(js_name = executeDeposit)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn execute_deposit(
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         output_amounts: Array,
+        submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_deposit_inner(
+        let result = self
+            .execute_deposit_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 output_amounts,
+                submit_fn,
                 on_status,
             )
             .await?;
-        match prepared {
-            None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
-        }
+        execute_hashes_to_js(result)
     }
 
-    #[wasm_bindgen(js_name = planSpend)]
-    pub async fn plan_spend(
+    #[wasm_bindgen(js_name = plan)]
+    pub async fn plan(
         &self,
-        user_address: String,
         pool_contract_id: String,
+        user_address: String,
         amount: BigInt,
     ) -> Result<JsValue, JsError> {
         let preview = self
-            .plan_spend_inner(pool_contract_id, user_address, amount)
+            .plan_inner(pool_contract_id, user_address, amount)
             .await?;
         Ok(serde_wasm_bindgen::to_value(&preview)?)
     }
@@ -597,7 +487,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         recipient_note_key_hex: String,
         recipient_enc_key_hex: String,
@@ -612,22 +501,18 @@ impl WebClient {
             .map_err(|e| JsError::new(&e.to_string()))?;
         let target = SpendTarget::transfer(recipient_note, recipient_enc);
 
-        match self
+        let result = self
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 target,
                 "transfer",
                 submit_fn,
                 on_status,
             )
-            .await?
-        {
-            None => Ok(JsValue::NULL),
-            Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
-        }
+            .await?;
+        execute_hashes_to_js(result)
     }
 
     #[wasm_bindgen(js_name = executeWithdraw)]
@@ -636,7 +521,6 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         withdraw_recipient: String,
         amount: BigInt,
         submit_fn: Function,
@@ -646,57 +530,276 @@ impl WebClient {
 
         let target = SpendTarget::withdraw(withdraw_recipient);
 
-        match self
+        let result = self
             .execute_spend_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 amount,
                 target,
                 "withdraw",
                 submit_fn,
                 on_status,
             )
-            .await?
-        {
-            None => Ok(JsValue::NULL),
-            Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
-        }
+            .await?;
+        execute_hashes_to_js(result)
     }
 
-    #[wasm_bindgen(js_name = proveTransact)]
+    #[wasm_bindgen(js_name = executeTransact)]
     #[allow(clippy::too_many_arguments)]
-    pub async fn prove_transact(
+    pub async fn execute_transact_wasm(
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         ext_recipient: String,
         ext_amount: BigInt,
         input_note_ids: Array,
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
+        submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
-        let prepared = self
-            .prove_transact_from_js(
+        let result = self
+            .execute_transact_inner(
                 pool_contract_id,
                 user_address,
-                membership_blinding,
                 ext_recipient,
                 ext_amount,
                 input_note_ids,
                 output_amounts,
                 out_recipient_note_keys_hex,
                 out_recipient_enc_keys_hex,
+                submit_fn,
+                on_status,
+                "transact",
+            )
+            .await?;
+        execute_hashes_to_js(result)
+    }
+
+    #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn generate_selective_disclosure(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        selected_commitment_hex: String,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<JsValue, JsError> {
+        let receipt = self
+            .generate_selective_disclosure_inner(
+                &pool_contract_id,
+                &user_address,
+                selected_commitment_hex,
+                authority_label,
+                authority_identity_payload_hex,
+                purpose,
+                context_nonce,
                 on_status,
             )
             .await?;
-        match prepared {
+        match receipt {
             None => Ok(JsValue::NULL),
-            Some(p) => Ok(serde_wasm_bindgen::to_value(&p)?),
+            Some(r) => Ok(serde_wasm_bindgen::to_value(&r)?),
         }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn generate_selective_disclosure_inner(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        selected_commitment_hex: String,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<Option<DisclosureReceipt>, JsError> {
+        let selected_commitment = parse_field_hex_str(&selected_commitment_hex)?;
+        let context_nonce = parse_field_bigint_numeric(&context_nonce)?;
+
+        emit_progress(
+            &on_status,
+            "disclosure",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
+
+        let (inputs, network, pool_address) = loop {
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
+            let data = self
+                .fetcher
+                .contracts_data_for_pool(pool_contract_id)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let pool = data.pools.into_iter().next().ok_or_else(|| {
+                JsError::new(&format!(
+                    "pool {pool_contract_id} not found in contract state"
+                ))
+            })?;
+            let pool_root = pool.merkle_root;
+            let pool_next_index =
+                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+
+            let req = DisclosureInputsRequest {
+                user_address: user_address.to_string(),
+                pool_address: pool_contract_id.to_string(),
+                selected_commitment,
+                pool_root,
+                pool_next_index,
+                tree_depth: pool.merkle_levels,
+            };
+
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
+            match self
+                .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
+                .await?
+            {
+                StorageWorkerResponse::DisclosureInputs(inputs) => {
+                    break (
+                        inputs,
+                        self.fetcher.contract_config().network.clone(),
+                        pool.contract_id,
+                    );
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
+                    log::warn!(
+                        "[DISCLOSURE] the account {user_address} should register within ASP"
+                    );
+                    return Ok(None);
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
+                    log::info!("[DISCLOSURE] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "disclosure",
+                        "sync_wait",
+                        if let Some(gap) = gap {
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
+                        } else {
+                            "Waiting to sync ledgers from the chain...".to_string()
+                        },
+                        None,
+                        None,
+                    );
+                    TimeoutFuture::new(1_000).await;
+                    continue;
+                }
+                other => {
+                    return Err(JsError::new(&format!(
+                        "Unexpected storage worker response: {:?}",
+                        other
+                    )));
+                }
+            }
+        };
+
+        emit_progress(&on_status, "disclosure", "prove", "Proving…", None, None);
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        let prover_req = DisclosureProverRequest {
+            inputs,
+            network,
+            pool_address,
+            authority_label,
+            authority_identity_payload_hex,
+            purpose,
+            context_nonce,
+        };
+
+        let receipt = match self
+            .prover_request(ProverWorkerRequest::Disclosure(prover_req), 20_000)
+            .await?
+        {
+            ProverWorkerResponse::Disclosure(receipt) => receipt,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        Ok(Some(receipt))
+    }
+
+    #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+    pub async fn verify_selective_disclosure(
+        &self,
+        receipt_json: String,
+        expected_vk_hash: String,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        let proof_verified = match self
+            .prover_request(
+                ProverWorkerRequest::VerifyDisclosureProof(receipt.clone(), expected_vk_hash),
+                20_000,
+            )
+            .await?
+        {
+            ProverWorkerResponse::DisclosureProofVerified(v) => v,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        let pool_contract_id = receipt.context.pool_address.clone();
+        let mut known_root_status = true;
+        for root in &receipt.public_inputs.roots {
+            let is_known = self
+                .fetcher
+                .is_pool_known_root(&pool_contract_id, *root)
+                .await
+                .map_err(|e| JsError::new(&format!("root freshness check failed: {e}")))?;
+            if !is_known {
+                known_root_status = false;
+                break;
+            }
+        }
+
+        let context_verified = disclosure::verify_receipt_context(&receipt)
+            .map_err(|e| JsError::new(&format!("context verification failed: {e}")))?;
+
+        let report = DisclosureVerificationReport {
+            proof_verified,
+            context_verified,
+            known_root_status,
+        };
+
+        Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 }
 
@@ -730,10 +833,10 @@ impl stellar::ContractDataStorage for WebClient {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(
             10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress(
+            bridge.run(StorageWorkerRequest::SaveSyncProgress {
                 metadata,
                 fully_indexed,
-            )),
+            }),
         )
         .await?;
         match resp {
@@ -867,4 +970,8 @@ fn parse_u32_decimal(s: &str) -> Result<u32, String> {
         .parse::<u64>()
         .map_err(|_| format!("invalid decimal u64: {s}"))?;
     u32::try_from(v).map_err(|_| format!("value does not fit into u32: {s}"))
+}
+
+fn parse_hex32(hex: &str, what: &str) -> Result<[u8; 32], JsError> {
+    parse_0x_hex_32(hex.trim()).map_err(|e| JsError::new(&format!("Invalid {what}: {e}")))
 }

@@ -40,6 +40,14 @@ fn bn254_modulus_u256() -> U256 {
     U256::from_big_endian(&BN254_MODULUS_BE)
 }
 
+/// The BN254 scalar field modulus as a [`U256`] constant (little-endian limbs).
+pub const BN254_PRIME: U256 = U256([
+    0x43e1f593f0000001,
+    0x2833e84879b97091,
+    0xb85045b68181585d,
+    0x30644e72e131a029,
+]);
+
 /// Amount that appears inside encrypted notes.
 ///
 /// This is always non-negative and is currently constrained to what fits in the
@@ -359,6 +367,17 @@ impl Field {
     pub fn try_from_le_bytes(bytes: [u8; 32]) -> Result<Self> {
         let v = U256::from_little_endian(&bytes);
         Field::try_from_u256(v)
+    }
+
+    /// Builds a field element from a 32-byte little-endian representation,
+    /// reducing modulo the BN254 prime.
+    ///
+    /// This accepts arbitrary 32-byte values (e.g. SHA-256 outputs) that may
+    /// exceed the field modulus.
+    pub fn from_le_bytes_mod_order(bytes: [u8; 32]) -> Self {
+        let v = U256::from_little_endian(&bytes);
+        let reduced = v.checked_rem(BN254_PRIME).expect("BN254_PRIME is non-zero");
+        Field(reduced)
     }
 
     /// Builds a field element from a `U256`.
@@ -695,6 +714,33 @@ mod tests {
         let le = f.to_le_bytes();
         let parsed = Field::try_from_le_bytes(le)?;
         assert_eq!(parsed, f);
+        Ok(())
+    }
+
+    #[test]
+    fn bn254_prime_matches_modulus() {
+        assert_eq!(BN254_PRIME, Field::modulus());
+    }
+
+    #[test]
+    fn field_from_le_bytes_mod_order_reduces_correctly() -> Result<()> {
+        // A value one greater than the prime should reduce to 1.
+        let p_plus_one = BN254_PRIME + U256::from(1u64);
+        let le = p_plus_one.to_little_endian();
+        let f = Field::from_le_bytes_mod_order(le);
+        assert_eq!(f, Field::ONE);
+
+        // A value equal to the prime should reduce to 0.
+        let le = BN254_PRIME.to_little_endian();
+        let f = Field::from_le_bytes_mod_order(le);
+        assert_eq!(f, Field::ZERO);
+
+        // A value below the prime should remain unchanged.
+        let small = U256::from(42u64);
+        let le = small.to_little_endian();
+        let f = Field::from_le_bytes_mod_order(le);
+        assert_eq!(U256::from(f), small);
+
         Ok(())
     }
 

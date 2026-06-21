@@ -10,8 +10,8 @@ use std::{
     str::FromStr,
 };
 use stellar_xdr::curr::{
-    self as xdr, ContractId, Error as XdrError, LedgerEntryData, LedgerKey, Limits, ReadXdr,
-    WriteXdr,
+    self as xdr, AccountEntry, AccountId, ContractId, Error as XdrError, LedgerEntryData,
+    LedgerKey, LedgerKeyAccount, Limits, PublicKey, ReadXdr, Uint256, WriteXdr,
 };
 
 #[derive(thiserror::Error, Debug)]
@@ -183,12 +183,16 @@ pub struct ContractDataBulkRequest<'a> {
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
-#[derive(Deserialize, Serialize, Debug, Clone)]
+#[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
     pub auth: Vec<String>,
+    /// Legacy RPC field; may be absent on newer RPC servers.
     #[serde(default)]
     pub retval: Option<String>,
+    /// Current RPC field for read-only simulation results.
+    #[serde(default)]
+    pub xdr: Option<String>,
 }
 
 #[derive(Deserialize, Serialize, Debug, Clone)]
@@ -204,6 +208,27 @@ pub struct SimulateTransactionResponse {
     pub transaction_data: Option<String>,
     #[serde(rename = "minResourceFee", default)]
     pub min_resource_fee: Option<String>,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+/// Response from Soroban RPC `sendTransaction`.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct SendTransactionResponse {
+    pub hash: String,
+    pub status: String,
+    #[serde(rename = "errorResultXdr", default)]
+    pub error_result_xdr: Option<String>,
+    #[serde(rename = "latestLedger")]
+    pub latest_ledger: u32,
+}
+
+/// Response from Soroban RPC `getTransaction`.
+#[derive(Deserialize, Serialize, Debug, Clone)]
+pub struct GetTransactionResponse {
+    pub status: String,
+    #[serde(rename = "resultXdr", default)]
+    pub result_xdr: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -577,6 +602,57 @@ impl Client {
         let transaction = tx.to_xdr_base64(Limits::none())?;
         let params = json!({ "transaction": transaction });
         self.rpc_call("simulateTransaction", params).await
+    }
+
+    pub async fn get_account(&self, address: &str) -> Result<AccountEntry, Error> {
+        let pk = stellar_strkey::ed25519::PublicKey::from_str(address)?;
+        let key = LedgerKey::Account(LedgerKeyAccount {
+            account_id: AccountId(PublicKey::PublicKeyTypeEd25519(Uint256(pk.0))),
+        });
+        let response = self.get_ledger_entries(&[key]).await?;
+        let entries = response.entries.unwrap_or_default();
+        if entries.is_empty() {
+            return Err(Error::NotFound("Account", address.to_string()));
+        }
+        match LedgerEntryData::from_xdr_base64(&entries[0].xdr, Limits::none())? {
+            LedgerEntryData::Account(entry) => Ok(entry),
+            _ => Err(Error::UnexpectedScVal(
+                "expected account ledger entry".into(),
+            )),
+        }
+    }
+
+    /// Submits a signed transaction envelope to the network.
+    ///
+    /// TODO(#162): Wire into the web UI via WASM so JS does not depend on
+    /// `@stellar/stellar-sdk` for `sendTransaction` / `getTransaction`.
+    #[allow(dead_code)]
+    pub async fn send_transaction(
+        &self,
+        tx: &xdr::TransactionEnvelope,
+    ) -> Result<SendTransactionResponse, Error> {
+        let transaction = tx.to_xdr_base64(Limits::none())?;
+        let params = json!({ "transaction": transaction });
+        let resp: SendTransactionResponse = self.rpc_call("sendTransaction", params).await?;
+        if resp.status == "ERROR" {
+            return Err(Error::JsonRpc {
+                code: -1,
+                message: format!(
+                    "sendTransaction failed: {}",
+                    resp.error_result_xdr.unwrap_or_default()
+                ),
+            });
+        }
+        Ok(resp)
+    }
+
+    /// Fetches transaction status by hash.
+    ///
+    /// TODO(#162): See [`Self::send_transaction`].
+    #[allow(dead_code)]
+    pub async fn get_transaction(&self, hash: &str) -> Result<GetTransactionResponse, Error> {
+        let params = json!({ "hash": hash });
+        self.rpc_call("getTransaction", params).await
     }
 }
 

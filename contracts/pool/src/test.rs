@@ -113,6 +113,26 @@ fn setup_test_contracts(env: &Env) -> TestSetup {
     }
 }
 
+fn register_pool(
+    env: &Env,
+    setup: &TestSetup,
+    maximum_deposit_amount: U256,
+    levels: u32,
+) -> Address {
+    env.register(
+        PoolContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            setup.verifier.clone(),
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            maximum_deposit_amount,
+            levels,
+        ),
+    )
+}
+
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
 /// uses for test snapshots.
@@ -136,18 +156,7 @@ fn pool_constructor_sets_state() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max.clone(), levels);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
@@ -175,6 +184,7 @@ fn pool_constructor_sets_state() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn merkle_init_only_once() {
     let env = test_env();
     // As MerkleTreeWithHistory is now a module
@@ -184,18 +194,7 @@ fn merkle_init_only_once() {
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
     // First init should succeed
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
 
     env.as_contract(&pool_id, || {
         // Second init should return AlreadyInitialized error
@@ -210,18 +209,7 @@ fn merkle_insert_updates_root_and_index() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x01);
@@ -251,23 +239,103 @@ fn merkle_insert_updates_root_and_index() {
 }
 
 #[test]
+fn pool_is_known_root_returns_true_for_latest_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    let latest_root = pool.get_root();
+
+    assert!(pool.is_known_root(&latest_root));
+}
+
+#[test]
+fn pool_is_known_root_returns_true_for_recent_historical_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            &env,
+            U256::from_u32(&env, 1),
+            U256::from_u32(&env, 2),
+        )
+        .unwrap_or_else(|err| panic!("expected first insertion to succeed: {err:?}"));
+    });
+    let historical_root = pool.get_root();
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            &env,
+            U256::from_u32(&env, 3),
+            U256::from_u32(&env, 4),
+        )
+        .unwrap_or_else(|err| panic!("expected second insertion to succeed: {err:?}"));
+    });
+
+    assert!(pool.is_known_root(&historical_root));
+}
+
+#[test]
+fn pool_is_known_root_returns_false_for_zero_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let zero_root = U256::from_u32(&env, 0);
+
+    assert!(!pool.is_known_root(&zero_root));
+}
+
+#[test]
+fn pool_is_known_root_returns_false_for_evicted_root() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.as_contract(&pool_id, || {
+        MerkleTreeWithHistory::insert_two_leaves(
+            &env,
+            U256::from_u32(&env, 1),
+            U256::from_u32(&env, 2),
+        )
+        .unwrap_or_else(|err| panic!("expected first insertion to succeed: {err:?}"));
+    });
+    let evicted_root = pool.get_root();
+
+    for i in 0..90u32 {
+        let left = i
+            .checked_mul(2)
+            .and_then(|value| value.checked_add(3))
+            .unwrap_or_else(|| panic!("left leaf value overflow"));
+        let right = left
+            .checked_add(1)
+            .unwrap_or_else(|| panic!("right leaf value overflow"));
+        env.as_contract(&pool_id, || {
+            MerkleTreeWithHistory::insert_two_leaves(
+                &env,
+                U256::from_u32(&env, left),
+                U256::from_u32(&env, right),
+            )
+            .unwrap_or_else(|err| {
+                panic!("expected history rotation insertion to succeed: {err:?}")
+            });
+        });
+    }
+
+    assert!(!pool.is_known_root(&evicted_root));
+}
+
+#[test]
 fn merkle_insert_fails_when_full() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 1u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x0A);
@@ -284,23 +352,13 @@ fn merkle_insert_fails_when_full() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn merkle_init_rejects_zero_levels() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
     let levels = 0u32;
 
     env.as_contract(&pool_id, || {
@@ -310,24 +368,14 @@ fn merkle_init_rejects_zero_levels() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_unknown_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -358,23 +406,13 @@ fn transact_rejects_unknown_root() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_ext_hash() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -406,23 +444,13 @@ fn transact_rejects_bad_ext_hash() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_bad_public_amount() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            max.clone(),
-            levels,
-        ),
-    );
+    let pool_id = register_pool(&env, &setup, max, levels);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -455,6 +483,7 @@ fn transact_rejects_bad_public_amount() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_nullifier() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -507,6 +536,7 @@ fn transact_rejects_non_canonical_nullifier() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_output_commitment() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
@@ -558,6 +588,7 @@ fn transact_rejects_non_canonical_output_commitment() {
 }
 
 #[test]
+#[cfg_attr(miri, ignore)]
 fn transact_does_not_reject_boundary_canonical_public_input() {
     let env = test_env();
     let setup = setup_test_contracts(&env);

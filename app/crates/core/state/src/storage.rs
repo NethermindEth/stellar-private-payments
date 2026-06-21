@@ -25,11 +25,25 @@ pub struct DisclaimerState {
     pub accepted: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootnodeConfig {
+    pub enabled: bool,
+    pub url: String,
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountKeys {
     pub account_id: i64,
     pub note_keypair: NoteKeyPair,
     pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
+}
+
+#[derive(Debug, Clone)]
+pub struct StoredUserKeys {
+    pub note_keypair: NoteKeyPair,
+    pub encryption_keypair: EncryptionKeyPair,
+    pub membership_blinding: Field,
 }
 
 #[derive(Debug, Clone)]
@@ -100,25 +114,25 @@ impl Storage {
         for entry in metadata {
             let contract_id = Self::get_or_create_contract_id(&tx, &entry.contract_id)?;
             tx.execute(
-                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_fully_indexed_ledger)
-                 VALUES (?1, ?2, 0)
+                "INSERT INTO indexing_metadata (contract_id, last_cursor, last_indexed_ledger, last_fully_indexed_ledger)
+                 VALUES (?1, ?2, ?3, 0)
                  ON CONFLICT(contract_id) DO NOTHING",
-                params![contract_id, entry.cursor],
+                params![contract_id, entry.cursor, entry.last_indexed_ledger],
             )?;
 
             if fully_indexed {
                 tx.execute(
                     "UPDATE indexing_metadata
-                     SET last_cursor = ?2, last_fully_indexed_ledger = ?3
+                     SET last_cursor = ?2, last_indexed_ledger = ?3, last_fully_indexed_ledger = ?3
                      WHERE contract_id = ?1",
-                    params![contract_id, entry.cursor, entry.last_ledger],
+                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
                 )?;
             } else {
                 tx.execute(
                     "UPDATE indexing_metadata
-                     SET last_cursor = ?2
+                     SET last_cursor = ?2, last_indexed_ledger = ?3
                      WHERE contract_id = ?1",
-                    params![contract_id, entry.cursor],
+                    params![contract_id, entry.cursor, entry.last_indexed_ledger],
                 )?;
             }
         }
@@ -127,9 +141,17 @@ impl Storage {
         Ok(())
     }
 
+    /// Clears stored RPC cursors so the indexer restarts pagination by ledger.
+    pub fn clear_indexing_cursors(&mut self) -> Result<()> {
+        self.conn
+            .execute("UPDATE indexing_metadata SET last_cursor = NULL", [])
+            .context("failed to clear indexing cursors")?;
+        Ok(())
+    }
+
     pub fn get_sync_metadata(&self) -> Result<Vec<types::SyncMetadata>> {
         let mut stmt = self.conn.prepare(
-            "SELECT c.address, m.last_fully_indexed_ledger, m.last_cursor
+            "SELECT c.address, m.last_indexed_ledger, m.last_fully_indexed_ledger, m.last_cursor
              FROM indexing_metadata m
              JOIN contracts c ON c.contract_id = m.contract_id
              ORDER BY m.contract_id",
@@ -137,34 +159,36 @@ impl Storage {
 
         let rows = stmt.query_map([], |row| {
             let contract_id: String = row.get(0)?;
-            let ledger_i64: i64 = row.get(1)?;
-            let last_ledger = col_u32(ledger_i64, 1)?;
-            let cursor: Option<String> = row.get(2)?;
-            Ok(cursor.map(|cursor| types::SyncMetadata {
+            let indexed_ledger_i64: i64 = row.get(1)?;
+            let last_indexed_ledger = col_u32(indexed_ledger_i64, 1)?;
+            let fully_indexed_ledger_i64: i64 = row.get(2)?;
+            let last_fully_indexed_ledger = col_u32(fully_indexed_ledger_i64, 2)?;
+            let cursor: Option<String> = row.get(3)?;
+            Ok(types::SyncMetadata {
                 contract_id,
-                last_ledger,
-                cursor,
-            }))
+                last_indexed_ledger,
+                last_fully_indexed_ledger,
+                cursor: cursor.unwrap_or_default(),
+            })
         })?;
 
         let mut metadata = Vec::new();
         for row in rows {
-            if let Some(entry) = row? {
-                metadata.push(entry);
-            }
+            metadata.push(row?);
         }
 
         Ok(metadata)
     }
 
-    pub fn get_user_keys(&self, address: &str) -> Result<Option<(NoteKeyPair, EncryptionKeyPair)>> {
+    pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
         self.conn
             .query_row(
                 "SELECT
                 encryption_private_key,
                 encryption_public_key,
                 note_private_key,
-                note_public_key
+                note_public_key,
+                membership_blinding
                 FROM keypairs
                 JOIN accounts ON keypairs.account_id = accounts.id
                 WHERE accounts.address = ?1
@@ -176,17 +200,19 @@ impl Storage {
                     let enc_pub: EncryptionPublicKey = row.get(1)?;
                     let note_priv: NotePrivateKey = row.get(2)?;
                     let note_pub: NotePublicKey = row.get(3)?;
+                    let membership_blinding: Field = row.get(4)?;
 
-                    Ok((
-                        NoteKeyPair {
+                    Ok(StoredUserKeys {
+                        note_keypair: NoteKeyPair {
                             private: note_priv,
                             public: note_pub,
                         },
-                        EncryptionKeyPair {
+                        encryption_keypair: EncryptionKeyPair {
                             private: enc_priv,
                             public: enc_pub,
                         },
-                    ))
+                        membership_blinding,
+                    })
                 },
             )
             .optional()
@@ -198,6 +224,7 @@ impl Storage {
         account_address: &str,
         note_keypair: &NoteKeyPair,
         encryption_keypair: &EncryptionKeyPair,
+        membership_blinding: &Field,
     ) -> Result<()> {
         let tx = self
             .conn
@@ -212,13 +239,15 @@ impl Storage {
                 encryption_public_key,
                 note_private_key,
                 note_public_key,
+                membership_blinding,
                 account_id
-            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             params![
                 &encryption_keypair.private,
                 &encryption_keypair.public,
                 &note_keypair.private,
                 &note_keypair.public,
+                membership_blinding,
                 account_id,
             ],
         )
@@ -282,6 +311,27 @@ impl Storage {
         .context("failed to insert disclaimer acceptance")?;
 
         tx.commit().context("failed to commit transaction")?;
+        Ok(())
+    }
+
+    pub fn get_bootnode_config(&self) -> Result<BootnodeConfig> {
+        self.conn
+            .query_row("SELECT enabled, url FROM bootnode_config", [], |row| {
+                Ok(BootnodeConfig {
+                    enabled: row.get::<_, i64>(0)? != 0,
+                    url: row.get(1)?,
+                })
+            })
+            .context("failed to query bootnode config")
+    }
+
+    pub fn set_bootnode_config(&mut self, enabled: bool, url: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "UPDATE bootnode_config SET enabled = ?1, url = ?2",
+                params![i64::from(enabled), url],
+            )
+            .context("failed to update bootnode config")?;
         Ok(())
     }
 
@@ -671,15 +721,15 @@ impl Storage {
             return Ok(AspMembershipSync::SyncRequired(Some(current_ledger)));
         };
 
-        if current_ledger > sync_meta.last_ledger {
-            let gap = current_ledger.saturating_sub(sync_meta.last_ledger);
+        if current_ledger > sync_meta.last_fully_indexed_ledger {
+            let gap = current_ledger.saturating_sub(sync_meta.last_fully_indexed_ledger);
             return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
-        if current_ledger < sync_meta.last_ledger {
+        if current_ledger < sync_meta.last_fully_indexed_ledger {
             anyhow::bail!(
                 "indexer metadata is ahead of chain tip: local={}, chain={}",
-                sync_meta.last_ledger,
+                sync_meta.last_fully_indexed_ledger,
                 current_ledger
             );
         }
@@ -713,7 +763,8 @@ impl Storage {
             return Ok(AspMembershipSync::RegisterAtASP);
         };
 
-        // current_ledger == last_ledger: require root match and leaf existence.
+        // current_ledger == last_fully_indexed_ledger: require root match and leaf
+        // existence.
         if *current_root != last_root {
             // If the root at the chain tip doesn't match the last stored root
             // but our last stored leaf is from an earlier ledger, we may have
@@ -841,7 +892,8 @@ impl Storage {
                 k.encryption_private_key,
                 k.encryption_public_key,
                 k.note_private_key,
-                k.note_public_key
+                k.note_public_key,
+                k.membership_blinding
              FROM accounts a
              JOIN (
                 SELECT account_id, MAX(id) AS max_id
@@ -859,6 +911,7 @@ impl Storage {
             let enc_pub: EncryptionPublicKey = row.get(2)?;
             let note_priv: NotePrivateKey = row.get(3)?;
             let note_pub: NotePublicKey = row.get(4)?;
+            let membership_blinding: Field = row.get(5)?;
 
             Ok(AccountKeys {
                 account_id,
@@ -870,6 +923,7 @@ impl Storage {
                     private: enc_priv,
                     public: enc_pub,
                 },
+                membership_blinding,
             })
         })?;
 
@@ -1261,9 +1315,16 @@ mod tests {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
         // Create an account with keypairs.
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let account_id: i64 = storage.conn.query_row(
             "SELECT id FROM accounts WHERE address = ?1",
@@ -1375,11 +1436,9 @@ mod tests {
     }
 
     #[test]
-    fn sync_metadata_advances_only_on_empty_page() -> Result<()> {
+    fn sync_metadata_tracks_progress_and_caught_up_tip() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
-        // Non-empty batch should update the cursor but not advance the "fully indexed"
-        // ledger.
         storage.save_events_batch(&ContractsEventData {
             cursor: "c1".to_string(),
             latest_ledger: 10,
@@ -1389,7 +1448,8 @@ mod tests {
             &[types::SyncMetadata {
                 contract_id: "CPOOL".to_string(),
                 cursor: "c1".to_string(),
-                last_ledger: 10,
+                last_indexed_ledger: 10,
+                last_fully_indexed_ledger: 0,
             }],
             false,
         )?;
@@ -1400,9 +1460,9 @@ mod tests {
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c1");
-        assert_eq!(meta.last_ledger, 0);
+        assert_eq!(meta.last_indexed_ledger, 10);
+        assert_eq!(meta.last_fully_indexed_ledger, 0);
 
-        // Empty batch is the "caught up" proof and advances last_fully_indexed_ledger.
         storage.save_events_batch(&ContractsEventData {
             cursor: "c2".to_string(),
             latest_ledger: 123,
@@ -1412,7 +1472,8 @@ mod tests {
             &[types::SyncMetadata {
                 contract_id: "CPOOL".to_string(),
                 cursor: "c2".to_string(),
-                last_ledger: 123,
+                last_indexed_ledger: 123,
+                last_fully_indexed_ledger: 0,
             }],
             true,
         )?;
@@ -1423,7 +1484,18 @@ mod tests {
             .find(|meta| meta.contract_id == "CPOOL")
             .expect("expected sync metadata");
         assert_eq!(meta.cursor, "c2");
-        assert_eq!(meta.last_ledger, 123);
+        assert_eq!(meta.last_indexed_ledger, 123);
+        assert_eq!(meta.last_fully_indexed_ledger, 123);
+
+        storage.clear_indexing_cursors()?;
+        let meta = storage
+            .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == "CPOOL")
+            .expect("expected sync metadata");
+        assert!(meta.cursor.is_empty());
+        assert_eq!(meta.last_indexed_ledger, 123);
+        assert_eq!(meta.last_fully_indexed_ledger, 123);
 
         Ok(())
     }
@@ -1432,27 +1504,39 @@ mod tests {
     fn get_user_keys_returns_latest_keypair() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
+        let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
+        let signature_2 = KeyDerivationSignature(vec![3u8; 64]);
         let (note_keypair_1, enc_keypair_1) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature_1.clone())?;
         let (note_keypair_2, enc_keypair_2) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![3u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature_2.clone())?;
+        let membership_blinding_1 =
+            encryption::derive_membership_blinding(&signature_1, "testnet")?;
+        let membership_blinding_2 =
+            encryption::derive_membership_blinding(&signature_2, "testnet")?;
 
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_1,
             &enc_keypair_1,
+            &membership_blinding_1,
         )?;
         storage.save_encryption_and_note_keypairs(
             "GTESTACCOUNT",
             &note_keypair_2,
             &enc_keypair_2,
+            &membership_blinding_2,
         )?;
 
-        let (got_note, got_enc) = storage
+        let keys = storage
             .get_user_keys("GTESTACCOUNT")?
             .expect("expected keypairs to exist");
-        assert_eq!(got_note.public.0, note_keypair_2.public.0);
-        assert_eq!(got_enc.public.0, enc_keypair_2.public.0);
+        assert_eq!(keys.note_keypair.public.0, note_keypair_2.public.0);
+        assert_eq!(keys.encryption_keypair.public.0, enc_keypair_2.public.0);
+        assert_eq!(
+            keys.membership_blinding.to_le_bytes(),
+            membership_blinding_2.to_le_bytes()
+        );
 
         Ok(())
     }
@@ -1461,11 +1545,23 @@ mod tests {
     fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
         let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
 
+        let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
-            encryption::derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![1u8; 64]))?;
+            encryption::derive_encryption_and_note_keypairs(signature.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&signature, "testnet")?;
 
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
-        storage.save_encryption_and_note_keypairs("GTESTACCOUNT", &note_keypair, &enc_keypair)?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
 
         let count: i64 = storage.conn.query_row(
             "SELECT COUNT(*) FROM accounts WHERE address = ?1",
@@ -1537,7 +1633,8 @@ mod tests {
             &[types::SyncMetadata {
                 contract_id: "CASP".to_string(),
                 cursor: "cur-tip".to_string(),
-                last_ledger: current_ledger,
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
             }],
             true,
         )?;
@@ -1599,7 +1696,8 @@ mod tests {
             &[types::SyncMetadata {
                 contract_id: "CASP".to_string(),
                 cursor: "cur-tip".to_string(),
-                last_ledger: current_ledger,
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
             }],
             true,
         )?;
@@ -1654,7 +1752,8 @@ mod tests {
             &[types::SyncMetadata {
                 contract_id: "CASP".to_string(),
                 cursor: "cur-tip".to_string(),
-                last_ledger: current_ledger,
+                last_indexed_ledger: current_ledger,
+                last_fully_indexed_ledger: 0,
             }],
             true,
         )?;
@@ -1662,6 +1761,332 @@ mod tests {
         let status =
             storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let amount_field_le = Field::from(amount).to_le_bytes();
+        let commitment_le = crypto::compute_commitment(
+            &amount_field_le,
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 3,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        assert!(storage.scan_commitments_for_user_notes(100, &mut derive)?);
+
+        let result =
+            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        assert!(result.is_some());
+        let (got_amount, got_blinding, got_leaf_index) = result.expect("just checked is_some");
+        assert_eq!(got_amount, amount);
+        assert_eq!(got_blinding, blinding);
+        assert_eq!(got_leaf_index, 3);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let amount_field_le = Field::from(amount).to_le_bytes();
+        let commitment_le = crypto::compute_commitment(
+            &amount_field_le,
+            note_keypair.public.as_ref(),
+            &blinding.to_le_bytes(),
+        )?;
+        let commitment_le: [u8; 32] = commitment_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("commitment: expected 32 bytes, got {}", v.len())
+        })?;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 3,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+
+        // Spend the note via nullifier.
+        let leaf_index: u32 = 3;
+        let mut path_indices_le = [0u8; 32];
+        path_indices_le[..8].copy_from_slice(&(u64::from(leaf_index)).to_le_bytes());
+        let signature = crypto::compute_signature(
+            &note_keypair.private.0,
+            &commitment.to_le_bytes(),
+            &path_indices_le,
+        )?;
+        let nullifier_le =
+            crypto::compute_nullifier(&commitment.to_le_bytes(), &path_indices_le, &signature)?;
+        let nullifier_le: [u8; 32] = nullifier_le.try_into().map_err(|v: Vec<u8>| {
+            anyhow::anyhow!("nullifier: expected 32 bytes, got {}", v.len())
+        })?;
+        let nullifier = Field::try_from_le_bytes(nullifier_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-null")],
+            cursor: "cur2".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_nullifier_events_batch(&vec![NewNullifierEvent {
+            id: "evt-null".to_string(),
+            nullifier,
+        }])?;
+        storage.reconcile_nullifiers(100)?;
+
+        let result =
+            storage.get_unspent_user_note_by_commitment("CPOOL", "GTESTACCOUNT", &commitment)?;
+        assert!(result.is_none(), "spent note should not be returned");
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let sig = KeyDerivationSignature(vec![1u8; 64]);
+        let (note_keypair, enc_keypair) =
+            encryption::derive_encryption_and_note_keypairs(sig.clone())?;
+        let membership_blinding = encryption::derive_membership_blinding(&sig, "testnet")?;
+        storage.save_encryption_and_note_keypairs(
+            "GTESTACCOUNT",
+            &note_keypair,
+            &enc_keypair,
+            &membership_blinding,
+        )?;
+
+        let amount = NoteAmount::from(5);
+        let mut blinding_le = [0u8; 32];
+        blinding_le[0] = 7;
+        let blinding = Field::try_from_le_bytes(blinding_le)?;
+
+        let encrypted_output =
+            encryption::encrypt_output_note(&enc_keypair.public, amount, &blinding)?;
+
+        let mut commitment_le = [0u8; 32];
+        commitment_le[0] = 1;
+        let commitment = Field::try_from_le_bytes(commitment_le)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-commit")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![NewCommitmentEvent {
+            id: "evt-commit".to_string(),
+            commitment,
+            index: 0,
+            encrypted_output: encrypted_output.clone(),
+        }])?;
+
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> Result<Option<DerivedUserNoteRow>> {
+            let opt = prover::notes::try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        storage.scan_commitments_for_user_notes(100, &mut derive)?;
+
+        let wrong_commitment = Field::try_from_le_bytes([
+            2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+            0, 0, 0,
+        ])?;
+        let result = storage.get_unspent_user_note_by_commitment(
+            "CPOOL",
+            "GTESTACCOUNT",
+            &wrong_commitment,
+        )?;
+        assert!(result.is_none(), "wrong commitment should not match");
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_pool_commitment_leaves_ordered_returns_ordered_leaves() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
+        let leaf1 = Field::try_from_le_bytes([1u8; 32])?;
+        let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![
+                dummy_event("evt-0"),
+                dummy_event("evt-1"),
+                dummy_event("evt-2"),
+            ],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: "evt-0".to_string(),
+                commitment: leaf0,
+                index: 0,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-1".to_string(),
+                commitment: leaf1,
+                index: 1,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-2".to_string(),
+                commitment: leaf2,
+                index: 2,
+                encrypted_output: vec![],
+            },
+        ])?;
+
+        let leaves = storage.get_pool_commitment_leaves_ordered("CPOOL")?;
+        assert_eq!(leaves.len(), 3);
+        assert_eq!(leaves[0], leaf0);
+        assert_eq!(leaves[1], leaf1);
+        assert_eq!(leaves[2], leaf2);
+
+        Ok(())
+    }
+
+    #[test]
+    fn get_pool_commitment_leaves_ordered_detects_gaps() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
+        let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            events: vec![dummy_event("evt-0"), dummy_event("evt-2")],
+            cursor: "cur".to_string(),
+            latest_ledger: 1,
+        })?;
+        storage.save_commitment_events_batch(&vec![
+            NewCommitmentEvent {
+                id: "evt-0".to_string(),
+                commitment: leaf0,
+                index: 0,
+                encrypted_output: vec![],
+            },
+            NewCommitmentEvent {
+                id: "evt-2".to_string(),
+                commitment: leaf2,
+                index: 2,
+                encrypted_output: vec![],
+            },
+        ])?;
+
+        let err = storage
+            .get_pool_commitment_leaves_ordered("CPOOL")
+            .expect_err("gap should error");
+        assert!(err.to_string().contains("gap/out-of-order"));
+
         Ok(())
     }
 }

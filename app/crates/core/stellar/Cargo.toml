@@ -9,10 +9,10 @@ publish.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-futures = { workspace = true }
+futures = { workspace = true, features = ["executor"] }
 http = "1.4.0"
 log = { workspace = true }
-reqwest = { version = "0.13", default-features = false, features = ["json"] }
+reqwest = { workspace = true }
 serde = { workspace = true }
 serde-aux = "4.7.0"
 serde_json = { workspace = true }
@@ -24,6 +24,11 @@ types = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+contract-types = { workspace = true }
+pool = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = { workspace = true }

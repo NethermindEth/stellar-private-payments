@@ -51,28 +51,6 @@ fn test_insert_leaf() {
 }
 
 #[test]
-fn test_update_leaf() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, (admin,));
-    env.mock_all_auths();
-    let client = ASPNonMembershipClient::new(&env, &contract_id);
-    // Insert and update leaf
-    let key = U256::from_u32(&env, 1u32);
-    let value1 = U256::from_u32(&env, 42u32);
-    let value2 = U256::from_u32(&env, 100u32);
-    // Insert
-    client.insert_leaf(&key, &value1);
-    let root1 = client.get_root();
-    // Update leaf with new value
-    client.update_leaf(&key, &value2);
-    let root2 = client.get_root();
-
-    // Root should have changed
-    assert_ne!(root1, root2);
-}
-
-#[test]
 fn test_insert_multiple_keys() {
     let env = test_env();
     let admin = Address::generate(&env);
@@ -118,26 +96,6 @@ fn test_duplicate_insert_fails() {
     client.insert_leaf(&key, &second_value);
 }
 
-/// This test is skipped under Miri because the panic formatting path triggers
-/// undefined behavior in the `ethnum` crate's unsafe formatting code.
-/// See: https://github.com/nlordell/ethnum-rs/issues/34
-#[test]
-#[cfg_attr(miri, ignore)]
-#[should_panic]
-fn test_update_nonexistent_key_fails() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, (admin,));
-    let client = ASPNonMembershipClient::new(&env, &contract_id);
-    // Mock auth for the contract
-    env.mock_all_auths();
-
-    let key = U256::from_u32(&env, 1u32);
-    let value = U256::from_u32(&env, 42u32);
-
-    client.update_leaf(&key, &value);
-}
-
 /// Test that matches the circuits test: insert key=1, value=42
 #[test]
 fn test_root_consistency_with_circuits_insert_1_42() {
@@ -163,43 +121,6 @@ fn test_root_consistency_with_circuits_insert_1_42() {
 
     let expected_root = U256::from_be_bytes(&env, &Bytes::from_array(&env, &expected_root_bytes));
     assert_eq!(root, expected_root, "Root should match the circuits test");
-}
-
-/// Test that matches the circuits test: insert key=1, value=42, then update to
-/// value=100
-#[test]
-fn test_root_consistency_with_circuits_update_1_100() {
-    let env = test_env();
-    let admin = Address::generate(&env);
-    let contract_id = env.register(ASPNonMembership, (admin,));
-    let client = ASPNonMembershipClient::new(&env, &contract_id);
-    env.mock_all_auths();
-
-    let key = U256::from_u32(&env, 1u32);
-    let value1 = U256::from_u32(&env, 42u32);
-    let value2 = U256::from_u32(&env, 100u32);
-
-    // Insert
-    client.insert_leaf(&key, &value1);
-
-    // Update
-    client.update_leaf(&key, &value2);
-
-    let root = client.get_root();
-
-    // Expected root from circuits test:
-    // 12569474685065514766800302626776627658362290519786081498087070427717152263146
-    // Hex: 0x1bca121020a7041a503dabbb08f8ed11fd45bf8c2c0851e9db040ea7ae6fcbea
-    let expected_root_bytes = [
-        27, 202, 18, 16, 32, 167, 4, 26, 80, 61, 171, 187, 8, 248, 237, 17, 253, 69, 191, 140, 44,
-        8, 81, 233, 219, 4, 14, 167, 174, 111, 203, 234,
-    ];
-
-    let expected_root = U256::from_be_bytes(&env, &Bytes::from_array(&env, &expected_root_bytes));
-    assert_eq!(
-        root, expected_root,
-        "Root should match the circuits test after update"
-    );
 }
 
 /// Test that matches the circuits test: insert key=1, value=42, then insert

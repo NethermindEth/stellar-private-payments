@@ -1,8 +1,9 @@
-//! Pool `transact` proving and planned multi-step execution (`executeTransfer`
-//! / `executeWithdraw`).
+//! Pool transaction proving and execution (`executeDeposit`, `executeTransact`,
+//! `executeTransfer`, `executeWithdraw`).
 
 use super::{
-    WebClient, emit_progress, parse_field_bigint_numeric, parse_note_amount_decimal,
+    WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
+    parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
     parse_u32_decimal,
 };
 use crate::protocol::{
@@ -10,12 +11,28 @@ use crate::protocol::{
     StorageWorkerResponse, TransactRequest,
 };
 use gloo_timers::future::TimeoutFuture;
-use js_sys::{BigInt, Function, Promise};
+use js_sys::{Array, BigInt, Function, Promise};
+use prover::flows::N_OUTPUTS;
 use serde::Serialize;
 use tx_planner::{SpendSession, SpendSessionError, SpendTarget, SpendableNote, Transact, plan};
-use types::{AspMembershipSync, ContractsStateData, Field, NotePublicKey, SMT_DEPTH};
+use types::{
+    AspMembershipSync, ContractsStateData, EncryptionPublicKey, ExtAmount, Field, NoteAmount,
+    NotePublicKey, SMT_DEPTH,
+};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
+
+struct ExecuteCtx {
+    pool_contract_id: String,
+    user_address: String,
+    submit_fn: Function,
+    on_status: Option<Function>,
+}
+
+struct ExecutedTransact {
+    hash: String,
+    output_commitments: [Field; 2],
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -65,7 +82,6 @@ impl WebClient {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-        membership_blinding: Field,
         step: &Transact,
         flow: &'static str,
         on_status: &Option<Function>,
@@ -151,7 +167,6 @@ impl WebClient {
 
             let req = TransactRequest {
                 user_address: user_address.to_string(),
-                membership_blinding,
                 pool_root,
                 pool_next_index,
                 pool_address: pool.contract_id,
@@ -241,7 +256,100 @@ impl WebClient {
             }
         };
 
+        let prepared = self
+            .finalize_prepared_prover_tx(pool_contract_id, user_address, prepared, on_status, flow)
+            .await?;
         Ok(Some(prepared))
+    }
+
+    async fn execute_transact(
+        &self,
+        ctx: ExecuteCtx,
+        step: Transact,
+        flow: &'static str,
+    ) -> Result<Option<Vec<String>>, JsError> {
+        let Some(executed) = self.prove_and_submit(&ctx, &step, flow, None, None).await? else {
+            return Ok(None);
+        };
+        Ok(Some(vec![executed.hash]))
+    }
+
+    async fn execute_plan(
+        &self,
+        ctx: ExecuteCtx,
+        amount: NoteAmount,
+        target: SpendTarget,
+        flow: &'static str,
+    ) -> Result<Option<Vec<String>>, JsError> {
+        let wallet = self
+            .load_spendable_wallet(&ctx.pool_contract_id, &ctx.user_address)
+            .await?;
+        let mut session = SpendSession::setup(wallet, amount, ctx.pool_contract_id.clone(), target)
+            .map_err(spend_session_err)?;
+
+        let total_u32 = u32::try_from(session.len())
+            .map_err(|_| JsError::new("plan produces too many steps for u32"))?;
+
+        let mut hashes = Vec::new();
+        while let Some(step) = session.step().map_err(spend_session_err)? {
+            let current = u32::try_from(session.step_index().saturating_add(1))
+                .map_err(|_| JsError::new("step index exceeds u32"))?;
+
+            let Some(executed) = self
+                .prove_and_submit(&ctx, &step, flow, Some(current), Some(total_u32))
+                .await?
+            else {
+                return Ok(None);
+            };
+            session
+                .complete_step(&executed.output_commitments)
+                .map_err(spend_session_err)?;
+            hashes.push(executed.hash);
+        }
+
+        Ok(Some(hashes))
+    }
+
+    async fn prove_and_submit(
+        &self,
+        ctx: &ExecuteCtx,
+        step: &Transact,
+        flow: &'static str,
+        step_current: Option<u32>,
+        step_total: Option<u32>,
+    ) -> Result<Option<ExecutedTransact>, JsError> {
+        let prepared = self
+            .prove_transact_inner(
+                &ctx.pool_contract_id,
+                &ctx.user_address,
+                step,
+                flow,
+                &ctx.on_status,
+                step_current,
+                step_total,
+            )
+            .await?;
+        let Some(prepared) = prepared else {
+            return Ok(None);
+        };
+
+        let message = match (step_current, step_total) {
+            (Some(current), Some(total)) => format!("Submitting step {current}/{total}…"),
+            _ => "Submitting…".to_string(),
+        };
+        emit_progress(
+            &ctx.on_status,
+            flow,
+            "submit",
+            message,
+            step_current,
+            step_total,
+        );
+        let hash = Self::call_js_submit(&ctx.submit_fn, &prepared).await?;
+        Ok(Some(ExecutedTransact {
+            hash,
+            output_commitments: prepared.prepared.output_commitments,
+        }))
     }
 
     async fn call_js_submit(
@@ -267,7 +375,115 @@ impl WebClient {
         })
     }
 
-    pub(super) async fn plan_spend_inner(
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn execute_transact_inner(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        ext_recipient: String,
+        ext_amount: BigInt,
+        input_note_ids: Array,
+        output_amounts: Array,
+        out_recipient_note_keys_hex: Array,
+        out_recipient_enc_keys_hex: Array,
+        submit_fn: Function,
+        on_status: Option<Function>,
+        flow: &'static str,
+    ) -> Result<Option<Vec<String>>, JsError> {
+        let expected_outputs =
+            u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
+        if out_recipient_note_keys_hex.length() != expected_outputs {
+            return Err(JsError::new(&format!(
+                "out_recipient_note_keys_hex must have length {N_OUTPUTS}"
+            )));
+        }
+        if out_recipient_enc_keys_hex.length() != expected_outputs {
+            return Err(JsError::new(&format!(
+                "out_recipient_enc_keys_hex must have length {N_OUTPUTS}"
+            )));
+        }
+
+        let ext_amount = parse_ext_amount_decimal(&ext_amount)?;
+        let input_commitments = parse_input_note_ids(
+            &input_note_ids,
+            0,
+            2,
+            "input_note_ids must have length 0..=2",
+        )?;
+        let out_amounts = parse_output_amounts(&output_amounts)?;
+        let (out_note_pks, out_enc_pks) =
+            parse_output_recipient_keys(&out_recipient_note_keys_hex, &out_recipient_enc_keys_hex)?;
+
+        let step = Transact::new(
+            input_commitments,
+            out_amounts,
+            ext_amount,
+            ext_recipient,
+            out_note_pks,
+            out_enc_pks,
+        );
+
+        let ctx = ExecuteCtx {
+            pool_contract_id,
+            user_address,
+            submit_fn,
+            on_status,
+        };
+        self.execute_transact(ctx, step, flow).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) async fn execute_deposit_inner(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        amount: BigInt,
+        output_amounts: Array,
+        submit_fn: Function,
+        on_status: Option<Function>,
+    ) -> Result<Option<Vec<String>>, JsError> {
+        let ext_amount = parse_ext_amount_decimal(&amount)?;
+        if ext_amount <= ExtAmount::ZERO {
+            return Err(JsError::new("amount must be > 0 for deposit"));
+        }
+        let out_amounts = parse_output_amounts(&output_amounts)?;
+
+        let keys = match self
+            .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
+            .await?
+        {
+            StorageWorkerResponse::UserKeys(keys) => {
+                keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
+            }
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected storage response loading user keys: {:?}",
+                    other
+                )));
+            }
+        };
+        let note_pk: NotePublicKey = keys.note_keypair.public;
+        let enc_pk: EncryptionPublicKey = keys.encryption_keypair.public;
+
+        let step = Transact::new(
+            Vec::new(),
+            out_amounts,
+            ext_amount,
+            pool_contract_id.clone(),
+            [Some(note_pk.clone()), Some(note_pk)],
+            [Some(enc_pk.clone()), Some(enc_pk)],
+        );
+
+        let ctx = ExecuteCtx {
+            pool_contract_id,
+            user_address,
+            submit_fn,
+            on_status,
+        };
+        self.execute_transact(ctx, step, "deposit").await
+    }
+
+    pub(super) async fn plan_inner(
         &self,
         pool_contract_id: String,
         user_address: String,
@@ -292,65 +508,23 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        membership_blinding: BigInt,
         amount: BigInt,
         target: SpendTarget,
         flow: &'static str,
         submit_fn: Function,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
-        let membership_blinding = parse_field_bigint_numeric(&membership_blinding)?;
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        let wallet = self
-            .load_spendable_wallet(&pool_contract_id, &user_address)
-            .await?;
-        let mut session = SpendSession::setup(wallet, amount, pool_contract_id.clone(), target)
-            .map_err(spend_session_err)?;
-
-        let total_u32 = u32::try_from(session.len())
-            .map_err(|_| JsError::new("plan produces too many steps for u32"))?;
-
-        let mut hashes = Vec::new();
-        while let Some(step) = session.step().map_err(spend_session_err)? {
-            let current = u32::try_from(session.step_index().saturating_add(1))
-                .map_err(|_| JsError::new("step index exceeds u32"))?;
-
-            let prepared = self
-                .prove_transact_inner(
-                    &pool_contract_id,
-                    &user_address,
-                    membership_blinding,
-                    &step,
-                    flow,
-                    &on_status,
-                    Some(current),
-                    Some(total_u32),
-                )
-                .await?;
-            let prepared = match prepared {
-                None => return Ok(None),
-                Some(p) => p,
-            };
-
-            emit_progress(
-                &on_status,
-                flow,
-                "submit",
-                format!("Submitting step {current}/{total_u32}…"),
-                Some(current),
-                Some(total_u32),
-            );
-            let hash = Self::call_js_submit(&submit_fn, &prepared).await?;
-            session
-                .complete_step(&prepared.prepared.output_commitments)
-                .map_err(spend_session_err)?;
-            hashes.push(hash);
-        }
-
-        Ok(Some(hashes))
+        let ctx = ExecuteCtx {
+            pool_contract_id,
+            user_address,
+            submit_fn,
+            on_status,
+        };
+        self.execute_plan(ctx, amount, target, flow).await
     }
 }

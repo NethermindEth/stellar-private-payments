@@ -1,9 +1,11 @@
 mod amounts;
 mod chain_data;
+mod disclosure;
 mod ext_data;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
+pub use disclosure::*;
 pub use ext_data::*;
 
 use serde::{Deserialize, Serialize};
@@ -184,6 +186,28 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     hex::decode_to_slice(s, &mut out)
         .map_err(|e| anyhow!("cannot decode hex `{s}` to 32 bytes: {e}"))?;
     Ok(out)
+}
+
+impl ContractConfig {
+    pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
+        self.pools.iter().filter(|p| p.enabled)
+    }
+
+    /// Contract IDs for enabled pools and ASP membership.
+    pub fn pools_and_membership_contract_ids(&self) -> Vec<String> {
+        self.enabled_pools()
+            .map(|p| p.pool_contract_id.clone())
+            .chain(std::iter::once(self.asp_membership.clone()))
+            .collect()
+    }
+
+    /// Earliest deployment ledger among enabled pools.
+    pub fn min_deployment_ledger(&self) -> Result<u32> {
+        self.enabled_pools()
+            .map(|p| p.deployment_ledger)
+            .min()
+            .ok_or_else(|| anyhow!("at least one pool should be enabled"))
+    }
 }
 
 impl EncryptionPublicKey {

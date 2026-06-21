@@ -195,6 +195,38 @@ fn proof_to_uncompressed_bytes(proof: &Proof<Bn254>) -> Vec<u8> {
     out
 }
 
+fn verify_proof_with_processed_vk(
+    pvk: &PreparedVerifyingKey<Bn254>,
+    expected_inputs: usize,
+    proof: &Proof<Bn254>,
+    public_inputs_bytes: &[u8],
+) -> Result<bool> {
+    if !public_inputs_bytes.len().is_multiple_of(FIELD_SIZE) {
+        return Err(anyhow!("Invalid public inputs size"));
+    }
+
+    let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
+    if num_inputs != expected_inputs {
+        return Err(anyhow!(
+            "Public input count mismatch: got {}, expected {}",
+            num_inputs,
+            expected_inputs
+        ));
+    }
+
+    let mut public_inputs = Vec::with_capacity(num_inputs);
+    for chunk in public_inputs_bytes.chunks_exact(FIELD_SIZE) {
+        public_inputs.push(bytes_to_fr(chunk)?);
+    }
+
+    <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
+        pvk,
+        &public_inputs,
+        proof,
+    )
+    .map_err(|e| anyhow!("Verification error: {}", e))
+}
+
 /// A circuit that replays R1CS constraints with pre-computed witness
 ///
 /// This is used to create proofs from:
@@ -546,16 +578,8 @@ impl Prover {
 
     /// Verify a proof (for testing purposes)
     pub fn verify(&self, proof_bytes: &[u8], public_inputs_bytes: &[u8]) -> Result<bool> {
-        // Deserialize proof
         let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
             .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
-
-        // Parse public inputs
-        if !public_inputs_bytes.len().is_multiple_of(FIELD_SIZE) {
-            return Err(anyhow!("Invalid public inputs size"));
-        }
-
-        let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
         let expected_inputs = self
             .pk
             .vk
@@ -563,30 +587,7 @@ impl Prover {
             .len()
             .checked_sub(1)
             .ok_or_else(|| anyhow!("Invalid verifying key"))?;
-
-        if num_inputs != expected_inputs {
-            return Err(anyhow!(
-                "Public input count mismatch: got {}, expected {}",
-                num_inputs,
-                expected_inputs
-            ));
-        }
-
-        let mut public_inputs = Vec::with_capacity(num_inputs);
-        for chunk in public_inputs_bytes.chunks_exact(FIELD_SIZE) {
-            public_inputs.push(bytes_to_fr(chunk)?);
-        }
-
-        // Verify
-        let result =
-            <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-                &self.pvk,
-                &public_inputs,
-                &proof,
-            )
-            .map_err(|e| anyhow!("Verification error: {}", e))?;
-
-        Ok(result)
+        verify_proof_with_processed_vk(&self.pvk, expected_inputs, &proof, public_inputs_bytes)
     }
 }
 
@@ -610,33 +611,14 @@ pub fn verify_proof(
     let vk = VerifyingKey::<Bn254>::deserialize_compressed(vk_bytes)
         .map_err(|e| anyhow!("Failed to load VK: {}", e))?;
 
-    // Process VK
     let pvk = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&vk)
         .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
-
-    // Deserialize proof
     let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
         .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
-
-    // Parse public inputs
-    if !public_inputs_bytes.len().is_multiple_of(FIELD_SIZE) {
-        return Err(anyhow!("Invalid public inputs size"));
-    }
-
-    let num_inputs = public_inputs_bytes.len() / FIELD_SIZE;
-    let mut public_inputs = Vec::with_capacity(num_inputs);
-    for chunk in public_inputs_bytes.chunks_exact(FIELD_SIZE) {
-        public_inputs.push(bytes_to_fr(chunk)?);
-    }
-
-    // Verify
-    let result =
-        <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::verify_with_processed_vk(
-            &pvk,
-            &public_inputs,
-            &proof,
-        )
-        .map_err(|e| anyhow!("Verification error: {}", e))?;
-
-    Ok(result)
+    let expected_inputs = vk
+        .gamma_abc_g1
+        .len()
+        .checked_sub(1)
+        .ok_or_else(|| anyhow!("Invalid verifying key"))?;
+    verify_proof_with_processed_vk(&pvk, expected_inputs, &proof, public_inputs_bytes)
 }

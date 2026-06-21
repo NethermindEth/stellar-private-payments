@@ -804,6 +804,69 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
+/// Parameters for a selective disclosure (1 note).
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectiveDisclosure1Params {
+    pub root: Field,
+    pub note_commitment: Field,
+    pub note_amount: NoteAmount,
+    pub note_private_key: NotePrivateKey,
+    pub note_blinding: Field,
+    pub merkle_path_indices: Field,
+    pub merkle_path_elements: Vec<Field>,
+    pub ext_context_hash: Field,
+}
+
+/// Artifacts generated for selective disclosure.
+#[derive(Clone, Debug)]
+pub struct DisclosureArtifacts {
+    pub circuit_inputs: CircuitInputs,
+    pub ext_context_hash: Field,
+}
+
+/// Generates circuit inputs for selectiveDisclosure_1.
+pub fn selective_disclosure_1(params: SelectiveDisclosure1Params) -> Result<DisclosureArtifacts> {
+    let mut circuit = CircuitInputs::new();
+
+    // Public inputs
+    circuit.set_array("roots", vec![field_to_circuit_hex(&params.root)?]);
+    circuit.set_array(
+        "noteCommitments",
+        vec![field_to_circuit_hex(&params.note_commitment)?],
+    );
+    circuit.set_single(
+        "extContextHash",
+        &field_to_circuit_hex(&params.ext_context_hash)?,
+    );
+
+    // Private inputs
+    let amount_field = note_amount_to_field(&params.note_amount);
+    circuit.set_array("inAmount", vec![field_to_circuit_hex(&amount_field)?]);
+
+    let priv_key_hex = field_bytes_to_hex(&params.note_private_key.0)?;
+    circuit.set_array("inPrivateKey", vec![priv_key_hex]);
+
+    let blinding_hex = field_bytes_to_hex(&params.note_blinding.to_le_bytes())?;
+    circuit.set_array("inBlinding", vec![blinding_hex]);
+
+    circuit.set_array(
+        "inPathIndices",
+        vec![field_to_circuit_hex(&params.merkle_path_indices)?],
+    );
+
+    let mut path_elements_hex = Vec::with_capacity(params.merkle_path_elements.len());
+    for pe in &params.merkle_path_elements {
+        path_elements_hex.push(field_to_circuit_hex(pe)?);
+    }
+    circuit.set_array("inPathElements", path_elements_hex);
+
+    Ok(DisclosureArtifacts {
+        circuit_inputs: circuit,
+        ext_context_hash: params.ext_context_hash,
+    })
+}
+
 fn sum_note_amounts_inputs(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
     let mut sum = NoteAmount::ZERO;
     for n in inputs {
@@ -827,6 +890,7 @@ fn sum_note_amounts_outputs(outputs: &[TransactOutput]) -> Result<NoteAmount> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::InputValue;
 
     fn zero_membership(tree_depth: usize) -> AspMembershipProof {
         AspMembershipProof {
@@ -1033,5 +1097,132 @@ mod tests {
         );
 
         assert!(res.is_ok());
+    }
+
+    #[test]
+    fn selective_disclosure_1_witness_shape_is_correct() {
+        let tree_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+
+        let params = SelectiveDisclosure1Params {
+            root: Field::try_from_le_bytes([1u8; 32]).expect("field"),
+            note_commitment: Field::try_from_le_bytes([2u8; 32]).expect("field"),
+            note_amount: NoteAmount::from(42),
+            note_private_key: NotePrivateKey([3u8; 32]),
+            note_blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_indices: Field::try_from_le_bytes([5u8; 32]).expect("field"),
+            merkle_path_elements: vec![
+                Field::try_from_le_bytes([6u8; 32]).expect("field");
+                tree_depth_usize
+            ],
+            ext_context_hash: Field::try_from_le_bytes([7u8; 32]).expect("field"),
+        };
+
+        let artifacts = selective_disclosure_1(params.clone()).expect("builds witness");
+
+        // Public inputs
+        assert!(artifacts.circuit_inputs.signals.contains_key("roots"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("noteCommitments")
+        );
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("extContextHash")
+        );
+
+        // Private inputs
+        assert!(artifacts.circuit_inputs.signals.contains_key("inAmount"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPrivateKey")
+        );
+        assert!(artifacts.circuit_inputs.signals.contains_key("inBlinding"));
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPathIndices")
+        );
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("inPathElements")
+        );
+
+        // Array shapes for n_notes = 1
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("roots")
+            .expect("roots present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("roots should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("noteCommitments")
+            .expect("noteCommitments present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("noteCommitments should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inAmount")
+            .expect("inAmount present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inAmount should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPrivateKey")
+            .expect("inPrivateKey present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inPrivateKey should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inBlinding")
+            .expect("inBlinding present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inBlinding should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPathIndices")
+            .expect("inPathIndices present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), 1),
+            _ => panic!("inPathIndices should be an array"),
+        }
+        match artifacts
+            .circuit_inputs
+            .signals
+            .get("inPathElements")
+            .expect("inPathElements present")
+        {
+            InputValue::Array(v) => assert_eq!(v.len(), tree_depth_usize),
+            _ => panic!("inPathElements should be an array"),
+        }
+
+        // ext_context_hash is preserved
+        assert_eq!(artifacts.ext_context_hash, params.ext_context_hash);
     }
 }

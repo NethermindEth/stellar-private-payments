@@ -1,17 +1,18 @@
 use crate::protocol::{
-    DepositPrepared, PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
+    PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
 };
 use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use prover::{
-    flows::{TransactArtifacts, deposit, transact},
+    flows::{TransactArtifacts, transact},
     prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar::hash_ext_data_offchain;
+use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
@@ -22,6 +23,9 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
+);
+const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
 );
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -72,13 +76,15 @@ fn ensure_sha256_matches(
 thread_local! {
     static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
     static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
+    static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
     if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
-    let (graph_bytes, r1cs_bytes) = try_join!(
+    let (graph_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
         async {
             let graph_bytes: Vec<u8> =
                 fetch_circuit_file("circuits/policy_tx_2_2.graph.bin").await?;
@@ -92,6 +98,24 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+        },
+        async {
+            let wasm_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.wasm").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
+                wasm_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(wasm_bytes)
+        },
+        async {
+            let r1cs_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.r1cs").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.r1cs: {} bytes",
                 r1cs_bytes.len()
             );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
@@ -119,15 +143,49 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
     )?;
 
+    ensure_sha256_matches(
+        "selectiveDisclosure_1_proving_key.bin",
+        DISCLOSURE_PROVING_KEY,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "selectiveDisclosure_1.wasm",
+        &disc_wasm_bytes,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
+    )?;
+    ensure_sha256_matches(
+        "selectiveDisclosure_1.r1cs",
+        &disc_r1cs_bytes,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
+    )?;
+
     let witness_calc = WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
+
+    let disc_witness_calc =
+        WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
+            JsError::new(&format!(
+                "failed to init disclosure witness calculator: {e:#}"
+            ))
+        })?;
+    let disc_prover =
+        Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
 
     WITNESS_CALC.with(|cell| {
         *cell.borrow_mut() = Some(witness_calc);
     });
     PROVER.with(|cell| {
         *cell.borrow_mut() = Some(prover);
+    });
+    DISCLOSURE_WITNESS_CALC.with(|cell| {
+        *cell.borrow_mut() = Some(disc_witness_calc);
+    });
+    DISCLOSURE_PROVER.with(|cell| {
+        *cell.borrow_mut() = Some(disc_prover);
     });
     Ok(())
 }
@@ -176,22 +234,107 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 TimeoutFuture::new(50).await;
             }
         }
-        ProverWorkerRequest::Deposit(params) => {
-            log::debug!("[{WORKER_NAME}] deposit");
-            let transact_artifacts = deposit(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            let prepared = prove_from_artifacts(transact_artifacts)?;
-            ProverWorkerResponse::DepositPrepared(DepositPrepared {
-                proof_uncompressed: prepared.proof_uncompressed,
-                ext_data: prepared.ext_data,
-                prepared: prepared.prepared,
-            })
-        }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
             let artifacts = transact(params, hash_ext_data_offchain)?;
             log::debug!("[{WORKER_NAME}] prove_from_artifacts");
             ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
+        }
+        ProverWorkerRequest::Disclosure(req) => {
+            log::debug!("[{WORKER_NAME}] disclosure");
+
+            let context = types::DisclosureContext {
+                network: req.network,
+                pool_address: req.pool_address,
+                authority_label: req.authority_label,
+                authority_identity_payload_hex: req.authority_identity_payload_hex,
+                purpose: req.purpose,
+                context_nonce: req.context_nonce,
+            };
+            let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
+
+            let params = prover::flows::SelectiveDisclosure1Params {
+                root: req.inputs.root,
+                note_commitment: req.inputs.note_commitment,
+                note_amount: req.inputs.note_amount,
+                note_private_key: req.inputs.note_private_key,
+                note_blinding: req.inputs.note_blinding,
+                merkle_path_indices: req.inputs.merkle_path_indices,
+                merkle_path_elements: req.inputs.merkle_path_elements,
+                ext_context_hash,
+            };
+
+            let artifacts = prover::flows::selective_disclosure_1(params)?;
+            let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
+
+            let witness_bytes = DISCLOSURE_WITNESS_CALC.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let calc = borrow.as_mut().ok_or_else(|| {
+                    anyhow::anyhow!("disclosure witness calculator is not initialized")
+                })?;
+                calc.compute_witness(&circuit_inputs_json)
+                    .context("disclosure witness calculation failed")
+            })?;
+
+            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVER.with(|cell| {
+                let borrow = cell.borrow();
+                let prover = borrow
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
+                let proved = disclosure::prove_receipt_proof_with_prover(prover, &witness_bytes)?;
+
+                let vk_bytes = prover.get_verifying_key()?;
+                let vk_hash_hex = disclosure::vk_hash_hex(&vk_bytes);
+
+                Ok::<_, anyhow::Error>((proved.proof_compressed, vk_hash_hex))
+            })?;
+
+            let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
+
+            let receipt = types::DisclosureReceipt {
+                version: types::DISCLOSURE_RECEIPT_VERSION,
+                circuit: types::DisclosureCircuitMetadata {
+                    name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
+                    levels: SELECTIVE_DISCLOSURE_1_LEVELS,
+                    n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
+                    vk_hash: vk_hash_hex,
+                },
+                context,
+                public_inputs: types::DisclosurePublicInputs {
+                    roots: vec![req.inputs.root],
+                    note_commitments: vec![req.inputs.note_commitment],
+                    ext_context_hash,
+                },
+                proof_compressed_hex,
+                issued_at: js_sys::Date::new_0()
+                    .to_iso_string()
+                    .as_string()
+                    .ok_or_else(|| anyhow::anyhow!("failed to get current ISO date"))?,
+            };
+
+            ProverWorkerResponse::Disclosure(receipt)
+        }
+        // TODO: Consider extracting disclosure proof verification into a separate
+        // interface/crate. Verification is initiated by a receipt holder outside
+        // the app, while proving is app-initiated, so the responsibilities differ.
+        ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
+            log::debug!("[{WORKER_NAME}] verify disclosure proof");
+
+            // Early metadata validation for clear error messages. The actual
+            // VK-byte trust binding lives inside disclosure::verify_receipt_proof.
+            disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
+
+            let proof_verified = DISCLOSURE_PROVER.with(|cell| {
+                let borrow = cell.borrow();
+                let prover = borrow
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
+
+                let vk_bytes = prover.get_verifying_key()?;
+                disclosure::verify_receipt_proof(&receipt, &vk_bytes, &expected_vk_hash)
+            })?;
+
+            ProverWorkerResponse::DisclosureProofVerified(proof_verified)
         }
     };
     Ok(resp)
@@ -251,6 +394,7 @@ fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<Prepare
         proof_uncompressed,
         ext_data,
         prepared: prepared_public,
+        soroban_tx: Default::default(),
     })
 }
 
@@ -267,13 +411,18 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
     let public_url = PUBLIC_URL.unwrap_or("/");
+    let path = path.trim_start_matches('/');
 
     let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
-        format!("{public_url}{path}")
+        format!("{}/{path}", public_url.trim_end_matches('/'))
     } else if public_url == "/" {
         format!("{origin}/{path}")
+    } else if public_url.starts_with('/') {
+        format!("{origin}/{}/{path}", public_url.trim_matches('/'))
     } else {
-        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
+        return Err(JsError::new(
+            "PUBLIC_URL must be an absolute URL or root-relative path",
+        ));
     };
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
