@@ -21,7 +21,6 @@ path = "src/bin/prover_worker.rs"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-base64 = "0.22"
 console_error_panic_hook = { workspace = true }
 disclosure = { workspace = true }
 futures = { workspace = true }
