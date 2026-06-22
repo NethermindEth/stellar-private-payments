@@ -390,7 +390,7 @@ fn address_credentials_signature(public_key: &[u8; 32], signature: &Signature) -
         .try_into()
         .map_err(|_| anyhow!("signature bytes"))?;
 
-    Ok(ScVal::Map(Some(
+    let ed25519_sig = ScVal::Map(Some(
         ScMap::sorted_from([
             (
                 ScVal::Symbol(
@@ -406,7 +406,10 @@ fn address_credentials_signature(public_key: &[u8; 32], signature: &Signature) -
             ),
         ])
         .context("auth signature map")?,
-    )))
+    ));
+
+    let sc_vec = xdr::ScVec::try_from(vec![ed25519_sig]).context("auth signature vec")?;
+    Ok(ScVal::Vec(Some(sc_vec)))
 }
 
 pub fn patch_auth_entries(

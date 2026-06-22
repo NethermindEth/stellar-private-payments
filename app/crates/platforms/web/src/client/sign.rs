@@ -23,6 +23,27 @@ fn wallet_opts(address: &str, network_passphrase: &str) -> Object {
     opts
 }
 
+fn copy_js_error_fields(from: &JsValue, to: &JsValue) {
+    for key in ["code", "cause"] {
+        if let Ok(value) = Reflect::get(from, &JsValue::from_str(key))
+            && !value.is_undefined()
+            && !value.is_null()
+        {
+            let _ = Reflect::set(to, &JsValue::from_str(key), &value);
+        }
+    }
+}
+
+fn wallet_js_error(method: &str, stage: &str, rejection: JsValue) -> JsError {
+    let message = rejection
+        .dyn_ref::<js_sys::Error>()
+        .and_then(|err| err.message().as_string())
+        .unwrap_or_else(|| format!("{rejection:?}"));
+    let err = JsError::new(&format!("wallet.{method} {stage}: {message}"));
+    copy_js_error_fields(&rejection, &JsValue::from(err.clone()));
+    err
+}
+
 async fn wallet_call(method: &str, args: &[JsValue]) -> Result<String, JsError> {
     let window = web_sys::window().ok_or_else(|| JsError::new("no window"))?;
     let bridge = Reflect::get(&window, &WALLET_BRIDGE_KEY.into())
@@ -38,13 +59,13 @@ async fn wallet_call(method: &str, args: &[JsValue]) -> Result<String, JsError> 
     }
     let promise_val = func
         .apply(&bridge, &js_args)
-        .map_err(|e| JsError::new(&format!("wallet.{method} failed: {e:?}")))?;
+        .map_err(|e| wallet_js_error(method, "failed", e))?;
     let promise: Promise = promise_val
         .dyn_into()
         .map_err(|_| JsError::new(&format!("wallet.{method} must return a Promise")))?;
     let result = JsFuture::from(promise)
         .await
-        .map_err(|e| JsError::new(&format!("wallet.{method} rejected: {e:?}")))?;
+        .map_err(|e| wallet_js_error(method, "rejected", e))?;
     result
         .as_string()
         .ok_or_else(|| JsError::new(&format!("wallet.{method} must return a string")))
