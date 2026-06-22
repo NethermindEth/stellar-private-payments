@@ -19,5 +19,5 @@ pub use signer::{
     auth_sign_steps, needs_wallet_auth, network_id, patch_auth_entries, sign_prepared_tx_with,
     soroban_auth_preimage_b64, unsigned_tx_xdr_for_signing, verify_tx,
 };
-pub use submit::submit_and_confirm;
+pub use submit::{parse_transaction_envelope_xdr, submit_and_confirm};
 pub use tx_prepare::PoolTransactInput;

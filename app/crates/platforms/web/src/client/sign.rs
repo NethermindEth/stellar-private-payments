@@ -4,9 +4,9 @@ use super::{WebClient, emit_progress};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use stellar::{
-    PreparedSorobanTx, Signature, auth_sign_steps, submit_and_confirm, unsigned_tx_xdr_for_signing,
+    PreparedSorobanTx, Signature, auth_sign_steps, parse_transaction_envelope_xdr,
+    submit_and_confirm, unsigned_tx_xdr_for_signing,
 };
-use stellar_xdr::curr::{Limits, ReadXdr, TransactionEnvelope};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 
@@ -142,8 +142,8 @@ impl WebClient {
         flow: &'static str,
         on_status: &Option<Function>,
     ) -> Result<String, JsError> {
-        let signed = TransactionEnvelope::from_xdr_base64(signed_tx_xdr, Limits::none())
-            .map_err(|e| JsError::new(&format!("invalid signed tx xdr: {e}")))?;
+        let signed = parse_transaction_envelope_xdr(signed_tx_xdr)
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let mut on_poll = |current: u32, total: u32| {
             emit_progress(
                 on_status,

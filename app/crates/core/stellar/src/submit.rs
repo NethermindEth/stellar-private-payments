@@ -1,9 +1,15 @@
 //! Submit signed Soroban transactions to RPC.
 
 use anyhow::{Context, Result, bail};
-use stellar_xdr::curr::TransactionEnvelope;
+use stellar_xdr::curr::{Limits, ReadXdr, TransactionEnvelope};
 
 use crate::rpc::Client;
+
+/// Parses a base64-encoded v1 transaction envelope XDR.
+pub fn parse_transaction_envelope_xdr(xdr_b64: &str) -> Result<TransactionEnvelope> {
+    TransactionEnvelope::from_xdr_base64(xdr_b64, Limits::none())
+        .context("invalid transaction envelope xdr")
+}
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_SECS: u64 = 1;

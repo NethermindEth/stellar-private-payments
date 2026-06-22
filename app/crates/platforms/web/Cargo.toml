@@ -36,8 +36,6 @@ serde_json = { workspace = true, features = ["alloc"] }
 sha2 = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
-stellar-strkey = "0.0.16"
-stellar-xdr = { version = "26.0.0", features = ["curr", "base64", "std", "alloc"] }
 tx-planner = { workspace = true }
 types = { workspace = true }
 wasm-bindgen = { workspace = true }

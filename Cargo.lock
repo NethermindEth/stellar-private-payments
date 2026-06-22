@@ -5869,8 +5869,6 @@ dependencies = [
  "sqlite-wasm-vfs",
  "state",
  "stellar",
- "stellar-strkey 0.0.16",
- "stellar-xdr",
  "tokio",
  "tx-planner",
  "types",
