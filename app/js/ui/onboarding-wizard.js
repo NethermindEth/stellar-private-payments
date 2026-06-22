@@ -426,13 +426,13 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
         const p1 = document.createElement('p');
         p1.textContent =
-            'We ask Freighter to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.';
+            'We ask your wallet to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.';
         wrap.appendChild(p1);
 
         const p2 = document.createElement('p');
         p2.className = 'text-xs text-dark-500';
         p2.textContent =
-            'Tip: starting this from a button click helps some browsers keep Freighter in its normal overlay window.';
+            'Tip: starting this from a button click helps some browsers keep the wallet popup in its normal overlay window.';
         wrap.appendChild(p2);
 
         const progress = document.createElement('p');

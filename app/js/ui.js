@@ -23,7 +23,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     OnchainState.init();
     PoolEvents.init();
     
-    // On first page load, attempt to onboard immediately (Freighter + WASM + keys).
-    // If the user rejects, they can click "Connect Freighter" to retry.
+    // On first page load, attempt to onboard immediately (wallet + WASM + keys).
+    // If the user rejects, they can click "Connect Wallet" to retry.
     Wallet.connect({ auto: true }).catch(() => {});
 });

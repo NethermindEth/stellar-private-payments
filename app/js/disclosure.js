@@ -241,7 +241,7 @@ export function mountGenerate(container) {
     const msg = document.createElement('div');
     msg.className = 'text-sm text-dark-400';
     msg.textContent =
-      'Connect your Freighter wallet to generate disclosure receipts for your unspent notes.';
+      'Connect your wallet to generate disclosure receipts for your unspent notes.';
     container.appendChild(msg);
     return;
   }
