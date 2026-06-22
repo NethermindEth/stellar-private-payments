@@ -7,7 +7,7 @@ Zero-knowledge proof generation for private Stellar payments. This application a
 ## Features of the web application
 - Support for deposits, transfers, and withdrawals
 - Real-time synchronization with on-chain state
-- Freighter wallet integration for Stellar transactions
+- Multi-wallet support via Stellar Wallets Kit (Freighter, Hana, xBull, Albedo)
 - Client-side Groth16 proof generation via WebAssembly
 - Local state management with Sqlite
 - Note encryption/decryption

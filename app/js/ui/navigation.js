@@ -3,7 +3,8 @@
  * @module ui/navigation
  */
 
-import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { connectWallet, disconnectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
+import { Networks } from '@creit.tech/stellar-wallets-kit/types';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
@@ -135,7 +136,7 @@ export const Wallet = {
 
         disconnectBtn?.addEventListener('click', () => {
             this.closeDropdown();
-            this.disconnect();
+            void disconnectWallet().finally(() => this.disconnect());
         });
 
         registerBtn?.addEventListener('click', () => {
@@ -187,7 +188,7 @@ export const Wallet = {
     },
 
     /**
-     * Connect to Freighter, assert testnet, initialize WASM, and derive keys.
+     * Connect wallet, assert testnet, initialize WASM, and derive keys.
      * @param {{auto?: boolean}} opts
      */
     async connect({ auto = false } = {}) {
@@ -206,13 +207,13 @@ export const Wallet = {
 
         const run = async () => {
             setButtonLoading('Connecting...');
-            const address = await connectWallet();
+            const address = await connectWallet({ silent: auto });
 
             const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
             const rpcUrl = sorobanRpcUrl || '';
 
-            if (!rpcUrl.toLowerCase().includes('testnet')) {
-                Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
+            if (networkPassphrase !== Networks.TESTNET) {
+                Toast.show('This app works only on Stellar testnet. Please switch your wallet to testnet.', 'error', 8000);
                 this.disconnect();
                 return;
             }
@@ -296,7 +297,7 @@ export const Wallet = {
             } finally {
                 this._connectPromise = null;
                 if (btn) btn.disabled = false;
-                if (!App.state.wallet.connected && text) text.textContent = 'Connect Freighter';
+                if (!App.state.wallet.connected && text) text.textContent = 'Connect Wallet';
             }
         })();
 
@@ -319,7 +320,7 @@ export const Wallet = {
         const text = document.getElementById('wallet-text');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
         const addressDisplay = document.getElementById('wallet-dropdown-address');
-        if (text) text.textContent = 'Connect Freighter';
+        if (text) text.textContent = 'Connect Wallet';
         if (dropdownIcon) dropdownIcon.classList.add('hidden');
         if (addressDisplay) addressDisplay.textContent = '';
 
@@ -383,8 +384,8 @@ export const Wallet = {
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
                 const rpcUrl = sorobanRpcUrl || App.state.wallet.sorobanRpcUrl || '';
 
-                if (!rpcUrl.toLowerCase().includes('testnet')) {
-                    Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
+                if (networkPassphrase !== Networks.TESTNET) {
+                    Toast.show('This app works only on Stellar testnet. Please switch your wallet to testnet.', 'error', 8000);
                     this.disconnect();
                     return;
                 }
@@ -431,7 +432,7 @@ export const Wallet = {
         updateSubmitButtons(true);
         App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
 
-        Toast.show('Freighter account changed. Privacy keys ready.', 'info');
+        Toast.show('Wallet account changed. Privacy keys ready.', 'info');
     },
 
     async registerPublicKey() {
@@ -490,7 +491,7 @@ export const Wallet = {
             App.events.dispatchEvent(new CustomEvent('addressbook:refresh'));
         } catch (e) {
             if (e?.code === 'USER_REJECTED') {
-                Toast.show('Registration cancelled in Freighter', 'error', 6000);
+                Toast.show('Registration cancelled in wallet', 'error', 6000);
                 return;
             }
             throw e;

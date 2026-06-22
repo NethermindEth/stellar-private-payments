@@ -113,7 +113,7 @@ flowchart LR
 
 **Keypair Derivation:**
 
-Keys are derived deterministically from Freighter wallet signatures:
+Keys are derived deterministically from wallet signatures (SEP-53):
 1. User signs the message defined by `KEY_DERIVATION_MESSAGE` from `app/crates/core/prover/src/encryption.rs`
 2. The app derives the BN254 note identity keypair and the X25519 encryption keypair from that single signature using separate domain-separated hashes
 

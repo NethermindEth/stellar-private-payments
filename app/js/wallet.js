@@ -1,248 +1,354 @@
-import {
-    WatchWalletChanges,
-    getAddress,
-    getNetworkDetails,
-    isAllowed,
-    isConnected,
-    requestAccess,
-    setAllowed,
-    signAuthEntry,
-    signTransaction,
-    signMessage
-} from '@stellar/freighter-api';
+import { StellarWalletsKit } from '@creit.tech/stellar-wallets-kit/sdk';
+import { FreighterModule, FREIGHTER_ID } from '@creit.tech/stellar-wallets-kit/modules/freighter';
+import { HanaModule, HANA_ID } from '@creit.tech/stellar-wallets-kit/modules/hana';
+import { xBullModule, XBULL_ID } from '@creit.tech/stellar-wallets-kit/modules/xbull';
+import { AlbedoModule, ALBEDO_ID } from '@creit.tech/stellar-wallets-kit/modules/albedo';
+import { Networks, SwkAppDarkTheme } from '@creit.tech/stellar-wallets-kit/types';
 
 import { getHandle } from './wasm-facade.js';
+
+const WALLET_STORAGE_KEY = 'poolstellar-selected-wallet';
+
+const SOROBAN_RPC_BY_PASSPHRASE = {
+    [Networks.TESTNET]: 'https://soroban-testnet.stellar.org',
+    [Networks.PUBLIC]: 'https://soroban.stellar.org',
+    [Networks.FUTURENET]: 'https://rpc-futurenet.stellar.org',
+};
+
 /**
- * Request wallet access and return the active public key.
- *
- * Throws when the extension is missing or unavailable.
- *
- * @returns {Promise<void>}
+ * Wallets bundled for this app. Freighter and Hana support signTransaction,
+ * signAuthEntry, and signMessage. xBull and Albedo are included for broader
+ * coverage but cannot complete all flows (see WALLET_CAPABILITIES).
  */
-async function assertFreighterInstalled() {
-    const conn = await isConnected();
-    if (conn?.error) {
-        throw normalizeWalletError(conn.error, "Failed to check Freighter connection");
+const APP_WALLET_MODULES = [
+    new FreighterModule(),
+    new HanaModule(),
+    new xBullModule(),
+    new AlbedoModule(),
+];
+
+/** @type {Record<string, { signTransaction: boolean, signAuthEntry: boolean, signMessage: boolean }>} */
+export const WALLET_CAPABILITIES = {
+    [FREIGHTER_ID]: { signTransaction: true, signAuthEntry: true, signMessage: true },
+    [HANA_ID]: { signTransaction: true, signAuthEntry: true, signMessage: true },
+    [XBULL_ID]: { signTransaction: true, signAuthEntry: false, signMessage: true },
+    [ALBEDO_ID]: { signTransaction: true, signAuthEntry: false, signMessage: false },
+};
+
+const APP_THEME = {
+    ...SwkAppDarkTheme,
+    primary: '#f59e0b',
+    'primary-foreground': '#0a0a0a',
+    background: '#171717',
+    'background-secondary': '#0a0a0a',
+    'font-family': 'Outfit, sans-serif',
+};
+
+let kitReady = false;
+
+function readSavedWalletId() {
+    try {
+        const saved = localStorage.getItem(WALLET_STORAGE_KEY);
+        return APP_WALLET_MODULES.some((mod) => mod.productId === saved) ? saved : FREIGHTER_ID;
+    } catch {
+        return FREIGHTER_ID;
     }
-    if (!conn?.isConnected) {
-        throw new Error("Freighter not detected. Install from https://www.freighter.app/");
+}
+
+function persistWalletId(id) {
+    try {
+        localStorage.setItem(WALLET_STORAGE_KEY, id);
+    } catch {
+        // best-effort
+    }
+}
+
+function ensureKitInitialized() {
+    if (kitReady) return;
+    StellarWalletsKit.init({
+        modules: APP_WALLET_MODULES,
+        network: Networks.TESTNET,
+        selectedWalletId: readSavedWalletId(),
+        theme: APP_THEME,
+        authModal: {
+            showInstallLabel: true,
+            hideUnsupportedWallets: true,
+        },
+    });
+    kitReady = true;
+}
+
+function getActiveWalletId() {
+    ensureKitInitialized();
+    return StellarWalletsKit.selectedModule.productId;
+}
+
+function assertWalletCapabilities(walletId = getActiveWalletId()) {
+    const caps = WALLET_CAPABILITIES[walletId];
+    if (!caps?.signMessage || !caps?.signAuthEntry) {
+        const name = StellarWalletsKit.selectedModule.productName;
+        throw new Error(
+            `${name} does not support all signing methods required by this app. ` +
+            'Please connect with Freighter or Hana Wallet.',
+        );
     }
 }
 
 /**
- * Ensure Freighter is installed, connected, and allowed for this site.
+ * Normalize wallet errors to a consistent shape.
  *
- * Optionally requests wallet access and returns the active public key.
- *
- * @param {Object} [opts] - Optional configuration.
- * @param {boolean} [opts.requestAddress=false] - Whether to request and return the active address.
- * @returns {Promise<string|void>} - Connected Stellar public key when requested.
+ * @param {unknown} error
+ * @param {string} fallbackMessage
+ * @returns {Error}
  */
-async function ensureFreighterReady(opts = {}) {
-    const { requestAddress = false } = opts;
+function normalizeWalletError(error, fallbackMessage = 'Wallet error') {
+    const message = error?.message || fallbackMessage;
+    const lower = String(message).toLowerCase();
+    const err = new Error(message);
+    const userRejected =
+        error?.code === -1 ||
+        /reject|declin|denied|cancel|closed the modal/.test(lower);
+    err.code = userRejected ? 'USER_REJECTED' : 'WALLET_ERROR';
+    err.cause = error;
+    return err;
+}
 
-    await assertFreighterInstalled();
-
-    const allowed = await isAllowed();
-    if (allowed?.error) {
-        throw normalizeWalletError(allowed.error, "Failed to check Freighter allow-list");
+async function ensureWalletReady() {
+    ensureKitInitialized();
+    try {
+        await StellarWalletsKit.getAddress();
+    } catch {
+        throw new Error('No wallet connected. Please connect your wallet first.');
     }
+}
 
-    if (!allowed?.isAllowed) {
-        const set = await setAllowed();
-        if (set?.error) {
-            throw normalizeWalletError(set.error, "Freighter access rejected");
-        }
-    }
+function resolveSorobanRpcUrl(networkPassphrase) {
+    return SOROBAN_RPC_BY_PASSPHRASE[networkPassphrase] || '';
+}
 
-    if (requestAddress) {
-        const access = await requestAccess();
-        if (access?.error) {
-            throw normalizeWalletError(access.error, "Freighter access request failed");
+/**
+ * Open the wallet picker modal and return the connected public key.
+ * @param {{silent?: boolean}} [opts]
+ * @returns {Promise<string>}
+ */
+export async function connectWallet(opts = {}) {
+    const { silent = false } = opts;
+    ensureKitInitialized();
+
+    try {
+        try {
+            const { address } = await StellarWalletsKit.getAddress();
+            if (address) {
+                assertWalletCapabilities();
+                return address;
+            }
+        } catch {
+            // No active session in kit memory.
         }
-        if (!access?.address) {
-            throw new Error("No public key returned");
+
+        if (silent) {
+            const { address } = await StellarWalletsKit.fetchAddress();
+            if (!address) {
+                throw new Error('No public key returned');
+            }
+            persistWalletId(getActiveWalletId());
+            assertWalletCapabilities();
+            return address;
         }
-        return access.address;
+
+        const { address } = await StellarWalletsKit.authModal();
+        if (!address) {
+            throw new Error('No public key returned');
+        }
+        persistWalletId(getActiveWalletId());
+        assertWalletCapabilities();
+        return address;
+    } catch (e) {
+        throw normalizeWalletError(e, 'Wallet connection failed');
     }
 }
 
 /**
- * Request wallet access and return the active public key.
- *
- * Validates Freighter availability, prompts for access if needed,
- * and returns the connected Stellar address.
- *
- * @returns {Promise<string>} - Connected Stellar public key (G...).
- */
-export async function connectWallet() {
-    return await ensureFreighterReady({requestAddress: true});
-}
-
-/**
- * Fetch the currently active public key from Freighter without prompting.
+ * Fetch the currently active public key without opening the picker.
  * @returns {Promise<string>}
  */
 export async function getWalletAddress() {
-    await ensureFreighterReady();
-    const res = await getAddress();
-    if (res?.error) {
-        throw normalizeWalletError(res.error, "Failed to get active Freighter address");
+    await ensureWalletReady();
+    const { address } = await StellarWalletsKit.getAddress();
+    if (!address) {
+        throw new Error('No public key returned');
     }
-    if (!res?.address) {
-        throw new Error("No public key returned");
-    }
-    return res.address;
+    return address;
 }
 
 /**
- * Watch Freighter for wallet address/network changes.
+ * Watch the connected wallet for address/network changes.
  * @param {{intervalMs?: number, onChange: function}} opts
  * @returns {function} stop watcher
  */
 export function startWalletWatcher(opts) {
     const { intervalMs = 3000, onChange } = opts || {};
-    const watcher = new WatchWalletChanges(intervalMs);
-    const res = watcher.watch((info) => {
+    let lastAddress = null;
+    let lastNetwork = null;
+    let lastPassphrase = null;
+
+    const tick = async () => {
         try {
-            onChange?.(info);
+            await ensureWalletReady();
+            const { address } = await StellarWalletsKit.getAddress();
+
+            let network = 'TESTNET';
+            let networkPassphrase = Networks.TESTNET;
+            try {
+                const details = await StellarWalletsKit.getNetwork();
+                network = details.network || network;
+                networkPassphrase = details.networkPassphrase || networkPassphrase;
+            } catch {
+                // Wallets like Hana do not expose getNetwork; app is testnet-only.
+            }
+
+            if (
+                address !== lastAddress ||
+                network !== lastNetwork ||
+                networkPassphrase !== lastPassphrase
+            ) {
+                lastAddress = address;
+                lastNetwork = network;
+                lastPassphrase = networkPassphrase;
+                onChange?.({ address, network, networkPassphrase });
+            }
         } catch (e) {
-            console.warn('[Wallet] watch callback failed:', e);
+            onChange?.({ error: e });
         }
-    });
-    if (res?.error) {
-        throw normalizeWalletError(res.error, 'Failed to start wallet watcher');
-    }
-    return () => watcher.stop();
+    };
+
+    const timer = setInterval(() => {
+        void tick();
+    }, intervalMs);
+    void tick();
+
+    return () => clearInterval(timer);
 }
 
 /**
- * Fetch current network details from Freighter.
- *
- * Useful for displaying network name and ensuring app/network alignment.
+ * Fetch current network details from the connected wallet.
  *
  * @returns {Promise<{network: string, networkUrl: string, networkPassphrase: string, sorobanRpcUrl?: string}>}
  */
 export async function getWalletNetwork() {
-    const details = await getNetworkDetails();
-    if (details?.error) {
-        throw normalizeWalletError(details.error, "Failed to get Freighter network details");
+    await ensureWalletReady();
+
+    let network = 'TESTNET';
+    let networkPassphrase = Networks.TESTNET;
+    let networkUrl = '';
+
+    try {
+        const details = await StellarWalletsKit.getNetwork();
+        network = details.network || network;
+        networkPassphrase = details.networkPassphrase || networkPassphrase;
+    } catch {
+        // Fall back to the kit's configured network for wallets without getNetwork.
     }
 
-    const { network, networkUrl, networkPassphrase, sorobanRpcUrl } = details;
-    return { network, networkUrl, networkPassphrase, sorobanRpcUrl };
+    return {
+        network,
+        networkUrl,
+        networkPassphrase,
+        sorobanRpcUrl: resolveSorobanRpcUrl(networkPassphrase),
+    };
 }
 
 /**
- * Normalize Freighter errors to a consistent shape.
- *
- * Marks common rejection phrases as USER_REJECTED for UI handling.
- *
- * @param {Object} error - Raw Freighter error payload.
- * @param {string} fallbackMessage - Default message when none provided.
- * @returns {Error} - Error with `code` set to USER_REJECTED or WALLET_ERROR.
- */
-function normalizeWalletError(error, fallbackMessage = "Wallet error") {
-    const message = error?.message || fallbackMessage;
-    const lower = String(message).toLowerCase();
-    const err = new Error(message);
-    err.code = /reject|declin|denied|cancel/.test(lower) ? 'USER_REJECTED' : 'WALLET_ERROR';
-    err.cause = error;
-    return err;
-}
-
-/**
- * Request the user to sign a transaction XDR via Freighter.
- *
- * Ensures wallet access, then returns the signed XDR and signer address.
- *
- * @param {string} transactionXdr - Unsigned transaction XDR (base64).
- * @param {Object} opts - Optional signing context.
- * @param {string} [opts.networkPassphrase] - Network passphrase for signing.
- * @param {string} [opts.address] - Specific account to sign with.
+ * @param {string} transactionXdr
+ * @param {Object} opts
+ * @param {string} [opts.networkPassphrase]
+ * @param {string} [opts.address]
  * @returns {Promise<{signedTxXdr: string, signerAddress: string}>}
  */
 export async function signWalletTransaction(transactionXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureWalletReady();
+    assertWalletCapabilities();
 
-    const { signedTxXdr, signerAddress, error } = await signTransaction(transactionXdr, opts);
-    if (error) {
-        throw normalizeWalletError(error, 'Transaction signature failed');
+    try {
+        const { signedTxXdr, signerAddress } = await StellarWalletsKit.signTransaction(
+            transactionXdr,
+            opts,
+        );
+        if (!signedTxXdr) {
+            throw new Error('Transaction signature was not returned');
+        }
+        return { signedTxXdr, signerAddress };
+    } catch (e) {
+        throw normalizeWalletError(e, 'Transaction signature failed');
     }
-
-    return { signedTxXdr, signerAddress };
 }
 
 /**
- * Request the user to sign a Soroban auth preimage via Freighter.
- *
- * Takes HashIdPreimage XDR (base64); returns raw signature bytes for authorizeEntry.
- *
- * @param {string} entryXdr - Authorization preimage XDR (base64).
- * @param {Object} opts - Optional signing context.
- * @param {string} [opts.networkPassphrase] - Network passphrase for signing.
- * @param {string} [opts.address] - Specific account to sign with.
+ * @param {string} entryXdr
+ * @param {Object} opts
+ * @param {string} [opts.networkPassphrase]
+ * @param {string} [opts.address]
  * @returns {Promise<{signedAuthEntry: string | null, signerAddress: string}>}
  */
 export async function signWalletAuthEntry(entryXdr, opts = {}) {
-    await ensureFreighterReady();
+    await ensureWalletReady();
+    assertWalletCapabilities();
 
-    const { signedAuthEntry, signerAddress, error } = await signAuthEntry(entryXdr, opts);
-    if (error) {
-        throw normalizeWalletError(error, 'Auth entry signature failed');
+    try {
+        const { signedAuthEntry, signerAddress } = await StellarWalletsKit.signAuthEntry(
+            entryXdr,
+            opts,
+        );
+        if (!signedAuthEntry) {
+            throw new Error('Auth entry signature was not returned');
+        }
+        return { signedAuthEntry, signerAddress };
+    } catch (e) {
+        throw normalizeWalletError(e, 'Auth entry signature failed');
     }
-
-    return { signedAuthEntry, signerAddress };
 }
 
 /**
- * Request the user to sign an arbitrary message via Freighter.
- *
- * Used for deriving encryption keys deterministically.
- *
- * @param {string} message - Message to sign.
- * @param {Object} [opts] - Optional signing context.
- * @param {string} [opts.address] - Specific account to sign with.
- * @param {string} [opts.networkPassphrase] - Network passphrase for signing context.
+ * @param {string} message
+ * @param {Object} [opts]
+ * @param {string} [opts.address]
+ * @param {string} [opts.networkPassphrase]
+ * @param {boolean} [opts.skipEnsureReady]
  * @returns {Promise<{signedMessage: string | null, signerAddress: string}>}
  */
 export async function signWalletMessage(message, opts = {}) {
-    const { skipEnsureReady = false, ...freighterOpts } = opts || {};
+    const { skipEnsureReady = false, ...signOpts } = opts || {};
     if (!skipEnsureReady) {
-        await ensureFreighterReady();
+        await ensureWalletReady();
     }
+    assertWalletCapabilities();
 
     console.log('[Wallet] Requesting message signature for:', message.substring(0, 30) + '...');
-    const result = await signMessage(message, freighterOpts);
-    console.log('[Wallet] signMessage result:', {
-        hasSignedMessage: !!result?.signedMessage,
-        hasError: !!result?.error,
-        error: result?.error,
-    });
-
-    const { signedMessage, signerAddress, error } = result || {};
-    if (error) {
-        throw normalizeWalletError(error, 'Message signature failed');
+    try {
+        const { signedMessage, signerAddress } = await StellarWalletsKit.signMessage(
+            message,
+            signOpts,
+        );
+        console.log('[Wallet] signMessage result:', {
+            hasSignedMessage: !!signedMessage,
+        });
+        if (!signedMessage) {
+            throw new Error('No signature returned. User may have rejected the request.');
+        }
+        return { signedMessage, signerAddress };
+    } catch (e) {
+        throw normalizeWalletError(e, 'Message signature failed');
     }
-    // If SignMessage returns null
-    if (!signedMessage) {
-        throw new Error('No signature returned. User may have rejected the request.');
-    }
-
-    return { signedMessage, signerAddress };
 }
 
 /**
- * Derives spending and encryption keys from a single Freighter wallet signature.
- * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
+ * Derives spending and encryption keys from a single wallet signature.
  *
- * @param {account} string
+ * @param {string} account
  * @param {Object} options
- * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
- * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
- * @param {boolean} [options.skipCacheCheck=false] - Skip existing-key lookup before signature prompts
- * @returns {Promise<{pubKey: string, encryptionKeypair: {publicKey: string}, aspSecret: string}>}
- * @throws {Error} If user rejects signature requests
+ * @param {function} options.onStatus
+ * @param {Object} [options.signOptions]
+ * @param {boolean} [options.skipCacheCheck]
  */
 export async function deriveKeysFromWallet(
     account,
@@ -301,4 +407,13 @@ export async function deriveKeysFromWallet(
         },
         aspSecret: aspSecret.membershipBlinding,
     };
+}
+
+/**
+ * Disconnect the active wallet session.
+ * @returns {Promise<void>}
+ */
+export async function disconnectWallet() {
+    ensureKitInitialized();
+    await StellarWalletsKit.disconnect();
 }
