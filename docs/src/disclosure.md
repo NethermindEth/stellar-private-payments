@@ -76,7 +76,7 @@ Note owners generate receipts through the standalone **Disclosure** page at `/di
 7. Download the receipt JSON.
 
 ### Preselection via URL
-A per-row "Disclose" button in the main app's notes table (planned post-merge) links to:
+A per-row "Disclose" button in the main app's notes table links to:
 
 ```
 /disclosure.html?commitment=0x<note-commitment>

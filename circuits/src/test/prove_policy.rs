@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{Inputs, SignalKey, prove_and_verify},
+        circom_tester::{InputValue, Inputs, SignalKey, prove_and_verify},
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         keypair::derive_public_key,
         merkle_tree::{merkle_proof, merkle_root},
@@ -12,17 +12,26 @@ mod tests {
         },
     };
     use anyhow::{Context, Result, ensure};
+    use ark_bn254::Fr;
+    use ark_circom::WitnessCalculator as ArkWitnessCalculator;
     use num_bigint::BigInt;
     use std::{
+        cell::RefCell,
+        collections::HashMap,
         convert::TryInto,
+        env, fs,
+        hint::black_box,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
+        time::{Duration, Instant},
     };
+    use wasmer::Store;
     use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
     const LEVELS: usize = 10;
     const N_MEM_PROOFS: usize = 1;
     const N_NON_PROOFS: usize = 1;
+    type PolicyReferenceCase = (TxCase, Vec<Scalar>, Vec<MembershipTree>, Vec<NonMembership>);
 
     pub struct MembershipTree {
         pub leaves: [Scalar; 1 << LEVELS],
@@ -317,13 +326,22 @@ mod tests {
         load_artifacts("policy_tx_2_2")
     }
 
-    #[test]
-    #[ignore]
-    fn test_tx_1in_1out() -> Result<()> {
+    fn benchmark_policy_artifacts() -> Result<(PathBuf, PathBuf)> {
+        match (
+            env::var_os("POLICY_BENCH_WASM"),
+            env::var_os("POLICY_BENCH_R1CS"),
+        ) {
+            (Some(wasm), Some(r1cs)) => Ok((PathBuf::from(wasm), PathBuf::from(r1cs))),
+            (None, None) => policy_artifacts(),
+            _ => Err(anyhow::anyhow!(
+                "POLICY_BENCH_WASM and POLICY_BENCH_R1CS must be set together"
+            )),
+        }
+    }
+
+    fn policy_one_in_one_out_case() -> Result<PolicyReferenceCase> {
         // One real input (in1), one dummy input (in0.amount = 0).
         // One real output (out0 = in1.amount), one dummy output (out1.amount = 0).
-        let (wasm, r1cs) = policy_artifacts()?;
-
         let case = TxCase::new(
             vec![
                 InputNote {
@@ -370,6 +388,265 @@ mod tests {
             },
         ];
 
+        Ok((case, leaves, membership_trees, keys))
+    }
+
+    fn policy_graph_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin")
+    }
+
+    fn policy_proving_key_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin")
+    }
+
+    fn input_value_to_json(value: &InputValue) -> serde_json::Value {
+        match value {
+            InputValue::Single(value) => serde_json::Value::String(value.to_string()),
+            InputValue::Array(values) => serde_json::Value::Array(
+                values
+                    .iter()
+                    .map(|value| serde_json::Value::String(value.to_string()))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn inputs_to_json(inputs: &Inputs) -> Result<String> {
+        let mut object = serde_json::Map::new();
+        for (key, value) in inputs.iter() {
+            object.insert(key.clone(), input_value_to_json(value));
+        }
+
+        serde_json::to_string(&object).context("failed to serialize policy witness inputs")
+    }
+
+    fn inputs_to_hashmap(inputs: &Inputs) -> HashMap<String, Vec<BigInt>> {
+        inputs
+            .iter()
+            .map(|(key, value)| {
+                let values = match value {
+                    InputValue::Single(value) => vec![value.clone()],
+                    InputValue::Array(values) => values.clone(),
+                };
+                (key.clone(), values)
+            })
+            .collect()
+    }
+
+    fn bigint_witness_to_le_bytes(witness: &[BigInt]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(
+            witness
+                .len()
+                .checked_mul(32)
+                .expect("witness byte length overflow"),
+        );
+        for value in witness {
+            let (sign, mut be_bytes) = value.to_bytes_be();
+            assert!(
+                sign != num_bigint::Sign::Minus,
+                "witness outputs must be canonical field elements"
+            );
+            assert!(
+                be_bytes.len() <= 32,
+                "witness field element exceeds 32 bytes"
+            );
+            let mut padded = vec![0u8; 32 - be_bytes.len()];
+            padded.append(&mut be_bytes);
+            padded.reverse();
+            bytes.extend_from_slice(&padded);
+        }
+        bytes
+    }
+
+    fn time_iterations<F>(iterations: usize, mut f: F) -> Result<Vec<Duration>>
+    where
+        F: FnMut() -> Result<()>,
+    {
+        let mut durations = Vec::with_capacity(iterations);
+        for _ in 0..iterations {
+            let start = Instant::now();
+            f()?;
+            durations.push(start.elapsed());
+        }
+        Ok(durations)
+    }
+
+    fn print_benchmark(label: &str, durations: &[Duration]) {
+        let mut sorted = durations.to_vec();
+        sorted.sort();
+        let total_nanos: u128 = durations.iter().map(Duration::as_nanos).sum();
+        let mean_ms = total_nanos as f64 / durations.len() as f64 / 1_000_000.0;
+        let all_ms = durations
+            .iter()
+            .map(|duration| format!("{:.3}", duration.as_nanos() as f64 / 1_000_000.0))
+            .collect::<Vec<_>>()
+            .join(",");
+        println!(
+            "BENCH {label} iterations={} min_ms={:.3} median_ms={:.3} mean_ms={:.3} max_ms={:.3} all_ms=[{}]",
+            durations.len(),
+            sorted[0].as_nanos() as f64 / 1_000_000.0,
+            sorted[sorted.len() / 2].as_nanos() as f64 / 1_000_000.0,
+            mean_ms,
+            sorted[sorted.len() - 1].as_nanos() as f64 / 1_000_000.0,
+            all_ms
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_witness_runtime_benchmark() -> Result<()> {
+        const INIT_ITERATIONS: usize = 5;
+        const COMPUTE_ITERATIONS: usize = 10;
+        const COLD_ITERATIONS: usize = 5;
+
+        let (wasm, r1cs) = benchmark_policy_artifacts()?;
+        let (case, leaves, membership_trees, keys) = policy_one_in_one_out_case()?;
+        let captured_inputs = RefCell::new(None);
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            leaves,
+            Scalar::from(0u64),
+            &membership_trees,
+            &keys,
+            Some(|inputs: &mut Inputs| {
+                captured_inputs.replace(Some(inputs.clone()));
+            }),
+        )?;
+
+        let inputs = captured_inputs
+            .into_inner()
+            .ok_or_else(|| anyhow::anyhow!("policy input capture did not run"))?;
+        let inputs_json = inputs_to_json(&inputs)?;
+        let wasmer_inputs = inputs_to_hashmap(&inputs);
+        let graph_bytes = fs::read(policy_graph_path()).context("failed to read policy graph")?;
+        let r1cs_bytes = fs::read(&r1cs).context("failed to read policy R1CS")?;
+
+        let mut wasmer_store = Store::default();
+        let mut wasmer_calculator = ArkWitnessCalculator::new(&mut wasmer_store, &wasm)
+            .map_err(|e| anyhow::anyhow!("failed to initialize Wasmer witness calculator: {e}"))?;
+        let wasmer_witness = wasmer_calculator
+            .calculate_witness_element::<Fr, _>(&mut wasmer_store, wasmer_inputs.clone(), false)
+            .map_err(|e| anyhow::anyhow!("Wasmer witness calculation failed: {e}"))?;
+        let wasmer_witness_bigints = wasmer_calculator
+            .calculate_witness(&mut wasmer_store, wasmer_inputs.clone(), false)
+            .map_err(|e| anyhow::anyhow!("Wasmer bigint witness calculation failed: {e}"))?;
+        let wasmer_witness_bytes = bigint_witness_to_le_bytes(&wasmer_witness_bigints);
+
+        let mut graph_calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+            .context("failed to initialize native graph witness calculator")?;
+        let graph_witness_bytes = graph_calculator
+            .compute_witness(&inputs_json)
+            .context("native graph witness calculation failed")?;
+
+        if wasmer_witness_bytes != graph_witness_bytes {
+            let first_diff = wasmer_witness_bytes
+                .chunks_exact(32)
+                .zip(graph_witness_bytes.chunks_exact(32))
+                .position(|(wasmer, graph)| wasmer != graph)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("native graph witness byte length differs from Wasmer witness")
+                })?;
+            let wasmer_value = BigInt::from_bytes_le(
+                num_bigint::Sign::Plus,
+                &wasmer_witness_bytes[first_diff * 32..][..32],
+            );
+            let graph_value = BigInt::from_bytes_le(
+                num_bigint::Sign::Plus,
+                &graph_witness_bytes[first_diff * 32..][..32],
+            );
+            ensure!(
+                false,
+                "native graph witness bytes differ from Wasmer witness bytes at element {first_diff}: Wasmer={wasmer_value}, graph={graph_value}"
+            );
+        }
+        println!(
+            "BENCH witness_elements={} witness_bytes={} input_json_bytes={}",
+            wasmer_witness.len(),
+            graph_witness_bytes.len(),
+            inputs_json.len()
+        );
+
+        let wasmer_init = time_iterations(INIT_ITERATIONS, || {
+            let mut store = Store::default();
+            let calculator = ArkWitnessCalculator::new(&mut store, &wasm).map_err(|e| {
+                anyhow::anyhow!("failed to initialize Wasmer witness calculator: {e}")
+            })?;
+            black_box(calculator);
+            Ok(())
+        })?;
+        print_benchmark("wasmer_cranelift_init", &wasmer_init);
+
+        let graph_init = time_iterations(INIT_ITERATIONS, || {
+            let calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+                .context("failed to initialize graph witness calculator")?;
+            black_box(calculator.witness_size());
+            Ok(())
+        })?;
+        print_benchmark("circom_witness_rs_graph_init", &graph_init);
+
+        let mut wasmer_store = Store::default();
+        let mut wasmer_calculator = ArkWitnessCalculator::new(&mut wasmer_store, &wasm)
+            .map_err(|e| anyhow::anyhow!("failed to initialize Wasmer witness calculator: {e}"))?;
+        let wasmer_compute = time_iterations(COMPUTE_ITERATIONS, || {
+            let witness = wasmer_calculator
+                .calculate_witness_element::<Fr, _>(&mut wasmer_store, wasmer_inputs.clone(), false)
+                .map_err(|e| anyhow::anyhow!("Wasmer witness calculation failed: {e}"))?;
+            black_box(witness.len());
+            Ok(())
+        })?;
+        print_benchmark("wasmer_cranelift_reused_calculate_witness", &wasmer_compute);
+
+        let mut graph_calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+            .context("failed to initialize graph witness calculator")?;
+        let graph_compute = time_iterations(COMPUTE_ITERATIONS, || {
+            let witness = graph_calculator
+                .compute_witness(&inputs_json)
+                .context("native graph witness calculation failed")?;
+            black_box(witness.len());
+            Ok(())
+        })?;
+        print_benchmark(
+            "circom_witness_rs_graph_reused_compute_witness",
+            &graph_compute,
+        );
+
+        let wasmer_cold = time_iterations(COLD_ITERATIONS, || {
+            let mut store = Store::default();
+            let mut calculator = ArkWitnessCalculator::new(&mut store, &wasm).map_err(|e| {
+                anyhow::anyhow!("failed to initialize Wasmer witness calculator: {e}")
+            })?;
+            let witness = calculator
+                .calculate_witness_element::<Fr, _>(&mut store, wasmer_inputs.clone(), false)
+                .map_err(|e| anyhow::anyhow!("Wasmer witness calculation failed: {e}"))?;
+            black_box(witness.len());
+            Ok(())
+        })?;
+        print_benchmark("wasmer_cranelift_cold_init_and_witness", &wasmer_cold);
+
+        let graph_cold = time_iterations(COLD_ITERATIONS, || {
+            let mut calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+                .context("failed to initialize graph witness calculator")?;
+            let witness = calculator
+                .compute_witness(&inputs_json)
+                .context("native graph witness calculation failed")?;
+            black_box(witness.len());
+            Ok(())
+        })?;
+        print_benchmark("circom_witness_rs_graph_cold_init_and_witness", &graph_cold);
+
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn test_tx_1in_1out() -> Result<()> {
+        let (wasm, r1cs) = policy_artifacts()?;
+        let (case, leaves, membership_trees, keys) = policy_one_in_one_out_case()?;
+
         run_case(
             &wasm,
             &r1cs,
@@ -380,6 +657,59 @@ mod tests {
             &keys,
             None::<fn(&mut Inputs)>,
         )
+    }
+
+    #[test]
+    #[ignore]
+    fn native_policy_graph_witness_proves_reference_case() -> Result<()> {
+        let (wasm, r1cs) = policy_artifacts()?;
+        let (case, leaves, membership_trees, keys) = policy_one_in_one_out_case()?;
+        let captured_inputs = RefCell::new(None);
+
+        run_case(
+            &wasm,
+            &r1cs,
+            &case,
+            leaves,
+            Scalar::from(0u64),
+            &membership_trees,
+            &keys,
+            Some(|inputs: &mut Inputs| {
+                captured_inputs.replace(Some(inputs.clone()));
+            }),
+        )?;
+
+        let inputs = captured_inputs
+            .into_inner()
+            .ok_or_else(|| anyhow::anyhow!("policy input capture did not run"))?;
+        let inputs_json = inputs_to_json(&inputs)?;
+        let graph_bytes = fs::read(policy_graph_path()).context("failed to read policy graph")?;
+        let r1cs_bytes = fs::read(&r1cs).context("failed to read policy R1CS")?;
+        let proving_key =
+            fs::read(policy_proving_key_path()).context("failed to read policy proving key")?;
+
+        let mut witness_calculator = witness::WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
+            .context("failed to initialize native graph witness calculator")?;
+        let witness_bytes = witness_calculator
+            .compute_witness(&inputs_json)
+            .context("native graph witness calculation failed")?;
+
+        let prover = prover::prover::Prover::new(&proving_key, &r1cs_bytes)
+            .context("failed to initialize prover")?;
+        let proof = prover
+            .prove_bytes(&witness_bytes)
+            .context("failed to prove native graph witness")?;
+        let public_inputs = prover
+            .extract_public_inputs(&witness_bytes)
+            .context("failed to extract public inputs from graph witness")?;
+
+        ensure!(
+            prover
+                .verify(&proof, &public_inputs)
+                .context("failed to verify native graph witness proof")?,
+            "native graph witness proof did not verify"
+        );
+        Ok(())
     }
 
     #[test]

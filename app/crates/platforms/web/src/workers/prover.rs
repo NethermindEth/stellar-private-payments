@@ -84,14 +84,15 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
-    let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
+    let (graph_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
         async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
+            let graph_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/policy_tx_2_2.graph.bin").await?;
             log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
-                wasm_bytes.len()
+                "[{WORKER_NAME}] fetched policy_tx_2_2.graph.bin: {} bytes",
+                graph_bytes.len()
             );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
+            Ok::<Vec<u8>, JsError>(graph_bytes)
         },
         async {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
@@ -130,10 +131,10 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
     )?;
     ensure_sha256_matches(
-        "policy_tx_2_2.wasm",
-        &wasm_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
+        "policy_tx_2_2.graph.bin",
+        &graph_bytes,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_GRAPH_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_GRAPH_SHA256,
     )?;
     ensure_sha256_matches(
         "policy_tx_2_2.r1cs",
@@ -161,7 +162,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
     )?;
 
-    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
+    let witness_calc = WitnessCalculator::new(&graph_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
 
@@ -410,13 +411,18 @@ async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .ok_or_else(|| JsError::new("Origin is not a string"))?;
 
     let public_url = PUBLIC_URL.unwrap_or("/");
+    let path = path.trim_start_matches('/');
 
     let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
-        format!("{public_url}{path}")
+        format!("{}/{path}", public_url.trim_end_matches('/'))
     } else if public_url == "/" {
         format!("{origin}/{path}")
+    } else if public_url.starts_with('/') {
+        format!("{origin}/{}/{path}", public_url.trim_matches('/'))
     } else {
-        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
+        return Err(JsError::new(
+            "PUBLIC_URL must be an absolute URL or root-relative path",
+        ));
     };
 
     log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);

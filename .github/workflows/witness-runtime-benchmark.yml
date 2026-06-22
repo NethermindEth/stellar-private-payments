@@ -1,0 +1,72 @@
+name: Witness runtime benchmark
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  benchmark:
+    timeout-minutes: 180
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Print benchmark environment
+        run: |
+          set -eux
+          git rev-parse HEAD
+          rustc --version
+          cargo --version
+          uname -a
+          lscpu
+
+      - name: Install Circom compiler
+        run: cargo install --git https://github.com/iden3/circom --tag v2.2.3 --locked circom
+
+      - name: Generate matching policy witness graph
+        run: tools/witness-graph/generate-policy-graph.sh
+
+      - name: Generate matching O1 Circom benchmark artifacts
+        run: |
+          set -eux
+          mkdir -p target/witness-runtime-benchmark-o1
+          circom target/witness-graph-builder/circuits-src/policy_tx_2_2.circom \
+            --r1cs \
+            --wasm \
+            --sym \
+            --O1 \
+            -l target/witness-graph-builder/circuits-src \
+            -o target/witness-runtime-benchmark-o1
+          find target/witness-runtime-benchmark-o1 -maxdepth 3 -type f -print
+
+      - name: Run policy witness runtime benchmark
+        run: |
+          set -o pipefail
+          POLICY_BENCH_R1CS="$GITHUB_WORKSPACE/target/witness-runtime-benchmark-o1/policy_tx_2_2.r1cs" \
+          POLICY_BENCH_WASM="$GITHUB_WORKSPACE/target/witness-runtime-benchmark-o1/policy_tx_2_2_js/policy_tx_2_2.wasm" \
+          BUILD_TESTS=1 cargo test -p circuits --release policy_witness_runtime_benchmark -- --ignored --nocapture \
+            | tee witness-runtime-benchmark.log
+
+      - name: Upload benchmark log
+        if: always()
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: witness-runtime-benchmark-log
+          path: |
+            witness-runtime-benchmark.log
+            target/witness-runtime-benchmark-o1/policy_tx_2_2.sym
+          retention-days: 7

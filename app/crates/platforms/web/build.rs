@@ -38,6 +38,17 @@ fn read_file(path: &Path) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("web/build.rs: failed to read {}: {e}", path.display()))
 }
 
+fn target_dir(repo_root: &Path) -> PathBuf {
+    let target_dir = env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| repo_root.join("target"));
+    if target_dir.is_absolute() {
+        target_dir
+    } else {
+        repo_root.join(target_dir)
+    }
+}
+
 fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repo_root = repo_root_from_manifest_dir(&manifest_dir);
@@ -48,7 +59,9 @@ fn main() {
         repo_root.join("deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin");
 
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
-    let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
+    let circuits_out = target_dir(&repo_root)
+        .join("circuits-artifacts")
+        .join(&profile);
 
     if !circuits_out.is_dir() {
         let suggestion = if profile == "release" {
@@ -62,34 +75,35 @@ fn main() {
         );
     }
 
-    let wasm_path = circuits_out.join("policy_tx_2_2.wasm");
+    let graph_path = circuits_out.join("policy_tx_2_2.graph.bin");
     let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
 
     let disclosure_wasm_path = circuits_out.join("selectiveDisclosure_1.wasm");
     let disclosure_r1cs_path = circuits_out.join("selectiveDisclosure_1.r1cs");
 
     println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=CARGO_TARGET_DIR");
     println!("cargo:rerun-if-changed={}", proving_key_path.display());
     println!(
         "cargo:rerun-if-changed={}",
         disclosure_proving_key_path.display()
     );
-    println!("cargo:rerun-if-changed={}", wasm_path.display());
+    println!("cargo:rerun-if-changed={}", graph_path.display());
     println!("cargo:rerun-if-changed={}", r1cs_path.display());
     println!("cargo:rerun-if-changed={}", disclosure_wasm_path.display());
     println!("cargo:rerun-if-changed={}", disclosure_r1cs_path.display());
     println!("cargo:rerun-if-changed=build.rs");
 
     let proving_key_bytes = read_file(&proving_key_path);
+    let graph_bytes = read_file(&graph_path);
     let disclosure_proving_key_bytes = read_file(&disclosure_proving_key_path);
-    let wasm_bytes = read_file(&wasm_path);
     let r1cs_bytes = read_file(&r1cs_path);
     let disclosure_wasm_bytes = read_file(&disclosure_wasm_path);
     let disclosure_r1cs_bytes = read_file(&disclosure_r1cs_path);
 
     let proving_key_hash = sha256(&proving_key_bytes);
+    let graph_hash = sha256(&graph_bytes);
     let disclosure_proving_key_hash = sha256(&disclosure_proving_key_bytes);
-    let wasm_hash = sha256(&wasm_bytes);
     let r1cs_hash = sha256(&r1cs_bytes);
     let disclosure_wasm_hash = sha256(&disclosure_wasm_bytes);
     let disclosure_r1cs_hash = sha256(&disclosure_r1cs_bytes);
@@ -103,11 +117,11 @@ fn main() {
 // Do not edit manually.
 
 pub const EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256: [u8; 32] = {proving_key_hash};
-pub const EXPECTED_POLICY_TX_2_2_WASM_SHA256: [u8; 32] = {wasm_hash};
+pub const EXPECTED_POLICY_TX_2_2_GRAPH_SHA256: [u8; 32] = {graph_hash};
 pub const EXPECTED_POLICY_TX_2_2_R1CS_SHA256: [u8; 32] = {r1cs_hash};
 
 pub const EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN: usize = {proving_key_len};
-pub const EXPECTED_POLICY_TX_2_2_WASM_LEN: usize = {wasm_len};
+pub const EXPECTED_POLICY_TX_2_2_GRAPH_LEN: usize = {graph_len};
 pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
 
 pub const EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256: [u8; 32] = {disclosure_proving_key_hash};
@@ -119,10 +133,10 @@ pub const EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN: usize = {disclosure_wasm_len
 pub const EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN: usize = {disclosure_r1cs_len};
 ",
         proving_key_hash = fmt_u8_array(&proving_key_hash),
-        wasm_hash = fmt_u8_array(&wasm_hash),
+        graph_hash = fmt_u8_array(&graph_hash),
         r1cs_hash = fmt_u8_array(&r1cs_hash),
         proving_key_len = proving_key_bytes.len(),
-        wasm_len = wasm_bytes.len(),
+        graph_len = graph_bytes.len(),
         r1cs_len = r1cs_bytes.len(),
         disclosure_proving_key_hash = fmt_u8_array(&disclosure_proving_key_hash),
         disclosure_wasm_hash = fmt_u8_array(&disclosure_wasm_hash),

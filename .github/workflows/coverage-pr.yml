@@ -30,9 +30,11 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
       - uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
       - name: Build circuit artifacts (required by web)
-        run: cargo build -p circuits
-      - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
+        run: BUILD_TESTS=1 cargo build -p circuits
+      - run: BUILD_TESTS=1 cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
         uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
@@ -97,14 +99,16 @@ jobs:
       - name: Install cargo-llvm-cov (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
         uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
+        with:
+          tool: cargo-llvm-cov
 
       - name: Build circuit artifacts (required by web) (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        run: cargo build -p circuits
+        run: BUILD_TESTS=1 cargo build -p circuits
 
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        run: cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
+        run: BUILD_TESTS=1 cargo llvm-cov --workspace --lcov --output-path base.lcov.info --ignore-filename-regex '^examples/'
 
       # 3) Extract base coverage (from artifact or from freshly computed fallback)
       - name: Extract total coverage % (base)

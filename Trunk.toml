@@ -21,18 +21,26 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p $TRUNK_STAGING_DIR/circuits
+set -eu
+
+mkdir -p "$TRUNK_STAGING_DIR/circuits"
 
 # Circuit artifacts from a deterministic publish directory
 #
 # `circuits/build.rs` publishes to:
 #   target/circuits-artifacts/<profile>/{name}.r1cs
-#   target/circuits-artifacts/<profile>/{name}.wasm
+#   target/circuits-artifacts/<profile>/{name}.graph.bin
+#   target/circuits-artifacts/<profile>/{name}.graph.manifest
 #
 # Prefer the artifacts which match the active Trunk build profile. Trunk exposes
 # the selected profile to hooks via `TRUNK_PROFILE`.
 PROFILE="${TRUNK_PROFILE:-release}"
-CIRCUIT_OUT="target/circuits-artifacts/$PROFILE"
+TARGET_DIR="${CARGO_TARGET_DIR:-target}"
+case "$TARGET_DIR" in
+    /*) ;;
+    *) TARGET_DIR="$(pwd)/$TARGET_DIR" ;;
+esac
+CIRCUIT_OUT="$TARGET_DIR/circuits-artifacts/$PROFILE"
 
 if [ ! -d "$CIRCUIT_OUT" ]; then
     echo "trunk:error: missing circuit artifacts dir: $CIRCUIT_OUT" >&2
@@ -44,12 +52,14 @@ if [ ! -d "$CIRCUIT_OUT" ]; then
     exit 1
 fi
 
-cp "$CIRCUIT_OUT"/*.r1cs $TRUNK_STAGING_DIR/circuits/
-cp "$CIRCUIT_OUT"/*.wasm $TRUNK_STAGING_DIR/circuits/
+cp "$CIRCUIT_OUT"/*.r1cs "$TRUNK_STAGING_DIR/circuits/"
+cp "$CIRCUIT_OUT"/*.wasm "$TRUNK_STAGING_DIR/circuits/"
+cp "$CIRCUIT_OUT"/*.graph.bin "$TRUNK_STAGING_DIR/circuits/"
+cp "$CIRCUIT_OUT"/*.graph.manifest "$TRUNK_STAGING_DIR/circuits/"
 
 # Static files
-cp app/admin.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
-cp app/disclosure.html $TRUNK_STAGING_DIR/ 2>/dev/null || true
+cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
+cp app/disclosure.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 
 # Distribution legal files (licenses + notices).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"

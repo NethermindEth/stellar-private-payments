@@ -31,6 +31,7 @@ ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] 
 ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
 ark-ff = { version = "0.6.0", default-features = false }
 ark-groth16 = { version = "0.6.0", default-features = false }
+ark-poly = { version = "0.6.0", default-features = false }
 ark-relations = { version = "0.6.0", default-features = false }
 ark-serialize = { version = "0.6.0", default-features = false }
 ark-snark = { version = "0.6.0", default-features = false }
@@ -39,6 +40,7 @@ asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.89", default-features = false }
 cfg-if = { version = "1", default-features = false }
+circom-witness-rs = { version = "0.2.3", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
@@ -56,6 +58,7 @@ pool = { path = "contracts/pool" }
 prover = { path = "app/crates/core/prover" }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
 rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+ruint = { version = "1.18", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false }
