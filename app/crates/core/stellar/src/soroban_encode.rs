@@ -276,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_account_encoding_matches_contracttype_xdr() {
+    fn account_encoding_matches_contracttype_xdr() {
         let env = Env::default();
         let owner = Address::from_str(&env, TEST_ACCOUNT);
         let encryption_key = Bytes::from_array(&env, &[0xEE; 32]);
