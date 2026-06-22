@@ -3,7 +3,7 @@
 use super::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use stellar::{
-    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr, auth_sign_steps,
+    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, auth_sign_steps,
     unsigned_tx_for_signing,
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
@@ -95,9 +95,8 @@ pub async fn sign_prepared_transaction(
             Some(total),
         );
         let preimage_b64 = step
-            .preimage
-            .to_xdr_base64(Limits::none())
-            .map_err(|e| JsError::new(&format!("encode auth preimage xdr: {e}")))?;
+            .wallet_preimage_b64()
+            .map_err(|e| JsError::new(&e.to_string()))?;
         let sig_b64 = wallet_call(
             "signAuthEntry",
             &[

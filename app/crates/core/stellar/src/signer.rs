@@ -19,7 +19,6 @@
 use anyhow::{Context, Result, anyhow, bail};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature as DalekSignature, Signer as _, SigningKey, Verifier, VerifyingKey};
-use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use stellar_strkey::ed25519::{self, PrivateKey};
 use stellar_xdr::curr::{
@@ -30,9 +29,9 @@ use stellar_xdr::curr::{
 
 use crate::{contract_state::PreparedSorobanTx, conversions::scval_to_address_string};
 
-pub const AUTH_EXPIRATION_LEDGERS: u32 = 100;
+const AUTH_EXPIRATION_LEDGERS: u32 = 100;
 
-pub fn network_id(network_passphrase: &str) -> [u8; 32] {
+fn network_id(network_passphrase: &str) -> [u8; 32] {
     Sha256::digest(network_passphrase.as_bytes()).into()
 }
 
@@ -109,7 +108,7 @@ impl LocalSigner {
     /// Signs a v1 transaction envelope and appends a `DecoratedSignature`.
     pub fn sign_transaction(
         &self,
-        envelope: &mut TransactionEnvelope,
+        mut envelope: TransactionEnvelope,
         network_passphrase: &str,
     ) -> Result<TransactionEnvelope> {
         let tx_hash = envelope
@@ -132,7 +131,7 @@ impl LocalSigner {
             ),
         };
 
-        match envelope {
+        match &mut envelope {
             TransactionEnvelope::Tx(v1) => {
                 let mut signatures = v1.signatures.to_vec();
                 signatures.push(decorated);
@@ -141,7 +140,7 @@ impl LocalSigner {
             _ => bail!("unsupported transaction envelope (expected v1)"),
         }
 
-        Ok(envelope.clone())
+        Ok(envelope)
     }
 
     /// Signs a prepared transaction (auth entries + envelope).
@@ -160,18 +159,26 @@ impl LocalSigner {
             auth_signatures.push((step.entry_index, self.sign_auth_preimage(&step.preimage)?));
         }
         let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)?;
-        let mut envelope = TransactionEnvelope::from_xdr_base64(&tx_b64, Limits::none())
+        let envelope = TransactionEnvelope::from_xdr_base64(&tx_b64, Limits::none())
             .context("invalid tx xdr")?;
-        self.sign_transaction(&mut envelope, network_passphrase)
+        self.sign_transaction(envelope, network_passphrase)
     }
 }
 
 /// One Soroban auth preimage the wallet must sign (`signAuthEntry`).
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub struct AuthSignStep {
     pub entry_index: usize,
-    pub preimage: HashIdPreimage,
+    preimage: HashIdPreimage,
+}
+
+impl AuthSignStep {
+    /// Base64 XDR for Freighter `signAuthEntry`.
+    pub fn wallet_preimage_b64(&self) -> Result<String> {
+        self.preimage
+            .to_xdr_base64(Limits::none())
+            .context("encode auth preimage xdr")
+    }
 }
 
 /// Auth preimage steps required for `user_address` on a prepared transaction.
@@ -280,6 +287,68 @@ fn apply_address_auth_signature(
     Ok(())
 }
 
+fn needs_wallet_auth(entry: &SorobanAuthorizationEntry, address: &str) -> Result<bool> {
+    let SorobanCredentials::Address(creds) = &entry.credentials else {
+        return Ok(false);
+    };
+    if !matches!(creds.signature, ScVal::Void) {
+        return Ok(false);
+    }
+    Ok(scval_to_address_string(&ScVal::Address(creds.address.clone()))? == address)
+}
+
+fn address_credentials_signature(public_key: &[u8; 32], signature: &Signature) -> Result<ScVal> {
+    let public_key_bytes: xdr::BytesM = public_key
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("public key bytes"))?;
+    let signature_bytes: xdr::BytesM = signature
+        .as_bytes()
+        .as_slice()
+        .try_into()
+        .map_err(|_| anyhow!("signature bytes"))?;
+
+    let ed25519_sig = ScVal::Map(Some(
+        ScMap::sorted_from([
+            (
+                ScVal::Symbol(
+                    ScSymbol::try_from("public_key").map_err(|()| anyhow!("public_key symbol"))?,
+                ),
+                ScVal::Bytes(ScBytes(public_key_bytes)),
+            ),
+            (
+                ScVal::Symbol(
+                    ScSymbol::try_from("signature").map_err(|()| anyhow!("signature symbol"))?,
+                ),
+                ScVal::Bytes(ScBytes(signature_bytes)),
+            ),
+        ])
+        .context("auth signature map")?,
+    ));
+
+    let sc_vec = xdr::ScVec::try_from(vec![ed25519_sig]).context("auth signature vec")?;
+    Ok(ScVal::Vec(Some(sc_vec)))
+}
+
+fn patch_auth_entries(
+    envelope: &mut TransactionEnvelope,
+    signed_auth: Vec<SorobanAuthorizationEntry>,
+) -> Result<()> {
+    let xdr::TransactionEnvelope::Tx(v1) = envelope else {
+        bail!("unsupported transaction envelope (expected v1)");
+    };
+
+    for op in v1.tx.operations.iter_mut() {
+        let OperationBody::InvokeHostFunction(invoke) = &mut op.body else {
+            continue;
+        };
+        invoke.auth = VecM::try_from(signed_auth).context("attach signed auth entries")?;
+        return Ok(());
+    }
+
+    bail!("no invokeHostFunction operation found to attach auth entries");
+}
+
 /// Hash signed over when the signature at `signature_index` was created.
 fn tx_hash_for_signature(
     signed_envelope: &TransactionEnvelope,
@@ -343,68 +412,6 @@ pub fn verify_tx(
         .verify(&tx_hash, &signature)
         .map_err(|e| anyhow!("transaction signature invalid: {e}"))?;
     Ok(())
-}
-
-fn needs_wallet_auth(entry: &SorobanAuthorizationEntry, address: &str) -> Result<bool> {
-    let SorobanCredentials::Address(creds) = &entry.credentials else {
-        return Ok(false);
-    };
-    if !matches!(creds.signature, ScVal::Void) {
-        return Ok(false);
-    }
-    Ok(scval_to_address_string(&ScVal::Address(creds.address.clone()))? == address)
-}
-
-fn address_credentials_signature(public_key: &[u8; 32], signature: &Signature) -> Result<ScVal> {
-    let public_key_bytes: xdr::BytesM = public_key
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow!("public key bytes"))?;
-    let signature_bytes: xdr::BytesM = signature
-        .as_bytes()
-        .as_slice()
-        .try_into()
-        .map_err(|_| anyhow!("signature bytes"))?;
-
-    let ed25519_sig = ScVal::Map(Some(
-        ScMap::sorted_from([
-            (
-                ScVal::Symbol(
-                    ScSymbol::try_from("public_key").map_err(|()| anyhow!("public_key symbol"))?,
-                ),
-                ScVal::Bytes(ScBytes(public_key_bytes)),
-            ),
-            (
-                ScVal::Symbol(
-                    ScSymbol::try_from("signature").map_err(|()| anyhow!("signature symbol"))?,
-                ),
-                ScVal::Bytes(ScBytes(signature_bytes)),
-            ),
-        ])
-        .context("auth signature map")?,
-    ));
-
-    let sc_vec = xdr::ScVec::try_from(vec![ed25519_sig]).context("auth signature vec")?;
-    Ok(ScVal::Vec(Some(sc_vec)))
-}
-
-fn patch_auth_entries(
-    envelope: &mut TransactionEnvelope,
-    signed_auth: Vec<SorobanAuthorizationEntry>,
-) -> Result<()> {
-    let xdr::TransactionEnvelope::Tx(v1) = envelope else {
-        bail!("unsupported transaction envelope (expected v1)");
-    };
-
-    for op in v1.tx.operations.iter_mut() {
-        let OperationBody::InvokeHostFunction(invoke) = &mut op.body else {
-            continue;
-        };
-        invoke.auth = VecM::try_from(signed_auth).context("attach signed auth entries")?;
-        return Ok(());
-    }
-
-    bail!("no invokeHostFunction operation found to attach auth entries");
 }
 
 #[cfg(test)]
@@ -485,9 +492,9 @@ mod tests {
     #[test]
     fn sign_verify() {
         let signer = test_signer();
-        let mut envelope = test_fixtures::empty_envelope();
+        let envelope = test_fixtures::empty_envelope();
         let signed = signer
-            .sign_transaction(&mut envelope, TEST_PASSPHRASE)
+            .sign_transaction(envelope, TEST_PASSPHRASE)
             .expect("sign tx");
         verify_tx(&signed, TEST_PASSPHRASE, signer.public_key(), 0).expect("verify tx");
     }
