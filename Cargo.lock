@@ -1895,6 +1895,7 @@ dependencies = [
  "rand_core",
  "serde",
  "sha2 0.10.9",
+ "signature",
  "subtle",
  "zeroize",
 ]
@@ -4769,6 +4770,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "contract-types",
+ "ed25519-dalek",
  "futures",
  "gloo-timers",
  "http",
@@ -4778,6 +4780,7 @@ dependencies = [
  "serde",
  "serde-aux",
  "serde_json",
+ "sha2 0.11.0",
  "sha3 0.11.0",
  "soroban-sdk",
  "stellar-strkey 0.0.16",

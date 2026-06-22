@@ -16,9 +16,11 @@ reqwest = { workspace = true }
 serde = { workspace = true }
 serde-aux = "4.7.0"
 serde_json = { workspace = true }
+ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
+sha2 = { workspace = true }
 sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.16"
-stellar-xdr = { version = "26.0.0", features = ["curr", "serde", "base64"] }
+stellar-xdr = { version = "26.0.0", features = ["curr", "serde", "base64", "std", "alloc"] }
 thiserror = { workspace = true }
 types = { workspace = true }
 
