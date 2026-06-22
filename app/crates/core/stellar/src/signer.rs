@@ -15,6 +15,7 @@
 //! orchestration via [`sign_prepared_tx_with`] and [`LocalSigner`].
 
 use anyhow::{Context, Result, anyhow, bail};
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature as DalekSignature, Signer as _, SigningKey, Verifier, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -42,6 +43,15 @@ impl Signature {
 
     pub const fn from_bytes(bytes: [u8; 64]) -> Self {
         Self(bytes)
+    }
+
+    pub fn from_base64(s: &str) -> Result<Self> {
+        let bytes = STANDARD.decode(s).context("base64 decode failed")?;
+        let sig: [u8; 64] = bytes
+            .as_slice()
+            .try_into()
+            .context("signature must be 64 bytes")?;
+        Ok(Self::from_bytes(sig))
     }
 
     pub const fn as_bytes(&self) -> &[u8; 64] {
@@ -134,13 +144,13 @@ impl LocalSigner {
         Ok(envelope.clone())
     }
 
-    /// Signs an unsigned transaction envelope XDR (base64).
-    pub fn sign_transaction_xdr(
+    /// Signs an unsigned transaction envelope (base64).
+    pub fn sign_transaction(
         &self,
-        tx_xdr_b64: &str,
+        tx_b64: &str,
         network_passphrase: &str,
     ) -> Result<TransactionEnvelope> {
-        let mut envelope = TransactionEnvelope::from_xdr_base64(tx_xdr_b64, Limits::none())
+        let mut envelope = TransactionEnvelope::from_xdr_base64(tx_b64, Limits::none())
             .context("invalid tx xdr")?;
         self.sign_transaction_envelope(&mut envelope, network_passphrase)
     }
@@ -160,7 +170,7 @@ impl LocalSigner {
             network_passphrase,
             user_address,
             |preimage_b64| self.sign_auth_preimage_b64(preimage_b64),
-            |tx_xdr_b64| self.sign_transaction_xdr(tx_xdr_b64, network_passphrase),
+            |tx_b64| self.sign_transaction(tx_b64, network_passphrase),
         )
     }
 }
@@ -194,9 +204,8 @@ pub fn auth_sign_steps(
     Ok(steps)
 }
 
-/// Unsigned transaction envelope XDR (base64) with signed auth entries
-/// attached.
-pub fn unsigned_tx_xdr_for_signing(
+/// Unsigned transaction envelope (base64) with signed auth entries attached.
+pub fn unsigned_tx_for_signing(
     prepared: &PreparedSorobanTx,
     user_address: &str,
     auth_signatures: &[(usize, Signature)],
@@ -245,7 +254,7 @@ pub fn sign_prepared_tx_with(
     network_passphrase: &str,
     user_address: &str,
     sign_auth_preimage_b64: impl Fn(&str) -> Result<Signature>,
-    sign_transaction_xdr_b64: impl FnOnce(&str) -> Result<TransactionEnvelope>,
+    sign_transaction_b64: impl FnOnce(&str) -> Result<TransactionEnvelope>,
 ) -> Result<TransactionEnvelope> {
     let steps = auth_sign_steps(prepared, network_passphrase, user_address)?;
     let mut auth_signatures = Vec::with_capacity(steps.len());
@@ -255,8 +264,8 @@ pub fn sign_prepared_tx_with(
             sign_auth_preimage_b64(&step.preimage_b64)?,
         ));
     }
-    let tx_xdr = unsigned_tx_xdr_for_signing(prepared, user_address, &auth_signatures)?;
-    sign_transaction_xdr_b64(&tx_xdr)
+    let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)?;
+    sign_transaction_b64(&tx_b64)
 }
 
 fn auth_expiration_ledger(prepared: &PreparedSorobanTx) -> u32 {
@@ -443,6 +452,20 @@ mod tests {
         let signing_key = SigningKey::from_bytes(&[7u8; 32]);
         let secret = PrivateKey(signing_key.to_bytes()).to_string().to_string();
         LocalSigner::from_secret(&secret).expect("fixture signer")
+    }
+
+    #[test]
+    fn from_base64_roundtrip() {
+        let bytes = [42u8; 64];
+        let b64 = STANDARD.encode(bytes);
+        let sig = Signature::from_base64(&b64).expect("decode");
+        assert_eq!(sig, Signature::from_bytes(bytes));
+    }
+
+    #[test]
+    fn from_base64_rejects_wrong_length() {
+        let b64 = STANDARD.encode([1u8; 32]);
+        assert!(Signature::from_base64(&b64).is_err());
     }
 
     #[test]

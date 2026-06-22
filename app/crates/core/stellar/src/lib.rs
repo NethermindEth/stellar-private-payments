@@ -17,7 +17,8 @@ pub use rpc::{Client, Error as RpcError, GetTransactionResponse, SendTransaction
 pub use signer::{
     AUTH_EXPIRATION_LEDGERS, AuthSignStep, LocalSigner, Signature, apply_address_auth_signature,
     auth_sign_steps, needs_wallet_auth, network_id, patch_auth_entries, sign_prepared_tx_with,
-    soroban_auth_preimage_b64, unsigned_tx_xdr_for_signing, verify_tx,
+    soroban_auth_preimage_b64, unsigned_tx_for_signing, verify_tx,
 };
-pub use submit::{parse_transaction_envelope_xdr, submit_and_confirm};
+pub use stellar_xdr::curr::{Limits, ReadXdr, TransactionEnvelope};
+pub use submit::{TxConfirmStatus, confirm_tx, submit_tx};
 pub use tx_prepare::PoolTransactInput;

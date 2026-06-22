@@ -15,7 +15,7 @@ use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
 use stellar::{
     OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
-    StateFetcher as CoreStateFetcher,
+    StateFetcher as CoreStateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
 };
 use types::{
     AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
@@ -26,6 +26,9 @@ use wasm_bindgen::{JsCast, prelude::*};
 
 mod sign;
 mod transact;
+
+const CONFIRM_POLL_ATTEMPTS: u32 = 30;
+const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 
 fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
     match result {
@@ -118,6 +121,18 @@ impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
 }
 
 impl WebClient {
+    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            storage_bridge: StorageWorker::spawner()
+                .as_module(true)
+                .spawn("./js/storage-worker.js"),
+            prover_bridge: ProverWorker::spawner()
+                .as_module(true)
+                .spawn("./js/prover-worker.js"),
+            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
+        })
+    }
+
     async fn prepare_pool_tx(
         &self,
         pool_contract_id: &str,
@@ -138,6 +153,49 @@ impl WebClient {
             )
             .await
             .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    pub(super) async fn submit_tx(
+        &self,
+        signed: &TransactionEnvelope,
+        flow: &'static str,
+        on_status: &Option<Function>,
+    ) -> Result<String, JsError> {
+        let rpc = self.fetcher.rpc();
+        let hash = submit_tx(signed, rpc)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+            emit_progress(
+                on_status,
+                flow,
+                "confirm",
+                "Confirming…",
+                Some(attempt),
+                Some(CONFIRM_POLL_ATTEMPTS),
+            );
+            TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
+            match confirm_tx(&hash, rpc)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?
+            {
+                TxConfirmStatus::Success => return Ok(hash),
+                TxConfirmStatus::Failed { detail } => {
+                    return Err(JsError::new(&format!("transaction failed{detail}")));
+                }
+                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
+                    return Err(JsError::new(&format!(
+                        "transaction confirmation timed out after 30s (hash: {hash})"
+                    )));
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+
+        Err(JsError::new(&format!(
+            "transaction confirmation failed (hash: {hash})"
+        )))
     }
 
     async fn finalize_prepared_prover_tx(
@@ -166,18 +224,6 @@ impl WebClient {
             )
             .await?;
         Ok(prepared)
-    }
-
-    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
-        Ok(Self {
-            storage_bridge: StorageWorker::spawner()
-                .as_module(true)
-                .spawn("./js/storage-worker.js"),
-            prover_bridge: ProverWorker::spawner()
-                .as_module(true)
-                .spawn("./js/prover-worker.js"),
-            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
-        })
     }
 
     pub async fn ping_storage(&self) -> anyhow::Result<()> {
@@ -299,14 +345,16 @@ impl WebClient {
             .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        self.sign_and_submit(
+        let signed_tx = sign::sign_prepared_tx(
             &prepared,
-            &user_address,
             &network_passphrase,
+            &user_address,
             "register",
             &on_status,
         )
-        .await
+        .await?;
+        emit_progress(&on_status, "register", "submit", "Submitting…", None, None);
+        self.submit_tx(&signed_tx, "register", &on_status).await
     }
 
     #[wasm_bindgen(js_name = keyDerivationMessage)]
