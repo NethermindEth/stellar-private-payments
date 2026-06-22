@@ -114,6 +114,8 @@ CREATE TABLE public_keys (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
+CREATE INDEX IF NOT EXISTS idx_public_keys_owner ON public_keys (owner);
+
 -- Leaves of the ASP membership Merkle tree observed on-chain.
 --
 -- Used to reconstruct membership proofs locally for proving.

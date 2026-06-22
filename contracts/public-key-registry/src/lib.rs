@@ -36,6 +36,19 @@ pub struct PublicKeyEvent {
     pub note_key: Bytes,
 }
 
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum DataKey {
+    Registration(Address),
+}
+
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Registration {
+    encryption_key: Bytes,
+    note_key: Bytes,
+}
+
 /// Public key registry contract.
 ///
 /// Emits one global registration event stream for user key discovery across
@@ -48,6 +61,25 @@ impl PublicKeyRegistry {
     /// Register a user's public encryption and note keys.
     pub fn register(env: Env, account: Account) {
         account.owner.require_auth();
+        assert_eq!(account.encryption_key.len(), 32);
+        assert_eq!(account.note_key.len(), 32);
+
+        let key = DataKey::Registration(account.owner.clone());
+        let next = Registration {
+            encryption_key: account.encryption_key.clone(),
+            note_key: account.note_key.clone(),
+        };
+
+        if env
+            .storage()
+            .persistent()
+            .get::<DataKey, Registration>(&key)
+            == Some(next.clone())
+        {
+            return;
+        }
+
+        env.storage().persistent().set(&key, &next);
         PublicKeyEvent {
             owner: account.owner,
             encryption_key: account.encryption_key,
