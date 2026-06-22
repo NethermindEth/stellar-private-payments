@@ -16,9 +16,9 @@ use stellar_private_payments_sdk::{
     chain::{OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher},
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
-        AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
-        EncryptionPublicKey, ExtAmount, ExtData, Field, KeyDerivationSignature, NoteAmount,
-        NotePublicKey, SyncMetadata, ContractsEventData, parse_0x_hex_32,
+        AspMembershipSync, ContractConfig, ContractsEventData, DisclosureReceipt,
+        DisclosureVerificationReport, EncryptionPublicKey, ExtAmount, ExtData, Field,
+        KeyDerivationSignature, NoteAmount, NotePublicKey, SyncMetadata, parse_0x_hex_32,
     },
 };
 use wasm_bindgen::{JsCast, prelude::*};
@@ -804,9 +804,7 @@ impl WebClient {
 
 #[async_trait::async_trait(?Send)]
 impl stellar_private_payments_sdk::chain::ContractDataStorage for WebClient {
-    async fn get_sync_state(
-        &self,
-    ) -> anyhow::Result<Vec<SyncMetadata>> {
+    async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
         match resp {
@@ -816,10 +814,7 @@ impl stellar_private_payments_sdk::chain::ContractDataStorage for WebClient {
         }
     }
 
-    async fn save_events_batch(
-        &self,
-        data: ContractsEventData,
-    ) -> anyhow::Result<()> {
+    async fn save_events_batch(&self, data: ContractsEventData) -> anyhow::Result<()> {
         let mut bridge = self.storage_bridge.fork();
         let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
         match resp {

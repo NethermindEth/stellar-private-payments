@@ -1,4 +1,4 @@
-//! Stellar Private Payments SDK client
+//! Stellar Private Payments chain RPC client
 
 use anyhow::Result;
 use stellar::StateFetcher;

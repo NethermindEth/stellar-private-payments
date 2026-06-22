@@ -4793,8 +4793,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "prover",
+ "serde",
  "state",
  "stellar",
+ "thiserror 2.0.18",
+ "tx-planner",
  "types",
  "witness",
 ]
