@@ -24,6 +24,7 @@ use types::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
+mod sign;
 mod transact;
 
 fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
@@ -117,7 +118,7 @@ impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
 }
 
 impl WebClient {
-    async fn prepare_pool_soroban_tx(
+    async fn prepare_pool_tx(
         &self,
         pool_contract_id: &str,
         user_address: &str,
@@ -156,7 +157,7 @@ impl WebClient {
             None,
         );
         prepared.soroban_tx = self
-            .prepare_pool_soroban_tx(
+            .prepare_pool_tx(
                 pool_contract_id,
                 user_address,
                 prepared.proof_uncompressed.clone(),
@@ -281,14 +282,16 @@ impl WebClient {
         )?)
     }
 
-    #[wasm_bindgen(js_name = prepareRegisterPublicKeys)]
-    pub async fn prepare_register_public_keys(
+    #[wasm_bindgen(js_name = registerPublicKeys)]
+    pub async fn register_public_keys(
         &self,
         pool_contract_id: String,
         user_address: String,
         note_public_key_hex: String,
         encryption_public_key_hex: String,
-    ) -> Result<JsValue, JsError> {
+        network_passphrase: String,
+        on_status: Option<Function>,
+    ) -> Result<String, JsError> {
         let note_key = parse_hex32(&note_public_key_hex, "note public key")?;
         let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
         let prepared = self
@@ -296,7 +299,14 @@ impl WebClient {
             .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&prepared)?)
+        self.sign_and_submit(
+            &prepared,
+            &user_address,
+            &network_passphrase,
+            "register",
+            &on_status,
+        )
+        .await
     }
 
     #[wasm_bindgen(js_name = keyDerivationMessage)]
@@ -452,7 +462,7 @@ impl WebClient {
         user_address: String,
         amount: BigInt,
         output_amounts: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         let result = self
@@ -461,7 +471,7 @@ impl WebClient {
                 user_address,
                 amount,
                 output_amounts,
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -490,7 +500,7 @@ impl WebClient {
         amount: BigInt,
         recipient_note_key_hex: String,
         recipient_enc_key_hex: String,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         use tx_planner::SpendTarget;
@@ -508,7 +518,7 @@ impl WebClient {
                 amount,
                 target,
                 "transfer",
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -523,7 +533,7 @@ impl WebClient {
         user_address: String,
         withdraw_recipient: String,
         amount: BigInt,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         use tx_planner::SpendTarget;
@@ -537,7 +547,7 @@ impl WebClient {
                 amount,
                 target,
                 "withdraw",
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -556,7 +566,7 @@ impl WebClient {
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         let result = self
@@ -569,7 +579,7 @@ impl WebClient {
                 output_amounts,
                 out_recipient_note_keys_hex,
                 out_recipient_enc_keys_hex,
-                submit_fn,
+                network_passphrase,
                 on_status,
                 "transact",
             )

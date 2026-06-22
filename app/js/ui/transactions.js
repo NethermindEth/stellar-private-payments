@@ -2,13 +2,12 @@
  * Transactions UI - Deposit / Withdraw / Transfer / Transact.
  *
  * WASM-first: all proving + tx preparation happens in WebClient.
- * JS is responsible only for UI interactions and signing/submitting prepared XDR.
+ * JS is responsible only for UI interactions; signing and submit run in WASM.
  *
  * @module ui/transactions
  */
 
 import { getHandle } from '../wasm-facade.js';
-import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
@@ -208,12 +207,26 @@ function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId 
     update();
 }
 
-function makePoolSubmitFn(userAddress, onStatus) {
-    return proved => submitPreparedSorobanTx(proved.sorobanTx, {
-        address: userAddress,
-        rpcUrl: App.state.wallet.sorobanRpcUrl,
-        networkPassphrase: App.state.wallet.networkPassphrase,
-    }, { onStatus });
+async function prepareExecuteContext(btn) {
+    requireWalletReady();
+    const userAddress = App.state.wallet.address;
+    const networkPassphrase = App.state.wallet.networkPassphrase;
+    if (!networkPassphrase) {
+        throw new Error('Wallet network passphrase unavailable');
+    }
+    setLoading(btn, 'Validating…');
+    const onStatus = p => p?.message && setLoadingText(btn, p.message);
+    const config = await getContractConfig();
+    const poolContractId = getActivePoolContractId(config);
+    const client = getHandle().webClient;
+    return {
+        btn,
+        userAddress,
+        poolContractId,
+        networkPassphrase,
+        onStatus,
+        client,
+    };
 }
 
 function showSubmittedToasts(hashes) {
@@ -265,25 +278,6 @@ async function requirePlanApproval(poolContractId, userAddress, amountStroops) {
         if (!ok) return null;
     }
     return stepCount;
-}
-
-async function prepareExecuteContext(btn) {
-    requireWalletReady();
-    const userAddress = App.state.wallet.address;
-    setLoading(btn, 'Validating…');
-    const onStatus = p => p?.message && setLoadingText(btn, p.message);
-    const config = await getContractConfig();
-    const poolContractId = getActivePoolContractId(config);
-    const submitFn = makePoolSubmitFn(userAddress, onStatus);
-    const client = getHandle().webClient;
-    return {
-        btn,
-        userAddress,
-        poolContractId,
-        submitFn,
-        onStatus,
-        client,
-    };
 }
 
 async function executeFromAmount(ctx, { btn, amountInputId, run }) {
@@ -617,7 +611,7 @@ export const Transactions = {
                     ctx.userAddress,
                     amountStroops,
                     outputAmounts,
-                    ctx.submitFn,
+                    ctx.networkPassphrase,
                     ctx.onStatus,
                 );
 
@@ -668,7 +662,7 @@ export const Transactions = {
                         [0n, 0n],
                         [null, null],
                         [null, null],
-                        ctx.submitFn,
+                        ctx.networkPassphrase,
                         ctx.onStatus,
                     );
                 } else {
@@ -680,7 +674,7 @@ export const Transactions = {
                             c.userAddress,
                             recipient,
                             amountStroops,
-                            c.submitFn,
+                            c.networkPassphrase,
                             c.onStatus,
                         ),
                     });
@@ -743,7 +737,7 @@ export const Transactions = {
                         outputAmounts,
                         [recipientNoteKey, recipientNoteKey],
                         [recipientEncKey, recipientEncKey],
-                        ctx.submitFn,
+                        ctx.networkPassphrase,
                         ctx.onStatus,
                     );
                 } else {
@@ -756,7 +750,7 @@ export const Transactions = {
                             amountStroops,
                             recipientNoteKey,
                             recipientEncKey,
-                            c.submitFn,
+                            c.networkPassphrase,
                             c.onStatus,
                         ),
                     });
@@ -824,7 +818,7 @@ export const Transactions = {
                     outputAmounts,
                     noteKeys,
                     encKeys,
-                    ctx.submitFn,
+                    ctx.networkPassphrase,
                     ctx.onStatus,
                 );
                 showExecuteResult(hashes);

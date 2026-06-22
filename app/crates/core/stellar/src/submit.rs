@@ -9,7 +9,14 @@ const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_SECS: u64 = 1;
 
 /// Sends a signed transaction and polls until success or failure.
-pub async fn submit_and_confirm(signed: &TransactionEnvelope, rpc: &Client) -> Result<String> {
+///
+/// `on_poll`, when provided, is invoked at the start of each confirmation poll
+/// with `(current_attempt, max_attempts)`.
+pub async fn submit_and_confirm(
+    signed: &TransactionEnvelope,
+    rpc: &Client,
+    mut on_poll: Option<&mut dyn FnMut(u32, u32)>,
+) -> Result<String> {
     let send = rpc
         .send_transaction(signed)
         .await
@@ -20,6 +27,9 @@ pub async fn submit_and_confirm(signed: &TransactionEnvelope, rpc: &Client) -> R
     }
 
     for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+        if let Some(cb) = on_poll.as_deref_mut() {
+            cb(attempt, CONFIRM_POLL_ATTEMPTS);
+        }
         confirm_sleep().await;
         let status = rpc
             .get_transaction(&hash)

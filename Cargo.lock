@@ -5852,6 +5852,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "console_error_panic_hook",
  "disclosure",
  "futures",
@@ -5868,6 +5869,8 @@ dependencies = [
  "sqlite-wasm-vfs",
  "state",
  "stellar",
+ "stellar-strkey 0.0.16",
+ "stellar-xdr",
  "tokio",
  "tx-planner",
  "types",
