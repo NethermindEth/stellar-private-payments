@@ -4,7 +4,7 @@
 use super::{
     WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
     parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
-    parse_u32_decimal, sign::sign_prepared_tx,
+    parse_u32_decimal, sign::sign_prepared_transaction,
 };
 use crate::protocol::{
     PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
@@ -336,7 +336,7 @@ impl WebClient {
             (Some(current), Some(total)) => format!("Submitting step {current}/{total}…"),
             _ => "Submitting…".to_string(),
         };
-        let signed_tx = sign_prepared_tx(
+        let signed_tx = sign_prepared_transaction(
             &prepared.soroban_tx,
             &ctx.network_passphrase,
             &ctx.user_address,

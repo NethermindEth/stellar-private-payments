@@ -345,7 +345,7 @@ impl WebClient {
             .prepare_register(&pool_contract_id, &user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        let signed_tx = sign::sign_prepared_tx(
+        let signed_tx = sign::sign_prepared_transaction(
             &prepared,
             &network_passphrase,
             &user_address,

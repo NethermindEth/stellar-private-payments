@@ -3,7 +3,7 @@
 use super::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use stellar::{
-    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, auth_sign_steps,
+    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr, auth_sign_steps,
     unsigned_tx_for_signing,
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
@@ -71,7 +71,7 @@ async fn wallet_call(method: &str, args: &[JsValue]) -> Result<String, JsError> 
 }
 
 /// Signs a prepared Soroban transaction via Freighter.
-pub async fn sign_prepared_tx(
+pub async fn sign_prepared_transaction(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
     user_address: &str,
@@ -94,10 +94,14 @@ pub async fn sign_prepared_tx(
             Some(current),
             Some(total),
         );
+        let preimage_b64 = step
+            .preimage
+            .to_xdr_base64(Limits::none())
+            .map_err(|e| JsError::new(&format!("encode auth preimage xdr: {e}")))?;
         let sig_b64 = wallet_call(
             "signAuthEntry",
             &[
-                step.preimage_b64.as_str().into(),
+                preimage_b64.as_str().into(),
                 wallet_opts(user_address, network_passphrase).into(),
             ],
         )
