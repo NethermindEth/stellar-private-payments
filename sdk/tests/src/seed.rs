@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use stellar_private_payments_sdk::{
     TransactChainContext,
-    storage::Storage,
+    state::Storage,
     tx::{crypto, encryption, merkle::MerklePrefixTree},
 };
 use types::{

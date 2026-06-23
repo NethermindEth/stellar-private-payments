@@ -9,7 +9,7 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Registrable, oneshot::oneshot};
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    storage::{
+    state::{
         AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
         process_events, process_notes,
     },

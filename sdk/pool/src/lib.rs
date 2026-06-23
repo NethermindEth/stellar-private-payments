@@ -45,20 +45,30 @@ pub mod proving {
     pub use witness::WitnessCalculator;
 }
 
-pub mod storage;
+pub mod state {
+    //! SQLite-backed local wallet and indexer state.
+    pub use ::state::{
+        AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
+        process_events, process_notes,
+    };
+}
 
 mod client;
 mod error;
+mod indexer;
 mod plan;
 mod pool;
 mod prover;
+mod runtime;
+mod transact;
 
 pub use client::Client;
 pub use error::PoolError;
+pub use indexer::Indexer;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
 pub use prover::ProverEngine;
-pub use storage::{
+pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,
     transact_request_from_step,

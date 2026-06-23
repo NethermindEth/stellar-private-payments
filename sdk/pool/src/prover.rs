@@ -6,7 +6,7 @@ use prover::{
 use stellar::hash_ext_data_offchain;
 use witness::WitnessCalculator;
 
-use crate::storage::{PreparedProverTx, PreparedTxPublic};
+use crate::transact::{PreparedProverTx, PreparedTxPublic};
 
 pub struct ProverEngine {
     witness: WitnessCalculator,

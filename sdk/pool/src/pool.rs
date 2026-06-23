@@ -1,15 +1,21 @@
 //! Per-pool private payments API.
 
-use state::Storage;
+use crate::runtime::block_on_rpc;
+use prover::notes::try_decrypt_and_derive_user_note;
+use state::{
+    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+};
+use stellar::StateFetcher;
 use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
-use types::{ExtAmount, NoteAmount};
+use types::{ExtAmount, NoteAmount, SMT_DEPTH};
 
 use crate::{
     PreparedTransaction,
     error::PoolError,
+    indexer::Indexer,
     plan::PreparedTransactionPlan,
     prover::ProverEngine,
-    storage::{
+    transact::{
         BuildTransactParams, TransactRequest, build_transact_params, load_user_key_material,
         transact_request_from_step,
     },
@@ -22,7 +28,7 @@ use crate::{
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool {
     config: PrivatePoolConfig,
-    storage: Option<Storage>,
+    indexer: Option<Indexer>,
     prover: Option<ProverEngine>,
     chain: Option<TransactChainContext>,
 }
@@ -41,17 +47,20 @@ impl PrivatePool {
         }
         Ok(Self {
             config,
-            storage: None,
+            indexer: None,
             prover: None,
             chain: None,
         })
     }
 
     pub fn initialize(&mut self) -> Result<(), PoolError> {
-        let storage_path = &self.config.storage_path;
-        self.storage = Some(
-            Storage::connect_file(storage_path)
-                .map_err(|e| PoolError::Other(format!("open storage: {e}")))?,
+        self.indexer = Some(
+            Indexer::open(
+                &self.config.storage_path,
+                &self.config.rpc_url,
+                &self.config.contract_config,
+            )
+            .map_err(|e| PoolError::Other(format!("open indexer: {e:#}")))?,
         );
         Ok(())
     }
@@ -59,7 +68,43 @@ impl PrivatePool {
     /// Fetch on-chain events, refresh local pool state, and update chain
     /// snapshot.
     pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
-        Err(PoolError::NotImplemented)
+        let indexer = self.indexer.as_mut().ok_or(PoolError::NotInitialized)?;
+        let from_ledger = indexer
+            .storage()
+            .get_sync_metadata()
+            .map_err(|e| PoolError::Other(e.to_string()))?
+            .into_iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .min()
+            .unwrap_or(0);
+
+        while indexer
+            .fetch_contract_events()
+            .map_err(|e| PoolError::Other(format!("fetch events: {e:#}")))?
+        {}
+
+        process_local_state(indexer.storage_mut())?;
+        self.refresh_chain_context()?;
+
+        let to_ledger = self
+            .indexer
+            .as_ref()
+            .ok_or(PoolError::NotInitialized)?
+            .storage()
+            .get_sync_metadata()
+            .map_err(|e| PoolError::Other(e.to_string()))?
+            .into_iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .max()
+            .unwrap_or(from_ledger);
+
+        Ok(SyncResult {
+            from_ledger,
+            to_ledger,
+            new_commitments: 0,
+            new_nullifiers: 0,
+            new_membership_leaves: 0,
+        })
     }
 
     /// Chain snapshot from the last successful [`Self::sync`].
@@ -67,8 +112,7 @@ impl PrivatePool {
         self.chain.as_ref().ok_or(PoolError::NotSynced)
     }
 
-    /// Install chain snapshot without RPC (tests / until [`Self::sync`] is
-    /// wired).
+    /// Install chain snapshot without RPC (tests / offline wallets).
     pub fn set_chain_context(&mut self, chain: TransactChainContext) {
         self.chain = Some(chain);
     }
@@ -198,7 +242,61 @@ impl PrivatePool {
     }
 
     pub fn storage(&self) -> Result<&Storage, PoolError> {
-        self.storage.as_ref().ok_or(PoolError::NotInitialized)
+        Ok(self
+            .indexer
+            .as_ref()
+            .ok_or(PoolError::NotInitialized)?
+            .storage())
+    }
+
+    fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
+        let storage = self.storage()?;
+        let (_, note_pub, ..) = load_user_key_material(storage, &self.config.user_address)
+            .map_err(|e| PoolError::Other(e.to_string()))?;
+
+        let rpc_url = self.config.rpc_url.clone();
+        let contract_config = self.config.contract_config.clone();
+        let pool_contract_id = self.config.pool_contract_id.clone();
+        let user_address = self.config.user_address.clone();
+
+        let chain = block_on_rpc(async move {
+            let fetcher = StateFetcher::new(&rpc_url, contract_config)?;
+            let data = fetcher.contracts_data_for_pool(&pool_contract_id).await?;
+            let pool =
+                data.pools.into_iter().next().ok_or_else(|| {
+                    anyhow::anyhow!("pool data not fetched for {pool_contract_id}")
+                })?;
+            let pool_root = pool
+                .merkle_root
+                .ok_or_else(|| anyhow::anyhow!("pool merkle_root not fetched"))?;
+            let pool_next_index = pool
+                .merkle_next_index
+                .parse::<u32>()
+                .map_err(|e| anyhow::anyhow!("invalid pool merkle_next_index: {e}"))?;
+
+            let non_membership_proof = fetcher
+                .get_nonmembership_proof(
+                    &note_pub,
+                    data.asp_non_membership.root,
+                    SMT_DEPTH as usize,
+                    &user_address,
+                )
+                .await?;
+
+            Ok::<_, anyhow::Error>(TransactChainContext {
+                pool_root,
+                pool_next_index,
+                pool_merkle_levels: pool.merkle_levels,
+                asp_membership_root: data.asp_membership.root,
+                asp_membership_contract_id: data.asp_membership.contract_id,
+                asp_membership_ledger: data.asp_membership.ledger,
+                non_membership_proof,
+            })
+        })
+        .map_err(|e| PoolError::Other(format!("refresh chain context: {e:#}")))?;
+
+        self.chain = Some(chain);
+        Ok(())
     }
 
     fn prover(&mut self) -> Result<&mut ProverEngine, PoolError> {
@@ -268,4 +366,36 @@ impl PrivatePool {
             .collect();
         Ok(spendable_notes)
     }
+}
+
+fn process_local_state(storage: &mut Storage) -> Result<(), PoolError> {
+    const FETCH_LIMIT: u32 = 50;
+
+    loop {
+        let did_raw =
+            process_events(storage, FETCH_LIMIT).map_err(|e| PoolError::Other(e.to_string()))?;
+        let mut derive = |account: &AccountKeys,
+                          row: &PoolCommitmentRow|
+         -> anyhow::Result<Option<DerivedUserNoteRow>> {
+            let opt = try_decrypt_and_derive_user_note(
+                &account.note_keypair,
+                &account.encryption_keypair.private,
+                &row.commitment,
+                row.leaf_index,
+                &row.encrypted_output,
+            )?;
+            Ok(opt.map(|d| DerivedUserNoteRow {
+                amount: d.amount,
+                blinding: d.blinding,
+                expected_nullifier: d.expected_nullifier,
+            }))
+        };
+        let did_notes = process_notes(storage, FETCH_LIMIT, &mut derive)
+            .map_err(|e| PoolError::Other(e.to_string()))?;
+        if !did_raw && !did_notes {
+            break;
+        }
+    }
+
+    Ok(())
 }

@@ -1,9 +1,4 @@
-//! SQLite-backed local state and transact parameter building.
-
-pub use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys, process_events,
-    process_notes,
-};
+//! Transact witness input building and prepared-transaction types.
 
 use anyhow::Result;
 use prover::{
@@ -13,6 +8,7 @@ use prover::{
     merkle::{MerklePrefixTree, MerklePrefixTreeBuilt, MerkleProof},
 };
 use serde::{Deserialize, Serialize};
+use state::{Storage, StoredUserKeys};
 use stellar::{OnchainProofPublicInputs, PreparedSorobanTx};
 use tx_planner::Transact;
 use types::{
