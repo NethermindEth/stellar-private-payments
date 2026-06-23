@@ -29,6 +29,9 @@ use stellar_xdr::curr::{
 
 use crate::{contract_state::PreparedSorobanTx, conversions::scval_to_address_string};
 
+/// Auth validity
+///
+/// Matches js-stellar-sdk's default (~8.3 minutes at ~5s/ledger).
 const AUTH_EXPIRATION_LEDGERS: u32 = 100;
 
 fn network_id(network_passphrase: &str) -> [u8; 32] {
