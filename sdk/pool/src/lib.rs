@@ -39,30 +39,31 @@ pub mod tx {
     };
 }
 
-pub mod storage {
-    //! SQLite-backed local state (events, notes, keys).
-    pub use state::{
-        AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
-        process_events, process_notes,
-    };
-}
-
 pub mod proving {
     //! Groth16 proving and Circom witness generation.
     pub use prover::prover::Prover;
     pub use witness::WitnessCalculator;
 }
 
+pub mod storage;
+
 mod client;
 mod error;
 mod plan;
 mod pool;
+mod prover;
 
 pub use client::Client;
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
+pub use prover::ProverEngine;
+pub use storage::{
+    BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
+    build_transact_params, build_validated_pool_tree, load_user_key_material,
+    transact_request_from_step,
+};
 pub use types::{
-    Estimate, PreparedTransaction, PrivatePoolConfig, SignedTransaction, SyncResult,
-    TransactRequest, TransactionResult, TransferRecipient,
+    Estimate, PreparedTransaction, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
+    SyncResult, TransactChainContext, TransactionResult, TransferRecipient,
 };

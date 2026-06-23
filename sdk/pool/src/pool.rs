@@ -1,15 +1,20 @@
 //! Per-pool private payments API.
 
 use state::Storage;
-use tx_planner::{SpendSession, SpendTarget, SpendableNote};
-use types::NoteAmount;
+use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
+use types::{ExtAmount, NoteAmount};
 
 use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
+    prover::ProverEngine,
+    storage::{
+        BuildTransactParams, PreparedProverTx, TransactRequest, build_transact_params,
+        load_user_key_material, transact_request_from_step,
+    },
     types::{
         Estimate, PreparedTransaction, PrivatePoolConfig, SignedTransaction, SyncResult,
-        TransactRequest, TransactionResult, TransferRecipient,
+        TransactChainContext, TransactionResult, TransferRecipient,
     },
 };
 
@@ -17,6 +22,8 @@ use crate::{
 pub struct PrivatePool {
     config: PrivatePoolConfig,
     storage: Option<Storage>,
+    prover: Option<ProverEngine>,
+    chain: Option<TransactChainContext>,
 }
 
 impl PrivatePool {
@@ -34,6 +41,8 @@ impl PrivatePool {
         Ok(Self {
             config,
             storage: None,
+            prover: None,
+            chain: None,
         })
     }
 
@@ -46,9 +55,21 @@ impl PrivatePool {
         Ok(())
     }
 
-    /// Fetch on-chain events and refresh local pool state.
+    /// Fetch on-chain events, refresh local pool state, and update chain
+    /// snapshot.
     pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
         Err(PoolError::NotImplemented)
+    }
+
+    /// Chain snapshot from the last successful [`Self::sync`].
+    pub fn chain_context(&self) -> Result<&TransactChainContext, PoolError> {
+        self.chain.as_ref().ok_or(PoolError::NotSynced)
+    }
+
+    /// Install chain snapshot without RPC (tests / until [`Self::sync`] is
+    /// wired).
+    pub fn set_chain_context(&mut self, chain: TransactChainContext) {
+        self.chain = Some(chain);
     }
 
     pub fn get_balance(&self) -> Result<NoteAmount, PoolError> {
@@ -113,14 +134,30 @@ impl PrivatePool {
         })
     }
 
+    /// Build witness inputs from local storage and produce a Groth16 proof.
     pub fn prepare_transact(
         &mut self,
-        _req: TransactRequest,
-    ) -> Result<PreparedTransaction, PoolError> {
-        Err(PoolError::NotImplemented)
+        req: TransactRequest,
+    ) -> Result<PreparedProverTx, PoolError> {
+        let storage = self.storage()?;
+        let params = match build_transact_params(storage, &req)
+            .map_err(|e| PoolError::Other(e.to_string()))?
+        {
+            BuildTransactParams::Ready(params) => params,
+            BuildTransactParams::MembershipSync(status) => {
+                return Err(PoolError::MembershipSync(status));
+            }
+        };
+
+        self.ensure_prover()?;
+
+        self.prover()?
+            .prove_transact(params)
+            .map_err(|e| PoolError::Other(format!("prove: {e:#}")))
     }
 
-    /// Prove and simulate the current plan tx, then advance the plan.
+    /// Prove the current plan step, advance the plan, and return unsigned
+    /// Soroban tx metadata (empty until RPC simulate is wired).
     pub fn next_prepared_transaction(
         &mut self,
         plan: &mut PreparedTransactionPlan,
@@ -129,18 +166,20 @@ impl PrivatePool {
             return Err(PoolError::Other("transaction plan is complete".into()));
         }
 
-        let output_commitments = plan.stub_output_commitments()?;
+        let chain = self.chain_context()?;
+        let step = self.transact_step_for_plan(plan)?;
+        let req = transact_request_from_step(
+            &step,
+            &self.config.user_address,
+            &self.config.pool_contract_id,
+            chain,
+        );
 
-        // TODO: build transact params, prove, and simulate against RPC.
-        let prepared = PreparedTransaction {
-            tx_xdr: "stub-unsigned-xdr".into(),
-            auth_entries: vec![],
-            latest_ledger: 1,
-        };
-
+        let proved = self.prepare_transact(req)?;
+        let output_commitments = proved.prepared.output_commitments;
         plan.finish_proved_tx(&output_commitments)?;
 
-        Ok(prepared)
+        Ok(proved.soroban_tx)
     }
 
     pub fn submit(
@@ -153,8 +192,64 @@ impl PrivatePool {
         })
     }
 
+    pub fn storage(&self) -> Result<&Storage, PoolError> {
+        self.storage.as_ref().ok_or(PoolError::NotInitialized)
+    }
+
+    fn prover(&mut self) -> Result<&mut ProverEngine, PoolError> {
+        self.prover.as_mut().ok_or(PoolError::NotInitialized)
+    }
+
+    fn ensure_prover(&mut self) -> Result<(), PoolError> {
+        if self.prover.is_some() {
+            return Ok(());
+        }
+
+        let artifacts = &self.config.prover_artifacts;
+
+        self.prover = Some(
+            ProverEngine::new(
+                &artifacts.proving_key,
+                &artifacts.circuit_wasm,
+                &artifacts.circuit_r1cs,
+            )
+            .map_err(|e| PoolError::Other(format!("init prover: {e:#}")))?,
+        );
+
+        Ok(())
+    }
+
+    fn transact_step_for_plan(
+        &self,
+        plan: &PreparedTransactionPlan,
+    ) -> Result<Transact, PoolError> {
+        if let Some(amount) = plan.deposit_amount() {
+            return self.deposit_transact_step(amount);
+        }
+
+        plan.current_spend_step()?
+            .ok_or_else(|| PoolError::Other("plan tx missing".into()))
+    }
+
+    fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, PoolError> {
+        let ext_amount = ExtAmount::try_from(amount)
+            .map_err(|_| PoolError::Other("deposit amount exceeds ext_amount range".into()))?;
+        let storage = self.storage()?;
+        let (_, note_pub, enc_pub, _) = load_user_key_material(storage, &self.config.user_address)
+            .map_err(|e| PoolError::Other(e.to_string()))?;
+
+        Ok(Transact::new(
+            Vec::new(),
+            [amount, NoteAmount::ZERO],
+            ext_amount,
+            self.config.pool_contract_id.clone(),
+            [Some(note_pub.clone()), Some(note_pub)],
+            [Some(enc_pub.clone()), Some(enc_pub)],
+        ))
+    }
+
     fn spendable_wallet(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        let storage = self.storage.as_ref().ok_or(PoolError::NotInitialized)?;
+        let storage = self.storage()?;
         let pool_contract_id = &self.config.pool_contract_id;
         let user_address = &self.config.user_address;
         let spendable_notes = storage

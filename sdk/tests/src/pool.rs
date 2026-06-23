@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::Result;
 
 use stellar_private_payments_sdk::{
-    PrivatePool, PrivatePoolConfig, TransferRecipient,
+    PrivatePool, PrivatePoolConfig, ProverArtifacts, TransferRecipient,
     types::{NoteAmount, NotePublicKey},
 };
 use types::{EncryptionPublicKey, Field};
@@ -52,6 +52,7 @@ pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         pool_contract_id: POOL_CONTRACT_ID.into(),
         user_address: USER_ADDRESS.into(),
         storage_path: db_path.to_string_lossy().into_owned(),
+        prover_artifacts: test_prover_artifacts()?,
     })?;
     pool.initialize()?;
 
@@ -69,6 +70,19 @@ pub fn test_recipient() -> TransferRecipient {
         )
         .expect("encryption public key"),
     }
+}
+
+fn test_prover_artifacts() -> Result<ProverArtifacts> {
+    let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
+    let circuits = repo.join("target/circuits-artifacts").join(profile);
+    Ok(ProverArtifacts {
+        proving_key: std::fs::read(
+            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"),
+        )?,
+        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2.wasm"))?,
+        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2.r1cs"))?,
+    })
 }
 
 fn test_note(amount: u64) -> (Field, NoteAmount) {

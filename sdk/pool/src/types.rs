@@ -5,6 +5,15 @@ use stellar::PreparedSorobanTx;
 
 pub type PreparedTransaction = PreparedSorobanTx;
 
+/// Circuit bytes for lazy prover init (load via platform I/O before pool
+/// config).
+#[derive(Debug, Clone)]
+pub struct ProverArtifacts {
+    pub proving_key: Vec<u8>,
+    pub circuit_wasm: Vec<u8>,
+    pub circuit_r1cs: Vec<u8>,
+}
+
 #[derive(Debug, Clone)]
 pub struct PrivatePoolConfig {
     pub rpc_url: String,
@@ -12,6 +21,7 @@ pub struct PrivatePoolConfig {
     pub pool_contract_id: String,
     pub user_address: String,
     pub storage_path: String,
+    pub prover_artifacts: ProverArtifacts,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -47,8 +57,17 @@ pub struct SignedTransaction {
     pub signed_xdr: String,
 }
 
-/// Low-level transact inputs; fields will expand as the API is wired up.
+/// On-chain snapshot used when building transact witness inputs.
+///
+/// Refreshed by [`PrivatePool::sync`] (RPC + local indexer). Until sync is
+/// wired, tests may seed it via [`PrivatePool::set_chain_context`].
 #[derive(Debug, Clone)]
-pub struct TransactRequest {
-    pub amount: NoteAmount,
+pub struct TransactChainContext {
+    pub pool_root: Field,
+    pub pool_next_index: u32,
+    pub pool_merkle_levels: u32,
+    pub asp_membership_root: Field,
+    pub asp_membership_contract_id: String,
+    pub asp_membership_ledger: u32,
+    pub non_membership_proof: AspNonMembershipProof,
 }

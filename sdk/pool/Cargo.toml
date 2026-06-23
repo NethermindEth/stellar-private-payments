@@ -11,9 +11,11 @@ description = "Stellar Private Payments Rust SDK"
 name = "stellar_private_payments_sdk"
 
 [dependencies]
-serde = { workspace = true }
 anyhow = { workspace = true }
+log = { workspace = true }
 prover = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
 thiserror = { workspace = true }

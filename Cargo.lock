@@ -4803,8 +4803,10 @@ name = "stellar-private-payments-sdk"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "log",
  "prover",
  "serde",
+ "serde_json",
  "state",
  "stellar",
  "thiserror 2.0.18",

@@ -1,7 +1,7 @@
 //! Logical transaction plans (tx-planner session), resolved one on-chain tx at
 //! a time.
 
-use tx_planner::SpendSession;
+use tx_planner::{SpendSession, Transact};
 use types::{Field, NoteAmount};
 
 use crate::error::PoolError;
@@ -62,20 +62,19 @@ impl PreparedTransactionPlan {
         self.current_tx += 1;
     }
 
-    /// Stub prove result until real proving is wired.
-    pub(crate) fn stub_output_commitments(&mut self) -> Result<[Field; 2], PoolError> {
-        match self.kind_mut() {
-            PlanKind::Deposit { .. } => Ok([Field::ZERO, Field::ZERO]),
-            PlanKind::Spend(session) => {
-                let step = session.step()?;
-                let step = step.ok_or(PoolError::Other("plan tx missing".into()))?;
-                let merge = if step.output_amounts[0] == NoteAmount::from(8) {
-                    Field::from(NoteAmount::from(900))
-                } else {
-                    Field::from(NoteAmount::from(1000))
-                };
-                Ok([merge, Field::ZERO])
-            }
+    pub(crate) fn deposit_amount(&self) -> Option<NoteAmount> {
+        match &self.kind {
+            PlanKind::Deposit { amount } => Some(*amount),
+            PlanKind::Spend(_) => None,
+        }
+    }
+
+    pub(crate) fn current_spend_step(
+        &self,
+    ) -> Result<Option<Transact>, tx_planner::SpendSessionError> {
+        match &self.kind {
+            PlanKind::Deposit { .. } => Ok(None),
+            PlanKind::Spend(session) => session.step(),
         }
     }
 

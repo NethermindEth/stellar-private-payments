@@ -12,10 +12,10 @@ name = "sdk_tests"
 path = "src/lib.rs"
 
 [dependencies]
-stellar-private-payments-sdk = { workspace = true }
 anyhow = { workspace = true }
 rusqlite = { workspace = true }
 serde_json = { workspace = true }
+stellar-private-payments-sdk = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 
 [lints]
