@@ -245,38 +245,6 @@
                             >
                         </div>
 
-                        <label class="flex items-center gap-2 text-sm text-dark-400 cursor-pointer select-none">
-                            <input
-                                type="checkbox"
-                                id="deposit-advanced-mode"
-                                class="rounded border-dark-600 bg-dark-800 text-brand-500 focus:ring-brand-500 focus:ring-offset-dark-950"
-                            >
-                            Advanced (manual output split)
-                        </label>
-
-                        <div id="deposit-advanced-section" class="hidden space-y-4">
-                        <!-- Balance Equation -->
-                        <div id="deposit-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
-                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="input">Deposit: 0</span>
-                            <span class="text-dark-500">=</span>
-                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 0</span>
-                            <span class="ml-2" data-eq="status" aria-label="Equation balanced">
-                                <svg class="w-5 h-5 text-emerald-500 hidden" data-icon="valid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                <svg class="w-5 h-5 text-red-500 hidden" data-icon="invalid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                            </span>
-                        </div>
-
-                        <!-- Output Notes -->
-                        <fieldset>
-                            <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
-                                Output Notes <span class="normal-case text-dark-500">(how to split your deposit)</span>
-                            </legend>
-                            <div id="deposit-outputs" class="space-y-2">
-                                <!-- Output rows will be created from template -->
-                            </div>
-                        </fieldset>
-                        </div>
-
                         <!-- Submit Button -->
                         <button
                             type="button"
@@ -314,33 +282,6 @@
                             >
                             <p id="withdraw-plan-hint" class="text-xs text-dark-500 mt-1 hidden" aria-live="polite"></p>
                         </div>
-
-                        <label class="flex items-center gap-2 text-sm text-dark-400 cursor-pointer select-none">
-                            <input
-                                type="checkbox"
-                                id="withdraw-advanced-mode"
-                                class="rounded border-dark-600 bg-dark-800 text-brand-500 focus:ring-brand-500 focus:ring-offset-dark-950"
-                            >
-                            Advanced (manual note selection)
-                        </label>
-
-                        <!-- Input Notes (advanced) -->
-                        <fieldset id="withdraw-advanced-section" class="hidden">
-                            <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
-                                Input Notes <span class="normal-case text-dark-500">(notes to spend)</span>
-                            </legend>
-                            <div id="withdraw-inputs" class="space-y-2">
-                                <!-- Input rows will be created from template -->
-                            </div>
-                            <button type="button" id="withdraw-add-input" class="hidden mt-2 px-3 py-1.5 text-xs text-dark-400 hover:text-brand-400 border border-dashed border-dark-600 hover:border-brand-500 rounded-lg transition-colors flex items-center gap-1.5">
-                                <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-                                Add another note
-                            </button>
-                            <div class="flex justify-between items-center mt-3 p-3 bg-dark-800 rounded-lg">
-                                <span class="text-sm text-dark-400">Total to withdraw:</span>
-                                <span id="withdraw-total" class="font-mono text-lg font-semibold text-brand-400">0</span>
-                            </div>
-                        </fieldset>
 
                         <!-- Recipient Address -->
                         <div>
@@ -443,51 +384,6 @@
                             <p id="transfer-plan-hint" class="text-xs text-dark-500 mt-1 hidden" aria-live="polite"></p>
                         </div>
 
-                        <label class="flex items-center gap-2 text-sm text-dark-400 cursor-pointer select-none">
-                            <input
-                                type="checkbox"
-                                id="transfer-advanced-mode"
-                                class="rounded border-dark-600 bg-dark-800 text-brand-500 focus:ring-brand-500 focus:ring-offset-dark-950"
-                            >
-                            Advanced (manual note selection)
-                        </label>
-
-                        <!-- Balance Equation (advanced) -->
-                        <div id="transfer-advanced-section" class="hidden space-y-4">
-                        <div id="transfer-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
-                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="inputs">Inputs: 0</span>
-                            <span class="text-dark-500">=</span>
-                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 0</span>
-                            <span class="ml-2" data-eq="status">
-                                <svg class="w-5 h-5 text-emerald-500 hidden" data-icon="valid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-                                <svg class="w-5 h-5 text-red-500 hidden" data-icon="invalid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-                            </span>
-                        </div>
-
-                        <!-- Inputs / Outputs Grid -->
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            <!-- Inputs Column -->
-                            <fieldset>
-                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
-                                    Your Input Notes <span class="normal-case text-dark-500">(notes to spend)</span>
-                                </legend>
-                                <div id="transfer-inputs" class="space-y-2">
-                                    <!-- Input rows will be created from template -->
-                                </div>
-                            </fieldset>
-
-                            <!-- Outputs Column -->
-                            <fieldset>
-                                <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
-                                    Recipient's Output Notes <span class="normal-case text-dark-500">(notes they will receive)</span>
-                                </legend>
-                                <div id="transfer-outputs" class="space-y-2">
-                                    <!-- Output rows will be created from template -->
-                                </div>
-                            </fieldset>
-                        </div>
-                        </div>
-
                         <!-- Submit Button -->
                         <button
                             type="button"
@@ -509,52 +405,15 @@
                         aria-labelledby="tab-transact"
                         class="tab-panel hidden space-y-6"
                     >
-                        <!-- Public Amount -->
-                        <div>
-                            <label for="transact-amount" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
-                                Public Amount <span class="normal-case text-dark-500">(+ deposit, − withdraw)</span>
-                            </label>
-                            <div class="flex items-center gap-4">
-                                <input
-                                    type="range"
-                                    id="transact-slider"
-                                    min="-500"
-                                    max="500"
-                                    value="0"
-                                    step="1"
-                                    class="flex-1 h-1.5 bg-gradient-to-r from-red-500 via-dark-700 to-emerald-500 rounded-full appearance-none cursor-pointer"
-                                    aria-label="Public amount slider"
-                                >
-                                <div class="flex items-center gap-2">
-                                    <div class="relative">
-                                        <input
-                                            type="number"
-                                            id="transact-amount"
-                                            value="0"
-                                            step="0.0000001"
-                                            class="w-24 px-3 py-2 pr-6 bg-dark-800 border border-dark-700 rounded-lg text-right font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-                                        >
-                                        <div class="absolute right-1 top-1/2 -translate-y-1/2 flex flex-col">
-                                            <button type="button" class="spinner-up p-0.5 text-dark-500 hover:text-brand-500" aria-label="Increase amount" data-target="transact-amount">
-                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M18 15l-6-6-6 6"/></svg>
-                                            </button>
-                                            <button type="button" class="spinner-down p-0.5 text-dark-500 hover:text-brand-500" aria-label="Decrease amount" data-target="transact-amount">
-                                                <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3"><path d="M6 9l6 6 6-6"/></svg>
-                                            </button>
-                                        </div>
-                                    </div>
-                                    <span class="text-sm text-dark-500">XLM</span>
-                                </div>
-                            </div>
-                        </div>
-
                         <!-- Balance Equation -->
                         <div id="transact-balance" class="flex flex-wrap items-center justify-center gap-2 p-3 bg-dark-800 border border-dark-700 rounded-lg text-sm" role="status" aria-live="polite">
                             <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="inputs">Inputs: 0</span>
                             <span class="text-dark-500">+</span>
-                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="public">Public: +0</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="deposit">Deposit: 0</span>
                             <span class="text-dark-500">=</span>
                             <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="outputs">Outputs: 0</span>
+                            <span class="text-dark-500">+</span>
+                            <span class="font-mono px-2 py-1 bg-dark-700 rounded" data-eq="withdraw">Withdraw: 0</span>
                             <span class="ml-2" data-eq="status">
                                 <svg class="w-5 h-5 text-emerald-500 hidden" data-icon="valid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
                                 <svg class="w-5 h-5 text-red-500 hidden" data-icon="invalid" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
@@ -568,6 +427,23 @@
                                 <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
                                     Inputs <span class="normal-case text-dark-500">(notes to spend)</span>
                                 </legend>
+                                <div class="mb-3">
+                                    <label for="transact-ext-deposit" class="block text-xs font-medium text-dark-400 mb-1.5">
+                                        External Deposit <span class="text-dark-500">(public funds in)</span>
+                                    </label>
+                                    <div class="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            id="transact-ext-deposit"
+                                            placeholder="0.0"
+                                            inputmode="decimal"
+                                            class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600"
+                                            autocomplete="off"
+                                            spellcheck="false"
+                                        >
+                                        <span class="text-sm text-dark-500">XLM</span>
+                                    </div>
+                                </div>
                                 <div id="transact-inputs" class="space-y-2">
                                     <!-- Input rows will be created from template -->
                                 </div>
@@ -578,6 +454,23 @@
                                 <legend class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2 pb-2 border-b border-dark-700">
                                     Outputs <span class="normal-case text-dark-500">(new notes to create - each can have a different recipient)</span>
                                 </legend>
+                                <div class="mb-3">
+                                    <label for="transact-ext-withdraw" class="block text-xs font-medium text-dark-400 mb-1.5">
+                                        External Withdraw <span class="text-dark-500">(public funds out)</span>
+                                    </label>
+                                    <div class="flex items-center gap-2">
+                                        <input
+                                            type="text"
+                                            id="transact-ext-withdraw"
+                                            placeholder="0.0"
+                                            inputmode="decimal"
+                                            class="w-full px-4 py-3 bg-dark-800 border border-dark-700 rounded-lg font-mono text-sm focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder:text-dark-600"
+                                            autocomplete="off"
+                                            spellcheck="false"
+                                        >
+                                        <span class="text-sm text-dark-500">XLM</span>
+                                    </div>
+                                </div>
                                 <div id="transact-outputs" class="space-y-3">
                                     <!-- Advanced output rows will be created from template -->
                                 </div>
@@ -587,7 +480,7 @@
                         <!-- Recipient Address for Withdrawals -->
                         <div>
                             <label for="transact-recipient" class="block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2">
-                                Withdrawal Recipient <span class="normal-case text-dark-500">(for public amount if negative)</span>
+                                Withdrawal Recipient <span class="normal-case text-dark-500">(for external withdraw)</span>
                             </label>
                             <input
                                 type="text"

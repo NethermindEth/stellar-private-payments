@@ -222,32 +222,16 @@ export const Templates = {
             discloseBtn.href = `disclosure.html?commitment=${encodeURIComponent(commitment)}`;
         }
 
-        // Use button - fills note in current tab's input (or switches to withdraw if in deposit)
+        // Use button - fills the note into the Transact tab's inputs (the only flow with
+        // manual note selection; Deposit/Withdraw/Transfer auto-select notes).
         const useBtn = row.querySelector('.use-btn');
         if (useBtn) {
             useBtn.addEventListener('click', () => {
-                // Determine which tab to use
-                let targetTab = App.state.activeTab;
-
-                // Deposit doesn't have input notes, redirect to withdraw
-                if (targetTab === 'deposit') {
-                    targetTab = 'withdraw';
-                    if (TabsRef) {
-                        TabsRef.switch('withdraw');
-                    }
+                if (App.state.activeTab !== 'transact' && TabsRef) {
+                    TabsRef.switch('transact');
                 }
 
-                // Map tab to input container ID
-                const containerIds = {
-                    withdraw: 'withdraw-inputs',
-                    transfer: 'transfer-inputs',
-                    transact: 'transact-inputs',
-                };
-
-                const containerId = containerIds[targetTab];
-                if (!containerId) return;
-
-                const inputs = document.querySelectorAll(`#${containerId} .note-input`);
+                const inputs = document.querySelectorAll('#transact-inputs .note-input');
                 if (!inputs.length) return;
 
                 // Find first empty input, or use first if all filled
