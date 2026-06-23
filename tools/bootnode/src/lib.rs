@@ -46,7 +46,7 @@ impl Bootnode {
     ) -> Result<Self> {
         let cfg = Arc::new(cfg);
         let deployment = deployment::deployment_config()?;
-        let contract_ids = Arc::new(deployment.pools_and_membership_contract_ids());
+        let contract_ids = Arc::new(deployment.all_contract_ids());
         let min_deployment_ledger = deployment.min_deployment_ledger()?;
         let kv = storage.load_kv().await?;
         let ledger_tip = cfg.initial_ledger_tip.max(kv.ledger_tip);

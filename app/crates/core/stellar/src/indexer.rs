@@ -18,7 +18,7 @@ impl<S: ContractDataStorage> Indexer<S> {
     pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
         let min_pool_ledger = config.min_deployment_ledger()?;
-        let contract_ids = config.pools_and_membership_contract_ids();
+        let contract_ids = config.all_contract_ids();
 
         let existing_sync = storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> = contract_ids.iter().map(String::as_str).collect();

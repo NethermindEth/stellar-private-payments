@@ -26,6 +26,7 @@ db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "deny"
 ignore = [
     "RUSTSEC-2026-0097", # https://github.com/NethermindEth/stellar-private-payments/issues/161, shouldn't affect smart contracts
+    "RUSTSEC-2026-0186", # memmap2, will update with wasmer
 ]
 unmaintained = "workspace"
 

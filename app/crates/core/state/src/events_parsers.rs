@@ -15,11 +15,12 @@ pub fn parse_event(event: ContractEvent) -> Result<ProcessedEvent> {
         "new_nullifier_event" | "NewNullifierEvent" => {
             ProcessedEvent::Nullifier(parse_new_nullifier_event(parsed)?)
         }
-        "public_key_event" | "PublicKeyEvent" => {
-            ProcessedEvent::PublicKey(parse_public_key_event(parsed)?)
-        }
         "new_commitment_event" | "NewCommitmentEvent" => {
             ProcessedEvent::Commitment(parse_new_commitment_event(parsed)?)
+        }
+        // Public keys registry contracts/public-key-registry/src/lib.rs
+        "public_key_event" | "PublicKeyEvent" => {
+            ProcessedEvent::PublicKey(parse_public_key_event(parsed)?)
         }
         // ASP membership events contracts/asp-membership
         "leaf_added" | "LeafAdded" => ProcessedEvent::LeafAdded(parse_leaf_added(parsed)?),

@@ -107,8 +107,8 @@ pub fn pool_ext_data_to_scval(ext: &ExtData) -> Result<ScVal> {
     ])
 }
 
-/// Encodes pool `Account` for `register`.
-pub fn pool_account_to_scval(
+/// Encodes a public-key registration `Account` for `register`.
+pub fn register_account_to_scval(
     owner: &str,
     encryption_key: [u8; 32],
     note_key: [u8; 32],
@@ -125,7 +125,8 @@ mod tests {
     use super::*;
     use crate::ext_data_hash::hash_ext_data_offchain;
     use contract_types::Groth16Proof;
-    use pool::{Account, ExtData as PoolExtData, Proof};
+    use pool::{ExtData as PoolExtData, Proof};
+    use public_key_registry::Account;
     use soroban_sdk::{
         Address, Bytes, BytesN, Env, I256, U256 as SorobanU256, Vec,
         crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -275,7 +276,7 @@ mod tests {
     }
 
     #[test]
-    fn pool_account_encoding_matches_contracttype_xdr() {
+    fn account_encoding_matches_contracttype_xdr() {
         let env = Env::default();
         let owner = Address::from_str(&env, TEST_ACCOUNT);
         let encryption_key = Bytes::from_array(&env, &[0xEE; 32]);
@@ -288,7 +289,7 @@ mod tests {
         let expected = on_chain.to_xdr(&env);
 
         let ours = scval_xdr(
-            &pool_account_to_scval(
+            &register_account_to_scval(
                 TEST_ACCOUNT,
                 soroban_bytes32(&encryption_key),
                 soroban_bytes32(&note_key),
