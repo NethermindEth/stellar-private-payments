@@ -10,7 +10,7 @@ use stellar_private_payments_sdk::{
 };
 use types::{EncryptionPublicKey, Field};
 
-use crate::seed;
+use crate::seed::{self, POOL_MERKLE_LEVELS};
 
 static NOTE_SALT: AtomicUsize = AtomicUsize::new(0);
 
@@ -31,20 +31,25 @@ const TEST_CONFIG_JSON: &str = r#"{
 }"#;
 
 const POOL_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+const ASP_MEMBERSHIP_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const USER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+
+pub use crate::seed::TEST_NETWORK;
 
 pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
     let db_path =
         std::env::temp_dir().join(format!("stellar-sdk-test-{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&db_path);
 
-    let notes: Vec<_> = wallet
-        .unwrap_or_default()
-        .iter()
-        .copied()
-        .map(test_note)
-        .collect();
-    seed::seed_notes(&db_path, POOL_CONTRACT_ID, USER_ADDRESS, &notes)?;
+    let amounts: Vec<u64> = wallet.unwrap_or_default().to_vec();
+    let chain = seed::seed_prove_wallet(
+        &db_path,
+        POOL_CONTRACT_ID,
+        ASP_MEMBERSHIP_CONTRACT_ID,
+        USER_ADDRESS,
+        TEST_NETWORK,
+        &amounts,
+    )?;
 
     let mut pool = PrivatePool::new(PrivatePoolConfig {
         rpc_url: "https://soroban-testnet.stellar.org".into(),
@@ -55,6 +60,7 @@ pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         prover_artifacts: test_prover_artifacts()?,
     })?;
     pool.initialize()?;
+    pool.set_chain_context(chain);
 
     Ok(pool)
 }
@@ -85,6 +91,7 @@ fn test_prover_artifacts() -> Result<ProverArtifacts> {
     })
 }
 
+#[allow(dead_code)]
 fn test_note(amount: u64) -> (Field, NoteAmount) {
     let amount = NoteAmount::from(u128::from(amount));
     let salt = NOTE_SALT.fetch_add(1, Ordering::Relaxed);
@@ -94,3 +101,6 @@ fn test_note(amount: u64) -> (Field, NoteAmount) {
         .expect("test note commitment value overflow");
     (Field::from(NoteAmount::from(commitment_value)), amount)
 }
+
+#[allow(dead_code)]
+pub const TEST_POOL_MERKLE_LEVELS: u32 = POOL_MERKLE_LEVELS;

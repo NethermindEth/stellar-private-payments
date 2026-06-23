@@ -64,6 +64,9 @@ pub use storage::{
     transact_request_from_step,
 };
 pub use types::{
-    Estimate, PreparedTransaction, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
-    SyncResult, TransactChainContext, TransactionResult, TransferRecipient,
+    Estimate, PrivatePoolConfig, ProverArtifacts, SignedTransaction, SyncResult,
+    TransactChainContext, TransactionResult, TransferRecipient,
 };
+
+/// Groth16 prove output for a transact step (simulate / sign / submit).
+pub type PreparedTransaction = PreparedProverTx;

@@ -5,16 +5,17 @@ use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
 use types::{ExtAmount, NoteAmount};
 
 use crate::{
+    PreparedTransaction,
     error::PoolError,
     plan::PreparedTransactionPlan,
     prover::ProverEngine,
     storage::{
-        BuildTransactParams, PreparedProverTx, TransactRequest, build_transact_params,
-        load_user_key_material, transact_request_from_step,
+        BuildTransactParams, TransactRequest, build_transact_params, load_user_key_material,
+        transact_request_from_step,
     },
     types::{
-        Estimate, PreparedTransaction, PrivatePoolConfig, SignedTransaction, SyncResult,
-        TransactChainContext, TransactionResult, TransferRecipient,
+        Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
+        TransactionResult, TransferRecipient,
     },
 };
 
@@ -138,7 +139,7 @@ impl PrivatePool {
     pub fn prepare_transact(
         &mut self,
         req: TransactRequest,
-    ) -> Result<PreparedProverTx, PoolError> {
+    ) -> Result<PreparedTransaction, PoolError> {
         let storage = self.storage()?;
         let params = match build_transact_params(storage, &req)
             .map_err(|e| PoolError::Other(e.to_string()))?
@@ -156,8 +157,8 @@ impl PrivatePool {
             .map_err(|e| PoolError::Other(format!("prove: {e:#}")))
     }
 
-    /// Prove the current plan step, advance the plan, and return unsigned
-    /// Soroban tx metadata (empty until RPC simulate is wired).
+    /// Prove the current plan step, advance the plan, and return the prepared
+    /// transaction.
     pub fn next_prepared_transaction(
         &mut self,
         plan: &mut PreparedTransactionPlan,
@@ -175,11 +176,15 @@ impl PrivatePool {
             chain,
         );
 
-        let proved = self.prepare_transact(req)?;
-        let output_commitments = proved.prepared.output_commitments;
+        let prepared = self.prepare_transact(req)?;
+        let output_commitments = prepared.prepared.output_commitments;
         plan.finish_proved_tx(&output_commitments)?;
 
-        Ok(proved.soroban_tx)
+        Ok(prepared)
+    }
+
+    pub fn config(&self) -> &PrivatePoolConfig {
+        &self.config
     }
 
     pub fn submit(

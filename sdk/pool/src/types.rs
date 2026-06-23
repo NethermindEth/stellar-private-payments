@@ -1,9 +1,6 @@
 pub use ::types::*;
 
 use serde::{Deserialize, Serialize};
-use stellar::PreparedSorobanTx;
-
-pub type PreparedTransaction = PreparedSorobanTx;
 
 /// Circuit bytes for lazy prover init (load via platform I/O before pool
 /// config).
