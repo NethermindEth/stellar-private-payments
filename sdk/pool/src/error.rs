@@ -1,4 +1,4 @@
-use tx_planner::PlanError;
+use tx_planner::{PlanError, SpendSessionError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum PoolError {
@@ -13,6 +13,9 @@ pub enum PoolError {
 
     #[error(transparent)]
     Plan(#[from] PlanError),
+
+    #[error(transparent)]
+    SpendSession(#[from] SpendSessionError),
 
     #[error("{0}")]
     Other(String),

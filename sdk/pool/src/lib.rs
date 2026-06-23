@@ -55,10 +55,12 @@ pub mod proving {
 
 mod client;
 mod error;
+mod plan;
 mod pool;
 
 pub use client::Client;
 pub use error::PoolError;
+pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
 pub use types::{
     Estimate, PreparedTransaction, PrivatePoolConfig, SignedTransaction, SyncResult,

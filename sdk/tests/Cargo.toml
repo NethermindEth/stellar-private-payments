@@ -1,0 +1,22 @@
+[package]
+name = "sdk-tests"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish = false
+description = "Tests for the Stellar Private Payments SDK"
+
+[lib]
+name = "sdk_tests"
+path = "src/lib.rs"
+
+[dependencies]
+stellar-private-payments-sdk = { workspace = true }
+anyhow = { workspace = true }
+rusqlite = { workspace = true }
+serde_json = { workspace = true }
+types = { workspace = true, features = ["rusqlite"] }
+
+[lints]
+workspace = true
