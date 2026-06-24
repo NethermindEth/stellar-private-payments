@@ -43,22 +43,37 @@ export const Dashboard = {
 
     async refresh() {
         if (!App.state.wallet.address) return;
-        try {
-            const [balances, feed, selfLookup] = await Promise.all([
-                getHandle().webClient.getPortfolioBalances(App.state.wallet.address),
-                getHandle().webClient.getOperationalFeed(8),
-                getHandle().webClient.lookupRegisteredPublicKey(App.state.wallet.address),
-            ]);
-            App.state.balances = Array.isArray(balances) ? balances : [];
-            App.state.feed = Array.isArray(feed) ? feed : [];
-            App.state.profile.registryLookup = selfLookup || null;
-            App.state.profile.registered = !!selfLookup?.entry;
+        const address = App.state.wallet.address;
+        const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
+            getHandle().webClient.getPortfolioBalances(address),
+            getHandle().webClient.getOperationalFeed(8),
+            getHandle().webClient.lookupRegisteredPublicKey(address),
+        ]);
+
+        if (balancesRes.status === 'fulfilled') {
+            App.state.balances = Array.isArray(balancesRes.value) ? balancesRes.value : [];
             this.renderBalances();
+        } else {
+            console.warn('[Dashboard] balances refresh failed:', balancesRes.reason);
+        }
+
+        if (feedRes.status === 'fulfilled') {
+            App.state.feed = Array.isArray(feedRes.value) ? feedRes.value : [];
             this.renderFeed();
-            this.renderProfile();
-            App.events.dispatchEvent(new CustomEvent('profile:updated'));
-        } catch (error) {
-            console.warn('[Dashboard] refresh failed:', error);
+        } else {
+            console.warn('[Dashboard] feed refresh failed:', feedRes.reason);
+        }
+
+        if (lookupRes.status === 'fulfilled') {
+            App.state.profile.registryLookup = lookupRes.value || null;
+            App.state.profile.registered = !!lookupRes.value?.entry;
+        } else {
+            console.warn('[Dashboard] registry lookup failed:', lookupRes.reason);
+        }
+        this.renderProfile();
+        App.events.dispatchEvent(new CustomEvent('profile:updated'));
+
+        if (balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected') {
             Toast.show('Failed to refresh dashboard data', 'info');
         }
     },

@@ -277,14 +277,14 @@ export const Wallet = {
 
     openSettings() {
         App.state.ui.settingsOpen = true;
-        document.getElementById('settings-drawer')?.classList.remove('translate-x-full');
+        document.getElementById('settings-drawer')?.classList.remove('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.remove('hidden');
         renderSettingsDrawer();
     },
 
     closeSettings() {
         App.state.ui.settingsOpen = false;
-        document.getElementById('settings-drawer')?.classList.add('translate-x-full');
+        document.getElementById('settings-drawer')?.classList.add('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.add('hidden');
     },
 
