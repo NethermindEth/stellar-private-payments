@@ -1,27 +1,20 @@
 import { Templates } from './ui/templates.js';
-import { Tabs, Wallet } from './ui/navigation.js';
-import { NotesTable } from './ui/notes-table.js';
-import { AddressBook } from './ui/address-book.js';
+import { Shell, Wallet } from './ui/navigation.js';
 import { Transactions } from './ui/transactions.js';
-import { OnchainState } from './ui/onchain-state.js';
-import { PoolEvents } from './ui/pool-events.js';
+import { NotesTable } from './ui/notes-table.js';
+import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
 
-// Initialize on DOM ready
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
-    Tabs.init();
+    Shell.init();
     Wallet.init();
     Transactions.init();
     NotesTable.init();
-    AddressBook.init();
-    OnchainState.init();
-    PoolEvents.init();
+    Dashboard.init();
 
     updateLastVisit();
     registerServiceWorker();
 
-    // On first page load, attempt to onboard immediately (Freighter + WASM + keys).
-    // If the user rejects, they can click "Connect Freighter" to retry.
     Wallet.connect({ auto: true }).catch(() => {});
 });

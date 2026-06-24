@@ -5,10 +5,10 @@ import {
     getNotificationsPrompted,
     setNotificationsPrompted,
     requestNotificationPermission,
-    registerServiceWorker,
 } from './push-notifications.js';
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
+const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
 
 function hasStorageManager() {
     return (
@@ -23,8 +23,7 @@ async function isPersisted() {
     if (!hasStorageManager()) return false;
     try {
         return await navigator.storage.persisted();
-    } catch (e) {
-        console.debug('[Storage] navigator.storage.persisted() failed:', e);
+    } catch {
         return false;
     }
 }
@@ -45,9 +44,116 @@ function setPersistPromptedFlag() {
     }
 }
 
+function setHidden(el, hidden) {
+    el?.classList.toggle('hidden', !!hidden);
+}
+
+function setError(message) {
+    const el = document.getElementById('onboarding-error');
+    if (!el) return;
+    if (!message) {
+        el.textContent = '';
+        el.classList.add('hidden');
+        return;
+    }
+    el.textContent = message;
+    el.classList.remove('hidden');
+}
+
+function showModal() {
+    const el = document.getElementById('onboarding-modal');
+    if (!el) throw new Error('Onboarding modal is missing');
+    setError('');
+    el.classList.remove('hidden');
+}
+
+function hideModal() {
+    document.getElementById('onboarding-modal')?.classList.add('hidden');
+}
+
+function renderContent(node) {
+    const el = document.getElementById('onboarding-content');
+    if (!el) return;
+    el.replaceChildren();
+    if (node) el.appendChild(node);
+}
+
+function renderActions(buttons) {
+    const el = document.getElementById('onboarding-actions');
+    if (!el) return;
+    el.replaceChildren(...buttons);
+}
+
+function makeButton({ text, variant = 'secondary', onClick }) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.textContent = text;
+    btn.className = variant === 'primary'
+        ? 'rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-60'
+        : variant === 'ghost'
+            ? 'rounded-2xl border border-white/10 px-5 py-3 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60'
+            : 'rounded-2xl border border-white/10 bg-white/[0.03] px-5 py-3 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-60';
+    if (onClick) btn.addEventListener('click', onClick);
+    return btn;
+}
+
+function makePanel({ eyebrow, title, body, aside }) {
+    const wrap = document.createElement('div');
+    wrap.className = 'space-y-5';
+
+    const intro = document.createElement('div');
+    intro.innerHTML = `
+        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">${eyebrow}</p>
+        <h3 class="mt-2 text-2xl font-semibold tracking-tight text-white">${title}</h3>
+        <p class="mt-3 text-sm leading-6 text-slate-300">${body}</p>
+    `;
+    wrap.appendChild(intro);
+
+    if (aside) {
+        const info = document.createElement('div');
+        info.className = 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300';
+        if (typeof aside === 'string') {
+            info.innerHTML = aside;
+        } else {
+            info.appendChild(aside);
+        }
+        wrap.appendChild(info);
+    }
+
+    return wrap;
+}
+
+function setStepState(stepId, state) {
+    const el = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
+    if (!el) return;
+    el.dataset.state = state;
+    el.classList.remove(
+        'border-white/8',
+        'bg-white/[0.03]',
+        'text-slate-400',
+        'border-cyan-300/30',
+        'bg-cyan-300/10',
+        'text-cyan-100',
+        'border-emerald-300/30',
+        'bg-emerald-300/10',
+        'text-emerald-100'
+    );
+    if (state === 'current') {
+        el.classList.add('border-cyan-300/30', 'bg-cyan-300/10', 'text-cyan-100');
+    } else if (state === 'done') {
+        el.classList.add('border-emerald-300/30', 'bg-emerald-300/10', 'text-emerald-100');
+    } else {
+        el.classList.add('border-white/8', 'bg-white/[0.03]', 'text-slate-400');
+    }
+}
+
+function maskSecret(secret) {
+    if (!secret) return 'Not available';
+    return `${'*'.repeat(12)}${secret.slice(-6)}`;
+}
+
 function renderDisclaimerMarkdown(md, container) {
     container.textContent = '';
-
     const lines = String(md || '').replace(/\r\n/g, '\n').split('\n');
     let currentList = null;
     let inCode = false;
@@ -60,7 +166,7 @@ function renderDisclaimerMarkdown(md, container) {
     const flushCode = () => {
         if (!codeLines.length) return;
         const pre = document.createElement('pre');
-        pre.className = 'p-3 bg-dark-950 border border-dark-800 rounded-lg overflow-auto text-xs font-mono text-dark-200';
+        pre.className = 'overflow-auto rounded-2xl border border-white/8 bg-ink-950 px-4 py-3 text-xs text-slate-200';
         pre.textContent = codeLines.join('\n');
         container.appendChild(pre);
         codeLines = [];
@@ -68,7 +174,6 @@ function renderDisclaimerMarkdown(md, container) {
 
     for (const rawLine of lines) {
         const line = rawLine.replace(/\s+$/g, '');
-
         if (line.startsWith('```')) {
             if (inCode) {
                 inCode = false;
@@ -80,12 +185,10 @@ function renderDisclaimerMarkdown(md, container) {
             }
             continue;
         }
-
         if (inCode) {
             codeLines.push(rawLine);
             continue;
         }
-
         if (!line.trim()) {
             flushList();
             continue;
@@ -96,15 +199,10 @@ function renderDisclaimerMarkdown(md, container) {
             flushList();
             const level = headingMatch[1].length;
             const text = headingMatch[2].trim();
-            const el = document.createElement(`h${level}`);
-            el.textContent = text;
-            el.className =
-                level === 1
-                    ? 'text-base sm:text-lg font-semibold text-dark-100 mt-2'
-                    : level === 2
-                        ? 'text-sm sm:text-base font-semibold text-dark-100 mt-4'
-                        : 'text-sm font-semibold text-dark-100 mt-3';
-            container.appendChild(el);
+            const heading = document.createElement(level === 1 ? 'h4' : 'h5');
+            heading.className = level === 1 ? 'text-lg font-semibold text-white' : 'text-sm font-semibold text-white';
+            heading.textContent = text;
+            container.appendChild(heading);
             continue;
         }
 
@@ -112,7 +210,7 @@ function renderDisclaimerMarkdown(md, container) {
         if (listMatch) {
             if (!currentList) {
                 currentList = document.createElement('ul');
-                currentList.className = 'list-disc pl-5 space-y-1';
+                currentList.className = 'list-disc space-y-2 pl-5';
                 container.appendChild(currentList);
             }
             const li = document.createElement('li');
@@ -122,517 +220,421 @@ function renderDisclaimerMarkdown(md, container) {
         }
 
         flushList();
-
         const p = document.createElement('p');
-        p.className = 'leading-relaxed';
-
-        const trimmed = line.trim();
-        if (/^https?:\/\/\S+$/i.test(trimmed)) {
-            const a = document.createElement('a');
-            a.href = trimmed;
-            a.target = '_blank';
-            a.rel = 'noreferrer';
-            a.className = 'text-brand-400 hover:text-brand-300 underline';
-            a.textContent = trimmed;
-            p.appendChild(a);
-        } else {
-            p.textContent = trimmed;
-        }
-
+        p.className = 'leading-6';
+        p.textContent = line.trim();
         container.appendChild(p);
     }
 
-    if (inCode) {
-        flushCode();
-    }
+    if (inCode) flushCode();
 }
 
-function setHidden(el, hidden) {
-    el?.classList.toggle('hidden', !!hidden);
+function notificationStepNeeded() {
+    if (!hasNotificationSupport()) return false;
+    if (Notification.permission !== 'default') return false;
+    return !getNotificationsPrompted();
 }
 
-function setError(msg) {
-    const errorEl = document.getElementById('onboarding-error');
-    if (!errorEl) return;
-    if (!msg) {
-        errorEl.textContent = '';
-        errorEl.classList.add('hidden');
-        return;
-    }
-    errorEl.textContent = msg;
-    errorEl.classList.remove('hidden');
-}
-
-function setStepState(stepId, state) {
-    const el = document.querySelector(`#onboarding-steps [data-step="${stepId}"]`);
-    if (!el) return;
-    el.dataset.state = state;
-
-    el.classList.remove(
-        'border-dark-700',
-        'text-dark-400',
-        'bg-dark-900/40',
-        'border-brand-500/40',
-        'text-brand-300',
-        'bg-brand-500/10',
-        'border-emerald-500/40',
-        'text-emerald-300',
-        'bg-emerald-500/10'
-    );
-
-    if (state === 'current') {
-        el.classList.add('border-brand-500/40', 'text-brand-300', 'bg-brand-500/10');
-    } else if (state === 'done') {
-        el.classList.add('border-emerald-500/40', 'text-emerald-300', 'bg-emerald-500/10');
-    } else {
-        el.classList.add('border-dark-700', 'text-dark-400', 'bg-dark-900/40');
-    }
-}
-
-function showModal() {
-    const modal = document.getElementById('onboarding-modal');
-    if (!modal) throw new Error('Onboarding modal is missing from the page');
-    setError('');
-    modal.classList.remove('hidden');
-}
-
-function hideModal() {
-    const modal = document.getElementById('onboarding-modal');
-    modal?.classList.add('hidden');
-}
-
-function renderActions(buttons) {
-    const actions = document.getElementById('onboarding-actions');
-    if (!actions) return;
-    actions.textContent = '';
-    for (const btn of buttons) actions.appendChild(btn);
-}
-
-function makeButton({ id, text, variant = 'secondary', onClick }) {
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    if (id) btn.id = id;
-    btn.textContent = text;
-
-    if (variant === 'primary') {
-        btn.className =
-            'px-4 py-2 rounded-lg bg-brand-500 text-dark-950 font-semibold hover:bg-brand-400 transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
-    } else if (variant === 'danger') {
-        btn.className =
-            'px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 hover:text-red-300 transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
-    } else {
-        btn.className =
-            'px-4 py-2 rounded-lg border border-dark-600 bg-dark-800 text-dark-200 hover:bg-dark-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed';
-    }
-
-    if (onClick) btn.addEventListener('click', onClick);
-    return btn;
-}
-
-function renderStepContent(htmlOrNode) {
-    const content = document.getElementById('onboarding-content');
-    if (!content) return;
-    content.textContent = '';
-    if (typeof htmlOrNode === 'string') {
-        content.innerHTML = htmlOrNode;
-        return;
-    }
-    if (htmlOrNode) content.appendChild(htmlOrNode);
-}
-
-async function copyText(value) {
-    if (!value) return false;
+async function persistStorageIfWanted() {
+    if (!hasStorageManager()) return false;
     try {
-        await navigator.clipboard.writeText(value);
-        return true;
+        return await navigator.storage.persist();
     } catch {
         return false;
     }
 }
 
-export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
+async function registerNow({ client, address, notePublicKey, encryptionPublicKey, networkPassphrase }) {
+    if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
+    return client.registerPublicKeys(
+        address,
+        notePublicKey,
+        encryptionPublicKey,
+        networkPassphrase,
+        null,
+    );
+}
+
+export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
     const client = getHandle().webClient;
     if (!address) throw new Error('Wallet address required for onboarding');
 
     const disclaimerState = await client.getDisclaimerState(address);
     const existingKeys = await client.getUserKeys(address);
     const existingAspSecret = await client.getASPSecret(address);
-
-    const needsDisclaimer = !disclaimerState?.accepted;
-    const needsKeys = !existingKeys || !existingAspSecret?.membershipBlinding;
+    const explorerSetting = await client.getExplorerSetting();
+    const bootnodeSetting = await client.getBootnodeConfig();
+    const registryLookup = await client.lookupRegisteredPublicKey(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
-    const prompted = storageAvailable ? getPersistPromptedFlag() : true;
-    const needsStorageStep = storageAvailable && !persisted && !prompted;
+    const storagePrompted = storageAvailable ? getPersistPromptedFlag() : true;
+    const needsStorageStep = storageAvailable && (!persisted || !storagePrompted);
+    const needsNotificationStep = notificationStepNeeded();
 
-    const notificationsSupported = hasNotificationSupport();
-    const notificationsPrompted = notificationsSupported ? getNotificationsPrompted() : true;
-    const notificationsPermission = notificationsSupported ? Notification.permission : 'denied';
-    const needsNotificationsStep =
-        notificationsSupported && !notificationsPrompted && notificationsPermission === 'default';
+    const steps = [
+        ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(needsStorageStep ? ['storage'] : []),
+        ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
+        ...(needsNotificationStep || !bootnodeSetting ? ['retention'] : []),
+        [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
+        [registryLookup?.entry ? null : 'registration'].filter(Boolean),
+    ].flat();
 
-    if (!needsDisclaimer && !needsStorageStep && !needsNotificationsStep && !needsKeys) {
+    if (!steps.length) {
         return {
             pubKey: existingKeys.noteKeypair.public,
-            encryptionKeypair: {
-                publicKey: existingKeys.encryptionKeypair.public,
-            },
+            encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
             aspSecret: existingAspSecret.membershipBlinding,
         };
     }
 
     showModal();
 
-    const abort = new AbortController();
     let cancelled = false;
+    let closeHandler = null;
     const closeBtn = document.getElementById('onboarding-close-btn');
-    const onClose = () => {
+    closeBtn.onclick = () => {
         cancelled = true;
-        abort.abort();
+        closeHandler?.();
         hideModal();
     };
-    if (closeBtn) closeBtn.onclick = onClose;
 
-    setStepState('disclaimer', needsDisclaimer ? 'current' : 'done');
-    setStepState('storage', needsStorageStep ? 'pending' : 'done');
-    setStepState('notifications', needsNotificationsStep ? 'pending' : 'done');
-    setStepState('keys', needsKeys ? 'pending' : 'done');
+    const state = {
+        keys: existingKeys ? {
+            pubKey: existingKeys.noteKeypair.public,
+            encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
+            aspSecret: existingAspSecret?.membershipBlinding || '',
+        } : null,
+        explorerBaseUrl: explorerSetting?.baseUrl || DEFAULT_EXPLORER_BASE_URL,
+        bootnode: bootnodeSetting || { enabled: false, url: '' },
+        registered: !!registryLookup?.entry,
+    };
 
-    if (needsDisclaimer) {
-        setStepState('disclaimer', 'current');
-        const wrap = document.createElement('div');
-        wrap.className = 'space-y-3 text-sm text-dark-300';
+    ['disclaimer', 'storage', 'keys', 'retention', 'explorer', 'registration'].forEach(stepId => {
+        setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
+    });
 
-        const intro = document.createElement('p');
-        intro.className = 'text-xs text-dark-500';
-        intro.textContent = 'Step 1/4 · Please review and accept the Terms & Conditions to continue.';
-        wrap.appendChild(intro);
+    const ensureNotCancelled = () => {
+        if (cancelled) throw new Error('Onboarding cancelled');
+    };
 
-        const md = document.createElement('div');
-        md.className = 'space-y-3';
-        renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', md);
-        wrap.appendChild(md);
+    const waitForStep = (setup) => new Promise((resolve, reject) => {
+        closeHandler = () => reject(new Error('Onboarding cancelled'));
+        setup(
+            (value) => {
+                closeHandler = null;
+                resolve(value);
+            },
+            (error) => {
+                closeHandler = null;
+                reject(error);
+            },
+        );
+    });
 
-        renderStepContent(wrap);
-
-        await new Promise((resolve, reject) => {
-            const onAbort = () => reject(new Error('Onboarding cancelled'));
-            abort.signal.addEventListener('abort', onAbort, { once: true });
-
-            const decline = makeButton({
-                text: 'Decline',
-                variant: 'danger',
-                onClick: () => {
-                    onClose();
-                    reject(new Error('Terms & Conditions must be accepted to use this service.'));
-                },
-            });
-            const accept = makeButton({
-                text: 'Accept',
-                variant: 'primary',
-                onClick: async () => {
-                    try {
-                        setError('');
-                        accept.disabled = true;
-                        decline.disabled = true;
-                        setButtonLoading?.('Accepting Terms & Conditions…');
-                        await client.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
-                        abort.signal.removeEventListener('abort', onAbort);
-                        resolve();
-                    } catch (e) {
-                        accept.disabled = false;
-                        decline.disabled = false;
-                        setError(e?.message || 'Failed to accept Terms & Conditions');
-                    }
-                },
-            });
-
-            renderActions([decline, accept]);
+    for (let i = 0; i < steps.length; i += 1) {
+        const stepId = steps[i];
+        setError('');
+        steps.forEach((candidate, index) => {
+            setStepState(candidate, index < i ? 'done' : index === i ? 'current' : 'pending');
         });
 
-        if (cancelled) throw new Error('Onboarding cancelled');
-        setStepState('disclaimer', 'done');
-    }
-
-    if (needsStorageStep) {
-        setStepState('storage', 'current');
-        // Mark as prompted before showing UI to avoid repeated prompts if anything throws.
-        setPersistPromptedFlag();
-        renderStepContent(`
-            <div class="space-y-3 text-sm text-dark-300">
-                <p class="text-xs text-dark-500">Step 2/4 · Optional, but recommended.</p>
-                <h3 class="text-base font-semibold text-dark-100">Enable durable storage?</h3>
-                <p>
-                    This app stores your local database in the browser (SQLite via OPFS).
-                    Without durable storage, the browser may delete it under storage pressure.
-                </p>
-                <p class="text-xs text-dark-500">
-                    Durable storage helps prevent eviction, but clearing site data will still remove it.
-                </p>
-            </div>
-        `);
-
-        await new Promise((resolve) => {
-            const onAbort = () => resolve();
-            abort.signal.addEventListener('abort', onAbort, { once: true });
-
-            const notNow = makeButton({
-                text: 'Not now',
-                variant: 'secondary',
-                onClick: () => {
-                    abort.signal.removeEventListener('abort', onAbort);
-                    resolve();
-                },
+        if (stepId === 'disclaimer') {
+            const markdown = document.createElement('div');
+            markdown.className = 'space-y-3 text-sm text-slate-300';
+            renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', markdown);
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Review the operating disclaimer',
+                body: 'This setup stores private payment material locally and assumes the operator understands the wallet, retention, and registration model.',
+                aside: markdown,
             });
+            renderContent(panel);
 
-            const enable = makeButton({
-                text: 'Enable durable storage',
-                variant: 'primary',
-                onClick: async () => {
-                    try {
-                        setError('');
-                        notNow.disabled = true;
-                        enable.disabled = true;
-                        setButtonLoading?.('Requesting durable storage…');
-                        let granted = false;
+            await waitForStep((resolve, reject) => {
+                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: () => reject(new Error('Onboarding cancelled')) });
+                const accept = makeButton({
+                    text: 'Accept disclaimer',
+                    variant: 'primary',
+                    onClick: async () => {
                         try {
-                            granted = await navigator.storage.persist();
-                        } catch (e) {
-                            console.debug('[Storage] navigator.storage.persist() failed:', e);
+                            accept.disabled = true;
+                            await client.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
+                            resolve();
+                        } catch (error) {
+                            accept.disabled = false;
+                            setError(error?.message || 'Failed to accept disclaimer');
                         }
-                        if (!granted) {
-                            setError('Browser did not grant durable storage. You can continue, but data may be evicted under storage pressure.');
-                        }
-                        abort.signal.removeEventListener('abort', onAbort);
+                    },
+                });
+                renderActions([cancel, accept]);
+            });
+            ensureNotCancelled();
+            continue;
+        }
+
+        if (stepId === 'storage') {
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Request durable browser storage',
+                body: 'The app keeps your privacy keys, ASP secret, local notes, and settings in browser storage. Persistent storage reduces the chance of silent eviction.',
+                aside: `<p>Current status: <span class="font-semibold text-white">${persisted ? 'already persisted' : 'not persisted yet'}</span></p>`,
+            });
+            renderContent(panel);
+
+            await waitForStep((resolve, reject) => {
+                const later = makeButton({
+                    text: 'Continue without it',
+                    variant: 'ghost',
+                    onClick: () => {
+                        setPersistPromptedFlag();
                         resolve();
-                    } catch (e) {
-                        notNow.disabled = false;
-                        enable.disabled = false;
-                        setError(e?.message || 'Failed to request durable storage');
-                    }
-                },
-            });
-
-            renderActions([notNow, enable]);
-        });
-
-        if (cancelled) throw new Error('Onboarding cancelled');
-        setStepState('storage', 'done');
-    }
-
-    if (needsNotificationsStep) {
-        setStepState('notifications', 'current');
-        renderStepContent(`
-            <div class="space-y-3 text-sm text-dark-300">
-                <p class="text-xs text-dark-500">Step 3/4 · Optional, but recommended.</p>
-                <h3 class="text-base font-semibold text-dark-100">Enable reminders?</h3>
-                <p>
-                    PoolStellar relies on the Stellar RPC retention window (7 days). If you don't open
-                    the app for more than 5 days, we'll send a browser notification to remind you to
-                    sync before your local state falls outside the window.
-                </p>
-                <p class="text-xs text-dark-500">
-                    No push server is involved — reminders are triggered locally by your browser.
-                </p>
-            </div>
-        `);
-
-        await new Promise((resolve) => {
-            const onAbort = () => resolve();
-            abort.signal.addEventListener('abort', onAbort, { once: true });
-
-            const notNow = makeButton({
-                text: 'Not now',
-                variant: 'secondary',
-                onClick: () => {
-                    setNotificationsPrompted();
-                    abort.signal.removeEventListener('abort', onAbort);
-                    resolve();
-                },
-            });
-
-            const enable = makeButton({
-                text: 'Enable reminders',
-                variant: 'primary',
-                onClick: async () => {
-                    try {
-                        setError('');
-                        notNow.disabled = true;
-                        enable.disabled = true;
-                        setButtonLoading?.('Requesting notification permission…');
-                        const permission = await requestNotificationPermission();
-                        if (permission === 'granted') {
-                            await registerServiceWorker();
+                    },
+                });
+                const request = makeButton({
+                    text: 'Request persistent storage',
+                    variant: 'primary',
+                    onClick: async () => {
+                        try {
+                            request.disabled = true;
+                            await persistStorageIfWanted();
+                            setPersistPromptedFlag();
+                            resolve();
+                        } catch (error) {
+                            request.disabled = false;
+                            setError(error?.message || 'Failed to request storage persistence');
                         }
-                        setNotificationsPrompted();
-                        abort.signal.removeEventListener('abort', onAbort);
-                        resolve();
-                    } catch (e) {
-                        notNow.disabled = false;
-                        enable.disabled = false;
-                        setError(e?.message || 'Failed to request notification permission');
-                    }
-                },
+                    },
+                });
+                renderActions([later, request]);
             });
+            ensureNotCancelled();
+            continue;
+        }
 
-            renderActions([notNow, enable]);
-        });
-
-        if (cancelled) throw new Error('Onboarding cancelled');
-        setStepState('notifications', 'done');
-    }
-
-    let keys = existingKeys;
-    if (needsKeys) {
-        setStepState('keys', 'current');
-
-        const wrap = document.createElement('div');
-        wrap.className = 'space-y-3 text-sm text-dark-300';
-
-        const intro = document.createElement('p');
-        intro.className = 'text-xs text-dark-500';
-        intro.textContent = 'Step 4/4 · Create your privacy keys.';
-        wrap.appendChild(intro);
-
-        const title = document.createElement('h3');
-        title.className = 'text-base font-semibold text-dark-100';
-        title.textContent = 'Derive privacy keys + ASP secret (1 signature)';
-        wrap.appendChild(title);
-
-        const p1 = document.createElement('p');
-        p1.textContent =
-            'We ask Freighter to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.';
-        wrap.appendChild(p1);
-
-        const p2 = document.createElement('p');
-        p2.className = 'text-xs text-dark-500';
-        p2.textContent =
-            'Tip: starting this from a button click helps some browsers keep Freighter in its normal overlay window.';
-        wrap.appendChild(p2);
-
-        const progress = document.createElement('p');
-        progress.id = 'onboarding-progress';
-        progress.className = 'text-xs text-dark-400';
-        progress.textContent = 'Ready.';
-        wrap.appendChild(progress);
-
-        renderStepContent(wrap);
-
-        await new Promise((resolve, reject) => {
-            const onAbort = () => reject(new Error('Onboarding cancelled'));
-            abort.signal.addEventListener('abort', onAbort, { once: true });
-
-            const deriveBtn = makeButton({
-                text: 'Derive privacy keys',
-                variant: 'primary',
-                onClick: async () => {
-                    try {
-                        setError('');
-                        deriveBtn.disabled = true;
-                        progress.textContent = 'Starting…';
-                        const derived = await deriveKeysFromWallet(address, {
-                            onStatus: (msg) => {
-                                if (msg) progress.textContent = msg;
-                                setButtonLoading?.(msg);
-                            },
-                            signOptions: { address },
-                            skipCacheCheck: true,
-                        });
-                        keys = {
-                            noteKeypair: { public: derived.pubKey },
-                            encryptionKeypair: derived.encryptionKeypair,
-                            aspSecret: derived.aspSecret,
-                        };
-
-                        const aspWrap = document.createElement('div');
-                        aspWrap.className = 'space-y-3 text-sm text-dark-300';
-
-                        const aspIntro = document.createElement('p');
-                        aspIntro.className = 'text-xs text-dark-500';
-                        aspIntro.textContent = 'Step 3/3 · Save your ASP registration details.';
-                        aspWrap.appendChild(aspIntro);
-
-                        const aspTitle = document.createElement('h3');
-                        aspTitle.className = 'text-base font-semibold text-dark-100';
-                        aspTitle.textContent = 'Copy your note public key + ASP secret';
-                        aspWrap.appendChild(aspTitle);
-
-                        const aspBody = document.createElement('p');
-                        aspBody.textContent = 'Send both values to your ASP provider so they can register your note public key.';
-                        aspWrap.appendChild(aspBody);
-
-                        const noteKeyLabel = document.createElement('p');
-                        noteKeyLabel.className = 'text-xs font-medium uppercase tracking-wide text-dark-500';
-                        noteKeyLabel.textContent = 'Note public key';
-                        aspWrap.appendChild(noteKeyLabel);
-
-                        const noteKeyValue = document.createElement('div');
-                        noteKeyValue.className = 'px-3 py-2 bg-dark-950 border border-dark-800 rounded-lg font-mono text-xs text-dark-200 break-all';
-                        noteKeyValue.textContent = derived.pubKey;
-                        aspWrap.appendChild(noteKeyValue);
-
-                        const aspSecretLabel = document.createElement('p');
-                        aspSecretLabel.className = 'text-xs font-medium uppercase tracking-wide text-dark-500';
-                        aspSecretLabel.textContent = 'ASP secret';
-                        aspWrap.appendChild(aspSecretLabel);
-
-                        const aspValue = document.createElement('div');
-                        aspValue.className = 'px-3 py-2 bg-dark-950 border border-dark-800 rounded-lg font-mono text-xs text-brand-400 break-all';
-                        aspValue.textContent = derived.aspSecret;
-                        aspWrap.appendChild(aspValue);
-
-                        const aspHint = document.createElement('p');
-                        aspHint.className = 'text-xs text-dark-500';
-                        aspHint.textContent = 'Keep these values handy until the ASP provider confirms your membership leaf has been inserted.';
-                        aspWrap.appendChild(aspHint);
-
-                        renderStepContent(aspWrap);
-
-                        const copyBtn = makeButton({
-                            text: 'Copy ASP details',
-                            variant: 'secondary',
-                            onClick: async () => {
-                                const copied = await copyText(`Note public key: ${derived.pubKey}\nASP secret: ${derived.aspSecret}`);
-                                setError(copied ? '' : 'Failed to copy ASP registration details');
-                                if (copied) copyBtn.textContent = 'Copied';
-                            },
-                        });
-                        const continueBtn = makeButton({
-                            text: 'Continue',
-                            variant: 'primary',
-                            onClick: () => {
-                                abort.signal.removeEventListener('abort', onAbort);
-                                resolve();
-                            },
-                        });
-                        renderActions([copyBtn, continueBtn]);
-                    } catch (e) {
-                        deriveBtn.disabled = false;
-                        setError(e?.message || 'Failed to derive privacy keys');
-                    }
-                },
+        if (stepId === 'keys') {
+            const secretWrap = document.createElement('div');
+            secretWrap.className = 'rounded-[24px] border border-white/8 bg-ink-950/75 p-5';
+            secretWrap.innerHTML = `
+                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Derived Material</p>
+                <p class="mt-3 text-sm text-slate-300">Your ASP secret is derived deterministically from wallet signatures and stored locally. It stays masked unless explicitly revealed.</p>
+                <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                    <p class="text-xs text-slate-500">ASP secret preview</p>
+                    <p id="wizard-asp-secret" class="mt-2 break-all font-mono text-xs text-slate-100">${maskSecret(state.keys?.aspSecret || '')}</p>
+                </div>
+            `;
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Derive note keys and ASP secret',
+                body: 'This requires a wallet signature but does not move funds. The derived note key, encryption key, and ASP secret are then cached locally.',
+                aside: secretWrap,
             });
+            renderContent(panel);
 
-            renderActions([deriveBtn]);
-        });
+            await waitForStep((resolve, reject) => {
+                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: () => reject(new Error('Onboarding cancelled')) });
+                const derive = makeButton({
+                    text: 'Derive and store keys',
+                    variant: 'primary',
+                    onClick: async () => {
+                        try {
+                            derive.disabled = true;
+                            const result = await deriveKeysFromWallet(address, {
+                                onStatus: () => {},
+                                skipCacheCheck: false,
+                            });
+                            state.keys = result;
+                            document.getElementById('wizard-asp-secret').textContent = maskSecret(result.aspSecret);
+                            resolve();
+                        } catch (error) {
+                            derive.disabled = false;
+                            setError(error?.message || 'Failed to derive privacy keys');
+                        }
+                    },
+                });
+                renderActions([cancel, derive]);
+            });
+            ensureNotCancelled();
+            continue;
+        }
 
-        if (cancelled) throw new Error('Onboarding cancelled');
-        if (!keys) throw new Error('Privacy keys not ready yet. Please try again.');
-        setStepState('keys', 'done');
+        if (stepId === 'retention') {
+            const enableNotifications = hasNotificationSupport();
+            const bootnodeEnabled = !!state.bootnode?.enabled;
+            const inputWrap = document.createElement('div');
+            inputWrap.className = 'space-y-4';
+            inputWrap.innerHTML = `
+                <div class="rounded-[24px] border border-white/8 bg-ink-950/75 p-5 text-sm text-slate-300">
+                    <p class="font-semibold text-white">When do you need this?</p>
+                    <p class="mt-3">If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
+                    <ul class="mt-4 list-disc space-y-2 pl-5">
+                        <li>Integrity risk: a bootnode can omit or forge event history.</li>
+                        <li>Availability risk: a bootnode can be unavailable or rate limit you.</li>
+                        <li>Privacy risk: the operator can observe IP address and timing.</li>
+                        <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
+                    </ul>
+                </div>
+                <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+                    <label class="flex items-start gap-3">
+                        <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300" ${bootnodeEnabled ? 'checked' : ''}>
+                        <span>
+                            <span class="block text-sm font-medium text-white">Store a bootnode URL now</span>
+                            <span class="mt-1 block text-sm text-slate-400">Use this if you want an explicit retention bypass path instead of relying only on reminders.</span>
+                        </span>
+                    </label>
+                    <div class="mt-4">
+                        <label for="wizard-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
+                        <input id="wizard-bootnode-url" type="text" value="${state.bootnode?.url || ''}" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                    </div>
+                </div>
+            `;
+
+            if (enableNotifications) {
+                const notif = document.createElement('div');
+                notif.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300';
+                notif.innerHTML = `
+                    <p class="font-medium text-white">Browser reminder</p>
+                    <p class="mt-2">If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.</p>
+                    <p class="mt-2 text-xs text-slate-500">Current permission: ${Notification.permission}</p>
+                `;
+                inputWrap.appendChild(notif);
+            }
+
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Set your retention fallback',
+                body: 'Choose whether this operator station keeps a bootnode archive URL, relies on browser reminders, or both. You can change bootnode settings later.',
+                aside: inputWrap,
+            });
+            renderContent(panel);
+
+            await waitForStep((resolve, reject) => {
+                const later = makeButton({ text: 'Continue', variant: 'ghost', onClick: () => resolve() });
+                const requestNotif = enableNotifications
+                    ? makeButton({
+                        text: 'Allow reminders',
+                        onClick: async () => {
+                            try {
+                                requestNotif.disabled = true;
+                                await requestNotificationPermission();
+                                setNotificationsPrompted();
+                                requestNotif.disabled = false;
+                            } catch (error) {
+                                requestNotif.disabled = false;
+                                setError(error?.message || 'Failed to request notifications');
+                            }
+                        },
+                    })
+                    : null;
+                const save = makeButton({
+                    text: 'Save retention setup',
+                    variant: 'primary',
+                    onClick: async () => {
+                        try {
+                            const enabled = !!document.getElementById('wizard-bootnode-enabled')?.checked;
+                            const url = document.getElementById('wizard-bootnode-url')?.value?.trim() || '';
+                            if (enabled && url && !url.startsWith('https://')) {
+                                throw new Error('Bootnode URL must start with https://');
+                            }
+                            await client.setSetting('bootnode_config', { enabled, url });
+                            state.bootnode = { enabled, url };
+                            if (enableNotifications) {
+                                setNotificationsPrompted();
+                            }
+                            resolve();
+                        } catch (error) {
+                            setError(error?.message || 'Failed to save retention configuration');
+                        }
+                    },
+                });
+                renderActions([later, ...(requestNotif ? [requestNotif] : []), save]);
+            });
+            ensureNotCancelled();
+            continue;
+        }
+
+        if (stepId === 'explorer') {
+            const wrap = document.createElement('div');
+            wrap.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5';
+            wrap.innerHTML = `
+                <label for="wizard-explorer-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Explorer Base URL</label>
+                <input id="wizard-explorer-url" type="text" value="${state.explorerBaseUrl}" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
+            `;
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Choose the explorer base link',
+                body: 'The UI uses a single explorer base URL across transaction feedback and address shortcuts.',
+                aside: wrap,
+            });
+            renderContent(panel);
+
+            await waitForStep((resolve, reject) => {
+                const later = makeButton({ text: 'Use default', variant: 'ghost', onClick: () => resolve() });
+                const save = makeButton({
+                    text: 'Save explorer',
+                    variant: 'primary',
+                    onClick: async () => {
+                        try {
+                            const baseUrl = document.getElementById('wizard-explorer-url')?.value?.trim() || DEFAULT_EXPLORER_BASE_URL;
+                            await client.setSetting('explorer', { baseUrl });
+                            state.explorerBaseUrl = baseUrl;
+                            resolve();
+                        } catch (error) {
+                            setError(error?.message || 'Failed to save explorer setting');
+                        }
+                    },
+                });
+                renderActions([later, save]);
+            });
+            ensureNotCancelled();
+            continue;
+        }
+
+        if (stepId === 'registration') {
+            const panel = makePanel({
+                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                title: 'Register your public keys in the address book',
+                body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
+                aside: `<p>If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.</p>`,
+            });
+            renderContent(panel);
+
+            await waitForStep((resolve, reject) => {
+                const later = makeButton({ text: 'Register later', variant: 'ghost', onClick: () => resolve() });
+                const register = makeButton({
+                    text: 'Register now',
+                    variant: 'primary',
+                    onClick: async () => {
+                        try {
+                            if (!state.keys?.pubKey || !state.keys?.encryptionKeypair?.publicKey) {
+                                throw new Error('Derive keys before registration');
+                            }
+                            register.disabled = true;
+                            await registerNow({
+                                client,
+                                address,
+                                notePublicKey: state.keys.pubKey,
+                                encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
+                                networkPassphrase,
+                            });
+                            state.registered = true;
+                            resolve();
+                        } catch (error) {
+                            register.disabled = false;
+                            setError(error?.message || 'Failed to register public keys');
+                        }
+                    },
+                });
+                renderActions([later, register]);
+            });
+            ensureNotCancelled();
+        }
     }
 
     hideModal();
 
-    const final = keys || (await client.getUserKeys(address));
-    if (!final) throw new Error('Privacy keys not available');
-
-    const finalAspSecret = keys?.aspSecret ? { membershipBlinding: keys.aspSecret } : await client.getASPSecret(address);
-    return {
-        pubKey: final.noteKeypair.public,
-        encryptionKeypair: {
-            publicKey: final.encryptionKeypair.public,
-        },
-        aspSecret: finalAspSecret?.membershipBlinding || null,
-    };
+    const finalKeys = state.keys || await deriveKeysFromWallet(address, { onStatus: () => {}, skipCacheCheck: false });
+    return finalKeys;
 }

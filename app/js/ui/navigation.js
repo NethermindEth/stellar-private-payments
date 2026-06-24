@@ -1,17 +1,14 @@
-/**
- * Navigation - tab switching and wallet onboarding.
- * @module ui/navigation
- */
-
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
-import { App, Utils, Toast } from './core.js';
-import { setTabsRef } from './templates.js';
+import { App, Toast, Utils } from './core.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
+function setHidden(el, hidden) {
+    el?.classList.toggle('hidden', !!hidden);
+}
+
 function isRpcSyncGapError(message) {
-    return typeof message === 'string'
-        && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
+    return typeof message === 'string' && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
 }
 
 function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
@@ -24,461 +21,317 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
     const rpcUrlEl = document.getElementById('bootnode-consent-rpc-url');
     const detailsEl = document.getElementById('bootnode-consent-details');
 
-    if (!modal || !urlInput || !acceptBtn || !cancelBtn || !closeBtn || !errorEl) {
-        throw new Error('Bootnode consent modal is missing from the page');
-    }
-
-    errorEl.classList.add('hidden');
     errorEl.textContent = '';
+    errorEl.classList.add('hidden');
     urlInput.value = defaultUrl || '';
-    if (rpcUrlEl) rpcUrlEl.textContent = rpcUrl || '';
-    if (detailsEl) detailsEl.textContent = errorMessage || '';
-
+    rpcUrlEl.textContent = rpcUrl || '';
+    detailsEl.textContent = errorMessage || '';
     modal.classList.remove('hidden');
 
-    return new Promise((resolve) => {
-        const cleanup = () => {
+    return new Promise(resolve => {
+        const cleanup = (accepted = false) => {
             acceptBtn.removeEventListener('click', onAccept);
             cancelBtn.removeEventListener('click', onCancel);
             closeBtn.removeEventListener('click', onCancel);
             modal.classList.add('hidden');
+            resolve(accepted ? { accepted: true, url: urlInput.value.trim() } : { accepted: false });
         };
-
-        const onCancel = () => {
-            cleanup();
-            resolve({ accepted: false, url: null });
-        };
-
+        const onCancel = () => cleanup(false);
         const onAccept = () => {
-            const url = (urlInput.value || '').trim();
-            if (!url.startsWith('https://')) {
+            if (urlInput.value.trim() && !urlInput.value.trim().startsWith('https://')) {
                 errorEl.textContent = 'Bootnode URL must start with https://';
                 errorEl.classList.remove('hidden');
                 return;
             }
-            cleanup();
-            resolve({ accepted: true, url });
+            cleanup(true);
         };
-
         acceptBtn.addEventListener('click', onAccept);
         cancelBtn.addEventListener('click', onCancel);
         closeBtn.addEventListener('click', onCancel);
     });
 }
 
-/**
- * Updates the disabled state of all submit buttons and disclaimers based on wallet connection.
- * @param {boolean} connected
- */
-function updateSubmitButtons(connected) {
-    const modes = ['deposit', 'withdraw', 'transfer', 'transact'];
-    for (const mode of modes) {
-        const btn = document.getElementById(`btn-${mode}`);
-        const disclaimer = document.getElementById(`wallet-disclaimer-${mode}`);
-        if (btn) btn.disabled = !connected;
-        if (disclaimer) disclaimer.classList.toggle('hidden', connected);
-    }
+function setActiveView(view) {
+    App.state.views.active = view;
+    document.querySelectorAll('[data-view]').forEach(btn => {
+        const active = btn.dataset.view === view;
+        btn.classList.toggle('bg-cyan-400/15', active);
+        btn.classList.toggle('text-cyan-100', active);
+        btn.classList.toggle('text-slate-400', !active);
+    });
+    document.querySelectorAll('.view-panel').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
+    });
 }
 
-export const Tabs = {
+function setMoveFlow(flow) {
+    App.state.views.moveFlow = flow;
+    document.querySelectorAll('[data-move-flow]').forEach(btn => {
+        const active = btn.dataset.moveFlow === flow;
+        btn.classList.toggle('bg-cyan-400', active);
+        btn.classList.toggle('text-slate-950', active);
+        btn.classList.toggle('text-slate-300', !active);
+    });
+    document.querySelectorAll('.move-flow-panel').forEach(panel => {
+        panel.classList.toggle('hidden', panel.dataset.movePanel !== flow);
+    });
+}
+
+async function loadRuntimeState() {
+    const config = await getHandle().webClient.contractConfig();
+    App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
+    App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
+    const poolSelects = document.querySelectorAll('[data-pool-select]');
+    poolSelects.forEach(select => {
+        select.replaceChildren();
+        App.state.pools.forEach(pool => {
+            const option = document.createElement('option');
+            option.value = pool.poolContractId;
+            option.textContent = Utils.poolLabel(pool);
+            select.appendChild(option);
+        });
+        select.value = App.state.selectedPoolId || '';
+    });
+
+    const explorerSetting = await getHandle().webClient.getExplorerSetting();
+    App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
+
+    const bootnodeSetting = await getHandle().webClient.getBootnodeConfig();
+    App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
+
+    App.events.dispatchEvent(new CustomEvent('pool:config'));
+    App.events.dispatchEvent(new CustomEvent('settings:updated'));
+}
+
+function renderWallet() {
+    const walletText = document.getElementById('wallet-text');
+    const walletAddress = document.getElementById('settings-wallet-address');
+    walletText.textContent = App.state.wallet.connected
+        ? Utils.shortAddress(App.state.wallet.address, 8, 6)
+        : 'Connect Freighter';
+    walletAddress.textContent = App.state.wallet.address || 'Not connected';
+    document.getElementById('network-name').textContent = App.state.wallet.network?.toUpperCase() || 'NETWORK';
+    document.getElementById('sync-status-badge').textContent = App.state.wallet.connected ? 'Live' : 'Offline';
+}
+
+function renderSettingsDrawer() {
+    document.getElementById('settings-note-key').textContent = App.state.keys.notePublicKey || '—';
+    document.getElementById('settings-enc-key').textContent = App.state.keys.encryptionPublicKey || '—';
+    const aspMasked = App.state.keys.aspSecret ? `${'*'.repeat(12)}${App.state.keys.aspSecret.slice(-6)}` : '—';
+    const aspValue = document.getElementById('settings-asp-secret');
+    const revealBtn = document.getElementById('settings-reveal-secret');
+    const revealed = revealBtn?.dataset.revealed === 'true';
+    aspValue.textContent = revealed ? (App.state.keys.aspSecret || '—') : aspMasked;
+    document.getElementById('settings-registration-status').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
+    document.getElementById('settings-explorer-input').value = App.state.settings.explorerBaseUrl || Utils.defaultExplorerBaseUrl;
+    document.getElementById('settings-bootnode-enabled').checked = !!App.state.settings.bootnode?.enabled;
+    document.getElementById('settings-bootnode-url').value = App.state.settings.bootnode?.url || '';
+}
+
+export const Shell = {
     init() {
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            btn.addEventListener('click', () => this.switch(btn.dataset.tab));
+        document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => setActiveView(btn.dataset.view)));
+        document.querySelectorAll('[data-move-flow]').forEach(btn => btn.addEventListener('click', () => setMoveFlow(btn.dataset.moveFlow)));
+        document.querySelectorAll('[data-pool-select]').forEach(select => {
+            select.addEventListener('change', () => {
+                App.state.selectedPoolId = select.value;
+                document.querySelectorAll('[data-pool-select]').forEach(other => {
+                    if (other !== select) other.value = select.value;
+                });
+                App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId: select.value } }));
+            });
         });
-        setTabsRef(this);
-    },
+        document.getElementById('open-settings-btn')?.addEventListener('click', () => Wallet.openSettings());
+        document.getElementById('settings-close-btn')?.addEventListener('click', () => Wallet.closeSettings());
+        document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
+        document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
+        document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
+        document.getElementById('settings-reveal-secret')?.addEventListener('click', (e) => {
+            e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
+            renderSettingsDrawer();
+        });
+        document.getElementById('settings-copy-secret')?.addEventListener('click', () => {
+            if (App.state.keys.aspSecret) Utils.copyToClipboard(App.state.keys.aspSecret);
+        });
 
-    switch(tabId) {
-        App.state.activeTab = tabId;
-
-        document.querySelectorAll('.tab-btn').forEach(btn => {
-            const isActive = btn.dataset.tab === tabId;
-            btn.setAttribute('aria-selected', isActive);
-            if (isActive) {
-                btn.classList.add('bg-dark-800', 'text-brand-500', 'border', 'border-brand-500/30', 'shadow-lg', 'shadow-brand-500/10');
-                btn.classList.remove('text-dark-400', 'hover:text-dark-200', 'hover:bg-dark-800');
-            } else {
-                btn.classList.remove('bg-dark-800', 'text-brand-500', 'border', 'border-brand-500/30', 'shadow-lg', 'shadow-brand-500/10');
-                btn.classList.add('text-dark-400', 'hover:text-dark-200', 'hover:bg-dark-800');
+        App.events.addEventListener('dashboard:quick-flow', (event) => {
+            const { flow, poolId } = event.detail;
+            if (poolId) {
+                App.state.selectedPoolId = poolId;
+                document.querySelectorAll('[data-pool-select]').forEach(select => {
+                    select.value = poolId;
+                });
             }
+            setActiveView('move-funds');
+            setMoveFlow(flow);
+            App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
-        document.querySelectorAll('.tab-panel').forEach(panel => {
-            const isActive = panel.id === `panel-${tabId}`;
-            panel.classList.toggle('hidden', !isActive);
-        });
-    }
+        setActiveView('dashboard');
+        setMoveFlow('deposit');
+    },
 };
 
 export const Wallet = {
-    dropdownOpen: false,
     _connectPromise: null,
-    _lastInitError: { msg: null, at: 0 },
     _stopWatcher: null,
-    _walletChangeInFlight: null,
 
     init() {
-        const btn = document.getElementById('wallet-btn');
-        const dropdown = document.getElementById('wallet-dropdown');
-        const disconnectBtn = document.getElementById('wallet-disconnect-btn');
-        const registerBtn = document.getElementById('wallet-register-btn');
-
-        btn?.addEventListener('click', (e) => {
+        document.getElementById('wallet-btn')?.addEventListener('click', () => {
             if (App.state.wallet.connected) {
-                e.stopPropagation();
-                this.toggleDropdown();
+                this.openSettings();
             } else {
-                this.connect({ auto: false });
+                this.connect({ auto: false }).catch(() => {});
             }
         });
-
-        disconnectBtn?.addEventListener('click', () => {
-            this.closeDropdown();
-            this.disconnect();
-        });
-
-        registerBtn?.addEventListener('click', () => {
-            this.closeDropdown();
-            this.registerPublicKey().catch(e => {
-                Toast.show(e?.message || 'Public key registration failed', 'error', 8000);
-            });
-        });
-
-        document.addEventListener('click', (e) => {
-            if (this.dropdownOpen && !dropdown?.contains(e.target) && e.target !== btn) {
-                this.closeDropdown();
-            }
-        });
-
-        updateSubmitButtons(false);
+        renderWallet();
     },
 
-    toggleDropdown() {
-        if (this.dropdownOpen) this.closeDropdown();
-        else this.openDropdown();
-    },
-
-    openDropdown() {
-        const dropdown = document.getElementById('wallet-dropdown');
-        const btn = document.getElementById('wallet-btn');
-        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        const addressDisplay = document.getElementById('wallet-dropdown-address');
-
-        if (addressDisplay && App.state.wallet.address) {
-            addressDisplay.textContent = App.state.wallet.address;
-        }
-
-        dropdown?.classList.remove('hidden');
-        btn?.setAttribute('aria-expanded', 'true');
-        dropdownIcon?.classList.add('rotate-180');
-        this.dropdownOpen = true;
-    },
-
-    closeDropdown() {
-        const dropdown = document.getElementById('wallet-dropdown');
-        const btn = document.getElementById('wallet-btn');
-        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-
-        dropdown?.classList.add('hidden');
-        btn?.setAttribute('aria-expanded', 'false');
-        dropdownIcon?.classList.remove('rotate-180');
-        this.dropdownOpen = false;
-    },
-
-    /**
-     * Connect to Freighter, assert testnet, initialize WASM, and derive keys.
-     * @param {{auto?: boolean}} opts
-     */
     async connect({ auto = false } = {}) {
         if (this._connectPromise) return this._connectPromise;
 
-        const btn = document.getElementById('wallet-btn');
-        const text = document.getElementById('wallet-text');
-        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        const addressDisplay = document.getElementById('wallet-dropdown-address');
-        const networkName = document.getElementById('network-name');
-
-        const setButtonLoading = (msg) => {
-            if (text) text.textContent = msg;
-            if (btn) btn.disabled = true;
-        };
-
-        const run = async () => {
-            setButtonLoading('Connecting...');
-            const address = await connectWallet();
-
-            const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
-            const rpcUrl = sorobanRpcUrl || '';
-
-            if (!rpcUrl.toLowerCase().includes('testnet')) {
-                Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
-                this.disconnect();
-                return;
-            }
-
-            App.state.wallet.connected = true;
-            App.state.wallet.address = address;
-            App.state.wallet.sorobanRpcUrl = rpcUrl;
-            App.state.wallet.network = network;
-            App.state.wallet.networkPassphrase = networkPassphrase;
-
-            if (networkName) networkName.textContent = (network || 'TESTNET').toUpperCase();
-
-            setButtonLoading('Loading WASM...');
-            try {
-                await initializeWasm(rpcUrl);
-            } catch (e) {
-                let msg = e?.message || 'Failed to initialize WASM';
-
-                // Retention-window bootstrap: offer an opt-in bootnode for the indexer only.
-                if (isRpcSyncGapError(msg)) {
-                    try {
-                        const modal = await showBootnodeConsentModal({
-                            defaultUrl: '',
-                            rpcUrl,
-                            errorMessage: msg,
-                        });
-                        if (modal?.accepted && modal?.url) {
-                            setButtonLoading('Loading WASM (bootnode)...');
-                            await initializeWasm(rpcUrl, modal.url);
-                            try {
-                                await getHandle().webClient.setBootnodeConfig(modal.url);
-                            } catch (saveErr) {
-                                console.debug('[Bootnode] failed to persist config:', saveErr);
-                            }
-                            msg = null;
-                        }
-                    } catch (modalErr) {
-                        console.debug('[Bootnode] consent flow failed:', modalErr);
-                    }
-                }
-
-                if (msg) {
-                    // Always toast init failures (even on auto-connect) because it's actionable.
-                    const now = Date.now();
-                    const last = this._lastInitError || { msg: null, at: 0 };
-                    if (msg !== last.msg || (now - last.at) > 20_000) {
-                        Toast.show(msg, 'error', 20_000);
-                        this._lastInitError = { msg, at: now };
-                    }
-                    throw e;
-                }
-            }
-
-            setButtonLoading('Onboarding…');
-            const keys = await runOnboardingWizard({ address, setButtonLoading });
-
-            App.state.keys.notePublicKey = keys?.pubKey || null;
-            App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
-
-            if (text) text.textContent = Utils.truncateHex(address, 7, 6);
-            if (dropdownIcon) dropdownIcon.classList.remove('hidden');
-            if (addressDisplay) addressDisplay.textContent = address;
-
-            updateSubmitButtons(true);
-            App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
-
-            this._startWatcher();
-
-            if (!auto) {
-                Toast.show('Wallet connected. Privacy keys ready.', 'success');
-            }
-        };
-
         this._connectPromise = (async () => {
             try {
-                await run();
-            } catch (e) {
-                if (!auto) Toast.show(e?.message || 'Failed to connect wallet', 'error');
+                const address = await connectWallet();
+                const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
+                const rpcUrl = sorobanRpcUrl || '';
+                if (!rpcUrl.toLowerCase().includes('testnet')) {
+                    throw new Error('This app supports Stellar testnet only.');
+                }
+
+                App.state.wallet.connected = true;
+                App.state.wallet.address = address;
+                App.state.wallet.sorobanRpcUrl = rpcUrl;
+                App.state.wallet.network = network;
+                App.state.wallet.networkPassphrase = networkPassphrase;
+                renderWallet();
+
+                try {
+                    await initializeWasm(rpcUrl);
+                } catch (error) {
+                    const message = error?.message || 'Failed to initialize app runtime';
+                    if (!isRpcSyncGapError(message)) throw error;
+                    const modal = await showBootnodeConsentModal({ defaultUrl: '', rpcUrl, errorMessage: message });
+                    if (!modal.accepted || !modal.url) throw error;
+                    await initializeWasm(rpcUrl, modal.url);
+                    await getHandle().webClient.setBootnodeConfig(modal.url);
+                }
+
+                const keys = await runOnboardingWizard({
+                    address,
+                    networkPassphrase,
+                });
+                App.state.keys.notePublicKey = keys?.pubKey || null;
+                App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
+                App.state.keys.aspSecret = keys?.aspSecret || null;
+
+                await loadRuntimeState();
+                renderSettingsDrawer();
+                renderWallet();
+                App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+                this.startWatcher();
+                if (!auto) Toast.show('Wallet connected', 'success');
+            } catch (error) {
                 this.disconnect();
-                throw e;
+                if (!auto) Toast.show(error?.message || 'Failed to connect wallet', 'error');
+                throw error;
             } finally {
                 this._connectPromise = null;
-                if (btn) btn.disabled = false;
-                if (!App.state.wallet.connected && text) text.textContent = 'Connect Freighter';
             }
         })();
 
         return this._connectPromise;
     },
 
-    disconnect() {
-        this._stopWatcher?.();
-        this._stopWatcher = null;
-        this._walletChangeInFlight = null;
-
-        App.state.wallet.connected = false;
-        App.state.wallet.address = null;
-        App.state.wallet.sorobanRpcUrl = null;
-        App.state.wallet.network = null;
-        App.state.wallet.networkPassphrase = null;
-        App.state.keys.notePublicKey = null;
-        App.state.keys.encryptionPublicKey = null;
-
-        const text = document.getElementById('wallet-text');
-        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        const addressDisplay = document.getElementById('wallet-dropdown-address');
-        if (text) text.textContent = 'Connect Freighter';
-        if (dropdownIcon) dropdownIcon.classList.add('hidden');
-        if (addressDisplay) addressDisplay.textContent = '';
-
-        updateSubmitButtons(false);
-        App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
-    }
-
-    ,
-
-    _startWatcher() {
+    startWatcher() {
         if (this._stopWatcher) return;
-
-        try {
-            this._stopWatcher = startWalletWatcher({
-                intervalMs: 2000,
-                onChange: (info) => {
-                    void this._handleWalletChange(info);
-                },
-            });
-        } catch (e) {
-            console.warn('[Wallet] Failed to start watcher:', e);
-        }
-    },
-
-    async _handleWalletChange(info) {
-        if (!App.state.wallet.connected) return;
-        if (this._connectPromise) return;
-        if (!info || info.error) return;
-
-        const nextAddress = info.address || '';
-        const nextNetwork = info.network || '';
-        const nextNetworkPassphrase = info.networkPassphrase || '';
-
-        const addressChanged =
-            nextAddress &&
-            App.state.wallet.address &&
-            nextAddress !== App.state.wallet.address;
-
-        const networkChanged =
-            (nextNetwork && nextNetwork !== App.state.wallet.network) ||
-            (nextNetworkPassphrase && nextNetworkPassphrase !== App.state.wallet.networkPassphrase);
-
-        if (!addressChanged && !networkChanged) return;
-        if (this._walletChangeInFlight) return;
-
-        this._walletChangeInFlight = (async () => {
-            const btn = document.getElementById('wallet-btn');
-            const text = document.getElementById('wallet-text');
-            const addressDisplay = document.getElementById('wallet-dropdown-address');
-            const networkNameEl = document.getElementById('network-name');
-
-            const setButtonLoading = (msg) => {
-                if (text) text.textContent = msg;
-                if (btn) btn.disabled = true;
-            };
-
-            try {
-                setButtonLoading('Wallet changed…');
-                updateSubmitButtons(false);
-
-                const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
-                const rpcUrl = sorobanRpcUrl || App.state.wallet.sorobanRpcUrl || '';
-
-                if (!rpcUrl.toLowerCase().includes('testnet')) {
-                    Toast.show('This app works only on Stellar testnet. Please switch Freighter to testnet.', 'error', 8000);
+        this._stopWatcher = startWalletWatcher({
+            intervalMs: 2_000,
+            onChange: async (info) => {
+                if (!App.state.wallet.connected || info?.error) return;
+                if (info.address && info.address !== App.state.wallet.address) {
                     this.disconnect();
-                    return;
+                    Toast.show('Freighter account changed. Reconnect to continue.', 'info', 6000);
                 }
-
-                App.state.wallet.network = network;
-                App.state.wallet.networkPassphrase = networkPassphrase;
-                App.state.wallet.sorobanRpcUrl = rpcUrl;
-                if (networkNameEl) networkNameEl.textContent = (network || 'TESTNET').toUpperCase();
-
-                if (addressChanged) {
-                    await this._applyWalletIdentityChange(nextAddress, setButtonLoading);
-                } else {
-                    if (btn) btn.disabled = false;
-                }
-            } catch (e) {
-                Toast.show(e?.message || 'Wallet changed; failed to re-onboard', 'error', 8000);
-                this.disconnect();
-            } finally {
-                const btn = document.getElementById('wallet-btn');
-                if (btn) btn.disabled = false;
-            }
-        })().finally(() => {
-            this._walletChangeInFlight = null;
+            },
         });
     },
 
-    async _applyWalletIdentityChange(nextAddress, setButtonLoading) {
-        const text = document.getElementById('wallet-text');
-        const dropdownIcon = document.getElementById('wallet-dropdown-icon');
-        const addressDisplay = document.getElementById('wallet-dropdown-address');
+    disconnect() {
+        this._stopWatcher?.();
+        this._stopWatcher = null;
+        App.state.wallet = {
+            connected: false,
+            address: null,
+            sorobanRpcUrl: null,
+            network: null,
+            networkPassphrase: null,
+        };
+        App.state.keys = { notePublicKey: null, encryptionPublicKey: null, aspSecret: null };
+        renderWallet();
+        this.closeSettings();
+        App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
+    },
 
-        App.state.wallet.address = nextAddress;
-        if (addressDisplay) addressDisplay.textContent = nextAddress;
+    openSettings() {
+        App.state.ui.settingsOpen = true;
+        document.getElementById('settings-drawer')?.classList.remove('translate-x-full');
+        document.getElementById('settings-overlay')?.classList.remove('hidden');
+        renderSettingsDrawer();
+    },
 
-        setButtonLoading?.('Onboarding new account…');
-        const keys = await runOnboardingWizard({ address: nextAddress, setButtonLoading });
+    closeSettings() {
+        App.state.ui.settingsOpen = false;
+        document.getElementById('settings-drawer')?.classList.add('translate-x-full');
+        document.getElementById('settings-overlay')?.classList.add('hidden');
+    },
 
-        App.state.keys.notePublicKey = keys?.pubKey || null;
-        App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
+    async saveSettings() {
+        try {
+            const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
+            const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
+            const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-        if (text) text.textContent = Utils.truncateHex(nextAddress, 7, 6);
-        if (dropdownIcon) dropdownIcon.classList.remove('hidden');
+            await getHandle().webClient.setSetting('explorer', { baseUrl: explorerBaseUrl });
+            await getHandle().webClient.setSetting('bootnode_config', {
+                enabled: !!bootnodeEnabled,
+                url: bootnodeEnabled ? bootnodeUrl : '',
+            });
 
-        updateSubmitButtons(true);
-        App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
-
-        Toast.show('Freighter account changed. Privacy keys ready.', 'info');
+            App.state.settings.explorerBaseUrl = explorerBaseUrl;
+            App.state.settings.bootnode = { enabled: !!bootnodeEnabled, url: bootnodeEnabled ? bootnodeUrl : '' };
+            Toast.show('Settings saved', 'success');
+            App.events.dispatchEvent(new CustomEvent('settings:updated'));
+        } catch (error) {
+            Toast.show(error?.message || 'Failed to save settings', 'error');
+        }
     },
 
     async registerPublicKey() {
-        if (!App.state.wallet.connected || !App.state.wallet.address) {
-            Toast.show('Please connect your wallet first', 'error');
-            return;
-        }
-        if (!App.state.wallet.sorobanRpcUrl || !App.state.wallet.networkPassphrase) {
-            Toast.show('Wallet network details unavailable', 'error');
-            return;
-        }
-        if (!App.state.keys.notePublicKey || !App.state.keys.encryptionPublicKey) {
-            Toast.show('Privacy keys not ready yet. Please reconnect your wallet.', 'error', 8000);
-            return;
-        }
-
-        const registerBtn = document.getElementById('wallet-register-btn');
-        const originalText = registerBtn?.textContent || 'Register Public Key';
-        const setBtnText = (t) => {
-            if (registerBtn) registerBtn.textContent = t;
-        };
-
         try {
-            if (registerBtn) registerBtn.disabled = true;
-            setBtnText('Registering…');
+            if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
+                throw new Error('Connect wallet first');
+            }
+            if (!App.state.keys.notePublicKey || !App.state.keys.encryptionPublicKey) {
+                throw new Error('Privacy keys are not ready yet');
+            }
 
             const hash = await getHandle().webClient.registerPublicKeys(
                 App.state.wallet.address,
                 App.state.keys.notePublicKey,
                 App.state.keys.encryptionPublicKey,
                 App.state.wallet.networkPassphrase,
-                (p) => {
-                    const msg = p?.message || '';
-                    if (msg) setBtnText(msg);
-                },
+                null,
             );
-
-            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 8, 6)}`, 'success', 6000);
-            App.events.dispatchEvent(new CustomEvent('addressbook:refresh'));
-        } catch (e) {
-            if (e?.code === 'USER_REJECTED') {
-                Toast.show('Registration cancelled in Freighter', 'error', 6000);
-                return;
-            }
-            throw e;
-        } finally {
-            setBtnText(originalText);
-            if (registerBtn) registerBtn.disabled = false;
+            App.state.profile.registered = true;
+            renderSettingsDrawer();
+            Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {
+                linkUrl: Utils.explorerTxUrl(hash),
+                linkAriaLabel: 'Open transaction in explorer',
+            });
+            App.events.dispatchEvent(new CustomEvent('profile:updated'));
+        } catch (error) {
+            Toast.show(error?.message || 'Registration failed', 'error');
         }
-    }
+    },
 };
