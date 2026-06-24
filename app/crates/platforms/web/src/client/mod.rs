@@ -15,7 +15,7 @@ use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
 use std::{rc::Rc, str::FromStr};
 use stellar::{
     OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
-    StateFetcher as CoreStateFetcher,
+    StateFetcher as CoreStateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
 };
 use types::{
     AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
@@ -24,7 +24,11 @@ use types::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
+mod sign;
 mod transact;
+
+const CONFIRM_POLL_ATTEMPTS: u32 = 30;
+const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 
 fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
     match result {
@@ -117,7 +121,19 @@ impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
 }
 
 impl WebClient {
-    async fn prepare_pool_soroban_tx(
+    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
+        Ok(Self {
+            storage_bridge: StorageWorker::spawner()
+                .as_module(true)
+                .spawn("./js/storage-worker.js"),
+            prover_bridge: ProverWorker::spawner()
+                .as_module(true)
+                .spawn("./js/prover-worker.js"),
+            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
+        })
+    }
+
+    async fn prepare_pool_tx(
         &self,
         pool_contract_id: &str,
         user_address: &str,
@@ -139,6 +155,49 @@ impl WebClient {
             .map_err(|e| JsError::new(&e.to_string()))
     }
 
+    pub(super) async fn submit_tx(
+        &self,
+        signed: &TransactionEnvelope,
+        flow: &'static str,
+        on_status: &Option<Function>,
+    ) -> Result<String, JsError> {
+        let rpc = self.fetcher.rpc();
+        let hash = submit_tx(signed, rpc)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+            emit_progress(
+                on_status,
+                flow,
+                "confirm",
+                "Confirming…",
+                Some(attempt),
+                Some(CONFIRM_POLL_ATTEMPTS),
+            );
+            TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
+            match confirm_tx(&hash, rpc)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?
+            {
+                TxConfirmStatus::Success => return Ok(hash),
+                TxConfirmStatus::Failed { detail } => {
+                    return Err(JsError::new(&format!("transaction failed{detail}")));
+                }
+                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
+                    return Err(JsError::new(&format!(
+                        "transaction confirmation timed out after 30s (hash: {hash})"
+                    )));
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+
+        Err(JsError::new(&format!(
+            "transaction confirmation failed (hash: {hash})"
+        )))
+    }
+
     async fn finalize_prepared_prover_tx(
         &self,
         pool_contract_id: &str,
@@ -156,7 +215,7 @@ impl WebClient {
             None,
         );
         prepared.soroban_tx = self
-            .prepare_pool_soroban_tx(
+            .prepare_pool_tx(
                 pool_contract_id,
                 user_address,
                 prepared.proof_uncompressed.clone(),
@@ -165,18 +224,6 @@ impl WebClient {
             )
             .await?;
         Ok(prepared)
-    }
-
-    pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
-        Ok(Self {
-            storage_bridge: StorageWorker::spawner()
-                .as_module(true)
-                .spawn("./js/storage-worker.js"),
-            prover_bridge: ProverWorker::spawner()
-                .as_module(true)
-                .spawn("./js/prover-worker.js"),
-            fetcher: Rc::new(CoreStateFetcher::new(rpc_url, contract_config)?),
-        })
     }
 
     pub async fn ping_storage(&self) -> anyhow::Result<()> {
@@ -281,13 +328,15 @@ impl WebClient {
         )?)
     }
 
-    #[wasm_bindgen(js_name = prepareRegisterPublicKeys)]
-    pub async fn prepare_register_public_keys(
+    #[wasm_bindgen(js_name = registerPublicKeys)]
+    pub async fn register_public_keys(
         &self,
         user_address: String,
         note_public_key_hex: String,
         encryption_public_key_hex: String,
-    ) -> Result<JsValue, JsError> {
+        network_passphrase: String,
+        on_status: Option<Function>,
+    ) -> Result<String, JsError> {
         let note_key = parse_hex32(&note_public_key_hex, "note public key")?;
         let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
         let prepared = self
@@ -295,7 +344,16 @@ impl WebClient {
             .prepare_register(&user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&prepared)?)
+        let signed_tx = sign::sign_prepared_transaction(
+            &prepared,
+            &network_passphrase,
+            &user_address,
+            "register",
+            &on_status,
+        )
+        .await?;
+        emit_progress(&on_status, "register", "submit", "Submitting…", None, None);
+        self.submit_tx(&signed_tx, "register", &on_status).await
     }
 
     #[wasm_bindgen(js_name = keyDerivationMessage)]
@@ -451,7 +509,7 @@ impl WebClient {
         user_address: String,
         amount: BigInt,
         output_amounts: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         let result = self
@@ -460,7 +518,7 @@ impl WebClient {
                 user_address,
                 amount,
                 output_amounts,
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -489,7 +547,7 @@ impl WebClient {
         amount: BigInt,
         recipient_note_key_hex: String,
         recipient_enc_key_hex: String,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         use tx_planner::SpendTarget;
@@ -507,7 +565,7 @@ impl WebClient {
                 amount,
                 target,
                 "transfer",
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -522,7 +580,7 @@ impl WebClient {
         user_address: String,
         withdraw_recipient: String,
         amount: BigInt,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         use tx_planner::SpendTarget;
@@ -536,7 +594,7 @@ impl WebClient {
                 amount,
                 target,
                 "withdraw",
-                submit_fn,
+                network_passphrase,
                 on_status,
             )
             .await?;
@@ -555,7 +613,7 @@ impl WebClient {
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
         let result = self
@@ -568,7 +626,7 @@ impl WebClient {
                 output_amounts,
                 out_recipient_note_keys_hex,
                 out_recipient_enc_keys_hex,
-                submit_fn,
+                network_passphrase,
                 on_status,
                 "transact",
             )

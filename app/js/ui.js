@@ -1,9 +1,3 @@
-/**
- * PoolStellar Private Payment System
- * Main UI entry point - imports and initializes all UI modules.
- * 
- * @module ui
- */
 import { Templates } from './ui/templates.js';
 import { Tabs, Wallet } from './ui/navigation.js';
 import { NotesTable } from './ui/notes-table.js';
