@@ -5202,7 +5202,6 @@ dependencies = [
  "state",
  "stellar",
  "thiserror 2.0.18",
- "tokio",
  "tx-planner",
  "types",
  "witness",

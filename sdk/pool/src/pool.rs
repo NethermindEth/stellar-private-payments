@@ -26,10 +26,7 @@ use crate::{
 use crate::indexer::Indexer;
 
 #[cfg(not(target_arch = "wasm32"))]
-use crate::runtime::block_on_rpc;
-
-#[cfg(not(target_arch = "wasm32"))]
-use stellar::StateFetcher;
+use stellar::blocking::StateFetcher;
 
 #[cfg(not(target_arch = "wasm32"))]
 use types::SMT_DEPTH;
@@ -291,46 +288,42 @@ impl PrivatePool {
         let (_, note_pub, ..) = load_user_key_material(storage, &self.config.user_address)
             .map_err(|e| PoolError::Other(e.to_string()))?;
 
-        let rpc_url = self.config.rpc_url.clone();
-        let contract_config = self.config.contract_config.clone();
-        let pool_contract_id = self.config.pool_contract_id.clone();
-        let user_address = self.config.user_address.clone();
+        let fetcher = StateFetcher::new(&self.config.rpc_url, self.config.contract_config.clone())
+            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+        let data = fetcher
+            .contracts_data_for_pool(&self.config.pool_contract_id)
+            .map_err(|e| PoolError::Other(format!("fetch pool state: {e:#}")))?;
+        let pool = data.pools.into_iter().next().ok_or_else(|| {
+            PoolError::Other(format!(
+                "pool data not fetched for {}",
+                self.config.pool_contract_id
+            ))
+        })?;
+        let pool_root = pool
+            .merkle_root
+            .ok_or_else(|| PoolError::Other("pool merkle_root not fetched".into()))?;
+        let pool_next_index = pool
+            .merkle_next_index
+            .parse::<u32>()
+            .map_err(|e| PoolError::Other(format!("invalid pool merkle_next_index: {e}")))?;
+        let non_membership_proof = fetcher
+            .get_nonmembership_proof(
+                &note_pub,
+                data.asp_non_membership.root,
+                SMT_DEPTH as usize,
+                &self.config.user_address,
+            )
+            .map_err(|e| PoolError::Other(format!("non-membership proof: {e:#}")))?;
 
-        let chain = block_on_rpc(async move {
-            let fetcher = StateFetcher::new(&rpc_url, contract_config)?;
-            let data = fetcher.contracts_data_for_pool(&pool_contract_id).await?;
-            let pool =
-                data.pools.into_iter().next().ok_or_else(|| {
-                    anyhow::anyhow!("pool data not fetched for {pool_contract_id}")
-                })?;
-            let pool_root = pool
-                .merkle_root
-                .ok_or_else(|| anyhow::anyhow!("pool merkle_root not fetched"))?;
-            let pool_next_index = pool
-                .merkle_next_index
-                .parse::<u32>()
-                .map_err(|e| anyhow::anyhow!("invalid pool merkle_next_index: {e}"))?;
-
-            let non_membership_proof = fetcher
-                .get_nonmembership_proof(
-                    &note_pub,
-                    data.asp_non_membership.root,
-                    SMT_DEPTH as usize,
-                    &user_address,
-                )
-                .await?;
-
-            Ok::<_, anyhow::Error>(TransactChainContext {
-                pool_root,
-                pool_next_index,
-                pool_merkle_levels: pool.merkle_levels,
-                asp_membership_root: data.asp_membership.root,
-                asp_membership_contract_id: data.asp_membership.contract_id,
-                asp_membership_ledger: data.asp_membership.ledger,
-                non_membership_proof,
-            })
-        })
-        .map_err(|e| PoolError::Other(format!("refresh chain context: {e:#}")))?;
+        let chain = TransactChainContext {
+            pool_root,
+            pool_next_index,
+            pool_merkle_levels: pool.merkle_levels,
+            asp_membership_root: data.asp_membership.root,
+            asp_membership_contract_id: data.asp_membership.contract_id,
+            asp_membership_ledger: data.asp_membership.ledger,
+            non_membership_proof,
+        };
 
         self.chain = Some(chain);
         Ok(())

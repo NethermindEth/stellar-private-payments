@@ -14,6 +14,6 @@ pub use indexer::{ContractDataStorage, Indexer};
 pub use rpc::{Client, Error as RpcError, Event, GetTransactionResponse, SendTransactionResponse};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking {
-    pub use crate::rpc::blocking::Client;
+    pub use crate::{contract_state::blocking::StateFetcher, rpc::blocking::Client};
 }
 pub use tx_prepare::PoolTransactInput;
