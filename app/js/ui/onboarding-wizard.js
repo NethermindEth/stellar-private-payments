@@ -1,5 +1,12 @@
 import { getHandle } from '../wasm-facade.js';
 import { deriveKeysFromWallet } from '../wallet.js';
+import {
+    hasNotificationSupport,
+    getNotificationsPrompted,
+    setNotificationsPrompted,
+    requestNotificationPermission,
+    registerServiceWorker,
+} from './push-notifications.js';
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 
@@ -259,7 +266,13 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
     const prompted = storageAvailable ? getPersistPromptedFlag() : true;
     const needsStorageStep = storageAvailable && !persisted && !prompted;
 
-    if (!needsDisclaimer && !needsStorageStep && !needsKeys) {
+    const notificationsSupported = hasNotificationSupport();
+    const notificationsPrompted = notificationsSupported ? getNotificationsPrompted() : true;
+    const notificationsPermission = notificationsSupported ? Notification.permission : 'denied';
+    const needsNotificationsStep =
+        notificationsSupported && !notificationsPrompted && notificationsPermission === 'default';
+
+    if (!needsDisclaimer && !needsStorageStep && !needsNotificationsStep && !needsKeys) {
         return {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: {
@@ -283,6 +296,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
     setStepState('disclaimer', needsDisclaimer ? 'current' : 'done');
     setStepState('storage', needsStorageStep ? 'pending' : 'done');
+    setStepState('notifications', needsNotificationsStep ? 'pending' : 'done');
     setStepState('keys', needsKeys ? 'pending' : 'done');
 
     if (needsDisclaimer) {
@@ -292,7 +306,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
         const intro = document.createElement('p');
         intro.className = 'text-xs text-dark-500';
-        intro.textContent = 'Step 1/3 · Please review and accept the Terms & Conditions to continue.';
+        intro.textContent = 'Step 1/4 · Please review and accept the Terms & Conditions to continue.';
         wrap.appendChild(intro);
 
         const md = document.createElement('div');
@@ -347,7 +361,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
         setPersistPromptedFlag();
         renderStepContent(`
             <div class="space-y-3 text-sm text-dark-300">
-                <p class="text-xs text-dark-500">Step 2/3 · Optional, but recommended.</p>
+                <p class="text-xs text-dark-500">Step 2/4 · Optional, but recommended.</p>
                 <h3 class="text-base font-semibold text-dark-100">Enable durable storage?</h3>
                 <p>
                     This app stores your local database in the browser (SQLite via OPFS).
@@ -407,6 +421,68 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
         setStepState('storage', 'done');
     }
 
+    if (needsNotificationsStep) {
+        setStepState('notifications', 'current');
+        renderStepContent(`
+            <div class="space-y-3 text-sm text-dark-300">
+                <p class="text-xs text-dark-500">Step 3/4 · Optional, but recommended.</p>
+                <h3 class="text-base font-semibold text-dark-100">Enable reminders?</h3>
+                <p>
+                    PoolStellar relies on the Stellar RPC retention window (7 days). If you don't open
+                    the app for more than 5 days, we'll send a browser notification to remind you to
+                    sync before your local state falls outside the window.
+                </p>
+                <p class="text-xs text-dark-500">
+                    No push server is involved — reminders are triggered locally by your browser.
+                </p>
+            </div>
+        `);
+
+        await new Promise((resolve) => {
+            const onAbort = () => resolve();
+            abort.signal.addEventListener('abort', onAbort, { once: true });
+
+            const notNow = makeButton({
+                text: 'Not now',
+                variant: 'secondary',
+                onClick: () => {
+                    setNotificationsPrompted();
+                    abort.signal.removeEventListener('abort', onAbort);
+                    resolve();
+                },
+            });
+
+            const enable = makeButton({
+                text: 'Enable reminders',
+                variant: 'primary',
+                onClick: async () => {
+                    try {
+                        setError('');
+                        notNow.disabled = true;
+                        enable.disabled = true;
+                        setButtonLoading?.('Requesting notification permission…');
+                        const permission = await requestNotificationPermission();
+                        if (permission === 'granted') {
+                            await registerServiceWorker();
+                        }
+                        setNotificationsPrompted();
+                        abort.signal.removeEventListener('abort', onAbort);
+                        resolve();
+                    } catch (e) {
+                        notNow.disabled = false;
+                        enable.disabled = false;
+                        setError(e?.message || 'Failed to request notification permission');
+                    }
+                },
+            });
+
+            renderActions([notNow, enable]);
+        });
+
+        if (cancelled) throw new Error('Onboarding cancelled');
+        setStepState('notifications', 'done');
+    }
+
     let keys = existingKeys;
     if (needsKeys) {
         setStepState('keys', 'current');
@@ -416,7 +492,7 @@ export async function runOnboardingWizard({ address, setButtonLoading } = {}) {
 
         const intro = document.createElement('p');
         intro.className = 'text-xs text-dark-500';
-        intro.textContent = 'Step 3/3 · Create your privacy keys.';
+        intro.textContent = 'Step 4/4 · Create your privacy keys.';
         wrap.appendChild(intro);
 
         const title = document.createElement('h3');

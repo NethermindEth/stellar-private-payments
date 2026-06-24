@@ -101,7 +101,7 @@ CREATE TABLE pool_commitments (
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
 
--- An address book of registered public keys in the pool contract for sending private transfers
+-- An address book of registered public keys emitted by the public key registry contract
 --
 -- `event_id` ties each registration back to `raw_contract_events` so the registration ledger can
 -- be recovered by joining on the raw event.
@@ -113,6 +113,8 @@ CREATE TABLE public_keys (
     event_id  TEXT NOT NULL PRIMARY KEY,
     FOREIGN KEY (event_id) REFERENCES raw_contract_events(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_public_keys_owner ON public_keys (owner);
 
 -- Leaves of the ASP membership Merkle tree observed on-chain.
 --

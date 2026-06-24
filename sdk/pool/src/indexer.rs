@@ -24,7 +24,7 @@ impl Indexer {
     pub fn new(rpc_url: &str, storage: Storage, config: &ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
         let min_pool_ledger = config.min_deployment_ledger()?;
-        let contract_ids = config.pools_and_membership_contract_ids();
+        let contract_ids = config.all_contract_ids();
 
         Ok(Self {
             client,

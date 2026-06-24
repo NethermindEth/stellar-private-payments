@@ -137,22 +137,6 @@ pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
     BytesN::from_array(env, &buf)
 }
 
-/// User account registration data
-///
-/// Used for registering a user's public key to enable encrypted communication
-/// for receiving transfers.
-/// Not required to interact with the pool. But facilitates in-pool transfers
-/// via events. As parties can learn about each other public key.
-#[contracttype]
-pub struct Account {
-    /// Owner address of the account
-    pub owner: Address,
-    /// X25519 encryption public key for encrypting note data (32 bytes)
-    pub encryption_key: Bytes,
-    /// BN254 note public key for creating commitments (32 bytes)
-    pub note_key: Bytes,
-}
-
 // Contract clients for cross-contract dependencies
 #[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
 pub trait ASPMembershipInterface {
@@ -218,24 +202,6 @@ pub struct NewNullifierEvent {
     /// The nullifier that was spent
     #[topic]
     pub nullifier: U256,
-}
-
-/// Event emitted when a user registers their public keys
-///
-/// This event allows other users to discover keys for sending private
-/// transfers. Two key types are required:
-/// - encryption_key: X25519 key for encrypting note data (amount, blinding)
-/// - note_key: BN254 key for creating commitments in the ZK circuit
-#[contractevent]
-#[derive(Clone)]
-pub struct PublicKeyEvent {
-    /// Address of the account owner
-    #[topic]
-    pub owner: Address,
-    /// X25519 encryption public key
-    pub encryption_key: Bytes,
-    /// BN254 note public key
-    pub note_key: Bytes,
 }
 
 /// Privacy Pool Contract
@@ -659,26 +625,6 @@ impl PoolContract {
         .publish(env);
 
         Ok(())
-    }
-
-    /// Register a user's public encryption key
-    ///
-    /// Allows users to publish their public key so others can send them
-    /// encrypted outputs for private transfers.
-    /// The account owner must authorize this call
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `account` - Account data containing owner address and public key
-    pub fn register(env: Env, account: Account) {
-        account.owner.require_auth();
-        PublicKeyEvent {
-            owner: account.owner,
-            encryption_key: account.encryption_key,
-            note_key: account.note_key,
-        }
-        .publish(&env);
     }
 
     // ========== Storage Getters and Setters ==========

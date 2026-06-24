@@ -155,7 +155,7 @@ get_latest_ledger_seq() {
 
 step "build contracts"
 mkdir -p "$WASM_DIR"
-for pkg in asp-membership asp-non-membership pool; do
+for pkg in asp-membership asp-non-membership public-key-registry pool; do
   stellar contract build --manifest-path "$ROOT_DIR/Cargo.toml" --out-dir "$WASM_DIR" --optimize \
     --package "$pkg" >/dev/null
 done
@@ -175,11 +175,13 @@ fi
 ASP_MEMBERSHIP_WASM="$WASM_DIR/asp_membership.wasm"
 ASP_NON_MEMBERSHIP_WASM="$WASM_DIR/asp_non_membership.wasm"
 VERIFIER_WASM="$WASM_DIR/circom_groth16_verifier.wasm"
+PUBLIC_KEY_REGISTRY_WASM="$WASM_DIR/public_key_registry.wasm"
 POOL_WASM="$WASM_DIR/pool.wasm"
 
 [[ -f "$ASP_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_MEMBERSHIP_WASM"
 [[ -f "$ASP_NON_MEMBERSHIP_WASM" ]] || die "missing wasm: $ASP_NON_MEMBERSHIP_WASM"
 [[ -f "$VERIFIER_WASM" ]] || die "missing wasm: $VERIFIER_WASM"
+[[ -f "$PUBLIC_KEY_REGISTRY_WASM" ]] || die "missing wasm: $PUBLIC_KEY_REGISTRY_WASM"
 [[ -f "$POOL_WASM" ]] || die "missing wasm: $POOL_WASM"
 
 deploy_contract() {
@@ -251,6 +253,9 @@ fi
 step "deploy circom-groth16-verifier"
 VERIFIER_ID="$(deploy_contract circom-groth16-verifier "$VERIFIER_WASM")"
 
+step "deploy public-key-registry"
+PUBLIC_KEY_REGISTRY_ID="$(deploy_contract public-key-registry "$PUBLIC_KEY_REGISTRY_WASM")"
+
 POOL_IDS=()
 POOL_TOKEN_IDS=()
 POOL_ASSET_JSONS=()
@@ -292,6 +297,7 @@ Deployment complete
   ASP membership:      $ASP_MEMBERSHIP_ID
   ASP non-membership:  $ASP_NON_MEMBERSHIP_ID
   Verifier:            $VERIFIER_ID
+  Public key registry: $PUBLIC_KEY_REGISTRY_ID
   Pools deployed:      ${#POOL_IDS[@]}
   Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
 __DEPLOY_SUMMARY__
@@ -310,7 +316,7 @@ for i in "${!POOL_IDS[@]}"; do
 done
 pools_json+="]"
 
-DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"verifier\":\"$VERIFIER_ID\",\"pools\":$pools_json}"
+DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\":\"$ADMIN_ADDR\",\"asp_membership\":\"$ASP_MEMBERSHIP_ID\",\"asp_non_membership\":\"$ASP_NON_MEMBERSHIP_ID\",\"verifier\":\"$VERIFIER_ID\",\"public_key_registry\":\"$PUBLIC_KEY_REGISTRY_ID\",\"pools\":$pools_json}"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"

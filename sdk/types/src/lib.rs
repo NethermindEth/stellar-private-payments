@@ -24,6 +24,8 @@ pub struct ContractConfig {
     pub asp_non_membership: String,
     /// Address of verifier deployed contract
     pub verifier: String,
+    /// Address of public key registry deployed contract
+    pub public_key_registry: String,
     /// Pool deployments (one per supported asset/token).
     pub pools: Vec<PoolConfigEntry>,
 }
@@ -194,10 +196,11 @@ impl ContractConfig {
     }
 
     /// Contract IDs for enabled pools and ASP membership.
-    pub fn pools_and_membership_contract_ids(&self) -> Vec<String> {
+    pub fn all_contract_ids(&self) -> Vec<String> {
         self.enabled_pools()
             .map(|p| p.pool_contract_id.clone())
             .chain(std::iter::once(self.asp_membership.clone()))
+            .chain(std::iter::once(self.public_key_registry.clone()))
             .collect()
     }
 
