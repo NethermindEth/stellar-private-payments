@@ -45,6 +45,10 @@ const computeNonMembershipLeafBtn = document.getElementById('computeNonMembershi
 const computedNonMembershipLeafHexEl = document.getElementById('computedNonMembershipLeafHex');
 const insertNonMembershipLeafBtn = document.getElementById('insertNonMembershipLeafBtn');
 
+// Non-membership leaf removal inputs
+const removeNonMembershipKeyInput = document.getElementById('removeNonMembershipKey');
+const removeNonMembershipLeafBtn = document.getElementById('removeNonMembershipLeafBtn');
+
 const state = {
   address: null,
   networkPassphrase: null,
@@ -453,6 +457,34 @@ async function computeNonMembershipLeaf() {
   }
 }
 
+async function removeNonMembershipLeaf() {
+  try {
+    ensureWalletConnected();
+    const contractId = nonMembershipContractInput.value.trim();
+    if (!contractId) {
+      throw new Error('Non-membership contract ID is required');
+    }
+
+    const keyValue = parseBigIntInput(reverseHexWithPrefix(removeNonMembershipKeyInput.value), 'Key');
+    if (keyValue === null) {
+      throw new Error('Key is required');
+    }
+
+    setStatus('Removing non-membership leaf...', 'info');
+    const client = await getNonMembershipClient(contractId);
+    const tx = await client.delete_leaf({ key: keyValue });
+    const sent = await tx.signAndSend();
+    log(`Non-membership leaf removed: ${sent.sendTransactionResponse?.hash || 'ok'}`);
+    setStatus('Non-membership leaf removed', 'ok');
+    showToast('Non-membership leaf removed successfully', 'success');
+    await refreshState();
+  } catch (err) {
+    setStatus('Non-membership removal failed', 'error');
+    log(`Non-membership removal error: ${err.message}`);
+    showToast('Failed to remove non-membership leaf', 'error');
+  }
+}
+
 async function insertNonMembershipLeaf() {
   try {
     ensureWalletConnected();
@@ -503,6 +535,9 @@ computeNonMembershipLeafBtn.addEventListener('click', () => {
 });
 insertNonMembershipLeafBtn.addEventListener('click', () => {
   insertNonMembershipLeaf();
+});
+removeNonMembershipLeafBtn.addEventListener('click', () => {
+  removeNonMembershipLeaf();
 });
 valueSameCheckbox.addEventListener('change', () => {
   syncNonMembershipValue();
