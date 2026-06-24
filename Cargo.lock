@@ -6820,8 +6820,10 @@ name = "witness"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254 0.5.0",
  "ark-bn254 0.6.0",
  "ark-circom",
+ "ark-ff 0.5.0",
  "circom-witness-rs",
  "getrandom 0.2.17",
  "num-bigint",

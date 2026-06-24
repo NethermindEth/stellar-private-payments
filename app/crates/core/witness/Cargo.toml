@@ -19,6 +19,11 @@ ark-circom = { workspace = true }
 # feature, which we never enable here.
 circom-witness-rs = { workspace = true }
 ruint = { workspace = true }
+# circom-witness-rs's black box functions use arkworks 0.5 `Fr`
+# type, so the bbf closures must use the matching 0.5
+# packages instead of the workspace 0.6 arkworks.
+ark-bn254-05 = { package = "ark-bn254", version = "0.5", default-features = false }
+ark-ff-05 = { package = "ark-ff", version = "0.5", default-features = false }
 
 # BigInt support for input parsing
 num-bigint = { workspace = true }

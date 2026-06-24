@@ -167,7 +167,7 @@ fn is_pure_array(value: &serde_json::Value) -> bool {
 /// - Multi-dimensional arrays of primitives are flattened to a single key in
 ///   row-major order
 /// - Arrays containing objects use indexed keys with dot notation for fields
-pub(crate) fn flatten_input(
+fn flatten_input(
     key: &str,
     value: &serde_json::Value,
     inputs: &mut HashMap<String, Vec<BigInt>>,
