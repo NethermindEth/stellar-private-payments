@@ -11,6 +11,9 @@ use num_bigint::{BigInt, Sign};
 use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
 use wasmer::{Module, Store};
 
+mod graph_witness;
+pub use graph_witness::GraphWitnessCalculator;
+
 /// BN254 scalar field modulus
 const BN254_FIELD_MODULUS: &str =
     "21888242871839275222246405745257275088548364400416034343698204186575808495617";
@@ -164,7 +167,7 @@ fn is_pure_array(value: &serde_json::Value) -> bool {
 /// - Multi-dimensional arrays of primitives are flattened to a single key in
 ///   row-major order
 /// - Arrays containing objects use indexed keys with dot notation for fields
-fn flatten_input(
+pub(crate) fn flatten_input(
     key: &str,
     value: &serde_json::Value,
     inputs: &mut HashMap<String, Vec<BigInt>>,
