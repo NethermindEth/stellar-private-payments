@@ -57,6 +57,16 @@ pub struct PrivatePoolConfig {
     pub prover_artifacts: ProverArtifacts,
 }
 
+impl ProverArtifacts {
+    pub fn empty() -> Self {
+        Self {
+            proving_key: Vec::new(),
+            circuit_wasm: Vec::new(),
+            circuit_r1cs: Vec::new(),
+        }
+    }
+}
+
 impl PrivatePoolConfig {
     pub fn chain_config(&self) -> PoolChainConfig {
         PoolChainConfig::from(self)

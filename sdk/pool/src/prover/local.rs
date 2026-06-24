@@ -6,8 +6,13 @@ use prover::{
 use stellar::hash_ext_data_offchain;
 use witness::WitnessCalculator;
 
-use crate::transact::{PreparedProverTx, PreparedTxPublic};
+use crate::{
+    error::PoolError,
+    transact::{PreparedProverTx, PreparedTxPublic},
+    types::ProverArtifacts,
+};
 
+/// In-process Groth16 prover for transact circuits.
 pub struct ProverEngine {
     witness: WitnessCalculator,
     prover: Prover,
@@ -66,5 +71,36 @@ impl ProverEngine {
             prepared,
             soroban_tx: Default::default(),
         })
+    }
+}
+
+/// [`super::TransactionProver`] backed by [`ProverEngine`].
+pub struct LocalTransactionProver(ProverEngine);
+
+impl LocalTransactionProver {
+    pub fn from_artifacts(artifacts: &ProverArtifacts) -> Result<Self, PoolError> {
+        ProverEngine::new(
+            &artifacts.proving_key,
+            &artifacts.circuit_wasm,
+            &artifacts.circuit_r1cs,
+        )
+        .map(Self)
+        .map_err(|e| PoolError::Other(format!("init prover: {e:#}")))
+    }
+
+    pub fn prove(&mut self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
+        self.0
+            .prove_transact(params)
+            .map_err(|e| PoolError::Other(format!("prove: {e:#}")))
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl super::TransactionProver for LocalTransactionProver {
+    async fn prove_transact(
+        &mut self,
+        params: TransactParams,
+    ) -> Result<PreparedProverTx, PoolError> {
+        self.prove(params)
     }
 }

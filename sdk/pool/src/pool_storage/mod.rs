@@ -86,7 +86,7 @@ pub trait PoolStorage {
     ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError>;
 
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
-        Ok(self.user_keys(user_address).await?.note_keypair.public)
+        Ok(self.user_public_keys(user_address).await?.0)
     }
 
     /// Fetch indexer events and process local state. Returns ledger range

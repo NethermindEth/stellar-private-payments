@@ -5,11 +5,13 @@ use crate::{
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     workers::storage::StorageBridge,
 };
+use gloo_timers::future::TimeoutFuture;
 use stellar_private_payments_sdk::{
     PoolError, PoolStorage, TransactRequest,
+    chain::Client,
     state::StoredUserKeys,
     tx::flows::TransactParams,
-    types::{EncryptionPublicKey, NotePublicKey},
+    types::{ContractConfig, EncryptionPublicKey, NotePublicKey, SyncMetadata},
 };
 use tx_planner::SpendableNote;
 
@@ -33,6 +35,29 @@ impl BridgePoolStorage {
             .call(req, timeout_ms)
             .await
             .map_err(|e| PoolError::Other(e.to_string()))
+    }
+
+    async fn sync_state(&self) -> Result<Vec<SyncMetadata>, PoolError> {
+        match self.call(StorageWorkerRequest::SyncState, 5_000).await? {
+            StorageWorkerResponse::SyncState(metadata) => Ok(metadata),
+            other => Err(PoolError::Other(format!(
+                "unexpected storage response loading sync state: {other:?}"
+            ))),
+        }
+    }
+
+    fn ledger_range(metadata: &[SyncMetadata]) -> (u32, u32) {
+        let from = metadata
+            .iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .min()
+            .unwrap_or(0);
+        let to = metadata
+            .iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .max()
+            .unwrap_or(from);
+        (from, to)
     }
 }
 
@@ -118,6 +143,34 @@ impl PoolStorage for BridgePoolStorage {
             other => Err(PoolError::Other(format!(
                 "unexpected storage response loading user keys: {other:?}"
             ))),
+        }
+    }
+
+    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
+        Ok(self.user_public_keys(user_address).await?.0)
+    }
+
+    async fn sync_indexer(
+        &self,
+        rpc_url: &str,
+        _contract_config: &ContractConfig,
+    ) -> Result<(u32, u32), PoolError> {
+        let rpc =
+            Client::new(rpc_url).map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+        let from = Self::ledger_range(&self.sync_state().await?).0;
+
+        loop {
+            let tip = rpc
+                .get_latest_ledger()
+                .await
+                .map_err(|e| PoolError::Other(format!("latest ledger: {e:#}")))?
+                .sequence;
+            let metadata = self.sync_state().await?;
+            let (_, to) = Self::ledger_range(&metadata);
+            if to >= tip {
+                return Ok((from, to));
+            }
+            TimeoutFuture::new(1_000).await;
         }
     }
 }

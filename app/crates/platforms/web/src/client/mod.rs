@@ -10,13 +10,13 @@ use crate::{
     },
 };
 use anyhow::anyhow;
-use futures::FutureExt;
+use futures::{FutureExt, lock::Mutex};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
-    PoolError, PrivatePool, PrivatePoolConfig, TransactionSigner,
+    PoolError, PrivatePool, PrivatePoolConfig, TransactionProver, TransactionSigner,
     chain::{
         OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
         TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
@@ -30,7 +30,10 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
+mod pool_session;
 mod transact;
+
+pub(crate) use pool_session::SharedPoolSession;
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
@@ -83,17 +86,22 @@ pub(crate) fn emit_progress(
 
 #[wasm_bindgen]
 pub struct WebClient {
+    rpc_url: String,
     storage: StorageBridge,
     prover_bridge: OneshotBridge<ProverWorker>,
     fetcher: Rc<StateFetcher>,
+    #[wasm_bindgen(skip)]
+    pool: SharedPoolSession,
 }
 
 impl Clone for WebClient {
     fn clone(&self) -> Self {
         Self {
+            rpc_url: self.rpc_url.clone(),
             storage: self.storage.clone(),
             prover_bridge: self.prover_bridge.fork(),
             fetcher: self.fetcher.clone(),
+            pool: self.pool.clone(),
         }
     }
 }
@@ -113,6 +121,7 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
 impl WebClient {
     pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
+            rpc_url: rpc_url.to_string(),
             storage: StorageBridge::new(
                 StorageWorker::spawner()
                     .as_module(true)
@@ -122,6 +131,7 @@ impl WebClient {
                 .as_module(true)
                 .spawn("./js/prover-worker.js"),
             fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
+            pool: Rc::new(Mutex::new(None)),
         })
     }
 
@@ -137,9 +147,15 @@ impl WebClient {
         &self,
         config: PrivatePoolConfig,
         signer: Box<dyn TransactionSigner>,
+        prover: Option<Box<dyn TransactionProver>>,
     ) -> Result<PrivatePool<crate::pool_storage::BridgePoolStorage>, PoolError> {
         use crate::pool_storage::BridgePoolStorage;
-        PrivatePool::with_storage(config, BridgePoolStorage::new(self.storage()), signer)
+        PrivatePool::with_storage(
+            config,
+            BridgePoolStorage::new(self.storage()),
+            signer,
+            prover,
+        )
     }
 
     /// Wallet-backed [`TransactionSigner`] for [`Self::private_pool`].
@@ -218,7 +234,7 @@ impl WebClient {
         )))
     }
 
-    async fn finalize_prepared_prover_tx(
+    pub(super) async fn finalize_prepared_prover_tx(
         &self,
         pool_contract_id: &str,
         user_address: &str,
@@ -320,6 +336,11 @@ impl WebClient {
         Ok(serde_wasm_bindgen::to_value(
             self.fetcher.contract_config(),
         )?)
+    }
+
+    #[wasm_bindgen(js_name = closePool)]
+    pub async fn close_pool_wasm(&self) {
+        self.close_pool().await;
     }
 
     #[wasm_bindgen(js_name = registerPublicKeys)]
@@ -513,9 +534,10 @@ impl WebClient {
         pool_contract_id: String,
         user_address: String,
         amount: BigInt,
+        network_passphrase: String,
     ) -> Result<JsValue, JsError> {
         let preview = self
-            .plan_inner(pool_contract_id, user_address, amount)
+            .plan_inner(pool_contract_id, user_address, amount, network_passphrase)
             .await?;
         Ok(serde_wasm_bindgen::to_value(&preview)?)
     }

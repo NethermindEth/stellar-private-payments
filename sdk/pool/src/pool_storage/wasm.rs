@@ -140,7 +140,8 @@ impl PoolStorage for LocalPoolBackend {
         &self,
         user_address: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
-        let keys = self.user_keys(user_address).await?;
+        let storage = self.storage.borrow();
+        let keys = map_user_keys(&storage, user_address)?;
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 

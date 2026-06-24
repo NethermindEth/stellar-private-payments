@@ -33,7 +33,7 @@ impl PrivatePool {
             &config.contract_config,
         )?;
         Ok(Self(AsyncPrivatePool::with_storage(
-            config, backend, signer,
+            config, backend, signer, None,
         )?))
     }
 
@@ -132,8 +132,13 @@ impl PrivatePool {
         &mut self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
+        recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        pollster::block_on(self.0.withdraw(wallet, amount))
+        pollster::block_on(self.0.withdraw(wallet, amount, recipient))
+    }
+
+    pub fn transact(&mut self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {
+        pollster::block_on(self.0.transact(step))
     }
 
     pub fn sync(&mut self) -> Result<SyncResult, PoolError> {

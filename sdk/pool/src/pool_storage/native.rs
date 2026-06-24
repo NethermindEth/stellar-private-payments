@@ -97,7 +97,7 @@ impl PoolStorage for NativePoolBackend {
         &self,
         user_address: &str,
     ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
-        let keys = self.user_keys(user_address).await?;
+        let keys = map_user_keys(&self.storage(), user_address)?;
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 

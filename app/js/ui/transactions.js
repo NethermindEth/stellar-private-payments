@@ -260,8 +260,13 @@ function planHintText(stepCount) {
     return `Requires ${stepCount} on-chain transactions.`;
 }
 
-async function fetchPlanStepCount(poolContractId, userAddress, amountStroops) {
-    const plan = await getHandle().webClient.plan(poolContractId, userAddress, amountStroops);
+async function fetchPlanStepCount(poolContractId, userAddress, amountStroops, networkPassphrase) {
+    const plan = await getHandle().webClient.plan(
+        poolContractId,
+        userAddress,
+        amountStroops,
+        networkPassphrase,
+    );
     const stepCount = planStepCount(plan);
     if (stepCount == null || stepCount < 1) {
         throw new Error('Could not load plan');
@@ -269,8 +274,13 @@ async function fetchPlanStepCount(poolContractId, userAddress, amountStroops) {
     return stepCount;
 }
 
-async function requirePlanApproval(poolContractId, userAddress, amountStroops) {
-    const stepCount = await fetchPlanStepCount(poolContractId, userAddress, amountStroops);
+async function requirePlanApproval(poolContractId, userAddress, amountStroops, networkPassphrase) {
+    const stepCount = await fetchPlanStepCount(
+        poolContractId,
+        userAddress,
+        amountStroops,
+        networkPassphrase,
+    );
     if (stepCount > 1) {
         const ok = window.confirm(
             `This requires ${stepCount} on-chain transactions (${stepCount} wallet approvals). Continue?`,
@@ -292,6 +302,7 @@ async function executeFromAmount(ctx, { btn, amountInputId, run }) {
         ctx.poolContractId,
         ctx.userAddress,
         amountRes.value,
+        ctx.networkPassphrase,
     );
     if (stepCount == null) return undefined;
 
@@ -335,10 +346,16 @@ function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
         try {
             const config = await getContractConfig();
             const poolContractId = getActivePoolContractId(config);
+            const networkPassphrase = App.state.wallet.networkPassphrase;
+            if (!networkPassphrase) {
+                hide();
+                return;
+            }
             const stepCount = await fetchPlanStepCount(
                 poolContractId,
                 App.state.wallet.address,
                 res.value,
+                networkPassphrase,
             );
             if (hint) {
                 hint.textContent = planHintText(stepCount);

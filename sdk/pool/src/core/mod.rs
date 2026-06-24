@@ -80,6 +80,7 @@ impl PoolCore {
         &mut self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
+        recipient: impl Into<String>,
     ) -> Result<PreparedTransactionPlan, PoolError> {
         if amount.is_zero() {
             return Err(PoolError::InvalidConfig("amount must be > 0".into()));
@@ -88,7 +89,7 @@ impl PoolCore {
             wallet.to_vec(),
             amount,
             self.config.pool_contract_id.clone(),
-            SpendTarget::withdraw(self.config.user_address.clone()),
+            SpendTarget::withdraw(recipient.into()),
         )?;
         PreparedTransactionPlan::from_session(session).map_err(PoolError::from)
     }

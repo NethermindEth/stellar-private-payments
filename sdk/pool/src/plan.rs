@@ -10,6 +10,7 @@ use crate::error::PoolError;
 pub(crate) enum PlanKind {
     Deposit { amount: NoteAmount },
     Spend(SpendSession),
+    Raw(Transact),
 }
 
 /// Frozen multi-tx spend; each on-chain step is executed via
@@ -42,6 +43,14 @@ impl PreparedTransactionPlan {
         })
     }
 
+    pub(crate) fn transact(step: Transact) -> Self {
+        Self {
+            tx_count: 1,
+            current_tx: 0,
+            kind: PlanKind::Raw(step),
+        }
+    }
+
     pub fn tx_count(&self) -> u32 {
         self.tx_count
     }
@@ -65,7 +74,7 @@ impl PreparedTransactionPlan {
     pub(crate) fn deposit_amount(&self) -> Option<NoteAmount> {
         match &self.kind {
             PlanKind::Deposit { amount } => Some(*amount),
-            PlanKind::Spend(_) => None,
+            PlanKind::Spend(_) | PlanKind::Raw(_) => None,
         }
     }
 
@@ -73,8 +82,15 @@ impl PreparedTransactionPlan {
         &self,
     ) -> Result<Option<Transact>, tx_planner::SpendSessionError> {
         match &self.kind {
-            PlanKind::Deposit { .. } => Ok(None),
+            PlanKind::Deposit { .. } | PlanKind::Raw(_) => Ok(None),
             PlanKind::Spend(session) => session.step(),
+        }
+    }
+
+    pub(crate) fn raw_transact_step(&self) -> Option<&Transact> {
+        match &self.kind {
+            PlanKind::Raw(step) => Some(step),
+            _ => None,
         }
     }
 
@@ -83,7 +99,7 @@ impl PreparedTransactionPlan {
         output_commitments: &[Field; 2],
     ) -> Result<(), PoolError> {
         match self.kind_mut() {
-            PlanKind::Deposit { .. } => self.advance(),
+            PlanKind::Deposit { .. } | PlanKind::Raw(_) => self.advance(),
             PlanKind::Spend(_) => self.complete_pending_spend(output_commitments)?,
         }
         Ok(())

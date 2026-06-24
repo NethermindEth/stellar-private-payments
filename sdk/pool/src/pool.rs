@@ -15,7 +15,7 @@ use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
     pool_storage::PoolStorage,
-    prover::ProverEngine,
+    prover::{LocalTransactionProver, TransactionProver, local_transaction_prover},
     signer::TransactionSigner,
     transact::transact_request_from_step,
     types::{
@@ -32,7 +32,7 @@ pub struct PrivatePool<S> {
     core: PoolCore,
     config: PrivatePoolConfig,
     storage: Option<S>,
-    prover: Option<ProverEngine>,
+    prover: Option<Box<dyn TransactionProver>>,
     signer: Box<dyn TransactionSigner>,
 }
 
@@ -41,12 +41,13 @@ impl<S> PrivatePool<S> {
         config: PrivatePoolConfig,
         storage: S,
         signer: Box<dyn TransactionSigner>,
+        prover: Option<Box<dyn TransactionProver>>,
     ) -> Result<Self, PoolError> {
         Ok(Self {
             core: PoolCore::new(config.chain_config())?,
             config,
             storage: Some(storage),
-            prover: None,
+            prover,
             signer,
         })
     }
@@ -57,6 +58,14 @@ impl<S> PrivatePool<S> {
 
     pub fn set_signer(&mut self, signer: Box<dyn TransactionSigner>) {
         self.signer = signer;
+    }
+
+    pub fn set_prover(&mut self, prover: Box<dyn TransactionProver>) {
+        self.prover = Some(prover);
+    }
+
+    pub fn prover(&self) -> Option<&dyn TransactionProver> {
+        self.prover.as_deref()
     }
 
     pub fn core(&self) -> &PoolCore {
@@ -93,25 +102,14 @@ impl<S> PrivatePool<S> {
         self.storage()
     }
 
-    fn prover(&mut self) -> Result<&mut ProverEngine, PoolError> {
-        self.prover.as_mut().ok_or(PoolError::NotInitialized)
-    }
-
     fn ensure_prover(&mut self) -> Result<(), PoolError> {
         if self.prover.is_some() {
             return Ok(());
         }
 
-        let artifacts = &self.config.prover_artifacts;
-
-        self.prover = Some(
-            ProverEngine::new(
-                &artifacts.proving_key,
-                &artifacts.circuit_wasm,
-                &artifacts.circuit_r1cs,
-            )
-            .map_err(|e| PoolError::Other(format!("init prover: {e:#}")))?,
-        );
+        self.prover = Some(Box::new(local_transaction_prover(
+            &self.config.prover_artifacts,
+        )?));
 
         Ok(())
     }
@@ -253,15 +251,25 @@ impl<S: PoolStorage> PrivatePool<S> {
         &mut self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
+        recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        let mut plan = self.core.prepare_withdraw(wallet, amount)?;
+        let mut plan = self.core.prepare_withdraw(wallet, amount, recipient)?;
         self.execute(&mut plan).await
     }
 
+    /// Execute a single low-level `transact` step (custom inputs/outputs).
+    pub async fn transact(&mut self, step: Transact) -> Result<TransactionResult, PoolError> {
+        let mut plan = PreparedTransactionPlan::transact(step);
+        let mut results = self.execute(&mut plan).await?;
+        results
+            .pop()
+            .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
+    }
+
     pub async fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
-        let note_pub = self
+        let (note_pub, _) = self
             .storage()?
-            .user_note_pubkey(&self.config.user_address)
+            .user_public_keys(&self.config.user_address)
             .await?;
         let snapshot = fetch_snapshot_async(self.core.config(), &note_pub).await?;
         self.core.set_chain_context(snapshot);
@@ -295,6 +303,8 @@ impl<S: PoolStorage> PrivatePool<S> {
         let chain = self.core.chain_context()?;
         let step = if let Some(amount) = plan.deposit_amount() {
             self.deposit_transact_step(amount).await?
+        } else if let Some(step) = plan.raw_transact_step() {
+            step.clone()
         } else {
             transact_step_for_plan(plan)?
         };
@@ -308,9 +318,11 @@ impl<S: PoolStorage> PrivatePool<S> {
         let params = self.storage()?.build_transact_params(&req).await?;
         self.ensure_prover()?;
         let prepared = self
-            .prover()?
+            .prover
+            .as_mut()
+            .ok_or(PoolError::NotInitialized)?
             .prove_transact(params)
-            .map_err(|e| PoolError::Other(format!("prove: {e:#}")))?;
+            .await?;
 
         plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
         Ok(prepared)

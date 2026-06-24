@@ -307,6 +307,8 @@ export const Wallet = {
         this._stopWatcher = null;
         this._walletChangeInFlight = null;
 
+        void getHandle().webClient.closePool();
+
         App.state.wallet.connected = false;
         App.state.wallet.address = null;
         App.state.wallet.sorobanRpcUrl = null;
@@ -395,6 +397,9 @@ export const Wallet = {
 
                 if (addressChanged) {
                     await this._applyWalletIdentityChange(nextAddress, setButtonLoading);
+                } else if (networkChanged) {
+                    await getHandle().webClient.closePool();
+                    if (btn) btn.disabled = false;
                 } else {
                     if (btn) btn.disabled = false;
                 }
@@ -414,6 +419,8 @@ export const Wallet = {
         const text = document.getElementById('wallet-text');
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
         const addressDisplay = document.getElementById('wallet-dropdown-address');
+
+        await getHandle().webClient.closePool();
 
         App.state.wallet.address = nextAddress;
         if (addressDisplay) addressDisplay.textContent = nextAddress;

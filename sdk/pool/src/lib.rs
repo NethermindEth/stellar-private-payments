@@ -86,7 +86,9 @@ pub use pool_storage::LocalPoolBackend;
 #[cfg(not(target_arch = "wasm32"))]
 pub use pool_storage::NativePoolBackend;
 pub use pool_storage::PoolStorage;
-pub use prover::ProverEngine;
+pub use prover::{
+    LocalTransactionProver, ProverEngine, TransactionProver, local_transaction_prover,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use signer::LocalTransactionSigner;
 pub use signer::TransactionSigner;

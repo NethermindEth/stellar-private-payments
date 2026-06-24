@@ -1,4 +1,7 @@
-use crate::protocol::{ProverWorkerRequest, ProverWorkerResponse};
+use crate::{
+    circuits::fetch_circuit_file,
+    protocol::{ProverWorkerRequest, ProverWorkerResponse},
+};
 use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
@@ -342,63 +345,4 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
     };
     Ok(resp)
-}
-
-async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
-    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
-    let global = js_sys::global();
-
-    let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
-        .map_err(|_| JsError::new("Accessing self.location failed"))?;
-
-    let origin = js_sys::Reflect::get(&location, &JsValue::from_str("origin"))
-        .map_err(|_| JsError::new("Accessing self.location.origin failed"))?
-        .as_string()
-        .ok_or_else(|| JsError::new("Origin is not a string"))?;
-
-    let public_url = PUBLIC_URL.unwrap_or("/");
-
-    let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
-        format!("{public_url}{path}")
-    } else if public_url == "/" {
-        format!("{origin}/{path}")
-    } else {
-        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
-    };
-
-    log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
-
-    let opts = RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(RequestMode::Cors);
-
-    let request = Request::new_with_str_and_init(&url_string, &opts)
-        .map_err(|e| JsError::new(&format!("Request failed for {}: {:?}", url_string, e)))?;
-
-    let global_scope = global.unchecked_into::<web_sys::WorkerGlobalScope>();
-    let resp_value = JsFuture::from(global_scope.fetch_with_request(&request))
-        .await
-        .map_err(|e| JsError::new(&format!("Network error: {:?}", e)))?;
-
-    let resp: web_sys::Response = resp_value
-        .dyn_into()
-        .map_err(|_| JsError::new("Failed to cast response"))?;
-
-    if !resp.ok() {
-        return Err(JsError::new(&format!(
-            "HTTP {} for {}",
-            resp.status(),
-            url_string
-        )));
-    }
-
-    let array_buffer_promise = resp
-        .array_buffer()
-        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
-    let array_buffer_value = JsFuture::from(array_buffer_promise)
-        .await
-        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
-
-    let type_array = js_sys::Uint8Array::new(&array_buffer_value);
-    Ok(type_array.to_vec())
 }
