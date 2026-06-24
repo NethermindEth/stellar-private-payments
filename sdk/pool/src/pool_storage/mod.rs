@@ -89,7 +89,8 @@ pub trait PoolStorage {
         Ok(self.user_keys(user_address).await?.note_keypair.public)
     }
 
-    /// Fetch indexer events and process local state. Returns ledger range synced.
+    /// Fetch indexer events and process local state. Returns ledger range
+    /// synced.
     async fn sync_indexer(
         &self,
         _rpc_url: &str,

@@ -25,8 +25,8 @@ pub mod chain {
     pub use stellar::{
         Client, ContractDataStorage, Indexer, Limits, LocalSigner, OnchainProofPublicInputs,
         PoolTransactInput, PreparedSorobanTx, ReadXdr, RpcError, Signature, StateFetcher,
-        TransactionEnvelope, TxConfirmStatus, auth_sign_steps, confirm_tx, hash_ext_data_offchain,
-        submit_tx, unsigned_tx_for_signing, verify_tx,
+        TransactionEnvelope, TxConfirmStatus, WriteXdr, auth_sign_steps, confirm_tx,
+        hash_ext_data_offchain, submit_tx, unsigned_tx_for_signing, verify_tx,
     };
 
     /// Synchronous RPC client, indexer, and state reads (native only).

@@ -1,9 +1,9 @@
 mod client;
 mod config;
 mod events;
-#[cfg(target_arch = "wasm32")]
 pub mod pool_storage;
 mod protocol;
+pub mod signer;
 pub mod workers;
 
 pub(crate) mod artifact_hashes {

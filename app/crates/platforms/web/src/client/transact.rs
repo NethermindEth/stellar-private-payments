@@ -4,11 +4,14 @@
 use super::{
     WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
     parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
-    parse_u32_decimal, sign::sign_prepared_transaction,
+    parse_u32_decimal,
 };
-use crate::protocol::{
-    PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
-    StorageWorkerResponse, TransactRequest,
+use crate::{
+    protocol::{
+        PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
+        StorageWorkerResponse, TransactRequest,
+    },
+    signer::sign_prepared_transaction,
 };
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};

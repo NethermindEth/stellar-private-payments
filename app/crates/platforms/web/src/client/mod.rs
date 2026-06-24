@@ -15,9 +15,8 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{rc::Rc, str::FromStr};
-#[cfg(target_arch = "wasm32")]
-use stellar_private_payments_sdk::{PoolError, PrivatePool, PrivatePoolConfig, TransactionSigner};
 use stellar_private_payments_sdk::{
+    PoolError, PrivatePool, PrivatePoolConfig, TransactionSigner,
     chain::{
         OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
         TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
@@ -31,7 +30,6 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
-mod sign;
 mod transact;
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
@@ -44,7 +42,7 @@ fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError>
     }
 }
 
-fn emit_progress(
+pub(crate) fn emit_progress(
     on_status: &Option<Function>,
     flow: &'static str,
     stage: &'static str,
@@ -131,7 +129,6 @@ impl WebClient {
         self.storage.clone()
     }
 
-    #[cfg(target_arch = "wasm32")]
     /// Construct a [`PrivatePool`] backed by the storage worker bridge.
     ///
     /// Indexing remains on [`crate::events::events_listener`]; call
@@ -143,6 +140,17 @@ impl WebClient {
     ) -> Result<PrivatePool<crate::pool_storage::BridgePoolStorage>, PoolError> {
         use crate::pool_storage::BridgePoolStorage;
         PrivatePool::with_storage(config, BridgePoolStorage::new(self.storage()), signer)
+    }
+
+    /// Wallet-backed [`TransactionSigner`] for [`Self::private_pool`].
+    pub fn wallet_transaction_signer(
+        network_passphrase: String,
+        on_status: Option<Function>,
+    ) -> Box<dyn TransactionSigner> {
+        Box::new(crate::signer::WalletTransactionSigner::with_progress(
+            network_passphrase,
+            on_status,
+        ))
     }
 
     async fn prepare_pool_tx(
@@ -330,7 +338,7 @@ impl WebClient {
             .prepare_register(&user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        let signed_tx = sign::sign_prepared_transaction(
+        let signed_tx = crate::signer::sign_prepared_transaction(
             &prepared,
             &network_passphrase,
             &user_address,

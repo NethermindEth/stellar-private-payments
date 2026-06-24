@@ -1,10 +1,14 @@
-//! Wallet signing (Freighter).
+//! Freighter wallet bridge and [`TransactionSigner`] for [`PrivatePool`].
 
-use super::emit_progress;
+use crate::client::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use stellar_private_payments_sdk::chain::{
-    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, auth_sign_steps,
-    unsigned_tx_for_signing,
+use stellar_private_payments_sdk::{
+    PoolError, PreparedTransaction, TransactionSigner,
+    chain::{
+        Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
+        auth_sign_steps, unsigned_tx_for_signing,
+    },
+    types::{PrivatePoolConfig, SignedTransaction},
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -71,7 +75,7 @@ async fn wallet_call(method: &str, args: &[JsValue]) -> Result<String, JsError> 
 }
 
 /// Signs a prepared Soroban transaction via Freighter.
-pub async fn sign_prepared_transaction(
+pub(crate) async fn sign_prepared_transaction(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
     user_address: &str,
@@ -133,4 +137,62 @@ pub async fn sign_prepared_transaction(
     .await?;
     TransactionEnvelope::from_xdr_base64(&signed_b64, Limits::none())
         .map_err(|e| JsError::new(&format!("invalid transaction envelope xdr: {e}")))
+}
+
+/// Signs simulated pool transactions via the JS wallet bridge (Freighter).
+pub struct WalletTransactionSigner {
+    network_passphrase: String,
+    on_status: Option<Function>,
+}
+
+impl WalletTransactionSigner {
+    pub fn new(network_passphrase: impl Into<String>) -> Self {
+        Self {
+            network_passphrase: network_passphrase.into(),
+            on_status: None,
+        }
+    }
+
+    pub fn with_progress(
+        network_passphrase: impl Into<String>,
+        on_status: Option<Function>,
+    ) -> Self {
+        Self {
+            network_passphrase: network_passphrase.into(),
+            on_status,
+        }
+    }
+
+    pub fn network_passphrase(&self) -> &str {
+        &self.network_passphrase
+    }
+
+    pub fn on_status(&self) -> &Option<Function> {
+        &self.on_status
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl TransactionSigner for WalletTransactionSigner {
+    async fn sign(
+        &self,
+        prepared: &PreparedTransaction,
+        config: &PrivatePoolConfig,
+    ) -> Result<SignedTransaction, PoolError> {
+        let envelope = sign_prepared_transaction(
+            &prepared.soroban_tx,
+            &self.network_passphrase,
+            &config.user_address,
+            "pool",
+            &self.on_status,
+        )
+        .await
+        .map_err(|e| PoolError::Other(format!("{e:?}")))?;
+
+        let signed_xdr = envelope
+            .to_xdr_base64(Limits::none())
+            .map_err(|e| PoolError::Other(format!("encode signed transaction xdr: {e}")))?;
+
+        Ok(SignedTransaction { signed_xdr })
+    }
 }

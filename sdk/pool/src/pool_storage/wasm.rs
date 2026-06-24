@@ -75,15 +75,12 @@ impl LocalPoolBackend {
     }
 
     async fn fetch_contract_events(&self) -> Result<bool, PoolError> {
-        let indexer = self
-            .indexer
-            .borrow()
-            .as_ref()
-            .ok_or(PoolError::NotInitialized)?;
+        let indexer_guard = self.indexer.borrow();
+        let indexer = indexer_guard.as_ref().ok_or(PoolError::NotInitialized)?;
         indexer
             .fetch_contract_events()
             .await
-            .map_err(|e| PoolError::Other(format!("fetch events: {e:#}"))?)
+            .map_err(|e| PoolError::Other(format!("fetch events: {e:#}")))
     }
 
     fn sync_metadata_min_ledger(&self) -> Result<u32, PoolError> {

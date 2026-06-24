@@ -204,6 +204,18 @@ impl<S: PoolStorage> PrivatePool<S> {
             .await
     }
 
+    /// Sum of unspent note amounts for this pool and user.
+    pub async fn balance(&self) -> Result<NoteAmount, PoolError> {
+        let wallet = self.wallet().await?;
+        wallet
+            .iter()
+            .map(|note| note.amount)
+            .try_fold(NoteAmount::ZERO, |sum, amount| {
+                sum.checked_add(amount)
+                    .ok_or_else(|| PoolError::Other("wallet balance overflow".into()))
+            })
+    }
+
     pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
         let (from_ledger, to_ledger) = self
             .storage()?

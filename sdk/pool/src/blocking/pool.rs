@@ -144,6 +144,10 @@ impl PrivatePool {
         pollster::block_on(self.0.wallet())
     }
 
+    pub fn balance(&self) -> Result<NoteAmount, PoolError> {
+        pollster::block_on(self.0.balance())
+    }
+
     pub fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
         pollster::block_on(self.0.refresh_chain_context())
     }
