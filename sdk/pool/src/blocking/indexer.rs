@@ -1,7 +1,5 @@
 //! Synchronous contract-event indexer backed by local [`Storage`].
 
-#![cfg(not(target_arch = "wasm32"))]
-
 use std::collections::HashSet;
 
 use anyhow::{Result, anyhow};

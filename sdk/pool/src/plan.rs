@@ -12,8 +12,8 @@ pub(crate) enum PlanKind {
     Spend(SpendSession),
 }
 
-/// Frozen multi-tx spend; Soroban txs are produced lazily via
-/// [`PrivatePool::next_prepared_transaction`].
+/// Frozen multi-tx spend; each on-chain step is executed via
+/// [`crate::pool::PrivatePool::transfer`] / [`withdraw`] / [`deposit`].
 #[derive(Debug)]
 pub struct PreparedTransactionPlan {
     tx_count: u32,

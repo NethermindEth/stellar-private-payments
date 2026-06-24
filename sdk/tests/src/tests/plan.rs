@@ -19,11 +19,13 @@ fn transfer_two_steps() {
     let amount = NoteAmount::from(10u128);
     let recipient = test_recipient();
 
-    let estimate = pool.estimate(amount).expect("estimate");
+    let wallet = pool.wallet().expect("wallet");
+    let estimate = pool.estimate(&wallet, amount).expect("estimate");
     assert_eq!(estimate.tx_count, 2, "expected two txs for transfer");
 
     let mut plan = pool
-        .prepare_transfer(recipient, amount)
+        .core_mut()
+        .prepare_transfer(&wallet, recipient, amount)
         .expect("prepare transfer");
     assert_eq!(plan.tx_count(), 2);
     assert_eq!(plan.current_tx(), 0);

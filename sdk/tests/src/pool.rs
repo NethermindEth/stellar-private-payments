@@ -1,11 +1,13 @@
-//! Test fixtures for [`PrivatePool`].
+//! Test fixtures for [`stellar_private_payments_sdk::blocking::PrivatePool`].
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 
 use stellar_private_payments_sdk::{
-    PrivatePool, PrivatePoolConfig, ProverArtifacts, TransferRecipient,
+    LocalTransactionSigner, PrivatePoolConfig, ProverArtifacts, TransactionSigner,
+    TransferRecipient,
+    blocking::PrivatePool,
     types::{NoteAmount, NotePublicKey},
 };
 use types::{EncryptionPublicKey, Field};
@@ -37,7 +39,7 @@ const USER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 
 pub use crate::seed::TEST_NETWORK;
 
-pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
     let db_path =
         std::env::temp_dir().join(format!("stellar-sdk-test-{}.sqlite", std::process::id()));
     let _ = std::fs::remove_file(&db_path);
@@ -52,18 +54,24 @@ pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         &amounts,
     )?;
 
-    let mut pool = PrivatePool::new(PrivatePoolConfig {
-        rpc_url: "https://soroban-testnet.stellar.org".into(),
-        contract_config: serde_json::from_str(TEST_CONFIG_JSON)?,
-        pool_contract_id: POOL_CONTRACT_ID.into(),
-        user_address: USER_ADDRESS.into(),
-        storage_path: db_path.to_string_lossy().into_owned(),
-        prover_artifacts: test_prover_artifacts()?,
-    })?;
-    pool.initialize()?;
+    let mut pool = PrivatePool::open(
+        PrivatePoolConfig {
+            rpc_url: "https://soroban-testnet.stellar.org".into(),
+            contract_config: serde_json::from_str(TEST_CONFIG_JSON)?,
+            pool_contract_id: POOL_CONTRACT_ID.into(),
+            user_address: USER_ADDRESS.into(),
+            storage_path: db_path.to_string_lossy().into_owned(),
+            prover_artifacts: test_prover_artifacts()?,
+        },
+        test_signer()?,
+    )?;
     pool.set_chain_context(chain);
 
     Ok(pool)
+}
+
+pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+    test_session(wallet)
 }
 
 pub fn test_recipient() -> TransferRecipient {
@@ -77,6 +85,12 @@ pub fn test_recipient() -> TransferRecipient {
         )
         .expect("encryption public key"),
     }
+}
+
+fn test_signer() -> Result<Box<dyn TransactionSigner>> {
+    Ok(Box::new(LocalTransactionSigner::test_fixture(
+        "Test SDF Network ; September 2015",
+    )?))
 }
 
 fn test_prover_artifacts() -> Result<ProverArtifacts> {

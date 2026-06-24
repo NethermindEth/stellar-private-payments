@@ -19,7 +19,7 @@ use types::{
 
 use crate::types::TransactChainContext;
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TransactRequest {
     pub user_address: String,

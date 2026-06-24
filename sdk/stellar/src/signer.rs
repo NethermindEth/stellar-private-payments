@@ -85,6 +85,13 @@ impl LocalSigner {
         })
     }
 
+    /// Deterministic signer for tests (matches unit-test fixture key material).
+    pub fn test_fixture() -> Result<Self> {
+        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
+        let secret = PrivateKey(signing_key.to_bytes()).to_string();
+        Self::from_secret(&secret)
+    }
+
     pub fn public_key(&self) -> &str {
         &self.public_key
     }

@@ -15,6 +15,8 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{rc::Rc, str::FromStr};
+#[cfg(target_arch = "wasm32")]
+use stellar_private_payments_sdk::{PoolError, PrivatePool, PrivatePoolConfig, TransactionSigner};
 use stellar_private_payments_sdk::{
     chain::{
         OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
@@ -127,6 +129,20 @@ impl WebClient {
 
     pub(crate) fn storage(&self) -> StorageBridge {
         self.storage.clone()
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    /// Construct a [`PrivatePool`] backed by the storage worker bridge.
+    ///
+    /// Indexing remains on [`crate::events::events_listener`]; call
+    /// [`PrivatePool::refresh_chain_context`] after the indexer has caught up.
+    pub fn private_pool(
+        &self,
+        config: PrivatePoolConfig,
+        signer: Box<dyn TransactionSigner>,
+    ) -> Result<PrivatePool<crate::pool_storage::BridgePoolStorage>, PoolError> {
+        use crate::pool_storage::BridgePoolStorage;
+        PrivatePool::with_storage(config, BridgePoolStorage::new(self.storage()), signer)
     }
 
     async fn prepare_pool_tx(

@@ -32,7 +32,7 @@ pub mod chain {
     /// Synchronous RPC client, indexer, and state reads (native only).
     #[cfg(not(target_arch = "wasm32"))]
     pub mod blocking {
-        pub use crate::indexer::Indexer;
+        pub use crate::blocking::Indexer;
         pub use stellar::blocking::{Client, StateFetcher, confirm_tx, submit_tx};
     }
 }
@@ -56,36 +56,47 @@ pub mod proving {
 
 pub mod state {
     //! SQLite-backed local wallet and indexer state.
-    pub use crate::pool::process_local_state_batch;
+    pub use crate::core::process_local_state_batch;
     pub use ::state::{
         AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
         process_events, process_notes,
     };
 }
 
-mod client;
-mod error;
 #[cfg(not(target_arch = "wasm32"))]
-mod indexer;
+pub mod blocking;
+mod client;
+mod core;
+mod error;
 mod plan;
 mod pool;
+mod pool_storage;
 mod prover;
+mod signer;
 mod transact;
-#[cfg(target_arch = "wasm32")]
-mod wasm_indexer;
 
 pub use client::Client;
+pub use core::PoolCore;
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
+#[cfg(target_arch = "wasm32")]
+pub use pool_storage::LocalPoolBackend;
+#[cfg(not(target_arch = "wasm32"))]
+pub use pool_storage::NativePoolBackend;
+pub use pool_storage::PoolStorage;
 pub use prover::ProverEngine;
+#[cfg(not(target_arch = "wasm32"))]
+pub use signer::LocalTransactionSigner;
+pub use signer::TransactionSigner;
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,
     transact_request_from_step,
 };
+pub use tx_planner::SpendableNote;
 pub use types::{
-    Estimate, PrivatePoolConfig, ProverArtifacts, SignedTransaction, SyncResult,
+    Estimate, PoolChainConfig, PrivatePoolConfig, ProverArtifacts, SignedTransaction, SyncResult,
     TransactChainContext, TransactionResult, TransferRecipient,
 };
 
