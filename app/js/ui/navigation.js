@@ -169,6 +169,18 @@ export const Shell = {
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
+        App.events.addEventListener('dashboard:view-notes', (event) => {
+            const { poolId } = event.detail;
+            if (poolId) {
+                App.state.selectedPoolId = poolId;
+                document.querySelectorAll('[data-pool-select]').forEach(select => {
+                    select.value = poolId;
+                });
+            }
+            setActiveView('advanced');
+            App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
+        });
+
         setActiveView('dashboard');
         setMoveFlow('deposit');
     },

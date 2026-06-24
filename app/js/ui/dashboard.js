@@ -92,6 +92,13 @@ export const Dashboard = {
                 }));
             });
         });
+        container.querySelectorAll('[data-view-notes]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                App.events.dispatchEvent(new CustomEvent('dashboard:view-notes', {
+                    detail: { poolId: btn.dataset.poolId },
+                }));
+            });
+        });
     },
 
     renderFeed() {

@@ -36,6 +36,7 @@ export const NotesTable = {
             this.render();
         });
         App.events.addEventListener('pool:config', () => this.render());
+        App.events.addEventListener('pool:selected', () => this.render());
     },
 
     startPolling() {
@@ -81,6 +82,7 @@ export const NotesTable = {
         tbody.replaceChildren();
         const filtered = App.state.notes
             .filter(note => this.filter === 'all' ? true : this.filter === 'unspent' ? !note.spent : note.spent)
+            .filter(note => !App.state.selectedPoolId || note.poolContractId === App.state.selectedPoolId)
             .map(noteWithLabels);
 
         if (!filtered.length) {
