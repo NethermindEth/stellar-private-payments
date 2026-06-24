@@ -16,11 +16,12 @@ use stellar_private_payments_sdk::{
     chain::{OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher},
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
-        AspMembershipSync, ContractConfig, ContractsEventData, DisclosureReceipt,
+        AspMembershipSync, ContractConfig, DisclosureReceipt,
         DisclosureVerificationReport, EncryptionPublicKey, ExtAmount, ExtData, Field,
-        KeyDerivationSignature, NoteAmount, NotePublicKey, SyncMetadata, parse_0x_hex_32,
+        KeyDerivationSignature, NoteAmount, NotePublicKey, parse_0x_hex_32,
     },
 };
+use crate::workers::storage::StorageBridge;
 use wasm_bindgen::{JsCast, prelude::*};
 
 mod transact;
@@ -73,7 +74,7 @@ fn emit_progress(
 
 #[wasm_bindgen]
 pub struct WebClient {
-    storage_bridge: OneshotBridge<StorageWorker>,
+    storage: StorageBridge,
     prover_bridge: OneshotBridge<ProverWorker>,
     fetcher: Rc<StateFetcher>,
 }
@@ -81,7 +82,7 @@ pub struct WebClient {
 impl Clone for WebClient {
     fn clone(&self) -> Self {
         Self {
-            storage_bridge: self.storage_bridge.fork(),
+            storage: self.storage.clone(),
             prover_bridge: self.prover_bridge.fork(),
             fetcher: self.fetcher.clone(),
         }
@@ -153,9 +154,11 @@ impl WebClient {
 
     pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
-            storage_bridge: StorageWorker::spawner()
-                .as_module(true)
-                .spawn("./js/storage-worker.js"),
+            storage: StorageBridge::new(
+                StorageWorker::spawner()
+                    .as_module(true)
+                    .spawn("./js/storage-worker.js"),
+            ),
             prover_bridge: ProverWorker::spawner()
                 .as_module(true)
                 .spawn("./js/prover-worker.js"),
@@ -163,17 +166,12 @@ impl WebClient {
         })
     }
 
+    pub(crate) fn storage(&self) -> StorageBridge {
+        self.storage.clone()
+    }
+
     pub async fn ping_storage(&self) -> anyhow::Result<()> {
-        let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::Ping)).await?;
-        match resp {
-            StorageWorkerResponse::Pong => Ok(()),
-            StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!(
-                "unexpected response from Storage Worker: {:?}",
-                other
-            )),
-        }
+        self.storage.ping().await
     }
 
     pub async fn ping_prover(&self) -> anyhow::Result<()> {
@@ -194,27 +192,10 @@ impl WebClient {
         req: StorageWorkerRequest,
         timeout_ms: u32,
     ) -> Result<StorageWorkerResponse, JsError> {
-        let mut bridge = self.storage_bridge.fork();
-
-        // Handle transport/timeout errors
-        let resp: StorageWorkerResponse = with_timeout(timeout_ms, bridge.run(req))
+        self.storage
+            .call(req, timeout_ms)
             .await
-            .map_err(|e| JsError::new(&format!("Storage Worker Communication Error: {}", e)))?;
-
-        match resp {
-            StorageWorkerResponse::Error(e) => Err(JsError::new(&e)),
-            _ => Ok(resp),
-        }
-    }
-
-    pub(crate) async fn clear_indexing_cursors(&self) -> Result<(), JsError> {
-        match self
-            .storage_request(StorageWorkerRequest::ClearIndexingCursors, 2_000)
-            .await?
-        {
-            StorageWorkerResponse::Saved => Ok(()),
-            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-        }
+            .map_err(|e| JsError::new(&format!("Storage Worker Communication Error: {e}")))
     }
 
     async fn prover_request(
@@ -326,18 +307,6 @@ impl WebClient {
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::Saved => Ok(()),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-        }
-    }
-
-    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        match self
-            .storage_request(StorageWorkerRequest::BootnodeConfig, 2_000)
-            .await
-        {
-            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
-                (config.enabled && !config.url.is_empty()).then_some(config.url)
-            }
-            _ => None,
         }
     }
 
@@ -783,50 +752,6 @@ impl WebClient {
         };
 
         Ok(serde_wasm_bindgen::to_value(&report)?)
-    }
-}
-
-#[async_trait::async_trait(?Send)]
-impl stellar_private_payments_sdk::chain::ContractDataStorage for WebClient {
-    async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
-        let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(StorageWorkerRequest::SyncState)).await?;
-        match resp {
-            StorageWorkerResponse::SyncState(state) => Ok(state),
-            StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
-        }
-    }
-
-    async fn save_events_batch(&self, data: ContractsEventData) -> anyhow::Result<()> {
-        let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(10_000, bridge.run(StorageWorkerRequest::SaveEvents(data))).await?;
-        match resp {
-            StorageWorkerResponse::Saved => Ok(()),
-            StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
-        }
-    }
-
-    async fn save_sync_progress(
-        &self,
-        metadata: Vec<SyncMetadata>,
-        fully_indexed: bool,
-    ) -> anyhow::Result<()> {
-        let mut bridge = self.storage_bridge.fork();
-        let resp = with_timeout(
-            10_000,
-            bridge.run(StorageWorkerRequest::SaveSyncProgress {
-                metadata,
-                fully_indexed,
-            }),
-        )
-        .await?;
-        match resp {
-            StorageWorkerResponse::Saved => Ok(()),
-            StorageWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!("unexpected response: {:?}", other)),
-        }
     }
 }
 

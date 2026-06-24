@@ -1,4 +1,4 @@
-use crate::client::WebClient;
+use crate::workers::storage::StorageBridge;
 use gloo_timers::future::TimeoutFuture;
 use stellar_private_payments_sdk::{
     chain::{Indexer, RpcError},
@@ -31,7 +31,7 @@ pub(crate) fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
 /// consented.
 pub(crate) async fn bootnode_check(
     rpc_url: &str,
-    storage: WebClient,
+    storage: StorageBridge,
     config: &'static ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<Option<String>, anyhow::Error> {
@@ -60,7 +60,7 @@ fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
 pub(crate) async fn events_listener(
     rpc_url: String,
     bootnode_url: Option<String>,
-    storage: WebClient,
+    storage: StorageBridge,
     config: &'static ContractConfig,
 ) {
     log::debug!("[EVENTS] listening");
@@ -105,7 +105,7 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
             if let Some(indexer) = bootnode_indexer {
                 loop {
                     match indexer.fetch_contract_events().await {
-                        Ok(()) => {}
+                        Ok(_) => {}
                         Err(e)
                             if e.downcast_ref::<RpcError>()
                                 .is_some_and(is_retention_handoff) =>
@@ -141,7 +141,7 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
     // main rpc event listening loop
     loop {
         match indexer.fetch_contract_events().await {
-            Ok(()) => {}
+            Ok(_) => {}
             Err(e) => log::error!("[EVENTS] round failed: {e}"),
         }
         TimeoutFuture::new(INDEXER_INTERVAL_MS).await;

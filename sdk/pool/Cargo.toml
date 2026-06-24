@@ -12,6 +12,7 @@ name = "stellar_private_payments_sdk"
 
 [dependencies]
 anyhow = { workspace = true }
+async-trait = { workspace = true }
 log = { workspace = true }
 prover = { workspace = true }
 serde = { workspace = true }

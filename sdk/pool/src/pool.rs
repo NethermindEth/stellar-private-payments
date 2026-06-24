@@ -28,8 +28,13 @@ use crate::indexer::Indexer;
 #[cfg(not(target_arch = "wasm32"))]
 use stellar::blocking::StateFetcher;
 
-#[cfg(not(target_arch = "wasm32"))]
-use types::SMT_DEPTH;
+use types::{AspNonMembershipProof, ContractsStateData, SMT_DEPTH};
+
+#[cfg(target_arch = "wasm32")]
+use crate::wasm_indexer::{SharedStorage, WasmPoolState};
+
+#[cfg(target_arch = "wasm32")]
+use stellar::{Indexer as AsyncIndexer, StateFetcher};
 
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool {
@@ -37,7 +42,7 @@ pub struct PrivatePool {
     #[cfg(not(target_arch = "wasm32"))]
     indexer: Option<Indexer>,
     #[cfg(target_arch = "wasm32")]
-    storage: Option<Storage>,
+    wasm_state: Option<WasmPoolState>,
     prover: Option<ProverEngine>,
     chain: Option<TransactChainContext>,
 }
@@ -59,7 +64,7 @@ impl PrivatePool {
             #[cfg(not(target_arch = "wasm32"))]
             indexer: None,
             #[cfg(target_arch = "wasm32")]
-            storage: None,
+            wasm_state: None,
             prover: None,
             chain: None,
         })
@@ -77,10 +82,12 @@ impl PrivatePool {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            self.storage = Some(
-                Storage::connect_file(&self.config.storage_path)
-                    .map_err(|e| PoolError::Other(format!("open storage: {e}")))?,
-            );
+            let storage = Storage::connect_file(&self.config.storage_path)
+                .map_err(|e| PoolError::Other(format!("open storage: {e:#}")))?;
+            self.wasm_state = Some(WasmPoolState {
+                storage: std::rc::Rc::new(std::cell::RefCell::new(storage)),
+                indexer: None,
+            });
         }
         Ok(())
     }
@@ -129,8 +136,64 @@ impl PrivatePool {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
-        Err(PoolError::NotImplemented)
+    pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
+        let from_ledger = self
+            .wasm_state
+            .as_ref()
+            .ok_or(PoolError::NotInitialized)?
+            .storage
+            .borrow()
+            .get_sync_metadata()
+            .map_err(|e| PoolError::Other(e.to_string()))?
+            .into_iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .min()
+            .unwrap_or(0);
+
+        {
+            let wasm = self.wasm_state.as_mut().ok_or(PoolError::NotInitialized)?;
+
+            if wasm.indexer.is_none() {
+                let shared = SharedStorage(std::rc::Rc::clone(&wasm.storage));
+                wasm.indexer = Some(
+                    AsyncIndexer::init(&self.config.rpc_url, shared, &self.config.contract_config)
+                        .await
+                        .map_err(|e| PoolError::Other(format!("open indexer: {e:#}")))?,
+                );
+            }
+
+            let indexer = wasm.indexer.as_ref().expect("indexer initialized");
+            while indexer
+                .fetch_contract_events()
+                .await
+                .map_err(|e| PoolError::Other(format!("fetch events: {e:#}")))?
+            {}
+
+            process_local_state(&mut *wasm.storage.borrow_mut())?;
+        }
+
+        self.refresh_chain_context().await?;
+
+        let to_ledger = self
+            .wasm_state
+            .as_ref()
+            .ok_or(PoolError::NotInitialized)?
+            .storage
+            .borrow()
+            .get_sync_metadata()
+            .map_err(|e| PoolError::Other(e.to_string()))?
+            .into_iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .max()
+            .unwrap_or(from_ledger);
+
+        Ok(SyncResult {
+            from_ledger,
+            to_ledger,
+            new_commitments: 0,
+            new_nullifiers: 0,
+            new_membership_leaves: 0,
+        })
     }
 
     /// Chain snapshot from the last successful [`Self::sync`].
@@ -210,13 +273,31 @@ impl PrivatePool {
         &mut self,
         req: TransactRequest,
     ) -> Result<PreparedTransaction, PoolError> {
-        let storage = self.storage()?;
-        let params = match build_transact_params(storage, &req)
-            .map_err(|e| PoolError::Other(e.to_string()))?
-        {
-            BuildTransactParams::Ready(params) => params,
-            BuildTransactParams::MembershipSync(status) => {
-                return Err(PoolError::MembershipSync(status));
+        let params = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let storage = self.storage()?;
+                match build_transact_params(storage, &req)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+                {
+                    BuildTransactParams::Ready(params) => params,
+                    BuildTransactParams::MembershipSync(status) => {
+                        return Err(PoolError::MembershipSync(status));
+                    }
+                }
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let wasm = self.wasm_state.as_ref().ok_or(PoolError::NotInitialized)?;
+                let storage = wasm.storage.borrow();
+                match build_transact_params(&storage, &req)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+                {
+                    BuildTransactParams::Ready(params) => params,
+                    BuildTransactParams::MembershipSync(status) => {
+                        return Err(PoolError::MembershipSync(status));
+                    }
+                }
             }
         };
 
@@ -267,19 +348,13 @@ impl PrivatePool {
         })
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn storage(&self) -> Result<&Storage, PoolError> {
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            return Ok(self
-                .indexer
-                .as_ref()
-                .ok_or(PoolError::NotInitialized)?
-                .storage());
-        }
-        #[cfg(target_arch = "wasm32")]
-        {
-            Ok(self.storage.as_ref().ok_or(PoolError::NotInitialized)?)
-        }
+        Ok(self
+            .indexer
+            .as_ref()
+            .ok_or(PoolError::NotInitialized)?
+            .storage())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -293,19 +368,6 @@ impl PrivatePool {
         let data = fetcher
             .contracts_data_for_pool(&self.config.pool_contract_id)
             .map_err(|e| PoolError::Other(format!("fetch pool state: {e:#}")))?;
-        let pool = data.pools.into_iter().next().ok_or_else(|| {
-            PoolError::Other(format!(
-                "pool data not fetched for {}",
-                self.config.pool_contract_id
-            ))
-        })?;
-        let pool_root = pool
-            .merkle_root
-            .ok_or_else(|| PoolError::Other("pool merkle_root not fetched".into()))?;
-        let pool_next_index = pool
-            .merkle_next_index
-            .parse::<u32>()
-            .map_err(|e| PoolError::Other(format!("invalid pool merkle_next_index: {e}")))?;
         let non_membership_proof = fetcher
             .get_nonmembership_proof(
                 &note_pub,
@@ -315,17 +377,44 @@ impl PrivatePool {
             )
             .map_err(|e| PoolError::Other(format!("non-membership proof: {e:#}")))?;
 
-        let chain = TransactChainContext {
-            pool_root,
-            pool_next_index,
-            pool_merkle_levels: pool.merkle_levels,
-            asp_membership_root: data.asp_membership.root,
-            asp_membership_contract_id: data.asp_membership.contract_id,
-            asp_membership_ledger: data.asp_membership.ledger,
+        self.chain = Some(chain_context_from_fetched_state(
+            data,
+            &self.config.pool_contract_id,
             non_membership_proof,
+        )?);
+        Ok(())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    async fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
+        let (_, note_pub, ..) = {
+            let wasm = self.wasm_state.as_ref().ok_or(PoolError::NotInitialized)?;
+            let storage = wasm.storage.borrow();
+            load_user_key_material(&storage, &self.config.user_address)
+                .map_err(|e| PoolError::Other(e.to_string()))?
         };
 
-        self.chain = Some(chain);
+        let fetcher = StateFetcher::new(&self.config.rpc_url, self.config.contract_config.clone())
+            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+        let data = fetcher
+            .contracts_data_for_pool(&self.config.pool_contract_id)
+            .await
+            .map_err(|e| PoolError::Other(format!("fetch pool state: {e:#}")))?;
+        let non_membership_proof = fetcher
+            .get_nonmembership_proof(
+                &note_pub,
+                data.asp_non_membership.root,
+                SMT_DEPTH as usize,
+                &self.config.user_address,
+            )
+            .await
+            .map_err(|e| PoolError::Other(format!("non-membership proof: {e:#}")))?;
+
+        self.chain = Some(chain_context_from_fetched_state(
+            data,
+            &self.config.pool_contract_id,
+            non_membership_proof,
+        )?);
         Ok(())
     }
 
@@ -367,9 +456,21 @@ impl PrivatePool {
     fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, PoolError> {
         let ext_amount = ExtAmount::try_from(amount)
             .map_err(|_| PoolError::Other("deposit amount exceeds ext_amount range".into()))?;
-        let storage = self.storage()?;
-        let (_, note_pub, enc_pub, _) = load_user_key_material(storage, &self.config.user_address)
-            .map_err(|e| PoolError::Other(e.to_string()))?;
+        let (_, note_pub, enc_pub, _) = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let storage = self.storage()?;
+                load_user_key_material(storage, &self.config.user_address)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let wasm = self.wasm_state.as_ref().ok_or(PoolError::NotInitialized)?;
+                let storage = wasm.storage.borrow();
+                load_user_key_material(&storage, &self.config.user_address)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+            }
+        };
 
         Ok(Transact::new(
             Vec::new(),
@@ -382,18 +483,31 @@ impl PrivatePool {
     }
 
     fn spendable_wallet(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        let storage = self.storage()?;
         let pool_contract_id = &self.config.pool_contract_id;
         let user_address = &self.config.user_address;
-        let spendable_notes = storage
-            .list_unspent_user_notes(pool_contract_id, user_address)
-            .map_err(|e| PoolError::Other(e.to_string()))?
-            .into_iter()
-            .map(|n| SpendableNote {
-                commitment: n.id,
-                amount: n.amount,
-            })
-            .collect();
+        let spendable_notes = {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let storage = self.storage()?;
+                storage
+                    .list_unspent_user_notes(pool_contract_id, user_address)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+            }
+            #[cfg(target_arch = "wasm32")]
+            {
+                let wasm = self.wasm_state.as_ref().ok_or(PoolError::NotInitialized)?;
+                let storage = wasm.storage.borrow();
+                storage
+                    .list_unspent_user_notes(pool_contract_id, user_address)
+                    .map_err(|e| PoolError::Other(e.to_string()))?
+            }
+        }
+        .into_iter()
+        .map(|n| SpendableNote {
+            commitment: n.id,
+            amount: n.amount,
+        })
+        .collect();
         Ok(spendable_notes)
     }
 }
@@ -401,6 +515,35 @@ impl PrivatePool {
 fn process_local_state(storage: &mut Storage) -> Result<(), PoolError> {
     while process_local_state_batch(storage).map_err(|e| PoolError::Other(e.to_string()))? {}
     Ok(())
+}
+
+fn chain_context_from_fetched_state(
+    data: ContractsStateData,
+    pool_contract_id: &str,
+    non_membership_proof: AspNonMembershipProof,
+) -> Result<TransactChainContext, PoolError> {
+    let pool = data.pools.into_iter().next().ok_or_else(|| {
+        PoolError::Other(format!(
+            "pool data not fetched for {pool_contract_id}"
+        ))
+    })?;
+    let pool_root = pool
+        .merkle_root
+        .ok_or_else(|| PoolError::Other("pool merkle_root not fetched".into()))?;
+    let pool_next_index = pool
+        .merkle_next_index
+        .parse::<u32>()
+        .map_err(|e| PoolError::Other(format!("invalid pool merkle_next_index: {e}")))?;
+
+    Ok(TransactChainContext {
+        pool_root,
+        pool_next_index,
+        pool_merkle_levels: pool.merkle_levels,
+        asp_membership_root: data.asp_membership.root,
+        asp_membership_contract_id: data.asp_membership.contract_id,
+        asp_membership_ledger: data.asp_membership.ledger,
+        non_membership_proof,
+    })
 }
 
 const PROCESS_FETCH_LIMIT: u32 = 50;

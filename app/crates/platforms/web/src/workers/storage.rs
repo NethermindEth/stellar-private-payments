@@ -3,19 +3,21 @@ use crate::protocol::{
     PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
     UserKeys,
 };
-use anyhow::Result;
-use futures::{channel::mpsc, stream::StreamExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, channel::mpsc, stream::StreamExt};
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{Registrable, oneshot::oneshot};
+use gloo_worker::{Registrable, oneshot::OneshotBridge, oneshot::oneshot};
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
     BuildTransactParams, build_transact_params, build_validated_pool_tree, load_user_key_material,
+    chain::ContractDataStorage,
     state::{Storage, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
         encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
         merkle::MerkleProof,
     },
+    types::{ContractsEventData, SyncMetadata},
 };
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
@@ -425,4 +427,119 @@ async fn process_until_empty() -> anyhow::Result<()> {
         TimeoutFuture::new(0).await;
     }
     Ok(())
+}
+
+/// Storage worker bridge — single entry point for all main-thread ↔ worker I/O.
+pub(crate) struct StorageBridge {
+    bridge: OneshotBridge<StorageWorker>,
+}
+
+impl Clone for StorageBridge {
+    fn clone(&self) -> Self {
+        Self {
+            bridge: self.bridge.fork(),
+        }
+    }
+}
+
+impl StorageBridge {
+    pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
+        Self { bridge }
+    }
+
+    /// Send a request to the storage worker and return its response.
+    ///
+    /// Worker-level [`StorageWorkerResponse::Error`] is mapped to `Err`.
+    pub(crate) async fn call(
+        &self,
+        req: StorageWorkerRequest,
+        timeout_ms: u32,
+    ) -> anyhow::Result<StorageWorkerResponse> {
+        let mut bridge = self.bridge.fork();
+        let fut = bridge.run(req).fuse();
+        let timeout = TimeoutFuture::new(timeout_ms).fuse();
+
+        futures::pin_mut!(fut, timeout);
+
+        let resp = futures::select! {
+            value = fut => value,
+            _ = timeout => {
+                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
+            }
+        };
+
+        match resp {
+            StorageWorkerResponse::Error(e) => Err(anyhow!(e)),
+            other => Ok(other),
+        }
+    }
+
+    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
+        match self.call(StorageWorkerRequest::Ping, 5_000).await? {
+            StorageWorkerResponse::Pong => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn clear_indexing_cursors(&self) -> anyhow::Result<()> {
+        match self
+            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+        match self
+            .call(StorageWorkerRequest::BootnodeConfig, 2_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
+                (config.enabled && !config.url.is_empty()).then_some(config.url)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ContractDataStorage for StorageBridge {
+    async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
+        match self.call(StorageWorkerRequest::SyncState, 5_000).await? {
+            StorageWorkerResponse::SyncState(state) => Ok(state),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    async fn save_events_batch(&self, data: ContractsEventData) -> anyhow::Result<()> {
+        match self
+            .call(StorageWorkerRequest::SaveEvents(data), 10_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    async fn save_sync_progress(
+        &self,
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()> {
+        match self
+            .call(
+                StorageWorkerRequest::SaveSyncProgress {
+                    metadata,
+                    fully_indexed,
+                },
+                10_000,
+            )
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
 }

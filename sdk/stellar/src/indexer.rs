@@ -53,7 +53,11 @@ impl<S: ContractDataStorage> Indexer<S> {
         })
     }
 
-    pub async fn fetch_contract_events(&self) -> Result<()> {
+    /// Fetch up to [`MAX_PAGES_PER_ROUND`] event pages from RPC into storage.
+    ///
+    /// Returns `true` when the round ended on a non-empty page (caller may want
+    /// another round).
+    pub async fn fetch_contract_events(&self) -> Result<bool> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
@@ -97,6 +101,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             );
             None
         };
+
+        let mut may_have_more = false;
 
         for page in 0..MAX_PAGES_PER_ROUND {
             log::trace!(
@@ -147,11 +153,12 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             cursor = Some(new_cursor);
             if is_empty {
-                break;
+                return Ok(may_have_more);
             }
+            may_have_more = true;
         }
 
-        Ok(())
+        Ok(may_have_more)
     }
 }
 

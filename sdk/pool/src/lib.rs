@@ -65,6 +65,8 @@ mod client;
 mod error;
 #[cfg(not(target_arch = "wasm32"))]
 mod indexer;
+#[cfg(target_arch = "wasm32")]
+mod wasm_indexer;
 mod plan;
 mod pool;
 mod prover;
