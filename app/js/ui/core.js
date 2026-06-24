@@ -135,32 +135,23 @@ export const Toast = {
         const toast = template.content.cloneNode(true).firstElementChild;
         const icon = toast.querySelector('.toast-icon');
         const msgEl = toast.querySelector('.toast-message');
-        const open = toast.querySelector('.toast-open');
+        const link = toast.querySelector('.toast-link');
 
         msgEl.textContent = String(message ?? '');
         msgEl.title = String(message ?? '');
 
-        if (type === 'success') {
-            icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-            toast.classList.add('border-cyan-400/40');
-            icon.classList.add('text-cyan-300');
-        } else if (type === 'info') {
-            icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><circle cx="12" cy="8" r="1"/>';
-            toast.classList.add('border-slate-400/40');
-            icon.classList.add('text-slate-200');
-        } else {
-            icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>';
-            toast.classList.add('border-rose-400/40');
-            icon.classList.add('text-rose-300');
+        const dot = type === 'info' ? 'bg-slate-300' : type === 'error' ? 'bg-rose-400' : 'bg-cyan-300';
+        const border = type === 'info' ? 'border-slate-400/40' : type === 'error' ? 'border-rose-400/40' : 'border-cyan-400/40';
+        icon?.classList.remove('bg-cyan-300');
+        icon?.classList.add(dot);
+        toast.classList.add(border);
+
+        if (opts.linkUrl && link) {
+            link.href = opts.linkUrl;
+            if (opts.linkAriaLabel) link.setAttribute('aria-label', opts.linkAriaLabel);
+            link.classList.remove('hidden');
         }
 
-        if (opts.linkUrl) {
-            open.href = opts.linkUrl;
-            if (opts.linkAriaLabel) open.setAttribute('aria-label', opts.linkAriaLabel);
-            open.classList.remove('hidden');
-        }
-
-        toast.querySelector('.toast-close')?.addEventListener('click', () => toast.remove());
         container.appendChild(toast);
 
         setTimeout(() => {

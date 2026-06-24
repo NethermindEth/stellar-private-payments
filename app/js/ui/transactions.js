@@ -189,7 +189,7 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes);
+                this.showHashes(hashes, 'Deposit');
             } catch (error) {
                 Toast.show(error?.message || 'Deposit failed', 'error');
             } finally {
@@ -233,7 +233,7 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes);
+                this.showHashes(hashes, 'Transfer');
             } catch (error) {
                 Toast.show(error?.message || 'Transfer failed', 'error');
             } finally {
@@ -258,7 +258,7 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes);
+                this.showHashes(hashes, 'Withdrawal');
             } catch (error) {
                 Toast.show(error?.message || 'Withdraw failed', 'error');
             } finally {
@@ -298,7 +298,7 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes);
+                this.showHashes(hashes, 'Advanced transaction');
             } catch (error) {
                 Toast.show(error?.message || 'Advanced transaction failed', 'error');
             } finally {
@@ -307,13 +307,13 @@ export const Transactions = {
         });
     },
 
-    showHashes(hashes) {
+    showHashes(hashes, label = 'Transaction') {
         if (!Array.isArray(hashes) || !hashes.length) {
-            Toast.show('Transaction submitted', 'success');
+            Toast.show(`${label} submitted`, 'success');
             return;
         }
         const lastHash = hashes[hashes.length - 1];
-        Toast.show(`Submitted: ${Utils.truncateHex(lastHash, 10, 8)}`, 'success', 7000, {
+        Toast.show(`${label} submitted: ${Utils.truncateHex(lastHash, 10, 8)}`, 'success', 7000, {
             linkUrl: Utils.explorerTxUrl(lastHash),
             linkAriaLabel: 'Open transaction in explorer',
         });
