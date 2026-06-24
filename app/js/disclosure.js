@@ -590,6 +590,7 @@ export function mountGenerate(container) {
     try {
       const receipt = await generateReceipt(form);
       if (receipt) {
+        setGenerateState(null);
         showResult(receipt);
         generateBtn.textContent = 'Generated';
       } else {
