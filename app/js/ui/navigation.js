@@ -132,6 +132,7 @@ function renderSettingsDrawer() {
 export const Shell = {
     init() {
         document.querySelectorAll('[data-view]').forEach(btn => btn.addEventListener('click', () => setActiveView(btn.dataset.view)));
+        document.getElementById('home-link')?.addEventListener('click', () => setActiveView('dashboard'));
         document.querySelectorAll('[data-move-flow]').forEach(btn => btn.addEventListener('click', () => setMoveFlow(btn.dataset.moveFlow)));
         document.querySelectorAll('[data-pool-select]').forEach(select => {
             select.addEventListener('change', () => {
