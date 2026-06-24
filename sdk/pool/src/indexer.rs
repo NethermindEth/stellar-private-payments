@@ -7,7 +7,7 @@ use std::collections::HashSet;
 use anyhow::{Result, anyhow};
 use state::Storage;
 use stellar::blocking::Client;
-use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
+use types::{ContractConfig, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
 const MAX_PAGES_PER_ROUND: usize = 10;
@@ -122,7 +122,7 @@ impl Indexer {
             self.storage.save_events_batch(&ContractsEventData {
                 cursor: new_cursor.clone(),
                 latest_ledger,
-                events: events.into_iter().map(contract_event_from_rpc).collect(),
+                events: events.into_iter().map(Into::into).collect(),
             })?;
 
             self.storage.save_sync_progress(
@@ -147,15 +147,5 @@ impl Indexer {
         }
 
         Ok(may_have_more)
-    }
-}
-
-fn contract_event_from_rpc(event: stellar::Event) -> ContractEvent {
-    ContractEvent {
-        id: event.id,
-        ledger: event.ledger,
-        contract_id: event.contract_id,
-        topics: event.topic,
-        value: event.value,
     }
 }

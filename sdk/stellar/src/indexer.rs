@@ -1,7 +1,7 @@
 use crate::rpc::{Client, Error as RpcError};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
-use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
+use types::{ContractConfig, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
 const PAGE_SIZE: usize = 300;
@@ -168,23 +168,4 @@ pub trait ContractDataStorage {
         metadata: Vec<SyncMetadata>,
         fully_indexed: bool,
     ) -> anyhow::Result<()>;
-}
-impl From<crate::rpc::Event> for ContractEvent {
-    fn from(val: crate::rpc::Event) -> Self {
-        let crate::rpc::Event {
-            id,
-            ledger,
-            contract_id,
-            topic,
-            value,
-            ..
-        } = val;
-        ContractEvent {
-            id,
-            ledger,
-            contract_id,
-            topics: topic,
-            value,
-        }
-    }
 }
