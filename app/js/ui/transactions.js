@@ -258,8 +258,14 @@ export const Transactions = {
             const button = event.currentTarget;
             try {
                 requireWallet();
-                const publicAmount = parseAmount(document.getElementById('advanced-public-amount')?.value, { allowNegative: true });
-                if (!publicAmount.ok) throw new Error(publicAmount.error);
+                const deposit = parseAmount(document.getElementById('advanced-public-deposit')?.value, { allowNegative: false });
+                if (!deposit.ok) throw new Error(`Public deposit: ${deposit.error}`);
+                const withdraw = parseAmount(document.getElementById('advanced-public-withdraw')?.value, { allowNegative: false });
+                if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
+                // Public deposit is value entering the transaction (input, positive);
+                // public withdraw is value leaving it (output, negative). The contract
+                // takes a single signed ext amount.
+                const publicAmount = deposit.value - withdraw.value;
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
                 const pool = selectedPool();
@@ -270,7 +276,7 @@ export const Transactions = {
                     pool.poolContractId,
                     App.state.wallet.address,
                     recipient,
-                    publicAmount.value,
+                    publicAmount,
                     inputNoteIds,
                     amounts,
                     noteKeys,

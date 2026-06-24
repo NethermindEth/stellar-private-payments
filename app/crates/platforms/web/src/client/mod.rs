@@ -415,7 +415,12 @@ impl WebClient {
                     .map(|raw| serde_json::from_str::<JsonValue>(&raw))
                     .transpose()
                     .map_err(|e| JsError::new(&e.to_string()))?;
-                Ok(serde_wasm_bindgen::to_value(&parsed)?)
+                // Serialize JSON objects as plain JS objects (not the default JS `Map`)
+                // so the frontend can read fields via property access, e.g.
+                // `explorerSetting.baseUrl` / `bootnodeSetting.enabled`.
+                let serializer =
+                    serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+                Ok(serde::Serialize::serialize(&parsed, &serializer)?)
             }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
