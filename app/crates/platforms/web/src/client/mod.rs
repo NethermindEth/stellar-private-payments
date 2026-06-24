@@ -535,7 +535,7 @@ impl WebClient {
 
     #[wasm_bindgen(js_name = getPortfolioBalances)]
     pub async fn get_portfolio_balances(&self, address: String) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::PortfolioBalances(address, self.fetcher.contract_config().clone());
+        let req = StorageWorkerRequest::PortfolioBalances(address);
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::PortfolioBalances(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),

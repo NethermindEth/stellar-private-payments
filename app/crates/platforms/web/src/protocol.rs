@@ -65,7 +65,7 @@ pub enum StorageWorkerRequest {
     UserKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
-    PortfolioBalances(Address, types::ContractConfig),
+    PortfolioBalances(Address),
     UnspentUserNotes {
         user_address: Address,
         pool_contract_id: Address,

@@ -94,48 +94,41 @@
 
         <main id="main-content" class="flex-1">
             <section class="view-panel" data-view-panel="dashboard">
-                <div class="grid gap-6 xl:grid-cols-[minmax(0,1.65fr)_minmax(340px,0.9fr)]">
-                    <div class="space-y-6">
-                        <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                            <div class="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-                                <div>
-                                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
-                                    <h2 class="mt-2 text-3xl font-semibold tracking-tight text-white">Balances by pool</h2>
-                                    <p class="mt-2 max-w-2xl text-sm text-slate-400">Start from token balances and move directly into the high-frequency flows. Notes and selective disclosure stay available, but outside the primary lane.</p>
-                                </div>
+                <div class="space-y-6">
+                    <section class="rounded-[28px] border border-white/8 bg-[linear-gradient(160deg,rgba(22,36,67,0.95),rgba(9,15,29,0.98))] p-6 shadow-[0_16px_60px_rgba(2,6,23,0.55)]">
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Profile</p>
+                        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operator posture</h2>
+                        <dl class="mt-6 grid gap-4 text-sm sm:grid-cols-3">
+                            <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                                <dt class="text-slate-500">Wallet</dt>
+                                <dd id="dashboard-profile-address" class="mt-1 font-mono text-slate-100">Not connected</dd>
                             </div>
-                            <div id="dashboard-balance-grid" class="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3"></div>
-                        </section>
-
-                        <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                            <div>
-                                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contract Pulse</p>
-                                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operational feed</h2>
+                            <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                                <dt class="text-slate-500">Address Book</dt>
+                                <dd id="dashboard-profile-registration" class="mt-1 text-slate-100">—</dd>
                             </div>
-                            <div id="dashboard-feed" class="mt-6 grid gap-4"></div>
-                        </section>
-                    </div>
+                            <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
+                                <dt class="text-slate-500">Registry State</dt>
+                                <dd id="dashboard-profile-sync" class="mt-1 text-slate-100">Registry syncing</dd>
+                            </div>
+                        </dl>
+                    </section>
 
-                    <aside class="space-y-6">
-                        <section class="rounded-[28px] border border-white/8 bg-[linear-gradient(160deg,rgba(22,36,67,0.95),rgba(9,15,29,0.98))] p-6 shadow-[0_16px_60px_rgba(2,6,23,0.55)]">
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Profile</p>
-                            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operator posture</h2>
-                            <dl class="mt-6 space-y-4 text-sm">
-                                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                                    <dt class="text-slate-500">Wallet</dt>
-                                    <dd id="dashboard-profile-address" class="mt-1 font-mono text-slate-100">Not connected</dd>
-                                </div>
-                                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                                    <dt class="text-slate-500">Address Book</dt>
-                                    <dd id="dashboard-profile-registration" class="mt-1 text-slate-100">—</dd>
-                                </div>
-                                <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                                    <dt class="text-slate-500">Registry State</dt>
-                                    <dd id="dashboard-profile-sync" class="mt-1 text-slate-100">Registry syncing</dd>
-                                </div>
-                            </dl>
-                        </section>
-                    </aside>
+                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
+                            <h2 class="mt-2 text-3xl font-semibold tracking-tight text-white">Balances by pool</h2>
+                        </div>
+                        <div id="dashboard-balance-grid" class="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3"></div>
+                    </section>
+
+                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contract Pulse</p>
+                            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operational feed</h2>
+                        </div>
+                        <div id="dashboard-feed" class="mt-6 grid gap-4"></div>
+                    </section>
                 </div>
             </section>
 

@@ -296,8 +296,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
-        StorageWorkerRequest::PortfolioBalances(address, config) => {
+        StorageWorkerRequest::PortfolioBalances(address) => {
             log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");
+            // Load the contract config from the embedded deployment JSON rather than
+            // receiving it over the worker bridge: ContractConfig contains the
+            // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
+            // cannot deserialize (panics with DeserializeAnyNotSupported).
+            let config: types::ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
             let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }

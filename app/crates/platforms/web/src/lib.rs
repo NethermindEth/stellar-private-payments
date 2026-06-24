@@ -8,7 +8,8 @@ pub(crate) mod artifact_hashes {
     include!(concat!(env!("OUT_DIR"), "/artifact_hashes.rs"));
 }
 
-const DEPLOYMENT: &str = include_str!("../../../../../deployments/testnet/deployments.json");
+pub(crate) const DEPLOYMENT: &str =
+    include_str!("../../../../../deployments/testnet/deployments.json");
 
 use client::WebClient;
 use config::Config;
