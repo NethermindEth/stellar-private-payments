@@ -45,20 +45,8 @@
     <div class="relative mx-auto flex min-h-screen max-w-[1600px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
         <header class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
             <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
-                <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between xl:flex-1">
-                    <div class="flex items-center gap-4">
-                        <h1 id="home-link" title="Go to Overview" class="cursor-pointer text-2xl font-semibold tracking-tight text-white">Stellar Private Payments</h1>
-                    </div>
-
-                    <div class="xl:w-[260px]">
-                        <div class="rounded-2xl border border-white/8 bg-ink-900/70 px-4 py-3">
-                            <p class="text-[11px] uppercase tracking-[0.24em] text-slate-500">Network</p>
-                            <div class="mt-2 flex items-center gap-2 text-sm font-medium text-slate-100">
-                                <span class="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.8)]"></span>
-                                <span id="network-name">NETWORK</span>
-                            </div>
-                        </div>
-                    </div>
+                <div class="flex items-center gap-4 xl:flex-1">
+                    <h1 id="home-link" title="Go to Overview" class="cursor-pointer text-2xl font-semibold tracking-tight text-white">Stellar Private Payments</h1>
                 </div>
 
                 <div class="flex flex-col gap-3 md:flex-row md:items-center">
@@ -69,6 +57,10 @@
                     </nav>
 
                     <div class="flex items-center gap-2">
+                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network">
+                            <span class="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.8)]"></span>
+                            <span id="network-name">NETWORK</span>
+                        </div>
                         <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
                             Connect Freighter
                         </button>
@@ -89,7 +81,6 @@
                 <div class="space-y-6">
                     <section class="rounded-[28px] border border-white/8 bg-[linear-gradient(160deg,rgba(22,36,67,0.95),rgba(9,15,29,0.98))] p-6 shadow-[0_16px_60px_rgba(2,6,23,0.55)]">
                         <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Profile</p>
-                        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operator posture</h2>
                         <dl class="mt-6 grid gap-4 text-sm sm:grid-cols-3">
                             <div class="rounded-2xl border border-white/8 bg-white/[0.03] p-4">
                                 <dt class="text-slate-500">Wallet</dt>
@@ -107,18 +98,12 @@
                     </section>
 
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
-                            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Balances by pool</h2>
-                        </div>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Portfolio</p>
                         <div id="dashboard-balance-grid" class="mt-6 grid gap-4 md:grid-cols-2 2xl:grid-cols-3"></div>
                     </section>
 
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contract Pulse</p>
-                            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operational feed</h2>
-                        </div>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Feed</p>
                         <div id="dashboard-feed" class="mt-6 grid gap-4"></div>
                     </section>
                 </div>
@@ -341,9 +326,13 @@
         <div class="flex items-start justify-between gap-4">
             <div>
                 <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Profile & Settings</p>
-                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Operator configuration</h2>
             </div>
-            <button id="settings-close-btn" type="button" class="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Close</button>
+            <button id="settings-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                    <line x1="18" y1="6" x2="6" y2="18"/>
+                    <line x1="6" y1="6" x2="18" y2="18"/>
+                </svg>
+            </button>
         </div>
 
         <div class="mt-8 space-y-6">
@@ -457,9 +446,13 @@
             <div class="flex items-start justify-between gap-4">
                 <div>
                     <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Onboarding</p>
-                    <h2 class="mt-2 text-3xl font-semibold tracking-tight text-white">Prepare this operator station</h2>
                 </div>
-                <button id="onboarding-close-btn" type="button" class="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Close</button>
+                <button id="onboarding-close-btn" type="button" aria-label="Close" title="Close" class="inline-flex h-10 w-10 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                    <svg class="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                        <line x1="18" y1="6" x2="6" y2="18"/>
+                        <line x1="6" y1="6" x2="18" y2="18"/>
+                    </svg>
+                </button>
             </div>
 
             <div id="onboarding-steps" class="mt-8 grid gap-3 md:grid-cols-6">
