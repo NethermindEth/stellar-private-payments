@@ -15,6 +15,10 @@ name = "bootnode"
 path = "bin/bootnode.rs"
 
 [dependencies]
+# workspace
+types = { path = "../../app/crates/core/types", version = "0.1.0" }
+
+# external
 anyhow = { version = "1", default-features = false }
 async-trait = { version = "0.1.89", default-features = false }
 axum = { version = "0.8.9", default-features = false, features = ["tokio", "http1", "json"] }
@@ -40,13 +44,15 @@ tower_governor = "0.7.0"
 tracing = "0.1.44"
 tracing-opentelemetry = { version = "0.29.0", default-features = false }
 tracing-subscriber = { version = "0.3.23", features = ["env-filter", "fmt"] }
-types = { path = "../../app/crates/core/types", version = "0.1.0" }
 url = "2.5.8"
 
 [dev-dependencies]
+# workspace
+types = { path = "../../app/crates/core/types", version = "0.1.0" }
+
+# external
 serde = { version = "1", default-features = false, features = ["derive"] }
 serde_json = { version = "1", default-features = false }
-types = { path = "../../app/crates/core/types", version = "0.1.0" }
 
 [lints.rust]
 missing_docs = "allow"

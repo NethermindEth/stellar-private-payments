@@ -11,13 +11,19 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
-soroban-sdk = { workspace = true }
+# workspace
 soroban-utils = { workspace = true }
 
+# external
+soroban-sdk = { workspace = true }
+
 [dev-dependencies]
+# workspace
+zkhash = { workspace = true }
+
+# external
 num-bigint = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
-zkhash = { workspace = true }
 
 [lints]
 workspace = true

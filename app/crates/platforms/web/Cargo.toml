@@ -19,35 +19,40 @@ name = "prover-worker"
 path = "src/bin/prover_worker.rs"
 
 [dependencies]
+# workspace
+disclosure = { workspace = true }
+prover = { workspace = true }
+state = { workspace = true }
+stellar = { workspace = true }
+tx-planner = { workspace = true }
+types = { workspace = true }
+witness = { workspace = true }
+
+# external
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 console_error_panic_hook = { workspace = true }
-disclosure = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 js-sys = "0.3"
 log = { workspace = true }
-prover = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 sha2 = { workspace = true }
-state = { workspace = true }
-stellar = { workspace = true }
-tx-planner = { workspace = true }
-types = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-log = { workspace = true }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window"] }
-witness = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies] # only to please clippy, this crate is intended only for WASM
+# external
 sqlite-wasm-rs = { version = "0.5.3", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 
 [build-dependencies]
+# external
 sha2 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

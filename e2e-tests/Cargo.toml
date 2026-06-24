@@ -7,23 +7,24 @@ license.workspace = true
 publish = false
 
 [dependencies]
-anyhow = { workspace = true }
+# workspace
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
 circuits = { workspace = true, features = ["std"] }
-num-bigint = { workspace = true }
-
 # Contract dependencies
 pool = { workspace = true }
-soroban-sdk = { workspace = true, features = ["testutils"] }
 soroban-utils = { workspace = true }
-
 # Shared deps
 tx-planner = { workspace = true }
 types = { workspace = true }
 zkhash = { workspace = true }
+
+# external
+anyhow = { workspace = true }
+num-bigint = { workspace = true }
+soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [lints]
 workspace = true

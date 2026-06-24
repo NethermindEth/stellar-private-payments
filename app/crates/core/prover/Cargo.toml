@@ -8,6 +8,14 @@ publish.workspace = true
 description = "Browser WASM module for ZK proof generation using Groth16"
 
 [dependencies]
+# workspace
+# Circuit utilities (core module only, no_std compatible)
+circuits = { workspace = true, default-features = false }
+types = { workspace = true }
+# Poseidon2 hash
+zkhash = { workspace = true }
+
+# external
 anyhow = { workspace = true }
 # Arkworks ZK proving
 ark-bn254 = { workspace = true }
@@ -18,18 +26,17 @@ ark-relations = { workspace = true }
 ark-serialize = { workspace = true }
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
-# Circuit utilities (core module only, no_std compatible)
-circuits = { workspace = true, default-features = false }
 crypto_secretbox = { version = "0.1.1", default-features = false, features = ["alloc", "salsa20"] }
 serde = { workspace = true }
 sha2 = { workspace = true }
-types = { workspace = true }
 x25519-dalek = { version = "2.0", default-features = false, features = ["static_secrets"] }
-# Poseidon2 hash
-zkhash = { workspace = true }
+
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# external
 getrandom = { workspace = true, features = ["std"] }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# external
 getrandom = { workspace = true, features = ["js"] }
 
 [lints]

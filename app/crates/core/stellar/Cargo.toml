@@ -7,6 +7,10 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# workspace
+types = { workspace = true }
+
+# external
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 base64 = "0.22"
@@ -23,9 +27,9 @@ sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.16"
 stellar-xdr = { version = "26.0.0", features = ["curr", "serde", "base64", "std", "alloc"] }
 thiserror = { workspace = true }
-types = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
+# external
 gloo-timers = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
