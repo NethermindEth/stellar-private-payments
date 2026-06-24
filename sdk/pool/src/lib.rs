@@ -54,6 +54,7 @@ pub mod proving {
 
 pub mod state {
     //! SQLite-backed local wallet and indexer state.
+    pub use crate::pool::process_local_state_batch;
     pub use ::state::{
         AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
         process_events, process_notes,

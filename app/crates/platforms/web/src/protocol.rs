@@ -1,13 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+pub use stellar_private_payments_sdk::{PreparedProverTx, PreparedTxPublic, TransactRequest};
+
 use stellar_private_payments_sdk::{
-    chain::PreparedSorobanTx,
-    tx::flows::{N_OUTPUTS, TransactParams},
+    tx::flows::TransactParams,
     types::{
-        AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt,
-        EncryptionPublicKey, ExtAmount, ExtData, Field, KeyDerivationSignature, NoteAmount,
-        NotePrivateKey, NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SyncMetadata,
-        UserNoteSummary,
+        AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
+        KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey, PoolLedgerActivity,
+        PublicKeyEntry, SyncMetadata, UserNoteSummary,
     },
 };
 
@@ -146,54 +146,6 @@ pub struct DisclosureInputs {
     pub note_blinding: Field,
     pub merkle_path_indices: Field,
     pub merkle_path_elements: Vec<Field>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct TransactRequest {
-    pub user_address: Address,
-    pub pool_root: Option<Field>,
-    pub pool_next_index: u32,
-    pub pool_address: Address,
-    pub ext_recipient: Address,
-    pub ext_amount: ExtAmount,
-    pub aspmem_root: Field,
-    pub aspmem_contract_id: Address,
-    pub aspmem_ledger: u32,
-    pub input_commitments: Vec<Field>,
-    pub output_amounts: [NoteAmount; N_OUTPUTS],
-    pub out_recipient_note_pubkeys: [Option<NotePublicKey>; N_OUTPUTS],
-    pub out_recipient_encryption_pubkeys: [Option<EncryptionPublicKey>; N_OUTPUTS],
-    pub smt_depth: u32,
-    pub tree_depth: u32,
-    pub non_membership_proof: AspNonMembershipProof,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedTxPublic {
-    pub pool_root: Field,
-    pub input_nullifiers: [Field; 2],
-    pub output_commitments: [Field; 2],
-    pub public_amount: Field,
-    pub ext_data_hash_be: [u8; 32],
-    pub asp_membership_root: Field,
-    pub asp_non_membership_root: Field,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PreparedProverTx {
-    /// Uncompressed Soroban-ready proof bytes: A(64) || B(128) || C(64) = 256
-    /// bytes.
-    pub proof_uncompressed: Vec<u8>,
-    /// extData passed to the pool contract.
-    pub ext_data: ExtData,
-    /// Public inputs and derived values used to build the on-chain `Proof`
-    /// struct.
-    pub prepared: PreparedTxPublic,
-    /// Unsigned transaction + auth entries from RPC simulation.
-    pub soroban_tx: PreparedSorobanTx,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

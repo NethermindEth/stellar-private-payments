@@ -100,21 +100,6 @@ async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> 
     }
 }
 
-impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
-    fn from(p: &PreparedTxPublic) -> Self {
-        Self {
-            root: p.pool_root,
-            input_nullifiers: p.input_nullifiers,
-            output_commitment0: p.output_commitments[0],
-            output_commitment1: p.output_commitments[1],
-            public_amount: p.public_amount,
-            ext_data_hash_be: p.ext_data_hash_be,
-            asp_membership_root: p.asp_membership_root,
-            asp_non_membership_root: p.asp_non_membership_root,
-        }
-    }
-}
-
 impl WebClient {
     async fn prepare_pool_soroban_tx(
         &self,

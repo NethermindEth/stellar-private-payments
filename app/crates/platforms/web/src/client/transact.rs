@@ -14,6 +14,7 @@ use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function, Promise};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
+    TransactChainContext, transact_request_from_step,
     tx::flows::N_OUTPUTS,
     types::{
         AspMembershipSync, ContractsStateData, EncryptionPublicKey, ExtAmount, Field, NoteAmount,
@@ -167,24 +168,16 @@ impl WebClient {
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?;
 
-            let req = TransactRequest {
-                user_address: user_address.to_string(),
-                pool_root,
+            let chain = TransactChainContext {
+                pool_root: pool_root.ok_or_else(|| JsError::new("missing pool_root"))?,
                 pool_next_index,
-                pool_address: pool.contract_id,
-                ext_recipient: step.ext_recipient.clone(),
-                ext_amount: step.ext_amount,
-                aspmem_root: asp_membership.root,
-                aspmem_contract_id: asp_membership.contract_id.clone(),
-                aspmem_ledger: asp_membership.ledger,
-                input_commitments: step.input_commitments.clone(),
-                output_amounts: step.output_amounts,
-                out_recipient_note_pubkeys: step.out_recipient_note_pubkeys.clone(),
-                out_recipient_encryption_pubkeys: step.out_recipient_encryption_pubkeys.clone(),
-                smt_depth: SMT_DEPTH,
-                tree_depth: pool.merkle_levels,
+                pool_merkle_levels: pool.merkle_levels,
+                asp_membership_root: asp_membership.root,
+                asp_membership_contract_id: asp_membership.contract_id.clone(),
+                asp_membership_ledger: asp_membership.ledger,
                 non_membership_proof,
             };
+            let req = transact_request_from_step(&step, user_address, &pool.contract_id, &chain);
 
             emit_progress(
                 on_status,

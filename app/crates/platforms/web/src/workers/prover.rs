@@ -1,6 +1,4 @@
-use crate::protocol::{
-    PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
-};
+use crate::protocol::{ProverWorkerRequest, ProverWorkerResponse};
 use anyhow::{Context as _, Result};
 use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
@@ -8,9 +6,9 @@ use gloo_worker::{Registrable, oneshot::oneshot};
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
-    chain::hash_ext_data_offchain,
+    ProverEngine,
     proving::{Prover, WitnessCalculator},
-    tx::flows::{SelectiveDisclosure1Params, TransactArtifacts, selective_disclosure_1, transact},
+    tx::flows::{SelectiveDisclosure1Params, selective_disclosure_1},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosureContext,
         DisclosurePublicInputs, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT,
@@ -77,14 +75,16 @@ fn ensure_sha256_matches(
 // wasm threads?
 
 thread_local! {
-    static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
-    static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
+    static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
     static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
     static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
-    if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
+    if TRANSACT_PROVER.with(|s| s.borrow().is_some())
+        && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
+        && DISCLOSURE_PROVER.with(|s| s.borrow().is_some())
+    {
         return Ok(());
     }
     let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
@@ -164,9 +164,8 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
     )?;
 
-    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
-    let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
+    let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
 
     let disc_witness_calc =
         WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
@@ -177,11 +176,8 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     let disc_prover =
         Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
 
-    WITNESS_CALC.with(|cell| {
-        *cell.borrow_mut() = Some(witness_calc);
-    });
-    PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(prover);
+    TRANSACT_PROVER.with(|cell| {
+        *cell.borrow_mut() = Some(transact_prover);
     });
     DISCLOSURE_WITNESS_CALC.with(|cell| {
         *cell.borrow_mut() = Some(disc_witness_calc);
@@ -225,8 +221,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Ping => {
             log::trace!("[{WORKER_NAME}] ping");
             loop {
-                let ready = WITNESS_CALC.with(|s| s.borrow().is_some())
-                    && PROVER.with(|s| s.borrow().is_some());
+                let ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
+                    && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
+                    && DISCLOSURE_PROVER.with(|s| s.borrow().is_some());
 
                 if ready {
                     log::trace!("[{WORKER_NAME}] pong");
@@ -238,9 +235,14 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
-            let artifacts = transact(params, hash_ext_data_offchain)?;
-            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
-            ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
+            let prepared = TRANSACT_PROVER.with(|cell| {
+                let mut borrow = cell.borrow_mut();
+                let engine = borrow
+                    .as_mut()
+                    .ok_or_else(|| anyhow::anyhow!("transact prover is not initialized"))?;
+                engine.prove_transact(params)
+            })?;
+            ProverWorkerResponse::TransactPrepared(prepared)
         }
         ProverWorkerRequest::Disclosure(req) => {
             log::debug!("[{WORKER_NAME}] disclosure");
@@ -340,64 +342,6 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
     };
     Ok(resp)
-}
-
-fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
-    let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
-    let ext_data = transact_artifacts.ext_data.clone();
-    log::debug!("[{WORKER_NAME}] compute witness");
-    let witness_bytes = WITNESS_CALC.with(|cell| {
-        let mut borrow = cell.borrow_mut();
-        let calc = borrow
-            .as_mut()
-            .ok_or_else(|| anyhow::anyhow!("witness calculator is not initialized"))?;
-        calc.compute_witness(&circuit_inputs_json)
-            .context("witness calculation failed")
-    })?;
-
-    let (proof_uncompressed, prepared_public) = PROVER.with(|cell| {
-        let borrow = cell.borrow();
-        let prover = borrow
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("prover is not initialized"))?;
-
-        log::debug!("[{WORKER_NAME}] prove");
-        let proof_compressed = prover.prove_bytes(&witness_bytes)?;
-        let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
-        log::debug!("[{WORKER_NAME}] verify");
-        let ok = prover.verify(&proof_compressed, &public_inputs)?;
-        if !ok {
-            return Err(anyhow::anyhow!("proof verification failed"));
-        }
-
-        let proof_uncompressed = prover.proof_bytes_to_uncompressed(&proof_compressed)?;
-        if proof_uncompressed.len() != 256 {
-            return Err(anyhow::anyhow!(
-                "unexpected uncompressed proof length: {}",
-                proof_uncompressed.len()
-            ));
-        }
-
-        let p = transact_artifacts.prepared;
-        let prepared_public = PreparedTxPublic {
-            pool_root: p.pool_root,
-            input_nullifiers: p.input_nullifiers,
-            output_commitments: p.output_commitments,
-            public_amount: p.public_amount_field,
-            ext_data_hash_be: p.ext_data_hash_be,
-            asp_membership_root: p.asp_membership_root,
-            asp_non_membership_root: p.asp_non_membership_root,
-        };
-
-        Ok::<_, anyhow::Error>((proof_uncompressed, prepared_public))
-    })?;
-
-    Ok(PreparedProverTx {
-        proof_uncompressed,
-        ext_data,
-        prepared: prepared_public,
-        soroban_tx: Default::default(),
-    })
 }
 
 async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
