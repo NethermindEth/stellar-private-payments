@@ -187,10 +187,11 @@ CREATE TABLE disclaimer_acceptances (
 );
 CREATE INDEX idx_disclaimer_acceptances_hash ON disclaimer_acceptances(disclaimer_hash);
 
--- Client-wide bootnode opt-in for indexer historical event recovery.
-CREATE TABLE bootnode_config (
-  id INTEGER PRIMARY KEY CHECK (id = 1),
-  enabled INTEGER NOT NULL DEFAULT 0,
-  url TEXT NOT NULL DEFAULT ''
+-- Generic application settings store.
+--
+-- Values are stored as JSON text so UI/runtime settings can evolve without
+-- repeated schema changes.
+CREATE TABLE app_settings (
+    key TEXT PRIMARY KEY,
+    value JSON NOT NULL
 );
-INSERT INTO bootnode_config (id) VALUES (1);

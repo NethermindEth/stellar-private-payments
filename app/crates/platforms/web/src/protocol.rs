@@ -6,7 +6,8 @@ use stellar::PreparedSorobanTx;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
     ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
-    PoolLedgerActivity, PublicKeyEntry, SyncMetadata, UserNoteSummary,
+    OperationalFeedItem, PoolLedgerActivity, PortfolioBalance, PublicKeyEntry, RecipientLookup,
+    SyncMetadata, UserNoteSummary,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -42,13 +43,6 @@ pub struct DisclaimerStatePayload {
     pub accepted: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BootnodeConfigPayload {
-    pub enabled: bool,
-    pub url: String,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
@@ -63,20 +57,30 @@ pub enum StorageWorkerRequest {
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
-    BootnodeConfig,
-    SetBootnodeConfig {
-        enabled: bool,
-        url: String,
+    GetSetting(String),
+    SetSetting {
+        key: String,
+        value_json: String,
     },
     UserKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
+    PortfolioBalances(Address, types::ContractConfig),
     UnspentUserNotes {
         user_address: Address,
         pool_contract_id: Address,
     },
     RecentPoolActivity(u32),
     RecentPubKeys(u32),
+    RecipientLookup {
+        address: Address,
+        public_key_registry_contract_id: String,
+    },
+    OperationalFeed {
+        limit: u32,
+        asp_membership_contract_id: String,
+        public_key_registry_contract_id: String,
+    },
     DisclosureInputs(DisclosureInputsRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
@@ -90,12 +94,15 @@ pub enum StorageWorkerResponse {
     Saved,
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
-    BootnodeConfig(BootnodeConfigPayload),
+    Setting(Option<String>),
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
+    PortfolioBalances(Vec<PortfolioBalance>),
     RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
+    RecipientLookup(RecipientLookup),
+    OperationalFeed(Vec<OperationalFeedItem>),
     AspMembershipSync(AspMembershipSync),
     DisclosureInputs(DisclosureInputs),
     TransactParams(TransactParams),

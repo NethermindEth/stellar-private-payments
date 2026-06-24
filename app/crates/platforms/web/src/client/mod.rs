@@ -12,6 +12,7 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use prover::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS};
+use serde_json::Value as JsonValue;
 use std::{rc::Rc, str::FromStr};
 use stellar::{
     OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx,
@@ -403,25 +404,67 @@ impl WebClient {
         }
     }
 
-    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+    #[wasm_bindgen(js_name = getSetting)]
+    pub async fn get_setting(&self, key: String) -> Result<JsValue, JsError> {
         match self
-            .storage_request(StorageWorkerRequest::BootnodeConfig, 2_000)
-            .await
+            .storage_request(StorageWorkerRequest::GetSetting(key), 2_000)
+            .await?
         {
-            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
-                (config.enabled && !config.url.is_empty()).then_some(config.url)
+            StorageWorkerResponse::Setting(value_json) => {
+                let parsed = value_json
+                    .map(|raw| serde_json::from_str::<JsonValue>(&raw))
+                    .transpose()
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+                Ok(serde_wasm_bindgen::to_value(&parsed)?)
             }
-            _ => None,
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
+    }
+
+    #[wasm_bindgen(js_name = setSetting)]
+    pub async fn set_setting(&self, key: String, value: JsValue) -> Result<(), JsError> {
+        let value_json = serde_wasm_bindgen::from_value::<JsonValue>(value)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        match self
+            .storage_request(
+                StorageWorkerRequest::SetSetting {
+                    key,
+                    value_json: serde_json::to_string(&value_json)
+                        .map_err(|e| JsError::new(&e.to_string()))?,
+                },
+                2_000,
+            )
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+        let setting = self.get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string()).await.ok()?;
+        let parsed = serde_wasm_bindgen::from_value::<Option<types::BootnodeSetting>>(setting).ok()?;
+        let config = parsed?;
+        (config.enabled && !config.url.is_empty()).then_some(config.url)
     }
 
     #[wasm_bindgen(js_name = setBootnodeConfig)]
     pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
-        let req = StorageWorkerRequest::SetBootnodeConfig { enabled: true, url };
-        match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::Saved => Ok(()),
-            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-        }
+        self.set_setting(
+            state::APP_SETTING_BOOTNODE_CONFIG.to_string(),
+            serde_wasm_bindgen::to_value(&types::BootnodeSetting { enabled: true, url })?,
+        )
+        .await
+    }
+
+    #[wasm_bindgen(js_name = getBootnodeConfig)]
+    pub async fn get_bootnode_config(&self) -> Result<JsValue, JsError> {
+        self.get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string()).await
+    }
+
+    #[wasm_bindgen(js_name = getExplorerSetting)]
+    pub async fn get_explorer_setting(&self) -> Result<JsValue, JsError> {
+        self.get_setting(state::APP_SETTING_EXPLORER.to_string()).await
     }
 
     #[wasm_bindgen(js_name = getUserKeys)]
@@ -490,6 +533,15 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = getPortfolioBalances)]
+    pub async fn get_portfolio_balances(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::PortfolioBalances(address, self.fetcher.contract_config().clone());
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::PortfolioBalances(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getRecentPoolActivity)]
     pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecentPoolActivity(limit);
@@ -497,6 +549,31 @@ impl WebClient {
             StorageWorkerResponse::RecentPoolActivity(list) => {
                 Ok(serde_wasm_bindgen::to_value(&list)?)
             }
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
+    pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::RecipientLookup {
+            address,
+            public_key_registry_contract_id: self.fetcher.contract_config().public_key_registry.clone(),
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::RecipientLookup(lookup) => Ok(serde_wasm_bindgen::to_value(&lookup)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getOperationalFeed)]
+    pub async fn get_operational_feed(&self, limit: u32) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::OperationalFeed {
+            limit,
+            asp_membership_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+            public_key_registry_contract_id: self.fetcher.contract_config().public_key_registry.clone(),
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::OperationalFeed(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }

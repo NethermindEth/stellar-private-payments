@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 pub const SMT_DEPTH: u32 = 10;
 
 // deployments/<network>/deployments.json
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContractConfig {
     pub network: String,
     pub deployer: String,
@@ -124,6 +124,8 @@ pub struct PublicKeyEntry {
 pub struct UserNoteSummary {
     /// Pool commitment (hex).
     pub id: Field,
+    /// Pool contract id that owns the commitment.
+    pub pool_contract_id: String,
     /// Amount in stroops.
     pub amount: NoteAmount,
     /// Commitment leaf index in the pool Merkle tree.
@@ -141,6 +143,50 @@ pub struct PoolLedgerActivity {
     pub ledger: u32,
     pub commitments: u32,
     pub nullifiers: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootnodeSetting {
+    pub enabled: bool,
+    pub url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExplorerSetting {
+    pub base_url: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PortfolioBalance {
+    pub pool_contract_id: String,
+    pub token_contract_id: String,
+    pub token_label: String,
+    pub amount: NoteAmount,
+    pub note_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipientLookup {
+    pub entry: Option<PublicKeyEntry>,
+    pub registry_fully_synced: bool,
+    pub network_tip_ledger: u32,
+    pub registry_last_fully_indexed_ledger: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationalFeedItem {
+    pub kind: String,
+    pub title: String,
+    pub body: String,
+    pub ledger: u32,
+    pub contract_id: Option<String>,
+    pub pool_contract_id: Option<String>,
+    pub tx_type: Option<String>,
 }
 
 /// Wallet signature used to derive both privacy keypairs
