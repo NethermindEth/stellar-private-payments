@@ -16,7 +16,7 @@ use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
-use witness::WitnessCalculator;
+use witness::{GraphWitnessCalculator, WitnessCalculator};
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
@@ -24,6 +24,9 @@ const WORKER_NAME: &str = "WORKER-PROVER";
 const PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"
 );
+// Policy witness is generated from this committed circom-witness-rs graph
+const POLICY_GRAPH: &[u8] =
+    include_bytes!("../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin");
 const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
 );
@@ -74,7 +77,7 @@ fn ensure_sha256_matches(
 // wasm threads?
 
 thread_local! {
-    static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static WITNESS_CALC: RefCell<Option<GraphWitnessCalculator>> = const { RefCell::new(None) };
     static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
     static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
     static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
@@ -84,15 +87,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
-    let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
-        async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
-        },
+    let (r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
         async {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
@@ -130,10 +125,10 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
     )?;
     ensure_sha256_matches(
-        "policy_tx_2_2.wasm",
-        &wasm_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
+        "policy_tx_2_2.graph.bin",
+        POLICY_GRAPH,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_GRAPH_LEN,
+        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_GRAPH_SHA256,
     )?;
     ensure_sha256_matches(
         "policy_tx_2_2.r1cs",
@@ -161,8 +156,11 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
     )?;
 
-    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
+    let witness_calc = GraphWitnessCalculator::from_graph(POLICY_GRAPH).map_err(|e| {
+        JsError::new(&format!(
+            "failed to init policy graph witness calculator: {e:#}"
+        ))
+    })?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
 
     let disc_witness_calc =

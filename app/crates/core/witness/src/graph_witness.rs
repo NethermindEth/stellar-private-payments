@@ -1,7 +1,8 @@
 //! Graph-based witness generation.
 //!
-//! Computes witnesses by evaluating a pre-computed `circom-witness-rs` operation
-//! graph. The runtime evaluator is pure Rust and compiles to `wasm32-unknown-unknown`.
+//! Computes witnesses by evaluating a pre-computed `circom-witness-rs`
+//! operation graph. The runtime evaluator is pure Rust and compiles to
+//! `wasm32-unknown-unknown`.
 
 use anyhow::{Context as _, Result, bail, ensure};
 // circom-witness-rs black-box hint functions operate on its arkworks 0.5 `Fr`.
@@ -97,8 +98,8 @@ fn parse_inputs(inputs_json: &str) -> Result<HashMap<String, Vec<U256>>> {
     Ok(out)
 }
 
-/// Parse one field element from a decimal or `0x`-prefixed hex string, rejecting
-/// anything outside the BN254 scalar field.
+/// Parse one field element from a decimal or `0x`-prefixed hex string,
+/// rejecting anything outside the BN254 scalar field.
 fn parse_field(s: &str) -> Result<U256> {
     let s = s.trim();
     let value = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
