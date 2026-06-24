@@ -51,6 +51,10 @@
     color-scheme: dark;
   }
 
+  button:not(:disabled) {
+    cursor: pointer;
+  }
+
   body {
     background:
       radial-gradient(circle at top, rgba(63, 138, 255, 0.12), transparent 32%),

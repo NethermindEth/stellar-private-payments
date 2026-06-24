@@ -1,5 +1,6 @@
 import { getHandle } from '../wasm-facade.js';
 import { deriveKeysFromWallet } from '../wallet.js';
+import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
     getNotificationsPrompted,
@@ -9,6 +10,7 @@ import {
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
+const STEP_ORDER = ['disclaimer', 'storage', 'keys', 'retention', 'explorer', 'registration'];
 
 function hasStorageManager() {
     return (
@@ -78,6 +80,12 @@ function renderContent(node) {
     if (node) el.appendChild(node);
 }
 
+function renderWhy(stepId) {
+    document.querySelectorAll('#onboarding-why [data-why]').forEach(el => {
+        el.classList.toggle('hidden', el.dataset.why !== stepId);
+    });
+}
+
 function renderActions(buttons) {
     const el = document.getElementById('onboarding-actions');
     if (!el) return;
@@ -105,7 +113,7 @@ function makePanel({ eyebrow, title, body, aside }) {
     intro.innerHTML = `
         <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">${eyebrow}</p>
         <h3 class="mt-2 text-2xl font-semibold tracking-tight text-white">${title}</h3>
-        <p class="mt-3 text-sm leading-6 text-slate-300">${body}</p>
+        ${body ? `<p class="mt-3 text-sm leading-6 text-slate-300">${body}</p>` : ''}
     `;
     wrap.appendChild(intro);
 
@@ -255,7 +263,7 @@ async function registerNow({ client, address, notePublicKey, encryptionPublicKey
     );
 }
 
-export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
+export async function runOnboardingWizard({ address, networkPassphrase, bootnodeRequired = false } = {}) {
     const client = getHandle().webClient;
     if (!address) throw new Error('Wallet address required for onboarding');
 
@@ -276,7 +284,7 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
-        ...(needsNotificationStep || !bootnodeSetting ? ['retention'] : []),
+        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         [registryLookup?.entry ? null : 'registration'].filter(Boolean),
     ].flat();
@@ -293,12 +301,13 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
 
     let cancelled = false;
     let closeHandler = null;
-    const closeBtn = document.getElementById('onboarding-close-btn');
-    closeBtn.onclick = () => {
+    const cancelOnboarding = () => {
         cancelled = true;
         closeHandler?.();
         hideModal();
     };
+    const closeBtn = document.getElementById('onboarding-close-btn');
+    closeBtn.onclick = cancelOnboarding;
 
     const state = {
         keys: existingKeys ? {
@@ -311,7 +320,7 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
         registered: !!registryLookup?.entry,
     };
 
-    ['disclaimer', 'storage', 'keys', 'retention', 'explorer', 'registration'].forEach(stepId => {
+    STEP_ORDER.forEach(stepId => {
         setStepState(stepId, steps.includes(stepId) ? 'pending' : 'done');
     });
 
@@ -339,21 +348,21 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
         steps.forEach((candidate, index) => {
             setStepState(candidate, index < i ? 'done' : index === i ? 'current' : 'pending');
         });
+        renderWhy(stepId);
 
         if (stepId === 'disclaimer') {
             const markdown = document.createElement('div');
             markdown.className = 'space-y-3 text-sm text-slate-300';
             renderDisclaimerMarkdown(disclaimerState?.disclaimerTextMd || '', markdown);
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Review the operating disclaimer',
-                body: 'This setup stores private payment material locally and assumes the operator understands the wallet, retention, and registration model.',
                 aside: markdown,
             });
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: () => reject(new Error('Onboarding cancelled')) });
+                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const accept = makeButton({
                     text: 'Accept disclaimer',
                     variant: 'primary',
@@ -375,11 +384,17 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
         }
 
         if (stepId === 'storage') {
+            const statusWrap = document.createElement('p');
+            statusWrap.append('Current status: ');
+            const statusValue = document.createElement('span');
+            statusValue.className = 'font-semibold text-white';
+            statusValue.textContent = persisted ? 'already persisted' : 'not persisted yet';
+            statusWrap.appendChild(statusValue);
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Request durable browser storage',
                 body: 'The app keeps your privacy keys, ASP secret, local notes, and settings in browser storage. Persistent storage reduces the chance of silent eviction.',
-                aside: `<p>Current status: <span class="font-semibold text-white">${persisted ? 'already persisted' : 'not persisted yet'}</span></p>`,
+                aside: statusWrap,
             });
             renderContent(panel);
 
@@ -398,11 +413,15 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                     onClick: async () => {
                         try {
                             request.disabled = true;
-                            await persistStorageIfWanted();
+                            later.disabled = true;
+                            const granted = await persistStorageIfWanted();
                             setPersistPromptedFlag();
-                            resolve();
+                            statusValue.textContent = granted ? 'granted — storage is now persistent' : 'denied by the browser';
+                            statusValue.className = granted ? 'font-semibold text-emerald-200' : 'font-semibold text-amber-200';
+                            renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             request.disabled = false;
+                            later.disabled = false;
                             setError(error?.message || 'Failed to request storage persistence');
                         }
                     },
@@ -414,26 +433,27 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
         }
 
         if (stepId === 'keys') {
-            const secretWrap = document.createElement('div');
-            secretWrap.className = 'rounded-[24px] border border-white/8 bg-ink-950/75 p-5';
-            secretWrap.innerHTML = `
-                <p class="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Derived Material</p>
-                <p class="mt-3 text-sm text-slate-300">Your ASP secret is derived deterministically from wallet signatures and stored locally. It stays masked unless explicitly revealed.</p>
-                <div class="mt-4 rounded-2xl border border-white/8 bg-white/[0.03] p-4">
-                    <p class="text-xs text-slate-500">ASP secret preview</p>
-                    <p id="wizard-asp-secret" class="mt-2 break-all font-mono text-xs text-slate-100">${maskSecret(state.keys?.aspSecret || '')}</p>
-                </div>
-            `;
+            const secretWrap = document.getElementById('tpl-onboarding-keys').content.firstElementChild.cloneNode(true);
+            const noteField = secretWrap.querySelector('[data-field="note"]');
+            const aspField = secretWrap.querySelector('[data-field="asp"]');
+            noteField.textContent = state.keys?.pubKey || 'Not available';
+            aspField.textContent = maskSecret(state.keys?.aspSecret || '');
+            secretWrap.querySelector('[data-copy="note"]').addEventListener('click', () => {
+                if (state.keys?.pubKey) Utils.copyToClipboard(state.keys.pubKey);
+            });
+            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', () => {
+                if (state.keys?.aspSecret) Utils.copyToClipboard(state.keys.aspSecret);
+            });
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Derive note keys and ASP secret',
-                body: 'This requires a wallet signature but does not move funds. The derived note key, encryption key, and ASP secret are then cached locally.',
+                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
                 aside: secretWrap,
             });
             renderContent(panel);
 
             await waitForStep((resolve, reject) => {
-                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: () => reject(new Error('Onboarding cancelled')) });
+                const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const derive = makeButton({
                     text: 'Derive and store keys',
                     variant: 'primary',
@@ -445,8 +465,9 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                                 skipCacheCheck: false,
                             });
                             state.keys = result;
-                            document.getElementById('wizard-asp-secret').textContent = maskSecret(result.aspSecret);
-                            resolve();
+                            noteField.textContent = result.pubKey;
+                            aspField.textContent = maskSecret(result.aspSecret);
+                            renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
                             setError(error?.message || 'Failed to derive privacy keys');
@@ -461,23 +482,13 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
 
         if (stepId === 'retention') {
             const enableNotifications = hasNotificationSupport();
-            const bootnodeEnabled = !!state.bootnode?.enabled;
+            const bootnodeEnabled = bootnodeRequired || !!state.bootnode?.enabled;
             const inputWrap = document.createElement('div');
             inputWrap.className = 'space-y-4';
             inputWrap.innerHTML = `
-                <div class="rounded-[24px] border border-white/8 bg-ink-950/75 p-5 text-sm text-slate-300">
-                    <p class="font-semibold text-white">When do you need this?</p>
-                    <p class="mt-3">If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
-                    <ul class="mt-4 list-disc space-y-2 pl-5">
-                        <li>Integrity risk: a bootnode can omit or forge event history.</li>
-                        <li>Availability risk: a bootnode can be unavailable or rate limit you.</li>
-                        <li>Privacy risk: the operator can observe IP address and timing.</li>
-                        <li>Handoff risk: it can provide an incorrect ledger handoff point.</li>
-                    </ul>
-                </div>
                 <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
                     <label class="flex items-start gap-3">
-                        <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300" ${bootnodeEnabled ? 'checked' : ''}>
+                        <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300" ${bootnodeEnabled ? 'checked' : ''} ${bootnodeRequired ? 'disabled' : ''}>
                         <span>
                             <span class="block text-sm font-medium text-white">Store a bootnode URL now</span>
                             <span class="mt-1 block text-sm text-slate-400">Use this if you want an explicit retention bypass path instead of relying only on reminders.</span>
@@ -490,19 +501,31 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                 </div>
             `;
 
+            if (bootnodeRequired) {
+                const requiredNote = document.createElement('p');
+                requiredNote.className = 'mt-4 text-sm text-amber-200';
+                requiredNote.textContent = 'The public RPC is missing event history (sync gap), so a bootnode archive URL is required to join the app.';
+                inputWrap.firstElementChild.appendChild(requiredNote);
+            }
+
+            let permStatus = null;
             if (enableNotifications) {
                 const notif = document.createElement('div');
-                notif.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300';
-                notif.innerHTML = `
-                    <p class="font-medium text-white">Browser reminder</p>
-                    <p class="mt-2">If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.</p>
-                    <p class="mt-2 text-xs text-slate-500">Current permission: ${Notification.permission}</p>
-                `;
+                notif.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5 text-sm text-slate-300 space-y-2';
+                const notifTitle = document.createElement('p');
+                notifTitle.className = 'font-medium text-white';
+                notifTitle.textContent = 'Browser reminder';
+                const notifBody = document.createElement('p');
+                notifBody.textContent = 'If you choose to rely on RPC only, you can allow notifications so the app can remind you to reopen the tab before retention becomes a problem.';
+                permStatus = document.createElement('p');
+                permStatus.className = 'text-xs text-slate-500';
+                permStatus.textContent = `Current permission: ${Notification.permission}`;
+                notif.append(notifTitle, notifBody, permStatus);
                 inputWrap.appendChild(notif);
             }
 
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Set your retention fallback',
                 body: 'Choose whether this operator station keeps a bootnode archive URL, relies on browser reminders, or both. You can change bootnode settings later.',
                 aside: inputWrap,
@@ -511,14 +534,19 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
 
             await waitForStep((resolve, reject) => {
                 const later = makeButton({ text: 'Continue', variant: 'ghost', onClick: () => resolve() });
-                const requestNotif = enableNotifications
+                const requestNotif = enableNotifications && Notification.permission !== 'granted'
                     ? makeButton({
                         text: 'Allow reminders',
                         onClick: async () => {
                             try {
                                 requestNotif.disabled = true;
-                                await requestNotificationPermission();
+                                const permission = await requestNotificationPermission();
                                 setNotificationsPrompted();
+                                if (permStatus) permStatus.textContent = `Current permission: ${Notification.permission}`;
+                                Toast.show(
+                                    permission === 'granted' ? 'Reminders enabled' : `Notifications ${permission}`,
+                                    permission === 'granted' ? 'success' : 'info',
+                                );
                                 requestNotif.disabled = false;
                             } catch (error) {
                                 requestNotif.disabled = false;
@@ -532,8 +560,11 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                     variant: 'primary',
                     onClick: async () => {
                         try {
-                            const enabled = !!document.getElementById('wizard-bootnode-enabled')?.checked;
+                            const enabled = bootnodeRequired || !!document.getElementById('wizard-bootnode-enabled')?.checked;
                             const url = document.getElementById('wizard-bootnode-url')?.value?.trim() || '';
+                            if (bootnodeRequired && !url) {
+                                throw new Error('A bootnode URL is required because the public RPC is missing event history.');
+                            }
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
                             }
@@ -548,7 +579,7 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                         }
                     },
                 });
-                renderActions([later, ...(requestNotif ? [requestNotif] : []), save]);
+                renderActions([...(bootnodeRequired ? [] : [later]), ...(requestNotif ? [requestNotif] : []), save]);
             });
             ensureNotCancelled();
             continue;
@@ -563,9 +594,8 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
                 <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
             `;
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Choose the explorer base link',
-                body: 'The UI uses a single explorer base URL across transaction feedback and address shortcuts.',
                 aside: wrap,
             });
             renderContent(panel);
@@ -594,7 +624,7 @@ export async function runOnboardingWizard({ address, networkPassphrase } = {}) {
 
         if (stepId === 'registration') {
             const panel = makePanel({
-                eyebrow: `Step ${i + 1} of ${steps.length}`,
+                eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Register your public keys in the address book',
                 body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
                 aside: `<p>If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.</p>`,

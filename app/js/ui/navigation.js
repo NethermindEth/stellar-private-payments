@@ -111,7 +111,6 @@ function renderWallet() {
         : 'Connect Freighter';
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = App.state.wallet.network?.toUpperCase() || 'NETWORK';
-    document.getElementById('sync-status-badge').textContent = App.state.wallet.connected ? 'Live' : 'Offline';
 }
 
 function renderSettingsDrawer() {
@@ -206,6 +205,7 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
+                let bootnodeRequired = false;
                 try {
                     await initializeWasm(rpcUrl);
                 } catch (error) {
@@ -215,11 +215,13 @@ export const Wallet = {
                     if (!modal.accepted || !modal.url) throw error;
                     await initializeWasm(rpcUrl, modal.url);
                     await getHandle().webClient.setBootnodeConfig(modal.url);
+                    bootnodeRequired = true;
                 }
 
                 const keys = await runOnboardingWizard({
                     address,
                     networkPassphrase,
+                    bootnodeRequired,
                 });
                 App.state.keys.notePublicKey = keys?.pubKey || null;
                 App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
