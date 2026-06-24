@@ -33,7 +33,7 @@ pub mod chain {
     #[cfg(not(target_arch = "wasm32"))]
     pub mod blocking {
         pub use crate::indexer::Indexer;
-        pub use stellar::blocking::{Client, StateFetcher};
+        pub use stellar::blocking::{Client, StateFetcher, confirm_tx, submit_tx};
     }
 }
 

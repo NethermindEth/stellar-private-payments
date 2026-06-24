@@ -19,6 +19,10 @@ pub use stellar_xdr::curr::{Limits, ReadXdr, TransactionEnvelope};
 pub use submit::{TxConfirmStatus, confirm_tx, submit_tx};
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking {
-    pub use crate::{contract_state::blocking::StateFetcher, rpc::blocking::Client};
+    pub use crate::{
+        contract_state::blocking::StateFetcher,
+        rpc::blocking::Client,
+        submit::blocking::{confirm_tx, submit_tx},
+    };
 }
 pub use tx_prepare::PoolTransactInput;

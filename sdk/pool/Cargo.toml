@@ -24,5 +24,8 @@ tx-planner = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 witness = { workspace = true }
 
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
+
 [lints]
 workspace = true

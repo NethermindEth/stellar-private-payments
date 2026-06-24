@@ -26,7 +26,9 @@ use crate::{
 use crate::indexer::Indexer;
 
 #[cfg(not(target_arch = "wasm32"))]
-use stellar::blocking::StateFetcher;
+use stellar::blocking::{Client as BlockingClient, StateFetcher, confirm_tx, submit_tx};
+#[cfg(not(target_arch = "wasm32"))]
+use stellar::{Limits, PoolTransactInput, ReadXdr, TransactionEnvelope, TxConfirmStatus};
 
 use types::{AspNonMembershipProof, ContractsStateData, SMT_DEPTH};
 
@@ -34,7 +36,10 @@ use types::{AspNonMembershipProof, ContractsStateData, SMT_DEPTH};
 use crate::wasm_indexer::{SharedStorage, WasmPoolState};
 
 #[cfg(target_arch = "wasm32")]
-use stellar::{Indexer as AsyncIndexer, StateFetcher};
+use stellar::{
+    Client, Indexer as AsyncIndexer, Limits, PoolTransactInput, ReadXdr, StateFetcher,
+    TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
+};
 
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool {
@@ -334,18 +339,132 @@ impl PrivatePool {
         Ok(prepared)
     }
 
+    /// Simulate the pool `transact` invocation and fill
+    /// [`PreparedTransaction::soroban_tx`] with unsigned XDR and auth
+    /// entries for signing.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
+        let fetcher = StateFetcher::new(&self.config.rpc_url, self.config.contract_config.clone())
+            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+
+        prepared.soroban_tx = fetcher
+            .prepare_pool_transact(
+                &self.config.pool_contract_id,
+                &pool_transact_input(prepared),
+                &self.config.user_address,
+            )
+            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
+
+        Ok(())
+    }
+
+    /// Simulate the pool `transact` invocation and fill
+    /// [`PreparedTransaction::soroban_tx`] with unsigned XDR and auth
+    /// entries for signing.
+    #[cfg(target_arch = "wasm32")]
+    pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
+        let fetcher = StateFetcher::new(&self.config.rpc_url, self.config.contract_config.clone())
+            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+
+        prepared.soroban_tx = fetcher
+            .prepare_pool_transact(
+                &self.config.pool_contract_id,
+                &pool_transact_input(prepared),
+                &self.config.user_address,
+            )
+            .await
+            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
+
+        Ok(())
+    }
+
     pub fn config(&self) -> &PrivatePoolConfig {
         &self.config
     }
 
-    pub fn submit(
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn submit(&mut self, signed_tx: SignedTransaction) -> Result<TransactionResult, PoolError> {
+        const CONFIRM_POLL_ATTEMPTS: u32 = 30;
+        const CONFIRM_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
+
+        let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
+            .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
+
+        let rpc = BlockingClient::new(&self.config.rpc_url)
+            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+
+        let hash = submit_tx(&envelope, &rpc)
+            .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))?;
+
+        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+            if attempt > 1 {
+                std::thread::sleep(CONFIRM_POLL_INTERVAL);
+            }
+            match confirm_tx(&hash, &rpc)
+                .map_err(|e| PoolError::Other(format!("confirm transaction: {e:#}")))?
+            {
+                TxConfirmStatus::Success => return Ok(TransactionResult { tx_hash: hash }),
+                TxConfirmStatus::Failed { detail } => {
+                    return Err(PoolError::Other(format!("transaction failed{detail}")));
+                }
+                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
+                    return Err(PoolError::Other(format!(
+                        "transaction confirmation timed out after 30s (hash: {hash})"
+                    )));
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+
+        Err(PoolError::Other(format!(
+            "transaction confirmation failed (hash: {hash})"
+        )))
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub async fn submit(
         &mut self,
-        _signed_tx: SignedTransaction,
+        signed_tx: SignedTransaction,
     ) -> Result<TransactionResult, PoolError> {
-        // TODO: submit signed XDR to Soroban RPC.
-        Ok(TransactionResult {
-            tx_hash: "stub-tx-hash".into(),
-        })
+        use gloo_timers::future::TimeoutFuture;
+
+        const CONFIRM_POLL_ATTEMPTS: u32 = 30;
+        const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
+
+        let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
+            .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
+
+        let rpc = Client::new(&self.config.rpc_url)
+            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+
+        let hash = submit_tx(&envelope, &rpc)
+            .await
+            .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))?;
+
+        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+            if attempt > 1 {
+                TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
+            }
+            match confirm_tx(&hash, &rpc)
+                .await
+                .map_err(|e| PoolError::Other(format!("confirm transaction: {e:#}")))?
+            {
+                TxConfirmStatus::Success => return Ok(TransactionResult { tx_hash: hash }),
+                TxConfirmStatus::Failed { detail } => {
+                    return Err(PoolError::Other(format!("transaction failed{detail}")));
+                }
+                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
+                    return Err(PoolError::Other(format!(
+                        "transaction confirmation timed out after 30s (hash: {hash})"
+                    )));
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+
+        Err(PoolError::Other(format!(
+            "transaction confirmation failed (hash: {hash})"
+        )))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -515,6 +634,14 @@ impl PrivatePool {
 fn process_local_state(storage: &mut Storage) -> Result<(), PoolError> {
     while process_local_state_batch(storage).map_err(|e| PoolError::Other(e.to_string()))? {}
     Ok(())
+}
+
+fn pool_transact_input(prepared: &PreparedTransaction) -> PoolTransactInput {
+    PoolTransactInput {
+        proof_uncompressed: prepared.proof_uncompressed.clone(),
+        ext_data: prepared.ext_data.clone(),
+        public: (&prepared.prepared).into(),
+    }
 }
 
 fn chain_context_from_fetched_state(
