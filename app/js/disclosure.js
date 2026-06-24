@@ -1,6 +1,7 @@
 import { initializeWasm, getHandle } from './wasm-facade.js';
 import {
   connectWallet,
+  getConnectedAddress,
   getWalletNetwork,
   deriveKeysFromWallet,
 } from './wallet.js';
@@ -154,8 +155,6 @@ async function connect() {
 
     walletChip.textContent = shortAddress(address);
     networkChip.textContent = net.network || 'Testnet';
-    connectBtn.classList.remove('bg-dark-800', 'hover:bg-dark-700');
-    connectBtn.classList.add('bg-brand-500/10', 'border-brand-500/30', 'text-brand-400');
 
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
@@ -1059,6 +1058,13 @@ async function init() {
 
   if (query.verify && verifyContainer) {
     verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  // If a wallet is already connected/allowed for this origin (e.g. connected on
+  // the main app page), restore the session automatically without a popup.
+  const existingAddress = await getConnectedAddress();
+  if (existingAddress) {
+    await connect();
   }
 }
 
