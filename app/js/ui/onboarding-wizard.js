@@ -600,21 +600,32 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
             });
             renderContent(panel);
 
+            const persistExplorer = async (button, baseUrl) => {
+                try {
+                    button.disabled = true;
+                    await client.setSetting('explorer', { baseUrl });
+                    state.explorerBaseUrl = baseUrl;
+                    resolveStep();
+                } catch (error) {
+                    button.disabled = false;
+                    setError(error?.message || 'Failed to save explorer setting');
+                }
+            };
+            let resolveStep = null;
             await waitForStep((resolve, reject) => {
-                const later = makeButton({ text: 'Use default', variant: 'ghost', onClick: () => resolve() });
+                resolveStep = resolve;
+                const later = makeButton({
+                    text: 'Use default',
+                    variant: 'ghost',
+                    onClick: () => persistExplorer(later, DEFAULT_EXPLORER_BASE_URL),
+                });
                 const save = makeButton({
                     text: 'Save explorer',
                     variant: 'primary',
-                    onClick: async () => {
-                        try {
-                            const baseUrl = document.getElementById('wizard-explorer-url')?.value?.trim() || DEFAULT_EXPLORER_BASE_URL;
-                            await client.setSetting('explorer', { baseUrl });
-                            state.explorerBaseUrl = baseUrl;
-                            resolve();
-                        } catch (error) {
-                            setError(error?.message || 'Failed to save explorer setting');
-                        }
-                    },
+                    onClick: () => persistExplorer(
+                        save,
+                        document.getElementById('wizard-explorer-url')?.value?.trim() || DEFAULT_EXPLORER_BASE_URL,
+                    ),
                 });
                 renderActions([later, save]);
             });

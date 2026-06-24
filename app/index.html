@@ -3,13 +3,13 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="PoolStellar control room for privacy-preserving institutional payments on Stellar.">
+    <meta name="description" content="Stellar Private Payments — privacy-preserving institutional payments on Stellar.">
     <meta name="keywords" content="Stellar, privacy, blockchain, zero-knowledge proofs, payments, treasury">
-    <meta name="author" content="PoolStellar">
+    <meta name="author" content="Stellar Private Payments">
     <meta name="robots" content="index, follow">
 
     <meta property="og:type" content="website">
-    <meta property="og:title" content="PoolStellar Control Room">
+    <meta property="og:title" content="Stellar Private Payments">
     <meta property="og:description" content="Private treasury operations on Stellar with zero-knowledge proofs.">
     <meta property="og:image" content="/assets/og-image.png">
     <meta name="twitter:card" content="summary_large_image">
@@ -18,7 +18,7 @@
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32.png">
     <link rel="apple-touch-icon" href="assets/apple-touch-icon.png">
 
-    <title>PoolStellar Control Room</title>
+    <title>Stellar Private Payments</title>
 
     <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
 
@@ -47,19 +47,7 @@
             <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
                 <div class="flex flex-col gap-4 md:flex-row md:items-center md:justify-between xl:flex-1">
                     <div class="flex items-center gap-4">
-                        <div class="flex h-12 w-12 items-center justify-center rounded-2xl border border-cyan-300/20 bg-[linear-gradient(145deg,rgba(112,191,255,0.22),rgba(28,65,120,0.45))] shadow-[0_12px_40px_rgba(37,99,235,0.3)]">
-                            <svg class="h-6 w-6 text-cyan-100" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
-                                <path d="M12 3v18"/>
-                                <path d="M6 8l6-5 6 5"/>
-                                <path d="M6 16l6 5 6-5"/>
-                                <circle cx="12" cy="12" r="2.75" fill="currentColor"/>
-                            </svg>
-                        </div>
-                        <div>
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.35em] text-cyan-200/70">PoolStellar</p>
-                            <h1 class="text-2xl font-semibold tracking-tight text-white">Control Room</h1>
-                            <p class="text-sm text-slate-400">Institutional private payments across configured Stellar pools.</p>
-                        </div>
+                        <h1 class="text-2xl font-semibold tracking-tight text-white">Stellar Private Payments</h1>
                     </div>
 
                     <div class="xl:w-[260px]">
@@ -80,12 +68,16 @@
                         <button type="button" data-view="advanced" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
                     </nav>
 
-                    <div class="flex gap-2">
-                        <button id="open-settings-btn" type="button" class="rounded-full border border-white/10 bg-white/[0.03] px-4 py-2 text-sm font-medium text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
-                            Settings
-                        </button>
+                    <div class="flex items-center gap-2">
                         <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
-                            <span id="wallet-text">Connect Freighter</span>
+                            Connect Freighter
+                        </button>
+                        <button id="open-settings-btn" type="button" aria-label="Settings" title="Wallet & settings" class="inline-flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-slate-200 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                            <span id="wallet-text" class="hidden font-mono text-sm text-slate-100"></span>
+                            <svg class="h-5 w-5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                <circle cx="12" cy="12" r="3"/>
+                                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.09a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.09a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+                            </svg>
                         </button>
                     </div>
                 </div>
@@ -133,7 +125,7 @@
             </section>
 
             <section class="view-panel hidden" data-view-panel="move-funds">
-                <div class="grid gap-6 xl:grid-cols-[minmax(0,1.3fr)_minmax(320px,0.8fr)]">
+                <div class="grid gap-6">
                     <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
                         <div class="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
                             <div>
@@ -234,18 +226,6 @@
                             </section>
                         </div>
                     </section>
-
-                    <aside class="space-y-6">
-                        <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">How To Use</p>
-                            <h2 class="mt-2 text-xl font-semibold text-white">Default lane</h2>
-                            <p class="mt-3 text-sm text-slate-400">Treat this area as the standard treasury console. Pick a token, run the action, and only drop into advanced if you need explicit note selection or custom outputs.</p>
-                        </section>
-                        <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
-                            <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Pool Scope</p>
-                            <p class="mt-3 text-sm text-slate-400">Every move operates against the currently selected pool. Available tokens are sourced from the app config, so users only see enabled pools.</p>
-                        </section>
-                    </aside>
                 </div>
             </section>
 
@@ -533,11 +513,11 @@
     <template id="tpl-balance-card">
         <article class="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,30,56,0.96),rgba(10,17,31,0.98))] p-5 shadow-[0_14px_40px_rgba(2,6,23,0.35)]">
             <div class="flex items-start justify-between gap-4">
-                <div>
-                    <p class="balance-token text-sm font-semibold text-white"></p>
-                    <p class="balance-pool mt-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-500"></p>
+                <div class="min-w-0">
+                    <a class="balance-token text-sm font-semibold text-white transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
+                    <a class="balance-pool mt-2 block font-mono text-[11px] text-cyan-200/80 transition hover:text-cyan-100 hover:underline" target="_blank" rel="noopener noreferrer"></a>
                 </div>
-                <span class="balance-notes rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] font-medium text-cyan-100"></span>
+                <span class="balance-notes shrink-0 rounded-full border border-cyan-300/20 bg-cyan-300/10 px-3 py-1 text-[11px] font-medium text-cyan-100"></span>
             </div>
             <p class="balance-amount mt-8 text-3xl font-semibold tracking-tight text-white"></p>
             <div class="mt-6 flex flex-wrap gap-2">

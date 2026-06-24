@@ -104,11 +104,13 @@ async function loadRuntimeState() {
 }
 
 function renderWallet() {
+    const connected = App.state.wallet.connected;
     const walletText = document.getElementById('wallet-text');
+    const walletBtn = document.getElementById('wallet-btn');
     const walletAddress = document.getElementById('settings-wallet-address');
-    walletText.textContent = App.state.wallet.connected
-        ? Utils.shortAddress(App.state.wallet.address, 8, 6)
-        : 'Connect Freighter';
+    walletText.textContent = connected ? Utils.shortAddress(App.state.wallet.address, 8, 6) : '';
+    walletText.classList.toggle('hidden', !connected);
+    walletBtn?.classList.toggle('hidden', connected);
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = App.state.wallet.network?.toUpperCase() || 'NETWORK';
 }

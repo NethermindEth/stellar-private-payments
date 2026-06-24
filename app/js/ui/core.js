@@ -110,6 +110,10 @@ export const Utils = {
         return `${this.explorerBaseUrl()}/account/${address}`;
     },
 
+    explorerContractUrl(contractId) {
+        return `${this.explorerBaseUrl()}/contract/${contractId}`;
+    },
+
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);

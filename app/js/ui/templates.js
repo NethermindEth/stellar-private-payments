@@ -26,10 +26,16 @@ export const Templates = {
 
     createBalanceCard(balance) {
         const el = App.templates.balanceCard.content.cloneNode(true).firstElementChild;
-        el.querySelector('.balance-token').textContent = balance.tokenLabel;
+        const tokenLink = el.querySelector('.balance-token');
+        tokenLink.textContent = balance.tokenLabel;
+        tokenLink.href = Utils.explorerContractUrl(balance.tokenContractId);
+        tokenLink.title = balance.tokenContractId;
         el.querySelector('.balance-amount').textContent = Utils.formatTokenAmount(balance.amount, balance.tokenLabel);
         el.querySelector('.balance-notes').textContent = `${balance.noteCount} note${balance.noteCount === 1 ? '' : 's'}`;
-        el.querySelector('.balance-pool').textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
+        const poolLink = el.querySelector('.balance-pool');
+        poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
+        poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
+        poolLink.title = balance.poolContractId;
 
         el.querySelectorAll('[data-quick-flow]').forEach(btn => {
             btn.dataset.poolId = balance.poolContractId;
