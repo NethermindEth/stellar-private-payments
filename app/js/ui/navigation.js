@@ -5,7 +5,6 @@
 
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
-import { submitPreparedSorobanTx } from '../stellar.js';
 import { App, Utils, Toast } from './core.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -458,24 +457,14 @@ export const Wallet = {
             if (registerBtn) registerBtn.disabled = true;
             setBtnText('Registering…');
 
-            const prepared = await getHandle().webClient.prepareRegisterPublicKeys(
+            const hash = await getHandle().webClient.registerPublicKeys(
                 App.state.wallet.address,
                 App.state.keys.notePublicKey,
                 App.state.keys.encryptionPublicKey,
-            );
-
-            const hash = await submitPreparedSorobanTx(
-                prepared,
-                {
-                    address: App.state.wallet.address,
-                    rpcUrl: App.state.wallet.sorobanRpcUrl,
-                    networkPassphrase: App.state.wallet.networkPassphrase,
-                },
-                {
-                    onStatus: (p) => {
-                        const msg = p?.message || '';
-                        if (msg) setBtnText(msg);
-                    },
+                App.state.wallet.networkPassphrase,
+                (p) => {
+                    const msg = p?.message || '';
+                    if (msg) setBtnText(msg);
                 },
             );
 

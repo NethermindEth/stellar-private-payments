@@ -23,8 +23,10 @@ pub mod types;
 pub mod chain {
     //! Stellar RPC client, indexer, and contract state reads.
     pub use stellar::{
-        Client, ContractDataStorage, Indexer, OnchainProofPublicInputs, PoolTransactInput,
-        PreparedSorobanTx, RpcError, StateFetcher, hash_ext_data_offchain,
+        Client, ContractDataStorage, Indexer, Limits, LocalSigner, OnchainProofPublicInputs,
+        PoolTransactInput, PreparedSorobanTx, ReadXdr, RpcError, Signature, StateFetcher,
+        TransactionEnvelope, TxConfirmStatus, auth_sign_steps, confirm_tx, hash_ext_data_offchain,
+        submit_tx, unsigned_tx_for_signing, verify_tx,
     };
 
     /// Synchronous RPC client, indexer, and state reads (native only).
@@ -65,12 +67,12 @@ mod client;
 mod error;
 #[cfg(not(target_arch = "wasm32"))]
 mod indexer;
-#[cfg(target_arch = "wasm32")]
-mod wasm_indexer;
 mod plan;
 mod pool;
 mod prover;
 mod transact;
+#[cfg(target_arch = "wasm32")]
+mod wasm_indexer;
 
 pub use client::Client;
 pub use error::PoolError;

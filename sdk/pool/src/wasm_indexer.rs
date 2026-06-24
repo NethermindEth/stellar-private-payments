@@ -1,7 +1,6 @@
 //! WASM indexer storage adapter and pool-local indexer state.
 
-use std::cell::RefCell;
-use std::rc::Rc;
+use std::{cell::RefCell, rc::Rc};
 
 use state::Storage;
 use stellar::ContractDataStorage;

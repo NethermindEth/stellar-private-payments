@@ -4,14 +4,14 @@
 use super::{
     WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
     parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
-    parse_u32_decimal,
+    parse_u32_decimal, sign::sign_prepared_transaction,
 };
 use crate::protocol::{
     PreparedProverTx, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
     StorageWorkerResponse, TransactRequest,
 };
 use gloo_timers::future::TimeoutFuture;
-use js_sys::{Array, BigInt, Function, Promise};
+use js_sys::{Array, BigInt, Function};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
     TransactChainContext, transact_request_from_step,
@@ -22,13 +22,12 @@ use stellar_private_payments_sdk::{
     },
 };
 use tx_planner::{SpendSession, SpendSessionError, SpendTarget, SpendableNote, Transact, plan};
-use wasm_bindgen::{JsCast, JsError, JsValue};
-use wasm_bindgen_futures::JsFuture;
+use wasm_bindgen::JsError;
 
 struct ExecuteCtx {
     pool_contract_id: String,
     user_address: String,
-    submit_fn: Function,
+    network_passphrase: String,
     on_status: Option<Function>,
 }
 
@@ -328,46 +327,31 @@ impl WebClient {
             return Ok(None);
         };
 
-        let message = match (step_current, step_total) {
+        let submit_message = match (step_current, step_total) {
             (Some(current), Some(total)) => format!("Submitting step {current}/{total}…"),
             _ => "Submitting…".to_string(),
         };
+        let signed_tx = sign_prepared_transaction(
+            &prepared.soroban_tx,
+            &ctx.network_passphrase,
+            &ctx.user_address,
+            flow,
+            &ctx.on_status,
+        )
+        .await?;
         emit_progress(
             &ctx.on_status,
             flow,
             "submit",
-            message,
+            submit_message,
             step_current,
             step_total,
         );
-        let hash = Self::call_js_submit(&ctx.submit_fn, &prepared).await?;
+        let hash = self.submit_tx(&signed_tx, flow, &ctx.on_status).await?;
         Ok(Some(ExecutedTransact {
             hash,
             output_commitments: prepared.prepared.output_commitments,
         }))
-    }
-
-    async fn call_js_submit(
-        submit_fn: &Function,
-        proved: &PreparedProverTx,
-    ) -> Result<String, JsError> {
-        let proved_js =
-            serde_wasm_bindgen::to_value(proved).map_err(|e| JsError::new(&e.to_string()))?;
-        let promise_val = submit_fn
-            .call1(&JsValue::NULL, &proved_js)
-            .map_err(|e| JsError::new(&format!("submit callback failed: {e:?}")))?;
-        if promise_val.is_null() || promise_val.is_undefined() {
-            return Err(JsError::new("submit callback must return a Promise"));
-        }
-        let promise: Promise = promise_val
-            .dyn_into()
-            .map_err(|_| JsError::new("submit callback must return a Promise"))?;
-        let result = JsFuture::from(promise)
-            .await
-            .map_err(|e| JsError::new(&format!("submit callback rejected: {e:?}")))?;
-        result.as_string().ok_or_else(|| {
-            JsError::new("submit callback must resolve to a transaction hash string")
-        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -381,7 +365,7 @@ impl WebClient {
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
         flow: &'static str,
     ) -> Result<Option<Vec<String>>, JsError> {
@@ -421,7 +405,7 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            submit_fn,
+            network_passphrase,
             on_status,
         };
         self.execute_transact(ctx, step, flow).await
@@ -434,7 +418,7 @@ impl WebClient {
         user_address: String,
         amount: BigInt,
         output_amounts: Array,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
         let ext_amount = parse_ext_amount_decimal(&amount)?;
@@ -472,7 +456,7 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            submit_fn,
+            network_passphrase,
             on_status,
         };
         self.execute_transact(ctx, step, "deposit").await
@@ -506,7 +490,7 @@ impl WebClient {
         amount: BigInt,
         target: SpendTarget,
         flow: &'static str,
-        submit_fn: Function,
+        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
         let amount = parse_note_amount_decimal(&amount)?;
@@ -517,7 +501,7 @@ impl WebClient {
         let ctx = ExecuteCtx {
             pool_contract_id,
             user_address,
-            submit_fn,
+            network_passphrase,
             on_status,
         };
         self.execute_plan(ctx, amount, target, flow).await

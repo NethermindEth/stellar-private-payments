@@ -629,10 +629,6 @@ impl Client {
     }
 
     /// Submits a signed transaction envelope to the network.
-    ///
-    /// TODO(#162): Wire into the web UI via WASM so JS does not depend on
-    /// `@stellar/stellar-sdk` for `sendTransaction` / `getTransaction`.
-    #[allow(dead_code)]
     pub async fn send_transaction(
         &self,
         tx: &xdr::TransactionEnvelope,
@@ -653,9 +649,6 @@ impl Client {
     }
 
     /// Fetches transaction status by hash.
-    ///
-    /// TODO(#162): See [`Self::send_transaction`].
-    #[allow(dead_code)]
     pub async fn get_transaction(&self, hash: &str) -> Result<GetTransactionResponse, Error> {
         let params = json!({ "hash": hash });
         self.rpc_call("getTransaction", params).await

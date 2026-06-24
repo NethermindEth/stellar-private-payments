@@ -1951,6 +1951,7 @@ dependencies = [
  "rand_core 0.6.4",
  "serde",
  "sha2 0.10.9",
+ "signature",
  "subtle",
  "zeroize",
 ]
@@ -5178,7 +5179,9 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "contract-types",
+ "ed25519-dalek",
  "futures",
  "gloo-timers",
  "http",
@@ -5189,6 +5192,7 @@ dependencies = [
  "serde",
  "serde-aux",
  "serde_json",
+ "sha2 0.11.0",
  "sha3 0.11.0",
  "soroban-sdk",
  "stellar-strkey 0.0.16",
@@ -6315,6 +6319,7 @@ dependencies = [
  "wasm-log",
  "web-sys",
  "wiremock",
+ "witness",
 ]
 
 [[package]]

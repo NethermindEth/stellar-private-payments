@@ -31,13 +31,12 @@ stellar-private-payments/
 │   │   │   ├── types/
 │   │   │   └── witness/
 │   │   └── platforms/
-│   │       └── web/            # WASM entrypoint + WebClient (wasm-bindgen) + internal worker protocol/bridges
+│   │       └── web/            # WASM entrypoint + WebClient (sign/submit in sign.rs)
 │   ├── js/                     # JavaScript frontend code (web interface)
 │   │   ├── ui/                 # UI components
 │   │   ├── admin.js            # Admin UI entry
-│   │   ├── stellar.js          # Stellar helpers
 │   │   ├── ui.js               # Main UI entry
-│   │   ├── wallet.js           # Freighter wallet integration
+│   │   ├── wallet.js           # Freighter integration + WASM signing bridge
 │   │   └── wasm-facade.js      # Thin wrapper over WASM exports
 │   ├── index.html              # Main web application entry
 │   └── admin.html              # Admin entry

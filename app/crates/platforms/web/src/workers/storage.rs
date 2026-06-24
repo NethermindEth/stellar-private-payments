@@ -6,11 +6,15 @@ use crate::protocol::{
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{Registrable, oneshot::OneshotBridge, oneshot::oneshot};
+use gloo_worker::{
+    Registrable,
+    oneshot::{OneshotBridge, oneshot},
+};
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, build_transact_params, build_validated_pool_tree, load_user_key_material,
+    BuildTransactParams, build_transact_params, build_validated_pool_tree,
     chain::ContractDataStorage,
+    load_user_key_material,
     state::{Storage, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
@@ -492,10 +496,7 @@ impl StorageBridge {
     }
 
     pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        match self
-            .call(StorageWorkerRequest::BootnodeConfig, 2_000)
-            .await
-        {
+        match self.call(StorageWorkerRequest::BootnodeConfig, 2_000).await {
             Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
                 (config.enabled && !config.url.is_empty()).then_some(config.url)
             }

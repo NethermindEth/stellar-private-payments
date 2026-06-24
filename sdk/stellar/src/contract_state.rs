@@ -430,6 +430,10 @@ impl StateFetcher {
         &self.config
     }
 
+    pub fn rpc(&self) -> &Client {
+        &self.client
+    }
+
     pub fn enabled_pool_for(&self, pool_contract_id: &str) -> Result<&types::PoolConfigEntry> {
         self.config
             .pools

@@ -522,11 +522,10 @@ fn chain_context_from_fetched_state(
     pool_contract_id: &str,
     non_membership_proof: AspNonMembershipProof,
 ) -> Result<TransactChainContext, PoolError> {
-    let pool = data.pools.into_iter().next().ok_or_else(|| {
-        PoolError::Other(format!(
-            "pool data not fetched for {pool_contract_id}"
-        ))
-    })?;
+    let pool =
+        data.pools.into_iter().next().ok_or_else(|| {
+            PoolError::Other(format!("pool data not fetched for {pool_contract_id}"))
+        })?;
     let pool_root = pool
         .merkle_root
         .ok_or_else(|| PoolError::Other("pool merkle_root not fetched".into()))?;

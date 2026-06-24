@@ -302,3 +302,24 @@ export async function deriveKeysFromWallet(
         aspSecret: aspSecret.membershipBlinding,
     };
 }
+
+/** WASM signing bridge (`window.__walletSignBridge`). */
+if (typeof window !== 'undefined') {
+    window.__walletSignBridge = {
+        async signAuthEntry(preimageXdr, opts = {}) {
+            const { signedAuthEntry } = await signWalletAuthEntry(preimageXdr, opts);
+            if (!signedAuthEntry) {
+                throw new Error('Auth entry signature was not returned');
+            }
+            return signedAuthEntry;
+        },
+
+        async signTransaction(txXdr, opts = {}) {
+            const { signedTxXdr } = await signWalletTransaction(txXdr, opts);
+            if (!signedTxXdr) {
+                throw new Error('Transaction signature was not returned');
+            }
+            return signedTxXdr;
+        },
+    };
+}
