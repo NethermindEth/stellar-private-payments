@@ -66,6 +66,7 @@ pub mod state {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking;
 mod client;
+mod confirm_poll;
 mod core;
 mod error;
 mod plan;

@@ -10,6 +10,7 @@ use stellar::{
 
 use crate::{
     PoolCore, PreparedTransaction,
+    confirm_poll::sleep_between_confirm_polls,
     core::{fetch_snapshot_async, pool_transact_input, transact_step_for_plan},
     error::PoolError,
     plan::PreparedTransactionPlan,
@@ -18,15 +19,13 @@ use crate::{
     signer::TransactionSigner,
     transact::transact_request_from_step,
     types::{
-        Estimate, PrivatePoolConfig, SignedTransaction, TransactChainContext, TransactionResult,
-        TransferRecipient,
+        Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
+        TransactionResult, TransferRecipient,
     },
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-use crate::types::SyncResult;
 #[cfg(target_arch = "wasm32")]
-use crate::{core::process_local_state, types::SyncResult};
+use crate::pool_storage::LocalPoolBackend;
 
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool<S> {
@@ -139,21 +138,28 @@ impl<S: PoolStorage> PrivatePool<S> {
     }
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
-        self.simulate_prepared(prepared).await
+        let chain_config = self.core.config();
+        let fetcher =
+            StateFetcher::new(&chain_config.rpc_url, chain_config.contract_config.clone())
+                .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+
+        prepared.soroban_tx = fetcher
+            .prepare_pool_transact(
+                &chain_config.pool_contract_id,
+                &pool_transact_input(prepared),
+                &chain_config.user_address,
+            )
+            .await
+            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
+
+        Ok(())
     }
 
     pub async fn submit(
         &self,
         signed_tx: SignedTransaction,
     ) -> Result<TransactionResult, PoolError> {
-        #[cfg(target_arch = "wasm32")]
-        use gloo_timers::future::TimeoutFuture;
-
         const CONFIRM_POLL_ATTEMPTS: u32 = 30;
-        #[cfg(target_arch = "wasm32")]
-        const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
-        #[cfg(not(target_arch = "wasm32"))]
-        const CONFIRM_POLL_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
         let chain_config = self.core.config();
         let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
@@ -168,10 +174,7 @@ impl<S: PoolStorage> PrivatePool<S> {
 
         for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
             if attempt > 1 {
-                #[cfg(target_arch = "wasm32")]
-                TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
-                #[cfg(not(target_arch = "wasm32"))]
-                std::thread::sleep(CONFIRM_POLL_INTERVAL);
+                sleep_between_confirm_polls().await;
             }
             match confirm_tx(&hash, &rpc)
                 .await
@@ -199,6 +202,21 @@ impl<S: PoolStorage> PrivatePool<S> {
         self.storage()?
             .spendable_wallet(&self.config.pool_contract_id, &self.config.user_address)
             .await
+    }
+
+    pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
+        let (from_ledger, to_ledger) = self
+            .storage()?
+            .sync_indexer(&self.config.rpc_url, &self.config.contract_config)
+            .await?;
+        self.refresh_chain_context().await?;
+        Ok(SyncResult {
+            from_ledger,
+            to_ledger,
+            new_commitments: 0,
+            new_nullifiers: 0,
+            new_membership_leaves: 0,
+        })
     }
 
     pub async fn deposit(&mut self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
@@ -245,7 +263,7 @@ impl<S: PoolStorage> PrivatePool<S> {
         let mut results = Vec::new();
         while !plan.is_complete() {
             let mut prepared = self.prove_plan_step(plan).await?;
-            self.simulate_prepared(&mut prepared).await?;
+            self.simulate(&mut prepared).await?;
             let signed = self.signer.sign(&prepared, &self.config).await?;
             let result = self.submit(signed).await?;
             results.push(result);
@@ -286,24 +304,6 @@ impl<S: PoolStorage> PrivatePool<S> {
         Ok(prepared)
     }
 
-    async fn simulate_prepared(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
-        let chain_config = self.core.config();
-        let fetcher =
-            StateFetcher::new(&chain_config.rpc_url, chain_config.contract_config.clone())
-                .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
-
-        prepared.soroban_tx = fetcher
-            .prepare_pool_transact(
-                &chain_config.pool_contract_id,
-                &pool_transact_input(prepared),
-                &chain_config.user_address,
-            )
-            .await
-            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
-
-        Ok(())
-    }
-
     async fn deposit_transact_step(&self, amount: NoteAmount) -> Result<Transact, PoolError> {
         let (note_pub, enc_pub) = self
             .storage()?
@@ -312,9 +312,6 @@ impl<S: PoolStorage> PrivatePool<S> {
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }
 }
-
-#[cfg(target_arch = "wasm32")]
-use crate::pool_storage::LocalPoolBackend;
 
 #[cfg(target_arch = "wasm32")]
 impl PrivatePool<LocalPoolBackend> {
@@ -334,65 +331,5 @@ impl PrivatePool<LocalPoolBackend> {
     pub fn initialize(&mut self) -> Result<(), PoolError> {
         self.storage = Some(LocalPoolBackend::open(&self.config.storage_path)?);
         Ok(())
-    }
-
-    pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
-        let pool_storage = self.storage.as_ref().ok_or(PoolError::NotInitialized)?;
-        let from_ledger = pool_storage.sync_metadata_min_ledger()?;
-
-        {
-            let pool_storage = self.storage.as_ref().ok_or(PoolError::NotInitialized)?;
-            pool_storage
-                .ensure_indexer(&self.config.rpc_url, &self.config.contract_config)
-                .await?;
-            while pool_storage.fetch_contract_events().await? {}
-            process_local_state(&mut *pool_storage.storage().borrow_mut())?;
-        }
-
-        self.refresh_chain_context().await?;
-
-        let to_ledger = self
-            .storage
-            .as_ref()
-            .ok_or(PoolError::NotInitialized)?
-            .sync_metadata_max_ledger(from_ledger)?;
-
-        Ok(SyncResult {
-            from_ledger,
-            to_ledger,
-            new_commitments: 0,
-            new_nullifiers: 0,
-            new_membership_leaves: 0,
-        })
-    }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-use crate::pool_storage::NativePoolBackend;
-
-#[cfg(not(target_arch = "wasm32"))]
-impl PrivatePool<NativePoolBackend> {
-    pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
-        use crate::core::process_local_state;
-
-        let from_ledger = self.storage()?.sync_metadata_min_ledger()?;
-
-        {
-            let backend = self.storage()?;
-            while backend.fetch_contract_events().await? {}
-            process_local_state(&mut *backend.storage_mut())?;
-        }
-
-        self.refresh_chain_context().await?;
-
-        let to_ledger = self.storage()?.sync_metadata_max_ledger(from_ledger)?;
-
-        Ok(SyncResult {
-            from_ledger,
-            to_ledger,
-            new_commitments: 0,
-            new_nullifiers: 0,
-            new_membership_leaves: 0,
-        })
     }
 }

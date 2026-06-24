@@ -1,31 +1,18 @@
-//! Transaction signing for async [`crate::pool::PrivatePool`] operations.
-
 use stellar::{Limits, LocalSigner, TransactionEnvelope, WriteXdr};
 
+use super::TransactionSigner;
 use crate::{
     PreparedTransaction,
     error::PoolError,
     types::{PrivatePoolConfig, SignedTransaction},
 };
 
-/// Signs a simulated [`PreparedTransaction`] before chain submission.
-#[async_trait::async_trait(?Send)]
-pub trait TransactionSigner {
-    async fn sign(
-        &self,
-        prepared: &PreparedTransaction,
-        config: &PrivatePoolConfig,
-    ) -> Result<SignedTransaction, PoolError>;
-}
-
 /// In-process Ed25519 signer for native CLI and tests.
-#[cfg(not(target_arch = "wasm32"))]
 pub struct LocalTransactionSigner {
     signer: LocalSigner,
     network_passphrase: String,
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 impl LocalTransactionSigner {
     pub fn new(secret_key: &str, network_passphrase: impl Into<String>) -> Result<Self, PoolError> {
         Ok(Self {
@@ -53,7 +40,6 @@ impl LocalTransactionSigner {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 #[async_trait::async_trait(?Send)]
 impl TransactionSigner for LocalTransactionSigner {
     async fn sign(
