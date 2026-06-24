@@ -1,5 +1,7 @@
 //! Blocking bridge for async Stellar RPC calls from the sync pool API.
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::sync::OnceLock;
 
 static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();

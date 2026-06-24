@@ -1,11 +1,12 @@
 //! Synchronous contract-event indexer backed by local [`Storage`].
 
+#![cfg(not(target_arch = "wasm32"))]
+
 use std::collections::HashSet;
 
-use crate::runtime::block_on_rpc;
 use anyhow::{Result, anyhow};
 use state::Storage;
-use stellar::{Client, Event};
+use stellar::blocking::Client;
 use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
 
 const PAGE_SIZE: usize = 300;
@@ -20,8 +21,7 @@ pub struct Indexer {
 }
 
 impl Indexer {
-    pub fn open(storage_path: &str, rpc_url: &str, config: &ContractConfig) -> Result<Self> {
-        let storage = Storage::connect_file(storage_path)?;
+    pub fn new(rpc_url: &str, storage: Storage, config: &ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.pools_and_membership_contract_ids();
@@ -47,7 +47,7 @@ impl Indexer {
     /// Returns `true` when the round ended on a non-empty page (caller may want
     /// another round).
     pub fn fetch_contract_events(&mut self) -> Result<bool> {
-        let network_tip = block_on_rpc(self.client.get_latest_ledger())?.sequence;
+        let network_tip = self.client.get_latest_ledger()?.sequence;
         let existing_sync = self.storage.get_sync_metadata()?;
         let active_contract_ids: HashSet<&str> =
             self.contract_ids.iter().map(String::as_str).collect();
@@ -98,13 +98,12 @@ impl Indexer {
                 "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
 
-            let (new_cursor, events, latest_ledger) =
-                block_on_rpc(self.client.get_contract_events(
-                    &self.contract_ids,
-                    start_ledger,
-                    PAGE_SIZE,
-                    cursor.clone(),
-                ))?;
+            let (new_cursor, events, latest_ledger) = self.client.get_contract_events(
+                &self.contract_ids,
+                start_ledger,
+                PAGE_SIZE,
+                cursor.clone(),
+            )?;
 
             let new_cursor = new_cursor
                 .clone()
@@ -151,7 +150,7 @@ impl Indexer {
     }
 }
 
-fn contract_event_from_rpc(event: Event) -> ContractEvent {
+fn contract_event_from_rpc(event: stellar::Event) -> ContractEvent {
     ContractEvent {
         id: event.id,
         ledger: event.ledger,

@@ -1,18 +1,15 @@
 //! Per-pool private payments API.
 
-use crate::runtime::block_on_rpc;
 use prover::notes::try_decrypt_and_derive_user_note;
 use state::{
     AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
 };
-use stellar::StateFetcher;
 use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
-use types::{ExtAmount, NoteAmount, SMT_DEPTH};
+use types::{ExtAmount, NoteAmount};
 
 use crate::{
     PreparedTransaction,
     error::PoolError,
-    indexer::Indexer,
     plan::PreparedTransactionPlan,
     prover::ProverEngine,
     transact::{
@@ -25,10 +22,25 @@ use crate::{
     },
 };
 
+#[cfg(not(target_arch = "wasm32"))]
+use crate::indexer::Indexer;
+
+#[cfg(not(target_arch = "wasm32"))]
+use crate::runtime::block_on_rpc;
+
+#[cfg(not(target_arch = "wasm32"))]
+use stellar::StateFetcher;
+
+#[cfg(not(target_arch = "wasm32"))]
+use types::SMT_DEPTH;
+
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool {
     config: PrivatePoolConfig,
+    #[cfg(not(target_arch = "wasm32"))]
     indexer: Option<Indexer>,
+    #[cfg(target_arch = "wasm32")]
+    storage: Option<Storage>,
     prover: Option<ProverEngine>,
     chain: Option<TransactChainContext>,
 }
@@ -47,26 +59,38 @@ impl PrivatePool {
         }
         Ok(Self {
             config,
+            #[cfg(not(target_arch = "wasm32"))]
             indexer: None,
+            #[cfg(target_arch = "wasm32")]
+            storage: None,
             prover: None,
             chain: None,
         })
     }
 
     pub fn initialize(&mut self) -> Result<(), PoolError> {
-        self.indexer = Some(
-            Indexer::open(
-                &self.config.storage_path,
-                &self.config.rpc_url,
-                &self.config.contract_config,
-            )
-            .map_err(|e| PoolError::Other(format!("open indexer: {e:#}")))?,
-        );
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let storage = Storage::connect_file(&self.config.storage_path)
+                .map_err(|e| PoolError::Other(format!("open storage: {e:#}")))?;
+            self.indexer = Some(
+                Indexer::new(&self.config.rpc_url, storage, &self.config.contract_config)
+                    .map_err(|e| PoolError::Other(format!("open indexer: {e:#}")))?,
+            );
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.storage = Some(
+                Storage::connect_file(&self.config.storage_path)
+                    .map_err(|e| PoolError::Other(format!("open storage: {e}")))?,
+            );
+        }
         Ok(())
     }
 
     /// Fetch on-chain events, refresh local pool state, and update chain
     /// snapshot.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
         let indexer = self.indexer.as_mut().ok_or(PoolError::NotInitialized)?;
         let from_ledger = indexer
@@ -105,6 +129,11 @@ impl PrivatePool {
             new_nullifiers: 0,
             new_membership_leaves: 0,
         })
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
+        Err(PoolError::NotImplemented)
     }
 
     /// Chain snapshot from the last successful [`Self::sync`].
@@ -242,13 +271,21 @@ impl PrivatePool {
     }
 
     pub fn storage(&self) -> Result<&Storage, PoolError> {
-        Ok(self
-            .indexer
-            .as_ref()
-            .ok_or(PoolError::NotInitialized)?
-            .storage())
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            return Ok(self
+                .indexer
+                .as_ref()
+                .ok_or(PoolError::NotInitialized)?
+                .storage());
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            Ok(self.storage.as_ref().ok_or(PoolError::NotInitialized)?)
+        }
     }
 
+    #[cfg(not(target_arch = "wasm32"))]
     fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
         let storage = self.storage()?;
         let (_, note_pub, ..) = load_user_key_material(storage, &self.config.user_address)

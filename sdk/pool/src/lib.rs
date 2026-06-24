@@ -22,6 +22,8 @@ pub mod types;
 
 pub mod chain {
     //! Stellar RPC client, indexer, and contract state reads.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub use crate::Indexer as BlockingIndexer;
     pub use stellar::{
         Client, ContractDataStorage, Indexer, OnchainProofPublicInputs, PoolTransactInput,
         PreparedSorobanTx, RpcError, StateFetcher, hash_ext_data_offchain,
@@ -55,15 +57,18 @@ pub mod state {
 
 mod client;
 mod error;
+#[cfg(not(target_arch = "wasm32"))]
 mod indexer;
 mod plan;
 mod pool;
 mod prover;
+#[cfg(not(target_arch = "wasm32"))]
 mod runtime;
 mod transact;
 
 pub use client::Client;
 pub use error::PoolError;
+#[cfg(not(target_arch = "wasm32"))]
 pub use indexer::Indexer;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
