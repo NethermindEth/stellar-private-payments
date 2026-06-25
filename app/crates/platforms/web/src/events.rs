@@ -1,6 +1,7 @@
 use crate::workers::storage::StorageBridge;
 use gloo_timers::future::TimeoutFuture;
 use stellar_private_payments_sdk::{
+    Storage,
     chain::{Indexer, RpcError},
     types::ContractConfig,
 };
@@ -27,6 +28,16 @@ pub(crate) fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
     )
 }
 
+fn fork_for_indexer(storage: &StorageBridge) -> Option<StorageBridge> {
+    match storage.fork() {
+        Ok(handle) => Some(handle),
+        Err(e) => {
+            log::error!("[EVENTS] storage fork failed: {e}");
+            None
+        }
+    }
+}
+
 /// Probes wallet RPC retention; returns a bootnode URL when one is needed and
 /// consented.
 pub(crate) async fn bootnode_check(
@@ -35,7 +46,7 @@ pub(crate) async fn bootnode_check(
     config: &'static ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<Option<String>, anyhow::Error> {
-    match Indexer::init(rpc_url, storage.clone(), config).await {
+    match Indexer::init(rpc_url, storage.fork().map_err(anyhow::Error::msg)?, config).await {
         Ok(_) => Ok(None),
         Err(e) if is_rpc_sync_gap(&e) => {
             let url = bootnode_url
@@ -70,7 +81,10 @@ pub(crate) async fn events_listener(
         return;
     }
 
-    let indexer = match Indexer::init(&rpc_url, storage.clone(), config).await {
+    let Some(indexer_storage) = fork_for_indexer(&storage) else {
+        return;
+    };
+    let indexer = match Indexer::init(&rpc_url, indexer_storage, config).await {
         // rpc ok
         Ok(indexer) => indexer,
         // sync-gap, try bootnode
@@ -89,7 +103,10 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
                 return;
             }
 
-            let bootnode_indexer = match Indexer::init(bootnode, storage.clone(), config).await {
+            let Some(bootnode_storage) = fork_for_indexer(&storage) else {
+                return;
+            };
+            let bootnode_indexer = match Indexer::init(bootnode, bootnode_storage, config).await {
                 Ok(indexer) => Some(indexer),
                 Err(e) if is_retention_handoff_err(&e) => {
                     log::info!("[EVENTS] bootnode handoff, resuming on wallet RPC");
@@ -124,7 +141,10 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
             }
 
             // back to rpc
-            match Indexer::init(&rpc_url, storage.clone(), config).await {
+            let Some(wallet_storage) = fork_for_indexer(&storage) else {
+                return;
+            };
+            match Indexer::init(&rpc_url, wallet_storage, config).await {
                 Ok(indexer) => indexer,
                 Err(e) => {
                     log::error!("[EVENTS] wallet RPC init failed: {e}");

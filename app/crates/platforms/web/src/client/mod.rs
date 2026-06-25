@@ -39,7 +39,7 @@ struct WebClientPool {
     pool_contract_id: String,
     user_address: String,
     network_passphrase: String,
-    private_pool: Option<Rc<PrivatePool>>,
+    private_pool: Option<Rc<PrivatePool<StorageBridge>>>,
     signer_progress: Rc<RefCell<Option<Function>>>,
 }
 
@@ -197,7 +197,7 @@ impl WebClient {
         user_address: String,
         network_passphrase: String,
         on_status: Option<Function>,
-    ) -> Result<Rc<PrivatePool>, JsError> {
+    ) -> Result<Rc<PrivatePool<StorageBridge>>, JsError> {
         if self
             .pool
             .borrow()
@@ -241,10 +241,8 @@ impl WebClient {
             Rc::clone(&signer_progress),
         );
         let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
-        let private_pool = Rc::new(
-            PrivatePool::init(config, Box::new(self.storage()), signer, prover)
-                .map_err(pool_err)?,
-        );
+        let private_pool =
+            Rc::new(PrivatePool::init(config, self.storage(), signer, prover).map_err(pool_err)?);
 
         {
             let mut pool_state = self.pool.borrow_mut();
@@ -259,7 +257,7 @@ impl WebClient {
 
     pub(super) async fn sync_pool(
         &self,
-        pool: &PrivatePool,
+        pool: &PrivatePool<StorageBridge>,
         flow: &'static str,
         on_status: &Option<Function>,
     ) -> Result<(), JsError> {

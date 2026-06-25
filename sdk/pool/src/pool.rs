@@ -4,8 +4,8 @@ use tx_planner::{SpendableNote, Transact};
 use types::NoteAmount;
 
 use stellar::{
-    Client, Limits, ReadXdr, StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx,
-    submit_tx,
+    Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, TxConfirmStatus,
+    confirm_tx, submit_tx,
 };
 
 use crate::{
@@ -25,20 +25,20 @@ use crate::{
 };
 
 /// Main entry point for a single privacy pool.
-pub struct PrivatePool {
+pub struct PrivatePool<S> {
     core: PoolCore,
     config: PrivatePoolConfig,
     client: Client,
     fetcher: StateFetcher,
-    storage: Box<dyn Storage>,
+    storage: S,
     prover: Box<dyn Prover>,
     signer: Box<dyn Signer>,
 }
 
-impl PrivatePool {
+impl<S> PrivatePool<S> {
     pub fn init(
         config: PrivatePoolConfig,
-        storage: Box<dyn Storage>,
+        storage: S,
         signer: Box<dyn Signer>,
         prover: Box<dyn Prover>,
     ) -> Result<Self, PoolError> {
@@ -73,6 +73,12 @@ impl PrivatePool {
         &self.config
     }
 
+    pub fn storage_backend(&self) -> &S {
+        &self.storage
+    }
+}
+
+impl<S: Storage> PrivatePool<S> {
     async fn next_prepared_transaction(
         &self,
         plan: &mut PreparedTransactionPlan,
@@ -181,10 +187,22 @@ impl PrivatePool {
     }
 
     pub async fn sync(&self) -> Result<SyncResult, PoolError> {
-        let (from_ledger, to_ledger) = self
-            .storage
-            .sync_indexer(&self.config.rpc_url, &self.config.contract_config)
-            .await?;
+        let (from_ledger, _) = sync_ledger_bounds(&self.storage).await?;
+
+        let indexer = Indexer::new(
+            self.client.clone(),
+            self.storage.fork()?,
+            &self.config.contract_config,
+        )
+        .map_err(|e| PoolError::Other(format!("indexer: {e:#}")))?;
+        indexer
+            .sync_until_caught_up()
+            .await
+            .map_err(|e| PoolError::Other(format!("indexer sync: {e:#}")))?;
+
+        self.storage.finalize_sync(&self.client).await?;
+
+        let (_, to_ledger) = sync_ledger_bounds(&self.storage).await?;
         Ok(SyncResult {
             from_ledger,
             to_ledger,
@@ -269,4 +287,22 @@ impl PrivatePool {
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }
+}
+
+async fn sync_ledger_bounds<S: Storage>(storage: &S) -> Result<(u32, u32), PoolError> {
+    let metadata = storage
+        .get_sync_state()
+        .await
+        .map_err(|e| PoolError::Other(e.to_string()))?;
+    let from = metadata
+        .iter()
+        .map(|meta| meta.last_indexed_ledger)
+        .min()
+        .unwrap_or(0);
+    let to = metadata
+        .iter()
+        .map(|meta| meta.last_indexed_ledger)
+        .max()
+        .unwrap_or(from);
+    Ok((from, to))
 }

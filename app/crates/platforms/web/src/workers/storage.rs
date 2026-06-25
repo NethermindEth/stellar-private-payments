@@ -12,18 +12,18 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, PoolError, Storage as PoolStorage, TransactRequest, build_transact_params,
+    BuildTransactParams, PoolError, Storage, TransactRequest, build_transact_params,
     build_validated_pool_tree,
     chain::{Client, ContractDataStorage},
     load_user_key_material,
-    state::{Storage, StoredUserKeys, process_local_state_batch},
+    state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
         encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
         flows::TransactParams,
         merkle::MerkleProof,
     },
-    types::{ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata},
+    types::{ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata},
 };
 use tx_planner::SpendableNote;
 use wasm_bindgen::JsError;
@@ -50,8 +50,7 @@ fn is_opfs_locked_error(message: &str) -> bool {
 }
 
 thread_local! {
-    static STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
-    // signalling the events processor
+    static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
@@ -125,7 +124,7 @@ async fn init() -> Result<(), JsError> {
         return Err(JsError::new(&msg));
     }
 
-    let storage = match Storage::connect() {
+    let storage = match SqliteStorage::connect() {
         Ok(storage) => storage,
         Err(e) => {
             let msg = format!("Failed to open local database: {e}");
@@ -198,9 +197,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 events_data.events.len()
             );
             with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
-            // We could pass the events_data here further for the processing but
-            // for the sake of the sequential processing we drop it here
-            // the storage is the single source of raw events for the processors
             log::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
@@ -507,16 +503,6 @@ impl StorageBridge {
         }
     }
 
-    async fn sync_state(&self) -> Result<Vec<SyncMetadata>, PoolError> {
-        match self.call(StorageWorkerRequest::SyncState, 5_000).await {
-            Ok(StorageWorkerResponse::SyncState(metadata)) => Ok(metadata),
-            Ok(other) => Err(PoolError::Other(format!(
-                "unexpected storage response loading sync state: {other:?}"
-            ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
-        }
-    }
-
     fn ledger_range(metadata: &[SyncMetadata]) -> (u32, u32) {
         let from = metadata
             .iter()
@@ -573,7 +559,32 @@ impl ContractDataStorage for StorageBridge {
 }
 
 #[async_trait::async_trait(?Send)]
-impl PoolStorage for StorageBridge {
+impl Storage for StorageBridge {
+    fn fork(&self) -> Result<Self, PoolError> {
+        Ok(Self {
+            bridge: self.bridge.fork(),
+        })
+    }
+
+    async fn finalize_sync(&self, client: &Client) -> Result<(), PoolError> {
+        loop {
+            let tip = client
+                .get_latest_ledger()
+                .await
+                .map_err(|e| PoolError::Other(format!("latest ledger: {e:#}")))?
+                .sequence;
+            let metadata = self
+                .get_sync_state()
+                .await
+                .map_err(|e| PoolError::Other(e.to_string()))?;
+            let (_, to) = Self::ledger_range(&metadata);
+            if to >= tip {
+                return Ok(());
+            }
+            TimeoutFuture::new(1_000).await;
+        }
+    }
+
     async fn ensure_ready(&self) -> Result<(), PoolError> {
         self.ping()
             .await
@@ -661,29 +672,5 @@ impl PoolStorage for StorageBridge {
 
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
         Ok(self.user_public_keys(user_address).await?.0)
-    }
-
-    async fn sync_indexer(
-        &self,
-        rpc_url: &str,
-        _contract_config: &ContractConfig,
-    ) -> Result<(u32, u32), PoolError> {
-        let rpc =
-            Client::new(rpc_url).map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
-        let from = Self::ledger_range(&self.sync_state().await?).0;
-
-        loop {
-            let tip = rpc
-                .get_latest_ledger()
-                .await
-                .map_err(|e| PoolError::Other(format!("latest ledger: {e:#}")))?
-                .sequence;
-            let metadata = self.sync_state().await?;
-            let (_, to) = Self::ledger_range(&metadata);
-            if to >= tip {
-                return Ok((from, to));
-            }
-            TimeoutFuture::new(1_000).await;
-        }
     }
 }

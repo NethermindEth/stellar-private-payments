@@ -8,7 +8,7 @@ use prover::{
     merkle::{MerklePrefixTree, MerklePrefixTreeBuilt, MerkleProof},
 };
 use serde::{Deserialize, Serialize};
-use state::{Storage, StoredUserKeys};
+use state::{SqliteStorage, StoredUserKeys};
 use stellar::{OnchainProofPublicInputs, PreparedSorobanTx};
 use tx_planner::Transact;
 use types::{
@@ -106,7 +106,7 @@ pub fn transact_request_from_step(
 }
 
 pub fn build_transact_params(
-    storage: &Storage,
+    storage: &SqliteStorage,
     req: &TransactRequest,
 ) -> Result<BuildTransactParams> {
     if req.input_commitments.len() > 2 {
@@ -179,7 +179,7 @@ pub fn build_transact_params(
 }
 
 pub fn load_user_key_material(
-    storage: &Storage,
+    storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<(NotePrivateKey, NotePublicKey, EncryptionPublicKey, Field)> {
     let StoredUserKeys {
@@ -199,7 +199,7 @@ pub fn load_user_key_material(
 }
 
 fn build_membership_proof(
-    storage: &Storage,
+    storage: &SqliteStorage,
     aspmem_contract_id: &str,
     note_pubkey: &NotePublicKey,
     membership_blinding: Field,
@@ -239,7 +239,7 @@ fn build_membership_proof(
 }
 
 fn build_pool_inputs(
-    storage: &Storage,
+    storage: &SqliteStorage,
     user_address: &str,
     pool_address: &str,
     pool_next_index: u32,
@@ -280,7 +280,7 @@ fn build_pool_inputs(
 }
 
 pub fn build_validated_pool_tree(
-    storage: &Storage,
+    storage: &SqliteStorage,
     pool_address: &str,
     pool_next_index: u32,
     tree_depth: u32,

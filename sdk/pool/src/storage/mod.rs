@@ -1,9 +1,10 @@
 //! Pluggable async wallet storage for [`crate::pool::PrivatePool`].
 
 use prover::flows::TransactParams;
-use state::{Storage as SqliteStorage, StoredUserKeys};
+use state::{SqliteStorage, StoredUserKeys};
+use stellar::Client;
 use tx_planner::SpendableNote;
-use types::{ContractConfig, EncryptionPublicKey, NotePublicKey};
+use types::{EncryptionPublicKey, NotePublicKey};
 
 use crate::{
     error::PoolError,
@@ -58,9 +59,14 @@ pub(crate) fn spendable_wallet_from_storage(
         })
 }
 
-/// Wallet + transact-param reads for [`crate::pool::PrivatePool`].
+/// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
 #[async_trait::async_trait(?Send)]
-pub trait Storage {
+pub trait Storage: stellar::ContractDataStorage {
+    /// Independent handle for a concurrent consumer
+    fn fork(&self) -> Result<Self, PoolError>
+    where
+        Self: Sized;
+
     async fn ensure_ready(&self) -> Result<(), PoolError>;
 
     async fn spendable_wallet(
@@ -85,15 +91,6 @@ pub trait Storage {
         Ok(self.user_public_keys(user_address).await?.0)
     }
 
-    /// Fetch indexer events and process local state. Returns ledger range
-    /// synced.
-    async fn sync_indexer(
-        &self,
-        _rpc_url: &str,
-        _contract_config: &ContractConfig,
-    ) -> Result<(u32, u32), PoolError> {
-        Err(PoolError::Other(
-            "sync not supported for this storage backend".into(),
-        ))
-    }
+    /// Run after indexer fetch rounds (derive notes, wait for worker, etc.).
+    async fn finalize_sync(&self, client: &Client) -> Result<(), PoolError>;
 }

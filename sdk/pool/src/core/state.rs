@@ -1,20 +1,21 @@
 use prover::notes::try_decrypt_and_derive_user_note;
 use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, process_events, process_notes,
+    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, SqliteStorage, process_events,
+    process_notes,
 };
 
 use crate::error::PoolError;
 
 const PROCESS_FETCH_LIMIT: u32 = 50;
 
-pub(crate) fn process_local_state(storage: &mut Storage) -> Result<(), PoolError> {
+pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), PoolError> {
     while process_local_state_batch(storage).map_err(|e| PoolError::Other(e.to_string()))? {}
     Ok(())
 }
 
 /// Process one batch of raw events and note derivation. Returns `true` when
 /// more work may remain.
-pub fn process_local_state_batch(storage: &mut Storage) -> anyhow::Result<bool> {
+pub fn process_local_state_batch(storage: &mut SqliteStorage) -> anyhow::Result<bool> {
     let did_raw = process_events(storage, PROCESS_FETCH_LIMIT)?;
     let mut derive = derive_user_note;
     let did_notes = process_notes(storage, PROCESS_FETCH_LIMIT, &mut derive)?;

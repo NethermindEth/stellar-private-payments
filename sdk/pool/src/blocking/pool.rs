@@ -1,8 +1,6 @@
 //! Sync wrapper around [`crate::PrivatePool`] via pollster.
 
-use std::rc::Rc;
-
-use state::Storage;
+use state::SqliteStorage;
 use tx_planner::SpendableNote;
 use types::NoteAmount;
 
@@ -19,35 +17,28 @@ use crate::{
     },
 };
 
-use super::Indexer;
-
 /// Native sync wallet — [`AsyncPrivatePool`] with blocking method names.
 pub struct PrivatePool {
-    inner: AsyncPrivatePool,
-    storage: Rc<LocalStorage>,
+    inner: AsyncPrivatePool<LocalStorage>,
 }
 
 impl PrivatePool {
     pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
-        let storage = Rc::new(LocalStorage::open(
-            &config.rpc_url,
-            &config.storage_path,
-            &config.contract_config,
-        )?);
+        let storage = LocalStorage::open(&config.storage_path)?;
         let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        let inner = AsyncPrivatePool::init(config, Box::new(Rc::clone(&storage)), signer, prover)?;
-        Ok(Self { inner, storage })
+        let inner = AsyncPrivatePool::init(config, storage, signer, prover)?;
+        Ok(Self { inner })
     }
 
-    pub fn into_inner(self) -> AsyncPrivatePool {
+    pub fn into_inner(self) -> AsyncPrivatePool<LocalStorage> {
         self.inner
     }
 
-    pub fn inner(&self) -> &AsyncPrivatePool {
+    pub fn inner(&self) -> &AsyncPrivatePool<LocalStorage> {
         &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool {
+    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool<LocalStorage> {
         &mut self.inner
     }
 
@@ -63,16 +54,12 @@ impl PrivatePool {
         self.inner.core().config()
     }
 
-    pub fn storage(&self) -> std::cell::Ref<'_, Storage> {
-        self.storage.storage()
+    pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
+        self.inner.storage_backend().storage()
     }
 
-    pub fn storage_mut(&self) -> std::cell::RefMut<'_, Storage> {
-        self.storage.storage_mut()
-    }
-
-    pub fn indexer_mut(&self) -> std::cell::RefMut<'_, Indexer> {
-        self.storage.indexer_mut()
+    pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
+        self.inner.storage_backend().storage_mut()
     }
 
     pub fn estimate(

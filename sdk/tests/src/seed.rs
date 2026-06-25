@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
 use stellar_private_payments_sdk::{
     TransactChainContext,
-    state::Storage,
+    state::SqliteStorage,
     tx::{crypto, encryption, merkle::MerklePrefixTree},
 };
 use types::{
@@ -24,7 +24,7 @@ fn test_derivation_signature() -> KeyDerivationSignature {
 
 /// Open (or create) `path` with schema migrations applied.
 pub fn ensure_schema(storage_path: &Path) -> Result<()> {
-    let _storage = Storage::connect_file(storage_path).context("apply storage migrations")?;
+    let _storage = SqliteStorage::connect_file(storage_path).context("apply storage migrations")?;
     Ok(())
 }
 
@@ -39,7 +39,7 @@ pub fn seed_prove_wallet(
 ) -> Result<TransactChainContext> {
     ensure_schema(storage_path)?;
 
-    let mut storage = Storage::connect_file(storage_path).context("open seeded database")?;
+    let mut storage = SqliteStorage::connect_file(storage_path).context("open seeded database")?;
 
     let signature = test_derivation_signature();
     let (note_keypair, encryption_keypair) =
@@ -172,7 +172,8 @@ pub fn apply_proved_step(
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature.clone())?;
 
-    let mut storage = Storage::connect_file(storage_path).context("open storage for apply step")?;
+    let mut storage =
+        SqliteStorage::connect_file(storage_path).context("open storage for apply step")?;
     let mut conn = Connection::open(storage_path).context("open storage connection")?;
     conn.pragma_update(None, "foreign_keys", "ON")?;
 
@@ -273,7 +274,8 @@ fn chain_snapshot_from_storage(
     asp_membership_contract_id: &str,
     _network: &str,
 ) -> Result<TransactChainContext> {
-    let storage = Storage::connect_file(storage_path).context("open storage for chain snapshot")?;
+    let storage =
+        SqliteStorage::connect_file(storage_path).context("open storage for chain snapshot")?;
     let signature = test_derivation_signature();
     let (note_keypair, _) = encryption::derive_encryption_and_note_keypairs(signature)?;
     let note_pubkey_field = Field::try_from_le_bytes(*note_keypair.public.as_ref())?;

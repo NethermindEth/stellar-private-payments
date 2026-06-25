@@ -32,7 +32,6 @@ pub mod chain {
     /// Synchronous RPC client, indexer, and state reads (native only).
     #[cfg(not(target_arch = "wasm32"))]
     pub mod blocking {
-        pub use crate::blocking::Indexer;
         pub use stellar::blocking::{Client, StateFetcher, confirm_tx, submit_tx};
     }
 }
@@ -58,7 +57,7 @@ pub mod state {
     //! SQLite-backed local wallet and indexer state.
     pub use crate::core::process_local_state_batch;
     pub use ::state::{
-        AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys,
+        AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, SqliteStorage, StoredUserKeys,
         process_events, process_notes,
     };
 }
