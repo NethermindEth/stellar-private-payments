@@ -49,7 +49,7 @@ impl PoolCore {
     }
 
     pub fn prepare_deposit(
-        &mut self,
+        &self,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
         if amount.is_zero() {
@@ -59,7 +59,7 @@ impl PoolCore {
     }
 
     pub fn prepare_transfer(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
@@ -77,7 +77,7 @@ impl PoolCore {
     }
 
     pub fn prepare_withdraw(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,

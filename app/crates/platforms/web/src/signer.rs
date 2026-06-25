@@ -2,6 +2,7 @@
 
 use crate::client::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
+use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments_sdk::{
     PoolError, PreparedTransaction, TransactionSigner,
     chain::{
@@ -142,20 +143,13 @@ pub(crate) async fn sign_prepared_transaction(
 /// Signs simulated pool transactions via the JS wallet bridge (Freighter).
 pub struct WalletTransactionSigner {
     network_passphrase: String,
-    on_status: Option<Function>,
+    on_status: Rc<RefCell<Option<Function>>>,
 }
 
 impl WalletTransactionSigner {
-    pub fn new(network_passphrase: impl Into<String>) -> Self {
-        Self {
-            network_passphrase: network_passphrase.into(),
-            on_status: None,
-        }
-    }
-
-    pub fn with_progress(
+    pub fn new(
         network_passphrase: impl Into<String>,
-        on_status: Option<Function>,
+        on_status: Rc<RefCell<Option<Function>>>,
     ) -> Self {
         Self {
             network_passphrase: network_passphrase.into(),
@@ -165,10 +159,6 @@ impl WalletTransactionSigner {
 
     pub fn network_passphrase(&self) -> &str {
         &self.network_passphrase
-    }
-
-    pub fn on_status(&self) -> &Option<Function> {
-        &self.on_status
     }
 }
 
@@ -184,7 +174,7 @@ impl TransactionSigner for WalletTransactionSigner {
             &self.network_passphrase,
             &config.user_address,
             "pool",
-            &self.on_status,
+            &self.on_status.borrow(),
         )
         .await
         .map_err(|e| PoolError::Other(format!("{e:?}")))?;

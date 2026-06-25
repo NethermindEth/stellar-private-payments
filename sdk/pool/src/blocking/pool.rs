@@ -10,6 +10,7 @@ use crate::{
     plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
     pool_storage::NativePoolBackend,
+    prover::LocalProver,
     signer::TransactionSigner,
     types::{
         Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
@@ -32,14 +33,10 @@ impl PrivatePool {
             &config.storage_path,
             &config.contract_config,
         )?;
-        Ok(Self(AsyncPrivatePool::with_storage(
-            config, backend, signer, None,
+        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
+        Ok(Self(AsyncPrivatePool::init(
+            config, backend, signer, prover,
         )?))
-    }
-
-    pub fn with_prover(mut self) -> Result<Self, PoolError> {
-        pollster::block_on(self.0.load_prover())?;
-        Ok(self)
     }
 
     pub fn into_inner(self) -> AsyncPrivatePool<NativePoolBackend> {
@@ -72,10 +69,6 @@ impl PrivatePool {
 
     pub fn signer(&self) -> &dyn TransactionSigner {
         self.0.signer()
-    }
-
-    pub fn set_signer(&mut self, signer: Box<dyn TransactionSigner>) {
-        self.0.set_signer(signer);
     }
 
     pub fn storage(&self) -> std::cell::Ref<'_, Storage> {
@@ -115,12 +108,12 @@ impl PrivatePool {
         self.0.estimate(wallet, amount)
     }
 
-    pub fn deposit(&mut self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
+    pub fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
         pollster::block_on(self.0.deposit(amount))
     }
 
     pub fn transfer(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
@@ -129,7 +122,7 @@ impl PrivatePool {
     }
 
     pub fn withdraw(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
@@ -137,11 +130,11 @@ impl PrivatePool {
         pollster::block_on(self.0.withdraw(wallet, amount, recipient))
     }
 
-    pub fn transact(&mut self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {
+    pub fn transact(&self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {
         pollster::block_on(self.0.transact(step))
     }
 
-    pub fn sync(&mut self) -> Result<SyncResult, PoolError> {
+    pub fn sync(&self) -> Result<SyncResult, PoolError> {
         pollster::block_on(self.0.sync())
     }
 
@@ -158,7 +151,7 @@ impl PrivatePool {
     }
 
     pub fn next_prepared_transaction(
-        &mut self,
+        &self,
         plan: &mut PreparedTransactionPlan,
     ) -> Result<PreparedTransaction, PoolError> {
         pollster::block_on(self.0.next_prepared_transaction(plan))

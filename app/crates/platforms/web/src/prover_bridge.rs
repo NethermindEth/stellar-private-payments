@@ -53,10 +53,7 @@ impl WorkerTransactionProver {
 
 #[async_trait::async_trait(?Send)]
 impl TransactionProver for WorkerTransactionProver {
-    async fn prove_transact(
-        &mut self,
-        params: TransactParams,
-    ) -> Result<PreparedProverTx, PoolError> {
+    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
         match self
             .request(ProverWorkerRequest::Transact(params), PROVE_TIMEOUT_MS)
             .await?

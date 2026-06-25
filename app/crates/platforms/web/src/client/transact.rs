@@ -38,19 +38,15 @@ impl WebClient {
         flow: &'static str,
         step: Transact,
     ) -> Result<Option<Vec<String>>, JsError> {
-        self.ensure_pool(
-            pool_contract_id,
-            user_address,
-            network_passphrase,
-            on_status.clone(),
-        )
-        .await?;
-        let mut guard = self.pool.lock().await;
-        let pool = &mut guard
-            .as_mut()
-            .expect("ensure_pool initializes session")
-            .pool;
-        self.sync_pool(pool, flow, &on_status).await?;
+        let pool = self
+            .pool_handle(
+                pool_contract_id,
+                user_address,
+                network_passphrase,
+                on_status.clone(),
+            )
+            .await?;
+        self.sync_pool(&pool, flow, &on_status).await?;
         emit_progress(&on_status, flow, "prove", "Proving…", None, None);
 
         loop {
@@ -134,19 +130,15 @@ impl WebClient {
                 .await;
         }
 
-        self.ensure_pool(
-            pool_contract_id,
-            user_address,
-            network_passphrase,
-            on_status.clone(),
-        )
-        .await?;
-        let mut guard = self.pool.lock().await;
-        let pool = &mut guard
-            .as_mut()
-            .expect("ensure_pool initializes session")
-            .pool;
-        self.sync_pool(pool, "deposit", &on_status).await?;
+        let pool = self
+            .pool_handle(
+                pool_contract_id,
+                user_address,
+                network_passphrase,
+                on_status.clone(),
+            )
+            .await?;
+        self.sync_pool(&pool, "deposit", &on_status).await?;
         emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
         loop {
             match pool.deposit(note_amount).await {
@@ -191,19 +183,15 @@ impl WebClient {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        self.ensure_pool(
-            pool_contract_id,
-            user_address,
-            network_passphrase,
-            on_status.clone(),
-        )
-        .await?;
-        let mut guard = self.pool.lock().await;
-        let pool = &mut guard
-            .as_mut()
-            .expect("ensure_pool initializes session")
-            .pool;
-        self.sync_pool(pool, flow, &on_status).await?;
+        let pool = self
+            .pool_handle(
+                pool_contract_id,
+                user_address,
+                network_passphrase,
+                on_status.clone(),
+            )
+            .await?;
+        self.sync_pool(&pool, flow, &on_status).await?;
 
         loop {
             let wallet = pool.wallet().await.map_err(pool_err)?;
@@ -261,13 +249,9 @@ impl WebClient {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        self.ensure_pool(pool_contract_id, user_address, network_passphrase, None)
+        let pool = self
+            .pool_handle(pool_contract_id, user_address, network_passphrase, None)
             .await?;
-        let guard = self.pool.lock().await;
-        let pool = &guard
-            .as_ref()
-            .expect("ensure_pool initializes session")
-            .pool;
         let wallet = pool.wallet().await.map_err(pool_err)?;
         let estimate = pool.estimate(&wallet, amount).map_err(pool_err)?;
         Ok(SpendPlanPreview {

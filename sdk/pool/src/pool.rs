@@ -15,7 +15,7 @@ use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
     pool_storage::PoolStorage,
-    prover::{LocalTransactionProver, TransactionProver, local_transaction_prover},
+    prover::TransactionProver,
     signer::TransactionSigner,
     transact::transact_request_from_step,
     types::{
@@ -32,16 +32,16 @@ pub struct PrivatePool<S> {
     core: PoolCore,
     config: PrivatePoolConfig,
     storage: Option<S>,
-    prover: Option<Box<dyn TransactionProver>>,
+    prover: Box<dyn TransactionProver>,
     signer: Box<dyn TransactionSigner>,
 }
 
 impl<S> PrivatePool<S> {
-    pub fn with_storage(
+    pub fn init(
         config: PrivatePoolConfig,
         storage: S,
         signer: Box<dyn TransactionSigner>,
-        prover: Option<Box<dyn TransactionProver>>,
+        prover: Box<dyn TransactionProver>,
     ) -> Result<Self, PoolError> {
         Ok(Self {
             core: PoolCore::new(config.chain_config())?,
@@ -56,16 +56,8 @@ impl<S> PrivatePool<S> {
         &*self.signer
     }
 
-    pub fn set_signer(&mut self, signer: Box<dyn TransactionSigner>) {
-        self.signer = signer;
-    }
-
-    pub fn set_prover(&mut self, prover: Box<dyn TransactionProver>) {
-        self.prover = Some(prover);
-    }
-
-    pub fn prover(&self) -> Option<&dyn TransactionProver> {
-        self.prover.as_deref()
+    pub fn prover(&self) -> &dyn TransactionProver {
+        &*self.prover
     }
 
     pub fn core(&self) -> &PoolCore {
@@ -76,8 +68,9 @@ impl<S> PrivatePool<S> {
         &mut self.core
     }
 
-    /// Chain snapshot from the last successful [`Self::sync`] or
-    /// [`Self::refresh_chain_context`].
+    /// Optional cached snapshot (tests / explicit
+    /// [`Self::refresh_chain_context`]). Prove steps fetch fresh chain
+    /// state from RPC, like the legacy web client.
     pub fn chain_context(&self) -> Result<&TransactChainContext, PoolError> {
         self.core.chain_context()
     }
@@ -102,18 +95,6 @@ impl<S> PrivatePool<S> {
         self.storage()
     }
 
-    fn ensure_prover(&mut self) -> Result<(), PoolError> {
-        if self.prover.is_some() {
-            return Ok(());
-        }
-
-        self.prover = Some(Box::new(local_transaction_prover(
-            &self.config.prover_artifacts,
-        )?));
-
-        Ok(())
-    }
-
     fn storage(&self) -> Result<&S, PoolError> {
         self.storage.as_ref().ok_or(PoolError::NotInitialized)
     }
@@ -124,12 +105,8 @@ impl<S: PoolStorage> PrivatePool<S> {
         self.storage()?.ensure_ready().await
     }
 
-    pub async fn load_prover(&mut self) -> Result<(), PoolError> {
-        self.ensure_prover()
-    }
-
     pub async fn next_prepared_transaction(
-        &mut self,
+        &self,
         plan: &mut PreparedTransactionPlan,
     ) -> Result<PreparedTransaction, PoolError> {
         self.prove_plan_step(plan).await
@@ -214,12 +191,11 @@ impl<S: PoolStorage> PrivatePool<S> {
             })
     }
 
-    pub async fn sync(&mut self) -> Result<SyncResult, PoolError> {
+    pub async fn sync(&self) -> Result<SyncResult, PoolError> {
         let (from_ledger, to_ledger) = self
             .storage()?
             .sync_indexer(&self.config.rpc_url, &self.config.contract_config)
             .await?;
-        self.refresh_chain_context().await?;
         Ok(SyncResult {
             from_ledger,
             to_ledger,
@@ -229,7 +205,7 @@ impl<S: PoolStorage> PrivatePool<S> {
         })
     }
 
-    pub async fn deposit(&mut self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
+    pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
         let mut plan = self.core.prepare_deposit(amount)?;
         let mut results = self.execute(&mut plan).await?;
         results
@@ -238,7 +214,7 @@ impl<S: PoolStorage> PrivatePool<S> {
     }
 
     pub async fn transfer(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
@@ -248,7 +224,7 @@ impl<S: PoolStorage> PrivatePool<S> {
     }
 
     pub async fn withdraw(
-        &mut self,
+        &self,
         wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
@@ -258,7 +234,7 @@ impl<S: PoolStorage> PrivatePool<S> {
     }
 
     /// Execute a single low-level `transact` step (custom inputs/outputs).
-    pub async fn transact(&mut self, step: Transact) -> Result<TransactionResult, PoolError> {
+    pub async fn transact(&self, step: Transact) -> Result<TransactionResult, PoolError> {
         let mut plan = PreparedTransactionPlan::transact(step);
         let mut results = self.execute(&mut plan).await?;
         results
@@ -266,18 +242,23 @@ impl<S: PoolStorage> PrivatePool<S> {
             .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
     }
 
+    /// Fetch current on-chain snapshot from RPC and cache it on the pool core.
     pub async fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
-        let (note_pub, _) = self
-            .storage()?
-            .user_public_keys(&self.config.user_address)
-            .await?;
-        let snapshot = fetch_snapshot_async(self.core.config(), &note_pub).await?;
+        let snapshot = self.fetch_chain_context_snapshot().await?;
         self.core.set_chain_context(snapshot);
         Ok(())
     }
 
+    async fn fetch_chain_context_snapshot(&self) -> Result<TransactChainContext, PoolError> {
+        let (note_pub, _) = self
+            .storage()?
+            .user_public_keys(&self.config.user_address)
+            .await?;
+        fetch_snapshot_async(self.core.config(), &note_pub).await
+    }
+
     async fn execute(
-        &mut self,
+        &self,
         plan: &mut PreparedTransactionPlan,
     ) -> Result<Vec<TransactionResult>, PoolError> {
         let mut results = Vec::new();
@@ -287,20 +268,19 @@ impl<S: PoolStorage> PrivatePool<S> {
             let signed = self.signer.sign(&prepared, &self.config).await?;
             let result = self.submit(signed).await?;
             results.push(result);
-            self.refresh_chain_context().await?;
         }
         Ok(results)
     }
 
     async fn prove_plan_step(
-        &mut self,
+        &self,
         plan: &mut PreparedTransactionPlan,
     ) -> Result<PreparedTransaction, PoolError> {
         if plan.is_complete() {
             return Err(PoolError::Other("transaction plan is complete".into()));
         }
 
-        let chain = self.core.chain_context()?;
+        let chain = self.fetch_chain_context_snapshot().await?;
         let step = if let Some(amount) = plan.deposit_amount() {
             self.deposit_transact_step(amount).await?
         } else if let Some(step) = plan.raw_transact_step() {
@@ -312,17 +292,11 @@ impl<S: PoolStorage> PrivatePool<S> {
             &step,
             &self.config.user_address,
             &self.config.pool_contract_id,
-            chain,
+            &chain,
         );
 
         let params = self.storage()?.build_transact_params(&req).await?;
-        self.ensure_prover()?;
-        let prepared = self
-            .prover
-            .as_mut()
-            .ok_or(PoolError::NotInitialized)?
-            .prove_transact(params)
-            .await?;
+        let prepared = self.prover.prove_transact(params).await?;
 
         plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
         Ok(prepared)
@@ -339,21 +313,14 @@ impl<S: PoolStorage> PrivatePool<S> {
 
 #[cfg(target_arch = "wasm32")]
 impl PrivatePool<LocalPoolBackend> {
-    pub fn new(
+    pub fn open(
         config: PrivatePoolConfig,
         signer: Box<dyn TransactionSigner>,
     ) -> Result<Self, PoolError> {
-        Ok(Self {
-            core: PoolCore::new(config.chain_config())?,
-            config,
-            storage: None,
-            prover: None,
-            signer,
-        })
-    }
+        use crate::prover::LocalProver;
 
-    pub fn initialize(&mut self) -> Result<(), PoolError> {
-        self.storage = Some(LocalPoolBackend::open(&self.config.storage_path)?);
-        Ok(())
+        let storage = LocalPoolBackend::open(&config.storage_path)?;
+        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
+        Self::init(config, storage, signer, prover)
     }
 }
