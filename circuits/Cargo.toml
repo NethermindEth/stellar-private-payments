@@ -64,5 +64,10 @@ regex = "1"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 wast = "248.0.0"
 
+[dev-dependencies]
+# Witness backends for the graph-vs-wasm equivalence test
+witness = { workspace = true }
+serde_json = { workspace = true, features = ["std"] }
+
 [lints]
 workspace = true

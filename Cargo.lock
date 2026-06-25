@@ -1163,8 +1163,10 @@ dependencies = [
  "parser",
  "program_structure",
  "regex",
+ "serde_json",
  "type_analysis",
  "wast",
+ "witness",
  "zkhash",
 ]
 

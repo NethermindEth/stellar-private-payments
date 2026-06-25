@@ -91,7 +91,7 @@ impl From<Vec<Scalar>> for InputValue {
 /// inputs.set("root", Scalar::from(5));
 /// inputs.set_key(&SignalKey::new("arr").idx(0), Scalar::from(10));
 /// ```
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Inputs {
     inner: HashMap<String, InputValue>,
 }

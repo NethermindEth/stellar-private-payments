@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{Inputs, SignalKey, prove_and_verify},
+        circom_tester::{InputValue, Inputs, SignalKey, prove_and_verify},
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         keypair::derive_public_key,
         merkle_tree::{merkle_proof, merkle_root},
@@ -14,7 +14,9 @@ mod tests {
     use anyhow::{Context, Result, ensure};
     use num_bigint::BigInt;
     use std::{
+        cell::RefCell,
         convert::TryInto,
+        fs,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
     };
@@ -1451,5 +1453,187 @@ mod tests {
         }
 
         Ok(())
+    }
+
+    // Graph witness equivalence
+    //
+    // Assert the committed circom-witness-rs graph produces a witness
+    // byte-identical to the wasmer/ark-circom path for real, proving tx shapes.
+    // `run_case` still proves+verifies via wasmer; the capture closure hands back
+    // the assembled inputs so we can additionally diff the two witness backends.
+
+    fn policy_graph_path() -> PathBuf {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin")
+    }
+
+    fn input_value_to_json(value: &InputValue) -> serde_json::Value {
+        match value {
+            InputValue::Single(v) => serde_json::Value::String(v.to_string()),
+            InputValue::Array(values) => serde_json::Value::Array(
+                values
+                    .iter()
+                    .map(|v| serde_json::Value::String(v.to_string()))
+                    .collect(),
+            ),
+        }
+    }
+
+    fn inputs_to_json(inputs: &Inputs) -> Result<String> {
+        let mut object = serde_json::Map::new();
+        for (key, value) in inputs.iter() {
+            object.insert(key.clone(), input_value_to_json(value));
+        }
+        serde_json::to_string(&object).context("failed to serialize witness inputs")
+    }
+
+    fn assert_graph_matches_wasm(
+        case: &TxCase,
+        leaves: Vec<Scalar>,
+        public_amount: Scalar,
+        membership_trees: &[MembershipTree],
+        keys: &[NonMembership],
+    ) -> Result<()> {
+        let (wasm_path, r1cs_path) = policy_artifacts()?;
+
+        // run_case proves+verifies via wasmer and hands back the assembled inputs.
+        let captured: RefCell<Option<Inputs>> = RefCell::new(None);
+        run_case(
+            &wasm_path,
+            &r1cs_path,
+            case,
+            leaves,
+            public_amount,
+            membership_trees,
+            keys,
+            Some(|inputs: &mut Inputs| {
+                captured.replace(Some(inputs.clone()));
+            }),
+        )?;
+        let inputs = captured.into_inner().context("input capture did not run")?;
+        let inputs_json = inputs_to_json(&inputs)?;
+
+        // Reference witness via the wasmer/ark-circom path the prover verifies.
+        let wasm_bytes = fs::read(&wasm_path).context("read policy wasm")?;
+        let r1cs_bytes = fs::read(&r1cs_path).context("read policy r1cs")?;
+        let mut wasm_calc = witness::WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
+            .context("init wasm witness calculator")?;
+        let wasm_witness = wasm_calc
+            .compute_witness(&inputs_json)
+            .context("wasm witness calculation failed")?;
+
+        // Witness via the committed circom-witness-rs graph.
+        let graph_blob = fs::read(policy_graph_path()).context("read policy graph")?;
+        let graph_calc = witness::GraphWitnessCalculator::from_graph(&graph_blob)
+            .context("load policy graph")?;
+        let graph_witness = graph_calc
+            .compute_witness(&inputs_json)
+            .context("graph witness calculation failed")?;
+
+        ensure!(
+            wasm_witness == graph_witness,
+            "graph witness differs from wasm witness ({} vs {} bytes)",
+            graph_witness.len(),
+            wasm_witness.len()
+        );
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn graph_witness_matches_wasm_1in1out() -> Result<()> {
+        let case = TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(101u64),
+                    blinding: Scalar::from(201u64),
+                    amount: Scalar::from(0u64),
+                },
+                InputNote {
+                    leaf_index: 7,
+                    priv_key: Scalar::from(102u64),
+                    blinding: Scalar::from(211u64),
+                    amount: Scalar::from(13u64),
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(501u64),
+                    blinding: Scalar::from(601u64),
+                    amount: Scalar::from(13u64),
+                },
+                OutputNote {
+                    pub_key: Scalar::from(502u64),
+                    blinding: Scalar::from(602u64),
+                    amount: Scalar::from(0u64),
+                },
+            ],
+        );
+        let leaves = prepopulated_leaves(
+            LEVELS,
+            0xDEAD_BEEFu64,
+            &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+            24,
+        );
+        let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
+        let keys = vec![
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
+            },
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
+            },
+        ];
+        assert_graph_matches_wasm(&case, leaves, Scalar::from(0u64), &membership_trees, &keys)
+    }
+
+    #[test]
+    #[ignore]
+    fn graph_witness_matches_wasm_2in2out() -> Result<()> {
+        let case = TxCase::new(
+            vec![
+                InputNote {
+                    leaf_index: 0,
+                    priv_key: Scalar::from(401u64),
+                    blinding: Scalar::from(501u64),
+                    amount: Scalar::from(15u64),
+                },
+                InputNote {
+                    leaf_index: 30,
+                    priv_key: Scalar::from(411u64),
+                    blinding: Scalar::from(511u64),
+                    amount: Scalar::from(8u64),
+                },
+            ],
+            vec![
+                OutputNote {
+                    pub_key: Scalar::from(1101u64),
+                    blinding: Scalar::from(1201u64),
+                    amount: Scalar::from(10u64),
+                },
+                OutputNote {
+                    pub_key: Scalar::from(1102u64),
+                    blinding: Scalar::from(1202u64),
+                    amount: Scalar::from(13u64),
+                },
+            ],
+        );
+        let leaves = prepopulated_leaves(
+            LEVELS,
+            0xBEEFu64,
+            &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+            24,
+        );
+        let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
+        let keys = vec![
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
+            },
+            NonMembership {
+                key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
+            },
+        ];
+        assert_graph_matches_wasm(&case, leaves, Scalar::from(0u64), &membership_trees, &keys)
     }
 }
