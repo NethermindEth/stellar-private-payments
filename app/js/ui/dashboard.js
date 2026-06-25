@@ -179,6 +179,10 @@ export const Dashboard = {
         const container = document.getElementById('dashboard-feed');
         if (!container) return;
         container.replaceChildren();
-        App.state.feed.forEach(item => container.appendChild(Templates.createFeedCard(item, poolLabelById(item.poolContractId))));
+        // Only pass a token label for pool items; registry/ASP items have no pool
+        // (poolContractId is null) and shouldn't show the "Token" fallback.
+        App.state.feed.forEach(item => container.appendChild(
+            Templates.createFeedCard(item, item.poolContractId ? poolLabelById(item.poolContractId) : null),
+        ));
     },
 };
