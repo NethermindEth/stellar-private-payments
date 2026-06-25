@@ -9,9 +9,9 @@ use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
-    pool_storage::NativePoolBackend,
     prover::LocalProver,
     signer::Signer,
+    storage::LocalStorage,
     types::{
         Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactionResult,
         TransferRecipient,
@@ -21,11 +21,11 @@ use crate::{
 use super::Indexer;
 
 /// Native sync wallet — [`AsyncPrivatePool`] with blocking method names.
-pub struct PrivatePool(AsyncPrivatePool<NativePoolBackend>);
+pub struct PrivatePool(AsyncPrivatePool<LocalStorage>);
 
 impl PrivatePool {
     pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
-        let backend = NativePoolBackend::open(
+        let backend = LocalStorage::open(
             &config.rpc_url,
             &config.storage_path,
             &config.contract_config,
@@ -36,15 +36,15 @@ impl PrivatePool {
         )?))
     }
 
-    pub fn into_inner(self) -> AsyncPrivatePool<NativePoolBackend> {
+    pub fn into_inner(self) -> AsyncPrivatePool<LocalStorage> {
         self.0
     }
 
-    pub fn inner(&self) -> &AsyncPrivatePool<NativePoolBackend> {
+    pub fn inner(&self) -> &AsyncPrivatePool<LocalStorage> {
         &self.0
     }
 
-    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool<NativePoolBackend> {
+    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool<LocalStorage> {
         &mut self.0
     }
 

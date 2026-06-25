@@ -1,7 +1,7 @@
 //! Cached [`PrivatePool`] session for browser [`WebClient`] flows.
 
 use super::{WebClient, emit_progress};
-use crate::{pool_storage::BridgePoolStorage, prover_bridge::WorkerProver};
+use crate::workers::storage::StorageBridge;
 use js_sys::Function;
 use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments_sdk::{
@@ -16,7 +16,7 @@ pub(crate) struct PoolSession {
     pool_contract_id: String,
     user_address: String,
     network_passphrase: String,
-    pool: Option<Rc<PrivatePool<BridgePoolStorage>>>,
+    pool: Option<Rc<PrivatePool<StorageBridge>>>,
     signer_progress: Rc<RefCell<Option<Function>>>,
 }
 
@@ -76,7 +76,7 @@ impl WebClient {
         user_address: String,
         network_passphrase: String,
         on_status: Option<Function>,
-    ) -> Result<Rc<PrivatePool<BridgePoolStorage>>, JsError> {
+    ) -> Result<Rc<PrivatePool<StorageBridge>>, JsError> {
         if self
             .pool_session
             .borrow()
@@ -116,7 +116,7 @@ impl WebClient {
             user_address.clone(),
             Rc::clone(&signer_progress),
         );
-        let prover: Box<dyn Prover> = Box::new(WorkerProver::new(self.prover_bridge.fork()));
+        let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
         let pool = Rc::new(
             self.private_pool(config, signer, prover)
                 .map_err(pool_err)?,
@@ -135,7 +135,7 @@ impl WebClient {
 
     pub(super) async fn sync_pool(
         &self,
-        pool: &PrivatePool<BridgePoolStorage>,
+        pool: &PrivatePool<StorageBridge>,
         flow: &'static str,
         on_status: &Option<Function>,
     ) -> Result<(), JsError> {

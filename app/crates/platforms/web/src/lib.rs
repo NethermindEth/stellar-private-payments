@@ -2,9 +2,7 @@ mod circuits;
 mod client;
 mod config;
 mod events;
-pub mod pool_storage;
 mod protocol;
-mod prover_bridge;
 pub mod signer;
 pub mod workers;
 

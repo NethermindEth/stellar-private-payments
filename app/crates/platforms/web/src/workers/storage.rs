@@ -12,17 +12,20 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, build_transact_params, build_validated_pool_tree,
-    chain::ContractDataStorage,
+    BuildTransactParams, PoolError, Storage as PoolStorage, TransactRequest, build_transact_params,
+    build_validated_pool_tree,
+    chain::{Client, ContractDataStorage},
     load_user_key_material,
-    state::{Storage, process_local_state_batch},
+    state::{Storage, StoredUserKeys, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
         encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
+        flows::TransactParams,
         merkle::MerkleProof,
     },
-    types::{ContractsEventData, SyncMetadata},
+    types::{ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata},
 };
+use tx_planner::SpendableNote;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
@@ -503,6 +506,30 @@ impl StorageBridge {
             _ => None,
         }
     }
+
+    async fn sync_state(&self) -> Result<Vec<SyncMetadata>, PoolError> {
+        match self.call(StorageWorkerRequest::SyncState, 5_000).await {
+            Ok(StorageWorkerResponse::SyncState(metadata)) => Ok(metadata),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading sync state: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    fn ledger_range(metadata: &[SyncMetadata]) -> (u32, u32) {
+        let from = metadata
+            .iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .min()
+            .unwrap_or(0);
+        let to = metadata
+            .iter()
+            .map(|meta| meta.last_indexed_ledger)
+            .max()
+            .unwrap_or(from);
+        (from, to)
+    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -541,6 +568,122 @@ impl ContractDataStorage for StorageBridge {
         {
             StorageWorkerResponse::Saved => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl PoolStorage for StorageBridge {
+    async fn ensure_ready(&self) -> Result<(), PoolError> {
+        self.ping()
+            .await
+            .map_err(|e| PoolError::Other(e.to_string()))
+    }
+
+    async fn spendable_wallet(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<SpendableNote>, PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::UnspentUserNotes {
+                    user_address: user_address.to_string(),
+                    pool_contract_id: pool_contract_id.to_string(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes
+                .into_iter()
+                .map(|n| SpendableNote {
+                    commitment: n.id,
+                    amount: n.amount,
+                })
+                .collect()),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading wallet: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn build_transact_params(
+        &self,
+        req: &TransactRequest,
+    ) -> Result<TransactParams, PoolError> {
+        match self
+            .call(StorageWorkerRequest::Transact(req.clone()), 5_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::TransactParams(params)) => Ok(params),
+            Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
+                Err(PoolError::MembershipSync(status))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response building transact params: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {
+        let _ = user_address;
+        Err(PoolError::Other(
+            "full user keys are not available on the storage bridge; use user_public_keys".into(),
+        ))
+    }
+
+    async fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::UserKeys(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserKeys(keys)) => {
+                let keys = keys.ok_or_else(|| {
+                    PoolError::Other("user keys not found in worker storage".into())
+                })?;
+                Ok((keys.note_keypair.public, keys.encryption_keypair.public))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading user keys: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
+        Ok(self.user_public_keys(user_address).await?.0)
+    }
+
+    async fn sync_indexer(
+        &self,
+        rpc_url: &str,
+        _contract_config: &ContractConfig,
+    ) -> Result<(u32, u32), PoolError> {
+        let rpc =
+            Client::new(rpc_url).map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+        let from = Self::ledger_range(&self.sync_state().await?).0;
+
+        loop {
+            let tip = rpc
+                .get_latest_ledger()
+                .await
+                .map_err(|e| PoolError::Other(format!("latest ledger: {e:#}")))?
+                .sequence;
+            let metadata = self.sync_state().await?;
+            let (_, to) = Self::ledger_range(&metadata);
+            if to >= tip {
+                return Ok((from, to));
+            }
+            TimeoutFuture::new(1_000).await;
         }
     }
 }

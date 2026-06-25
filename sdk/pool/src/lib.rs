@@ -71,9 +71,9 @@ mod core;
 mod error;
 mod plan;
 mod pool;
-mod pool_storage;
 mod prover;
 mod signer;
+mod storage;
 mod transact;
 
 pub use client::Client;
@@ -81,15 +81,13 @@ pub use core::PoolCore;
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
-#[cfg(target_arch = "wasm32")]
-pub use pool_storage::LocalPoolBackend;
-#[cfg(not(target_arch = "wasm32"))]
-pub use pool_storage::NativePoolBackend;
-pub use pool_storage::PoolStorage;
 pub use prover::{LocalProver, Prover, ProverEngine};
 #[cfg(not(target_arch = "wasm32"))]
 pub use signer::LocalSigner;
 pub use signer::Signer;
+#[cfg(not(target_arch = "wasm32"))]
+pub use storage::LocalStorage;
+pub use storage::Storage;
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,

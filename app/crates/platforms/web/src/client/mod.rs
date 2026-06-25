@@ -5,14 +5,14 @@ use crate::{
         StorageWorkerResponse,
     },
     workers::{
-        prover::ProverWorker,
+        prover::{ProverBridge, ProverWorker},
         storage::{StorageBridge, StorageWorker},
     },
 };
 use anyhow::anyhow;
 use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{Spawnable, oneshot::OneshotBridge};
+use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
@@ -86,7 +86,7 @@ pub(crate) fn emit_progress(
 pub struct WebClient {
     rpc_url: String,
     storage: StorageBridge,
-    prover_bridge: OneshotBridge<ProverWorker>,
+    prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
     #[wasm_bindgen(skip)]
     pool_session: pool_session::PoolSessionCell,
@@ -97,7 +97,7 @@ impl Clone for WebClient {
         Self {
             rpc_url: self.rpc_url.clone(),
             storage: self.storage.clone(),
-            prover_bridge: self.prover_bridge.fork(),
+            prover_bridge: self.prover_bridge.clone(),
             fetcher: self.fetcher.clone(),
             pool_session: self.pool_session.clone(),
         }
@@ -125,9 +125,11 @@ impl WebClient {
                     .as_module(true)
                     .spawn("./js/storage-worker.js"),
             ),
-            prover_bridge: ProverWorker::spawner()
-                .as_module(true)
-                .spawn("./js/prover-worker.js"),
+            prover_bridge: ProverBridge::new(
+                ProverWorker::spawner()
+                    .as_module(true)
+                    .spawn("./js/prover-worker.js"),
+            ),
             fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
             pool_session: Rc::new(RefCell::new(pool_session::PoolSession::new())),
         })
@@ -135,6 +137,10 @@ impl WebClient {
 
     pub(crate) fn storage(&self) -> StorageBridge {
         self.storage.clone()
+    }
+
+    pub(crate) fn prover_bridge(&self) -> ProverBridge {
+        self.prover_bridge.clone()
     }
 
     /// Construct a [`PrivatePool`] backed by the storage worker bridge.
@@ -146,14 +152,8 @@ impl WebClient {
         config: PrivatePoolConfig,
         signer: Box<dyn Signer>,
         prover: Box<dyn Prover>,
-    ) -> Result<PrivatePool<crate::pool_storage::BridgePoolStorage>, PoolError> {
-        use crate::pool_storage::BridgePoolStorage;
-        PrivatePool::init(
-            config,
-            BridgePoolStorage::new(self.storage()),
-            signer,
-            prover,
-        )
+    ) -> Result<PrivatePool<StorageBridge>, PoolError> {
+        PrivatePool::init(config, self.storage(), signer, prover)
     }
 
     /// Wallet-backed [`Signer`] for [`Self::private_pool`].
@@ -267,16 +267,7 @@ impl WebClient {
     }
 
     pub async fn ping_prover(&self) -> anyhow::Result<()> {
-        let mut bridge = self.prover_bridge.fork();
-        let resp = with_timeout(5_000, bridge.run(ProverWorkerRequest::Ping)).await?;
-        match resp {
-            ProverWorkerResponse::Pong => Ok(()),
-            ProverWorkerResponse::Error(e) => Err(anyhow::anyhow!(e)),
-            other => Err(anyhow::anyhow!(
-                "unexpected response from Prover Worker: {:?}",
-                other
-            )),
-        }
+        self.prover_bridge.ping().await
     }
 
     async fn storage_request(
@@ -295,17 +286,10 @@ impl WebClient {
         req: ProverWorkerRequest,
         timeout_ms: u32,
     ) -> Result<ProverWorkerResponse, JsError> {
-        let mut bridge = self.prover_bridge.fork();
-
-        // Handle transport/timeout errors
-        let resp: ProverWorkerResponse = with_timeout(timeout_ms, bridge.run(req))
+        self.prover_bridge
+            .call(req, timeout_ms)
             .await
-            .map_err(|e| JsError::new(&format!("Prover Worker Communication Error: {}", e)))?;
-
-        match resp {
-            ProverWorkerResponse::Error(e) => Err(JsError::new(&e)),
-            _ => Ok(resp),
-        }
+            .map_err(|e| JsError::new(&format!("Prover Worker Communication Error: {e}")))
     }
 }
 

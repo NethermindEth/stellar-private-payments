@@ -1,7 +1,7 @@
 //! Pluggable async wallet storage for [`crate::pool::PrivatePool`].
 
 use prover::flows::TransactParams;
-use state::{Storage, StoredUserKeys};
+use state::{Storage as SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
 use types::{ContractConfig, EncryptionPublicKey, NotePublicKey};
 
@@ -12,13 +12,9 @@ use crate::{
 
 #[cfg(not(target_arch = "wasm32"))]
 mod native;
-#[cfg(target_arch = "wasm32")]
-mod wasm;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use native::NativePoolBackend;
-#[cfg(target_arch = "wasm32")]
-pub use wasm::LocalPoolBackend;
+pub use native::LocalStorage;
 
 pub(crate) fn map_build_params(
     result: anyhow::Result<BuildTransactParams>,
@@ -30,7 +26,7 @@ pub(crate) fn map_build_params(
 }
 
 pub(crate) fn map_user_keys(
-    storage: &Storage,
+    storage: &SqliteStorage,
     user_address: &str,
 ) -> Result<StoredUserKeys, PoolError> {
     storage
@@ -44,7 +40,7 @@ pub(crate) fn map_user_keys(
 }
 
 pub(crate) fn spendable_wallet_from_storage(
-    storage: &Storage,
+    storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
 ) -> Result<Vec<SpendableNote>, PoolError> {
@@ -64,7 +60,7 @@ pub(crate) fn spendable_wallet_from_storage(
 
 /// Wallet + transact-param reads for [`crate::pool::PrivatePool`].
 #[async_trait::async_trait(?Send)]
-pub trait PoolStorage {
+pub trait Storage {
     async fn ensure_ready(&self) -> Result<(), PoolError>;
 
     async fn spendable_wallet(

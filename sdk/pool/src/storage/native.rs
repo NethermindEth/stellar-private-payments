@@ -1,23 +1,23 @@
 use prover::flows::TransactParams;
-use state::{Storage, StoredUserKeys};
+use state::{Storage as SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
 use types::{ContractConfig, EncryptionPublicKey, NotePublicKey};
 
-use super::{PoolStorage, map_build_params, map_user_keys, spendable_wallet_from_storage};
+use super::{Storage, map_build_params, map_user_keys, spendable_wallet_from_storage};
 use crate::{core::process_local_state, error::PoolError, transact::TransactRequest};
 
 /// In-process SQLite + synchronous contract indexer (native only).
-pub struct NativePoolBackend {
+pub struct LocalStorage {
     indexer: std::cell::RefCell<crate::blocking::Indexer>,
 }
 
-impl NativePoolBackend {
+impl LocalStorage {
     pub fn open(
         rpc_url: &str,
         storage_path: &str,
         contract_config: &ContractConfig,
     ) -> Result<Self, PoolError> {
-        let storage = Storage::connect_file(storage_path)
+        let storage = SqliteStorage::connect_file(storage_path)
             .map_err(|e| PoolError::Other(format!("open storage: {e:#}")))?;
         let indexer = crate::blocking::Indexer::new(rpc_url, storage, contract_config)
             .map_err(|e| PoolError::Other(format!("open indexer: {e:#}")))?;
@@ -26,11 +26,11 @@ impl NativePoolBackend {
         })
     }
 
-    pub fn storage(&self) -> std::cell::Ref<'_, Storage> {
+    pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
         std::cell::Ref::map(self.indexer.borrow(), |indexer| indexer.storage())
     }
 
-    pub fn storage_mut(&self) -> std::cell::RefMut<'_, Storage> {
+    pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
         std::cell::RefMut::map(self.indexer.borrow_mut(), |indexer| indexer.storage_mut())
     }
 
@@ -69,7 +69,7 @@ impl NativePoolBackend {
 }
 
 #[async_trait::async_trait(?Send)]
-impl PoolStorage for NativePoolBackend {
+impl Storage for LocalStorage {
     async fn ensure_ready(&self) -> Result<(), PoolError> {
         Ok(())
     }

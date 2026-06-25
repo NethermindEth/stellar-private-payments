@@ -14,18 +14,15 @@ use crate::{
     core::{pool_transact_input, transact_step_for_plan},
     error::PoolError,
     plan::PreparedTransactionPlan,
-    pool_storage::PoolStorage,
     prover::Prover,
     signer::Signer,
+    storage::Storage,
     transact::transact_request_from_step,
     types::{
         Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
         TransactionResult, TransferRecipient,
     },
 };
-
-#[cfg(target_arch = "wasm32")]
-use crate::pool_storage::LocalPoolBackend;
 
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool<S> {
@@ -101,7 +98,7 @@ impl<S> PrivatePool<S> {
     }
 }
 
-impl<S: PoolStorage> PrivatePool<S> {
+impl<S: Storage> PrivatePool<S> {
     pub async fn ensure_storage_ready(&self) -> Result<(), PoolError> {
         self.storage()?.ensure_ready().await
     }
@@ -304,16 +301,5 @@ impl<S: PoolStorage> PrivatePool<S> {
             .user_public_keys(&self.config.user_address)
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-impl PrivatePool<LocalPoolBackend> {
-    pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
-        use crate::prover::LocalProver;
-
-        let storage = LocalPoolBackend::open(&config.storage_path)?;
-        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        Self::init(config, storage, signer, prover)
     }
 }

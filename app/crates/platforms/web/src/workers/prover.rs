@@ -2,16 +2,19 @@ use crate::{
     circuits::fetch_circuit_file,
     protocol::{ProverWorkerRequest, ProverWorkerResponse},
 };
-use anyhow::{Context as _, Result};
-use futures::try_join;
+use anyhow::{Context as _, Result, anyhow};
+use futures::{FutureExt, try_join};
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{Registrable, oneshot::oneshot};
+use gloo_worker::{
+    Registrable,
+    oneshot::{OneshotBridge, oneshot},
+};
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
-    ProverEngine,
-    proving::{Prover, WitnessCalculator},
-    tx::flows::{SelectiveDisclosure1Params, selective_disclosure_1},
+    PoolError, PreparedProverTx, Prover, ProverEngine,
+    proving::{Prover as Groth16Prover, WitnessCalculator},
+    tx::flows::{SelectiveDisclosure1Params, TransactParams, selective_disclosure_1},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosureContext,
         DisclosurePublicInputs, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT,
@@ -80,7 +83,7 @@ fn ensure_sha256_matches(
 thread_local! {
     static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
     static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
-    static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
+    static DISCLOSURE_PROVER: RefCell<Option<Groth16Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
@@ -176,8 +179,8 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
                 "failed to init disclosure witness calculator: {e:#}"
             ))
         })?;
-    let disc_prover =
-        Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
+    let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
+        .expect("FAILED Disclosure Prover");
 
     TRANSACT_PROVER.with(|cell| {
         *cell.borrow_mut() = Some(transact_prover);
@@ -345,4 +348,72 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
     };
     Ok(resp)
+}
+
+const PROVE_TIMEOUT_MS: u32 = 20_000;
+
+/// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
+pub(crate) struct ProverBridge {
+    bridge: OneshotBridge<ProverWorker>,
+}
+
+impl Clone for ProverBridge {
+    fn clone(&self) -> Self {
+        Self {
+            bridge: self.bridge.fork(),
+        }
+    }
+}
+
+impl ProverBridge {
+    pub(crate) fn new(bridge: OneshotBridge<ProverWorker>) -> Self {
+        Self { bridge }
+    }
+
+    pub(crate) async fn call(
+        &self,
+        req: ProverWorkerRequest,
+        timeout_ms: u32,
+    ) -> anyhow::Result<ProverWorkerResponse> {
+        let mut bridge = self.bridge.fork();
+        let fut = bridge.run(req).fuse();
+        let timeout = TimeoutFuture::new(timeout_ms).fuse();
+
+        futures::pin_mut!(fut, timeout);
+
+        let resp = futures::select! {
+            value = fut => value,
+            _ = timeout => {
+                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
+            }
+        };
+
+        match resp {
+            ProverWorkerResponse::Error(e) => Err(anyhow!(e)),
+            other => Ok(other),
+        }
+    }
+
+    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
+        match self.call(ProverWorkerRequest::Ping, 5_000).await? {
+            ProverWorkerResponse::Pong => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Prover for ProverBridge {
+    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
+        match self
+            .call(ProverWorkerRequest::Transact(params), PROVE_TIMEOUT_MS)
+            .await
+        {
+            Ok(ProverWorkerResponse::TransactPrepared(prepared)) => Ok(prepared),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected prover worker response: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
 }
