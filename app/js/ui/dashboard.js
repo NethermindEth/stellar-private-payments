@@ -31,7 +31,6 @@ export const Dashboard = {
             this.stop();
             this.clear();
         });
-        App.events.addEventListener('profile:updated', () => this.renderProfile());
         document.getElementById('pool-history-close')?.addEventListener('click', () => this.closeHistory());
         document.getElementById('pool-history-modal')?.addEventListener('click', (e) => {
             if (e.target === e.currentTarget) this.closeHistory();
@@ -55,8 +54,6 @@ export const Dashboard = {
     clear() {
         document.getElementById('dashboard-balance-grid')?.replaceChildren();
         document.getElementById('dashboard-feed')?.replaceChildren();
-        document.getElementById('dashboard-profile-address').textContent = 'Not connected';
-        document.getElementById('dashboard-profile-registration').textContent = '—';
     },
 
     async refresh() {
@@ -89,7 +86,6 @@ export const Dashboard = {
         } else {
             console.warn('[Dashboard] registry lookup failed:', lookupRes.reason);
         }
-        this.renderProfile();
         App.events.dispatchEvent(new CustomEvent('profile:updated'));
 
         if (balancesRes.status === 'rejected' && feedRes.status === 'rejected' && lookupRes.status === 'rejected') {
@@ -184,12 +180,5 @@ export const Dashboard = {
         if (!container) return;
         container.replaceChildren();
         App.state.feed.forEach(item => container.appendChild(Templates.createFeedCard(item, poolLabelById(item.poolContractId))));
-    },
-
-    renderProfile() {
-        const address = App.state.wallet.address;
-        document.getElementById('dashboard-profile-address').textContent = address ? Utils.shortAddress(address, 8, 6) : 'Not connected';
-        document.getElementById('dashboard-profile-registration').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
-        document.getElementById('dashboard-profile-sync').textContent = App.state.profile.registryLookup?.registryFullySynced ? 'Registry synced' : 'Registry syncing';
     },
 };
