@@ -1,4 +1,4 @@
-use stellar::{Limits, LocalSigner as StellarSigner, TransactionEnvelope, WriteXdr};
+use stellar::{Limits, LocalSigner as StellarSigner, WriteXdr};
 
 use super::Signer;
 use crate::{PreparedTransaction, error::PoolError, types::SignedTransaction};

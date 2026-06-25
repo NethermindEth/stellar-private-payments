@@ -68,7 +68,10 @@ impl PreparedTransactionPlan {
     }
 
     pub(crate) fn advance(&mut self) {
-        self.current_tx += 1;
+        self.current_tx = self
+            .current_tx
+            .checked_add(1)
+            .expect("advance past tx_count");
     }
 
     pub(crate) fn deposit_amount(&self) -> Option<NoteAmount> {

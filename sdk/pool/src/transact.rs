@@ -75,7 +75,7 @@ impl From<&PreparedTxPublic> for OnchainProofPublicInputs {
 }
 
 pub enum BuildTransactParams {
-    Ready(TransactParams),
+    Ready(Box<TransactParams>),
     MembershipSync(AspMembershipSync),
 }
 
@@ -163,7 +163,7 @@ pub fn build_transact_params(
         });
     }
 
-    Ok(BuildTransactParams::Ready(TransactParams {
+    Ok(BuildTransactParams::Ready(Box::new(TransactParams {
         priv_key: note_privkey,
         encryption_pubkey,
         pool_root,
@@ -175,7 +175,7 @@ pub fn build_transact_params(
         non_membership_proof: req.non_membership_proof.clone(),
         tree_depth: req.tree_depth,
         smt_depth: req.smt_depth,
-    }))
+    })))
 }
 
 pub fn load_user_key_material(

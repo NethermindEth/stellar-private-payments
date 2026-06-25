@@ -1,31 +1,25 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DisclosureInputsRequest, DisclosureProverRequest, PreparedProverTx,
-        PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
-        StorageWorkerResponse,
+        AdminASPRequest, DisclosureInputsRequest, DisclosureProverRequest, ProverWorkerRequest,
+        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
     },
     workers::{
         prover::{ProverBridge, ProverWorker},
         storage::{StorageBridge, StorageWorker},
     },
 };
-use anyhow::anyhow;
-use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
     PoolError, PrivatePool, PrivatePoolConfig, Prover, ProverArtifacts, Signer,
-    chain::{
-        OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
-        TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
-    },
+    chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
         AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
-        EncryptionPublicKey, ExtAmount, ExtData, Field, KeyDerivationSignature, NoteAmount,
-        NotePublicKey, parse_0x_hex_32,
+        EncryptionPublicKey, ExtAmount, Field, KeyDerivationSignature, NoteAmount, NotePublicKey,
+        parse_0x_hex_32,
     },
 };
 use wasm_bindgen::{JsCast, prelude::*};
@@ -155,18 +149,6 @@ impl Clone for WebClient {
     }
 }
 
-async fn with_timeout<T>(ms: u32, fut: impl std::future::Future<Output = T>) -> anyhow::Result<T> {
-    let fut = fut.fuse();
-    let timeout = TimeoutFuture::new(ms).fuse();
-
-    futures::pin_mut!(fut, timeout);
-
-    futures::select! {
-        value = fut => Ok(value),
-        _ = timeout => Err(anyhow!("operation timed out after {} ms", ms)),
-    }
-}
-
 impl WebClient {
     pub fn new(rpc_url: &str, contract_config: &'static ContractConfig) -> anyhow::Result<Self> {
         Ok(Self {
@@ -292,28 +274,6 @@ impl WebClient {
         ))
     }
 
-    async fn prepare_pool_tx(
-        &self,
-        pool_contract_id: &str,
-        user_address: &str,
-        proof_uncompressed: Vec<u8>,
-        ext_data: ExtData,
-        prepared: &PreparedTxPublic,
-    ) -> Result<PreparedSorobanTx, JsError> {
-        self.fetcher
-            .prepare_pool_transact(
-                pool_contract_id,
-                &PoolTransactInput {
-                    proof_uncompressed,
-                    ext_data,
-                    public: prepared.into(),
-                },
-                user_address,
-            )
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))
-    }
-
     pub(super) async fn submit_tx(
         &self,
         signed: &TransactionEnvelope,
@@ -355,34 +315,6 @@ impl WebClient {
         Err(JsError::new(&format!(
             "transaction confirmation failed (hash: {hash})"
         )))
-    }
-
-    pub(super) async fn finalize_prepared_prover_tx(
-        &self,
-        pool_contract_id: &str,
-        user_address: &str,
-        mut prepared: PreparedProverTx,
-        on_status: &Option<Function>,
-        flow: &'static str,
-    ) -> Result<PreparedProverTx, JsError> {
-        emit_progress(
-            on_status,
-            flow,
-            "prepare_tx",
-            "Simulating transaction…",
-            None,
-            None,
-        );
-        prepared.soroban_tx = self
-            .prepare_pool_tx(
-                pool_contract_id,
-                user_address,
-                prepared.proof_uncompressed.clone(),
-                prepared.ext_data.clone(),
-                &prepared.prepared,
-            )
-            .await?;
-        Ok(prepared)
     }
 
     pub async fn ping_storage(&self) -> anyhow::Result<()> {

@@ -20,7 +20,7 @@ pub(crate) fn map_build_params(
     result: anyhow::Result<BuildTransactParams>,
 ) -> Result<TransactParams, PoolError> {
     match result.map_err(|e| PoolError::Other(e.to_string()))? {
-        BuildTransactParams::Ready(params) => Ok(params),
+        BuildTransactParams::Ready(params) => Ok(*params),
         BuildTransactParams::MembershipSync(status) => Err(PoolError::MembershipSync(status)),
     }
 }

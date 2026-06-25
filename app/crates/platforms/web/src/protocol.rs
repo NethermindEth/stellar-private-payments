@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-pub use stellar_private_payments_sdk::{PreparedProverTx, PreparedTxPublic, TransactRequest};
+pub use stellar_private_payments_sdk::{PreparedProverTx, TransactRequest};
 
 use stellar_private_payments_sdk::{
     tx::flows::TransactParams,

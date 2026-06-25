@@ -395,7 +395,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::Transact(req) => {
             log::trace!("[{WORKER_NAME}] transact");
             with_storage_mut!(storage => match build_transact_params(storage, &req)? {
-                BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(params),
+                BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
                 BuildTransactParams::MembershipSync(status) => {
                     StorageWorkerResponse::AspMembershipSync(status)
                 }

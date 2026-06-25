@@ -21,9 +21,8 @@ use stellar_private_payments_sdk::{
         SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES,
     },
 };
-use wasm_bindgen::{JsCast, JsError, JsValue};
-use wasm_bindgen_futures::{JsFuture, spawn_local};
-use web_sys::{Request, RequestInit, RequestMode};
+use wasm_bindgen::JsError;
+use wasm_bindgen_futures::spawn_local;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 

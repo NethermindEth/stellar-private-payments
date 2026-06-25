@@ -172,12 +172,13 @@ impl WalletSigner {
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
     async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
+        let on_status = self.on_status.borrow().clone();
         let envelope = sign_prepared_transaction(
             &prepared.soroban_tx,
             &self.network_passphrase,
             &self.user_address,
             "pool",
-            &self.on_status.borrow(),
+            &on_status,
         )
         .await
         .map_err(|e| PoolError::Other(format!("{e:?}")))?;

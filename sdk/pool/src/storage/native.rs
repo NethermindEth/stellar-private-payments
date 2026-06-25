@@ -38,15 +38,11 @@ impl LocalStorage {
 #[async_trait::async_trait(?Send)]
 impl ContractDataStorage for LocalStorage {
     async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
-        self.storage()
-            .get_sync_metadata()
-            .map_err(anyhow::Error::from)
+        self.storage().get_sync_metadata()
     }
 
     async fn save_events_batch(&self, batch: ContractsEventData) -> anyhow::Result<()> {
-        self.storage_mut()
-            .save_events_batch(&batch)
-            .map_err(anyhow::Error::from)
+        self.storage_mut().save_events_batch(&batch)
     }
 
     async fn save_sync_progress(
@@ -56,7 +52,6 @@ impl ContractDataStorage for LocalStorage {
     ) -> anyhow::Result<()> {
         self.storage_mut()
             .save_sync_progress(&metadata, fully_indexed)
-            .map_err(anyhow::Error::from)
     }
 }
 
@@ -103,6 +98,6 @@ impl Storage for LocalStorage {
     }
 
     async fn process_pending_state(&self) -> Result<(), PoolError> {
-        process_local_state(&mut *self.storage_mut())
+        process_local_state(&mut self.storage_mut())
     }
 }

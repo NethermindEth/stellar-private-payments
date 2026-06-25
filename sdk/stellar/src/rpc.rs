@@ -278,6 +278,9 @@ pub struct ContractDataBulkRequest<'a> {
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
+/// Bulk contract reads keyed by contract ID and logical key name.
+pub type ContractDataBulkState = HashMap<String, HashMap<String, xdr::ScVal>>;
+
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
@@ -501,7 +504,7 @@ impl Client {
     pub async fn get_contract_data_bulk(
         &self,
         requests: &[ContractDataBulkRequest<'_>],
-    ) -> Result<(HashMap<String, HashMap<String, xdr::ScVal>>, u32), Error> {
+    ) -> Result<(ContractDataBulkState, u32), Error> {
         #[derive(Clone)]
         struct KeyMeta {
             contract_id: String,
@@ -533,7 +536,7 @@ impl Client {
         }
 
         if all_keys.is_empty() {
-            return Ok((HashMap::new(), 0));
+            return Ok((ContractDataBulkState::new(), 0));
         }
 
         let mut expected_required: HashMap<String, BTreeSet<String>> = HashMap::new();
@@ -547,7 +550,7 @@ impl Client {
         }
 
         let mut latest_ledger = u32::MAX;
-        let mut result: HashMap<String, HashMap<String, xdr::ScVal>> = HashMap::new();
+        let mut result: ContractDataBulkState = HashMap::new();
         let mut actual_required: HashMap<String, BTreeSet<String>> = HashMap::new();
 
         for chunk in all_keys.chunks(MAX_LEDGER_KEYS_PER_REQUEST) {
@@ -810,7 +813,7 @@ pub mod blocking {
         pub fn get_contract_data_bulk(
             &self,
             requests: &[ContractDataBulkRequest<'_>],
-        ) -> Result<(HashMap<String, HashMap<String, xdr::ScVal>>, u32), Error> {
+        ) -> Result<(ContractDataBulkState, u32), Error> {
             #[derive(Clone)]
             struct KeyMeta {
                 contract_id: String,
@@ -842,7 +845,7 @@ pub mod blocking {
             }
 
             if all_keys.is_empty() {
-                return Ok((HashMap::new(), 0));
+                return Ok((ContractDataBulkState::new(), 0));
             }
 
             let mut expected_required: HashMap<String, BTreeSet<String>> = HashMap::new();
@@ -856,7 +859,7 @@ pub mod blocking {
             }
 
             let mut latest_ledger = u32::MAX;
-            let mut result: HashMap<String, HashMap<String, xdr::ScVal>> = HashMap::new();
+            let mut result: ContractDataBulkState = HashMap::new();
             let mut actual_required: HashMap<String, BTreeSet<String>> = HashMap::new();
 
             for chunk in all_keys.chunks(MAX_LEDGER_KEYS_PER_REQUEST) {
