@@ -185,6 +185,22 @@ pub struct RecipientLookup {
     pub registry_last_fully_indexed_ledger: u32,
 }
 
+/// A high-level operation the user performed in a pool (deposit / sent /
+/// withdraw / advanced), persisted in `user_operations` and shown as pool history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserOperation {
+    pub op_type: String,
+    /// Amount in stroops (absolute), as a decimal string.
+    pub amount: String,
+    /// "in" | "out" | "none" — used to sign/colour the amount in the UI.
+    pub direction: String,
+    pub counterparty: Option<String>,
+    pub tx_hash: Option<String>,
+    /// Unix milliseconds when the operation was recorded (client clock).
+    pub created_at: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OperationalFeedItem {

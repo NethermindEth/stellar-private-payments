@@ -37,7 +37,7 @@ export const Templates = {
         poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
         poolLink.title = balance.poolContractId;
 
-        el.querySelectorAll('[data-quick-flow], [data-view-notes]').forEach(btn => {
+        el.querySelectorAll('[data-quick-flow], [data-view-notes], [data-view-history]').forEach(btn => {
             btn.dataset.poolId = balance.poolContractId;
         });
         return el;

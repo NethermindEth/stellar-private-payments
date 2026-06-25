@@ -306,6 +306,34 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }
+        StorageWorkerRequest::RecordOperation {
+            address,
+            pool_contract_id,
+            op_type,
+            amount,
+            direction,
+            counterparty,
+            tx_hash,
+        } => {
+            with_storage!(s => s.insert_operation(
+                &address,
+                &pool_contract_id,
+                &op_type,
+                &amount,
+                &direction,
+                counterparty.as_deref(),
+                tx_hash.as_deref(),
+            )?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ListOperations {
+            address,
+            pool_contract_id,
+            limit,
+        } => {
+            let list = with_storage!(s => s.list_operations(&address, &pool_contract_id, limit)?)?;
+            StorageWorkerResponse::Operations(list)
+        }
         StorageWorkerRequest::UnspentUserNotes {
             user_address,
             pool_contract_id,

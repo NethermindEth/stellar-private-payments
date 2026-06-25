@@ -8,7 +8,7 @@ use types::{
     EncryptionPrivateKey, EncryptionPublicKey, ExplorerSetting, Field, LeafAddedEvent,
     NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
     NotePublicKey, OperationalFeedItem, PoolConfigEntry, PoolLedgerActivity, PortfolioBalance,
-    PublicKeyEvent, RecipientLookup, UserNoteSummary,
+    PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -17,7 +17,9 @@ pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_EXPLORER_BASE_URL: &str = "https://stellar.expert/explorer/testnet";
 
-const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
+const MIGRATION_ARRAY: &[M] = &[
+    M::up(include_str!("schema.sql")),
+];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
@@ -1499,6 +1501,58 @@ impl Storage {
 /// overflow.
 fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
     u32::try_from(val).map_err(|_| SqlError::IntegralValueOutOfRange(col, val))
+}
+
+impl Storage {
+    pub fn insert_operation(
+        &self,
+        address: &str,
+        pool_contract_id: &str,
+        op_type: &str,
+        amount: &str,
+        direction: &str,
+        counterparty: Option<&str>,
+        tx_hash: Option<&str>,
+    ) -> Result<()> {
+        // created_at is filled by the DB as UTC epoch seconds, not the client clock.
+        self.conn.execute(
+            "INSERT INTO app_user_operations
+                (address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))",
+            params![address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_operations(
+        &self,
+        address: &str,
+        pool_contract_id: &str,
+        limit: u32,
+    ) -> Result<Vec<UserOperation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT op_type, amount, direction, counterparty, tx_hash, created_at
+             FROM app_user_operations
+             WHERE address = ?1 AND pool_contract_id = ?2
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![address, pool_contract_id, limit], |row| {
+            Ok(UserOperation {
+                op_type: row.get(0)?,
+                amount: row.get(1)?,
+                direction: row.get(2)?,
+                counterparty: row.get(3)?,
+                tx_hash: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
 }
 
 fn token_label(pool: &PoolConfigEntry) -> String {

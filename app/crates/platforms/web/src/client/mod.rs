@@ -547,6 +547,51 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = recordOperation)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_operation(
+        &self,
+        address: String,
+        pool_contract_id: String,
+        op_type: String,
+        amount: String,
+        direction: String,
+        counterparty: Option<String>,
+        tx_hash: Option<String>,
+    ) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::RecordOperation {
+            address,
+            pool_contract_id,
+            op_type,
+            amount,
+            direction,
+            counterparty,
+            tx_hash,
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = listOperations)]
+    pub async fn list_operations(
+        &self,
+        address: String,
+        pool_contract_id: String,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::ListOperations {
+            address,
+            pool_contract_id,
+            limit,
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Operations(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
     #[wasm_bindgen(js_name = getRecentPoolActivity)]
     pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecentPoolActivity(limit);

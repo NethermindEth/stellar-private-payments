@@ -1,6 +1,7 @@
 import { getHandle } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
+import { OpHistory } from './op-history.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -211,6 +212,9 @@ export const Transactions = {
                     statusUpdater(button),
                 );
                 if (this.showHashes(hashes, 'Deposit')) {
+                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+                        type: 'Deposit', amount: amount.value, direction: 'in', hashes,
+                    });
                     document.getElementById('deposit-amount').value = '';
                 }
             } catch (error) {
@@ -257,6 +261,10 @@ export const Transactions = {
                     statusUpdater(button),
                 );
                 if (this.showHashes(hashes, 'Transfer')) {
+                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+                        type: 'Sent', amount: amount.value, direction: 'out',
+                        counterparty: transferAddress.value.trim() || noteKey, hashes,
+                    });
                     document.getElementById('transfer-amount').value = '';
                     transferAddress.value = '';
                     transferRefs.noteKey.value = '';
@@ -290,6 +298,10 @@ export const Transactions = {
                     statusUpdater(button),
                 );
                 if (this.showHashes(hashes, 'Withdrawal')) {
+                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+                        type: 'Withdraw', amount: amount.value, direction: 'out',
+                        counterparty: recipient, hashes,
+                    });
                     document.getElementById('withdraw-amount').value = '';
                     document.getElementById('withdraw-recipient').value = '';
                 }
@@ -333,6 +345,12 @@ export const Transactions = {
                     statusUpdater(button),
                 );
                 if (this.showHashes(hashes, 'Advanced transaction')) {
+                    const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
+                    const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
+                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+                        type: 'Advanced', amount: absAmount, direction,
+                        counterparty: direction === 'out' ? recipient : null, hashes,
+                    });
                     this.buildAdvancedComposer();
                     document.getElementById('advanced-public-deposit').value = '';
                     document.getElementById('advanced-public-withdraw').value = '';

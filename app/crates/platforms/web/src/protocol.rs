@@ -7,7 +7,7 @@ use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
     ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
     OperationalFeedItem, PoolLedgerActivity, PortfolioBalance, PublicKeyEntry, RecipientLookup,
-    SyncMetadata, UserNoteSummary,
+    SyncMetadata, UserNoteSummary, UserOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +66,20 @@ pub enum StorageWorkerRequest {
     AspSecret(Address),
     UserNotes(Address, u32),
     PortfolioBalances(Address),
+    RecordOperation {
+        address: Address,
+        pool_contract_id: String,
+        op_type: String,
+        amount: String,
+        direction: String,
+        counterparty: Option<String>,
+        tx_hash: Option<String>,
+    },
+    ListOperations {
+        address: Address,
+        pool_contract_id: String,
+        limit: u32,
+    },
     UnspentUserNotes {
         user_address: Address,
         pool_contract_id: Address,
@@ -99,6 +113,7 @@ pub enum StorageWorkerResponse {
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
     PortfolioBalances(Vec<PortfolioBalance>),
+    Operations(Vec<UserOperation>),
     RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
     RecipientLookup(RecipientLookup),
