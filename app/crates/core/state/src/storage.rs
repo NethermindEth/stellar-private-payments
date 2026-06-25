@@ -5,17 +5,16 @@ use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
 use types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
-    EncryptionPrivateKey, EncryptionPublicKey, ExplorerSetting, Field, LeafAddedEvent,
-    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup,
-    UserNoteSummary, UserOperation,
+    EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
+    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
+    PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
+    UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
-pub const DEFAULT_EXPLORER_BASE_URL: &str = "https://stellar.expert/explorer/testnet";
 
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
@@ -370,23 +369,6 @@ impl Storage {
             &BootnodeSetting {
                 enabled,
                 url: url.to_string(),
-            },
-        )
-    }
-
-    pub fn get_explorer_setting(&self) -> Result<ExplorerSetting> {
-        Ok(self
-            .get_setting_json(APP_SETTING_EXPLORER)?
-            .unwrap_or(ExplorerSetting {
-                base_url: DEFAULT_EXPLORER_BASE_URL.to_string(),
-            }))
-    }
-
-    pub fn set_explorer_setting(&mut self, base_url: &str) -> Result<()> {
-        self.set_setting_json(
-            APP_SETTING_EXPLORER,
-            &ExplorerSetting {
-                base_url: base_url.to_string(),
             },
         )
     }
