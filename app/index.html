@@ -55,9 +55,11 @@
                     </nav>
 
                     <div class="flex items-center gap-2">
-                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network">
-                            <span class="h-2 w-2 rounded-full bg-cyan-300 shadow-[0_0_18px_rgba(34,211,238,0.8)]"></span>
+                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network & sync status">
+                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-slate-500"></span>
                             <span id="network-name">NETWORK</span>
+                            <span class="text-slate-600">·</span>
+                            <span id="sync-status" class="text-slate-400">Offline</span>
                         </div>
                         <button id="wallet-btn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110">
                             Connect Freighter

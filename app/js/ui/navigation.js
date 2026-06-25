@@ -114,6 +114,25 @@ function renderWallet() {
     walletBtn?.classList.toggle('hidden', connected);
     walletAddress.textContent = App.state.wallet.address || 'Not connected';
     document.getElementById('network-name').textContent = App.state.wallet.network?.toUpperCase() || 'NETWORK';
+    renderSyncStatus();
+}
+
+// Sync indicator lives inside the network pill: grey/Offline when disconnected,
+// pulsing amber/Syncing until the registry is caught up, green/Synced after.
+function renderSyncStatus() {
+    const dot = document.getElementById('sync-dot');
+    const text = document.getElementById('sync-status');
+    if (!dot || !text) return;
+    if (!App.state.wallet.connected) {
+        text.textContent = 'Offline';
+        dot.className = 'h-2 w-2 rounded-full bg-slate-500';
+        return;
+    }
+    const synced = !!App.state.profile?.registryLookup?.registryFullySynced;
+    text.textContent = synced ? 'Synced' : 'Syncing';
+    dot.className = synced
+        ? 'h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_18px_rgba(52,211,153,0.7)]'
+        : 'h-2 w-2 rounded-full bg-amber-300 animate-pulse-dot';
 }
 
 function renderSettingsDrawer() {
@@ -200,8 +219,11 @@ export const Shell = {
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
+        App.events.addEventListener('profile:updated', renderSyncStatus);
+
         setActiveView('dashboard');
         setMoveFlow('deposit');
+        renderSyncStatus();
     },
 };
 
