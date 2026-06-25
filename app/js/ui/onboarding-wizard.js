@@ -46,10 +46,6 @@ function setPersistPromptedFlag() {
     }
 }
 
-function setHidden(el, hidden) {
-    el?.classList.toggle('hidden', !!hidden);
-}
-
 function setError(message) {
     const el = document.getElementById('onboarding-error');
     if (!el) return;

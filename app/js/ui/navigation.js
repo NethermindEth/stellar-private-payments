@@ -4,10 +4,6 @@ import { App, Toast, Utils } from './core.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
-function setHidden(el, hidden) {
-    el?.classList.toggle('hidden', !!hidden);
-}
-
 function isRpcSyncGapError(message) {
     return typeof message === 'string' && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
 }
