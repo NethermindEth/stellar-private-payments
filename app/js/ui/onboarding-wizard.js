@@ -294,7 +294,10 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
         ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
-        [registryLookup?.entry ? null : 'registration'].filter(Boolean),
+        // Only offer registration when the registry is fully synced AND there's no
+        // entry. If the local registry hasn't synced yet, the lookup can't prove the
+        // user is unregistered — skip it rather than falsely suggesting registration.
+        ...((!registryLookup?.entry && registryLookup?.registryFullySynced) ? ['registration'] : []),
     ].flat();
 
     // Registration is optional (also available later from Settings), so it must
