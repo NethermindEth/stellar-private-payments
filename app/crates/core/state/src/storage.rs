@@ -1,5 +1,5 @@
 use crate::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
 use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
@@ -575,7 +575,10 @@ impl Storage {
                 .entry(pool_contract_id)
                 .or_insert((0u32, NoteAmount::ZERO));
             entry.0 = entry.0.saturating_add(1);
-            entry.1 += amount;
+            entry.1 = entry
+                .1
+                .checked_add(amount)
+                .ok_or_else(|| anyhow!("overflow computing total balance"))?;
         }
 
         let mut balances = Vec::new();
@@ -1451,6 +1454,7 @@ fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
 }
 
 impl Storage {
+    #[allow(clippy::too_many_arguments)]
     pub fn insert_operation(
         &self,
         address: &str,
