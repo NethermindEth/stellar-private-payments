@@ -56,3 +56,10 @@ docs/book/
 ceremony/
 *.ptau
 artifacts.zip
+
+# ZKey files (trusted setup artifacts)
+circuits/**/*.zkey
+circuits/testdata/pot14_*.ptau
+
+# VK parameters (generated)
+contracts/spm/src/vk_params.rs

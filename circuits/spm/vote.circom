@@ -1,18 +1,4 @@
-pragma circom 2.2.2;
-
-// Binary Vote Circuit
-// Proves a valid vote with commitment and nullifier
-//
-// PUBLIC INPUTS:
-// - nullifier_root: Root of the nullifier Merkle tree
-// - vote_commitment: H(vote, nonce) committed on-chain
-//
-// PRIVATE INPUTS:
-// - nonce: Random value to hide the vote
-// - vote: 0 or 1 (the actual vote choice)
-// - nullifier_path_elements: Merkle proof path elements
-// - nullifier_path_indices: Merkle proof path indices
-// - nullifier: Unique value to prevent double-voting
+pragma circom 2.0.0;
 
 include "circomlib/circuits/poseidon.circom";
 include "./merkleproof.circom";
