@@ -71,6 +71,7 @@ export const Dashboard = {
         if (balancesRes.status === 'fulfilled') {
             App.state.balances = Array.isArray(balancesRes.value) ? balancesRes.value : [];
             this.renderBalances();
+            App.events.dispatchEvent(new CustomEvent('balances:updated'));
         } else {
             console.warn('[Dashboard] balances refresh failed:', balancesRes.reason);
         }

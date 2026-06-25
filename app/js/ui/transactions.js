@@ -63,6 +63,14 @@ function updatePoolLabels() {
     });
 }
 
+// Show the balance of the currently selected token in Move Funds.
+function updateMoveFundsBalance() {
+    const el = document.getElementById('move-funds-balance');
+    if (!el) return;
+    const balance = (App.state.balances || []).find(b => b.poolContractId === App.state.selectedPoolId);
+    el.textContent = balance ? Utils.formatTokenAmount(balance.amount, balance.tokenLabel) : '—';
+}
+
 async function lookupRecipient(address, refs) {
     refs.warning.textContent = '';
     refs.status.textContent = '';
@@ -172,6 +180,7 @@ export const Transactions = {
         this.bindMoveFunds();
         this.bindAdvancedTransact();
         updatePoolLabels();
+        updateMoveFundsBalance();
     },
 
     buildAdvancedComposer() {
@@ -192,6 +201,9 @@ export const Transactions = {
     bindSharedEvents() {
         App.events.addEventListener('pool:config', updatePoolLabels);
         App.events.addEventListener('pool:selected', updatePoolLabels);
+        App.events.addEventListener('pool:config', updateMoveFundsBalance);
+        App.events.addEventListener('pool:selected', updateMoveFundsBalance);
+        App.events.addEventListener('balances:updated', updateMoveFundsBalance);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success');
