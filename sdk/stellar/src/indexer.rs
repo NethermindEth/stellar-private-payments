@@ -165,8 +165,9 @@ impl<S: ContractDataStorage> Indexer<S> {
         Ok(may_have_more)
     }
 
-    /// Fetch RPC event pages until caught up with the network tip.
-    pub async fn sync_until_caught_up(&self) -> Result<()> {
+    /// Ingest contract events from RPC until pagination reaches the network
+    /// tip.
+    pub async fn catch_up(&self) -> Result<()> {
         while self.fetch_contract_events().await? {}
         Ok(())
     }

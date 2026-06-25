@@ -2,7 +2,6 @@
 
 use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
-use stellar::Client;
 use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NotePublicKey};
 
@@ -91,6 +90,6 @@ pub trait Storage: stellar::ContractDataStorage {
         Ok(self.user_public_keys(user_address).await?.0)
     }
 
-    /// Run after indexer fetch rounds (derive notes, wait for worker, etc.).
-    async fn finalize_sync(&self, client: &Client) -> Result<(), PoolError>;
+    /// Finalize local processing after RPC ingest
+    async fn process_pending_state(&self) -> Result<(), PoolError>;
 }

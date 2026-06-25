@@ -2,7 +2,7 @@ use std::{cell::RefCell, path::PathBuf, sync::Arc};
 
 use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
-use stellar::{Client, ContractDataStorage};
+use stellar::ContractDataStorage;
 use tx_planner::SpendableNote;
 use types::{ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata};
 
@@ -102,7 +102,7 @@ impl Storage for LocalStorage {
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 
-    async fn finalize_sync(&self, _client: &Client) -> Result<(), PoolError> {
+    async fn process_pending_state(&self) -> Result<(), PoolError> {
         process_local_state(&mut *self.storage_mut())
     }
 }

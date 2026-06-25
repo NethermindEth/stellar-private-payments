@@ -196,11 +196,11 @@ impl<S: Storage> PrivatePool<S> {
         )
         .map_err(|e| PoolError::Other(format!("indexer: {e:#}")))?;
         indexer
-            .sync_until_caught_up()
+            .catch_up()
             .await
-            .map_err(|e| PoolError::Other(format!("indexer sync: {e:#}")))?;
+            .map_err(|e| PoolError::Other(format!("indexer catch-up: {e:#}")))?;
 
-        self.storage.finalize_sync(&self.client).await?;
+        self.storage.process_pending_state().await?;
 
         let (_, to_ledger) = sync_ledger_bounds(&self.storage).await?;
         Ok(SyncResult {

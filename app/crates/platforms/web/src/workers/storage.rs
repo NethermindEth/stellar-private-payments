@@ -14,7 +14,7 @@ use std::cell::RefCell;
 use stellar_private_payments_sdk::{
     BuildTransactParams, PoolError, Storage, TransactRequest, build_transact_params,
     build_validated_pool_tree,
-    chain::{Client, ContractDataStorage},
+    chain::ContractDataStorage,
     load_user_key_material,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
@@ -502,20 +502,6 @@ impl StorageBridge {
             _ => None,
         }
     }
-
-    fn ledger_range(metadata: &[SyncMetadata]) -> (u32, u32) {
-        let from = metadata
-            .iter()
-            .map(|meta| meta.last_indexed_ledger)
-            .min()
-            .unwrap_or(0);
-        let to = metadata
-            .iter()
-            .map(|meta| meta.last_indexed_ledger)
-            .max()
-            .unwrap_or(from);
-        (from, to)
-    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -566,23 +552,10 @@ impl Storage for StorageBridge {
         })
     }
 
-    async fn finalize_sync(&self, client: &Client) -> Result<(), PoolError> {
-        loop {
-            let tip = client
-                .get_latest_ledger()
-                .await
-                .map_err(|e| PoolError::Other(format!("latest ledger: {e:#}")))?
-                .sequence;
-            let metadata = self
-                .get_sync_state()
-                .await
-                .map_err(|e| PoolError::Other(e.to_string()))?;
-            let (_, to) = Self::ledger_range(&metadata);
-            if to >= tip {
-                return Ok(());
-            }
-            TimeoutFuture::new(1_000).await;
-        }
+    async fn process_pending_state(&self) -> Result<(), PoolError> {
+        // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
+        // in the worker background loop without blocking this bridge.
+        Ok(())
     }
 
     async fn ensure_ready(&self) -> Result<(), PoolError> {
