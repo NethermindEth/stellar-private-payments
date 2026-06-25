@@ -1,0 +1,9 @@
+{
+  "contract_id": "CD3VMIEISSHPRQSQPGQZ2CVCQQT4YY2BI7JAFUFCUKEX45E2XQLXRKYO",
+  "network": "testnet",
+  "deployed_at": "2026-06-25T14:30:00Z",
+  "alias": "spm",
+  "wasm_hash": "ab7688008ec5a48c4005ab4cf792aefe228ad457a938d804711f1d2e43daa8cf",
+  "version": "0.1.0",
+  "explorer": "https://stellar.expert/explorer/testnet/account/CD3VMIEISSHPRQSQPGQZ2CVCQQT4YY2BI7JAFUFCUKEX45E2XQLXRKYO"
+}
