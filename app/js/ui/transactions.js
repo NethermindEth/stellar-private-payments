@@ -309,7 +309,10 @@ export const Transactions = {
 
     showHashes(hashes, label = 'Transaction') {
         if (!Array.isArray(hashes) || !hashes.length) {
-            Toast.show(`${label} submitted`, 'success');
+            // The backend returns no transaction hashes when the account is not yet
+            // in the ASP allow-list (RegisterAtASP). Nothing was submitted, so warn
+            // the user instead of reporting success.
+            Toast.show('Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.', 'error', 8000);
             return;
         }
         const lastHash = hashes[hashes.length - 1];
