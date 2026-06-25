@@ -592,17 +592,6 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = getRecentPoolActivity)]
-    pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::RecentPoolActivity(limit);
-        match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::RecentPoolActivity(list) => {
-                Ok(serde_wasm_bindgen::to_value(&list)?)
-            }
-            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
-        }
-    }
-
     #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
     pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecipientLookup {

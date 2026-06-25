@@ -144,15 +144,6 @@ pub struct UserNoteSummary {
     pub spent: bool,
 }
 
-/// Aggregated pool activity for a single ledger.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct PoolLedgerActivity {
-    pub ledger: u32,
-    pub commitments: u32,
-    pub nullifiers: u32,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BootnodeSetting {

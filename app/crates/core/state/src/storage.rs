@@ -7,7 +7,7 @@ use types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
     EncryptionPrivateKey, EncryptionPublicKey, ExplorerSetting, Field, LeafAddedEvent,
     NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
-    NotePublicKey, OperationalFeedItem, PoolConfigEntry, PoolLedgerActivity, PortfolioBalance,
+    NotePublicKey, OperationalFeedItem, PoolConfigEntry, PortfolioBalance,
     PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
 };
 
@@ -728,46 +728,6 @@ impl Storage {
         Ok(out)
     }
 
-    /// Returns recent pool activity grouped by ledger (newest first).
-    pub fn get_recent_pool_activity(&self, limit_ledgers: u32) -> Result<Vec<PoolLedgerActivity>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT ledger, SUM(commitments) AS commitments, SUM(nullifiers) AS nullifiers
-             FROM (
-                SELECT r.ledger AS ledger, COUNT(*) AS commitments, 0 AS nullifiers
-                FROM pool_commitments c
-                JOIN raw_contract_events r ON r.id = c.event_id
-                GROUP BY r.ledger
-                UNION ALL
-                SELECT r.ledger AS ledger, 0 AS commitments, COUNT(*) AS nullifiers
-                FROM pool_nullifiers n
-                JOIN raw_contract_events r ON r.id = n.event_id
-                GROUP BY r.ledger
-             )
-             GROUP BY ledger
-             ORDER BY ledger DESC
-             LIMIT ?1",
-        )?;
-
-        let rows = stmt.query_map(params![limit_ledgers], |row| {
-            let ledger_i64: i64 = row.get(0)?;
-            let ledger = col_u32(ledger_i64, 0)?;
-            let commitments_i64: i64 = row.get(1)?;
-            let commitments = col_u32(commitments_i64, 1)?;
-            let nullifiers_i64: i64 = row.get(2)?;
-            let nullifiers = col_u32(nullifiers_i64, 2)?;
-            Ok(PoolLedgerActivity {
-                ledger,
-                commitments,
-                nullifiers,
-            })
-        })?;
-
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
 
     /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no
     /// gaps.

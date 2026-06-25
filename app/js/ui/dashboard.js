@@ -63,7 +63,7 @@ export const Dashboard = {
         const address = App.state.wallet.address;
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
             getHandle().webClient.getPortfolioBalances(address),
-            getHandle().webClient.getOperationalFeed(8),
+            getHandle().webClient.getOperationalFeed(5),
             getHandle().webClient.lookupRegisteredPublicKey(address),
         ]);
 

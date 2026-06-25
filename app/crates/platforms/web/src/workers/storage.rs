@@ -350,12 +350,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
-        StorageWorkerRequest::RecentPoolActivity(limit) => {
-            log::trace!("[{WORKER_NAME}] fetch recent pool activity");
-            let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
-            log::trace!("[{WORKER_NAME}] fetched {} pool activity rows", list.len());
-            StorageWorkerResponse::RecentPoolActivity(list)
-        }
         StorageWorkerRequest::RecentPubKeys(limit) => {
             log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;

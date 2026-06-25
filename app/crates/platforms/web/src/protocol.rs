@@ -6,7 +6,7 @@ use stellar::PreparedSorobanTx;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
     ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PoolLedgerActivity, PortfolioBalance, PublicKeyEntry, RecipientLookup,
+    OperationalFeedItem, PortfolioBalance, PublicKeyEntry, RecipientLookup,
     SyncMetadata, UserNoteSummary, UserOperation,
 };
 
@@ -84,7 +84,6 @@ pub enum StorageWorkerRequest {
         user_address: Address,
         pool_contract_id: Address,
     },
-    RecentPoolActivity(u32),
     RecentPubKeys(u32),
     RecipientLookup {
         address: Address,
@@ -114,7 +113,6 @@ pub enum StorageWorkerResponse {
     UserNotes(Vec<UserNoteSummary>),
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),
-    RecentPoolActivity(Vec<PoolLedgerActivity>),
     PubKeys(Vec<PublicKeyEntry>),
     RecipientLookup(RecipientLookup),
     OperationalFeed(Vec<OperationalFeedItem>),
