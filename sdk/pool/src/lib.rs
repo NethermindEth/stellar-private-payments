@@ -94,7 +94,7 @@ pub use transact::{
 };
 pub use tx_planner::SpendableNote;
 pub use types::{
-    Estimate, PoolChainConfig, PrivatePoolConfig, ProverArtifacts, SignedTransaction, SyncResult,
+    Estimate, PoolChainConfig, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
     TransactChainContext, TransactionResult, TransferRecipient,
 };
 

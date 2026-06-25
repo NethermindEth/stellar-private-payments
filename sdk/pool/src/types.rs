@@ -75,16 +75,6 @@ impl PrivatePoolConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct SyncResult {
-    pub from_ledger: u32,
-    pub to_ledger: u32,
-    pub new_commitments: u32,
-    pub new_nullifiers: u32,
-    pub new_membership_leaves: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct TransactionResult {
     pub tx_hash: String,
 }

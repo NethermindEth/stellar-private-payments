@@ -10,12 +10,14 @@ use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
-    PoolError, TransactionResult, TransferRecipient,
+    PoolError, PreparedTransactionPlan, PrivatePool, TransactionResult, TransferRecipient,
     tx::flows::N_OUTPUTS,
     types::{AspMembershipSync, EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey},
 };
 use tx_planner::{SpendTarget, Transact};
 use wasm_bindgen::JsError;
+
+use crate::workers::storage::StorageBridge;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -28,58 +30,84 @@ fn tx_hashes(results: Vec<TransactionResult>) -> Vec<String> {
 }
 
 impl WebClient {
-    async fn run_pool_transact(
+    async fn execute_plan(
         &self,
-        pool_contract_id: String,
-        user_address: String,
-        network_passphrase: String,
-        on_status: Option<Function>,
+        pool: &PrivatePool<StorageBridge>,
+        plan: &mut PreparedTransactionPlan,
         flow: &'static str,
-        step: Transact,
+        on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
-        let pool = self
-            .ensure_pool(
-                pool_contract_id,
-                user_address,
-                network_passphrase,
-                on_status.clone(),
-            )
-            .await?;
-        emit_progress(
-            &on_status,
-            flow,
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-        emit_progress(&on_status, flow, "prove", "Proving…", None, None);
+        self.set_signer_flow(flow);
+        let on_status = &on_status;
+        let total = plan.tx_count();
+        let mut hashes = Vec::new();
 
-        loop {
-            match pool.transact(step.clone()).await {
-                Ok(result) => return Ok(Some(vec![result.tx_hash])),
-                Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
-                    log::warn!("[{flow}] account should register within ASP");
-                    return Ok(None);
+        while !plan.is_complete() {
+            let current = plan.current_tx().saturating_add(1);
+
+            let mut prepared = loop {
+                let prove_message = if total > 1 {
+                    format!("Proving step {current}/{total}…")
+                } else {
+                    "Proving…".to_string()
+                };
+                emit_progress(
+                    on_status,
+                    flow,
+                    "prove",
+                    prove_message,
+                    Some(current),
+                    Some(total),
+                );
+
+                match pool.prove_next(plan).await {
+                    Ok(prepared) => break prepared,
+                    Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
+                        log::warn!("[{flow}] account should register within ASP");
+                        return Ok(None);
+                    }
+                    Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
+                        log::info!("[{flow}] sync is needed - waiting the indexer");
+                        emit_progress(
+                            on_status,
+                            flow,
+                            "sync_wait",
+                            if let Some(gap) = gap {
+                                format!("Waiting to sync {gap} ledger(s) from the chain…")
+                            } else {
+                                "Waiting to sync ledgers from the chain…".to_string()
+                            },
+                            Some(current),
+                            Some(total),
+                        );
+                        TimeoutFuture::new(1_000).await;
+                    }
+                    Err(error) => return Err(pool_err(error)),
                 }
-                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
-                    emit_progress(
-                        &on_status,
-                        flow,
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain…")
-                        } else {
-                            "Waiting to sync ledgers from the chain…".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                }
-                Err(error) => return Err(pool_err(error)),
-            }
+            };
+
+            pool.simulate(&mut prepared).await.map_err(pool_err)?;
+            let signed = pool.sign(&prepared).await.map_err(pool_err)?;
+
+            let submit_message = if total > 1 {
+                format!("Submitting step {current}/{total}…")
+            } else {
+                "Submitting…".to_string()
+            };
+            emit_progress(
+                on_status,
+                flow,
+                "submit",
+                submit_message,
+                Some(current),
+                Some(total),
+            );
+            let hash = pool.submit(signed).await.map_err(pool_err)?;
+            self.confirm_with_progress(&hash, flow, on_status).await?;
+            hashes.push(hash);
         }
+
+        Ok(Some(hashes))
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -124,15 +152,17 @@ impl WebClient {
                 [Some(note_pk.clone()), Some(note_pk)],
                 [Some(enc_pk.clone()), Some(enc_pk)],
             );
-            return self
-                .run_pool_transact(
+            let pool = self
+                .ensure_pool(
                     pool_contract_id,
                     user_address,
                     network_passphrase,
-                    on_status,
-                    "deposit",
-                    step,
+                    on_status.clone(),
                 )
+                .await?;
+            let mut plan = pool.prepare_transact(step);
+            return self
+                .execute_plan(&pool, &mut plan, "deposit", on_status)
                 .await;
         }
 
@@ -144,40 +174,9 @@ impl WebClient {
                 on_status.clone(),
             )
             .await?;
-        emit_progress(
-            &on_status,
-            "deposit",
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-        emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
-        loop {
-            match pool.deposit(note_amount).await {
-                Ok(result) => return Ok(Some(vec![result.tx_hash])),
-                Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
-                    log::warn!("[deposit] account should register within ASP");
-                    return Ok(None);
-                }
-                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
-                    emit_progress(
-                        &on_status,
-                        "deposit",
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain…")
-                        } else {
-                            "Waiting to sync ledgers from the chain…".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                }
-                Err(error) => return Err(pool_err(error)),
-            }
-        }
+        let mut plan = pool.prepare_deposit(note_amount).map_err(pool_err)?;
+        self.execute_plan(&pool, &mut plan, "deposit", on_status)
+            .await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -204,57 +203,25 @@ impl WebClient {
                 on_status.clone(),
             )
             .await?;
-        emit_progress(
-            &on_status,
-            flow,
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-
-        loop {
-            let wallet = pool.spendable_notes().await.map_err(pool_err)?;
-            let result = match &target {
-                SpendTarget::Transfer {
-                    recipient_note,
-                    recipient_enc,
-                } => {
-                    let recipient = TransferRecipient {
-                        note_public_key: recipient_note.clone(),
-                        encryption_public_key: recipient_enc.clone(),
-                    };
-                    pool.transfer(&wallet, recipient, amount).await
-                }
-                SpendTarget::Withdraw { recipient } => {
-                    pool.withdraw(&wallet, amount, recipient.clone()).await
-                }
-            };
-
-            match result {
-                Ok(results) => return Ok(Some(tx_hashes(results))),
-                Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
-                    log::warn!("[{flow}] account should register within ASP");
-                    return Ok(None);
-                }
-                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
-                    emit_progress(
-                        &on_status,
-                        flow,
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain…")
-                        } else {
-                            "Waiting to sync ledgers from the chain…".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                }
-                Err(error) => return Err(pool_err(error)),
+        let wallet = pool.spendable_notes().await.map_err(pool_err)?;
+        let mut plan = match &target {
+            SpendTarget::Transfer {
+                recipient_note,
+                recipient_enc,
+            } => {
+                let recipient = TransferRecipient {
+                    note_public_key: recipient_note.clone(),
+                    encryption_public_key: recipient_enc.clone(),
+                };
+                pool.prepare_transfer(&wallet, recipient, amount)
+            }
+            SpendTarget::Withdraw { recipient } => {
+                pool.prepare_withdraw(&wallet, amount, recipient.clone())
             }
         }
+        .map_err(pool_err)?;
+
+        self.execute_plan(&pool, &mut plan, flow, on_status).await
     }
 
     pub(super) async fn plan_inner(
@@ -272,8 +239,7 @@ impl WebClient {
         let pool = self
             .ensure_pool(pool_contract_id, user_address, network_passphrase, None)
             .await?;
-        let wallet = pool.spendable_notes().await.map_err(pool_err)?;
-        let estimate = pool.estimate(&wallet, amount).map_err(pool_err)?;
+        let estimate = pool.plan(amount).await.map_err(pool_err)?;
         Ok(SpendPlanPreview {
             step_count: estimate.tx_count,
         })
@@ -327,14 +293,15 @@ impl WebClient {
             out_enc_pks,
         );
 
-        self.run_pool_transact(
-            pool_contract_id,
-            user_address,
-            network_passphrase,
-            on_status,
-            flow,
-            step,
-        )
-        .await
+        let pool = self
+            .ensure_pool(
+                pool_contract_id,
+                user_address,
+                network_passphrase,
+                on_status.clone(),
+            )
+            .await?;
+        let mut plan = pool.prepare_transact(step);
+        self.execute_plan(&pool, &mut plan, flow, on_status).await
     }
 }

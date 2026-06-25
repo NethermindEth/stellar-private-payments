@@ -19,8 +19,8 @@ use crate::{
     storage::Storage,
     transact::transact_request_from_step,
     types::{
-        Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
-        TransactionResult, TransferRecipient,
+        Estimate, PrivatePoolConfig, SignedTransaction, TransactChainContext, TransactionResult,
+        TransferRecipient,
     },
 };
 
@@ -193,9 +193,7 @@ impl<S: Storage> PrivatePool<S> {
             })
     }
 
-    pub async fn sync(&self) -> Result<SyncResult, PoolError> {
-        let (from_ledger, _) = sync_ledger_bounds(&self.storage).await?;
-
+    pub async fn sync(&self) -> Result<(), PoolError> {
         let indexer = Indexer::init(
             self.client.clone(),
             self.storage.fork()?,
@@ -208,22 +206,63 @@ impl<S: Storage> PrivatePool<S> {
             .await
             .map_err(|e| PoolError::Other(format!("indexer catch-up: {e:#}")))?;
 
-        self.storage.process_pending_state().await?;
+        self.storage.process_pending_state().await
+    }
 
-        let (_, to_ledger) = sync_ledger_bounds(&self.storage).await?;
-        Ok(SyncResult {
-            from_ledger,
-            to_ledger,
-            new_commitments: 0,
-            new_nullifiers: 0,
-            new_membership_leaves: 0,
-        })
+    /// Estimate how many on-chain transactions a spend of `amount` requires.
+    pub async fn plan(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
+        let wallet = self.spendable_notes().await?;
+        self.estimate(&wallet, amount)
+    }
+
+    pub fn prepare_deposit(
+        &self,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_deposit(amount)
+    }
+
+    pub fn prepare_transfer(
+        &self,
+        wallet: &[SpendableNote],
+        recipient: TransferRecipient,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_transfer(wallet, recipient, amount)
+    }
+
+    pub fn prepare_withdraw(
+        &self,
+        wallet: &[SpendableNote],
+        amount: NoteAmount,
+        recipient: impl Into<String>,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_withdraw(wallet, amount, recipient)
+    }
+
+    pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
+        PreparedTransactionPlan::from_transact(step)
+    }
+
+    /// Prove and advance the next transaction in `plan`.
+    pub async fn prove_next(
+        &self,
+        plan: &mut PreparedTransactionPlan,
+    ) -> Result<PreparedTransaction, PoolError> {
+        self.next_prepared_transaction(plan).await
+    }
+
+    pub async fn sign(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, PoolError> {
+        self.signer.sign(prepared).await
     }
 
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
-        let mut plan = self.core.prepare_deposit(amount)?;
-        let mut results = self.execute(&mut plan).await?;
-        results
+        let mut plan = self.prepare_deposit(amount)?;
+        self.execute(&mut plan)
+            .await?
             .pop()
             .ok_or_else(|| PoolError::Other("deposit produced no transaction".into()))
     }
@@ -234,7 +273,7 @@ impl<S: Storage> PrivatePool<S> {
         recipient: TransferRecipient,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        let mut plan = self.core.prepare_transfer(wallet, recipient, amount)?;
+        let mut plan = self.prepare_transfer(wallet, recipient, amount)?;
         self.execute(&mut plan).await
     }
 
@@ -244,15 +283,15 @@ impl<S: Storage> PrivatePool<S> {
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        let mut plan = self.core.prepare_withdraw(wallet, amount, recipient)?;
+        let mut plan = self.prepare_withdraw(wallet, amount, recipient)?;
         self.execute(&mut plan).await
     }
 
     /// Execute a single low-level `transact` step (custom inputs/outputs).
     pub async fn transact(&self, step: Transact) -> Result<TransactionResult, PoolError> {
-        let mut plan = PreparedTransactionPlan::transact(step);
-        let mut results = self.execute(&mut plan).await?;
-        results
+        let mut plan = self.prepare_transact(step);
+        self.execute(&mut plan)
+            .await?
             .pop()
             .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
     }
@@ -278,9 +317,9 @@ impl<S: Storage> PrivatePool<S> {
     ) -> Result<Vec<TransactionResult>, PoolError> {
         let mut results = Vec::new();
         while !plan.is_complete() {
-            let mut prepared = self.next_prepared_transaction(plan).await?;
+            let mut prepared = self.prove_next(plan).await?;
             self.simulate(&mut prepared).await?;
-            let signed = self.signer.sign(&prepared).await?;
+            let signed = self.sign(&prepared).await?;
             let hash = self.submit(signed).await?;
             let result = self.confirm(&hash).await?;
             results.push(result);
@@ -295,22 +334,4 @@ impl<S: Storage> PrivatePool<S> {
             .await?;
         self.core.deposit_transact_step(note_pub, enc_pub, amount)
     }
-}
-
-async fn sync_ledger_bounds<S: Storage>(storage: &S) -> Result<(u32, u32), PoolError> {
-    let metadata = storage
-        .get_sync_state()
-        .await
-        .map_err(|e| PoolError::Other(e.to_string()))?;
-    let from = metadata
-        .iter()
-        .map(|meta| meta.last_indexed_ledger)
-        .min()
-        .unwrap_or(0);
-    let to = metadata
-        .iter()
-        .map(|meta| meta.last_indexed_ledger)
-        .max()
-        .unwrap_or(from);
-    Ok((from, to))
 }

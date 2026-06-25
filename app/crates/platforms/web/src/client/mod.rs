@@ -35,6 +35,7 @@ struct WebClientPool {
     network_passphrase: String,
     private_pool: Option<Rc<PrivatePool<StorageBridge>>>,
     signer_progress: Rc<RefCell<Option<Function>>>,
+    signer_flow: Rc<RefCell<&'static str>>,
 }
 
 impl WebClientPool {
@@ -45,6 +46,7 @@ impl WebClientPool {
             network_passphrase: String::new(),
             private_pool: None,
             signer_progress: Rc::new(RefCell::new(None)),
+            signer_flow: Rc::new(RefCell::new("pool")),
         }
     }
 
@@ -54,6 +56,7 @@ impl WebClientPool {
         self.network_passphrase.clear();
         self.private_pool = None;
         *self.signer_progress.borrow_mut() = None;
+        *self.signer_flow.borrow_mut() = "pool";
     }
 
     fn matches(
@@ -217,10 +220,15 @@ impl WebClient {
             prover_artifacts: ProverArtifacts::empty(),
         };
         let signer_progress = Rc::new(RefCell::new(on_status));
+        let signer_flow = {
+            let pool_state = self.pool.borrow();
+            Rc::clone(&pool_state.signer_flow)
+        };
         let signer: Box<dyn Signer> = Self::wallet_signer(
             network_passphrase.clone(),
             user_address.clone(),
             Rc::clone(&signer_progress),
+            signer_flow,
         );
         let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
         let private_pool =
@@ -237,36 +245,17 @@ impl WebClient {
         Ok(private_pool)
     }
 
-    pub(crate) fn storage(&self) -> StorageBridge {
-        self.storage.clone()
+    pub(super) fn set_signer_flow(&self, flow: &'static str) {
+        *self.pool.borrow().signer_flow.borrow_mut() = flow;
     }
 
-    pub(crate) fn prover_bridge(&self) -> ProverBridge {
-        self.prover_bridge.clone()
-    }
-
-    fn wallet_signer(
-        network_passphrase: String,
-        user_address: String,
-        on_status: Rc<RefCell<Option<Function>>>,
-    ) -> Box<dyn Signer> {
-        Box::new(crate::signer::WalletSigner::new(
-            network_passphrase,
-            user_address,
-            on_status,
-        ))
-    }
-
-    pub(super) async fn submit_tx(
+    pub(super) async fn confirm_with_progress(
         &self,
-        signed: &TransactionEnvelope,
+        hash: &str,
         flow: &'static str,
         on_status: &Option<Function>,
-    ) -> Result<String, JsError> {
+    ) -> Result<(), JsError> {
         let rpc = self.fetcher.rpc();
-        let hash = submit_tx(signed, rpc)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
 
         for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
             emit_progress(
@@ -278,11 +267,11 @@ impl WebClient {
                 Some(CONFIRM_POLL_ATTEMPTS),
             );
             TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
-            match confirm_tx(&hash, rpc)
+            match confirm_tx(hash, rpc)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?
             {
-                TxConfirmStatus::Success => return Ok(hash),
+                TxConfirmStatus::Success => return Ok(()),
                 TxConfirmStatus::Failed { detail } => {
                     return Err(JsError::new(&format!("transaction failed{detail}")));
                 }
@@ -298,6 +287,43 @@ impl WebClient {
         Err(JsError::new(&format!(
             "transaction confirmation failed (hash: {hash})"
         )))
+    }
+
+    pub(crate) fn storage(&self) -> StorageBridge {
+        self.storage.clone()
+    }
+
+    pub(crate) fn prover_bridge(&self) -> ProverBridge {
+        self.prover_bridge.clone()
+    }
+
+    fn wallet_signer(
+        network_passphrase: String,
+        user_address: String,
+        on_status: Rc<RefCell<Option<Function>>>,
+        signer_flow: Rc<RefCell<&'static str>>,
+    ) -> Box<dyn Signer> {
+        Box::new(crate::signer::WalletSigner::new(
+            network_passphrase,
+            user_address,
+            on_status,
+            signer_flow,
+        ))
+    }
+
+    pub(super) async fn submit_tx(
+        &self,
+        signed: &TransactionEnvelope,
+        flow: &'static str,
+        on_status: &Option<Function>,
+    ) -> Result<String, JsError> {
+        let rpc = self.fetcher.rpc();
+        let hash = submit_tx(signed, rpc)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        self.confirm_with_progress(&hash, flow, on_status).await?;
+        Ok(hash)
     }
 
     pub async fn ping_storage(&self) -> anyhow::Result<()> {

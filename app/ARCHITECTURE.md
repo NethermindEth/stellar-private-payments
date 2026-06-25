@@ -28,19 +28,33 @@ The UI is written in JavaScript and calls into the WASM bundle. It does not comm
 **Main thread (WASM)**
 
 - Entry point is `mainThread(config)` (WASM export).
-- Initializes logging / panic hooks, constructs `WebClient`, and starts an indexer polling loop.
+- Initializes logging / panic hooks, constructs `WebClient`, and starts the background events listener (`events_listener`).
 
-**Indexer (core Rust)**
+**Indexer (SDK + web platform)**
 
 - The indexer is generic over a storage backend (`Indexer<S: ContractDataStorage>`).
-- On web, the storage backend is `WebClient`, which implements the `ContractDataStorage` trait by forwarding calls to the Storage Worker.
-- The indexer polls Stellar RPC for contract events and persists them as raw events.
+- On web, the storage backend is **`StorageBridge`**, which implements `ContractDataStorage` (and the SDK `Storage` trait) by forwarding calls to the Storage Worker.
+- `events_listener` (in `events.rs`) owns the long-running indexer loop: it constructs `Indexer::init(...)`, calls `catch_up()` on an interval, and handles bootnode handoff when the wallet RPC has a retention gap.
+- `WebClient` does **not** implement `ContractDataStorage`; it holds a `StorageBridge` and passes clones of it to the listener and to `PrivatePool`.
 
 **`WebClient` (WASM, wasm-bindgen API)**
 
 - `WebClient` is the only Rust API exposed to JS, via `#[wasm_bindgen]` methods.
 - Spawns both workers and performs request/response routing internally; JS never constructs or sends worker protocol messages.
 - Implements the worker communication protocol defined in `protocol.rs`.
+- For pool transactions (deposit, transfer, withdraw, transact), builds or reuses a cached **`PrivatePool<StorageBridge>`** session (`ensure_pool`): SDK proving/signing/submit path with `WalletSigner` + `ProverBridge`.
+- Other operations (onboarding, disclosure, cross-pool note listing, admin reads) still call the Storage Worker directly via `StorageBridge::call`.
+
+**`PrivatePool` (SDK, web session)**
+
+- Per-pool, per-user session: RPC client, state fetcher, `StorageBridge`, prover, and Freighter signer.
+- Exposes `deposit` / `transfer` / `withdraw` / `transact`, `spendable_notes`, `notes` (pool-scoped), `balance`, and `sync`.
+- Cached on `WebClient` until `closePool()` (wallet disconnect / account switch).
+
+**`StorageBridge` (WASM main thread)**
+
+- Typed async bridge to the Storage Worker (`StorageWorkerRequest` / `StorageWorkerResponse`).
+- Used by the indexer, `PrivatePool`, and ad-hoc `WebClient` storage reads/writes.
 
 **Storage Worker (Web Worker)**
 
@@ -69,7 +83,10 @@ flowchart LR
   subgraph WASM["Main thread (WASM)"]
     MT["mainThread(config)"]
     WC["WebClient (wasm-bindgen API)"]
-    IDX["Indexer loop"]
+    PP["PrivatePool session"]
+    SB["StorageBridge"]
+    EL["events_listener"]
+    IDX["Indexer"]
   end
 
   %% Workers
@@ -88,23 +105,26 @@ flowchart LR
 
   UI -->|"calls WASM exports"| MT
   MT -->|"constructs"| WC
+  WC -->|"owns"| SB
+  WC -->|"ensure_pool → transacts"| PP
+  PP --> SB
+  PP --> PW
 
-  WC -->|"spawns"| SW
-  WC -->|"spawns"| PW
-
-  MT -->|"starts"| IDX
-  IDX -->|"fetch_contract_events()"| RPCAPI
-  IDX -->|"save_events_batch() via ContractDataStorage"| WC
-  WC -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
+  MT -->|"spawn_local"| EL
+  EL --> IDX
+  IDX -->|"catch_up()"| RPCAPI
+  IDX -->|"ContractDataStorage"| SB
+  SB -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
 
   UI -->|"WebClient.* calls"| WC
   WC -->|"reads contract state"| RPCAPI
-  WC -->|"StorageWorkerRequest::*"| DB
-  WC -->|"ProverWorkerRequest::*"| PR
+  WC -->|"StorageWorkerRequest::* (onboarding, disclosure, …)"| DB
+  WC -->|"ProverWorkerRequest::* (disclosure, via pool prover)"| PR
   PR -->|"ProverWorkerResponse::*"| WC
-  DB -->|"StorageWorkerResponse::*"| WC
-  WC -->|"returns proved tx + PreparedSorobanTx"| UI
-  UI -->|"sign + submit (JS)"| RPC
+  DB -->|"StorageWorkerResponse::*"| SB
+  SB --> WC
+  WC -->|"returns tx hashes / JSON"| UI
+  UI -->|"sign + submit (wallet)"| RPC
 
   classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
   style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;

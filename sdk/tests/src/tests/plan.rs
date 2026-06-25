@@ -15,7 +15,6 @@ fn transfer_two_steps() {
     assert_eq!(estimate.tx_count, 2, "expected two txs for transfer");
 
     let plan = pool
-        .core()
         .prepare_transfer(&wallet, recipient, amount)
         .expect("prepare transfer");
     assert_eq!(plan.tx_count(), 2);

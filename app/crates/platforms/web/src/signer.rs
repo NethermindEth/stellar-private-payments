@@ -145,6 +145,7 @@ pub struct WalletSigner {
     network_passphrase: String,
     user_address: String,
     on_status: Rc<RefCell<Option<Function>>>,
+    flow: Rc<RefCell<&'static str>>,
 }
 
 impl WalletSigner {
@@ -152,11 +153,13 @@ impl WalletSigner {
         network_passphrase: impl Into<String>,
         user_address: impl Into<String>,
         on_status: Rc<RefCell<Option<Function>>>,
+        flow: Rc<RefCell<&'static str>>,
     ) -> Self {
         Self {
             network_passphrase: network_passphrase.into(),
             user_address: user_address.into(),
             on_status,
+            flow,
         }
     }
 
@@ -173,11 +176,12 @@ impl WalletSigner {
 impl Signer for WalletSigner {
     async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
         let on_status = self.on_status.borrow().clone();
+        let flow = *self.flow.borrow();
         let envelope = sign_prepared_transaction(
             &prepared.soroban_tx,
             &self.network_passphrase,
             &self.user_address,
-            "pool",
+            flow,
             &on_status,
         )
         .await

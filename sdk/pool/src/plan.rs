@@ -43,12 +43,16 @@ impl PreparedTransactionPlan {
         })
     }
 
-    pub(crate) fn transact(step: Transact) -> Self {
+    pub fn from_transact(step: Transact) -> Self {
         Self {
             tx_count: 1,
             current_tx: 0,
             kind: PlanKind::Raw(step),
         }
+    }
+
+    pub(crate) fn transact(step: Transact) -> Self {
+        Self::from_transact(step)
     }
 
     pub fn tx_count(&self) -> u32 {
