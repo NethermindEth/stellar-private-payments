@@ -125,6 +125,11 @@ function renderSettingsDrawer() {
     const revealed = revealBtn?.dataset.revealed === 'true';
     aspValue.textContent = revealed ? (App.state.keys.aspSecret || '—') : aspMasked;
     document.getElementById('settings-registration-status').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
+    const registerBtn = document.getElementById('settings-register-btn');
+    if (registerBtn) {
+        registerBtn.disabled = App.state.profile.registered;
+        registerBtn.textContent = App.state.profile.registered ? 'Registered' : 'Register now';
+    }
     document.getElementById('settings-explorer-input').value = App.state.settings.explorerBaseUrl || Utils.defaultExplorerBaseUrl;
     document.getElementById('settings-bootnode-enabled').checked = !!App.state.settings.bootnode?.enabled;
     document.getElementById('settings-bootnode-url').value = App.state.settings.bootnode?.url || '';
@@ -333,6 +338,8 @@ export const Wallet = {
     },
 
     async registerPublicKey() {
+        const btn = document.getElementById('settings-register-btn');
+        if (btn?.disabled) return; // already in-flight or already registered
         try {
             if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
                 throw new Error('Connect wallet first');
@@ -341,6 +348,7 @@ export const Wallet = {
                 throw new Error('Privacy keys are not ready yet');
             }
 
+            if (btn) btn.disabled = true; // prevent duplicate registrations
             const hash = await getHandle().webClient.registerPublicKeys(
                 App.state.wallet.address,
                 App.state.keys.notePublicKey,
@@ -357,6 +365,7 @@ export const Wallet = {
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
             Toast.show(error?.message || 'Registration failed', 'error');
+            if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },
 };
