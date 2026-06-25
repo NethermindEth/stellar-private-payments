@@ -2,6 +2,7 @@ import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.j
 import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
+import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
 function setHidden(el, hidden) {
     el?.classList.toggle('hidden', !!hidden);
@@ -250,7 +251,14 @@ export const Wallet = {
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 this.disconnect();
-                if (!auto) Toast.show(error?.message || 'Failed to connect wallet', 'error');
+                const message = error?.message || '';
+                if (isDbLockedError(message)) {
+                    // Blocking condition: another tab/window holds the local DB lock.
+                    // Surface it even on auto-connect (the common multi-tab trigger).
+                    showDbLockedModal(message);
+                } else if (!auto) {
+                    Toast.show(message || 'Failed to connect wallet', 'error');
+                }
                 throw error;
             } finally {
                 this._connectPromise = null;

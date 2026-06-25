@@ -5,6 +5,7 @@ import {
   getWalletNetwork,
   deriveKeysFromWallet,
 } from './wallet.js';
+import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -1046,6 +1047,10 @@ async function init() {
     networkChip.textContent = 'TESTNET';
   } catch (e) {
     console.error('WASM init failed:', e);
+    if (isDbLockedError(e?.message)) {
+      showDbLockedModal(e.message);
+      return;
+    }
     showToast('Failed to initialize cryptography', 'error', 8000);
   }
 
