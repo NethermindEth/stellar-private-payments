@@ -5,8 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::Result;
 
 use stellar_private_payments_sdk::{
-    LocalTransactionSigner, PrivatePoolConfig, ProverArtifacts, TransactionSigner,
-    TransferRecipient,
+    LocalSigner, PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
     blocking::PrivatePool,
     types::{NoteAmount, NotePublicKey},
 };
@@ -86,8 +85,8 @@ pub fn test_recipient() -> TransferRecipient {
     }
 }
 
-fn test_signer() -> Result<Box<dyn TransactionSigner>> {
-    Ok(Box::new(LocalTransactionSigner::test_fixture(
+fn test_signer() -> Result<Box<dyn Signer>> {
+    Ok(Box::new(LocalSigner::test_fixture(
         "Test SDF Network ; September 2015",
     )?))
 }

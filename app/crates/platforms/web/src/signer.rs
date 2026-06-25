@@ -1,10 +1,10 @@
-//! Freighter wallet bridge and [`TransactionSigner`] for [`PrivatePool`].
+//! Freighter wallet bridge and [`Signer`] for [`PrivatePool`].
 
 use crate::client::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments_sdk::{
-    PoolError, PreparedTransaction, TransactionSigner,
+    PoolError, PreparedTransaction, Signer,
     chain::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
@@ -141,12 +141,12 @@ pub(crate) async fn sign_prepared_transaction(
 }
 
 /// Signs simulated pool transactions via the JS wallet bridge (Freighter).
-pub struct WalletTransactionSigner {
+pub struct WalletSigner {
     network_passphrase: String,
     on_status: Rc<RefCell<Option<Function>>>,
 }
 
-impl WalletTransactionSigner {
+impl WalletSigner {
     pub fn new(
         network_passphrase: impl Into<String>,
         on_status: Rc<RefCell<Option<Function>>>,
@@ -163,7 +163,7 @@ impl WalletTransactionSigner {
 }
 
 #[async_trait::async_trait(?Send)]
-impl TransactionSigner for WalletTransactionSigner {
+impl Signer for WalletSigner {
     async fn sign(
         &self,
         prepared: &PreparedTransaction,

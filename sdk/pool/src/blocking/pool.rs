@@ -11,7 +11,7 @@ use crate::{
     pool::PrivatePool as AsyncPrivatePool,
     pool_storage::NativePoolBackend,
     prover::LocalProver,
-    signer::TransactionSigner,
+    signer::Signer,
     types::{
         Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactionResult,
         TransferRecipient,
@@ -24,10 +24,7 @@ use super::Indexer;
 pub struct PrivatePool(AsyncPrivatePool<NativePoolBackend>);
 
 impl PrivatePool {
-    pub fn open(
-        config: PrivatePoolConfig,
-        signer: Box<dyn TransactionSigner>,
-    ) -> Result<Self, PoolError> {
+    pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
         let backend = NativePoolBackend::open(
             &config.rpc_url,
             &config.storage_path,
@@ -63,7 +60,7 @@ impl PrivatePool {
         self.0.core().config()
     }
 
-    pub fn signer(&self) -> &dyn TransactionSigner {
+    pub fn signer(&self) -> &dyn Signer {
         self.0.signer()
     }
 

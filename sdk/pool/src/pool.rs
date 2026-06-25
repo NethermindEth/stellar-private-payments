@@ -15,8 +15,8 @@ use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
     pool_storage::PoolStorage,
-    prover::TransactionProver,
-    signer::TransactionSigner,
+    prover::Prover,
+    signer::Signer,
     transact::transact_request_from_step,
     types::{
         Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
@@ -34,16 +34,16 @@ pub struct PrivatePool<S> {
     client: Client,
     fetcher: StateFetcher,
     storage: Option<S>,
-    prover: Box<dyn TransactionProver>,
-    signer: Box<dyn TransactionSigner>,
+    prover: Box<dyn Prover>,
+    signer: Box<dyn Signer>,
 }
 
 impl<S> PrivatePool<S> {
     pub fn init(
         config: PrivatePoolConfig,
         storage: S,
-        signer: Box<dyn TransactionSigner>,
-        prover: Box<dyn TransactionProver>,
+        signer: Box<dyn Signer>,
+        prover: Box<dyn Prover>,
     ) -> Result<Self, PoolError> {
         let client = Client::new(&config.rpc_url)
             .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
@@ -60,11 +60,11 @@ impl<S> PrivatePool<S> {
         })
     }
 
-    pub fn signer(&self) -> &dyn TransactionSigner {
+    pub fn signer(&self) -> &dyn Signer {
         &*self.signer
     }
 
-    pub fn prover(&self) -> &dyn TransactionProver {
+    pub fn prover(&self) -> &dyn Prover {
         &*self.prover
     }
 
@@ -309,10 +309,7 @@ impl<S: PoolStorage> PrivatePool<S> {
 
 #[cfg(target_arch = "wasm32")]
 impl PrivatePool<LocalPoolBackend> {
-    pub fn open(
-        config: PrivatePoolConfig,
-        signer: Box<dyn TransactionSigner>,
-    ) -> Result<Self, PoolError> {
+    pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
         use crate::prover::LocalProver;
 
         let storage = LocalPoolBackend::open(&config.storage_path)?;

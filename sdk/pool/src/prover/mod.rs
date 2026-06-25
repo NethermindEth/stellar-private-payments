@@ -7,7 +7,7 @@ pub use local::LocalProver;
 use anyhow::{Context, Result};
 use prover::{
     flows::{TransactArtifacts, TransactParams, transact},
-    prover::Prover,
+    prover::Prover as Groth16Prover,
 };
 use stellar::hash_ext_data_offchain;
 use witness::WitnessCalculator;
@@ -20,14 +20,14 @@ use crate::{
 /// In-process Groth16 prover for transact circuits.
 pub struct ProverEngine {
     witness: WitnessCalculator,
-    prover: Prover,
+    prover: Groth16Prover,
 }
 
 impl ProverEngine {
     pub fn new(proving_key: &[u8], circuit_wasm: &[u8], r1cs: &[u8]) -> Result<Self> {
         let witness = WitnessCalculator::new(circuit_wasm, r1cs)
             .context("failed to init witness calculator")?;
-        let prover = Prover::new(proving_key, r1cs).context("failed to init prover")?;
+        let prover = Groth16Prover::new(proving_key, r1cs).context("failed to init prover")?;
         Ok(Self { witness, prover })
     }
 
@@ -84,6 +84,6 @@ impl ProverEngine {
 /// Native sync clients use [`LocalProver`]; browser apps may supply a
 /// worker-backed implementation over channels.
 #[async_trait::async_trait(?Send)]
-pub trait TransactionProver {
+pub trait Prover {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError>;
 }

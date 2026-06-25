@@ -10,11 +10,11 @@ use crate::{
 mod local;
 
 #[cfg(not(target_arch = "wasm32"))]
-pub use local::LocalTransactionSigner;
+pub use local::LocalSigner;
 
 /// Signs a simulated [`PreparedTransaction`] before chain submission.
 #[async_trait::async_trait(?Send)]
-pub trait TransactionSigner {
+pub trait Signer {
     async fn sign(
         &self,
         prepared: &PreparedTransaction,

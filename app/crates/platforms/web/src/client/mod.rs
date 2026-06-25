@@ -16,7 +16,7 @@ use gloo_worker::{Spawnable, oneshot::OneshotBridge};
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
-    PoolError, PrivatePool, PrivatePoolConfig, TransactionProver, TransactionSigner,
+    PoolError, PrivatePool, PrivatePoolConfig, Prover, Signer,
     chain::{
         OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
         TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
@@ -144,8 +144,8 @@ impl WebClient {
     pub fn private_pool(
         &self,
         config: PrivatePoolConfig,
-        signer: Box<dyn TransactionSigner>,
-        prover: Box<dyn TransactionProver>,
+        signer: Box<dyn Signer>,
+        prover: Box<dyn Prover>,
     ) -> Result<PrivatePool<crate::pool_storage::BridgePoolStorage>, PoolError> {
         use crate::pool_storage::BridgePoolStorage;
         PrivatePool::init(
@@ -156,12 +156,12 @@ impl WebClient {
         )
     }
 
-    /// Wallet-backed [`TransactionSigner`] for [`Self::private_pool`].
+    /// Wallet-backed [`Signer`] for [`Self::private_pool`].
     pub fn wallet_transaction_signer(
         network_passphrase: String,
         on_status: Rc<RefCell<Option<Function>>>,
-    ) -> Box<dyn TransactionSigner> {
-        Box::new(crate::signer::WalletTransactionSigner::new(
+    ) -> Box<dyn Signer> {
+        Box::new(crate::signer::WalletSigner::new(
             network_passphrase,
             on_status,
         ))

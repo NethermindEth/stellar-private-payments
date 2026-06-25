@@ -1,4 +1,4 @@
-//! Worker-backed [`TransactionProver`] for browser main-thread pool use.
+//! Worker-backed [`Prover`] for browser main-thread pool use.
 
 use crate::{
     protocol::{ProverWorkerRequest, ProverWorkerResponse},
@@ -8,17 +8,17 @@ use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::oneshot::OneshotBridge;
 use stellar_private_payments_sdk::{
-    PoolError, PreparedProverTx, TransactionProver, tx::flows::TransactParams,
+    PoolError, PreparedProverTx, Prover, tx::flows::TransactParams,
 };
 
 const PROVE_TIMEOUT_MS: u32 = 20_000;
 
 /// Proves transact steps in the dedicated prover web worker.
-pub struct WorkerTransactionProver {
+pub struct WorkerProver {
     bridge: OneshotBridge<ProverWorker>,
 }
 
-impl WorkerTransactionProver {
+impl WorkerProver {
     pub fn new(bridge: OneshotBridge<ProverWorker>) -> Self {
         Self { bridge }
     }
@@ -52,7 +52,7 @@ impl WorkerTransactionProver {
 }
 
 #[async_trait::async_trait(?Send)]
-impl TransactionProver for WorkerTransactionProver {
+impl Prover for WorkerProver {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
         match self
             .request(ProverWorkerRequest::Transact(params), PROVE_TIMEOUT_MS)

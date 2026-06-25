@@ -1,6 +1,6 @@
-use stellar::{Limits, LocalSigner, TransactionEnvelope, WriteXdr};
+use stellar::{Limits, LocalSigner as StellarSigner, TransactionEnvelope, WriteXdr};
 
-use super::TransactionSigner;
+use super::Signer;
 use crate::{
     PreparedTransaction,
     error::PoolError,
@@ -8,22 +8,22 @@ use crate::{
 };
 
 /// In-process Ed25519 signer for native CLI and tests.
-pub struct LocalTransactionSigner {
-    signer: LocalSigner,
+pub struct LocalSigner {
+    stellar: StellarSigner,
     network_passphrase: String,
 }
 
-impl LocalTransactionSigner {
+impl LocalSigner {
     pub fn new(secret_key: &str, network_passphrase: impl Into<String>) -> Result<Self, PoolError> {
         Ok(Self {
-            signer: LocalSigner::from_secret(secret_key)
+            stellar: StellarSigner::from_secret(secret_key)
                 .map_err(|e| PoolError::Other(format!("signer: {e:#}")))?,
             network_passphrase: network_passphrase.into(),
         })
     }
 
-    pub fn signer(&self) -> &LocalSigner {
-        &self.signer
+    pub fn stellar_signer(&self) -> &StellarSigner {
+        &self.stellar
     }
 
     pub fn network_passphrase(&self) -> &str {
@@ -33,7 +33,7 @@ impl LocalTransactionSigner {
     /// Deterministic signer for native tests.
     pub fn test_fixture(network_passphrase: impl Into<String>) -> Result<Self, PoolError> {
         Ok(Self {
-            signer: LocalSigner::test_fixture()
+            stellar: StellarSigner::test_fixture()
                 .map_err(|e| PoolError::Other(format!("test signer: {e:#}")))?,
             network_passphrase: network_passphrase.into(),
         })
@@ -41,14 +41,14 @@ impl LocalTransactionSigner {
 }
 
 #[async_trait::async_trait(?Send)]
-impl TransactionSigner for LocalTransactionSigner {
+impl Signer for LocalSigner {
     async fn sign(
         &self,
         prepared: &PreparedTransaction,
         config: &PrivatePoolConfig,
     ) -> Result<SignedTransaction, PoolError> {
         let envelope = self
-            .signer
+            .stellar
             .sign_prepared_transaction(
                 &prepared.soroban_tx,
                 &self.network_passphrase,

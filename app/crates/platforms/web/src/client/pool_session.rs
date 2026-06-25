@@ -1,12 +1,11 @@
 //! Cached [`PrivatePool`] session for browser [`WebClient`] flows.
 
 use super::{WebClient, emit_progress};
-use crate::{pool_storage::BridgePoolStorage, prover_bridge::WorkerTransactionProver};
+use crate::{pool_storage::BridgePoolStorage, prover_bridge::WorkerProver};
 use js_sys::Function;
 use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments_sdk::{
-    PoolError, PrivatePool, PrivatePoolConfig, ProverArtifacts, TransactionProver,
-    TransactionSigner,
+    PoolError, PrivatePool, PrivatePoolConfig, Prover, ProverArtifacts, Signer,
     types::{AspMembershipSync, ContractConfig},
 };
 use wasm_bindgen::JsError;
@@ -112,12 +111,11 @@ impl WebClient {
             prover_artifacts: ProverArtifacts::empty(),
         };
         let signer_progress = Rc::new(RefCell::new(on_status));
-        let signer: Box<dyn TransactionSigner> = Self::wallet_transaction_signer(
+        let signer: Box<dyn Signer> = Self::wallet_transaction_signer(
             network_passphrase.clone(),
             Rc::clone(&signer_progress),
         );
-        let prover: Box<dyn TransactionProver> =
-            Box::new(WorkerTransactionProver::new(self.prover_bridge.fork()));
+        let prover: Box<dyn Prover> = Box::new(WorkerProver::new(self.prover_bridge.fork()));
         let pool = Rc::new(
             self.private_pool(config, signer, prover)
                 .map_err(pool_err)?,

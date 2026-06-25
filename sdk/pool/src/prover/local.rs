@@ -4,12 +4,12 @@ use prover::flows::TransactParams;
 
 use crate::{
     error::PoolError,
-    prover::{ProverEngine, TransactionProver},
+    prover::{Prover, ProverEngine},
     transact::PreparedProverTx,
     types::ProverArtifacts,
 };
 
-/// [`TransactionProver`] backed by in-process [`ProverEngine`].
+/// [`Prover`] backed by in-process [`ProverEngine`].
 pub struct LocalProver(RefCell<ProverEngine>);
 
 impl LocalProver {
@@ -32,7 +32,7 @@ impl LocalProver {
 }
 
 #[async_trait::async_trait(?Send)]
-impl TransactionProver for LocalProver {
+impl Prover for LocalProver {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
         self.prove(params)
     }
