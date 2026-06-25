@@ -289,7 +289,12 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
         [registryLookup?.entry ? null : 'registration'].filter(Boolean),
     ].flat();
 
-    if (!steps.length) {
+    // Registration is optional (also available later from Settings), so it must
+    // not, on its own, reopen onboarding on reload. Only required steps
+    // (disclaimer, durable storage, keys, retention) should trigger the modal —
+    // e.g. it keeps reappearing while permanent storage hasn't been granted.
+    const hasRequiredStep = steps.some(step => step !== 'registration');
+    if (!hasRequiredStep) {
         return {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
