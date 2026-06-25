@@ -1,10 +1,10 @@
 #!/bin/sh
-# Generate the circuits operation graph for circom-witness-rs
+# Generate a circom-witness-rs operation graph.
 #
 # This is a maintainer tool, NOT part of `cargo build`: it needs a circom 2.2.3
 # CLI binary plus a C++ toolchain, neither of which the normal Rust-only build
-# requires. It produces a single committed artifact, `policy_tx_2_2.graph.bin`,
-# which `circuits/build.rs` then verifies by SHA-256 (no manifest).
+# requires. It produces a single artifact, `<circuit>.graph.bin`,
+# which the prover worker then verifies by SHA-256.
 #
 # It builds a throwaway crate that drives circom-witness-rs's `build-witness`
 # path, patched to use --O1 so the graph's wire layout matches the R1CS emitted
@@ -13,12 +13,16 @@
 # evaluation time.
 #
 # Usage:
-#   tools/witness-graph/generate-policy-graph.sh [OUTPUT.graph.bin]
+#   tools/witness-graph/generate-witness-graph.sh [CIRCUIT_STEM] [OUTPUT.graph.bin]
+# Examples:
+#   tools/witness-graph/generate-witness-graph.sh                       # policy_tx_2_2
+#   tools/witness-graph/generate-witness-graph.sh selectiveDisclosure_1
 # Requirements on PATH: circom 2.2.3, a C++ compiler, cargo, git.
 set -eu
 
 repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
-out_file=${1:-"$repo_root/deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin"}
+circuit=${1:-policy_tx_2_2}
+out_file=${2:-"$repo_root/deployments/testnet/circuit_keys/$circuit.graph.bin"}
 work_dir="$repo_root/target/witness-graph-builder"
 graph_src_dir="$work_dir/circuits-src"
 patched_witness_rs_dir="$work_dir/vendor/circom-witness-rs"
@@ -27,6 +31,11 @@ comparators_file="$circomlib_dir/circuits/comparators.circom"
 bitify_file="$circomlib_dir/circuits/bitify.circom"
 expected_circom_version="2.2.3"
 
+if [ ! -f "$repo_root/circuits/src/$circuit.circom" ]; then
+    echo "no entry circuit at circuits/src/$circuit.circom" >&2
+    exit 1
+fi
+
 mkdir -p "$work_dir/src" "$(dirname -- "$out_file")"
 rm -rf "$graph_src_dir"
 mkdir -p "$graph_src_dir"
@@ -34,7 +43,7 @@ mkdir -p "$graph_src_dir"
 # Minimal builder crate: a binary whose only job is to invoke build_witness().
 cat > "$work_dir/Cargo.toml" <<'EOF'
 [package]
-name = "policy-witness-graph-builder"
+name = "witness-graph-builder"
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -87,7 +96,7 @@ prepare_patched_witness_builder() {
 
     cat > "$work_dir/Cargo.toml" <<'EOF'
 [package]
-name = "policy-witness-graph-builder"
+name = "witness-graph-builder"
 version = "0.0.0"
 edition = "2021"
 publish = false
@@ -189,8 +198,8 @@ fi
 (
     cd "$work_dir"
     rm -f graph.bin
-    cargo clean -p circom-witness-rs -p policy-witness-graph-builder >/dev/null 2>&1 || true
-    WITNESS_CPP="$graph_src_dir/policy_tx_2_2.circom" \
+    cargo clean -p circom-witness-rs -p witness-graph-builder >/dev/null 2>&1 || true
+    WITNESS_CPP="$graph_src_dir/$circuit.circom" \
         CIRCOM_LIBRARY_PATH="$graph_src_dir" \
         cargo run --release
 )

@@ -16,7 +16,7 @@ use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::{JsFuture, spawn_local};
 use web_sys::{Request, RequestInit, RequestMode};
-use witness::{GraphWitnessCalculator, WitnessCalculator};
+use witness::GraphWitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
@@ -29,6 +29,10 @@ const POLICY_GRAPH: &[u8] =
     include_bytes!("../../../../../../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin");
 const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
+);
+// Disclosure witness is likewise generated from a committed graph (#192).
+const DISCLOSURE_GRAPH: &[u8] = include_bytes!(
+    "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1.graph.bin"
 );
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
@@ -79,7 +83,7 @@ fn ensure_sha256_matches(
 thread_local! {
     static WITNESS_CALC: RefCell<Option<GraphWitnessCalculator>> = const { RefCell::new(None) };
     static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
-    static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static DISCLOSURE_WITNESS_CALC: RefCell<Option<GraphWitnessCalculator>> = const { RefCell::new(None) };
     static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
@@ -87,7 +91,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
-    let (r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
+    let (r1cs_bytes, disc_r1cs_bytes) = try_join!(
         async {
             let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
             log::debug!(
@@ -95,15 +99,6 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
                 r1cs_bytes.len()
             );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
-        },
-        async {
-            let wasm_bytes: Vec<u8> =
-                fetch_circuit_file("circuits/selectiveDisclosure_1.wasm").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
             let r1cs_bytes: Vec<u8> =
@@ -144,10 +139,10 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
     )?;
     ensure_sha256_matches(
-        "selectiveDisclosure_1.wasm",
-        &disc_wasm_bytes,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
+        "selectiveDisclosure_1.graph.bin",
+        DISCLOSURE_GRAPH,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_GRAPH_LEN,
+        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_GRAPH_SHA256,
     )?;
     ensure_sha256_matches(
         "selectiveDisclosure_1.r1cs",
@@ -163,12 +158,11 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     })?;
     let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
 
-    let disc_witness_calc =
-        WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
-            JsError::new(&format!(
-                "failed to init disclosure witness calculator: {e:#}"
-            ))
-        })?;
+    let disc_witness_calc = GraphWitnessCalculator::from_graph(DISCLOSURE_GRAPH).map_err(|e| {
+        JsError::new(&format!(
+            "failed to init disclosure graph witness calculator: {e:#}"
+        ))
+    })?;
     let disc_prover =
         Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
 
