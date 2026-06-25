@@ -13,14 +13,14 @@
 # evaluation time.
 #
 # Usage:
-#   tools/witness-graph/generate-witness-graph.sh [CIRCUIT_STEM] [OUTPUT.graph.bin]
+#   scripts/generate-witness-graph.sh [CIRCUIT_STEM] [OUTPUT.graph.bin]
 # Examples:
-#   tools/witness-graph/generate-witness-graph.sh                       # policy_tx_2_2
-#   tools/witness-graph/generate-witness-graph.sh selectiveDisclosure_1
+#   scripts/generate-witness-graph.sh                       # policy_tx_2_2
+#   scripts/generate-witness-graph.sh selectiveDisclosure_1
 # Requirements on PATH: circom 2.2.3, a C++ compiler, cargo, git.
 set -eu
 
-repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
+repo_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 circuit=${1:-policy_tx_2_2}
 out_file=${2:-"$repo_root/deployments/testnet/circuit_keys/$circuit.graph.bin"}
 work_dir="$repo_root/target/witness-graph-builder"

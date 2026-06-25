@@ -31,8 +31,8 @@ circuits-build:
 .PHONY: witness-graphs
 witness-graphs:
 	@echo "Generating witness graphs (requires circom 2.2.3 + a C++ toolchain)..."
-	tools/witness-graph/generate-witness-graph.sh policy_tx_2_2
-	tools/witness-graph/generate-witness-graph.sh selectiveDisclosure_1
+	scripts/generate-witness-graph.sh policy_tx_2_2
+	scripts/generate-witness-graph.sh selectiveDisclosure_1
 
 .PHONY: install
 install:
