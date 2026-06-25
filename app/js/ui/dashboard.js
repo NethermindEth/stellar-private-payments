@@ -36,6 +36,7 @@ export const Dashboard = {
         document.getElementById('pool-history-modal')?.addEventListener('click', (e) => {
             if (e.target === e.currentTarget) this.closeHistory();
         });
+        document.getElementById('move-funds-history')?.addEventListener('click', () => this.openHistory(App.state.selectedPoolId));
     },
 
     start() {
