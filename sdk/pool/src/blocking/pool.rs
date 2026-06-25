@@ -2,7 +2,7 @@
 
 use state::SqliteStorage;
 use tx_planner::SpendableNote;
-use types::NoteAmount;
+use types::{NoteAmount, UserNoteSummary};
 
 use crate::{
     PoolCore, PreparedTransaction,
@@ -100,8 +100,12 @@ impl PrivatePool {
         pollster::block_on(self.inner.sync())
     }
 
-    pub fn wallet(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        pollster::block_on(self.inner.wallet())
+    pub fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
+        pollster::block_on(self.inner.spendable_notes())
+    }
+
+    pub fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
+        pollster::block_on(self.inner.notes())
     }
 
     pub fn balance(&self) -> Result<NoteAmount, PoolError> {

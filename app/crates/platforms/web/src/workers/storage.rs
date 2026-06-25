@@ -23,7 +23,9 @@ use stellar_private_payments_sdk::{
         flows::TransactParams,
         merkle::MerkleProof,
     },
-    types::{ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata},
+    types::{
+        ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
+    },
 };
 use tx_planner::SpendableNote;
 use wasm_bindgen::JsError;
@@ -312,6 +314,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
+        StorageWorkerRequest::PoolUserNotes {
+            user_address,
+            pool_contract_id,
+        } => {
+            log::trace!(
+                "[{WORKER_NAME}] list all notes for the account {user_address} in pool {pool_contract_id}"
+            );
+            let list = with_storage!(s =>
+                s.list_pool_user_notes(&pool_contract_id, &user_address)?
+            )?;
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} notes for the account {user_address}",
+                list.len()
+            );
+            StorageWorkerResponse::UserNotes(list)
+        }
         StorageWorkerRequest::RecentPoolActivity(limit) => {
             log::trace!("[{WORKER_NAME}] fetch recent pool activity");
             let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
@@ -564,7 +582,7 @@ impl Storage for StorageBridge {
             .map_err(|e| PoolError::Other(e.to_string()))
     }
 
-    async fn spendable_wallet(
+    async fn spendable_notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
@@ -587,7 +605,30 @@ impl Storage for StorageBridge {
                 })
                 .collect()),
             Ok(other) => Err(PoolError::Other(format!(
-                "unexpected storage response loading wallet: {other:?}"
+                "unexpected storage response loading spendable notes: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn notes(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<UserNoteSummary>, PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::PoolUserNotes {
+                    user_address: user_address.to_string(),
+                    pool_contract_id: pool_contract_id.to_string(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading notes: {other:?}"
             ))),
             Err(e) => Err(PoolError::Other(e.to_string())),
         }

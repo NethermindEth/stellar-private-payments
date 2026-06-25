@@ -444,6 +444,54 @@ impl Storage {
         Ok(out)
     }
 
+    /// All notes for `address` in `pool_contract_id` (newest first), spent and
+    /// unspent.
+    pub fn list_pool_user_notes(
+        &self,
+        pool_contract_id: &str,
+        address: &str,
+    ) -> Result<Vec<UserNoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                n.id,
+                n.amount,
+                c.leaf_index,
+                r.ledger,
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pool ON pool.contract_id = r.contract_id
+             WHERE a.address = ?1 AND pool.address = ?2
+             ORDER BY r.ledger DESC",
+        )?;
+
+        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
+            let id: Field = row.get(0)?;
+            let amount: NoteAmount = row.get(1)?;
+            let leaf_index_i64: i64 = row.get(2)?;
+            let leaf_index = col_u32(leaf_index_i64, 2)?;
+            let created_at_ledger_i64: i64 = row.get(3)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+            let spent_i64: i64 = row.get(4)?;
+
+            Ok(UserNoteSummary {
+                id,
+                amount,
+                leaf_index,
+                created_at_ledger,
+                spent: spent_i64 != 0,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
     /// All unspent notes for `address` in `pool_contract_id` (newest first).
     pub fn list_unspent_user_notes(
         &self,

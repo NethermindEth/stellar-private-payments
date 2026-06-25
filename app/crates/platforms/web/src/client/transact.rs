@@ -45,7 +45,14 @@ impl WebClient {
                 on_status.clone(),
             )
             .await?;
-        self.sync_pool(&pool, flow, &on_status).await?;
+        emit_progress(
+            &on_status,
+            flow,
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
         emit_progress(&on_status, flow, "prove", "Proving…", None, None);
 
         loop {
@@ -137,7 +144,14 @@ impl WebClient {
                 on_status.clone(),
             )
             .await?;
-        self.sync_pool(&pool, "deposit", &on_status).await?;
+        emit_progress(
+            &on_status,
+            "deposit",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
         emit_progress(&on_status, "deposit", "prove", "Proving…", None, None);
         loop {
             match pool.deposit(note_amount).await {
@@ -190,10 +204,17 @@ impl WebClient {
                 on_status.clone(),
             )
             .await?;
-        self.sync_pool(&pool, flow, &on_status).await?;
+        emit_progress(
+            &on_status,
+            flow,
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
 
         loop {
-            let wallet = pool.wallet().await.map_err(pool_err)?;
+            let wallet = pool.spendable_notes().await.map_err(pool_err)?;
             let result = match &target {
                 SpendTarget::Transfer {
                     recipient_note,
@@ -251,7 +272,7 @@ impl WebClient {
         let pool = self
             .ensure_pool(pool_contract_id, user_address, network_passphrase, None)
             .await?;
-        let wallet = pool.wallet().await.map_err(pool_err)?;
+        let wallet = pool.spendable_notes().await.map_err(pool_err)?;
         let estimate = pool.estimate(&wallet, amount).map_err(pool_err)?;
         Ok(SpendPlanPreview {
             step_count: estimate.tx_count,

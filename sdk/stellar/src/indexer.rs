@@ -15,17 +15,7 @@ pub struct Indexer<S: ContractDataStorage> {
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub fn new(client: Client, storage: S, config: &ContractConfig) -> Result<Self> {
-        Ok(Self {
-            client,
-            storage,
-            contract_ids: config.all_contract_ids(),
-            min_pool_ledger: config.min_deployment_ledger()?,
-        })
-    }
-
-    pub async fn init(rpc_url: &str, storage: S, config: &ContractConfig) -> Result<Self> {
-        let client = Client::new(rpc_url)?;
+    pub async fn init(client: Client, storage: S, config: &ContractConfig) -> Result<Self> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
 
@@ -54,7 +44,12 @@ impl<S: ContractDataStorage> Indexer<S> {
             Err(e) => return Err(e.into()),
         }
 
-        Self::new(client, storage, config)
+        Ok(Self {
+            client,
+            storage,
+            contract_ids,
+            min_pool_ledger,
+        })
     }
 
     /// Fetch up to [`MAX_PAGES_PER_ROUND`] event pages from RPC into storage.

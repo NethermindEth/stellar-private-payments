@@ -3,7 +3,7 @@
 use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
-use types::{EncryptionPublicKey, NotePublicKey};
+use types::{EncryptionPublicKey, NotePublicKey, UserNoteSummary};
 
 use crate::{
     error::PoolError,
@@ -39,7 +39,7 @@ pub(crate) fn map_user_keys(
         })
 }
 
-pub(crate) fn spendable_wallet_from_storage(
+pub(crate) fn spendable_notes_from_storage(
     storage: &SqliteStorage,
     pool_contract_id: &str,
     user_address: &str,
@@ -58,6 +58,16 @@ pub(crate) fn spendable_wallet_from_storage(
         })
 }
 
+pub(crate) fn pool_notes_from_storage(
+    storage: &SqliteStorage,
+    pool_contract_id: &str,
+    user_address: &str,
+) -> Result<Vec<UserNoteSummary>, PoolError> {
+    storage
+        .list_pool_user_notes(pool_contract_id, user_address)
+        .map_err(|e| PoolError::Other(e.to_string()))
+}
+
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
 #[async_trait::async_trait(?Send)]
 pub trait Storage: stellar::ContractDataStorage {
@@ -68,11 +78,17 @@ pub trait Storage: stellar::ContractDataStorage {
 
     async fn ensure_ready(&self) -> Result<(), PoolError>;
 
-    async fn spendable_wallet(
+    async fn spendable_notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
     ) -> Result<Vec<SpendableNote>, PoolError>;
+
+    async fn notes(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<UserNoteSummary>, PoolError>;
 
     async fn build_transact_params(
         &self,

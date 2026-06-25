@@ -79,6 +79,10 @@ pub enum StorageWorkerRequest {
         user_address: Address,
         pool_contract_id: Address,
     },
+    PoolUserNotes {
+        user_address: Address,
+        pool_contract_id: Address,
+    },
     RecentPoolActivity(u32),
     RecentPubKeys(u32),
     DisclosureInputs(DisclosureInputsRequest),

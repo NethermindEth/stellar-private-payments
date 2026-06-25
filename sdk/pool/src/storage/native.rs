@@ -4,9 +4,13 @@ use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
 use stellar::ContractDataStorage;
 use tx_planner::SpendableNote;
-use types::{ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata};
+use types::{
+    ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
+};
 
-use super::{Storage, map_build_params, map_user_keys, spendable_wallet_from_storage};
+use super::{
+    Storage, map_build_params, map_user_keys, pool_notes_from_storage, spendable_notes_from_storage,
+};
 use crate::{core::process_local_state, error::PoolError, transact::TransactRequest};
 
 /// In-process SQLite wallet storage (native only).
@@ -70,12 +74,20 @@ impl Storage for LocalStorage {
         Ok(())
     }
 
-    async fn spendable_wallet(
+    async fn spendable_notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
     ) -> Result<Vec<SpendableNote>, PoolError> {
-        spendable_wallet_from_storage(&self.storage(), pool_contract_id, user_address)
+        spendable_notes_from_storage(&self.storage(), pool_contract_id, user_address)
+    }
+
+    async fn notes(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<UserNoteSummary>, PoolError> {
+        pool_notes_from_storage(&self.storage(), pool_contract_id, user_address)
     }
 
     async fn build_transact_params(

@@ -237,23 +237,6 @@ impl WebClient {
         Ok(private_pool)
     }
 
-    pub(super) async fn sync_pool(
-        &self,
-        pool: &PrivatePool<StorageBridge>,
-        flow: &'static str,
-        on_status: &Option<Function>,
-    ) -> Result<(), JsError> {
-        emit_progress(
-            on_status,
-            flow,
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-        pool.sync().await.map_err(pool_err).map(|_| ())
-    }
-
     pub(crate) fn storage(&self) -> StorageBridge {
         self.storage.clone()
     }

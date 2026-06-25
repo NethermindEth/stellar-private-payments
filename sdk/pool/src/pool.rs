@@ -1,7 +1,7 @@
 //! Async per-pool private payments API.
 
 use tx_planner::{SpendableNote, Transact};
-use types::NoteAmount;
+use types::{NoteAmount, UserNoteSummary};
 
 use stellar::{
     Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, TxConfirmStatus,
@@ -168,15 +168,22 @@ impl<S: Storage> PrivatePool<S> {
             .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))
     }
 
-    pub async fn wallet(&self) -> Result<Vec<SpendableNote>, PoolError> {
+    pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
         self.storage
-            .spendable_wallet(&self.config.pool_contract_id, &self.config.user_address)
+            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
+            .await
+    }
+
+    /// All notes for this pool and user, spent and unspent
+    pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
+        self.storage
+            .notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
     }
 
     /// Sum of unspent note amounts for this pool and user.
     pub async fn balance(&self) -> Result<NoteAmount, PoolError> {
-        let wallet = self.wallet().await?;
+        let wallet = self.spendable_notes().await?;
         wallet
             .iter()
             .map(|note| note.amount)
@@ -189,11 +196,12 @@ impl<S: Storage> PrivatePool<S> {
     pub async fn sync(&self) -> Result<SyncResult, PoolError> {
         let (from_ledger, _) = sync_ledger_bounds(&self.storage).await?;
 
-        let indexer = Indexer::new(
+        let indexer = Indexer::init(
             self.client.clone(),
             self.storage.fork()?,
             &self.config.contract_config,
         )
+        .await
         .map_err(|e| PoolError::Other(format!("indexer: {e:#}")))?;
         indexer
             .catch_up()
