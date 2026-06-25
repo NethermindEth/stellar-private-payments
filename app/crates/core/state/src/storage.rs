@@ -665,8 +665,8 @@ impl Storage {
                     GROUP BY r.ledger, c.address
                     UNION ALL
                     SELECT r.ledger AS ledger, c.address AS pool_contract_id, 0 AS commitments, COUNT(*) AS nullifiers
-                    FROM pool_nullifiers pn
-                    JOIN raw_contract_events r ON r.id = pn.event_id
+                    FROM pool_nullifiers pnl
+                    JOIN raw_contract_events r ON r.id = pnl.event_id
                     JOIN contracts c ON c.contract_id = r.contract_id
                     GROUP BY r.ledger, c.address
                 )
