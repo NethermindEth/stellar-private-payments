@@ -6,9 +6,9 @@ use serde::{Serialize, de::DeserializeOwned};
 use types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
     EncryptionPrivateKey, EncryptionPublicKey, ExplorerSetting, Field, LeafAddedEvent,
-    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey,
-    NotePublicKey, OperationalFeedItem, PoolConfigEntry, PortfolioBalance,
-    PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
+    NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey,
+    OperationalFeedItem, PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup,
+    UserNoteSummary, UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -17,9 +17,7 @@ pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 pub const DEFAULT_EXPLORER_BASE_URL: &str = "https://stellar.expert/explorer/testnet";
 
-const MIGRATION_ARRAY: &[M] = &[
-    M::up(include_str!("schema.sql")),
-];
+const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
@@ -186,7 +184,11 @@ impl Storage {
         let metadata = self.get_sync_metadata()?;
         Ok(metadata
             .into_iter()
-            .map(|entry| entry.last_indexed_ledger.max(entry.last_fully_indexed_ledger))
+            .map(|entry| {
+                entry
+                    .last_indexed_ledger
+                    .max(entry.last_fully_indexed_ledger)
+            })
             .max()
             .unwrap_or_default())
     }
@@ -707,7 +709,11 @@ impl Storage {
         )?;
 
         let rows = stmt.query_map(
-            params![public_key_registry_contract_id, asp_membership_contract_id, limit],
+            params![
+                public_key_registry_contract_id,
+                asp_membership_contract_id,
+                limit
+            ],
             |row| {
                 Ok(OperationalFeedItem {
                     kind: row.get(0)?,
@@ -727,7 +733,6 @@ impl Storage {
         }
         Ok(out)
     }
-
 
     /// Fetch all pool commitments ordered by `leaf_index` (0..N-1) with no
     /// gaps.

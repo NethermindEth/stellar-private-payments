@@ -6,8 +6,8 @@ use stellar::PreparedSorobanTx;
 use types::{
     AspMembershipSync, AspNonMembershipProof, ContractsEventData, DisclosureReceipt, ExtAmount,
     ExtData, Field, KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey,
-    OperationalFeedItem, PortfolioBalance, PublicKeyEntry, RecipientLookup,
-    SyncMetadata, UserNoteSummary, UserOperation,
+    OperationalFeedItem, PortfolioBalance, PublicKeyEntry, RecipientLookup, SyncMetadata,
+    UserNoteSummary, UserOperation,
 };
 
 #[derive(Debug, Serialize, Deserialize)]

@@ -447,8 +447,12 @@ impl WebClient {
     }
 
     pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        let setting = self.get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string()).await.ok()?;
-        let parsed = serde_wasm_bindgen::from_value::<Option<types::BootnodeSetting>>(setting).ok()?;
+        let setting = self
+            .get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string())
+            .await
+            .ok()?;
+        let parsed =
+            serde_wasm_bindgen::from_value::<Option<types::BootnodeSetting>>(setting).ok()?;
         let config = parsed?;
         (config.enabled && !config.url.is_empty()).then_some(config.url)
     }
@@ -464,12 +468,14 @@ impl WebClient {
 
     #[wasm_bindgen(js_name = getBootnodeConfig)]
     pub async fn get_bootnode_config(&self) -> Result<JsValue, JsError> {
-        self.get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string()).await
+        self.get_setting(state::APP_SETTING_BOOTNODE_CONFIG.to_string())
+            .await
     }
 
     #[wasm_bindgen(js_name = getExplorerSetting)]
     pub async fn get_explorer_setting(&self) -> Result<JsValue, JsError> {
-        self.get_setting(state::APP_SETTING_EXPLORER.to_string()).await
+        self.get_setting(state::APP_SETTING_EXPLORER.to_string())
+            .await
     }
 
     #[wasm_bindgen(js_name = getUserKeys)]
@@ -542,7 +548,9 @@ impl WebClient {
     pub async fn get_portfolio_balances(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::PortfolioBalances(address);
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::PortfolioBalances(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            StorageWorkerResponse::PortfolioBalances(list) => {
+                Ok(serde_wasm_bindgen::to_value(&list)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
@@ -596,10 +604,16 @@ impl WebClient {
     pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::RecipientLookup {
             address,
-            public_key_registry_contract_id: self.fetcher.contract_config().public_key_registry.clone(),
+            public_key_registry_contract_id: self
+                .fetcher
+                .contract_config()
+                .public_key_registry
+                .clone(),
         };
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::RecipientLookup(lookup) => Ok(serde_wasm_bindgen::to_value(&lookup)?),
+            StorageWorkerResponse::RecipientLookup(lookup) => {
+                Ok(serde_wasm_bindgen::to_value(&lookup)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }
@@ -609,10 +623,16 @@ impl WebClient {
         let req = StorageWorkerRequest::OperationalFeed {
             limit,
             asp_membership_contract_id: self.fetcher.contract_config().asp_membership.clone(),
-            public_key_registry_contract_id: self.fetcher.contract_config().public_key_registry.clone(),
+            public_key_registry_contract_id: self
+                .fetcher
+                .contract_config()
+                .public_key_registry
+                .clone(),
         };
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::OperationalFeed(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            StorageWorkerResponse::OperationalFeed(list) => {
+                Ok(serde_wasm_bindgen::to_value(&list)?)
+            }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }

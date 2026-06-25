@@ -62,7 +62,8 @@ pub enum AssetDescriptor {
     #[serde(rename_all = "camelCase")]
     Contract {
         contract_id: String,
-        /// Token `symbol()` captured at deployment time and stored in the config.
+        /// Token `symbol()` captured at deployment time and stored in the
+        /// config.
         symbol: String,
     },
 }
@@ -177,7 +178,8 @@ pub struct RecipientLookup {
 }
 
 /// A high-level operation the user performed in a pool (deposit / sent /
-/// withdraw / advanced), persisted in `user_operations` and shown as pool history.
+/// withdraw / advanced), persisted in `user_operations` and shown as pool
+/// history.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct UserOperation {

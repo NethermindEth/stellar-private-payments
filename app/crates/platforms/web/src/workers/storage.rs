@@ -1,6 +1,6 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs,
-    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
+    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
