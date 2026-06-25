@@ -110,18 +110,26 @@ function makePanel({ eyebrow, title, body, aside }) {
     wrap.className = 'space-y-5';
 
     const intro = document.createElement('div');
-    intro.innerHTML = `
-        <p class="text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70">${eyebrow}</p>
-        <h3 class="mt-2 text-2xl font-semibold tracking-tight text-white">${title}</h3>
-        ${body ? `<p class="mt-3 text-sm leading-6 text-slate-300">${body}</p>` : ''}
-    `;
+    const eyebrowEl = document.createElement('p');
+    eyebrowEl.className = 'text-[11px] font-semibold uppercase tracking-[0.28em] text-cyan-200/70';
+    eyebrowEl.textContent = eyebrow;
+    const titleEl = document.createElement('h3');
+    titleEl.className = 'mt-2 text-2xl font-semibold tracking-tight text-white';
+    titleEl.textContent = title;
+    intro.append(eyebrowEl, titleEl);
+    if (body) {
+        const bodyEl = document.createElement('p');
+        bodyEl.className = 'mt-3 text-sm leading-6 text-slate-300';
+        bodyEl.textContent = body;
+        intro.appendChild(bodyEl);
+    }
     wrap.appendChild(intro);
 
     if (aside) {
         const info = document.createElement('div');
         info.className = 'rounded-[24px] border border-white/8 bg-ink-950/70 p-5 text-sm leading-6 text-slate-300';
         if (typeof aside === 'string') {
-            info.innerHTML = aside;
+            info.textContent = aside;
         } else {
             info.appendChild(aside);
         }
@@ -490,27 +498,18 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
             const bootnodeEnabled = bootnodeRequired || !!state.bootnode?.enabled;
             const inputWrap = document.createElement('div');
             inputWrap.className = 'space-y-4';
-            inputWrap.innerHTML = `
-                <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
-                    <label class="flex items-start gap-3">
-                        <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300" ${bootnodeEnabled ? 'checked' : ''} ${bootnodeRequired ? 'disabled' : ''}>
-                        <span>
-                            <span class="block text-sm font-medium text-white">Store a bootnode URL now</span>
-                            <span class="mt-1 block text-sm text-slate-400">Use this if you want an explicit retention bypass path instead of relying only on reminders.</span>
-                        </span>
-                    </label>
-                    <div class="mt-4">
-                        <label for="wizard-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
-                        <input id="wizard-bootnode-url" type="text" value="${state.bootnode?.url || ''}" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                    </div>
-                </div>
-            `;
+            const bootnodeBox = document.getElementById('tpl-wizard-bootnode').content.firstElementChild.cloneNode(true);
+            const bootnodeEnabledInput = bootnodeBox.querySelector('#wizard-bootnode-enabled');
+            bootnodeEnabledInput.checked = bootnodeEnabled;
+            bootnodeEnabledInput.disabled = bootnodeRequired;
+            bootnodeBox.querySelector('#wizard-bootnode-url').value = state.bootnode?.url || '';
+            inputWrap.appendChild(bootnodeBox);
 
             if (bootnodeRequired) {
                 const requiredNote = document.createElement('p');
                 requiredNote.className = 'mt-4 text-sm text-amber-200';
                 requiredNote.textContent = 'The public RPC is missing event history (sync gap), so a bootnode archive URL is required to join the app.';
-                inputWrap.firstElementChild.appendChild(requiredNote);
+                bootnodeBox.appendChild(requiredNote);
             }
 
             let permStatus = null;
@@ -591,13 +590,8 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
         }
 
         if (stepId === 'explorer') {
-            const wrap = document.createElement('div');
-            wrap.className = 'rounded-[24px] border border-white/8 bg-white/[0.03] p-5';
-            wrap.innerHTML = `
-                <label for="wizard-explorer-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Explorer Base URL</label>
-                <input id="wizard-explorer-url" type="text" value="${state.explorerBaseUrl}" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
-                <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
-            `;
+            const wrap = document.getElementById('tpl-wizard-explorer').content.firstElementChild.cloneNode(true);
+            wrap.querySelector('#wizard-explorer-url').value = state.explorerBaseUrl;
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Choose the explorer base link',
@@ -643,7 +637,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Register your public keys in the address book',
                 body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
-                aside: `<p>If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.</p>`,
+                aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.',
             });
             renderContent(panel);
 

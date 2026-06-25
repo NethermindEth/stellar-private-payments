@@ -520,6 +520,30 @@
         </div>
     </template>
 
+    <template id="tpl-wizard-bootnode">
+        <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+            <label class="flex items-start gap-3">
+                <input id="wizard-bootnode-enabled" type="checkbox" class="mt-1 h-4 w-4 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
+                <span>
+                    <span class="block text-sm font-medium text-white">Store a bootnode URL now</span>
+                    <span class="mt-1 block text-sm text-slate-400">Use this if you want an explicit retention bypass path instead of relying only on reminders.</span>
+                </span>
+            </label>
+            <div class="mt-4">
+                <label for="wizard-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
+                <input id="wizard-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+            </div>
+        </div>
+    </template>
+
+    <template id="tpl-wizard-explorer">
+        <div class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
+            <label for="wizard-explorer-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Explorer Base URL</label>
+            <input id="wizard-explorer-url" type="text" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+            <p class="mt-3 text-sm text-slate-400">This controls explorer links shown after transactions and in the shell. You can update it later in settings.</p>
+        </div>
+    </template>
+
     <template id="tpl-balance-card">
         <article class="rounded-[24px] border border-white/8 bg-[linear-gradient(180deg,rgba(19,30,56,0.96),rgba(10,17,31,0.98))] p-5 shadow-[0_14px_40px_rgba(2,6,23,0.35)]">
             <div class="flex items-start justify-between gap-4">

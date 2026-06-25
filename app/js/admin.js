@@ -100,16 +100,10 @@ function showToast(message, type = 'success', duration = 4000) {
 
   toast.querySelector('.toast-message').textContent = message;
 
-  const icon = toast.querySelector('.toast-icon');
-  if (type === 'success') {
-    icon.innerHTML = '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-    toast.classList.add('border-emerald-500/50');
-    icon.classList.add('text-emerald-500');
-  } else {
-    icon.innerHTML = '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>';
-    toast.classList.add('border-red-500/50');
-    icon.classList.add('text-red-500');
-  }
+  const isSuccess = type === 'success';
+  toast.querySelector('.toast-icon-success').classList.toggle('hidden', !isSuccess);
+  toast.querySelector('.toast-icon-error').classList.toggle('hidden', isSuccess);
+  toast.classList.add(isSuccess ? 'border-emerald-500/50' : 'border-red-500/50');
 
   toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
 

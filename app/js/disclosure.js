@@ -54,24 +54,53 @@ function shortAddress(address) {
   return `${address.slice(0, 6)}...${address.slice(-4)}`;
 }
 
+// DOM builders (used instead of innerHTML).
+const SVG_NS = 'http://www.w3.org/2000/svg';
+function svgEl(tag, attrs = {}, children = []) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  for (const c of children) node.appendChild(c);
+  return node;
+}
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function spinnerEl() {
+  return el('span', 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin');
+}
+function checkCircleIcon(cls) {
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M22 11.08V12a10 10 0 1 1-5.93-9.14' }),
+    svgEl('polyline', { points: '22 4 12 14.01 9 11.01' }),
+  ]);
+}
+function xCircleIcon(cls) {
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('circle', { cx: '12', cy: '12', r: '10' }),
+    svgEl('line', { x1: '15', y1: '9', x2: '9', y2: '15' }),
+    svgEl('line', { x1: '9', y1: '9', x2: '15', y2: '15' }),
+  ]);
+}
+function shieldIcon(cls) {
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }),
+    svgEl('polyline', { points: '22 4 12 14.01 9 11.01' }),
+  ]);
+}
+
 function showToast(message, type = 'success', duration = 4000) {
   if (!toastContainer || !toastTemplate) return;
   const toast = toastTemplate.content.cloneNode(true).firstElementChild;
 
   toast.querySelector('.toast-message').textContent = message;
 
-  const icon = toast.querySelector('.toast-icon');
-  if (type === 'success') {
-    icon.innerHTML =
-      '<path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/>';
-    toast.classList.add('border-emerald-500/50');
-    icon.classList.add('text-emerald-500');
-  } else {
-    icon.innerHTML =
-      '<circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/>';
-    toast.classList.add('border-red-500/50');
-    icon.classList.add('text-red-500');
-  }
+  const isSuccess = type === 'success';
+  toast.querySelector('.toast-icon-success').classList.toggle('hidden', !isSuccess);
+  toast.querySelector('.toast-icon-error').classList.toggle('hidden', isSuccess);
+  toast.classList.add(isSuccess ? 'border-emerald-500/50' : 'border-red-500/50');
 
   toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
 
@@ -229,7 +258,7 @@ function normalizeCommitment(s) {
 }
 
 export function mountGenerate(container) {
-  container.innerHTML = '';
+  container.replaceChildren();
 
   const heading = document.createElement('h2');
   heading.id = 'generate-heading';
@@ -247,18 +276,13 @@ export function mountGenerate(container) {
   }
 
   // Wallet status line
-  const statusLine = document.createElement('div');
-  statusLine.className = 'text-xs text-dark-500 mb-4';
-  statusLine.innerHTML = `Connected: <span class="font-mono text-dark-300">${shortAddress(state.address)}</span>`;
+  const statusLine = el('div', 'text-xs text-dark-500 mb-4');
+  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(state.address)));
   container.appendChild(statusLine);
 
   if (state.notesLoading) {
-    const spinner = document.createElement('div');
-    spinner.className = 'text-sm text-dark-400 flex items-center gap-2';
-    spinner.innerHTML = `
-      <span class="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></span>
-      Loading notes…
-    `;
+    const spinner = el('div', 'text-sm text-dark-400 flex items-center gap-2');
+    spinner.append(spinnerEl(), 'Loading notes…');
     container.appendChild(spinner);
     return;
   }
@@ -305,17 +329,15 @@ export function mountGenerate(container) {
     row.setAttribute('role', 'radio');
     row.setAttribute('aria-checked', String(isSelected));
 
-    row.innerHTML = `
-      <div class="min-w-0">
-        <div class="font-mono text-xs truncate">${shortCommitment(note.id)}</div>
-        <div class="text-[10px] text-dark-500 mt-0.5">
-          Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}
-        </div>
-      </div>
-      <div class="text-xs font-medium whitespace-nowrap ${isSelected ? 'text-brand-300' : 'text-dark-300'}">
-        ${formatAmount(note.amount)}
-      </div>
-    `;
+    const rowInfo = el('div', 'min-w-0');
+    rowInfo.append(
+      el('div', 'font-mono text-xs truncate', shortCommitment(note.id)),
+      el('div', 'text-[10px] text-dark-500 mt-0.5', `Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
+    );
+    row.append(
+      rowInfo,
+      el('div', `text-xs font-medium whitespace-nowrap ${isSelected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount)),
+    );
 
     row.addEventListener('click', () => {
       state.selectedNote = note;
@@ -328,12 +350,13 @@ export function mountGenerate(container) {
   container.appendChild(list);
 
   if (state.selectedNote) {
-    const selectedChip = document.createElement('div');
-    selectedChip.className = 'text-xs text-brand-400 mb-4';
-    selectedChip.innerHTML = `
-      Selected: <span class="font-mono">${shortCommitment(state.selectedNote.id)}</span>
-      <span class="text-dark-500">· ${formatAmount(state.selectedNote.amount)}</span>
-    `;
+    const selectedChip = el('div', 'text-xs text-brand-400 mb-4');
+    selectedChip.append(
+      'Selected: ',
+      el('span', 'font-mono', shortCommitment(state.selectedNote.id)),
+      ' ',
+      el('span', 'text-dark-500', `· ${formatAmount(state.selectedNote.amount)}`),
+    );
     container.appendChild(selectedChip);
   }
 
@@ -505,25 +528,22 @@ export function mountGenerate(container) {
     const date = new Date().toISOString().slice(0, 10);
     const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
 
-    resultArea.innerHTML = `
-      <div class="space-y-3">
-        <div class="text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3">
-          Disclosure receipt generated successfully.
-        </div>
-        <pre class="p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64">${escapeHtml(json)}</pre>
-        <div class="flex gap-2">
-          <button id="btn-download-receipt" type="button" class="px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition">
-            Download JSON
-          </button>
-          <button id="btn-copy-receipt" type="button" class="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition">
-            Copy to clipboard
-          </button>
-          <button id="btn-reset-generate" type="button" class="px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition">
-            Generate another
-          </button>
-        </div>
-      </div>
-    `;
+    const box = el('div', 'space-y-3');
+    box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    box.appendChild(el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json));
+    const actions = el('div', 'flex gap-2');
+    const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
+    dlBtn.type = 'button';
+    dlBtn.id = 'btn-download-receipt';
+    const copyBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Copy to clipboard');
+    copyBtn.type = 'button';
+    copyBtn.id = 'btn-copy-receipt';
+    const resetBtn = el('button', 'px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-medium hover:border-brand-500 hover:text-brand-400 transition', 'Generate another');
+    resetBtn.type = 'button';
+    resetBtn.id = 'btn-reset-generate';
+    actions.append(dlBtn, copyBtn, resetBtn);
+    box.appendChild(actions);
+    resultArea.replaceChildren(box);
 
     document.getElementById('btn-download-receipt')?.addEventListener('click', () => {
       const blob = new Blob([json], { type: 'application/json' });
@@ -550,7 +570,7 @@ export function mountGenerate(container) {
       state.generateError = null;
       state.generateStage = null;
       resultArea.classList.add('hidden');
-      resultArea.innerHTML = '';
+      resultArea.replaceChildren();
       progressArea.classList.add('hidden');
       progressArea.replaceChildren();
       // Re-enable form
@@ -609,14 +629,6 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
-function escapeHtml(str) {
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
 function getActivePoolContractId(config) {
   const pools = Array.isArray(config?.pools) ? config.pools : [];
   const selected = pools.find((p) => p?.enabled) || pools[0];
@@ -667,7 +679,7 @@ async function generateReceipt(form) {
 // ---------------------------------------------------------------------------
 
 export function mountVerify(container) {
-  container.innerHTML = '';
+  container.replaceChildren();
 
   const heading = document.createElement('h2');
   heading.id = 'verify-heading';
@@ -841,7 +853,7 @@ export function mountVerify(container) {
   };
 
   const renderSummary = (r) => {
-    summaryGrid.innerHTML = '';
+    summaryGrid.replaceChildren();
     const items = [
       { label: 'Network', value: r.context.network },
       { label: 'Pool address', value: r.context.poolAddress },
@@ -853,12 +865,11 @@ export function mountVerify(container) {
       { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
     ];
     items.forEach((item) => {
-      const cell = document.createElement('div');
-      cell.className = 'p-2 bg-dark-800 border border-dark-700 rounded-lg';
-      cell.innerHTML = `
-        <div class="text-[10px] uppercase tracking-wide text-dark-500">${escapeHtml(item.label)}</div>
-        <div class="text-xs font-mono text-dark-200 break-all">${escapeHtml(String(item.value))}</div>
-      `;
+      const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
+      cell.append(
+        el('div', 'text-[10px] uppercase tracking-wide text-dark-500', item.label),
+        el('div', 'text-xs font-mono text-dark-200 break-all', String(item.value)),
+      );
       summaryGrid.appendChild(cell);
     });
   };
@@ -928,12 +939,9 @@ export function mountVerify(container) {
     verifyBtn.disabled = true;
     verifyBtn.textContent = 'Verifying…';
     resultsWrap.classList.remove('hidden');
-    resultsWrap.innerHTML = `
-      <div class="flex items-center gap-2 text-sm text-dark-300">
-        <span class="w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"></span>
-        <span>Running verification checks…</span>
-      </div>
-    `;
+    const verifyingRow = el('div', 'flex items-center gap-2 text-sm text-dark-300');
+    verifyingRow.append(spinnerEl(), el('span', null, 'Running verification checks…'));
+    resultsWrap.replaceChildren(verifyingRow);
 
     try {
       const report = await getHandle().webClient.verifySelectiveDisclosure(
@@ -946,7 +954,7 @@ export function mountVerify(container) {
       const rootOk = !!report.knownRootStatus;
       const fullyVerified = proofOk && contextOk && rootOk;
 
-      resultsWrap.innerHTML = '';
+      resultsWrap.replaceChildren();
 
       const list = document.createElement('ul');
       list.className = 'space-y-2';
@@ -954,23 +962,19 @@ export function mountVerify(container) {
       list.setAttribute('aria-label', 'Verification results');
 
       const makeCheck = (label, pass, failText, passText) => {
-        const li = document.createElement('li');
-        li.className = `flex items-start gap-3 p-3 rounded-lg border ${
+        const li = el('li', `flex items-start gap-3 p-3 rounded-lg border ${
           pass
             ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
             : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
-        }`;
-        li.innerHTML = `
-          <div class="mt-0.5 w-4 h-4 flex-shrink-0">${
-            pass
-              ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>'
-              : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>'
-          }</div>
-          <div>
-            <div class="text-sm font-medium">${pass ? passText[0] : passText[1]}</div>
-            <div class="text-xs opacity-80 mt-0.5">${pass ? passText[2] : failText}</div>
-          </div>
-        `;
+        }`);
+        const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
+        iconWrap.appendChild(pass ? checkCircleIcon('w-4 h-4') : xCircleIcon('w-4 h-4'));
+        const textWrap = el('div');
+        textWrap.append(
+          el('div', 'text-sm font-medium', pass ? passText[0] : passText[1]),
+          el('div', 'text-xs opacity-80 mt-0.5', pass ? passText[2] : failText),
+        );
+        li.append(iconWrap, textWrap);
         return li;
       };
 
@@ -1002,23 +1006,17 @@ export function mountVerify(container) {
       resultsWrap.appendChild(list);
 
       if (fullyVerified) {
-        const badge = document.createElement('div');
-        badge.className =
-          'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2';
+        const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2');
         badge.setAttribute('role', 'status');
-        badge.innerHTML = `
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-          <span>Fully verified — this receipt is trustworthy.</span>
-        `;
+        badge.append(shieldIcon('w-5 h-5'), el('span', null, 'Fully verified — this receipt is trustworthy.'));
         resultsWrap.appendChild(badge);
       }
     } catch (err) {
       console.error('Verification failed:', err);
-      resultsWrap.innerHTML = `
-        <div class="text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3">
-          Verification could not be completed: ${escapeHtml(err.message || 'Unknown error')}
-        </div>
-      `;
+      resultsWrap.replaceChildren(
+        el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
+          `Verification could not be completed: ${err.message || 'Unknown error'}`),
+      );
     } finally {
       verifyBtn.disabled = false;
       verifyBtn.textContent = 'Verify Receipt';

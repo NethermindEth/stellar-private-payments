@@ -50,8 +50,33 @@ function inferType(row) {
     };
 }
 
-function iconSvg(type) {
-    return '<svg class="w-3.5 h-3.5 text-dark-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v6"/><path d="M12 17h.01"/></svg>';
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+function svgEl(tag, attrs = {}) {
+    const node = document.createElementNS(SVG_NS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    return node;
+}
+
+function iconSvg() {
+    const svg = svgEl('svg', { class: 'w-3.5 h-3.5 text-dark-400', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' });
+    svg.append(
+        svgEl('circle', { cx: '12', cy: '12', r: '9' }),
+        svgEl('path', { d: 'M12 7v6' }),
+        svgEl('path', { d: 'M12 17h.01' }),
+    );
+    return svg;
+}
+
+function externalLinkIcon() {
+    const svg = svgEl('svg', { class: 'w-3 h-3', fill: 'none', stroke: 'currentColor', viewBox: '0 0 24 24' });
+    svg.appendChild(svgEl('path', {
+        'stroke-linecap': 'round',
+        'stroke-linejoin': 'round',
+        'stroke-width': '2',
+        d: 'M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14',
+    }));
+    return svg;
 }
 
 function ledgerLink(ledger) {
@@ -116,7 +141,7 @@ export const PoolEvents = {
 
                 const left = document.createElement('div');
                 left.className = 'flex items-center gap-2';
-                left.innerHTML = iconSvg(info.label);
+                left.appendChild(iconSvg());
 
                 const txt = document.createElement('div');
                 txt.className = 'flex flex-col';
@@ -138,7 +163,7 @@ export const PoolEvents = {
                 a.target = '_blank';
                 a.rel = 'noopener noreferrer';
                 a.className = 'text-dark-400 hover:text-brand-400 transition-colors flex items-center gap-1';
-                a.innerHTML = `L${ledger} <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/></svg>`;
+                a.append(`L${ledger} `, externalLinkIcon());
 
                 li.appendChild(left);
                 li.appendChild(a);
