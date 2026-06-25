@@ -16,7 +16,7 @@ use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use std::{cell::RefCell, rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
-    PoolError, PrivatePool, PrivatePoolConfig, Prover, Signer,
+    PoolError, PrivatePool, PrivatePoolConfig, Prover, ProverArtifacts, Signer,
     chain::{
         OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, StateFetcher,
         TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx,
@@ -30,11 +30,62 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
-mod pool_session;
 mod transact;
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
+
+struct WebClientPool {
+    pool_contract_id: String,
+    user_address: String,
+    network_passphrase: String,
+    private_pool: Option<Rc<PrivatePool>>,
+    signer_progress: Rc<RefCell<Option<Function>>>,
+}
+
+impl WebClientPool {
+    fn new() -> Self {
+        Self {
+            pool_contract_id: String::new(),
+            user_address: String::new(),
+            network_passphrase: String::new(),
+            private_pool: None,
+            signer_progress: Rc::new(RefCell::new(None)),
+        }
+    }
+
+    fn clear(&mut self) {
+        self.pool_contract_id.clear();
+        self.user_address.clear();
+        self.network_passphrase.clear();
+        self.private_pool = None;
+        *self.signer_progress.borrow_mut() = None;
+    }
+
+    fn matches(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        network_passphrase: &str,
+    ) -> bool {
+        self.private_pool.is_some()
+            && self.pool_contract_id == pool_contract_id
+            && self.user_address == user_address
+            && self.network_passphrase == network_passphrase
+    }
+}
+
+pub(crate) fn pool_err(error: PoolError) -> JsError {
+    match &error {
+        PoolError::MembershipSync(AspMembershipSync::RegisterAtASP) => {
+            JsError::new("register at ASP before transacting")
+        }
+        PoolError::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
+            JsError::new("indexer sync in progress; try again shortly")
+        }
+        _ => JsError::new(&error.to_string()),
+    }
+}
 
 fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
     match result {
@@ -89,7 +140,7 @@ pub struct WebClient {
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
     #[wasm_bindgen(skip)]
-    pool_session: pool_session::PoolSessionCell,
+    pool: Rc<RefCell<WebClientPool>>,
 }
 
 impl Clone for WebClient {
@@ -99,7 +150,7 @@ impl Clone for WebClient {
             storage: self.storage.clone(),
             prover_bridge: self.prover_bridge.clone(),
             fetcher: self.fetcher.clone(),
-            pool_session: self.pool_session.clone(),
+            pool: self.pool.clone(),
         }
     }
 }
@@ -131,8 +182,96 @@ impl WebClient {
                     .spawn("./js/prover-worker.js"),
             ),
             fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
-            pool_session: Rc::new(RefCell::new(pool_session::PoolSession::new())),
+            pool: Rc::new(RefCell::new(WebClientPool::new())),
         })
+    }
+
+    /// Drop the open pool (e.g. wallet disconnect or account switch).
+    pub fn close_pool(&self) {
+        self.pool.borrow_mut().clear();
+    }
+
+    pub(super) async fn ensure_pool(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        network_passphrase: String,
+        on_status: Option<Function>,
+    ) -> Result<Rc<PrivatePool>, JsError> {
+        if self
+            .pool
+            .borrow()
+            .matches(&pool_contract_id, &user_address, &network_passphrase)
+        {
+            let pool_state = self.pool.borrow();
+            *pool_state.signer_progress.borrow_mut() = on_status;
+            return Ok(Rc::clone(
+                pool_state
+                    .private_pool
+                    .as_ref()
+                    .expect("matches implies pool is open"),
+            ));
+        }
+
+        emit_progress(
+            &on_status,
+            "pool",
+            "load_prover",
+            "Starting prover worker…",
+            None,
+            None,
+        );
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        let contract_config: ContractConfig = self.fetcher.contract_config().clone();
+        let config = PrivatePoolConfig {
+            rpc_url: self.rpc_url.clone(),
+            contract_config,
+            pool_contract_id: pool_contract_id.clone(),
+            user_address: user_address.clone(),
+            storage_path: String::new(),
+            prover_artifacts: ProverArtifacts::empty(),
+        };
+        let signer_progress = Rc::new(RefCell::new(on_status));
+        let signer: Box<dyn Signer> = Self::wallet_signer(
+            network_passphrase.clone(),
+            user_address.clone(),
+            Rc::clone(&signer_progress),
+        );
+        let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
+        let private_pool = Rc::new(
+            PrivatePool::init(config, Box::new(self.storage()), signer, prover)
+                .map_err(pool_err)?,
+        );
+
+        {
+            let mut pool_state = self.pool.borrow_mut();
+            pool_state.pool_contract_id = pool_contract_id;
+            pool_state.user_address = user_address;
+            pool_state.network_passphrase = network_passphrase;
+            pool_state.signer_progress = signer_progress;
+            pool_state.private_pool = Some(Rc::clone(&private_pool));
+        }
+        Ok(private_pool)
+    }
+
+    pub(super) async fn sync_pool(
+        &self,
+        pool: &PrivatePool,
+        flow: &'static str,
+        on_status: &Option<Function>,
+    ) -> Result<(), JsError> {
+        emit_progress(
+            on_status,
+            flow,
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
+        pool.sync().await.map_err(pool_err).map(|_| ())
     }
 
     pub(crate) fn storage(&self) -> StorageBridge {
@@ -143,21 +282,7 @@ impl WebClient {
         self.prover_bridge.clone()
     }
 
-    /// Construct a [`PrivatePool`] backed by the storage worker bridge.
-    ///
-    /// Indexing remains on [`crate::events::events_listener`]; call
-    /// [`PrivatePool::sync`] before transacting so local storage is caught up.
-    pub fn private_pool(
-        &self,
-        config: PrivatePoolConfig,
-        signer: Box<dyn Signer>,
-        prover: Box<dyn Prover>,
-    ) -> Result<PrivatePool<StorageBridge>, PoolError> {
-        PrivatePool::init(config, self.storage(), signer, prover)
-    }
-
-    /// Wallet-backed [`Signer`] for [`Self::private_pool`].
-    pub fn wallet_transaction_signer(
+    fn wallet_signer(
         network_passphrase: String,
         user_address: String,
         on_status: Rc<RefCell<Option<Function>>>,

@@ -6,9 +6,6 @@ pub enum PoolError {
     #[error("not implemented")]
     NotImplemented,
 
-    #[error("pool not initialized")]
-    NotInitialized,
-
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 

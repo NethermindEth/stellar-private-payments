@@ -1,3 +1,5 @@
+use std::rc::Rc;
+
 use prover::flows::TransactParams;
 use state::{Storage as SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
@@ -111,5 +113,48 @@ impl Storage for LocalStorage {
         process_local_state(&mut *self.storage_mut())?;
         let to_ledger = self.sync_metadata_max_ledger(from_ledger)?;
         Ok((from_ledger, to_ledger))
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Storage for Rc<LocalStorage> {
+    async fn ensure_ready(&self) -> Result<(), PoolError> {
+        self.as_ref().ensure_ready().await
+    }
+
+    async fn spendable_wallet(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<SpendableNote>, PoolError> {
+        self.as_ref()
+            .spendable_wallet(pool_contract_id, user_address)
+            .await
+    }
+
+    async fn build_transact_params(
+        &self,
+        req: &TransactRequest,
+    ) -> Result<TransactParams, PoolError> {
+        self.as_ref().build_transact_params(req).await
+    }
+
+    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {
+        self.as_ref().user_keys(user_address).await
+    }
+
+    async fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        self.as_ref().user_public_keys(user_address).await
+    }
+
+    async fn sync_indexer(
+        &self,
+        rpc_url: &str,
+        contract_config: &ContractConfig,
+    ) -> Result<(u32, u32), PoolError> {
+        self.as_ref().sync_indexer(rpc_url, contract_config).await
     }
 }

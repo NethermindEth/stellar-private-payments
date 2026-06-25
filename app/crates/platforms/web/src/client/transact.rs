@@ -3,8 +3,7 @@
 
 use super::{
     WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
-    parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys,
-    pool_session::pool_err,
+    parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys, pool_err,
 };
 use crate::protocol::{StorageWorkerRequest, StorageWorkerResponse};
 use gloo_timers::future::TimeoutFuture;
@@ -39,7 +38,7 @@ impl WebClient {
         step: Transact,
     ) -> Result<Option<Vec<String>>, JsError> {
         let pool = self
-            .pool_handle(
+            .ensure_pool(
                 pool_contract_id,
                 user_address,
                 network_passphrase,
@@ -131,7 +130,7 @@ impl WebClient {
         }
 
         let pool = self
-            .pool_handle(
+            .ensure_pool(
                 pool_contract_id,
                 user_address,
                 network_passphrase,
@@ -184,7 +183,7 @@ impl WebClient {
         }
 
         let pool = self
-            .pool_handle(
+            .ensure_pool(
                 pool_contract_id,
                 user_address,
                 network_passphrase,
@@ -250,7 +249,7 @@ impl WebClient {
         }
 
         let pool = self
-            .pool_handle(pool_contract_id, user_address, network_passphrase, None)
+            .ensure_pool(pool_contract_id, user_address, network_passphrase, None)
             .await?;
         let wallet = pool.wallet().await.map_err(pool_err)?;
         let estimate = pool.estimate(&wallet, amount).map_err(pool_err)?;

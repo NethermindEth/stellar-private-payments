@@ -1,5 +1,7 @@
 //! Sync wrapper around [`crate::PrivatePool`] via pollster.
 
+use std::rc::Rc;
+
 use state::Storage;
 use tx_planner::SpendableNote;
 use types::NoteAmount;
@@ -7,7 +9,6 @@ use types::NoteAmount;
 use crate::{
     PoolCore, PreparedTransaction,
     error::PoolError,
-    plan::PreparedTransactionPlan,
     pool::PrivatePool as AsyncPrivatePool,
     prover::LocalProver,
     signer::Signer,
@@ -21,68 +22,57 @@ use crate::{
 use super::Indexer;
 
 /// Native sync wallet — [`AsyncPrivatePool`] with blocking method names.
-pub struct PrivatePool(AsyncPrivatePool<LocalStorage>);
+pub struct PrivatePool {
+    inner: AsyncPrivatePool,
+    storage: Rc<LocalStorage>,
+}
 
 impl PrivatePool {
     pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
-        let backend = LocalStorage::open(
+        let storage = Rc::new(LocalStorage::open(
             &config.rpc_url,
             &config.storage_path,
             &config.contract_config,
-        )?;
+        )?);
         let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        Ok(Self(AsyncPrivatePool::init(
-            config, backend, signer, prover,
-        )?))
+        let inner = AsyncPrivatePool::init(config, Box::new(Rc::clone(&storage)), signer, prover)?;
+        Ok(Self { inner, storage })
     }
 
-    pub fn into_inner(self) -> AsyncPrivatePool<LocalStorage> {
-        self.0
+    pub fn into_inner(self) -> AsyncPrivatePool {
+        self.inner
     }
 
-    pub fn inner(&self) -> &AsyncPrivatePool<LocalStorage> {
-        &self.0
+    pub fn inner(&self) -> &AsyncPrivatePool {
+        &self.inner
     }
 
-    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool<LocalStorage> {
-        &mut self.0
+    pub fn inner_mut(&mut self) -> &mut AsyncPrivatePool {
+        &mut self.inner
     }
 
     pub fn config(&self) -> &PrivatePoolConfig {
-        self.0.config()
+        self.inner.config()
     }
 
     pub fn core(&self) -> &PoolCore {
-        self.0.core()
+        self.inner.core()
     }
 
     pub fn chain_config(&self) -> &crate::types::PoolChainConfig {
-        self.0.core().config()
-    }
-
-    pub fn signer(&self) -> &dyn Signer {
-        self.0.signer()
+        self.inner.core().config()
     }
 
     pub fn storage(&self) -> std::cell::Ref<'_, Storage> {
-        self.0
-            .pool_storage()
-            .expect("native pool storage is always initialized")
-            .storage()
+        self.storage.storage()
     }
 
     pub fn storage_mut(&self) -> std::cell::RefMut<'_, Storage> {
-        self.0
-            .pool_storage()
-            .expect("native pool storage is always initialized")
-            .storage_mut()
+        self.storage.storage_mut()
     }
 
     pub fn indexer_mut(&self) -> std::cell::RefMut<'_, Indexer> {
-        self.0
-            .pool_storage()
-            .expect("native pool storage is always initialized")
-            .indexer_mut()
+        self.storage.indexer_mut()
     }
 
     pub fn estimate(
@@ -90,11 +80,11 @@ impl PrivatePool {
         wallet: &[SpendableNote],
         amount: NoteAmount,
     ) -> Result<Estimate, PoolError> {
-        self.0.estimate(wallet, amount)
+        self.inner.estimate(wallet, amount)
     }
 
     pub fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.0.deposit(amount))
+        pollster::block_on(self.inner.deposit(amount))
     }
 
     pub fn transfer(
@@ -103,7 +93,7 @@ impl PrivatePool {
         recipient: TransferRecipient,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        pollster::block_on(self.0.transfer(wallet, recipient, amount))
+        pollster::block_on(self.inner.transfer(wallet, recipient, amount))
     }
 
     pub fn withdraw(
@@ -112,37 +102,34 @@ impl PrivatePool {
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        pollster::block_on(self.0.withdraw(wallet, amount, recipient))
+        pollster::block_on(self.inner.withdraw(wallet, amount, recipient))
     }
 
     pub fn transact(&self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.0.transact(step))
+        pollster::block_on(self.inner.transact(step))
     }
 
     pub fn sync(&self) -> Result<SyncResult, PoolError> {
-        pollster::block_on(self.0.sync())
+        pollster::block_on(self.inner.sync())
     }
 
     pub fn wallet(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        pollster::block_on(self.0.wallet())
+        pollster::block_on(self.inner.wallet())
     }
 
     pub fn balance(&self) -> Result<NoteAmount, PoolError> {
-        pollster::block_on(self.0.balance())
-    }
-
-    pub fn next_prepared_transaction(
-        &self,
-        plan: &mut PreparedTransactionPlan,
-    ) -> Result<PreparedTransaction, PoolError> {
-        pollster::block_on(self.0.next_prepared_transaction(plan))
+        pollster::block_on(self.inner.balance())
     }
 
     pub fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
-        pollster::block_on(self.0.simulate(prepared))
+        pollster::block_on(self.inner.simulate(prepared))
     }
 
-    pub fn submit(&self, signed_tx: SignedTransaction) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.0.submit(signed_tx))
+    pub fn submit(&self, signed_tx: SignedTransaction) -> Result<String, PoolError> {
+        pollster::block_on(self.inner.submit(signed_tx))
+    }
+
+    pub fn confirm(&self, hash: &str) -> Result<TransactionResult, PoolError> {
+        pollster::block_on(self.inner.confirm(hash))
     }
 }
