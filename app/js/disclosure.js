@@ -25,6 +25,7 @@ const state = {
   networkPassphrase: null,
   derivedKeys: null,
   notes: [],
+  pools: [],
   selectedNote: null,
   notesLoading: false,
   notesError: null,
@@ -127,11 +128,14 @@ async function loadNotes() {
 
   try {
     const LIMIT = 200;
+    const config = await getHandle().webClient.contractConfig();
+    state.pools = Array.isArray(config?.pools) ? config.pools : [];
     const list = await getHandle().webClient.getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
       id: n.id,
+      poolContractId: n.poolContractId,
       amount: n.amount,
       spent: !!n.spent,
       leafIndex: n.leafIndex ?? 0,
@@ -233,14 +237,29 @@ function parseQueryParams() {
 // Mount: Generate (wallet-gated)
 // ---------------------------------------------------------------------------
 
-function formatAmount(stroops) {
+function formatAmount(stroops, symbol = 'XLM') {
   try {
-    const n = BigInt(stroops);
-    const xlm = Number(n) / 10_000_000;
-    return `${xlm.toFixed(7)} XLM`;
+    let v = BigInt(stroops);
+    const negative = v < 0n;
+    if (negative) v = -v;
+    const abs = v.toString().padStart(8, '0');
+    const intPart = abs.slice(0, -7);
+    const frac = abs.slice(-7).replace(/0+$/, '');
+    const out = frac ? `${intPart}.${frac}` : intPart;
+    return `${negative ? '-' : ''}${out} ${symbol}`;
   } catch {
     return String(stroops);
   }
+}
+
+// Token symbol for a pool, derived from the deployment config's asset descriptor.
+function tokenLabelForPool(poolContractId) {
+  const pool = (state.pools || []).find((p) => p.poolContractId === poolContractId);
+  const asset = pool?.asset || {};
+  if (asset.kind === 'native') return 'XLM';
+  if (asset.kind === 'classic') return asset.code || 'Asset';
+  if (asset.kind === 'contract') return asset.symbol || 'Token';
+  return 'Token';
 }
 
 function shortCommitment(hex) {
@@ -329,14 +348,15 @@ export function mountGenerate(container) {
     row.setAttribute('role', 'radio');
     row.setAttribute('aria-checked', String(isSelected));
 
+    const noteLabel = tokenLabelForPool(note.poolContractId);
     const rowInfo = el('div', 'min-w-0');
     rowInfo.append(
       el('div', 'font-mono text-xs truncate', shortCommitment(note.id)),
-      el('div', 'text-[10px] text-dark-500 mt-0.5', `Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
+      el('div', 'text-[10px] text-dark-500 mt-0.5', `${noteLabel} · Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
     );
     row.append(
       rowInfo,
-      el('div', `text-xs font-medium whitespace-nowrap ${isSelected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount)),
+      el('div', `text-xs font-medium whitespace-nowrap ${isSelected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount, noteLabel)),
     );
 
     row.addEventListener('click', () => {
@@ -355,7 +375,7 @@ export function mountGenerate(container) {
       'Selected: ',
       el('span', 'font-mono', shortCommitment(state.selectedNote.id)),
       ' ',
-      el('span', 'text-dark-500', `· ${formatAmount(state.selectedNote.amount)}`),
+      el('span', 'text-dark-500', `· ${formatAmount(state.selectedNote.amount, tokenLabelForPool(state.selectedNote.poolContractId))}`),
     );
     container.appendChild(selectedChip);
   }
@@ -656,8 +676,10 @@ async function generateReceipt(form) {
     }
   };
 
+  // Disclose against the pool the selected note actually belongs to (there can
+  // be multiple pools); falling back to the first enabled pool only if unknown.
   const config = await getHandle().webClient.contractConfig();
-  const poolContractId = getActivePoolContractId(config);
+  const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
 
   const receipt = await getHandle().webClient.generateSelectiveDisclosure(
     poolContractId,
