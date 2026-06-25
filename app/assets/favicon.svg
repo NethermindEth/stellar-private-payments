@@ -6,6 +6,7 @@
     </linearGradient>
   </defs>
   <rect width="32" height="32" rx="7" fill="url(#spp)"/>
-  <path d="M21.5 10.4C21.5 7.6 17.2 6.3 13.6 8 10.2 9.6 10.2 13.2 13.8 14.9 16.6 16.2 19.8 16.6 19.9 19.5 20 22.6 15.3 24.1 11 21.9"
-        fill="none" stroke="#0b1423" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="16" y="21.5" text-anchor="middle"
+        font-family="ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, Arial, sans-serif"
+        font-size="12.5" font-weight="800" letter-spacing="-0.4" fill="#0b1423">SPP</text>
 </svg>
