@@ -14,7 +14,8 @@ use stellar_xdr::{curr as xdr, curr::ReadXdr};
 
 use types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
-    ExtAmount, Field, NotePublicKey, PoolInfo, U256,
+    ExtAmount, Field, NotePublicKey, PoolInfo, SMT_DEPTH, TransactChainContext, U256,
+    transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -420,10 +421,11 @@ impl StateFetcher {
     }
 
     pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
-        Ok(Self {
-            client: Client::new(rpc_url)?,
-            config,
-        })
+        Self::with_client(Client::new(rpc_url)?, config)
+    }
+
+    pub fn with_client(client: Client, config: ContractConfig) -> Result<Self> {
+        Ok(Self { client, config })
     }
 
     pub fn contract_config(&self) -> &ContractConfig {
@@ -534,6 +536,25 @@ impl StateFetcher {
             siblings,
             root: non_membership_root,
         })
+    }
+
+    /// Pool + ASP chain anchors for a single `transact` prove step.
+    pub async fn transact_chain_context(
+        &self,
+        pool_contract_id: &str,
+        note_pubkey: &NotePublicKey,
+        user_address: &str,
+    ) -> Result<TransactChainContext> {
+        let data = self.contracts_data_for_pool(pool_contract_id).await?;
+        let non_membership_proof = self
+            .get_nonmembership_proof(
+                note_pubkey,
+                data.asp_non_membership.root,
+                SMT_DEPTH as usize,
+                user_address,
+            )
+            .await?;
+        transact_chain_context_from_state(data, pool_contract_id, non_membership_proof)
     }
 
     /// Checks whether a pool Merkle root is still known by the deployed pool.
@@ -758,10 +779,11 @@ pub mod blocking {
 
     impl StateFetcher {
         pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
-            Ok(Self {
-                client: Client::new(rpc_url)?,
-                config,
-            })
+            Self::with_client(Client::new(rpc_url)?, config)
+        }
+
+        pub fn with_client(client: Client, config: ContractConfig) -> Result<Self> {
+            Ok(Self { client, config })
         }
 
         pub fn contract_config(&self) -> &ContractConfig {
@@ -857,6 +879,22 @@ pub mod blocking {
                 siblings,
                 root: non_membership_root,
             })
+        }
+
+        pub fn transact_chain_context(
+            &self,
+            pool_contract_id: &str,
+            note_pubkey: &NotePublicKey,
+            user_address: &str,
+        ) -> Result<TransactChainContext> {
+            let data = self.contracts_data_for_pool(pool_contract_id)?;
+            let non_membership_proof = self.get_nonmembership_proof(
+                note_pubkey,
+                data.asp_non_membership.root,
+                SMT_DEPTH as usize,
+                user_address,
+            )?;
+            transact_chain_context_from_state(data, pool_contract_id, non_membership_proof)
         }
 
         pub fn is_pool_known_root(&self, pool_contract_id: &str, root: Field) -> Result<bool> {

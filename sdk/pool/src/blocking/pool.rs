@@ -13,8 +13,8 @@ use crate::{
     prover::LocalProver,
     signer::TransactionSigner,
     types::{
-        Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactChainContext,
-        TransactionResult, TransferRecipient,
+        Estimate, PrivatePoolConfig, SignedTransaction, SyncResult, TransactionResult,
+        TransferRecipient,
     },
 };
 
@@ -59,10 +59,6 @@ impl PrivatePool {
         self.0.core()
     }
 
-    pub fn core_mut(&mut self) -> &mut PoolCore {
-        self.0.core_mut()
-    }
-
     pub fn chain_config(&self) -> &crate::types::PoolChainConfig {
         self.0.core().config()
     }
@@ -90,14 +86,6 @@ impl PrivatePool {
             .pool_storage()
             .expect("native pool storage is always initialized")
             .indexer_mut()
-    }
-
-    pub fn chain_context(&self) -> Result<&TransactChainContext, PoolError> {
-        self.0.chain_context()
-    }
-
-    pub fn set_chain_context(&mut self, chain: TransactChainContext) {
-        self.0.set_chain_context(chain);
     }
 
     pub fn estimate(
@@ -144,10 +132,6 @@ impl PrivatePool {
 
     pub fn balance(&self) -> Result<NoteAmount, PoolError> {
         pollster::block_on(self.0.balance())
-    }
-
-    pub fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
-        pollster::block_on(self.0.refresh_chain_context())
     }
 
     pub fn next_prepared_transaction(

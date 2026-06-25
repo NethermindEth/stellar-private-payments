@@ -14,10 +14,8 @@ use tx_planner::Transact;
 use types::{
     AspMembershipProof, AspMembershipSync, AspNonMembershipProof, EncryptionKeyPair,
     EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePrivateKey,
-    NotePublicKey, SMT_DEPTH,
+    NotePublicKey, SMT_DEPTH, TransactChainContext,
 };
-
-use crate::types::TransactChainContext;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

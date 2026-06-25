@@ -9,9 +9,6 @@ pub enum PoolError {
     #[error("pool not initialized")]
     NotInitialized,
 
-    #[error("chain state not synced; call sync() first")]
-    NotSynced,
-
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
 

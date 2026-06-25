@@ -1,4 +1,4 @@
-//! Shared pool config, snapshot, planning, and helpers (all targets).
+//! Shared pool config, planning, and helpers (all targets).
 
 use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
 use types::{ExtAmount, NoteAmount};
@@ -6,46 +6,29 @@ use types::{ExtAmount, NoteAmount};
 use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
-    types::{Estimate, PoolChainConfig, TransactChainContext, TransferRecipient},
+    types::{Estimate, PoolChainConfig, TransferRecipient},
 };
 
 mod plan;
-mod snapshot;
 mod state;
 
 pub(crate) use plan::{pool_transact_input, transact_step_for_plan};
-pub(crate) use snapshot::fetch_snapshot_async;
 pub(crate) use state::process_local_state;
 pub use state::process_local_state_batch;
 
-/// Config, synced snapshot, and planning for one privacy pool.
+/// Config and planning for one privacy pool.
 pub struct PoolCore {
     config: PoolChainConfig,
-    snapshot: Option<TransactChainContext>,
 }
 
 impl PoolCore {
     pub fn new(config: PoolChainConfig) -> Result<Self, PoolError> {
         config.validate()?;
-        Ok(Self {
-            config,
-            snapshot: None,
-        })
+        Ok(Self { config })
     }
 
     pub fn config(&self) -> &PoolChainConfig {
         &self.config
-    }
-
-    /// On-chain snapshot from the last successful refresh or an explicit
-    /// install.
-    pub fn chain_context(&self) -> Result<&TransactChainContext, PoolError> {
-        self.snapshot.as_ref().ok_or(PoolError::NotSynced)
-    }
-
-    /// Install snapshot without RPC (tests / offline wallets).
-    pub fn set_chain_context(&mut self, snapshot: TransactChainContext) {
-        self.snapshot = Some(snapshot);
     }
 
     pub fn prepare_deposit(

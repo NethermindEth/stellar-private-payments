@@ -105,19 +105,3 @@ pub struct Estimate {
 pub struct SignedTransaction {
     pub signed_xdr: String,
 }
-
-/// On-chain snapshot used when building transact witness inputs.
-///
-/// Refreshed by [`crate::blocking::PrivatePool::sync`] (RPC + local indexer).
-/// Until sync is wired, tests may seed it via
-/// [`crate::PoolCore::set_chain_context`].
-#[derive(Debug, Clone)]
-pub struct TransactChainContext {
-    pub pool_root: Field,
-    pub pool_next_index: u32,
-    pub pool_merkle_levels: u32,
-    pub asp_membership_root: Field,
-    pub asp_membership_contract_id: String,
-    pub asp_membership_ledger: u32,
-    pub non_membership_proof: AspNonMembershipProof,
-}

@@ -17,6 +17,7 @@ pub use rpc::{Client, Error as RpcError, Event, GetTransactionResponse, SendTran
 pub use signer::{LocalSigner, Signature, auth_sign_steps, unsigned_tx_for_signing, verify_tx};
 pub use stellar_xdr::curr::{Limits, ReadXdr, TransactionEnvelope, WriteXdr};
 pub use submit::{TxConfirmStatus, confirm_tx, submit_tx};
+pub use types::TransactChainContext;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking {
     pub use crate::{

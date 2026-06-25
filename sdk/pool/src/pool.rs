@@ -11,7 +11,7 @@ use stellar::{
 use crate::{
     PoolCore, PreparedTransaction,
     confirm_poll::sleep_between_confirm_polls,
-    core::{fetch_snapshot_async, pool_transact_input, transact_step_for_plan},
+    core::{pool_transact_input, transact_step_for_plan},
     error::PoolError,
     plan::PreparedTransactionPlan,
     pool_storage::PoolStorage,
@@ -31,6 +31,8 @@ use crate::pool_storage::LocalPoolBackend;
 pub struct PrivatePool<S> {
     core: PoolCore,
     config: PrivatePoolConfig,
+    client: Client,
+    fetcher: StateFetcher,
     storage: Option<S>,
     prover: Box<dyn TransactionProver>,
     signer: Box<dyn TransactionSigner>,
@@ -43,9 +45,15 @@ impl<S> PrivatePool<S> {
         signer: Box<dyn TransactionSigner>,
         prover: Box<dyn TransactionProver>,
     ) -> Result<Self, PoolError> {
+        let client = Client::new(&config.rpc_url)
+            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+        let fetcher = StateFetcher::with_client(client.clone(), config.contract_config.clone())
+            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
         Ok(Self {
             core: PoolCore::new(config.chain_config())?,
             config,
+            client,
+            fetcher,
             storage: Some(storage),
             prover,
             signer,
@@ -60,23 +68,16 @@ impl<S> PrivatePool<S> {
         &*self.prover
     }
 
+    pub fn state_fetcher(&self) -> &StateFetcher {
+        &self.fetcher
+    }
+
+    pub fn client(&self) -> &Client {
+        &self.client
+    }
+
     pub fn core(&self) -> &PoolCore {
         &self.core
-    }
-
-    pub fn core_mut(&mut self) -> &mut PoolCore {
-        &mut self.core
-    }
-
-    /// Optional cached snapshot (tests / explicit
-    /// [`Self::refresh_chain_context`]). Prove steps fetch fresh chain
-    /// state from RPC, like the legacy web client.
-    pub fn chain_context(&self) -> Result<&TransactChainContext, PoolError> {
-        self.core.chain_context()
-    }
-
-    pub fn set_chain_context(&mut self, chain: TransactChainContext) {
-        self.core.set_chain_context(chain);
     }
 
     pub fn estimate(
@@ -114,11 +115,8 @@ impl<S: PoolStorage> PrivatePool<S> {
 
     pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
         let chain_config = self.core.config();
-        let fetcher =
-            StateFetcher::new(&chain_config.rpc_url, chain_config.contract_config.clone())
-                .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
-
-        prepared.soroban_tx = fetcher
+        prepared.soroban_tx = self
+            .fetcher
             .prepare_pool_transact(
                 &chain_config.pool_contract_id,
                 &pool_transact_input(prepared),
@@ -136,14 +134,12 @@ impl<S: PoolStorage> PrivatePool<S> {
     ) -> Result<TransactionResult, PoolError> {
         const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 
-        let chain_config = self.core.config();
         let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
             .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
 
-        let rpc = Client::new(&chain_config.rpc_url)
-            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+        let rpc = &self.client;
 
-        let hash = submit_tx(&envelope, &rpc)
+        let hash = submit_tx(&envelope, rpc)
             .await
             .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))?;
 
@@ -151,7 +147,7 @@ impl<S: PoolStorage> PrivatePool<S> {
             if attempt > 1 {
                 sleep_between_confirm_polls().await;
             }
-            match confirm_tx(&hash, &rpc)
+            match confirm_tx(&hash, rpc)
                 .await
                 .map_err(|e| PoolError::Other(format!("confirm transaction: {e:#}")))?
             {
@@ -242,19 +238,19 @@ impl<S: PoolStorage> PrivatePool<S> {
             .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
     }
 
-    /// Fetch current on-chain snapshot from RPC and cache it on the pool core.
-    pub async fn refresh_chain_context(&mut self) -> Result<(), PoolError> {
-        let snapshot = self.fetch_chain_context_snapshot().await?;
-        self.core.set_chain_context(snapshot);
-        Ok(())
-    }
-
-    async fn fetch_chain_context_snapshot(&self) -> Result<TransactChainContext, PoolError> {
+    async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, PoolError> {
         let (note_pub, _) = self
             .storage()?
             .user_public_keys(&self.config.user_address)
             .await?;
-        fetch_snapshot_async(self.core.config(), &note_pub).await
+        self.fetcher
+            .transact_chain_context(
+                &self.config.pool_contract_id,
+                &note_pub,
+                &self.config.user_address,
+            )
+            .await
+            .map_err(|e| PoolError::Other(format!("fetch chain context: {e:#}")))
     }
 
     async fn execute(
@@ -280,7 +276,7 @@ impl<S: PoolStorage> PrivatePool<S> {
             return Err(PoolError::Other("transaction plan is complete".into()));
         }
 
-        let chain = self.fetch_chain_context_snapshot().await?;
+        let chain = self.fetch_transact_chain_context().await?;
         let step = if let Some(amount) = plan.deposit_amount() {
             self.deposit_transact_step(amount).await?
         } else if let Some(step) = plan.raw_transact_step() {

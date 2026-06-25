@@ -45,7 +45,7 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
     let _ = std::fs::remove_file(&db_path);
 
     let amounts: Vec<u64> = wallet.unwrap_or_default().to_vec();
-    let chain = seed::seed_prove_wallet(
+    seed::seed_prove_wallet(
         &db_path,
         POOL_CONTRACT_ID,
         ASP_MEMBERSHIP_CONTRACT_ID,
@@ -54,7 +54,7 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         &amounts,
     )?;
 
-    let mut pool = PrivatePool::open(
+    let pool = PrivatePool::open(
         PrivatePoolConfig {
             rpc_url: "https://soroban-testnet.stellar.org".into(),
             contract_config: serde_json::from_str(TEST_CONFIG_JSON)?,
@@ -65,7 +65,6 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         },
         test_signer()?,
     )?;
-    pool.set_chain_context(chain);
 
     Ok(pool)
 }
