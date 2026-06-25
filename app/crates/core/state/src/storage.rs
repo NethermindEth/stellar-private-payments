@@ -1505,10 +1505,7 @@ fn token_label(pool: &PoolConfigEntry) -> String {
     match &pool.asset {
         types::AssetDescriptor::Native => "XLM".to_string(),
         types::AssetDescriptor::Classic { code, .. } => code.clone(),
-        types::AssetDescriptor::Contract { contract_id } => {
-            let suffix_start = contract_id.len().saturating_sub(6);
-            format!("Token · {}", &contract_id[suffix_start..])
-        }
+        types::AssetDescriptor::Contract { symbol, .. } => symbol.clone(),
     }
 }
 

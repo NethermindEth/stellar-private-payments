@@ -68,10 +68,7 @@ export const Utils = {
         const asset = pool.asset || {};
         if (asset.kind === 'native') return 'XLM';
         if (asset.kind === 'classic') return asset.code || 'Asset';
-        if (asset.kind === 'contract') {
-            const contractId = asset.contractId || '';
-            return `Token ${contractId.slice(-6) || ''}`.trim();
-        }
+        if (asset.kind === 'contract') return asset.symbol || 'Token';
         return 'Token';
     },
 

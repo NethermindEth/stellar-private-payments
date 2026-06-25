@@ -200,9 +200,18 @@ deploy_contract() {
   echo "$id"
 }
 
+# Read the SEP-41 token symbol() from a Soroban token contract (read-only simulate).
+# Returns the bare ticker (quotes/whitespace stripped), empty on failure.
+fetch_token_symbol() {
+  local id="$1" out
+  out="$(stellar contract invoke --id "$id" --source-account "$DEPLOYER" --network "$NETWORK" -- symbol 2>/dev/null || true)"
+  out="${out//\"/}"
+  printf '%s' "$out" | tr -d '[:space:]'
+}
+
 parse_pool_spec() {
   local spec="$1"
-  local kind token code issuer rest
+  local kind token code issuer rest symbol
   kind="${spec%%:*}"
   rest="${spec#*:}"
 
@@ -210,8 +219,10 @@ parse_pool_spec() {
     contract)
       token="$rest"
       [[ -n "$token" ]] || die "invalid pool spec '$spec': missing token contract id"
+      symbol="$(fetch_token_symbol "$token")"
+      [[ -n "$symbol" ]] || die "invalid pool spec '$spec': could not read symbol() from token contract $token"
       printf '%s\n' "$token"
-      printf '%s\n' "{\"kind\":\"contract\",\"contractId\":\"$token\"}"
+      printf '%s\n' "{\"kind\":\"contract\",\"contractId\":\"$token\",\"symbol\":\"$symbol\"}"
       ;;
     native)
       token="$rest"

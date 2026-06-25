@@ -37,12 +37,15 @@ If you want to try it out:
 
 1. Deploy the contracts to a Stellar network:
     ```bash
-    ./deployments/scripts/deploy.sh <network> \         # e.g. testnet
-      --deployer <identity> \                           # Must be added in stellar-cli keys
-      --asp-levels 10 \                                 # Number of levels in the ASP trees
-      --pool-levels 10 \                                # Number of levels in the pool Merkle tree
-      --max-deposit 1000000000 \                        # Maximum deposit amount (in Stroops)
-      --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json # Verification key file
+    ./deployments/scripts/deploy.sh <network> \                                          # e.g. testnet
+      --deployer <identity> \                                                            # Must be added in stellar-cli keys
+      --asp-levels 10 \                                                                  # Number of levels in the ASP trees
+      --pool-levels 10 \                                                                 # Number of levels in the pool Merkle tree
+      --max-deposit 1000000000 \                                                         # Maximum deposit amount (in Stroops)
+      --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json                   # Verification key file
+      --pool native:$(stellar contract id asset --asset native --network testnet) \      # XLM pool
+      --pool classic:CODE:ISSUE:ASSET_CONTRACT \                                         # Stellar Asset Pool
+      --pool contract:TOKEN_CONTRACT                                                     # SEP-41 pool
     ```
    If you already have deployed contracts, make sure their addresses are updated in `deployments/testnet/deployments.json`.
 

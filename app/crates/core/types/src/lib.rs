@@ -49,13 +49,21 @@ pub struct PoolConfigEntry {
 pub enum AssetDescriptor {
     Native,
     /// Classic Stellar asset (CODE:ISSUER).
+    // `rename_all` on the enum only renames the variant tags, not the fields
+    // inside struct variants, so it must be repeated per variant to keep the
+    // JSON camelCase (e.g. `contractId`) consistent with deployments.json and
+    // the frontend.
+    #[serde(rename_all = "camelCase")]
     Classic {
         code: String,
         issuer: String,
     },
     /// Token contract address (Soroban contract id).
+    #[serde(rename_all = "camelCase")]
     Contract {
         contract_id: String,
+        /// Token `symbol()` captured at deployment time and stored in the config.
+        symbol: String,
     },
 }
 
