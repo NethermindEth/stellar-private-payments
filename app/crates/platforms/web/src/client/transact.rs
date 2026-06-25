@@ -37,7 +37,6 @@ impl WebClient {
         flow: &'static str,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
-        self.set_signer_flow(flow);
         let on_status = &on_status;
         let total = plan.tx_count();
         let mut hashes = Vec::new();

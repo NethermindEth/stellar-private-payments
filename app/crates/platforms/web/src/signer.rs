@@ -1,8 +1,6 @@
 //! Freighter wallet bridge and [`Signer`] for [`PrivatePool`].
 
-use crate::client::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use std::{cell::RefCell, rc::Rc};
 use stellar_private_payments_sdk::{
     PoolError, PreparedTransaction, Signer,
     chain::{
@@ -80,25 +78,12 @@ pub(crate) async fn sign_prepared_transaction(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
     user_address: &str,
-    flow: &'static str,
-    on_status: &Option<Function>,
 ) -> Result<TransactionEnvelope, JsError> {
     let steps = auth_sign_steps(prepared, network_passphrase, user_address)
         .map_err(|e| JsError::new(&e.to_string()))?;
-    let total = u32::try_from(steps.len()).map_err(|_| JsError::new("too many auth steps"))?;
 
     let mut auth_signatures = Vec::with_capacity(steps.len());
-    for (i, step) in steps.iter().enumerate() {
-        let current = u32::try_from(i.saturating_add(1))
-            .map_err(|_| JsError::new("auth step exceeds u32"))?;
-        emit_progress(
-            on_status,
-            flow,
-            "sign_auth",
-            format!("Approve authorization ({current}/{total})…"),
-            Some(current),
-            Some(total),
-        );
+    for step in &steps {
         let preimage_b64 = step
             .wallet_preimage_b64()
             .map_err(|e| JsError::new(&e.to_string()))?;
@@ -119,15 +104,6 @@ pub(crate) async fn sign_prepared_transaction(
     let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    emit_progress(
-        on_status,
-        flow,
-        "sign_tx",
-        "Approve transaction…",
-        None,
-        None,
-    );
-
     let signed_b64 = wallet_call(
         "signTransaction",
         &[
@@ -144,22 +120,13 @@ pub(crate) async fn sign_prepared_transaction(
 pub struct WalletSigner {
     network_passphrase: String,
     user_address: String,
-    on_status: Rc<RefCell<Option<Function>>>,
-    flow: Rc<RefCell<&'static str>>,
 }
 
 impl WalletSigner {
-    pub fn new(
-        network_passphrase: impl Into<String>,
-        user_address: impl Into<String>,
-        on_status: Rc<RefCell<Option<Function>>>,
-        flow: Rc<RefCell<&'static str>>,
-    ) -> Self {
+    pub fn new(network_passphrase: impl Into<String>, user_address: impl Into<String>) -> Self {
         Self {
             network_passphrase: network_passphrase.into(),
             user_address: user_address.into(),
-            on_status,
-            flow,
         }
     }
 
@@ -175,14 +142,10 @@ impl WalletSigner {
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
     async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
-        let on_status = self.on_status.borrow().clone();
-        let flow = *self.flow.borrow();
         let envelope = sign_prepared_transaction(
             &prepared.soroban_tx,
             &self.network_passphrase,
             &self.user_address,
-            flow,
-            &on_status,
         )
         .await
         .map_err(|e| PoolError::Other(format!("{e:?}")))?;

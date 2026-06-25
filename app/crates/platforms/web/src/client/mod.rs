@@ -34,8 +34,6 @@ struct WebClientPool {
     user_address: String,
     network_passphrase: String,
     private_pool: Option<Rc<PrivatePool<StorageBridge>>>,
-    signer_progress: Rc<RefCell<Option<Function>>>,
-    signer_flow: Rc<RefCell<&'static str>>,
 }
 
 impl WebClientPool {
@@ -45,8 +43,6 @@ impl WebClientPool {
             user_address: String::new(),
             network_passphrase: String::new(),
             private_pool: None,
-            signer_progress: Rc::new(RefCell::new(None)),
-            signer_flow: Rc::new(RefCell::new("pool")),
         }
     }
 
@@ -55,8 +51,6 @@ impl WebClientPool {
         self.user_address.clear();
         self.network_passphrase.clear();
         self.private_pool = None;
-        *self.signer_progress.borrow_mut() = None;
-        *self.signer_flow.borrow_mut() = "pool";
     }
 
     fn matches(
@@ -189,7 +183,6 @@ impl WebClient {
             .matches(&pool_contract_id, &user_address, &network_passphrase)
         {
             let pool_state = self.pool.borrow();
-            *pool_state.signer_progress.borrow_mut() = on_status;
             return Ok(Rc::clone(
                 pool_state
                     .private_pool
@@ -219,17 +212,8 @@ impl WebClient {
             storage_path: String::new(),
             prover_artifacts: ProverArtifacts::empty(),
         };
-        let signer_progress = Rc::new(RefCell::new(on_status));
-        let signer_flow = {
-            let pool_state = self.pool.borrow();
-            Rc::clone(&pool_state.signer_flow)
-        };
-        let signer: Box<dyn Signer> = Self::wallet_signer(
-            network_passphrase.clone(),
-            user_address.clone(),
-            Rc::clone(&signer_progress),
-            signer_flow,
-        );
+        let signer: Box<dyn Signer> =
+            Self::wallet_signer(network_passphrase.clone(), user_address.clone());
         let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
         let private_pool =
             Rc::new(PrivatePool::init(config, self.storage(), signer, prover).map_err(pool_err)?);
@@ -239,14 +223,9 @@ impl WebClient {
             pool_state.pool_contract_id = pool_contract_id;
             pool_state.user_address = user_address;
             pool_state.network_passphrase = network_passphrase;
-            pool_state.signer_progress = signer_progress;
             pool_state.private_pool = Some(Rc::clone(&private_pool));
         }
         Ok(private_pool)
-    }
-
-    pub(super) fn set_signer_flow(&self, flow: &'static str) {
-        *self.pool.borrow().signer_flow.borrow_mut() = flow;
     }
 
     pub(super) async fn confirm_with_progress(
@@ -297,17 +276,10 @@ impl WebClient {
         self.prover_bridge.clone()
     }
 
-    fn wallet_signer(
-        network_passphrase: String,
-        user_address: String,
-        on_status: Rc<RefCell<Option<Function>>>,
-        signer_flow: Rc<RefCell<&'static str>>,
-    ) -> Box<dyn Signer> {
+    fn wallet_signer(network_passphrase: String, user_address: String) -> Box<dyn Signer> {
         Box::new(crate::signer::WalletSigner::new(
             network_passphrase,
             user_address,
-            on_status,
-            signer_flow,
         ))
     }
 
@@ -407,14 +379,9 @@ impl WebClient {
             .prepare_register(&user_address, note_key, encryption_key)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
-        let signed_tx = crate::signer::sign_prepared_transaction(
-            &prepared,
-            &network_passphrase,
-            &user_address,
-            "register",
-            &on_status,
-        )
-        .await?;
+        let signed_tx =
+            crate::signer::sign_prepared_transaction(&prepared, &network_passphrase, &user_address)
+                .await?;
         emit_progress(&on_status, "register", "submit", "Submitting…", None, None);
         self.submit_tx(&signed_tx, "register", &on_status).await
     }
