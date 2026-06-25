@@ -210,7 +210,9 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes, 'Deposit');
+                if (this.showHashes(hashes, 'Deposit')) {
+                    document.getElementById('deposit-amount').value = '';
+                }
             } catch (error) {
                 Toast.show(error?.message || 'Deposit failed', 'error');
             } finally {
@@ -254,7 +256,15 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes, 'Transfer');
+                if (this.showHashes(hashes, 'Transfer')) {
+                    document.getElementById('transfer-amount').value = '';
+                    transferAddress.value = '';
+                    transferRefs.noteKey.value = '';
+                    transferRefs.encKey.value = '';
+                    transferRefs.status.textContent = '';
+                    transferRefs.warning.textContent = '';
+                    transferRefs.manual.classList.add('hidden');
+                }
             } catch (error) {
                 Toast.show(error?.message || 'Transfer failed', 'error');
             } finally {
@@ -279,7 +289,10 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes, 'Withdrawal');
+                if (this.showHashes(hashes, 'Withdrawal')) {
+                    document.getElementById('withdraw-amount').value = '';
+                    document.getElementById('withdraw-recipient').value = '';
+                }
             } catch (error) {
                 Toast.show(error?.message || 'Withdraw failed', 'error');
             } finally {
@@ -319,7 +332,12 @@ export const Transactions = {
                     App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                this.showHashes(hashes, 'Advanced transaction');
+                if (this.showHashes(hashes, 'Advanced transaction')) {
+                    this.buildAdvancedComposer();
+                    document.getElementById('advanced-public-deposit').value = '';
+                    document.getElementById('advanced-public-withdraw').value = '';
+                    document.getElementById('advanced-public-recipient').value = '';
+                }
             } catch (error) {
                 Toast.show(error?.message || 'Advanced transaction failed', 'error');
             } finally {
@@ -328,13 +346,15 @@ export const Transactions = {
         });
     },
 
+    // Returns true when a real submission happened (hashes present), so callers
+    // can clear their form only on success.
     showHashes(hashes, label = 'Transaction') {
         if (!Array.isArray(hashes) || !hashes.length) {
             // The backend returns no transaction hashes when the account is not yet
             // in the ASP allow-list (RegisterAtASP). Nothing was submitted, so warn
             // the user instead of reporting success.
             Toast.show('Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.', 'error', 8000);
-            return;
+            return false;
         }
         const lastHash = hashes[hashes.length - 1];
         Toast.show(`${label} submitted: ${Utils.truncateHex(lastHash, 10, 8)}`, 'success', 7000, {
@@ -342,5 +362,6 @@ export const Transactions = {
             linkAriaLabel: 'Open transaction in explorer',
         });
         App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { hashes } }));
+        return true;
     },
 };
