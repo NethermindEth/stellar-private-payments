@@ -88,6 +88,7 @@ pub fn test_recipient() -> TransferRecipient {
 fn test_signer() -> Result<Box<dyn Signer>> {
     Ok(Box::new(LocalSigner::test_fixture(
         "Test SDF Network ; September 2015",
+        USER_ADDRESS,
     )?))
 }
 

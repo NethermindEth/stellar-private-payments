@@ -113,6 +113,7 @@ impl WebClient {
         let signer_progress = Rc::new(RefCell::new(on_status));
         let signer: Box<dyn Signer> = Self::wallet_transaction_signer(
             network_passphrase.clone(),
+            user_address.clone(),
             Rc::clone(&signer_progress),
         );
         let prover: Box<dyn Prover> = Box::new(WorkerProver::new(self.prover_bridge.fork()));

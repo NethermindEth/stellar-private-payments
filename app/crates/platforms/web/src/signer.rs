@@ -9,7 +9,7 @@ use stellar_private_payments_sdk::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
     },
-    types::{PrivatePoolConfig, SignedTransaction},
+    types::SignedTransaction,
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -143,16 +143,19 @@ pub(crate) async fn sign_prepared_transaction(
 /// Signs simulated pool transactions via the JS wallet bridge (Freighter).
 pub struct WalletSigner {
     network_passphrase: String,
+    user_address: String,
     on_status: Rc<RefCell<Option<Function>>>,
 }
 
 impl WalletSigner {
     pub fn new(
         network_passphrase: impl Into<String>,
+        user_address: impl Into<String>,
         on_status: Rc<RefCell<Option<Function>>>,
     ) -> Self {
         Self {
             network_passphrase: network_passphrase.into(),
+            user_address: user_address.into(),
             on_status,
         }
     }
@@ -160,19 +163,19 @@ impl WalletSigner {
     pub fn network_passphrase(&self) -> &str {
         &self.network_passphrase
     }
+
+    pub fn user_address(&self) -> &str {
+        &self.user_address
+    }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
-    async fn sign(
-        &self,
-        prepared: &PreparedTransaction,
-        config: &PrivatePoolConfig,
-    ) -> Result<SignedTransaction, PoolError> {
+    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
         let envelope = sign_prepared_transaction(
             &prepared.soroban_tx,
             &self.network_passphrase,
-            &config.user_address,
+            &self.user_address,
             "pool",
             &self.on_status.borrow(),
         )

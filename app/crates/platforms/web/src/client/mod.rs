@@ -159,10 +159,12 @@ impl WebClient {
     /// Wallet-backed [`Signer`] for [`Self::private_pool`].
     pub fn wallet_transaction_signer(
         network_passphrase: String,
+        user_address: String,
         on_status: Rc<RefCell<Option<Function>>>,
     ) -> Box<dyn Signer> {
         Box::new(crate::signer::WalletSigner::new(
             network_passphrase,
+            user_address,
             on_status,
         ))
     }

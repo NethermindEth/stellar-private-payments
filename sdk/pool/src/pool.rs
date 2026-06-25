@@ -261,7 +261,7 @@ impl<S: PoolStorage> PrivatePool<S> {
         while !plan.is_complete() {
             let mut prepared = self.prove_plan_step(plan).await?;
             self.simulate(&mut prepared).await?;
-            let signed = self.signer.sign(&prepared, &self.config).await?;
+            let signed = self.signer.sign(&prepared).await?;
             let result = self.submit(signed).await?;
             results.push(result);
         }
