@@ -142,7 +142,6 @@ function wireAdvancedInputRow(row) {
 
 function wireAdvancedOutputRow(row) {
     const addressInput = row.querySelector('.output-address');
-    const lookupBtn = row.querySelector('.output-lookup');
     const refs = {
         status: row.querySelector('.lookup-status'),
         warning: row.querySelector('.lookup-warning'),
@@ -150,15 +149,20 @@ function wireAdvancedOutputRow(row) {
         noteKey: row.querySelector('.output-note-key'),
         encKey: row.querySelector('.output-enc-key'),
     };
-    const runLookup = async () => {
-        try {
-            await lookupRecipient(addressInput.value.trim(), refs);
-        } catch (error) {
-            refs.warning.textContent = error?.message || 'Lookup failed';
+    // Auto-search the registry once a full Stellar address (56 chars) is entered;
+    // reset the lookup state for any shorter/partial input.
+    addressInput?.addEventListener('input', async () => {
+        const value = addressInput.value.trim();
+        if (value.length === 56) {
+            try {
+                await lookupRecipient(value, refs);
+            } catch (error) {
+                refs.warning.textContent = error?.message || 'Lookup failed';
+            }
+        } else {
+            lookupRecipient('', refs);
         }
-    };
-    lookupBtn?.addEventListener('click', runLookup);
-    addressInput?.addEventListener('blur', runLookup);
+    });
 }
 
 export const Transactions = {
@@ -232,11 +236,18 @@ export const Transactions = {
             encKey: document.getElementById('transfer-enc-key'),
         };
         const transferAddress = document.getElementById('transfer-address');
-        document.getElementById('transfer-lookup-btn')?.addEventListener('click', async () => {
-            try {
-                await lookupRecipient(transferAddress.value.trim(), transferRefs);
-            } catch (error) {
-                transferRefs.warning.textContent = error?.message || 'Lookup failed';
+        // Auto-search the registry once a full Stellar address (56 chars) is entered;
+        // reset the lookup state for any shorter/partial input.
+        transferAddress?.addEventListener('input', async () => {
+            const value = transferAddress.value.trim();
+            if (value.length === 56) {
+                try {
+                    await lookupRecipient(value, transferRefs);
+                } catch (error) {
+                    transferRefs.warning.textContent = error?.message || 'Lookup failed';
+                }
+            } else {
+                lookupRecipient('', transferRefs);
             }
         });
 
