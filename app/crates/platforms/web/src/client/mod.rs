@@ -24,47 +24,13 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
+mod pool;
 mod transact;
+
+use pool::PoolSession;
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
-
-struct WebClientPool {
-    pool_contract_id: String,
-    user_address: String,
-    network_passphrase: String,
-    private_pool: Option<Rc<PrivatePool<StorageBridge>>>,
-}
-
-impl WebClientPool {
-    fn new() -> Self {
-        Self {
-            pool_contract_id: String::new(),
-            user_address: String::new(),
-            network_passphrase: String::new(),
-            private_pool: None,
-        }
-    }
-
-    fn clear(&mut self) {
-        self.pool_contract_id.clear();
-        self.user_address.clear();
-        self.network_passphrase.clear();
-        self.private_pool = None;
-    }
-
-    fn matches(
-        &self,
-        pool_contract_id: &str,
-        user_address: &str,
-        network_passphrase: &str,
-    ) -> bool {
-        self.private_pool.is_some()
-            && self.pool_contract_id == pool_contract_id
-            && self.user_address == user_address
-            && self.network_passphrase == network_passphrase
-    }
-}
 
 pub(crate) fn pool_err(error: PoolError) -> JsError {
     match &error {
@@ -131,7 +97,7 @@ pub struct WebClient {
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
     #[wasm_bindgen(skip)]
-    pool: Rc<RefCell<WebClientPool>>,
+    pool: Rc<RefCell<Option<PoolSession>>>,
 }
 
 impl Clone for WebClient {
@@ -161,13 +127,13 @@ impl WebClient {
                     .spawn("./js/prover-worker.js"),
             ),
             fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
-            pool: Rc::new(RefCell::new(WebClientPool::new())),
+            pool: Rc::new(RefCell::new(None)),
         })
     }
 
     /// Drop the open pool (e.g. wallet disconnect or account switch).
     pub fn close_pool(&self) {
-        self.pool.borrow_mut().clear();
+        *self.pool.borrow_mut() = None;
     }
 
     pub(super) async fn ensure_pool(
@@ -177,18 +143,10 @@ impl WebClient {
         network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Rc<PrivatePool<StorageBridge>>, JsError> {
-        if self
-            .pool
-            .borrow()
-            .matches(&pool_contract_id, &user_address, &network_passphrase)
-        {
-            let pool_state = self.pool.borrow();
-            return Ok(Rc::clone(
-                pool_state
-                    .private_pool
-                    .as_ref()
-                    .expect("matches implies pool is open"),
-            ));
+        if let Some(session) = self.pool.borrow().as_ref() {
+            if session.matches(&pool_contract_id, &user_address, &network_passphrase) {
+                return Ok(session.private_pool());
+            }
         }
 
         emit_progress(
@@ -219,11 +177,12 @@ impl WebClient {
             Rc::new(PrivatePool::init(config, self.storage(), signer, prover).map_err(pool_err)?);
 
         {
-            let mut pool_state = self.pool.borrow_mut();
-            pool_state.pool_contract_id = pool_contract_id;
-            pool_state.user_address = user_address;
-            pool_state.network_passphrase = network_passphrase;
-            pool_state.private_pool = Some(Rc::clone(&private_pool));
+            *self.pool.borrow_mut() = Some(PoolSession::new(
+                pool_contract_id,
+                user_address,
+                network_passphrase,
+                Rc::clone(&private_pool),
+            ));
         }
         Ok(private_pool)
     }
