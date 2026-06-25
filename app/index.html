@@ -475,13 +475,13 @@
                         <div data-why="disclaimer" class="hidden text-sm text-slate-300">This is a testnet demo to showcase the capabilities of the system. Expect breaking changes, and the state may reset.</div>
                         <div data-why="storage" class="hidden space-y-3 text-sm text-slate-300">
                             <p>The private payment material is stored locally in your browser.</p>
-                            <p>Without granting permanent storage, the browser can delete your local data under storage pressure.</p>
+                            <p>Without granting permanent storage, the browser can delete your local data under storage pressure or across updates.</p>
                             <p>All data can be privately restored locally if it is lost.</p>
                         </div>
                         <div data-why="keys" class="hidden text-sm text-slate-300">The ASP provider needs your note public key and ASP secret to include you in the allowed list.</div>
                         <div data-why="retention" class="hidden space-y-3 text-sm text-slate-300">
-                            <p class="font-semibold text-white">When do you need this?</p>
                             <p>If you rely only on a public RPC and miss the event retention window, the app may need either a browser reminder to reopen the tab in time or a bootnode archive URL to rebuild history later.</p>
+                            <p>You should understand the risks of using a bootnode (similar to the ones when using a 3d-party-hosted RPC:</p>
                             <ul class="list-disc space-y-2 pl-5">
                                 <li>Integrity risk: a bootnode can omit or forge event history.</li>
                                 <li>Availability risk: a bootnode can be unavailable or rate limit you.</li>
