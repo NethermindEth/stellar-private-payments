@@ -12,6 +12,7 @@
 #![no_std]
 extern crate alloc;
 
+pub mod circom_reduction;
 pub mod crypto;
 pub mod encryption;
 pub mod flows;

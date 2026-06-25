@@ -2,14 +2,16 @@
 //!
 //! Handles loading proving keys and generating ZK proofs from witness data.
 //!
-//! We cannot use ark_circom directly because it depends on
-//! wasmer which doesn't work in browser WASM. Instead, we:
+//! We do not use ark_circom because it depends on wasmer (browser-incompatible
+//! and conflicting with soroban-sdk). Instead, we:
 //! 1. Load the proving key
 //! 2. Parse the R1CS file to get constraint matrices (see r1cs.rs)
-//! 3. Accept pre-computed witness bytes from the JS witness calculator
-//! 4. Replay constraints and generate proofs using ark-groth16
+//! 3. Accept pre-computed witness bytes from the witness calculator
+//! 4. Replay constraints and generate proofs using ark-groth16, with circom's
+//!    QAP reduction ported in-tree (see circom_reduction.rs)
 
 use crate::{
+    circom_reduction::CircomReduction,
     r1cs::R1CS,
     serialization::bytes_to_fr,
     types::{FIELD_SIZE, Groth16Proof},
@@ -17,7 +19,6 @@ use crate::{
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
-use ark_circom::CircomReduction;
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
