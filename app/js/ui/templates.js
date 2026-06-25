@@ -72,7 +72,15 @@ export const Templates = {
             status.className = 'note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100';
         }
 
-        row.querySelector('.note-use')?.addEventListener('click', () => opts.onUse?.(note));
+        // A spent note can't be used as a transact input — hide its Use button.
+        const useBtn = row.querySelector('.note-use');
+        if (useBtn) {
+            if (note.spent) {
+                useBtn.classList.add('hidden');
+            } else {
+                useBtn.addEventListener('click', () => opts.onUse?.(note));
+            }
+        }
         row.querySelector('.note-copy')?.addEventListener('click', () => opts.onCopy?.(note));
         const disclose = row.querySelector('.note-disclose');
         if (disclose) {

@@ -336,28 +336,35 @@
         <div class="mt-8 space-y-6">
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">
                 <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Identity</p>
+                <p class="mt-1 text-xs text-slate-500">Click any value to copy it.</p>
                 <dl class="mt-4 space-y-4 text-sm">
                     <div>
                         <dt class="text-slate-500">Wallet</dt>
-                        <dd id="settings-wallet-address" class="mt-1 font-mono text-slate-100">Not connected</dd>
+                        <dd id="settings-wallet-address" data-copy class="mt-1 cursor-pointer break-all font-mono text-slate-100 transition hover:text-cyan-100" title="Click to copy">Not connected</dd>
                     </div>
                     <div>
                         <dt class="text-slate-500">Note Public Key</dt>
-                        <dd id="settings-note-key" class="mt-1 break-all font-mono text-xs text-slate-100">—</dd>
+                        <dd id="settings-note-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                     <div>
                         <dt class="text-slate-500">Encryption Public Key</dt>
-                        <dd id="settings-enc-key" class="mt-1 break-all font-mono text-xs text-slate-100">—</dd>
+                        <dd id="settings-enc-key" data-copy class="mt-1 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                     <div>
-                        <div class="flex items-center justify-between gap-3">
+                        <div class="flex items-center gap-2">
                             <dt class="text-slate-500">ASP Secret</dt>
-                            <div class="flex gap-2">
-                                <button id="settings-reveal-secret" type="button" data-revealed="false" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Reveal</button>
-                                <button id="settings-copy-secret" type="button" class="rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                            </div>
+                            <button id="settings-reveal-secret" type="button" data-revealed="false" aria-label="Reveal ASP secret" title="Reveal ASP secret" class="inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/10 text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">
+                                <svg class="settings-eye h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                    <path d="M1 12s4-7 11-7 11 7 11 7-4 7-11 7-11-7-11-7z"/>
+                                    <circle cx="12" cy="12" r="3"/>
+                                </svg>
+                                <svg class="settings-eye-off hidden h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"/>
+                                    <line x1="1" y1="1" x2="23" y2="23"/>
+                                </svg>
+                            </button>
                         </div>
-                        <dd id="settings-asp-secret" class="mt-2 break-all font-mono text-xs text-slate-100">—</dd>
+                        <dd id="settings-asp-secret" data-copy class="mt-2 cursor-pointer break-all font-mono text-xs text-slate-100 transition hover:text-cyan-100" title="Click to copy">—</dd>
                     </div>
                 </dl>
             </section>
@@ -596,6 +603,7 @@
         <div class="rounded-2xl border border-white/8 bg-ink-950/80 p-4">
             <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Input Note ID</label>
             <input type="text" class="note-input mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-xs text-slate-100 outline-none transition focus:border-cyan-300/40" placeholder="Paste or use a note from the table" autocomplete="off" spellcheck="false">
+            <p class="note-input-amount mt-2 text-xs text-cyan-200/80"></p>
         </div>
     </template>
 

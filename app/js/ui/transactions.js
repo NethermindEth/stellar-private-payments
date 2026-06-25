@@ -120,6 +120,25 @@ function fillNextAdvancedInput(noteId) {
     target.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// Show the amount of the note referenced by an input row (looked up from the
+// loaded notes), so the operator can see what each selected input is worth.
+function updateInputAmount(row) {
+    const amountEl = row.querySelector('.note-input-amount');
+    if (!amountEl) return;
+    const id = row.querySelector('.note-input')?.value.trim();
+    const note = id ? App.state.notes.find(n => n.id === id) : null;
+    if (note) {
+        const pool = App.state.pools.find(p => p.poolContractId === note.poolContractId);
+        amountEl.textContent = `Amount: ${Utils.formatTokenAmount(note.amount, Utils.poolLabel(pool))}`;
+    } else {
+        amountEl.textContent = '';
+    }
+}
+
+function wireAdvancedInputRow(row) {
+    row.querySelector('.note-input')?.addEventListener('input', () => updateInputAmount(row));
+}
+
 function wireAdvancedOutputRow(row) {
     const addressInput = row.querySelector('.output-address');
     const lookupBtn = row.querySelector('.output-lookup');
@@ -156,7 +175,9 @@ export const Transactions = {
         inputs?.replaceChildren();
         outputs?.replaceChildren();
         for (let i = 0; i < 2; i += 1) {
-            inputs?.appendChild(Templates.createNoteInputRow(i));
+            const inputRow = Templates.createNoteInputRow(i);
+            inputs?.appendChild(inputRow);
+            wireAdvancedInputRow(inputRow);
             const row = Templates.createOutputRow(i);
             outputs?.appendChild(row);
             wireAdvancedOutputRow(row);

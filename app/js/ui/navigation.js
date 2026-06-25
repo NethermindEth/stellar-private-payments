@@ -124,6 +124,9 @@ function renderSettingsDrawer() {
     const revealBtn = document.getElementById('settings-reveal-secret');
     const revealed = revealBtn?.dataset.revealed === 'true';
     aspValue.textContent = revealed ? (App.state.keys.aspSecret || '—') : aspMasked;
+    revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
+    revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
+    if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
     document.getElementById('settings-registration-status').textContent = App.state.profile.registered ? 'Registered' : 'Not registered';
     const registerBtn = document.getElementById('settings-register-btn');
     if (registerBtn) {
@@ -158,8 +161,18 @@ export const Shell = {
             e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
             renderSettingsDrawer();
         });
-        document.getElementById('settings-copy-secret')?.addEventListener('click', () => {
-            if (App.state.keys.aspSecret) Utils.copyToClipboard(App.state.keys.aspSecret);
+        // Click any identity value to copy it (copies the real value, even when masked).
+        const identityCopyTargets = {
+            'settings-wallet-address': () => App.state.wallet.address,
+            'settings-note-key': () => App.state.keys.notePublicKey,
+            'settings-enc-key': () => App.state.keys.encryptionPublicKey,
+            'settings-asp-secret': () => App.state.keys.aspSecret,
+        };
+        Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
+            document.getElementById(id)?.addEventListener('click', () => {
+                const value = getValue();
+                if (value) Utils.copyToClipboard(value);
+            });
         });
 
         App.events.addEventListener('dashboard:quick-flow', (event) => {
