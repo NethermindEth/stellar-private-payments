@@ -55,6 +55,25 @@
     cursor: pointer;
   }
 
+  /* Themed <select>: hide native chrome and draw a slate chevron so dropdowns
+     match the navy UI. (The open option list is OS-rendered; we colour the
+     options for dark mode but its exact look is browser-controlled.) */
+  select {
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    appearance: none;
+    cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.9rem center;
+    background-size: 1rem 1rem;
+  }
+
+  select option {
+    background-color: #0b1423;
+    color: #e2e8f0;
+  }
+
   body {
     background:
       radial-gradient(circle at top, rgba(63, 138, 255, 0.12), transparent 32%),
