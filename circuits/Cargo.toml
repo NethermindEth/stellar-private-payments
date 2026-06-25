@@ -67,6 +67,8 @@ wast = "248.0.0"
 [dev-dependencies]
 # Witness backends for the graph-vs-wasm equivalence test
 witness = { workspace = true }
+ark-circom = { workspace = true, features = ["parallel"] }
+wasmer = { workspace = true, features = ["cranelift"] }
 serde_json = { workspace = true, features = ["std"] }
 
 [lints]

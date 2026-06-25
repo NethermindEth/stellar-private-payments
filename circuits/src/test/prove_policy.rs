@@ -12,14 +12,17 @@ mod tests {
         },
     };
     use anyhow::{Context, Result, ensure};
-    use num_bigint::BigInt;
+    use ark_circom::WitnessCalculator as ArkWitnessCalculator;
+    use num_bigint::{BigInt, Sign};
     use std::{
         cell::RefCell,
+        collections::HashMap,
         convert::TryInto,
         fs,
         panic::{self, AssertUnwindSafe},
         path::PathBuf,
     };
+    use wasmer::Store;
     use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
     const LEVELS: usize = 10;
@@ -1487,6 +1490,44 @@ mod tests {
         serde_json::to_string(&object).context("failed to serialize witness inputs")
     }
 
+    fn inputs_to_hashmap(inputs: &Inputs) -> HashMap<String, Vec<BigInt>> {
+        inputs
+            .iter()
+            .map(|(key, value)| {
+                let values = match value {
+                    InputValue::Single(v) => vec![v.clone()],
+                    InputValue::Array(values) => values.clone(),
+                };
+                (key.clone(), values)
+            })
+            .collect()
+    }
+
+    /// Encode a bigint witness as little-endian bytes (32 bytes per element),
+    /// matching the graph runtime's output encoding.
+    fn bigint_witness_to_le_bytes(witness: &[BigInt]) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(
+            witness
+                .len()
+                .checked_mul(32)
+                .expect("witness byte length overflow"),
+        );
+        for value in witness {
+            let (sign, be_bytes) = value.to_bytes_be();
+            assert!(
+                sign != Sign::Minus,
+                "witness outputs must be canonical field elements"
+            );
+            assert!(be_bytes.len() <= 32, "witness element exceeds 32 bytes");
+            let mut padded = vec![0u8; 32];
+            let offset = 32usize.saturating_sub(be_bytes.len());
+            padded[offset..].copy_from_slice(&be_bytes);
+            padded.reverse();
+            bytes.extend_from_slice(&padded);
+        }
+        bytes
+    }
+
     fn assert_graph_matches_wasm(
         case: &TxCase,
         leaves: Vec<Scalar>,
@@ -1513,14 +1554,14 @@ mod tests {
         let inputs = captured.into_inner().context("input capture did not run")?;
         let inputs_json = inputs_to_json(&inputs)?;
 
-        // Reference witness via the wasmer/ark-circom path the prover verifies.
-        let wasm_bytes = fs::read(&wasm_path).context("read policy wasm")?;
-        let r1cs_bytes = fs::read(&r1cs_path).context("read policy r1cs")?;
-        let mut wasm_calc = witness::WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
-            .context("init wasm witness calculator")?;
-        let wasm_witness = wasm_calc
-            .compute_witness(&inputs_json)
-            .context("wasm witness calculation failed")?;
+        // Reference witness via wasmer/ark-circom. Kept as a test-only baseline
+        let mut store = Store::default();
+        let mut wasm_calc = ArkWitnessCalculator::new(&mut store, &wasm_path)
+            .map_err(|e| anyhow::anyhow!("init wasm witness calculator: {e}"))?;
+        let wasm_bigints = wasm_calc
+            .calculate_witness(&mut store, inputs_to_hashmap(&inputs), false)
+            .map_err(|e| anyhow::anyhow!("wasm witness calculation failed: {e}"))?;
+        let wasm_witness = bigint_witness_to_le_bytes(&wasm_bigints);
 
         // Witness via the committed circom-witness-rs graph.
         let graph_blob = fs::read(policy_graph_path()).context("read policy graph")?;

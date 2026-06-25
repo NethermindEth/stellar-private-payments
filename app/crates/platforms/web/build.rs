@@ -55,21 +55,20 @@ fn main() {
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
     let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);
 
-    if !circuits_out.is_dir() {
-        let suggestion = if profile == "release" {
-            "cargo build -p circuits --release"
-        } else {
-            "cargo build -p circuits"
-        };
+    let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
+    let disclosure_r1cs_path = circuits_out.join("selectiveDisclosure_1.r1cs");
+
+    // These r1cs files are published by the `circuits` build, not by cargo's
+    // dependency graph, so a bare `cargo build` can race ahead of them. The
+    // `make build`/`make serve` targets sequence `circuits-build` first.
+    if !circuits_out.is_dir() || !r1cs_path.exists() || !disclosure_r1cs_path.exists() {
         panic!(
-            "web/build.rs: missing circuit artifacts directory for PROFILE={profile}: {}. Run `{suggestion}` first.",
+            "web/build.rs: circuit artifacts for PROFILE={profile} are missing under {}. \
+             Build the circuits first (`cargo build -p circuits --release`), or build the app via `make build` / \
+             `make serve`, which sequence this automatically.",
             circuits_out.display(),
         );
     }
-
-    let r1cs_path = circuits_out.join("policy_tx_2_2.r1cs");
-
-    let disclosure_r1cs_path = circuits_out.join("selectiveDisclosure_1.r1cs");
 
     println!("cargo:rerun-if-env-changed=PROFILE");
     println!("cargo:rerun-if-changed={}", proving_key_path.display());

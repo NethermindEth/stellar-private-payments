@@ -703,10 +703,6 @@ where
                 .map(field_to_circuit_hex)
                 .collect::<Result<Vec<_>>>()?,
         );
-        circuit.set_single(
-            &format!("{prefix_m}root"),
-            &field_to_circuit_hex(&membership_proof.root)?,
-        );
 
         let prefix_n = format!("nonMembershipProofs[{}][0].", slot);
         circuit.set_single(
@@ -736,10 +732,6 @@ where
                 .iter()
                 .map(field_to_circuit_hex)
                 .collect::<Result<Vec<_>>>()?,
-        );
-        circuit.set_single(
-            &format!("{prefix_n}root"),
-            &field_to_circuit_hex(&non_membership_proof.root)?,
         );
     }
 

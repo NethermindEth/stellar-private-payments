@@ -27,6 +27,13 @@ circuits-build:
 	@echo "Building circuits (this may take a while)..."
 	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
 
+# Regenerate the committed circom-witness-rs graphs. Requires circom 2.2.3 and a C++ toolchain on PATH.
+.PHONY: witness-graphs
+witness-graphs:
+	@echo "Generating witness graphs (requires circom 2.2.3 + a C++ toolchain)..."
+	tools/witness-graph/generate-witness-graph.sh policy_tx_2_2
+	tools/witness-graph/generate-witness-graph.sh selectiveDisclosure_1
+
 .PHONY: install
 install:
 	@echo "Installing frontend dependencies..."

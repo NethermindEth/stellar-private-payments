@@ -1,357 +1,250 @@
-//! Witness Generation WASM Module
+//! Witness Generation Module
 //!
-//! Uses ark-circom to compute witnesses for Circom circuits in the browser.
-//! Outputs witness bytes compatible with the prover module.
+//! Computes witnesses for Circom circuits by evaluating a pre-computed
+//! `circom-witness-rs` operation graph (see [`GraphWitnessCalculator`]). The
+//! runtime evaluator is pure Rust and builds for both native and
+//! `wasm32-unknown-unknown`.
 
-use anyhow::{Context as _, Result};
-use ark_bn254::Fr;
-use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
-use num_bigint::{BigInt, Sign};
-// These are part of the reduced STD that is browser compatible
-use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
-use wasmer::{Module, Store};
+use anyhow::{Context as _, Result, bail, ensure};
+// circom-witness-rs black-box hint functions operate on its arkworks 0.5 `Fr`.
+use ark_bn254_05::Fr as BbfFr;
+use ark_ff_05::{BigInteger as _, Field as _, PrimeField as _};
+use circom_witness_rs::{BlackBoxFunction, Graph, M, calculate_witness, init_graph};
+use ruint::aliases::U256;
+use std::{
+    collections::{HashMap, HashSet},
+    string::String,
+    sync::Arc,
+    vec::Vec,
+};
 
-mod graph_witness;
-pub use graph_witness::GraphWitnessCalculator;
-
-/// BN254 scalar field modulus
-const BN254_FIELD_MODULUS: &str =
-    "21888242871839275222246405745257275088548364400416034343698204186575808495617";
-
-/// Get module version
-pub fn version() -> String {
-    String::from(env!("CARGO_PKG_VERSION"))
+/// Witness calculator backed by a `circom-witness-rs` operation graph.
+pub struct GraphWitnessCalculator {
+    graph: Graph,
+    bbfs: HashMap<String, BlackBoxFunction>,
+    /// fnv1a hashes of the graph's known input signal names.
+    input_hashes: HashSet<u64>,
 }
 
-/// Witness calculator instance
-pub struct WitnessCalculator {
-    /// Wasmer store for the circuit WASM instance
-    store: Store,
-    /// Internal ark-circom witness calculator
-    calculator: ArkWitnessCalculator,
-    /// Number of variables in the witness
-    witness_size: u32,
-    /// Number of public inputs (does not include public outputs or the constant
-    /// signal 1)
-    num_public_inputs: u32,
-}
-
-impl WitnessCalculator {
-    /// Create a new WitnessCalculator from circuit WASM and R1CS bytes
-    ///
-    /// # Arguments
-    /// * `circuit_wasm` - The compiled circuit WASM bytes
-    /// * `r1cs_bytes` - The R1CS constraint system bytes
-    pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
-        // Parse R1CS from bytes
-        let cursor = Cursor::new(r1cs_bytes);
-        let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor).context("Failed to parse R1CS")?;
-
-        let witness_size = r1cs_file.header.n_wires;
-        let num_public_inputs = r1cs_file.header.n_pub_in;
-
-        // Create wasmer store and load circuit module from bytes
-        let mut store = Store::default();
-        let module = Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
-
-        // Create witness calculator from module
-        let calculator = ArkWitnessCalculator::from_module(&mut store, module)
-            .map_err(|e| anyhow::anyhow!("Failed to init witness calc: {e}"))?;
-
-        Ok(WitnessCalculator {
-            store,
-            calculator,
-            witness_size,
-            num_public_inputs,
+impl GraphWitnessCalculator {
+    /// Build a calculator from a serialized operation-graph blob.
+    pub fn from_graph(graph_bytes: &[u8]) -> Result<GraphWitnessCalculator> {
+        let graph = init_graph(graph_bytes)
+            .map_err(|e| anyhow::anyhow!("Failed to load witness graph: {e}"))?;
+        let input_hashes = graph.input_mapping.iter().map(|info| info.hash).collect();
+        Ok(GraphWitnessCalculator {
+            graph,
+            bbfs: circomlib_black_box_functions(),
+            input_hashes,
         })
     }
 
-    // TODO it should be simplified
-    /// Compute witness from JSON inputs
-    ///
-    /// # Arguments
-    /// * `inputs_json` - JSON string with circuit inputs
-    ///
-    /// # Returns
-    /// * Witness as Little-Endian bytes (32 bytes per field element)
-    pub fn compute_witness(&mut self, inputs_json: &str) -> Result<Vec<u8>> {
-        use serde_json::Value;
-
-        // Parse JSON inputs
-        let inputs: Value = serde_json::from_str(inputs_json).context("Invalid JSON")?;
-
-        let inputs_map = inputs.as_object().context("Inputs must be a JSON object")?;
-
-        // Convert to HashMap<String, Vec<BigInt>> by flattening nested structures
-        let mut inputs_hashmap: HashMap<String, Vec<BigInt>> = HashMap::new();
-
-        for (key, value) in inputs_map {
-            flatten_input(key, value, &mut inputs_hashmap)?;
-        }
-
-        // Calculate witness
-        let witness = self
-            .calculator
-            .calculate_witness(&mut self.store, inputs_hashmap, false)
+    /// Compute the witness from JSON inputs, returning little-endian bytes
+    /// (32 bytes per field element) compatible with the prover module.
+    pub fn compute_witness(&self, inputs_json: &str) -> Result<Vec<u8>> {
+        let mut inputs = parse_inputs(inputs_json)?;
+        // Drop keys the graph does not know. circom-witness-rs panics on an
+        // unknown input signal; the wasmer path this replaces silently ignored
+        // them, so we match that leniency. A genuinely missing signal still
+        // surfaces downstream as a failed proof, not a worker crash
+        inputs.retain(|key, _| self.input_hashes.contains(&fnv1a(key)));
+        let witness = calculate_witness(inputs, &self.graph, Some(&self.bbfs))
             .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
-
-        // Convert to Little-Endian bytes
         Ok(witness_to_bytes(&witness))
     }
 
-    /// Get the witness size (number of field elements)
-    pub fn witness_size(&self) -> u32 {
-        self.witness_size
-    }
-
-    /// Get the number of public inputs
-    pub fn num_public_inputs(&self) -> u32 {
-        self.num_public_inputs
+    /// Number of field elements in the computed witness.
+    pub fn witness_size(&self) -> usize {
+        self.graph.signals.len()
     }
 }
 
-/// Convert a BigInt to its field element representation.
-/// Negative numbers are converted to p - |value| where p is the field modulus.
-/// Relevant for ZK proof computation. For on-chain token transfer
-/// we use a I256 passed to the contract.
-fn to_field_element(bi: BigInt) -> BigInt {
-    let modulus =
-        BigInt::parse_bytes(BN254_FIELD_MODULUS.as_bytes(), 10).expect("Invalid field modulus");
+/// Black-box hint functions bound at graph-evaluation time, mirroring the
+/// `bbf_*` hints injected into circomlib during graph generation
+/// (`tools/witness-graph/generate-policy-graph.sh`). These implement the
+/// non-quadratic (`<--`) assignments the graph cannot express directly.
+fn circomlib_black_box_functions() -> HashMap<String, BlackBoxFunction> {
+    let mut bbfs: HashMap<String, BlackBoxFunction> = HashMap::new();
 
-    if bi.sign() == Sign::Minus {
-        let abs_value = bi
-            .checked_mul(&BigInt::from(-1))
-            .expect("Overflow in getting the abs value"); // Get absolute value
+    // `bbf_inv(in) = in != 0 ? 1/in : 0` — circomlib `IsZero`.
+    let bbf_inv: BlackBoxFunction =
+        Arc::new(|params: &[BbfFr]| params[0].inverse().unwrap_or_else(|| BbfFr::from(0u64)));
+    bbfs.insert(String::from("bbf_inv"), bbf_inv);
 
-        // Check absolute value must be less than the field modulus
-        assert!(
-            abs_value < modulus,
-            "Negative value {} exceeds field modulus",
-            bi
-        );
+    // `bbf_bit(in, bit) = (in >> bit) & 1` — circomlib `Num2Bits`.
+    let bbf_bit: BlackBoxFunction = Arc::new(|params: &[BbfFr]| {
+        let value = params[0].into_bigint();
+        let bit_index = usize::try_from(params[1].into_bigint().as_ref()[0])
+            .expect("bbf_bit index fits in usize");
+        BbfFr::from(u64::from(value.get_bit(bit_index)))
+    });
+    bbfs.insert(String::from("bbf_bit"), bbf_bit);
 
-        // For negative n: field_element = p - |n|
-        modulus
-            .checked_sub(&abs_value)
-            .expect("Overflow in field element computation")
-    } else {
-        // Validate: positive value must be less than the field modulus
-        assert!(bi < modulus, "Value {} exceeds field modulus", bi);
-        bi
-    }
+    bbfs
 }
 
-/// Check if a JSON value is an array containing only primitives.
-fn is_pure_array(value: &serde_json::Value) -> bool {
-    use serde_json::Value;
-
-    let mut stack: Vec<&Value> = vec![value];
-
-    while let Some(current) = stack.pop() {
-        match current {
-            Value::Number(_) | Value::String(_) | Value::Bool(_) | Value::Null => {}
-            Value::Array(arr) => {
-                for item in arr {
-                    stack.push(item);
-                }
-            }
-            Value::Object(_) => return false,
-        }
-    }
-    true
-}
-
-/// Flatten a JSON value into the inputs hashmap.
+/// Parse JSON inputs into the `HashMap<String, Vec<U256>>` shape
+/// `circom-witness-rs` expects.
 ///
-/// For Circom circuits:
-/// - Multi-dimensional arrays of primitives are flattened to a single key in
-///   row-major order
-/// - Arrays containing objects use indexed keys with dot notation for fields
-fn flatten_input(
-    key: &str,
-    value: &serde_json::Value,
-    inputs: &mut HashMap<String, Vec<BigInt>>,
-) -> Result<()> {
+/// The prover already emits each signal flat — a hex string or a flat array of
+/// hex strings (`prover::types::InputValue`) — so we parse straight into field
+/// elements without the multi-dimensional flattening the wasm path performs.
+fn parse_inputs(inputs_json: &str) -> Result<HashMap<String, Vec<U256>>> {
     use serde_json::Value;
 
-    // (key, value) pairs to iterate over.
-    let mut stack: Vec<(String, &Value)> = vec![(key.to_string(), value)];
+    let value: Value = serde_json::from_str(inputs_json).context("Invalid JSON")?;
+    let obj = value.as_object().context("Inputs must be a JSON object")?;
 
-    while let Some((current_key, current_value)) = stack.pop() {
-        match current_value {
-            Value::Number(n) => {
-                let bi = if let Some(i) = n.as_u64() {
-                    BigInt::from(i)
-                } else if let Some(i) = n.as_i64() {
-                    BigInt::from(i)
-                } else {
-                    anyhow::bail!("Invalid number for {current_key}");
-                };
-                // Convert to field element (handles negative numbers)
-                inputs
-                    .entry(current_key)
-                    .or_default()
-                    .push(to_field_element(bi));
-            }
-            Value::String(s) => {
-                let bi = if let Some(hex) = s.strip_prefix("0x") {
-                    BigInt::parse_bytes(hex.as_bytes(), 16)
-                } else {
-                    BigInt::parse_bytes(s.as_bytes(), 10)
-                };
-                let bi = bi.context(format!("Invalid bigint for {current_key}: {s}"))?;
-                // Convert to field element (handles negative numbers)
-                inputs
-                    .entry(current_key)
-                    .or_default()
-                    .push(to_field_element(bi));
-            }
-            Value::Array(arr) => {
-                // Pure arrays get flattened to a single key as in
-                if is_pure_array(current_value) {
-                    flatten_pure_array(&current_key, current_value, inputs)?;
-                } else {
-                    //  If the array contains objects, we push indexed items in reverse order
-                    // to maintain the original order when popping
-                    for (idx, item) in arr.iter().enumerate().rev() {
-                        let indexed_key = format!("{}[{}]", current_key, idx);
-                        stack.push((indexed_key, item));
-                    }
-                }
-            }
-            Value::Object(obj) => {
-                // Push object fields
-                for (field, val) in obj {
-                    let nested_key = format!("{}.{}", current_key, field);
-                    stack.push((nested_key, val));
-                }
-            }
-            Value::Bool(b) => {
-                let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
-                inputs.entry(current_key).or_default().push(bi);
-            }
-            Value::Null => {
-                inputs.entry(current_key).or_default().push(BigInt::from(0));
-            }
-        }
+    let mut out = HashMap::with_capacity(obj.len());
+    for (key, val) in obj {
+        let values = match val {
+            Value::String(s) => vec![parse_field(s)?],
+            Value::Array(items) => items
+                .iter()
+                .map(|item| match item {
+                    Value::String(s) => parse_field(s),
+                    other => bail!("signal {key} has a non-string element: {other}"),
+                })
+                .collect::<Result<Vec<_>>>()?,
+            other => bail!("signal {key} must be a hex string or array, got: {other}"),
+        };
+        out.insert(key.clone(), values);
     }
-    Ok(())
+    Ok(out)
 }
 
-/// Flatten a pure array to a single key in row-major order.
-fn flatten_pure_array(
-    key: &str,
-    value: &serde_json::Value,
-    inputs: &mut HashMap<String, Vec<BigInt>>,
-) -> Result<()> {
-    use serde_json::Value;
-
-    // We use indices to maintain row-major order:
-    // each item is (array_ref, next_index_to_process).
-    // For non-array values, we process them immediately.
-    enum WorkItem<'a> {
-        Value(&'a Value),
-        ArrayIter { arr: &'a [Value], idx: usize },
+/// FNV-1a hash of a signal name, matching `circom-witness-rs`'s input mapping
+/// (`init_graph`/`get_input_mapping`). Used to drop input keys the graph does
+/// not declare before they reach the panicking lookup upstream.
+fn fnv1a(s: &str) -> u64 {
+    let mut hash: u64 = 0xCBF2_9CE4_8422_2325;
+    for byte in s.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01B3);
     }
-
-    let mut stack: Vec<WorkItem<'_>> = vec![WorkItem::Value(value)];
-
-    while let Some(item) = stack.pop() {
-        match item {
-            WorkItem::Value(v) => match v {
-                Value::Number(n) => {
-                    let bi = if let Some(i) = n.as_u64() {
-                        BigInt::from(i)
-                    } else if let Some(i) = n.as_i64() {
-                        BigInt::from(i)
-                    } else {
-                        anyhow::bail!("Invalid number for {key}");
-                    };
-                    inputs
-                        .entry(key.to_string())
-                        .or_default()
-                        .push(to_field_element(bi));
-                }
-                Value::String(s) => {
-                    let bi = if let Some(hex) = s.strip_prefix("0x") {
-                        BigInt::parse_bytes(hex.as_bytes(), 16)
-                    } else {
-                        BigInt::parse_bytes(s.as_bytes(), 10)
-                    };
-                    let bi = bi.context(format!("Invalid bigint for {key}: {s}"))?;
-                    inputs
-                        .entry(key.to_string())
-                        .or_default()
-                        .push(to_field_element(bi));
-                }
-                Value::Array(arr) => {
-                    if !arr.is_empty() {
-                        stack.push(WorkItem::ArrayIter { arr, idx: 0 });
-                    }
-                }
-                Value::Bool(b) => {
-                    let bi = if *b { BigInt::from(1) } else { BigInt::from(0) };
-                    inputs.entry(key.to_string()).or_default().push(bi);
-                }
-                Value::Null => {
-                    inputs
-                        .entry(key.to_string())
-                        .or_default()
-                        .push(BigInt::from(0));
-                }
-                Value::Object(_) => {
-                    anyhow::bail!("Unexpected object in pure array: {key}");
-                }
-            },
-            WorkItem::ArrayIter { arr, idx } => {
-                // Push continuation for remaining elements first
-                let next_idx = idx.saturating_add(1);
-                if next_idx < arr.len() {
-                    stack.push(WorkItem::ArrayIter { arr, idx: next_idx });
-                }
-                // Then push current element
-                stack.push(WorkItem::Value(&arr[idx]));
-            }
-        }
-    }
-    Ok(())
+    hash
 }
 
-/// Convert witness to Little-Endian bytes (32 bytes per element)
-fn witness_to_bytes(witness: &[BigInt]) -> Vec<u8> {
+/// Parse one field element from a decimal or `0x`-prefixed hex string,
+/// rejecting anything outside the BN254 scalar field.
+fn parse_field(s: &str) -> Result<U256> {
+    let s = s.trim();
+    let value = match s.strip_prefix("0x").or_else(|| s.strip_prefix("0X")) {
+        Some(hex) => U256::from_str_radix(hex, 16),
+        None => U256::from_str_radix(s, 10),
+    }
+    .map_err(|e| anyhow::anyhow!("invalid field element {s:?}: {e}"))?;
+    ensure!(value < M, "witness input exceeds BN254 field modulus");
+    Ok(value)
+}
+
+/// Encode witness field elements as little-endian bytes (32 bytes each).
+fn witness_to_bytes(witness: &[U256]) -> Vec<u8> {
     let mut bytes = Vec::with_capacity(
         witness
             .len()
             .checked_mul(32)
             .expect("Overflow in witness size"),
     );
+    for value in witness {
+        bytes.extend_from_slice(&value.to_le_bytes::<32>());
+    }
+    bytes
+}
 
-    for bi in witness {
-        // Convert BigInt to 32 LE bytes
-        let (sign, be_bytes) = bi.to_bytes_be();
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-        // Check it fits in 32 bytes
-        assert!(
-            be_bytes.len() <= 32,
-            "Field element exceeds 32 bytes in witness"
-        );
+    /// BN254 scalar field modulus, decimal.
+    const MODULUS_DEC: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495617";
+    /// `MODULUS - 1`, the largest valid field element.
+    const MODULUS_MINUS_ONE_DEC: &str =
+        "21888242871839275222246405745257275088548364400416034343698204186575808495616";
 
-        // Negative numbers should not occur in witness output since inputs
-        // are converted to field elements. Assert this invariant.
-        assert!(
-            sign != Sign::Minus,
-            "Negative number in witness output - inputs should be field elements"
-        );
+    #[test]
+    fn encodes_field_elements_little_endian() {
+        // 1 -> first byte set, rest zero.
+        let bytes = witness_to_bytes(&[U256::from(1u64)]);
+        assert_eq!(bytes.len(), 32);
+        assert_eq!(bytes[0], 1);
+        assert!(bytes[1..].iter().all(|&b| b == 0));
 
-        // Pad to 32 bytes (big-endian)
-        let mut padded = vec![0u8; 32];
-        let offset = 32usize.saturating_sub(be_bytes.len());
-        padded[offset..].copy_from_slice(&be_bytes[..be_bytes.len().min(32)]);
-
-        // Convert to little-endian
-        padded.reverse();
-        bytes.extend_from_slice(&padded);
+        // 0x0102 -> little-endian [0x02, 0x01, 0, ...].
+        let bytes = witness_to_bytes(&[U256::from(0x0102u64)]);
+        assert_eq!(&bytes[0..2], &[0x02, 0x01]);
     }
 
-    bytes
+    #[test]
+    fn encodes_multiple_elements_contiguously() {
+        let bytes = witness_to_bytes(&[U256::from(1u64), U256::from(2u64)]);
+        assert_eq!(bytes.len(), 64);
+        assert_eq!(bytes[0], 1);
+        assert_eq!(bytes[32], 2);
+    }
+
+    #[test]
+    fn parse_field_rejects_value_at_or_above_modulus() {
+        // p is not a valid field element; p - 1 is the largest valid one.
+        assert!(parse_field(MODULUS_DEC).is_err());
+        assert!(parse_field(MODULUS_MINUS_ONE_DEC).is_ok());
+    }
+
+    #[test]
+    fn parse_field_accepts_decimal_and_hex() {
+        assert_eq!(parse_field("255").expect("decimal"), U256::from(255u64));
+        assert_eq!(parse_field("0xff").expect("hex"), U256::from(255u64));
+        assert!(parse_field("-1").is_err());
+        assert!(parse_field("0xnope").is_err());
+    }
+
+    #[test]
+    fn parse_inputs_handles_single_and_flat_array_signals() {
+        // Matches the prover's InputValue: Single(hex) and Array(Vec<hex>).
+        let parsed = parse_inputs("{\"root\": \"0x05\", \"inAmount\": [\"0x01\", \"2\"]}")
+            .expect("valid inputs");
+        assert_eq!(parsed["root"], vec![U256::from(5u64)]);
+        assert_eq!(parsed["inAmount"], vec![U256::from(1u64), U256::from(2u64)]);
+    }
+
+    #[test]
+    fn parse_inputs_rejects_nested_arrays() {
+        // The prover never emits nested arrays; reject rather than silently flatten.
+        assert!(parse_inputs("{\"m\": [[1, 2], [3, 4]]}").is_err());
+    }
+
+    #[test]
+    fn parse_inputs_rejects_non_object() {
+        assert!(parse_inputs("[1, 2, 3]").is_err());
+    }
+
+    #[test]
+    fn bbf_inv_matches_circom_semantics() {
+        let bbfs = circomlib_black_box_functions();
+        let inv = &bbfs["bbf_inv"];
+
+        // Non-zero inputs map to the field inverse.
+        let x = BbfFr::from(7u64);
+        let expected = x.inverse().expect("7 is invertible in the field");
+        assert_eq!(inv(&[x]), expected);
+
+        // 0 maps to 0 (circom's `in != 0 ? 1/in : 0`).
+        assert_eq!(inv(&[BbfFr::from(0u64)]), BbfFr::from(0u64));
+    }
+
+    #[test]
+    fn bbf_bit_extracts_bits_lsb_first() {
+        let bbfs = circomlib_black_box_functions();
+        let bit = &bbfs["bbf_bit"];
+
+        // 5 = 0b101 -> bit0=1, bit1=0, bit2=1, bit3=0.
+        let value = BbfFr::from(5u64);
+        let one = BbfFr::from(1u64);
+        let zero = BbfFr::from(0u64);
+        assert_eq!(bit(&[value, BbfFr::from(0u64)]), one);
+        assert_eq!(bit(&[value, BbfFr::from(1u64)]), zero);
+        assert_eq!(bit(&[value, BbfFr::from(2u64)]), one);
+        assert_eq!(bit(&[value, BbfFr::from(3u64)]), zero);
+    }
 }
