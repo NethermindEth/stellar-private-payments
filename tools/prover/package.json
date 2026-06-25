@@ -1,0 +1,15 @@
+{
+  "name": "@social-prediction-market/prover",
+  "version": "0.1.0",
+  "description": "Off-chain ZK proof generator for social prediction market",
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "prove": "node src/index.js",
+    "setup": "node src/setup.js"
+  },
+  "dependencies": {
+    "circomlib": "^2.0.5",
+    "snarkjs": "^0.7.0"
+  }
+}
