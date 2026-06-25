@@ -21,19 +21,62 @@ env:
 jobs:
   ub-detection:
     name: Check for undefined behaviour (UB)
-    timeout-minutes: 480
+    timeout-minutes: 360
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - group: asp-membership
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p asp-membership"
+          - group: asp-non-membership
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p asp-non-membership"
+          - group: circuits
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p circuits"
+          - group: pool
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p pool -- --skip pool_is_known_root_returns_false_for_evicted_root"
+          - group: pool-root-eviction
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p pool test::pool_is_known_root_returns_false_for_evicted_root -- --exact"
+          - group: app-core
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p disclosure -p prover -p types -p stellar -p tx-planner -p witness -p web"
+          - group: contracts-light
+            miri_flags: "-Zmiri-strict-provenance"
+            cargo_args: "--lib -p contract-types -p soroban-utils -p public-key-registry -p circuit-keys -p e2e-tests -p zkhash"
+          - group: circom-groth16-verifier
+            miri_flags: "-Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks"
+            cargo_args: "--lib -p circom-groth16-verifier"
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Cache cargo build
+        id: cache-cargo
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        continue-on-error: false
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-miri-${{ matrix.group }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-miri-${{ matrix.group }}-
+            ${{ runner.os }}-cargo-miri-
+
       - name: Generate circuit testdata
         run: BUILD_TESTS=1 cargo build -p circuits
 
-      - run: |
+      - name: Install Miri
+        run: |
           rustup +nightly component add miri
           cargo +nightly miri setup
-          # Strict provenance for all crates except circom-groth16-verifier
-          MIRIFLAGS="-Zmiri-strict-provenance" cargo +nightly miri test --lib --workspace --exclude circom-groth16-verifier --exclude state
-          # circom-groth16-verifier uses ark-groth16 → rayon → crossbeam-epoch,
-          # which does integer-to-pointer casts incompatible with strict provenance,
-          # and stacked-borrows retags that are incompatible with Tree Borrows.
-          MIRIFLAGS="-Zmiri-permissive-provenance -Zmiri-tree-borrows -Zmiri-ignore-leaks" cargo +nightly miri test --lib -p circom-groth16-verifier
+
+      - name: Run Miri
+        run: MIRIFLAGS="${{ matrix.miri_flags }}" cargo +nightly miri test ${{ matrix.cargo_args }}
