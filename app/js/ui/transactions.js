@@ -42,16 +42,13 @@ function setLoading(button, loading, label = 'Submitting…') {
 }
 
 // Builds a progress callback for the Rust backend. The backend invokes it with
-// a { flow, stage, message, current?, total? } object at each stage; we surface
-// `message` on the button's loading label so the user sees live progress.
+// a { flow, stage, message } object at each stage; we surface `message` on the
+// button's loading label so the user sees live progress.
 function statusUpdater(button) {
     return (progress) => {
         if (!button || !progress?.message) return;
-        const text = progress.total
-            ? `${progress.message} (${progress.current ?? 0}/${progress.total})`
-            : progress.message;
         const loadingEl = button.querySelector('.btn-loading');
-        if (loadingEl) loadingEl.textContent = text;
+        if (loadingEl) loadingEl.textContent = progress.message;
     };
 }
 

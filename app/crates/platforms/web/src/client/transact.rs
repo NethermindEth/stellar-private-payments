@@ -76,7 +76,6 @@ impl WebClient {
             .collect())
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub(super) async fn prove_transact_inner(
         &self,
         pool_contract_id: &str,
@@ -84,16 +83,12 @@ impl WebClient {
         step: &Transact,
         flow: &'static str,
         on_status: &Option<Function>,
-        step_current: Option<u32>,
-        step_total: Option<u32>,
     ) -> Result<Option<PreparedProverTx>, JsError> {
         emit_progress(
             on_status,
             flow,
             "sync_check",
             "Checking sync & ASP membership…",
-            step_current,
-            step_total,
         );
 
         let params = loop {
@@ -102,8 +97,6 @@ impl WebClient {
                 flow,
                 "fetch_chain_state",
                 "Fetching on-chain state…",
-                step_current,
-                step_total,
             );
             let ContractsStateData {
                 pools,
@@ -123,14 +116,7 @@ impl WebClient {
             let pool_next_index =
                 parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
 
-            emit_progress(
-                on_status,
-                flow,
-                "load_state",
-                "Loading local keys…",
-                step_current,
-                step_total,
-            );
+            emit_progress(on_status, flow, "load_state", "Loading local keys…");
             let keys = match self
                 .storage_request(
                     StorageWorkerRequest::UserKeys(user_address.to_string()),
@@ -150,8 +136,6 @@ impl WebClient {
                 flow,
                 "fetch_chain_state",
                 "Fetching ASP non-membership proof…",
-                step_current,
-                step_total,
             );
             let non_membership_proof = self
                 .fetcher
@@ -183,14 +167,7 @@ impl WebClient {
                 non_membership_proof,
             };
 
-            emit_progress(
-                on_status,
-                flow,
-                "load_state",
-                "Building witness inputs…",
-                step_current,
-                step_total,
-            );
+            emit_progress(on_status, flow, "load_state", "Building witness inputs…");
             match self
                 .storage_request(StorageWorkerRequest::Transact(req), 5_000)
                 .await?
@@ -211,8 +188,6 @@ impl WebClient {
                         } else {
                             "Waiting to sync ledgers from the chain...".to_string()
                         },
-                        step_current,
-                        step_total,
                     );
                     TimeoutFuture::new(1_000).await;
                     continue;
@@ -226,18 +201,7 @@ impl WebClient {
             }
         };
 
-        let prove_message = match (step_current, step_total) {
-            (Some(current), Some(total)) => format!("Proving step {current}/{total}…"),
-            _ => "Proving…".to_string(),
-        };
-        emit_progress(
-            on_status,
-            flow,
-            "prove",
-            prove_message,
-            step_current,
-            step_total,
-        );
+        emit_progress(on_status, flow, "prove", "Proving…");
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
@@ -267,7 +231,7 @@ impl WebClient {
         step: Transact,
         flow: &'static str,
     ) -> Result<Option<Vec<String>>, JsError> {
-        let Some(executed) = self.prove_and_submit(&ctx, &step, flow, None, None).await? else {
+        let Some(executed) = self.prove_and_submit(&ctx, &step, flow).await? else {
             return Ok(None);
         };
         Ok(Some(vec![executed.hash]))
@@ -286,18 +250,9 @@ impl WebClient {
         let mut session = SpendSession::setup(wallet, amount, ctx.pool_contract_id.clone(), target)
             .map_err(spend_session_err)?;
 
-        let total_u32 = u32::try_from(session.len())
-            .map_err(|_| JsError::new("plan produces too many steps for u32"))?;
-
         let mut hashes = Vec::new();
         while let Some(step) = session.step().map_err(spend_session_err)? {
-            let current = u32::try_from(session.step_index().saturating_add(1))
-                .map_err(|_| JsError::new("step index exceeds u32"))?;
-
-            let Some(executed) = self
-                .prove_and_submit(&ctx, &step, flow, Some(current), Some(total_u32))
-                .await?
-            else {
+            let Some(executed) = self.prove_and_submit(&ctx, &step, flow).await? else {
                 return Ok(None);
             };
             session
@@ -314,8 +269,6 @@ impl WebClient {
         ctx: &ExecuteCtx,
         step: &Transact,
         flow: &'static str,
-        step_current: Option<u32>,
-        step_total: Option<u32>,
     ) -> Result<Option<ExecutedTransact>, JsError> {
         let prepared = self
             .prove_transact_inner(
@@ -324,18 +277,12 @@ impl WebClient {
                 step,
                 flow,
                 &ctx.on_status,
-                step_current,
-                step_total,
             )
             .await?;
         let Some(prepared) = prepared else {
             return Ok(None);
         };
 
-        let submit_message = match (step_current, step_total) {
-            (Some(current), Some(total)) => format!("Submitting step {current}/{total}…"),
-            _ => "Submitting…".to_string(),
-        };
         let signed_tx = sign_prepared_transaction(
             &prepared.soroban_tx,
             &ctx.network_passphrase,
@@ -344,14 +291,7 @@ impl WebClient {
             &ctx.on_status,
         )
         .await?;
-        emit_progress(
-            &ctx.on_status,
-            flow,
-            "submit",
-            submit_message,
-            step_current,
-            step_total,
-        );
+        emit_progress(&ctx.on_status, flow, "submit", "Submitting…");
         let hash = self.submit_tx(&signed_tx, flow, &ctx.on_status).await?;
         Ok(Some(ExecutedTransact {
             hash,

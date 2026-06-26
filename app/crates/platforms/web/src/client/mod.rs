@@ -43,8 +43,6 @@ fn emit_progress(
     flow: &'static str,
     stage: &'static str,
     message: impl AsRef<str>,
-    current: Option<u32>,
-    total: Option<u32>,
 ) {
     let Some(cb) = on_status else { return };
 
@@ -56,20 +54,6 @@ fn emit_progress(
         &JsValue::from_str("message"),
         &JsValue::from_str(message.as_ref()),
     );
-    if let Some(current) = current {
-        let _ = Reflect::set(
-            &obj,
-            &JsValue::from_str("current"),
-            &JsValue::from_f64(f64::from(current)),
-        );
-    }
-    if let Some(total) = total {
-        let _ = Reflect::set(
-            &obj,
-            &JsValue::from_str("total"),
-            &JsValue::from_f64(f64::from(total)),
-        );
-    }
 
     // Best-effort progress: never fail the transaction flow due to UI callbacks.
     if cb.call1(&JsValue::NULL, &obj.into()).is_err() {
@@ -168,14 +152,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&e.to_string()))?;
 
         for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
-            emit_progress(
-                on_status,
-                flow,
-                "confirm",
-                "Confirming…",
-                Some(attempt),
-                Some(CONFIRM_POLL_ATTEMPTS),
-            );
+            emit_progress(on_status, flow, "confirm", "Confirming…");
             TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
             match confirm_tx(&hash, rpc)
                 .await
@@ -207,14 +184,7 @@ impl WebClient {
         on_status: &Option<Function>,
         flow: &'static str,
     ) -> Result<PreparedProverTx, JsError> {
-        emit_progress(
-            on_status,
-            flow,
-            "prepare_tx",
-            "Simulating transaction…",
-            None,
-            None,
-        );
+        emit_progress(on_status, flow, "prepare_tx", "Simulating transaction…");
         prepared.soroban_tx = self
             .prepare_pool_tx(
                 pool_contract_id,
@@ -353,7 +323,7 @@ impl WebClient {
             &on_status,
         )
         .await?;
-        emit_progress(&on_status, "register", "submit", "Submitting…", None, None);
+        emit_progress(&on_status, "register", "submit", "Submitting…");
         self.submit_tx(&signed_tx, "register", &on_status).await
     }
 
@@ -821,8 +791,6 @@ impl WebClient {
             "disclosure",
             "sync_check",
             "Checking sync & ASP membership…",
-            None,
-            None,
         );
 
         let (inputs, network, pool_address) = loop {
@@ -831,8 +799,6 @@ impl WebClient {
                 "disclosure",
                 "fetch_chain_state",
                 "Fetching on-chain state…",
-                None,
-                None,
             );
             let data = self
                 .fetcher
@@ -863,8 +829,6 @@ impl WebClient {
                 "disclosure",
                 "load_state",
                 "Building witness inputs…",
-                None,
-                None,
             );
             match self
                 .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
@@ -894,8 +858,6 @@ impl WebClient {
                         } else {
                             "Waiting to sync ledgers from the chain...".to_string()
                         },
-                        None,
-                        None,
                     );
                     TimeoutFuture::new(1_000).await;
                     continue;
@@ -909,7 +871,7 @@ impl WebClient {
             }
         };
 
-        emit_progress(&on_status, "disclosure", "prove", "Proving…", None, None);
+        emit_progress(&on_status, "disclosure", "prove", "Proving…");
         self.ping_prover()
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;

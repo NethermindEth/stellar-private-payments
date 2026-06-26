@@ -91,8 +91,6 @@ pub async fn sign_prepared_transaction(
             flow,
             "sign_auth",
             format!("Approve authorization ({current}/{total})…"),
-            Some(current),
-            Some(total),
         );
         let preimage_b64 = step
             .wallet_preimage_b64()
@@ -114,14 +112,7 @@ pub async fn sign_prepared_transaction(
     let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    emit_progress(
-        on_status,
-        flow,
-        "sign_tx",
-        "Approve transaction…",
-        None,
-        None,
-    );
+    emit_progress(on_status, flow, "sign_tx", "Approve transaction…");
 
     let signed_b64 = wallet_call(
         "signTransaction",
