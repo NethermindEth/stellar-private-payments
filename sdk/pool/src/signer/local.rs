@@ -35,19 +35,6 @@ impl LocalSigner {
     pub fn user_address(&self) -> &str {
         &self.user_address
     }
-
-    /// Deterministic signer for native tests.
-    pub fn test_fixture(
-        network_passphrase: impl Into<String>,
-        user_address: impl Into<String>,
-    ) -> Result<Self, PoolError> {
-        Ok(Self {
-            stellar: StellarSigner::test_fixture()
-                .map_err(|e| PoolError::Other(format!("test signer: {e:#}")))?,
-            network_passphrase: network_passphrase.into(),
-            user_address: user_address.into(),
-        })
-    }
 }
 
 #[async_trait::async_trait(?Send)]

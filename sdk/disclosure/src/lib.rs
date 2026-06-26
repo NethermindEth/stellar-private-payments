@@ -9,6 +9,7 @@ use types::{
     SELECTIVE_DISCLOSURE_1_N_NOTES,
 };
 
+/// Domain prefix for `ext_context_hash` derivation.
 const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
 
 /// Compute the canonical `vk_hash` string from verifying-key bytes.

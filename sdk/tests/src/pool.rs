@@ -35,6 +35,9 @@ const TEST_CONFIG_JSON: &str = r#"{
 const POOL_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const ASP_MEMBERSHIP_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
 const USER_ADDRESS: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
+/// Ed25519 secret for `SigningKey::from_bytes(&[7u8; 32])` (stellar signer unit
+/// tests).
+const TEST_SIGNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQP54X";
 
 pub use crate::seed::TEST_NETWORK;
 
@@ -86,7 +89,8 @@ pub fn test_recipient() -> TransferRecipient {
 }
 
 fn test_signer() -> Result<Box<dyn Signer>> {
-    Ok(Box::new(LocalSigner::test_fixture(
+    Ok(Box::new(LocalSigner::new(
+        TEST_SIGNER_SECRET,
         "Test SDF Network ; September 2015",
         USER_ADDRESS,
     )?))

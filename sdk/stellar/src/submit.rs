@@ -31,14 +31,11 @@ pub async fn confirm_tx(hash: &str, rpc: &Client) -> Result<TxConfirmStatus> {
         .get_transaction(hash)
         .await
         .with_context(|| format!("getTransaction failed for {hash}"))?;
-    map_transaction_status(&status.status, status.result_xdr)
-}
-
-fn map_transaction_status(status: &str, result_xdr: Option<String>) -> Result<TxConfirmStatus> {
-    match status {
+    match status.status.as_str() {
         "SUCCESS" => Ok(TxConfirmStatus::Success),
         "FAILED" => {
-            let detail = result_xdr
+            let detail = status
+                .result_xdr
                 .map(|xdr| format!(" (resultXdr: {xdr})"))
                 .unwrap_or_default();
             Ok(TxConfirmStatus::Failed { detail })
