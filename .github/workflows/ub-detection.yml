@@ -38,10 +38,7 @@ jobs:
             cargo_args: "--lib -p circuits"
           - group: pool
             miri_flags: "-Zmiri-strict-provenance"
-            cargo_args: "--lib -p pool -- --skip pool_is_known_root_returns_false_for_evicted_root"
-          - group: pool-root-eviction
-            miri_flags: "-Zmiri-strict-provenance"
-            cargo_args: "--lib -p pool test::pool_is_known_root_returns_false_for_evicted_root -- --exact"
+            cargo_args: "--lib -p pool"
           - group: app-core
             miri_flags: "-Zmiri-strict-provenance"
             cargo_args: "--lib -p disclosure -p prover -p types -p stellar -p tx-planner -p witness -p web"
