@@ -2,10 +2,8 @@
 
 use crate::{PreparedTransaction, error::PoolError, types::SignedTransaction};
 
-#[cfg(not(target_arch = "wasm32"))]
 mod local;
 
-#[cfg(not(target_arch = "wasm32"))]
 pub use local::LocalSigner;
 
 /// Signs a simulated [`PreparedTransaction`] before chain submission.

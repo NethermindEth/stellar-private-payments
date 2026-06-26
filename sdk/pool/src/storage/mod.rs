@@ -6,16 +6,14 @@ use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NotePublicKey, UserNoteSummary};
 
 use crate::{
-    disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
+    disclosure::{DisclosureInputs, DisclosureInputsRequest},
     error::PoolError,
     transact::{BuildTransactParams, TransactRequest},
 };
 
-#[cfg(not(target_arch = "wasm32"))]
-mod native;
+mod local;
 
-#[cfg(not(target_arch = "wasm32"))]
-pub use native::LocalStorage;
+pub use local::LocalStorage;
 
 pub(crate) fn map_build_params(
     result: anyhow::Result<BuildTransactParams>,

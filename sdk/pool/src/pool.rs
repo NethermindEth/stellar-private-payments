@@ -10,7 +10,6 @@ use stellar::{
 
 use crate::{
     PoolCore, PreparedTransaction,
-    confirm_poll::sleep_between_confirm_polls,
     core::{pool_transact_input, transact_step_for_plan},
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
@@ -20,6 +19,7 @@ use crate::{
     plan::PreparedTransactionPlan,
     prover::Prover,
     signer::Signer,
+    sleep::sleep,
     storage::Storage,
     transact::transact_request_from_step,
     types::{
@@ -28,6 +28,8 @@ use crate::{
         TransferRecipient,
     },
 };
+
+const POLL_INTERVAL_MS: u32 = 1_000;
 
 /// Main entry point for a single privacy pool.
 pub struct PrivatePool<S> {
@@ -136,7 +138,7 @@ impl<S: Storage> PrivatePool<S> {
 
         for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
             if attempt > 1 {
-                sleep_between_confirm_polls().await;
+                sleep(POLL_INTERVAL_MS).await;
             }
             match confirm_tx(hash, rpc)
                 .await
@@ -358,7 +360,7 @@ impl<S: Storage> PrivatePool<S> {
                     return Ok(None);
                 }
                 Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(_gap))) => {
-                    sleep_between_confirm_polls().await;
+                    sleep(POLL_INTERVAL_MS).await;
                 }
                 Err(error) => return Err(error),
             }

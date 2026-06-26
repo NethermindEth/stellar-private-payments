@@ -1,8 +1,5 @@
 use crate::{
-    protocol::{
-        AdminASPRequest, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
-        StorageWorkerResponse,
-    },
+    protocol::{AdminASPRequest, StorageWorkerRequest, StorageWorkerResponse},
     workers::{
         prover::{ProverBridge, ProverWorker},
         storage::{StorageBridge, StorageWorker},
@@ -198,17 +195,6 @@ impl WebClient {
             .call(req, timeout_ms)
             .await
             .map_err(|e| JsError::new(&format!("Storage Worker Communication Error: {e}")))
-    }
-
-    async fn prover_request(
-        &self,
-        req: ProverWorkerRequest,
-        timeout_ms: u32,
-    ) -> Result<ProverWorkerResponse, JsError> {
-        self.prover_bridge
-            .call(req, timeout_ms)
-            .await
-            .map_err(|e| JsError::new(&format!("Prover Worker Communication Error: {e}")))
     }
 }
 
@@ -541,13 +527,6 @@ pub(crate) fn parse_output_recipient_keys(
         out_enc_pks[i] = enc_pk;
     }
     Ok((out_note_pks, out_enc_pks))
-}
-
-fn parse_u32_decimal(s: &str) -> Result<u32, String> {
-    let v: u64 = s
-        .parse::<u64>()
-        .map_err(|_| format!("invalid decimal u64: {s}"))?;
-    u32::try_from(v).map_err(|_| format!("value does not fit into u32: {s}"))
 }
 
 fn parse_hex32(hex: &str, what: &str) -> Result<[u8; 32], JsError> {

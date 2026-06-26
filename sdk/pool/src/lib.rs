@@ -61,13 +61,13 @@ pub mod state {
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking;
 mod client;
-mod confirm_poll;
 mod core;
 mod error;
 mod plan;
 mod pool;
 mod prover;
 mod signer;
+mod sleep;
 mod storage;
 mod transact;
 
@@ -81,12 +81,8 @@ pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
 pub use prover::{LocalProver, Prover, ProverEngine};
-#[cfg(not(target_arch = "wasm32"))]
-pub use signer::LocalSigner;
-pub use signer::Signer;
-#[cfg(not(target_arch = "wasm32"))]
-pub use storage::LocalStorage;
-pub use storage::Storage;
+pub use signer::{LocalSigner, Signer};
+pub use storage::{LocalStorage, Storage};
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,
