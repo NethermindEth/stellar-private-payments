@@ -19,6 +19,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
+disclosure = { workspace = true }
 thiserror = { workspace = true }
 tx-planner = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }

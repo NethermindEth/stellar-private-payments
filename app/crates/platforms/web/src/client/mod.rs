@@ -15,6 +15,7 @@ use std::{rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
     PoolError,
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
+    disclosure,
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
         AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,

@@ -20,7 +20,6 @@ path = "src/bin/prover_worker.rs"
 
 [dependencies]
 # workspace
-disclosure = { workspace = true }
 stellar-private-payments-sdk = { workspace = true }
 tx-planner = { workspace = true }
 

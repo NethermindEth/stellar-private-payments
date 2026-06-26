@@ -13,6 +13,7 @@ use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
     PoolError, PreparedProverTx, Prover, ProverEngine,
+    disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
     tx::flows::{SelectiveDisclosure1Params, TransactParams, selective_disclosure_1},
     types::{

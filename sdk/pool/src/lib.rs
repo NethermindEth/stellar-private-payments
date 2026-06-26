@@ -47,6 +47,11 @@ pub mod proving {
     pub use witness::WitnessCalculator;
 }
 
+pub mod disclosure {
+    //! Selective-disclosure receipt validation, proving, and verification.
+    pub use ::disclosure::*;
+}
+
 pub mod state {
     //! SQLite-backed local wallet and indexer state.
     pub use crate::core::process_local_state_batch;

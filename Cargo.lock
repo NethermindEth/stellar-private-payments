@@ -4828,6 +4828,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "disclosure",
  "futures-timer",
  "gloo-timers",
  "log",
@@ -5906,7 +5907,6 @@ dependencies = [
  "anyhow",
  "async-trait",
  "console_error_panic_hook",
- "disclosure",
  "futures",
  "gloo-timers",
  "gloo-worker",
