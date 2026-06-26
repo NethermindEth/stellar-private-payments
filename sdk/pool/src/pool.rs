@@ -30,6 +30,7 @@ use crate::{
 };
 
 const POLL_INTERVAL_MS: u32 = 1_000;
+const SYNC_MAX_RETRIES: u32 = 30;
 
 /// Main entry point for a single privacy pool
 pub struct PrivatePool<S> {
@@ -391,7 +392,24 @@ impl<S: Storage> PrivatePool<S> {
     ) -> Result<Vec<TransactionResult>, PoolError> {
         let mut results = Vec::new();
         while !plan.is_complete() {
-            let mut prepared = self.prove_next(plan).await?;
+            let mut prepared = {
+                let mut sync_waits = 0u32;
+                loop {
+                    match self.prove_next(plan).await {
+                        Ok(prepared) => break prepared,
+                        Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
+                            sync_waits = sync_waits.saturating_add(1);
+                            if sync_waits > SYNC_MAX_RETRIES {
+                                return Err(PoolError::MembershipSync(
+                                    AspMembershipSync::SyncRequired(gap),
+                                ));
+                            }
+                            sleep(POLL_INTERVAL_MS).await;
+                        }
+                        Err(error) => return Err(error),
+                    }
+                }
+            };
             self.simulate(&mut prepared).await?;
             let signed = self.sign(&prepared).await?;
             let hash = self.submit(signed).await?;
