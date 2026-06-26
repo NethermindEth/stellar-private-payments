@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
-    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureNoteInputs,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -11,9 +12,10 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildDisclosureInputs, BuildTransactParams, DisclosureInputs, PoolError, SpendableNote,
-    Storage, TransactRequest, build_disclosure_inputs, build_transact_params,
+    BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest, build_transact_params,
+    build_validated_pool_tree,
     chain::ContractDataStorage,
+    load_user_key_material,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
@@ -404,14 +406,67 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 req.user_address
             );
 
-            with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
-                BuildDisclosureInputs::Ready(inputs) => {
-                    StorageWorkerResponse::DisclosureInputs(inputs)
-                }
-                BuildDisclosureInputs::MembershipSync(status) => {
-                    StorageWorkerResponse::AspMembershipSync(status)
-                }
-            })?
+            if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
+                return Ok(StorageWorkerResponse::Error(
+                    "selective disclosure requires 1..=4 selected commitments".to_string(),
+                ));
+            }
+
+            let pool_root = req
+                .pool_root
+                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
+            let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) = STORAGE
+                .with(|s| {
+                    let borrow = s.borrow();
+                    let storage = borrow
+                        .as_ref()
+                        .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
+                    load_user_key_material(storage, &req.user_address)
+                })?;
+
+            let tree = match STORAGE.with(|s| {
+                let borrow = s.borrow();
+                let storage = borrow
+                    .as_ref()
+                    .ok_or_else(|| anyhow::anyhow!("storage is not initialized"))?;
+                build_validated_pool_tree(
+                    storage,
+                    &req.pool_address,
+                    req.pool_next_index,
+                    req.tree_depth,
+                    pool_root,
+                )
+            })? {
+                Ok(tree) => tree,
+                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
+            };
+
+            let mut notes = Vec::with_capacity(req.selected_commitments.len());
+            for commitment in &req.selected_commitments {
+                let (amount, blinding, leaf_index) = with_storage!(
+                    s => s.get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+                )?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unspent note not found for commitment {}",
+                        commitment
+                    )
+                })?;
+
+                let proof = tree.proof(leaf_index)?;
+
+                notes.push(DisclosureNoteInputs {
+                    root: proof.root,
+                    note_commitment: *commitment,
+                    note_amount: amount,
+                    note_private_key: note_privkey.clone(),
+                    note_blinding: blinding,
+                    merkle_path_indices: proof.path_indices,
+                    merkle_path_elements: proof.path_elements,
+                });
+            }
+
+            StorageWorkerResponse::DisclosureInputs(DisclosureInputs { notes })
         }
         StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
             membership_blinding,
@@ -679,12 +734,33 @@ impl Storage for StorageBridge {
     async fn build_disclosure_inputs(
         &self,
         req: &stellar_private_payments_sdk::DisclosureInputsRequest,
-    ) -> Result<DisclosureInputs, PoolError> {
+    ) -> Result<stellar_private_payments_sdk::DisclosureInputs, PoolError> {
+        let local_req = crate::protocol::DisclosureInputsRequest {
+            user_address: req.user_address.clone(),
+            pool_address: req.pool_address.clone(),
+            selected_commitments: vec![req.selected_commitment],
+            pool_root: req.pool_root,
+            pool_next_index: req.pool_next_index,
+            tree_depth: req.tree_depth,
+        };
         match self
-            .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
+            .call(StorageWorkerRequest::DisclosureInputs(local_req), 5_000)
             .await
         {
-            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => Ok(inputs),
+            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => {
+                let note = inputs.notes.into_iter().next().ok_or_else(|| {
+                    PoolError::Other("disclosure inputs returned no notes".into())
+                })?;
+                Ok(stellar_private_payments_sdk::DisclosureInputs {
+                    root: note.root,
+                    note_commitment: note.note_commitment,
+                    note_amount: note.note_amount,
+                    note_private_key: note.note_private_key,
+                    note_blinding: note.note_blinding,
+                    merkle_path_indices: note.merkle_path_indices,
+                    merkle_path_elements: note.merkle_path_elements,
+                })
+            }
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
                 Err(PoolError::MembershipSync(status))
             }

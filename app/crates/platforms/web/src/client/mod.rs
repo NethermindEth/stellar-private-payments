@@ -1,5 +1,8 @@
 use crate::{
-    protocol::{AdminASPRequest, StorageWorkerRequest, StorageWorkerResponse},
+    protocol::{
+        AdminASPRequest, DisclosureInputsRequest, DisclosureProverRequest, ProverWorkerRequest,
+        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+    },
     workers::{
         prover::{ProverBridge, ProverWorker},
         storage::{StorageBridge, StorageWorker},
@@ -157,6 +160,17 @@ impl WebClient {
 
     pub(crate) fn prover_bridge(&self) -> ProverBridge {
         self.prover_bridge.clone()
+    }
+
+    async fn prover_request(
+        &self,
+        req: ProverWorkerRequest,
+        timeout_ms: u32,
+    ) -> Result<ProverWorkerResponse, JsError> {
+        self.prover_bridge
+            .call(req, timeout_ms)
+            .await
+            .map_err(|e| JsError::new(&format!("Prover Worker Communication Error: {e}")))
     }
 
     pub(super) async fn submit_tx(
@@ -511,6 +525,181 @@ impl WebClient {
         }
     }
 
+    #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn generate_selective_disclosure(
+        &self,
+        pool_contract_id: String,
+        user_address: String,
+        selected_commitment_hexes: Array,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<JsValue, JsError> {
+        let selected_commitments = parse_disclosure_commitments(&selected_commitment_hexes)?;
+        let receipt = self
+            .generate_selective_disclosure_inner(
+                &pool_contract_id,
+                &user_address,
+                selected_commitments,
+                authority_label,
+                authority_identity_payload_hex,
+                purpose,
+                context_nonce,
+                on_status,
+            )
+            .await?;
+        match receipt {
+            None => Ok(JsValue::NULL),
+            Some(r) => Ok(serde_wasm_bindgen::to_value(&r)?),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn generate_selective_disclosure_inner(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+        selected_commitments: Vec<Field>,
+        authority_label: String,
+        authority_identity_payload_hex: String,
+        purpose: String,
+        context_nonce: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<Option<DisclosureReceipt>, JsError> {
+        if selected_commitments.is_empty() || selected_commitments.len() > 4 {
+            return Err(JsError::new(
+                "selective disclosure requires 1..=4 selected commitments",
+            ));
+        }
+        let context_nonce = parse_field_bigint_numeric(&context_nonce)?;
+
+        emit_progress(
+            &on_status,
+            "disclosure",
+            "sync_check",
+            "Checking sync & ASP membership…",
+            None,
+            None,
+        );
+
+        let (inputs, network, pool_address) = loop {
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "fetch_chain_state",
+                "Fetching on-chain state…",
+                None,
+                None,
+            );
+            let data = self
+                .fetcher
+                .contracts_data_for_pool(pool_contract_id)
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
+
+            let pool = data.pools.into_iter().next().ok_or_else(|| {
+                JsError::new(&format!(
+                    "pool {pool_contract_id} not found in contract state"
+                ))
+            })?;
+            let pool_root = pool.merkle_root;
+            let pool_next_index =
+                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
+
+            let req = DisclosureInputsRequest {
+                user_address: user_address.to_string(),
+                pool_address: pool_contract_id.to_string(),
+                selected_commitments: selected_commitments.clone(),
+                pool_root,
+                pool_next_index,
+                tree_depth: pool.merkle_levels,
+            };
+
+            emit_progress(
+                &on_status,
+                "disclosure",
+                "load_state",
+                "Building witness inputs…",
+                None,
+                None,
+            );
+            match self
+                .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
+                .await?
+            {
+                StorageWorkerResponse::DisclosureInputs(inputs) => {
+                    break (
+                        inputs,
+                        self.fetcher.contract_config().network.clone(),
+                        pool.contract_id,
+                    );
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
+                    log::warn!(
+                        "[DISCLOSURE] the account {user_address} should register within ASP"
+                    );
+                    return Ok(None);
+                }
+                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
+                    log::info!("[DISCLOSURE] sync is needed - waiting the indexer");
+                    emit_progress(
+                        &on_status,
+                        "disclosure",
+                        "sync_wait",
+                        if let Some(gap) = gap {
+                            format!("Waiting to sync {gap} ledger(s) from the chain...")
+                        } else {
+                            "Waiting to sync ledgers from the chain...".to_string()
+                        },
+                        None,
+                        None,
+                    );
+                    TimeoutFuture::new(1_000).await;
+                    continue;
+                }
+                other => {
+                    return Err(JsError::new(&format!(
+                        "Unexpected storage worker response: {:?}",
+                        other
+                    )));
+                }
+            }
+        };
+
+        emit_progress(&on_status, "disclosure", "prove", "Proving…", None, None);
+        self.ping_prover()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+        let prover_req = DisclosureProverRequest {
+            inputs: inputs.notes,
+            network,
+            pool_address,
+            authority_label,
+            authority_identity_payload_hex,
+            purpose,
+            context_nonce,
+        };
+
+        let receipt = match self
+            .prover_request(ProverWorkerRequest::Disclosure(prover_req), 20_000)
+            .await?
+        {
+            ProverWorkerResponse::Disclosure(receipt) => receipt,
+            other => {
+                return Err(JsError::new(&format!(
+                    "Unexpected prover worker response: {:?}",
+                    other
+                )));
+            }
+        };
+
+        Ok(Some(receipt))
+    }
+
     #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
     pub async fn verify_selective_disclosure(
         &self,
@@ -570,6 +759,24 @@ pub(crate) fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsErro
 
 pub(crate) fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
     Field::from_str(s).map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn parse_disclosure_commitments(arr: &Array) -> Result<Vec<Field>, JsError> {
+    let len = arr.length();
+    if len == 0 || len > 4 {
+        return Err(JsError::new(
+            "selected_commitment_hexes must contain 1..=4 commitment strings",
+        ));
+    }
+    let mut commitments = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        let v = arr.get(i);
+        let s = v
+            .as_string()
+            .ok_or_else(|| JsError::new("selected_commitment_hexes must be string[]"))?;
+        commitments.push(parse_field_hex_str(&s)?);
+    }
+    Ok(commitments)
 }
 
 pub(crate) fn parse_input_note_ids(
@@ -655,6 +862,13 @@ pub(crate) fn parse_output_recipient_keys(
         out_enc_pks[i] = enc_pk;
     }
     Ok((out_note_pks, out_enc_pks))
+}
+
+fn parse_u32_decimal(s: &str) -> Result<u32, String> {
+    let v: u64 = s
+        .parse::<u64>()
+        .map_err(|_| format!("invalid decimal u64: {s}"))?;
+    u32::try_from(v).map_err(|_| format!("value does not fit into u32: {s}"))
 }
 
 fn parse_hex32(hex: &str, what: &str) -> Result<[u8; 32], JsError> {

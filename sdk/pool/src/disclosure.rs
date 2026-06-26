@@ -1,12 +1,13 @@
 //! Selective-disclosure witness building and verification helpers.
 
 pub use ::disclosure::{vk_hash_hex, *};
+pub use types::DisclosureContext;
 
 use serde::{Deserialize, Serialize};
 use state::SqliteStorage;
 use types::{
-    AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport, Field,
-    NoteAmount, NotePrivateKey,
+    AspMembershipSync, DisclosureReceipt, DisclosureVerificationReport, Field, NoteAmount,
+    NotePrivateKey,
 };
 
 use crate::{

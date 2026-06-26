@@ -11,8 +11,16 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 // Canonical constants
 // ---------------------------------------------------------------------------
 
-const CANONICAL_SELECTIVE_DISCLOSURE_1_VK_HASH =
-  '0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af';
+const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
+  selectiveDisclosure_1:
+    '0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af',
+  selectiveDisclosure_2:
+    '0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1',
+  selectiveDisclosure_3:
+    '0x0902ecd9e05270b8f68073d8b05b44c1a9bfd2ebd349699374ab3e6f614d7f73',
+  selectiveDisclosure_4:
+    '0xfc1f2648fba94e325de3022ec380401b617ef0653f12acb91d2e5f9431d5134c',
+};
 
 // ---------------------------------------------------------------------------
 // State
@@ -26,7 +34,7 @@ const state = {
   derivedKeys: null,
   notes: [],
   pools: [],
-  selectedNote: null,
+  selectedNotes: [],
   notesLoading: false,
   notesError: null,
   generating: false,
@@ -144,18 +152,16 @@ async function loadNotes() {
 
     // Apply query-param preselection if present
     const query = parseQueryParams();
-    if (query.commitment) {
-      const target = normalizeCommitment(query.commitment);
-      const match = state.notes.find(
-        (n) =>
-          normalizeCommitment(n.id) === target &&
-          !n.spent
+    if (query.commitments && query.commitments.length > 0) {
+      const targets = query.commitments.map(normalizeCommitment);
+      const matches = state.notes.filter(
+        (n) => targets.includes(normalizeCommitment(n.id)) && !n.spent
       );
-      if (match) {
-        state.selectedNote = match;
+      if (matches.length > 0) {
+        state.selectedNotes = matches.slice(0, 4);
       } else {
         state.notesError =
-          'Note not found, already spent, or not owned by this account.';
+          'Preselected notes not found, already spent, or not owned by this account.';
       }
     }
   } catch (e) {
@@ -227,8 +233,9 @@ async function deriveKeys() {
 
 function parseQueryParams() {
   const params = new URLSearchParams(window.location.search);
+  const commitments = params.getAll('commitment');
   return {
-    commitment: params.get('commitment') || null,
+    commitments: commitments.length > 0 ? commitments : null,
     verify: params.get('verify') === '1' || params.get('verify') === 'true',
   };
 }
@@ -327,40 +334,56 @@ export function mountGenerate(container) {
   // Note picker
   const pickerLabel = document.createElement('label');
   pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
-  pickerLabel.textContent = `Select an unspent note (${unspent.length})`;
+  pickerLabel.textContent = `Select up to 4 unspent notes (${unspent.length})`;
   container.appendChild(pickerLabel);
 
   const list = document.createElement('div');
   list.className = 'space-y-2 mb-4';
-  list.setAttribute('role', 'radiogroup');
+  list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'Unspent notes');
 
-  unspent.forEach((note) => {
-    const isSelected = state.selectedNote && state.selectedNote.id === note.id;
+  const isSelected = (note) => state.selectedNotes.some((n) => n.id === note.id);
+  const atMaxSelection = () => state.selectedNotes.length >= 4;
 
-    const row = document.createElement('button');
-    row.type = 'button';
-    row.className = `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 ${
-      isSelected
+  unspent.forEach((note) => {
+    const selected = isSelected(note);
+
+    const row = document.createElement('label');
+    row.className = `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 cursor-pointer ${
+      selected
         ? 'bg-brand-500/10 border-brand-500/40 text-brand-300'
         : 'bg-dark-800 border-dark-700 hover:border-dark-600 text-dark-200'
     }`;
-    row.setAttribute('role', 'radio');
-    row.setAttribute('aria-checked', String(isSelected));
 
     const noteLabel = tokenLabelForPool(note.poolContractId);
+    const rowInner = el('div', 'flex items-center gap-3 min-w-0');
+    const checkbox = el('input', 'accent-brand-500');
+    checkbox.type = 'checkbox';
+    checkbox.checked = selected;
+    if (!selected && atMaxSelection()) checkbox.disabled = true;
+    rowInner.appendChild(checkbox);
+
     const rowInfo = el('div', 'min-w-0');
     rowInfo.append(
       el('div', 'font-mono text-xs truncate', shortCommitment(note.id)),
       el('div', 'text-[10px] text-dark-500 mt-0.5', `${noteLabel} · Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
     );
+    rowInner.appendChild(rowInfo);
+
     row.append(
-      rowInfo,
-      el('div', `text-xs font-medium whitespace-nowrap ${isSelected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount, noteLabel)),
+      rowInner,
+      el('div', `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount, noteLabel)),
     );
 
-    row.addEventListener('click', () => {
-      state.selectedNote = note;
+    const rowCheckbox = row.querySelector('input');
+    rowCheckbox.addEventListener('change', () => {
+      if (rowCheckbox.checked) {
+        if (!isSelected(note)) {
+          state.selectedNotes.push(note);
+        }
+      } else {
+        state.selectedNotes = state.selectedNotes.filter((n) => n.id !== note.id);
+      }
       mountGenerate(container);
     });
 
@@ -369,16 +392,20 @@ export function mountGenerate(container) {
 
   container.appendChild(list);
 
-  if (state.selectedNote) {
-    const selectedChip = el('div', 'text-xs text-brand-400 mb-4');
+  // Selection summary
+  const selectedChip = el('div', 'text-xs text-brand-400 mb-4');
+  const circuitName = `selectiveDisclosure_${state.selectedNotes.length || 1}`;
+  selectedChip.append(
+    el('span', 'text-dark-400', 'Selected: '),
+    `${state.selectedNotes.length} note${state.selectedNotes.length === 1 ? '' : 's'}`,
+  );
+  if (state.selectedNotes.length > 0) {
     selectedChip.append(
-      'Selected: ',
-      el('span', 'font-mono', shortCommitment(state.selectedNote.id)),
-      ' ',
-      el('span', 'text-dark-500', `· ${formatAmount(state.selectedNote.amount, tokenLabelForPool(state.selectedNote.poolContractId))}`),
+      ' · ',
+      el('span', 'font-mono text-dark-300', circuitName),
     );
-    container.appendChild(selectedChip);
   }
+  container.appendChild(selectedChip);
 
   // -------------------------------------------------------------------------
   // Context form
@@ -544,7 +571,9 @@ export function mountGenerate(container) {
     state.lastReceipt = receipt;
     resultArea.classList.remove('hidden');
     const json = JSON.stringify(receipt, null, 2);
-    const commitmentPrefix = state.selectedNote ? shortCommitment(state.selectedNote.id).replace('…', '-') : 'receipt';
+    const commitmentPrefix = state.selectedNotes.length
+      ? `${state.selectedNotes.length}-note`
+      : 'receipt';
     const date = new Date().toISOString().slice(0, 10);
     const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
 
@@ -611,12 +640,12 @@ export function mountGenerate(container) {
   generateBtn.className =
     'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
   generateBtn.textContent = 'Generate Disclosure Receipt';
-  generateBtn.disabled = !state.selectedNote;
+  generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
   formWrap.appendChild(generateBtn);
 
   generateBtn.addEventListener('click', async () => {
-    if (!state.selectedNote) {
-      showToast('Please select a note first', 'error');
+    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+      showToast('Please select 1 to 4 notes', 'error');
       return;
     }
 
@@ -649,6 +678,14 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
+function getActivePoolContractId(config) {
+  const pools = Array.isArray(config?.pools) ? config.pools : [];
+  const selected = pools.find((p) => p?.enabled) || pools[0];
+  const poolContractId = selected?.poolContractId;
+  if (!poolContractId) throw new Error('Pool contract ID not available');
+  return poolContractId;
+}
+
 async function generateReceipt(form) {
   const onStatus = (obj) => {
     const stage = obj?.stage || '';
@@ -668,11 +705,15 @@ async function generateReceipt(form) {
     }
   };
 
-  const { ensureAppPool } = await import('./ui/pool.js');
-  const pool = await ensureAppPool();
+  // Disclose against the pool the selected note actually belongs to (there can
+  // be multiple pools); falling back to the first enabled pool only if unknown.
+  const config = await getHandle().webClient.contractConfig();
+  const poolContractId = state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
 
-  const receipt = await pool.disclose(
-    state.selectedNote.id,
+  const receipt = await getHandle().webClient.generateSelectiveDisclosure(
+    poolContractId,
+    state.address,
+    state.selectedNotes.map((n) => n.id),
     form.authority,
     form.payload,
     form.purpose,
@@ -781,7 +822,7 @@ export function mountVerify(container) {
 
   const vkInput = document.createElement('input');
   vkInput.type = 'text';
-  vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_1_VK_HASH;
+  vkInput.value = CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
   vkInput.readOnly = true;
   vkInput.className =
     'flex-1 px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
@@ -864,6 +905,14 @@ export function mountVerify(container) {
 
   const renderSummary = (r) => {
     summaryGrid.replaceChildren();
+
+    const defaultVkHash =
+      CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES[r.circuit.name] ||
+      CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
+    if (vkInput.readOnly) {
+      vkInput.value = defaultVkHash;
+    }
+
     const items = [
       { label: 'Network', value: r.context.network },
       { label: 'Pool address', value: r.context.poolAddress },
