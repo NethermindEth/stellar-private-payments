@@ -1,11 +1,10 @@
 //! Sync wrapper around [`crate::PrivatePool`] via pollster.
 
-use state::SqliteStorage;
 use tx_planner::SpendableNote;
 use types::{NoteAmount, UserNoteSummary};
 
 use crate::{
-    PoolCore, PreparedTransaction, PreparedTransactionPlan,
+    PreparedTransaction, PreparedTransactionPlan,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
     prover::LocalProver,
@@ -43,28 +42,8 @@ impl PrivatePool {
         self.inner.config()
     }
 
-    pub fn core(&self) -> &PoolCore {
-        self.inner.core()
-    }
-
-    pub fn chain_config(&self) -> &crate::types::PoolChainConfig {
-        self.inner.core().config()
-    }
-
-    pub fn storage(&self) -> std::cell::Ref<'_, SqliteStorage> {
-        self.inner.storage_backend().storage()
-    }
-
-    pub fn storage_mut(&self) -> std::cell::RefMut<'_, SqliteStorage> {
-        self.inner.storage_backend().storage_mut()
-    }
-
-    pub fn estimate(
-        &self,
-        wallet: &[SpendableNote],
-        amount: NoteAmount,
-    ) -> Result<Estimate, PoolError> {
-        self.inner.estimate(wallet, amount)
+    pub fn estimate(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
+        pollster::block_on(self.inner.estimate(amount))
     }
 
     pub fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
@@ -95,10 +74,6 @@ impl PrivatePool {
 
     pub fn sync(&self) -> Result<(), PoolError> {
         pollster::block_on(self.inner.sync())
-    }
-
-    pub fn plan(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
-        pollster::block_on(self.inner.plan(amount))
     }
 
     pub fn prepare_deposit(

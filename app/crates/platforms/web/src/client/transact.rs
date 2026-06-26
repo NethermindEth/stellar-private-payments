@@ -7,19 +7,14 @@ use super::{
 };
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
-use serde::Serialize;
 use stellar_private_payments_sdk::{
-    PoolError, PreparedTransactionPlan, SpendTarget, Storage, Transact, TransferRecipient,
+    PoolError, PreparedTransactionPlan, SpendTarget, Transact, TransferRecipient,
     tx::flows::N_OUTPUTS,
-    types::{AspMembershipSync, EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey},
+    types::{
+        AspMembershipSync, EncryptionPublicKey, Estimate, ExtAmount, NoteAmount, NotePublicKey,
+    },
 };
 use wasm_bindgen::{JsError, prelude::*};
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SpendPlanPreview {
-    pub step_count: u32,
-}
 
 fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<wasm_bindgen::JsValue, JsError> {
     match result {
@@ -155,7 +150,6 @@ impl Pool {
         let out_amounts = parse_output_amounts(&output_amounts)?;
         if out_amounts != [note_amount, NoteAmount::ZERO] {
             let (note_pk, enc_pk) = pool
-                .storage_backend()
                 .user_public_keys(&user_address)
                 .await
                 .map_err(pool_err)?;
@@ -209,17 +203,14 @@ impl Pool {
         self.execute_plan(&mut plan, flow, on_status).await
     }
 
-    async fn plan_inner(&self, amount: BigInt) -> Result<SpendPlanPreview, JsError> {
+    async fn estimate_inner(&self, amount: BigInt) -> Result<Estimate, JsError> {
         let pool = self.inner();
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        let estimate = pool.plan(amount).await.map_err(pool_err)?;
-        Ok(SpendPlanPreview {
-            step_count: estimate.tx_count,
-        })
+        pool.estimate(amount).await.map_err(pool_err)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -275,10 +266,10 @@ impl Pool {
 
 #[wasm_bindgen]
 impl Pool {
-    #[wasm_bindgen(js_name = plan)]
-    pub async fn plan(&self, amount: BigInt) -> Result<wasm_bindgen::JsValue, JsError> {
-        let preview = self.plan_inner(amount).await?;
-        Ok(serde_wasm_bindgen::to_value(&preview)?)
+    #[wasm_bindgen(js_name = estimate)]
+    pub async fn estimate(&self, amount: BigInt) -> Result<wasm_bindgen::JsValue, JsError> {
+        let estimate = self.estimate_inner(amount).await?;
+        Ok(serde_wasm_bindgen::to_value(&estimate)?)
     }
 
     #[wasm_bindgen]

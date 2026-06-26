@@ -1,7 +1,7 @@
 //! Async per-pool private payments API.
 
 use tx_planner::{SpendableNote, Transact};
-use types::{NoteAmount, UserNoteSummary};
+use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use stellar::{
     Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, TxConfirmStatus,
@@ -64,131 +64,17 @@ impl<S> PrivatePool<S> {
         })
     }
 
-    pub fn core(&self) -> &PoolCore {
-        &self.core
-    }
-
-    pub fn estimate(
-        &self,
-        wallet: &[SpendableNote],
-        amount: NoteAmount,
-    ) -> Result<Estimate, PoolError> {
-        self.core.estimate(wallet, amount)
-    }
-
     pub fn config(&self) -> &PrivatePoolConfig {
         &self.config
-    }
-
-    pub fn storage_backend(&self) -> &S {
-        &self.storage
     }
 }
 
 impl<S: Storage> PrivatePool<S> {
-    async fn next_prepared_transaction(
-        &self,
-        plan: &mut PreparedTransactionPlan,
-    ) -> Result<PreparedTransaction, PoolError> {
-        if plan.is_complete() {
-            return Err(PoolError::Other("transaction plan is complete".into()));
-        }
-
-        let chain = self.fetch_transact_chain_context().await?;
-        let step = if let Some(amount) = plan.deposit_amount() {
-            self.deposit_transact_step(amount).await?
-        } else if let Some(step) = plan.raw_transact_step() {
-            step.clone()
-        } else {
-            transact_step_for_plan(plan)?
-        };
-        let req = transact_request_from_step(
-            &step,
-            &self.config.user_address,
-            &self.config.pool_contract_id,
-            &chain,
-        );
-
-        let params = self.storage.build_transact_params(&req).await?;
-        let prepared = self.prover.prove_transact(params).await?;
-
-        plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
-        Ok(prepared)
+    pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
+        let wallet = self.spendable_notes().await?;
+        self.core.estimate(&wallet, amount)
     }
 
-    pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
-        let chain_config = self.core.config();
-        prepared.soroban_tx = self
-            .fetcher
-            .prepare_pool_transact(
-                &chain_config.pool_contract_id,
-                &pool_transact_input(prepared),
-                &chain_config.user_address,
-            )
-            .await
-            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
-
-        Ok(())
-    }
-
-    pub async fn confirm(&self, hash: &str) -> Result<TransactionResult, PoolError> {
-        const CONFIRM_POLL_ATTEMPTS: u32 = 30;
-
-        let rpc = &self.client;
-
-        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
-            if attempt > 1 {
-                sleep(POLL_INTERVAL_MS).await;
-            }
-            match confirm_tx(hash, rpc)
-                .await
-                .map_err(|e| PoolError::Other(format!("confirm transaction: {e:#}")))?
-            {
-                TxConfirmStatus::Success => {
-                    return Ok(TransactionResult {
-                        tx_hash: hash.to_string(),
-                    });
-                }
-                TxConfirmStatus::Failed { detail } => {
-                    return Err(PoolError::Other(format!("transaction failed{detail}")));
-                }
-                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
-                    return Err(PoolError::Other(format!(
-                        "transaction confirmation timed out after 30s (hash: {hash})"
-                    )));
-                }
-                TxConfirmStatus::Pending => {}
-            }
-        }
-
-        Err(PoolError::Other(format!(
-            "transaction confirmation failed (hash: {hash})"
-        )))
-    }
-
-    pub async fn submit(&self, signed_tx: SignedTransaction) -> Result<String, PoolError> {
-        let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
-            .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
-
-        submit_tx(&envelope, &self.client)
-            .await
-            .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))
-    }
-
-    pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        self.storage
-            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
-            .await
-    }
-
-    /// All notes for this pool and user, spent and unspent
-    pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
-        self.storage
-            .notes(&self.config.pool_contract_id, &self.config.user_address)
-            .await
-    }
-
-    /// Sum of unspent note amounts for this pool and user.
     pub async fn balance(&self) -> Result<NoteAmount, PoolError> {
         let wallet = self.spendable_notes().await?;
         wallet
@@ -198,6 +84,18 @@ impl<S: Storage> PrivatePool<S> {
                 sum.checked_add(amount)
                     .ok_or_else(|| PoolError::Other("wallet balance overflow".into()))
             })
+    }
+
+    pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
+        self.storage
+            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
+            .await
+    }
+
+    pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
+        self.storage
+            .notes(&self.config.pool_contract_id, &self.config.user_address)
+            .await
     }
 
     pub async fn sync(&self) -> Result<(), PoolError> {
@@ -214,56 +112,6 @@ impl<S: Storage> PrivatePool<S> {
             .map_err(|e| PoolError::Other(format!("indexer catch-up: {e:#}")))?;
 
         self.storage.process_pending_state().await
-    }
-
-    /// Estimate how many on-chain transactions a spend of `amount` requires.
-    pub async fn plan(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
-        let wallet = self.spendable_notes().await?;
-        self.estimate(&wallet, amount)
-    }
-
-    pub fn prepare_deposit(
-        &self,
-        amount: NoteAmount,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_deposit(amount)
-    }
-
-    pub fn prepare_transfer(
-        &self,
-        wallet: &[SpendableNote],
-        recipient: TransferRecipient,
-        amount: NoteAmount,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_transfer(wallet, recipient, amount)
-    }
-
-    pub fn prepare_withdraw(
-        &self,
-        wallet: &[SpendableNote],
-        amount: NoteAmount,
-        recipient: impl Into<String>,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_withdraw(wallet, amount, recipient)
-    }
-
-    pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
-        PreparedTransactionPlan::from_transact(step)
-    }
-
-    /// Prove and advance the next transaction in `plan`.
-    pub async fn prove_next(
-        &self,
-        plan: &mut PreparedTransactionPlan,
-    ) -> Result<PreparedTransaction, PoolError> {
-        self.next_prepared_transaction(plan).await
-    }
-
-    pub async fn sign(
-        &self,
-        prepared: &PreparedTransaction,
-    ) -> Result<SignedTransaction, PoolError> {
-        self.signer.sign(prepared).await
     }
 
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
@@ -294,7 +142,6 @@ impl<S: Storage> PrivatePool<S> {
         self.execute(&mut plan).await
     }
 
-    /// Execute a single low-level `transact` step (custom inputs/outputs).
     pub async fn transact(&self, step: Transact) -> Result<TransactionResult, PoolError> {
         let mut plan = self.prepare_transact(step);
         self.execute(&mut plan)
@@ -303,9 +150,6 @@ impl<S: Storage> PrivatePool<S> {
             .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
     }
 
-    /// Prove a selective-disclosure receipt for `selected_commitment`.
-    ///
-    /// Returns `Ok(None)` when the account must register with the ASP first.
     pub async fn disclose(
         &self,
         req: DisclosureRequest,
@@ -367,8 +211,6 @@ impl<S: Storage> PrivatePool<S> {
         }
     }
 
-    /// Verify a selective-disclosure receipt (proof, context hash, root
-    /// freshness).
     pub async fn verify_disclosure(
         &self,
         receipt: &DisclosureReceipt,
@@ -381,6 +223,145 @@ impl<S: Storage> PrivatePool<S> {
             expected_vk_hash,
         )
         .await
+    }
+
+    pub async fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
+        let chain_config = self.core.config();
+        prepared.soroban_tx = self
+            .fetcher
+            .prepare_pool_transact(
+                &chain_config.pool_contract_id,
+                &pool_transact_input(prepared),
+                &chain_config.user_address,
+            )
+            .await
+            .map_err(|e| PoolError::Other(format!("simulate transaction: {e:#}")))?;
+
+        Ok(())
+    }
+
+    pub async fn submit(&self, signed_tx: SignedTransaction) -> Result<String, PoolError> {
+        let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
+            .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
+
+        submit_tx(&envelope, &self.client)
+            .await
+            .map_err(|e| PoolError::Other(format!("submit transaction: {e:#}")))
+    }
+
+    pub async fn confirm(&self, hash: &str) -> Result<TransactionResult, PoolError> {
+        const CONFIRM_POLL_ATTEMPTS: u32 = 30;
+
+        let rpc = &self.client;
+
+        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
+            if attempt > 1 {
+                sleep(POLL_INTERVAL_MS).await;
+            }
+            match confirm_tx(hash, rpc)
+                .await
+                .map_err(|e| PoolError::Other(format!("confirm transaction: {e:#}")))?
+            {
+                TxConfirmStatus::Success => {
+                    return Ok(TransactionResult {
+                        tx_hash: hash.to_string(),
+                    });
+                }
+                TxConfirmStatus::Failed { detail } => {
+                    return Err(PoolError::Other(format!("transaction failed{detail}")));
+                }
+                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
+                    return Err(PoolError::Other(format!(
+                        "transaction confirmation timed out after 30s (hash: {hash})"
+                    )));
+                }
+                TxConfirmStatus::Pending => {}
+            }
+        }
+
+        Err(PoolError::Other(format!(
+            "transaction confirmation failed (hash: {hash})"
+        )))
+    }
+
+    pub async fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        self.storage.user_public_keys(user_address).await
+    }
+
+    pub async fn sign(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, PoolError> {
+        self.signer.sign(prepared).await
+    }
+
+    async fn next_prepared_transaction(
+        &self,
+        plan: &mut PreparedTransactionPlan,
+    ) -> Result<PreparedTransaction, PoolError> {
+        if plan.is_complete() {
+            return Err(PoolError::Other("transaction plan is complete".into()));
+        }
+
+        let chain = self.fetch_transact_chain_context().await?;
+        let step = if let Some(amount) = plan.deposit_amount() {
+            self.deposit_transact_step(amount).await?
+        } else if let Some(step) = plan.raw_transact_step() {
+            step.clone()
+        } else {
+            transact_step_for_plan(plan)?
+        };
+        let req = transact_request_from_step(
+            &step,
+            &self.config.user_address,
+            &self.config.pool_contract_id,
+            &chain,
+        );
+
+        let params = self.storage.build_transact_params(&req).await?;
+        let prepared = self.prover.prove_transact(params).await?;
+
+        plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
+        Ok(prepared)
+    }
+
+    pub fn prepare_deposit(
+        &self,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_deposit(amount)
+    }
+
+    pub fn prepare_transfer(
+        &self,
+        wallet: &[SpendableNote],
+        recipient: TransferRecipient,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_transfer(wallet, recipient, amount)
+    }
+
+    pub fn prepare_withdraw(
+        &self,
+        wallet: &[SpendableNote],
+        amount: NoteAmount,
+        recipient: impl Into<String>,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_withdraw(wallet, amount, recipient)
+    }
+
+    pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
+        PreparedTransactionPlan::from_transact(step)
+    }
+
+    pub async fn prove_next(
+        &self,
+        plan: &mut PreparedTransactionPlan,
+    ) -> Result<PreparedTransaction, PoolError> {
+        self.next_prepared_transaction(plan).await
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, PoolError> {

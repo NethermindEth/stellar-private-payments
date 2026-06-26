@@ -218,8 +218,8 @@ function showSubmittedToasts(hashes) {
 
 const ASP_NOT_READY_MSG = 'Cannot prepare transaction yet (ASP registration required or ASP secret is not ready yet).';
 
-function planStepCount(plan) {
-    const n = plan?.stepCount ?? plan?.step_count;
+function estimateStepCount(estimate) {
+    const n = estimate?.txCount ?? estimate?.tx_count;
     if (typeof n === 'number' && Number.isFinite(n)) return Math.trunc(n);
     if (typeof n === 'bigint') return Number(n);
     return null;
@@ -232,8 +232,8 @@ function planHintText(stepCount) {
 
 async function fetchPlanStepCount(amountStroops) {
     const pool = await ensureAppPool();
-    const plan = await pool.plan(amountStroops);
-    const stepCount = planStepCount(plan);
+    const estimate = await pool.estimate(amountStroops);
+    const stepCount = estimateStepCount(estimate);
     if (stepCount == null || stepCount < 1) {
         throw new Error('Could not load plan');
     }
