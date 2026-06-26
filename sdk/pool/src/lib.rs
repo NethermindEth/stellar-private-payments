@@ -47,10 +47,7 @@ pub mod proving {
     pub use witness::WitnessCalculator;
 }
 
-pub mod disclosure {
-    //! Selective-disclosure receipt validation, proving, and verification.
-    pub use ::disclosure::*;
-}
+pub mod disclosure;
 
 pub mod state {
     //! SQLite-backed local wallet and indexer state.
@@ -76,6 +73,10 @@ mod transact;
 
 pub use client::Client;
 pub use core::PoolCore;
+pub use disclosure::{
+    BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
+    DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
+};
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;

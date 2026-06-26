@@ -12,6 +12,10 @@ use crate::{
     PoolCore, PreparedTransaction,
     confirm_poll::sleep_between_confirm_polls,
     core::{pool_transact_input, transact_step_for_plan},
+    disclosure::{
+        DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
+        verify_disclosure_receipt,
+    },
     error::PoolError,
     plan::PreparedTransactionPlan,
     prover::Prover,
@@ -19,6 +23,7 @@ use crate::{
     storage::Storage,
     transact::transact_request_from_step,
     types::{
+        AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
         Estimate, PrivatePoolConfig, SignedTransaction, TransactChainContext, TransactionResult,
         TransferRecipient,
     },
@@ -294,6 +299,86 @@ impl<S: Storage> PrivatePool<S> {
             .await?
             .pop()
             .ok_or_else(|| PoolError::Other("transact produced no transaction".into()))
+    }
+
+    /// Prove a selective-disclosure receipt for `selected_commitment`.
+    ///
+    /// Returns `Ok(None)` when the account must register with the ASP first.
+    pub async fn disclose(
+        &self,
+        req: DisclosureRequest,
+    ) -> Result<Option<DisclosureReceipt>, PoolError> {
+        loop {
+            let data = self
+                .fetcher
+                .contracts_data_for_pool(&self.config.pool_contract_id)
+                .await
+                .map_err(|e| PoolError::Other(format!("fetch chain context: {e:#}")))?;
+
+            let pool = data.pools.into_iter().next().ok_or_else(|| {
+                PoolError::Other(format!(
+                    "pool {} not found in contract state",
+                    self.config.pool_contract_id
+                ))
+            })?;
+            let pool_root = pool
+                .merkle_root
+                .ok_or_else(|| PoolError::Other("pool merkle_root not fetched".into()))?;
+            let pool_next_index = pool
+                .merkle_next_index
+                .parse::<u32>()
+                .map_err(|e| PoolError::Other(format!("invalid pool merkle_next_index: {e}")))?;
+
+            let inputs_req = DisclosureInputsRequest {
+                user_address: self.config.user_address.clone(),
+                pool_address: self.config.pool_contract_id.clone(),
+                selected_commitment: req.selected_commitment,
+                pool_root: Some(pool_root),
+                pool_next_index,
+                tree_depth: pool.merkle_levels,
+            };
+
+            match self.storage.build_disclosure_inputs(&inputs_req).await {
+                Ok(inputs) => {
+                    let context = DisclosureContext {
+                        network: self.fetcher.contract_config().network.clone(),
+                        pool_address: pool.contract_id,
+                        authority_label: req.authority_label,
+                        authority_identity_payload_hex: req.authority_identity_payload_hex,
+                        purpose: req.purpose,
+                        context_nonce: req.context_nonce,
+                    };
+                    let receipt = self
+                        .prover
+                        .prove_disclosure(DisclosureProveParams { inputs, context })
+                        .await?;
+                    return Ok(Some(receipt));
+                }
+                Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
+                    return Ok(None);
+                }
+                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(_gap))) => {
+                    sleep_between_confirm_polls().await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
+    /// Verify a selective-disclosure receipt (proof, context hash, root
+    /// freshness).
+    pub async fn verify_disclosure(
+        &self,
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<DisclosureVerificationReport, PoolError> {
+        verify_disclosure_receipt(
+            &self.fetcher,
+            self.prover.as_ref(),
+            receipt,
+            expected_vk_hash,
+        )
+        .await
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, PoolError> {

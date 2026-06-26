@@ -11,7 +11,12 @@ use types::{
 use super::{
     Storage, map_build_params, map_user_keys, pool_notes_from_storage, spendable_notes_from_storage,
 };
-use crate::{core::process_local_state, error::PoolError, transact::TransactRequest};
+use crate::{
+    core::process_local_state,
+    disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
+    error::PoolError,
+    transact::TransactRequest,
+};
 
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
@@ -95,6 +100,16 @@ impl Storage for LocalStorage {
         req: &TransactRequest,
     ) -> Result<TransactParams, PoolError> {
         map_build_params(crate::transact::build_transact_params(&self.storage(), req))
+    }
+
+    async fn build_disclosure_inputs(
+        &self,
+        req: &DisclosureInputsRequest,
+    ) -> Result<DisclosureInputs, PoolError> {
+        map_build_disclosure_inputs(crate::disclosure::build_disclosure_inputs(
+            &self.storage(),
+            req,
+        ))
     }
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {

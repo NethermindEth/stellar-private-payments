@@ -16,9 +16,9 @@ use stellar_private_payments_sdk::{
     proving::{Prover as Groth16Prover, WitnessCalculator},
     tx::flows::{SelectiveDisclosure1Params, TransactParams, selective_disclosure_1},
     types::{
-        DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosureContext,
-        DisclosurePublicInputs, DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT,
-        SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES,
+        DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
+        DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
+        SELECTIVE_DISCLOSURE_1_N_NOTES,
     },
 };
 use wasm_bindgen::JsError;
@@ -252,14 +252,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Disclosure(req) => {
             log::debug!("[{WORKER_NAME}] disclosure");
 
-            let context = DisclosureContext {
-                network: req.network,
-                pool_address: req.pool_address,
-                authority_label: req.authority_label,
-                authority_identity_payload_hex: req.authority_identity_payload_hex,
-                purpose: req.purpose,
-                context_nonce: req.context_nonce,
-            };
+            let context = req.context;
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
             let params = SelectiveDisclosure1Params {
@@ -323,14 +316,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::Disclosure(receipt)
         }
-        // TODO: Consider extracting disclosure proof verification into a separate
-        // interface/crate. Verification is initiated by a receipt holder outside
-        // the app, while proving is app-initiated, so the responsibilities differ.
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             log::debug!("[{WORKER_NAME}] verify disclosure proof");
 
-            // Early metadata validation for clear error messages. The actual
-            // VK-byte trust binding lives inside disclosure::verify_receipt_proof.
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
             let proof_verified = DISCLOSURE_PROVER.with(|cell| {
@@ -409,6 +397,45 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::TransactPrepared(prepared)) => Ok(prepared),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected prover worker response: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn prove_disclosure(
+        &self,
+        params: stellar_private_payments_sdk::DisclosureProveParams,
+    ) -> Result<DisclosureReceipt, PoolError> {
+        match self
+            .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)
+            .await
+        {
+            Ok(ProverWorkerResponse::Disclosure(receipt)) => Ok(receipt),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected prover worker response: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn verify_disclosure_proof(
+        &self,
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<bool, PoolError> {
+        match self
+            .call(
+                ProverWorkerRequest::VerifyDisclosureProof(
+                    receipt.clone(),
+                    expected_vk_hash.to_string(),
+                ),
+                PROVE_TIMEOUT_MS,
+            )
+            .await
+        {
+            Ok(ProverWorkerResponse::DisclosureProofVerified(v)) => Ok(v),
             Ok(other) => Err(PoolError::Other(format!(
                 "unexpected prover worker response: {other:?}"
             ))),

@@ -6,6 +6,7 @@ use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NotePublicKey, UserNoteSummary};
 
 use crate::{
+    disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
     error::PoolError,
     transact::{BuildTransactParams, TransactRequest},
 };
@@ -94,6 +95,11 @@ pub trait Storage: stellar::ContractDataStorage {
         &self,
         req: &TransactRequest,
     ) -> Result<TransactParams, PoolError>;
+
+    async fn build_disclosure_inputs(
+        &self,
+        req: &DisclosureInputsRequest,
+    ) -> Result<DisclosureInputs, PoolError>;
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError>;
 

@@ -164,4 +164,19 @@ impl PrivatePool {
     pub fn confirm(&self, hash: &str) -> Result<TransactionResult, PoolError> {
         pollster::block_on(self.inner.confirm(hash))
     }
+
+    pub fn disclose(
+        &self,
+        req: crate::DisclosureRequest,
+    ) -> Result<Option<types::DisclosureReceipt>, PoolError> {
+        pollster::block_on(self.inner.disclose(req))
+    }
+
+    pub fn verify_disclosure(
+        &self,
+        receipt: &types::DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<types::DisclosureVerificationReport, PoolError> {
+        pollster::block_on(self.inner.verify_disclosure(receipt, expected_vk_hash))
+    }
 }

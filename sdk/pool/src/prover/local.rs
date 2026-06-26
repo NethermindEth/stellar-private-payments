@@ -1,8 +1,10 @@
 use std::cell::RefCell;
 
 use prover::flows::TransactParams;
+use types::DisclosureReceipt;
 
 use crate::{
+    disclosure::DisclosureProveParams,
     error::PoolError,
     prover::{Prover, ProverEngine},
     transact::PreparedProverTx,
@@ -35,5 +37,24 @@ impl LocalProver {
 impl Prover for LocalProver {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
         self.prove(params)
+    }
+
+    async fn prove_disclosure(
+        &self,
+        _params: DisclosureProveParams,
+    ) -> Result<DisclosureReceipt, PoolError> {
+        Err(PoolError::Other(
+            "disclosure proving is not configured for this prover".into(),
+        ))
+    }
+
+    async fn verify_disclosure_proof(
+        &self,
+        _receipt: &DisclosureReceipt,
+        _expected_vk_hash: &str,
+    ) -> Result<bool, PoolError> {
+        Err(PoolError::Other(
+            "disclosure verification is not configured for this prover".into(),
+        ))
     }
 }

@@ -1,7 +1,7 @@
 use crate::{
     protocol::{
-        AdminASPRequest, DisclosureInputsRequest, DisclosureProverRequest, ProverWorkerRequest,
-        ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+        AdminASPRequest, ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest,
+        StorageWorkerResponse,
     },
     workers::{
         prover::{ProverBridge, ProverWorker},
@@ -15,16 +15,15 @@ use std::{rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
     PoolError,
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
-    disclosure,
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
-        AspMembershipSync, ContractConfig, DisclosureReceipt, DisclosureVerificationReport,
-        EncryptionPublicKey, ExtAmount, Field, KeyDerivationSignature, NoteAmount, NotePublicKey,
-        parse_0x_hex_32,
+        AspMembershipSync, ContractConfig, DisclosureReceipt, EncryptionPublicKey, ExtAmount,
+        Field, KeyDerivationSignature, NoteAmount, NotePublicKey, parse_0x_hex_32,
     },
 };
 use wasm_bindgen::{JsCast, prelude::*};
 
+mod disclosure;
 mod pool;
 mod transact;
 
@@ -398,176 +397,6 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn generate_selective_disclosure(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        selected_commitment_hex: String,
-        authority_label: String,
-        authority_identity_payload_hex: String,
-        purpose: String,
-        context_nonce: BigInt,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        let receipt = self
-            .generate_selective_disclosure_inner(
-                &pool_contract_id,
-                &user_address,
-                selected_commitment_hex,
-                authority_label,
-                authority_identity_payload_hex,
-                purpose,
-                context_nonce,
-                on_status,
-            )
-            .await?;
-        match receipt {
-            None => Ok(JsValue::NULL),
-            Some(r) => Ok(serde_wasm_bindgen::to_value(&r)?),
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn generate_selective_disclosure_inner(
-        &self,
-        pool_contract_id: &str,
-        user_address: &str,
-        selected_commitment_hex: String,
-        authority_label: String,
-        authority_identity_payload_hex: String,
-        purpose: String,
-        context_nonce: BigInt,
-        on_status: Option<Function>,
-    ) -> Result<Option<DisclosureReceipt>, JsError> {
-        let selected_commitment = parse_field_hex_str(&selected_commitment_hex)?;
-        let context_nonce = parse_field_bigint_numeric(&context_nonce)?;
-
-        emit_progress(
-            &on_status,
-            "disclosure",
-            "sync_check",
-            "Checking sync & ASP membership…",
-            None,
-            None,
-        );
-
-        let (inputs, network, pool_address) = loop {
-            emit_progress(
-                &on_status,
-                "disclosure",
-                "fetch_chain_state",
-                "Fetching on-chain state…",
-                None,
-                None,
-            );
-            let data = self
-                .fetcher
-                .contracts_data_for_pool(pool_contract_id)
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let pool = data.pools.into_iter().next().ok_or_else(|| {
-                JsError::new(&format!(
-                    "pool {pool_contract_id} not found in contract state"
-                ))
-            })?;
-            let pool_root = pool.merkle_root;
-            let pool_next_index =
-                parse_u32_decimal(&pool.merkle_next_index).map_err(|e| JsError::new(&e))?;
-
-            let req = DisclosureInputsRequest {
-                user_address: user_address.to_string(),
-                pool_address: pool_contract_id.to_string(),
-                selected_commitment,
-                pool_root,
-                pool_next_index,
-                tree_depth: pool.merkle_levels,
-            };
-
-            emit_progress(
-                &on_status,
-                "disclosure",
-                "load_state",
-                "Building witness inputs…",
-                None,
-                None,
-            );
-            match self
-                .storage_request(StorageWorkerRequest::DisclosureInputs(req), 5_000)
-                .await?
-            {
-                StorageWorkerResponse::DisclosureInputs(inputs) => {
-                    break (
-                        inputs,
-                        self.fetcher.contract_config().network.clone(),
-                        pool.contract_id,
-                    );
-                }
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::RegisterAtASP) => {
-                    log::warn!(
-                        "[DISCLOSURE] the account {user_address} should register within ASP"
-                    );
-                    return Ok(None);
-                }
-                StorageWorkerResponse::AspMembershipSync(AspMembershipSync::SyncRequired(gap)) => {
-                    log::info!("[DISCLOSURE] sync is needed - waiting the indexer");
-                    emit_progress(
-                        &on_status,
-                        "disclosure",
-                        "sync_wait",
-                        if let Some(gap) = gap {
-                            format!("Waiting to sync {gap} ledger(s) from the chain...")
-                        } else {
-                            "Waiting to sync ledgers from the chain...".to_string()
-                        },
-                        None,
-                        None,
-                    );
-                    TimeoutFuture::new(1_000).await;
-                    continue;
-                }
-                other => {
-                    return Err(JsError::new(&format!(
-                        "Unexpected storage worker response: {:?}",
-                        other
-                    )));
-                }
-            }
-        };
-
-        emit_progress(&on_status, "disclosure", "prove", "Proving…", None, None);
-        self.ping_prover()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
-
-        let prover_req = DisclosureProverRequest {
-            inputs,
-            network,
-            pool_address,
-            authority_label,
-            authority_identity_payload_hex,
-            purpose,
-            context_nonce,
-        };
-
-        let receipt = match self
-            .prover_request(ProverWorkerRequest::Disclosure(prover_req), 20_000)
-            .await?
-        {
-            ProverWorkerResponse::Disclosure(receipt) => receipt,
-            other => {
-                return Err(JsError::new(&format!(
-                    "Unexpected prover worker response: {:?}",
-                    other
-                )));
-            }
-        };
-
-        Ok(Some(receipt))
-    }
-
     #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
     pub async fn verify_selective_disclosure(
         &self,
@@ -581,44 +410,14 @@ impl WebClient {
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-        let proof_verified = match self
-            .prover_request(
-                ProverWorkerRequest::VerifyDisclosureProof(receipt.clone(), expected_vk_hash),
-                20_000,
-            )
-            .await?
-        {
-            ProverWorkerResponse::DisclosureProofVerified(v) => v,
-            other => {
-                return Err(JsError::new(&format!(
-                    "Unexpected prover worker response: {:?}",
-                    other
-                )));
-            }
-        };
-
-        let pool_contract_id = receipt.context.pool_address.clone();
-        let mut known_root_status = true;
-        for root in &receipt.public_inputs.roots {
-            let is_known = self
-                .fetcher
-                .is_pool_known_root(&pool_contract_id, *root)
-                .await
-                .map_err(|e| JsError::new(&format!("root freshness check failed: {e}")))?;
-            if !is_known {
-                known_root_status = false;
-                break;
-            }
-        }
-
-        let context_verified = disclosure::verify_receipt_context(&receipt)
-            .map_err(|e| JsError::new(&format!("context verification failed: {e}")))?;
-
-        let report = DisclosureVerificationReport {
-            proof_verified,
-            context_verified,
-            known_root_status,
-        };
+        let report = stellar_private_payments_sdk::verify_disclosure_receipt(
+            &self.fetcher,
+            &self.prover_bridge(),
+            &receipt,
+            &expected_vk_hash,
+        )
+        .await
+        .map_err(pool_err)?;
 
         Ok(serde_wasm_bindgen::to_value(&report)?)
     }

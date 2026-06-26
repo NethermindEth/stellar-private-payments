@@ -13,9 +13,11 @@ use stellar::hash_ext_data_offchain;
 use witness::WitnessCalculator;
 
 use crate::{
+    disclosure::DisclosureProveParams,
     error::PoolError,
     transact::{PreparedProverTx, PreparedTxPublic},
 };
+use types::DisclosureReceipt;
 
 /// In-process Groth16 prover for transact circuits.
 pub struct ProverEngine {
@@ -86,4 +88,15 @@ impl ProverEngine {
 #[async_trait::async_trait(?Send)]
 pub trait Prover {
     async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError>;
+
+    async fn prove_disclosure(
+        &self,
+        params: DisclosureProveParams,
+    ) -> Result<DisclosureReceipt, PoolError>;
+
+    async fn verify_disclosure_proof(
+        &self,
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<bool, PoolError>;
 }

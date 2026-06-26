@@ -1,5 +1,5 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, BootnodeConfigPayload, DisclaimerStatePayload, DisclosureInputs,
+    AdminASPRequest, AspSecret, BootnodeConfigPayload, DisclaimerStatePayload,
     PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
     UserKeys,
 };
@@ -12,16 +12,14 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest, build_transact_params,
-    build_validated_pool_tree,
+    BuildDisclosureInputs, BuildTransactParams, DisclosureInputs, PoolError, SpendableNote,
+    Storage, TransactRequest, build_disclosure_inputs, build_transact_params,
     chain::ContractDataStorage,
-    load_user_key_material,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
         encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
         flows::TransactParams,
-        merkle::MerkleProof,
     },
     types::{
         ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
@@ -350,54 +348,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 req.user_address
             );
 
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            with_storage_mut!(storage => {
-                let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
-                    load_user_key_material(storage, &req.user_address)?;
-
-                let tree = match build_validated_pool_tree(
-                    storage,
-                    &req.pool_address,
-                    req.pool_next_index,
-                    req.tree_depth,
-                    pool_root,
-                )? {
-                    Ok(tree) => tree,
-                    Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-                };
-
-                let (amount, blinding, leaf_index) = storage
-                    .get_unspent_user_note_by_commitment(
-                        &req.pool_address,
-                        &req.user_address,
-                        &req.selected_commitment,
-                    )?
-                    .ok_or_else(|| {
-                        anyhow::anyhow!(
-                            "unspent note not found for commitment {}",
-                            req.selected_commitment
-                        )
-                    })?;
-
-                let MerkleProof {
-                    path_elements,
-                    path_indices,
-                    root,
-                    ..
-                } = tree.proof(leaf_index)?;
-
-                StorageWorkerResponse::DisclosureInputs(DisclosureInputs {
-                    root,
-                    note_commitment: req.selected_commitment,
-                    note_amount: amount,
-                    note_private_key: note_privkey,
-                    note_blinding: blinding,
-                    merkle_path_indices: path_indices,
-                    merkle_path_elements: path_elements,
-                })
+            with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
+                BuildDisclosureInputs::Ready(inputs) => {
+                    StorageWorkerResponse::DisclosureInputs(inputs)
+                }
+                BuildDisclosureInputs::MembershipSync(status) => {
+                    StorageWorkerResponse::AspMembershipSync(status)
+                }
             })?
         }
         StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
@@ -647,6 +604,25 @@ impl Storage for StorageBridge {
             }
             Ok(other) => Err(PoolError::Other(format!(
                 "unexpected storage response building transact params: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn build_disclosure_inputs(
+        &self,
+        req: &stellar_private_payments_sdk::DisclosureInputsRequest,
+    ) -> Result<DisclosureInputs, PoolError> {
+        match self
+            .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => Ok(inputs),
+            Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
+                Err(PoolError::MembershipSync(status))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response building disclosure inputs: {other:?}"
             ))),
             Err(e) => Err(PoolError::Other(e.to_string())),
         }

@@ -1,13 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-pub use stellar_private_payments_sdk::{PreparedProverTx, TransactRequest};
+pub use stellar_private_payments_sdk::{
+    DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
+    TransactRequest,
+};
 
 use stellar_private_payments_sdk::{
     tx::flows::TransactParams,
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
-        KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey, PoolLedgerActivity,
-        PublicKeyEntry, SyncMetadata, UserNoteSummary,
+        KeyDerivationSignature, NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SyncMetadata,
+        UserNoteSummary,
     },
 };
 
@@ -115,7 +118,7 @@ pub enum StorageWorkerResponse {
 pub enum ProverWorkerRequest {
     Ping,
     Transact(TransactParams),
-    Disclosure(DisclosureProverRequest),
+    Disclosure(DisclosureProveParams),
     VerifyDisclosureProof(DisclosureReceipt, String),
 }
 
@@ -131,42 +134,7 @@ pub enum ProverWorkerResponse {
 
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DisclosureInputsRequest {
-    pub user_address: Address,
-    pub pool_address: Address,
-    pub selected_commitment: Field,
-    pub pool_root: Option<Field>,
-    pub pool_next_index: u32,
-    pub tree_depth: u32,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisclosureInputs {
-    pub root: Field,
-    pub note_commitment: Field,
-    pub note_amount: NoteAmount,
-    pub note_private_key: NotePrivateKey,
-    pub note_blinding: Field,
-    pub merkle_path_indices: Field,
-    pub merkle_path_elements: Vec<Field>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct AdminASPRequest {
     pub membership_blinding: Field,
     pub pubkey: NotePublicKey,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DisclosureProverRequest {
-    pub inputs: DisclosureInputs,
-    pub network: String,
-    pub pool_address: String,
-    pub authority_label: String,
-    pub authority_identity_payload_hex: String,
-    pub purpose: String,
-    pub context_nonce: Field,
 }
