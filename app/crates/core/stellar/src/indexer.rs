@@ -42,6 +42,10 @@ impl<S: ContractDataStorage> Indexer<S> {
             Err(RpcError::RpcSyncGap(oldest)) => {
                 return Err(RpcError::RpcSyncGap(oldest).into());
             }
+            // The probe ledger is at/ahead of the RPC's events tip: we are
+            // already caught up, which is not a retention gap. Proceed; the
+            // fetch loop will idle until the RPC indexes further.
+            Err(RpcError::RpcAhead(_)) => {}
             Err(e) => return Err(e.into()),
         }
 
@@ -103,10 +107,22 @@ impl<S: ContractDataStorage> Indexer<S> {
                 "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
 
-            let (new_cursor, events, latest_ledger) = self
+            let (new_cursor, events, latest_ledger) = match self
                 .client
                 .get_contract_events(&self.contract_ids, start_ledger, PAGE_SIZE, cursor)
-                .await?;
+                .await
+            {
+                Ok(page) => page,
+                // We are ahead of the RPC's events tip: nothing to fetch until
+                // it indexes further. Idle this round instead of erroring.
+                Err(RpcError::RpcAhead(newest)) => {
+                    log::debug!(
+                        "[INDEXER] local sync (start_ledger={start_ledger}) is ahead of RPC events tip (newest={newest}); waiting for RPC to catch up"
+                    );
+                    return Ok(());
+                }
+                Err(e) => return Err(e.into()),
+            };
 
             let new_cursor = new_cursor
                 .clone()
