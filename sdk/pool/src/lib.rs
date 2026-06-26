@@ -86,7 +86,7 @@ pub use transact::{
     build_transact_params, build_validated_pool_tree, load_user_key_material,
     transact_request_from_step,
 };
-pub use tx_planner::SpendableNote;
+pub use tx_planner::{SpendTarget, SpendableNote, Transact};
 pub use types::{
     Estimate, PoolChainConfig, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
     TransactChainContext, TransactionResult, TransferRecipient,

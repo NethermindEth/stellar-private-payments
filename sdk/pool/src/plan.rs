@@ -51,10 +51,6 @@ impl PreparedTransactionPlan {
         }
     }
 
-    pub(crate) fn transact(step: Transact) -> Self {
-        Self::from_transact(step)
-    }
-
     pub fn tx_count(&self) -> u32 {
         self.tx_count
     }
