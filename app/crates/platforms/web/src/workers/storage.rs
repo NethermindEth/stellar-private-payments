@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
-    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureNoteInputs,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::Result;
 use futures::{channel::mpsc, stream::StreamExt};
@@ -390,6 +391,12 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 req.user_address
             );
 
+            if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
+                return Ok(StorageWorkerResponse::Error(
+                    "selective disclosure requires 1..=4 selected commitments".to_string(),
+                ));
+            }
+
             let pool_root = req
                 .pool_root
                 .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
@@ -406,32 +413,37 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
             };
 
-            let (amount, blinding, leaf_index) = with_storage!(
-                s => s.get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, &req.selected_commitment)?
-            )?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unspent note not found for commitment {}",
-                    req.selected_commitment
-                )
-            })?;
+            let mut notes = Vec::with_capacity(req.selected_commitments.len());
+            for commitment in &req.selected_commitments {
+                let (amount, blinding, leaf_index) = with_storage!(
+                    s => s.get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+                )?
+                .ok_or_else(|| {
+                    anyhow::anyhow!(
+                        "unspent note not found for commitment {}",
+                        commitment
+                    )
+                })?;
 
-            let MerkleProof {
-                path_elements,
-                path_indices,
-                root,
-                ..
-            } = tree.proof(leaf_index)?;
+                let MerkleProof {
+                    path_elements,
+                    path_indices,
+                    root,
+                    ..
+                } = tree.proof(leaf_index)?;
 
-            StorageWorkerResponse::DisclosureInputs(DisclosureInputs {
-                root,
-                note_commitment: req.selected_commitment,
-                note_amount: amount,
-                note_private_key: note_privkey,
-                note_blinding: blinding,
-                merkle_path_indices: path_indices,
-                merkle_path_elements: path_elements,
-            })
+                notes.push(DisclosureNoteInputs {
+                    root,
+                    note_commitment: *commitment,
+                    note_amount: amount,
+                    note_private_key: note_privkey.clone(),
+                    note_blinding: blinding,
+                    merkle_path_indices: path_indices,
+                    merkle_path_elements: path_elements,
+                });
+            }
+
+            StorageWorkerResponse::DisclosureInputs(DisclosureInputs { notes })
         }
         StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
             membership_blinding,

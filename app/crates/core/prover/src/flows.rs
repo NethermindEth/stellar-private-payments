@@ -804,7 +804,40 @@ fn be32_to_0x_hex(be: &[u8; 32]) -> String {
     out
 }
 
+/// Input note data for a selective-disclosure proof.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureNote {
+    /// Pool Merkle root under which the note commitment is proven.
+    pub root: Field,
+    /// Note commitment being disclosed.
+    pub note_commitment: Field,
+    /// Note amount in token base units.
+    pub note_amount: NoteAmount,
+    /// Note private key used to prove ownership.
+    pub note_private_key: NotePrivateKey,
+    /// Note blinding factor.
+    pub note_blinding: Field,
+    /// Merkle path indices packed into a field element.
+    pub merkle_path_indices: Field,
+    /// Merkle proof sibling hashes, one per tree level.
+    pub merkle_path_elements: Vec<Field>,
+}
+
+/// Parameters for a multi-note selective-disclosure proof.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SelectiveDisclosureParams {
+    /// Notes to disclose (1..=4).
+    pub notes: Vec<DisclosureNote>,
+    /// Hashed disclosure context bound into the proof.
+    pub ext_context_hash: Field,
+}
+
 /// Parameters for a selective disclosure (1 note).
+///
+/// Deprecated: use [`SelectiveDisclosureParams`] and [`DisclosureNote`] for new
+/// code; this struct is kept as a convenience wrapper.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SelectiveDisclosure1Params {
@@ -818,6 +851,23 @@ pub struct SelectiveDisclosure1Params {
     pub ext_context_hash: Field,
 }
 
+impl From<SelectiveDisclosure1Params> for SelectiveDisclosureParams {
+    fn from(params: SelectiveDisclosure1Params) -> Self {
+        Self {
+            notes: vec![DisclosureNote {
+                root: params.root,
+                note_commitment: params.note_commitment,
+                note_amount: params.note_amount,
+                note_private_key: params.note_private_key,
+                note_blinding: params.note_blinding,
+                merkle_path_indices: params.merkle_path_indices,
+                merkle_path_elements: params.merkle_path_elements,
+            }],
+            ext_context_hash: params.ext_context_hash,
+        }
+    }
+}
+
 /// Artifacts generated for selective disclosure.
 #[derive(Clone, Debug)]
 pub struct DisclosureArtifacts {
@@ -825,46 +875,69 @@ pub struct DisclosureArtifacts {
     pub ext_context_hash: Field,
 }
 
-/// Generates circuit inputs for selectiveDisclosure_1.
-pub fn selective_disclosure_1(params: SelectiveDisclosure1Params) -> Result<DisclosureArtifacts> {
+/// Generates circuit inputs for a selective-disclosure proof.
+///
+/// The note count in `params.notes` determines which circuit entry point
+/// (`selectiveDisclosure_1`..`selectiveDisclosure_4`) must be used; this
+/// function only builds the witness inputs and does not validate the count.
+pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<DisclosureArtifacts> {
     let mut circuit = CircuitInputs::new();
 
+    let n_notes = params.notes.len();
+
     // Public inputs
-    circuit.set_array("roots", vec![field_to_circuit_hex(&params.root)?]);
-    circuit.set_array(
-        "noteCommitments",
-        vec![field_to_circuit_hex(&params.note_commitment)?],
-    );
+    let roots: Result<Vec<String>> = params
+        .notes
+        .iter()
+        .map(|n| field_to_circuit_hex(&n.root))
+        .collect();
+    circuit.set_array("roots", roots?);
+
+    let note_commitments: Result<Vec<String>> = params
+        .notes
+        .iter()
+        .map(|n| field_to_circuit_hex(&n.note_commitment))
+        .collect();
+    circuit.set_array("noteCommitments", note_commitments?);
+
     circuit.set_single(
         "extContextHash",
         &field_to_circuit_hex(&params.ext_context_hash)?,
     );
 
     // Private inputs
-    let amount_field = note_amount_to_field(&params.note_amount);
-    circuit.set_array("inAmount", vec![field_to_circuit_hex(&amount_field)?]);
+    let mut in_amount: Vec<String> = Vec::with_capacity(n_notes);
+    let mut in_private_key: Vec<String> = Vec::with_capacity(n_notes);
+    let mut in_blinding: Vec<String> = Vec::with_capacity(n_notes);
+    let mut in_path_indices: Vec<String> = Vec::with_capacity(n_notes);
+    let mut in_path_elements: Vec<String> = Vec::new();
 
-    let priv_key_hex = field_bytes_to_hex(&params.note_private_key.0)?;
-    circuit.set_array("inPrivateKey", vec![priv_key_hex]);
-
-    let blinding_hex = field_bytes_to_hex(&params.note_blinding.to_le_bytes())?;
-    circuit.set_array("inBlinding", vec![blinding_hex]);
-
-    circuit.set_array(
-        "inPathIndices",
-        vec![field_to_circuit_hex(&params.merkle_path_indices)?],
-    );
-
-    let mut path_elements_hex = Vec::with_capacity(params.merkle_path_elements.len());
-    for pe in &params.merkle_path_elements {
-        path_elements_hex.push(field_to_circuit_hex(pe)?);
+    for note in &params.notes {
+        let amount_field = note_amount_to_field(&note.note_amount);
+        in_amount.push(field_to_circuit_hex(&amount_field)?);
+        in_private_key.push(field_bytes_to_hex(&note.note_private_key.0)?);
+        in_blinding.push(field_bytes_to_hex(&note.note_blinding.to_le_bytes())?);
+        in_path_indices.push(field_to_circuit_hex(&note.merkle_path_indices)?);
+        for pe in &note.merkle_path_elements {
+            in_path_elements.push(field_to_circuit_hex(pe)?);
+        }
     }
-    circuit.set_array("inPathElements", path_elements_hex);
+
+    circuit.set_array("inAmount", in_amount);
+    circuit.set_array("inPrivateKey", in_private_key);
+    circuit.set_array("inBlinding", in_blinding);
+    circuit.set_array("inPathIndices", in_path_indices);
+    circuit.set_array("inPathElements", in_path_elements);
 
     Ok(DisclosureArtifacts {
         circuit_inputs: circuit,
         ext_context_hash: params.ext_context_hash,
     })
+}
+
+/// Generates circuit inputs for selectiveDisclosure_1.
+pub fn selective_disclosure_1(params: SelectiveDisclosure1Params) -> Result<DisclosureArtifacts> {
+    selective_disclosure(params.into())
 }
 
 fn sum_note_amounts_inputs(inputs: &[TransactInputNote]) -> Result<NoteAmount> {
@@ -1224,5 +1297,71 @@ mod tests {
 
         // ext_context_hash is preserved
         assert_eq!(artifacts.ext_context_hash, params.ext_context_hash);
+    }
+
+    fn disclosure_note(
+        root: Field,
+        note_commitment: Field,
+        note_private_key: NotePrivateKey,
+        tree_depth: u32,
+    ) -> DisclosureNote {
+        DisclosureNote {
+            root,
+            note_commitment,
+            note_amount: NoteAmount::from(42),
+            note_private_key,
+            note_blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            merkle_path_indices: Field::try_from_le_bytes([5u8; 32]).expect("field"),
+            merkle_path_elements: vec![
+                Field::try_from_le_bytes([6u8; 32]).expect("field");
+                usize::try_from(tree_depth).expect("tree_depth")
+            ],
+        }
+    }
+
+    #[test]
+    fn selective_disclosure_multi_note_witness_shapes() {
+        let tree_depth: u32 = 10;
+        let root = Field::try_from_le_bytes([1u8; 32]).expect("field");
+        let note_commitment = Field::try_from_le_bytes([2u8; 32]).expect("field");
+        let note_private_key = NotePrivateKey([3u8; 32]);
+        let ext_context_hash = Field::try_from_le_bytes([7u8; 32]).expect("field");
+
+        for n_notes in [2, 3, 4] {
+            let notes: Vec<DisclosureNote> = (0..n_notes)
+                .map(|_| {
+                    disclosure_note(root, note_commitment, note_private_key.clone(), tree_depth)
+                })
+                .collect();
+
+            let params = SelectiveDisclosureParams {
+                notes,
+                ext_context_hash,
+            };
+            let artifacts = selective_disclosure(params).expect("builds witness");
+
+            let expect_array_len = |name: &str, len: usize| match artifacts
+                .circuit_inputs
+                .signals
+                .get(name)
+                .unwrap_or_else(|| panic!("{name} should be present"))
+            {
+                InputValue::Array(v) => {
+                    assert_eq!(v.len(), len, "{name} length mismatch for n_notes={n_notes}")
+                }
+                _ => panic!("{name} should be an array"),
+            };
+
+            expect_array_len("roots", n_notes);
+            expect_array_len("noteCommitments", n_notes);
+            expect_array_len("inAmount", n_notes);
+            expect_array_len("inPrivateKey", n_notes);
+            expect_array_len("inBlinding", n_notes);
+            expect_array_len("inPathIndices", n_notes);
+            expect_array_len(
+                "inPathElements",
+                n_notes * usize::try_from(tree_depth).expect("tree_depth"),
+            );
+        }
     }
 }
