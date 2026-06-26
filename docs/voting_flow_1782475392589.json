@@ -1,0 +1,29 @@
+{
+  "contractId": "CCQ3T4VKYXBGJQ3BXPUCKOW4CDFQ5YR4UY4N54QY4EJOWC2NEYIJJZQI",
+  "network": "testnet",
+  "status": {
+    "code": 0,
+    "name": "Open"
+  },
+  "totalVotes": 0,
+  "operations": [
+    {
+      "type": "close",
+      "success": true,
+      "raw": "\n"
+    },
+    {
+      "type": "resolve",
+      "votesYes": 2,
+      "votesNo": 1,
+      "threshold": 30,
+      "success": false,
+      "error": "❌ error: transaction simulation failed: HostError: Error(WasmVm, InvalidAction)\n\nEvent log (newest first):\n   0: [Diagnostic Event] contract:CCQ3T4VKYXBGJQ3BXPUCKOW4CDFQ5YR4UY4N54QY4EJOWC2NEYIJJZQI, topics:[error, Error(WasmVm, InvalidAction)], data:[\"VM call trapped: UnreachableCodeReached\", resolve]\n   1: [Diagnostic Event] topics:[fn_call, CCQ3T4VKYXBGJQ3BXPUCKOW4CDFQ5YR4UY4N54QY4EJOWC2NEYIJJZQI, resolve], data:[2, 1, 3, 30]\n\n"
+    }
+  ],
+  "finalStatus": {
+    "code": 1,
+    "name": "Closed"
+  },
+  "timestamp": "2026-06-26T12:03:12.589Z"
+}
