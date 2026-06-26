@@ -301,6 +301,25 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn get_contract_events_maps_ahead_of_tip_to_rpc_ahead() {
+        let server = MockServer::start().await;
+        // Range response says newest queryable ledger is 3_000_000; we request
+        // one past it, so this is "ahead of tip", not a retention gap.
+        Mock::given(method("POST"))
+            .and(body_string_contains("getEvents"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(rpc_sync_gap_response()))
+            .mount(&server)
+            .await;
+
+        let client = Client::new(&server.uri()).expect("client");
+        let err = client
+            .get_contract_events(&["CA".to_string()], 3_000_001, 1, None)
+            .await
+            .expect_err("ahead of tip should fail");
+        assert!(matches!(err, RpcError::RpcAhead(3_000_000)));
+    }
+
+    #[tokio::test]
     async fn bootnode_handoff_round_trip() {
         let config = test_config();
         let pool_contract_id = config.pools[0].pool_contract_id.clone();

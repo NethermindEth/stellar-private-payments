@@ -1,16 +1,21 @@
 use crate::disclaimer::{CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD};
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
 use rusqlite_migration::{M, Migrations};
+use serde::{Serialize, de::DeserializeOwned};
 use std::path::Path;
 use types::{
-    AspMembershipSync, ContractEvent, EncryptionKeyPair, EncryptionPrivateKey, EncryptionPublicKey,
-    Field, LeafAddedEvent, NewCommitmentEvent, NewNullifierEvent, NoteAmount, NoteKeyPair,
-    NotePrivateKey, NotePublicKey, PoolLedgerActivity, PublicKeyEvent, UserNoteSummary,
+    AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
+    EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
+    NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
+    PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
+    UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
 const DB_NAME: &str = "poolstellar.sqlite";
+pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
+pub const APP_SETTING_EXPLORER: &str = "explorer";
 
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
@@ -24,12 +29,6 @@ pub struct DisclaimerState {
     pub disclaimer_text_md: String,
     pub disclaimer_hash_hex: String,
     pub accepted: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BootnodeConfig {
-    pub enabled: bool,
-    pub url: String,
 }
 
 #[derive(Debug, Clone)]
@@ -189,6 +188,19 @@ impl Storage {
         Ok(metadata)
     }
 
+    pub fn network_tip_ledger(&self) -> Result<u32> {
+        let metadata = self.get_sync_metadata()?;
+        Ok(metadata
+            .into_iter()
+            .map(|entry| {
+                entry
+                    .last_indexed_ledger
+                    .max(entry.last_fully_indexed_ledger)
+            })
+            .max()
+            .unwrap_or_default())
+    }
+
     pub fn get_user_keys(&self, address: &str) -> Result<Option<StoredUserKeys>> {
         self.conn
             .query_row(
@@ -323,25 +335,51 @@ impl Storage {
         Ok(())
     }
 
-    pub fn get_bootnode_config(&self) -> Result<BootnodeConfig> {
-        self.conn
-            .query_row("SELECT enabled, url FROM bootnode_config", [], |row| {
-                Ok(BootnodeConfig {
-                    enabled: row.get::<_, i64>(0)? != 0,
-                    url: row.get(1)?,
-                })
-            })
-            .context("failed to query bootnode config")
+    pub fn get_setting_json<T: DeserializeOwned>(&self, key: &str) -> Result<Option<T>> {
+        let raw: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT value FROM app_settings WHERE key = ?1",
+                params![key],
+                |row| row.get(0),
+            )
+            .optional()
+            .context("failed to query app setting")?;
+
+        raw.map(|value| serde_json::from_str(&value).context("failed to decode app setting"))
+            .transpose()
     }
 
-    pub fn set_bootnode_config(&mut self, enabled: bool, url: &str) -> Result<()> {
+    pub fn set_setting_json<T: Serialize>(&mut self, key: &str, value: &T) -> Result<()> {
+        let value_json = serde_json::to_string(value).context("failed to encode app setting")?;
         self.conn
             .execute(
-                "UPDATE bootnode_config SET enabled = ?1, url = ?2",
-                params![i64::from(enabled), url],
+                "INSERT INTO app_settings (key, value)
+                 VALUES (?1, ?2)
+                 ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                params![key, value_json],
             )
-            .context("failed to update bootnode config")?;
+            .context("failed to upsert app setting")?;
         Ok(())
+    }
+
+    pub fn get_bootnode_setting(&self) -> Result<BootnodeSetting> {
+        Ok(self
+            .get_setting_json(APP_SETTING_BOOTNODE_CONFIG)?
+            .unwrap_or(BootnodeSetting {
+                enabled: false,
+                url: String::new(),
+            }))
+    }
+
+    pub fn set_bootnode_setting(&mut self, enabled: bool, url: &str) -> Result<()> {
+        self.set_setting_json(
+            APP_SETTING_BOOTNODE_CONFIG,
+            &BootnodeSetting {
+                enabled,
+                url: url.to_string(),
+            },
+        )
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts
@@ -401,11 +439,33 @@ impl Storage {
             .context("get_recent_public_keys collect")
     }
 
+    pub fn lookup_public_key_by_address(
+        &self,
+        address: &str,
+    ) -> Result<Option<types::PublicKeyEntry>> {
+        self.conn
+            .query_row(
+                "SELECT owner, encryption_key, note_key, ledger
+                 FROM (
+                    SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
+                    FROM public_keys p
+                    JOIN raw_contract_events r ON r.id = p.event_id
+                    WHERE p.owner = ?1
+                    GROUP BY p.owner
+                 )",
+                params![address],
+                map_public_key_entry,
+            )
+            .optional()
+            .context("lookup_public_key_by_address")
+    }
+
     /// List notes derived for `address` (newest first).
     pub fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
                 n.id,
+                pool.address,
                 n.amount,
                 c.leaf_index,
                 r.ledger,
@@ -414,6 +474,7 @@ impl Storage {
              JOIN accounts a ON a.id = n.account_id
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1
              ORDER BY r.ledger DESC
              LIMIT ?2",
@@ -421,15 +482,17 @@ impl Storage {
 
         let rows = stmt.query_map(params![address, limit], |row| {
             let id: Field = row.get(0)?;
-            let amount: NoteAmount = row.get(1)?;
-            let leaf_index_i64: i64 = row.get(2)?;
-            let leaf_index = col_u32(leaf_index_i64, 2)?;
-            let created_at_ledger_i64: i64 = row.get(3)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
-            let spent_i64: i64 = row.get(4)?;
+            let pool_contract_id: String = row.get(1)?;
+            let amount: NoteAmount = row.get(2)?;
+            let leaf_index_i64: i64 = row.get(3)?;
+            let leaf_index = col_u32(leaf_index_i64, 3)?;
+            let created_at_ledger_i64: i64 = row.get(4)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+            let spent_i64: i64 = row.get(5)?;
 
             Ok(UserNoteSummary {
                 id,
+                pool_contract_id,
                 amount,
                 leaf_index,
                 created_at_ledger,
@@ -478,6 +541,7 @@ impl Storage {
 
             Ok(UserNoteSummary {
                 id,
+                pool_contract_id: pool_contract_id.to_string(),
                 amount,
                 leaf_index,
                 created_at_ledger,
@@ -501,6 +565,7 @@ impl Storage {
         let mut stmt = self.conn.prepare(
             "SELECT
                 n.id,
+                pool.address,
                 n.amount,
                 c.leaf_index,
                 r.ledger
@@ -515,14 +580,16 @@ impl Storage {
 
         let rows = stmt.query_map(params![address, pool_contract_id], |row| {
             let id: Field = row.get(0)?;
-            let amount: NoteAmount = row.get(1)?;
-            let leaf_index_i64: i64 = row.get(2)?;
-            let leaf_index = col_u32(leaf_index_i64, 2)?;
-            let created_at_ledger_i64: i64 = row.get(3)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+            let pool_contract_id: String = row.get(1)?;
+            let amount: NoteAmount = row.get(2)?;
+            let leaf_index_i64: i64 = row.get(3)?;
+            let leaf_index = col_u32(leaf_index_i64, 3)?;
+            let created_at_ledger_i64: i64 = row.get(4)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
 
             Ok(UserNoteSummary {
                 id,
+                pool_contract_id,
                 amount,
                 leaf_index,
                 created_at_ledger,
@@ -537,43 +604,175 @@ impl Storage {
         Ok(out)
     }
 
-    /// Returns recent pool activity grouped by ledger (newest first).
-    pub fn get_recent_pool_activity(&self, limit_ledgers: u32) -> Result<Vec<PoolLedgerActivity>> {
+    pub fn list_portfolio_balances(
+        &self,
+        address: &str,
+        config: &ContractConfig,
+    ) -> Result<Vec<PortfolioBalance>> {
         let mut stmt = self.conn.prepare(
-            "SELECT ledger, SUM(commitments) AS commitments, SUM(nullifiers) AS nullifiers
-             FROM (
-                SELECT r.ledger AS ledger, COUNT(*) AS commitments, 0 AS nullifiers
-                FROM pool_commitments c
-                JOIN raw_contract_events r ON r.id = c.event_id
-                GROUP BY r.ledger
-                UNION ALL
-                SELECT r.ledger AS ledger, 0 AS commitments, COUNT(*) AS nullifiers
-                FROM pool_nullifiers n
-                JOIN raw_contract_events r ON r.id = n.event_id
-                GROUP BY r.ledger
-             )
-             GROUP BY ledger
-             ORDER BY ledger DESC
-             LIMIT ?1",
+            "SELECT pool.address, n.amount
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pool ON pool.contract_id = r.contract_id
+             WHERE a.address = ?1 AND n.nullifier_id IS NULL
+             ORDER BY pool.address",
         )?;
 
-        let rows = stmt.query_map(params![limit_ledgers], |row| {
-            let ledger_i64: i64 = row.get(0)?;
-            let ledger = col_u32(ledger_i64, 0)?;
-            let commitments_i64: i64 = row.get(1)?;
-            let commitments = col_u32(commitments_i64, 1)?;
-            let nullifiers_i64: i64 = row.get(2)?;
-            let nullifiers = col_u32(nullifiers_i64, 2)?;
-            Ok(PoolLedgerActivity {
-                ledger,
-                commitments,
-                nullifiers,
-            })
+        let rows = stmt.query_map(params![address], |row| {
+            let pool_contract_id: String = row.get(0)?;
+            let amount: NoteAmount = row.get(1)?;
+            Ok((pool_contract_id, amount))
         })?;
 
+        let mut aggregated = std::collections::HashMap::new();
+        for row in rows {
+            let (pool_contract_id, amount) = row?;
+            let entry = aggregated
+                .entry(pool_contract_id)
+                .or_insert((0u32, NoteAmount::ZERO));
+            entry.0 = entry.0.saturating_add(1);
+            entry.1 = entry
+                .1
+                .checked_add(amount)
+                .ok_or_else(|| anyhow!("overflow computing total balance"))?;
+        }
+
+        let mut balances = Vec::new();
+        for pool in config.enabled_pools() {
+            let (note_count, amount) = aggregated
+                .remove(&pool.pool_contract_id)
+                .unwrap_or((0, NoteAmount::ZERO));
+            balances.push(PortfolioBalance {
+                pool_contract_id: pool.pool_contract_id.clone(),
+                token_contract_id: pool.token_contract_id.clone(),
+                token_label: token_label(pool),
+                amount,
+                note_count,
+            });
+        }
+
+        Ok(balances)
+    }
+
+    pub fn recipient_lookup(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<RecipientLookup> {
+        let entry = self.lookup_public_key_by_address(address)?;
+        let registry_last_fully_indexed_ledger = self
+            .get_sync_metadata()?
+            .into_iter()
+            .find(|meta| meta.contract_id == public_key_registry_contract_id)
+            .map(|meta| meta.last_fully_indexed_ledger)
+            .unwrap_or_default();
+        let network_tip_ledger = self.network_tip_ledger()?;
+
+        Ok(RecipientLookup {
+            entry,
+            registry_fully_synced: network_tip_ledger > 0
+                && registry_last_fully_indexed_ledger >= network_tip_ledger,
+            network_tip_ledger,
+            registry_last_fully_indexed_ledger,
+        })
+    }
+
+    pub fn get_operational_feed(
+        &self,
+        limit: u32,
+        asp_membership_contract_id: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<Vec<OperationalFeedItem>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT kind, title, body, ledger, contract_id, pool_contract_id, tx_type
+             FROM (
+                SELECT
+                    'pool' AS kind,
+                    'Pool activity' AS title,
+                    printf('%d commitment(s), %d nullifier(s)', SUM(commitments), SUM(nullifiers)) AS body,
+                    ledger,
+                    pool_contract_id AS contract_id,
+                    pool_contract_id,
+                    CASE
+                        WHEN SUM(commitments) > 0 AND SUM(nullifiers) > 0 THEN 'mixed'
+                        WHEN SUM(commitments) > 0 THEN 'deposit_or_transfer'
+                        ELSE 'spend'
+                    END AS tx_type
+                FROM (
+                    SELECT r.ledger AS ledger, c.address AS pool_contract_id, COUNT(*) AS commitments, 0 AS nullifiers
+                    FROM pool_commitments pc
+                    JOIN raw_contract_events r ON r.id = pc.event_id
+                    JOIN contracts c ON c.contract_id = r.contract_id
+                    GROUP BY r.ledger, c.address
+                    UNION ALL
+                    SELECT r.ledger AS ledger, c.address AS pool_contract_id, 0 AS commitments, COUNT(*) AS nullifiers
+                    FROM pool_nullifiers pnl
+                    JOIN raw_contract_events r ON r.id = pnl.event_id
+                    JOIN contracts c ON c.contract_id = r.contract_id
+                    GROUP BY r.ledger, c.address
+                )
+                GROUP BY ledger, pool_contract_id
+
+                UNION ALL
+
+                SELECT
+                    'registry' AS kind,
+                    'Address book registration' AS title,
+                    printf('%d public key registration(s)', COUNT(*)) AS body,
+                    r.ledger AS ledger,
+                    c.address AS contract_id,
+                    NULL AS pool_contract_id,
+                    'registration' AS tx_type
+                FROM public_keys pk
+                JOIN raw_contract_events r ON r.id = pk.event_id
+                JOIN contracts c ON c.contract_id = r.contract_id
+                WHERE c.address = ?1
+                GROUP BY r.ledger, c.address
+
+                UNION ALL
+
+                SELECT
+                    'asp' AS kind,
+                    'ASP membership update' AS title,
+                    printf('%d membership leaf/leaves inserted', COUNT(*)) AS body,
+                    r.ledger AS ledger,
+                    c.address AS contract_id,
+                    NULL AS pool_contract_id,
+                    'membership' AS tx_type
+                FROM asp_membership_leaves aml
+                JOIN raw_contract_events r ON r.id = aml.event_id
+                JOIN contracts c ON c.contract_id = r.contract_id
+                WHERE c.address = ?2
+                GROUP BY r.ledger, c.address
+             )
+             ORDER BY ledger DESC
+             LIMIT ?3",
+        )?;
+
+        let rows = stmt.query_map(
+            params![
+                public_key_registry_contract_id,
+                asp_membership_contract_id,
+                limit
+            ],
+            |row| {
+                Ok(OperationalFeedItem {
+                    kind: row.get(0)?,
+                    title: row.get(1)?,
+                    body: row.get(2)?,
+                    ledger: col_u32(row.get::<_, i64>(3)?, 3)?,
+                    contract_id: row.get(4)?,
+                    pool_contract_id: row.get(5)?,
+                    tx_type: row.get(6)?,
+                })
+            },
+        )?;
+
         let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
+        for row in rows {
+            out.push(row?);
         }
         Ok(out)
     }
@@ -1310,6 +1509,67 @@ impl Storage {
 /// overflow.
 fn col_u32(val: i64, col: usize) -> Result<u32, SqlError> {
     u32::try_from(val).map_err(|_| SqlError::IntegralValueOutOfRange(col, val))
+}
+
+impl Storage {
+    #[allow(clippy::too_many_arguments)]
+    pub fn insert_operation(
+        &self,
+        address: &str,
+        pool_contract_id: &str,
+        op_type: &str,
+        amount: &str,
+        direction: &str,
+        counterparty: Option<&str>,
+        tx_hash: Option<&str>,
+    ) -> Result<()> {
+        // created_at is filled by the DB as UTC epoch seconds, not the client clock.
+        self.conn.execute(
+            "INSERT INTO app_user_operations
+                (address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash, created_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, strftime('%s','now'))",
+            params![address, pool_contract_id, op_type, amount, direction, counterparty, tx_hash],
+        )?;
+        Ok(())
+    }
+
+    pub fn list_operations(
+        &self,
+        address: &str,
+        pool_contract_id: &str,
+        limit: u32,
+    ) -> Result<Vec<UserOperation>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT op_type, amount, direction, counterparty, tx_hash, created_at
+             FROM app_user_operations
+             WHERE address = ?1 AND pool_contract_id = ?2
+             ORDER BY created_at DESC, id DESC
+             LIMIT ?3",
+        )?;
+        let rows = stmt.query_map(params![address, pool_contract_id, limit], |row| {
+            Ok(UserOperation {
+                op_type: row.get(0)?,
+                amount: row.get(1)?,
+                direction: row.get(2)?,
+                counterparty: row.get(3)?,
+                tx_hash: row.get(4)?,
+                created_at: row.get(5)?,
+            })
+        })?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+}
+
+fn token_label(pool: &PoolConfigEntry) -> String {
+    match &pool.asset {
+        types::AssetDescriptor::Native => "XLM".to_string(),
+        types::AssetDescriptor::Classic { code, .. } => code.clone(),
+        types::AssetDescriptor::Contract { symbol, .. } => symbol.clone(),
+    }
 }
 
 fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry, SqlError> {

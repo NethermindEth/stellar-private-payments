@@ -58,8 +58,7 @@ stellar-private-payments/
 │   └── types/                  # Shared contract types
 ├── e2e-tests/                  # End-to-end integration tests
 ├── poseidon2/                  # Poseidon2 hash implementation
-├── scripts/                    # Deployment and utility scripts
-│   └── (moved to deployments/scripts/deploy.sh)
+├── deployments/                # Deployment and utility scripts
 ├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```
@@ -137,10 +136,22 @@ stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --opt
 
 ### Deploying Contracts
 You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a Stellar network.
-An example can be found in the _Demo Application_ section..
 
 See `./deployments/scripts/deploy.sh --help` for all options.
 
+For testnet purposes
+(https://www.circle.com/eurc#how-to-start-using-eurc, you can use https://faucet.circle.com/ to fund your account (but first add an asset and a trustline in your wallet))
+
+```sh
+./deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --asp-levels 10 \
+  --pool-levels 10 \
+  --max-deposit 1000000000 \
+  --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json \
+  --pool native:$(stellar contract id asset --asset native --network testnet) \
+  --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+```
 
 ### End-to-End Tests
 

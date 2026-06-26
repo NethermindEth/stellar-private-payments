@@ -1,7 +1,6 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, BootnodeConfigPayload, DisclaimerStatePayload,
-    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
-    UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
+    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -22,7 +21,8 @@ use stellar_private_payments_sdk::{
         flows::TransactParams,
     },
     types::{
-        ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata,
+        UserNoteSummary,
     },
 };
 use wasm_bindgen::JsError;
@@ -245,17 +245,16 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
             StorageWorkerResponse::Saved
         }
-        StorageWorkerRequest::BootnodeConfig => {
-            log::trace!("[{WORKER_NAME}] fetch bootnode config");
-            let config = with_storage!(s => s.get_bootnode_config()?)?;
-            StorageWorkerResponse::BootnodeConfig(BootnodeConfigPayload {
-                enabled: config.enabled,
-                url: config.url,
-            })
+        StorageWorkerRequest::GetSetting(key) => {
+            log::trace!("[{WORKER_NAME}] fetch setting {key}");
+            let value_json = with_storage!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
+                .map(|value| value.to_string());
+            StorageWorkerResponse::Setting(value_json)
         }
-        StorageWorkerRequest::SetBootnodeConfig { enabled, url } => {
-            log::trace!("[{WORKER_NAME}] set bootnode config enabled={enabled}");
-            with_storage_mut!(s => s.set_bootnode_config(enabled, &url)?)?;
+        StorageWorkerRequest::SetSetting { key, value_json } => {
+            log::trace!("[{WORKER_NAME}] set setting {key}");
+            let value: serde_json::Value = serde_json::from_str(&value_json)?;
+            with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {
@@ -295,6 +294,44 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
+        StorageWorkerRequest::PortfolioBalances(address) => {
+            log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");
+            // Load the contract config from the embedded deployment JSON rather than
+            // receiving it over the worker bridge: ContractConfig contains the
+            // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
+            // cannot deserialize (panics with DeserializeAnyNotSupported).
+            let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
+            let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;
+            StorageWorkerResponse::PortfolioBalances(list)
+        }
+        StorageWorkerRequest::RecordOperation {
+            address,
+            pool_contract_id,
+            op_type,
+            amount,
+            direction,
+            counterparty,
+            tx_hash,
+        } => {
+            with_storage!(s => s.insert_operation(
+                &address,
+                &pool_contract_id,
+                &op_type,
+                &amount,
+                &direction,
+                counterparty.as_deref(),
+                tx_hash.as_deref(),
+            )?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ListOperations {
+            address,
+            pool_contract_id,
+            limit,
+        } => {
+            let list = with_storage!(s => s.list_operations(&address, &pool_contract_id, limit)?)?;
+            StorageWorkerResponse::Operations(list)
+        }
         StorageWorkerRequest::UnspentUserNotes {
             user_address,
             pool_contract_id,
@@ -327,12 +364,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
-        StorageWorkerRequest::RecentPoolActivity(limit) => {
-            log::trace!("[{WORKER_NAME}] fetch recent pool activity");
-            let list = with_storage!(s => s.get_recent_pool_activity(limit)?)?;
-            log::trace!("[{WORKER_NAME}] fetched {} pool activity rows", list.len());
-            StorageWorkerResponse::RecentPoolActivity(list)
-        }
         StorageWorkerRequest::RecentPubKeys(limit) => {
             log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
@@ -341,6 +372,31 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 list.len()
             );
             StorageWorkerResponse::PubKeys(list)
+        }
+        StorageWorkerRequest::RecipientLookup {
+            address,
+            public_key_registry_contract_id,
+        } => {
+            log::trace!("[{WORKER_NAME}] lookup public keys for {address}");
+            let lookup = with_storage!(s =>
+                s.recipient_lookup(&address, &public_key_registry_contract_id)?
+            )?;
+            StorageWorkerResponse::RecipientLookup(lookup)
+        }
+        StorageWorkerRequest::OperationalFeed {
+            limit,
+            asp_membership_contract_id,
+            public_key_registry_contract_id,
+        } => {
+            log::trace!("[{WORKER_NAME}] fetch operational feed");
+            let list = with_storage!(s =>
+                s.get_operational_feed(
+                    limit,
+                    &asp_membership_contract_id,
+                    &public_key_registry_contract_id,
+                )?
+            )?;
+            StorageWorkerResponse::OperationalFeed(list)
         }
         StorageWorkerRequest::DisclosureInputs(req) => {
             log::trace!(
@@ -469,9 +525,20 @@ impl StorageBridge {
     }
 
     pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        match self.call(StorageWorkerRequest::BootnodeConfig, 2_000).await {
-            Ok(StorageWorkerResponse::BootnodeConfig(config)) => {
-                (config.enabled && !config.url.is_empty()).then_some(config.url)
+        match self
+            .call(
+                StorageWorkerRequest::GetSetting(
+                    stellar_private_payments_sdk::state::APP_SETTING_BOOTNODE_CONFIG.to_string(),
+                ),
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::Setting(Some(json))) => {
+                serde_json::from_str::<stellar_private_payments_sdk::types::BootnodeSetting>(&json)
+                    .ok()
+                    .filter(|config| config.enabled && !config.url.is_empty())
+                    .map(|config| config.url)
             }
             _ => None,
         }

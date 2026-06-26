@@ -1,275 +1,91 @@
-function formatBaseUnitsForDisplay(v) {
-    const decimals = (typeof TOKEN_DECIMALS === 'number') ? TOKEN_DECIMALS : 7;
-    const symbol = (typeof TOKEN_SYMBOL === 'string' && TOKEN_SYMBOL) ? TOKEN_SYMBOL : 'XLM';
-    try {
-        let bi = typeof v === 'bigint' ? v : BigInt(v || 0);
-        const neg = bi < 0n;
-        if (neg) bi = -bi;
-        const absStr = bi.toString().padStart(decimals + 1, '0');
-        const intPart = absStr.slice(0, -decimals);
-        const fracRaw = absStr.slice(-decimals);
-        const frac = fracRaw.replace(/0+$/, '');
-        const out = frac ? `${intPart}.${frac}` : intPart;
-        return `${neg ? '-' : ''}${out} ${symbol}`;
-    } catch {
-        return `0 ${symbol}`;
-    }
-}
-
-/**
- * Template Manager - handles DOM template cloning and population.
- * @module ui/templates
- */
-
-import { App, Utils, Toast } from './core.js';
-import { AddressBook } from './address-book.js';
-
-// Forward reference - set by navigation.js after it loads
-let TabsRef = null;
-
-/**
- * Sets the Tabs reference for use in template event handlers.
- * Called by navigation.js during initialization.
- * @param {Object} tabs - The Tabs module
- */
-export function setTabsRef(tabs) {
-    TabsRef = tabs;
-}
+import { App, Utils } from './core.js';
 
 export const Templates = {
     init() {
         App.templates = {
+            noteInputRow: document.getElementById('tpl-note-input-row'),
             outputRow: document.getElementById('tpl-output-row'),
-            advancedOutputRow: document.getElementById('tpl-advanced-output-row'),
-            inputRow: document.getElementById('tpl-input-row'),
-            txItem: document.getElementById('tpl-tx-item'),
             noteRow: document.getElementById('tpl-note-row'),
-            addressBookRow: document.getElementById('tpl-addressbook-row'),
-            toast: document.getElementById('tpl-toast')
+            feedCard: document.getElementById('tpl-feed-card'),
+            balanceCard: document.getElementById('tpl-balance-card'),
+            toast: document.getElementById('tpl-toast'),
         };
     },
 
-    createOutputRow(index, initialValue = 0) {
+    createNoteInputRow(index) {
+        const row = App.templates.noteInputRow.content.cloneNode(true).firstElementChild;
+        row.dataset.index = index;
+        return row;
+    },
+
+    createOutputRow(index) {
         const row = App.templates.outputRow.content.cloneNode(true).firstElementChild;
         row.dataset.index = index;
-
-        const amountInput = row.querySelector('.output-amount');
-        amountInput.value = initialValue;
-
-        // Update dummy badge on value change
-        amountInput.addEventListener('input', () => {
-            const val = parseFloat(amountInput.value) || 0;
-            row.querySelector('.dummy-badge').classList.toggle('hidden', val !== 0);
-        });
-
-        // Mini spinner buttons
-        row.querySelector('.mini-up').addEventListener('click', () => {
-            amountInput.value = (parseFloat(amountInput.value) || 0) + 1;
-            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-
-        row.querySelector('.mini-down').addEventListener('click', () => {
-            amountInput.value = Math.max(0, (parseFloat(amountInput.value) || 0) - 1);
-            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-
-        // Copy button
-        row.querySelector('.copy-btn').addEventListener('click', () => {
-            const noteId = row.querySelector('.output-note-id');
-            if (noteId.dataset.fullId) {
-                Utils.copyToClipboard(noteId.dataset.fullId);
-            }
-        });
-
-        // Initial dummy state
-        if (initialValue === 0) {
-            row.querySelector('.dummy-badge').classList.remove('hidden');
-        }
-
         return row;
     },
 
-    /**
-     * Creates an advanced output row with per-output recipient selection.
-     * Used in Transact mode where each output can go to a different recipient.
-     * Each output requires two keys: BN254 note key and X25519 encryption key.
-     * Empty keys = self, filled = other recipient.
-     * @param {number} index - Row index
-     * @param {number} initialValue - Initial amount value
-     * @returns {HTMLElement}
-     */
-    createAdvancedOutputRow(index, initialValue = 0) {
-        const row = App.templates.advancedOutputRow.content.cloneNode(true).firstElementChild;
-        row.dataset.index = index;
+    createBalanceCard(balance) {
+        const el = App.templates.balanceCard.content.cloneNode(true).firstElementChild;
+        const tokenLink = el.querySelector('.balance-token');
+        tokenLink.textContent = balance.tokenLabel;
+        tokenLink.href = Utils.explorerContractUrl(balance.tokenContractId);
+        tokenLink.title = balance.tokenContractId;
+        el.querySelector('.balance-amount').textContent = Utils.formatTokenAmount(balance.amount, balance.tokenLabel);
+        el.querySelector('.balance-notes').textContent = `${balance.noteCount} note${balance.noteCount === 1 ? '' : 's'}`;
+        const poolLink = el.querySelector('.balance-pool');
+        poolLink.textContent = Utils.shortAddress(balance.poolContractId, 6, 4);
+        poolLink.href = Utils.explorerContractUrl(balance.poolContractId);
+        poolLink.title = balance.poolContractId;
 
-        const amountInput = row.querySelector('.output-amount');
-        const noteKeyInput = row.querySelector('.output-note-key');
-        const encKeyInput = row.querySelector('.output-enc-key');
-        const lookupBtn = row.querySelector('.output-lookup-btn');
-
-        amountInput.value = initialValue;
-
-        // Update dummy badge on value change
-        amountInput.addEventListener('input', () => {
-            const val = parseFloat(amountInput.value) || 0;
-            row.querySelector('.dummy-badge').classList.toggle('hidden', val !== 0);
+        el.querySelectorAll('[data-quick-flow], [data-view-notes], [data-view-history]').forEach(btn => {
+            btn.dataset.poolId = balance.poolContractId;
         });
-
-        // Mini spinner buttons
-        row.querySelector('.mini-up').addEventListener('click', () => {
-            amountInput.value = (parseFloat(amountInput.value) || 0) + 1;
-            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-
-        row.querySelector('.mini-down').addEventListener('click', () => {
-            amountInput.value = Math.max(0, (parseFloat(amountInput.value) || 0) - 1);
-            amountInput.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-
-        // Address book lookup - scroll to address book section
-        lookupBtn?.addEventListener('click', () => {
-            App.state.addressBookFillTarget = { kind: 'transact-output', outputIndex: index };
-            AddressBook.switchSection('addressbook');
-            const section = document.getElementById('section-panel-addressbook');
-            if (section) {
-                section.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }
-            setTimeout(() => {
-                document.getElementById('addressbook-search')?.focus();
-            }, 300);
-            Toast.show('Select a recipient from the address book', 'info');
-        });
-
-        // Copy button
-        row.querySelector('.copy-btn').addEventListener('click', () => {
-            const noteId = row.querySelector('.output-note-id');
-            if (noteId.dataset.fullId) {
-                Utils.copyToClipboard(noteId.dataset.fullId);
-            }
-        });
-
-        // Initial dummy state
-        if (initialValue === 0) {
-            row.querySelector('.dummy-badge').classList.remove('hidden');
-        }
-
-        return row;
+        return el;
     },
 
-    createInputRow(index) {
-        const row = App.templates.inputRow.content.cloneNode(true).firstElementChild;
-        row.dataset.index = index;
-
-        const noteInput = row.querySelector('.note-input');
-        const valueDisplay = row.querySelector('.value-display');
-
-        // Update value display when note ID changes
-        noteInput.addEventListener('input', () => {
-            const noteId = noteInput.value.trim();
-            const note = App.state.notes.find(n => n.id === noteId && !n.spent);
-
-            if (note) {
-                // Convert token decimals to token for display
-                valueDisplay.textContent = formatBaseUnitsForDisplay(note.amount);
-                valueDisplay.classList.remove('text-dark-500');
-                valueDisplay.classList.add('text-brand-400');
-            } else {
-                valueDisplay.textContent = formatBaseUnitsForDisplay(0);
-                valueDisplay.classList.add('text-dark-500');
-                valueDisplay.classList.remove('text-brand-400', 'italic');
-                valueDisplay.title = '';
-            }
-        });
-
-        return row;
+    createFeedCard(item, poolLabel) {
+        const el = App.templates.feedCard.content.cloneNode(true).firstElementChild;
+        el.querySelector('.feed-title').textContent = item.title;
+        el.querySelector('.feed-body').textContent = item.body;
+        el.querySelector('.feed-meta').textContent = poolLabel
+            ? `${poolLabel} · Ledger ${item.ledger}`
+            : `Ledger ${item.ledger}`;
+        return el;
     },
 
-    createTxItem(hash, time) {
-        const item = App.templates.txItem.content.cloneNode(true).firstElementChild;
-        item.querySelector('.tx-hash').textContent = hash;
-        item.querySelector('.tx-time').textContent = time;
-        return item;
-    },
-
-    createNoteRow(note) {
+    createNoteRow(note, opts = {}) {
         const row = App.templates.noteRow.content.cloneNode(true).firstElementChild;
-        row.dataset.status = note.spent ? 'spent' : 'unspent';
-        row.dataset.id = note.id;
-        row.dataset.received = 'false';
-
+        row.dataset.noteId = note.id;
+        row.querySelector('.note-token').textContent = note.tokenLabel || 'Token';
         row.querySelector('.note-id').textContent = Utils.truncateHex(note.id, 10, 8);
-        // Note.amount is in token decimals - convert to token for display
-        row.querySelector('.note-amount').textContent = formatBaseUnitsForDisplay(note.amount);
-        row.querySelector('.note-date').textContent = note.createdAtText || '';
+        row.querySelector('.note-id').title = note.id;
+        row.querySelector('.note-amount').textContent = Utils.formatTokenAmount(note.amount, note.tokenLabel || 'XLM');
+        row.querySelector('.note-ledger').textContent = `Ledger ${note.createdAtLedger || 0}`;
+        row.querySelector('.note-pool').textContent = Utils.shortAddress(note.poolContractId, 6, 4);
 
-        const badge = row.querySelector('.status-badge');
+        const status = row.querySelector('.note-status');
         if (note.spent) {
-            badge.textContent = 'Spent';
-            badge.classList.add('bg-red-500/20', 'text-red-400');
-            row.classList.add('opacity-50');
-            row.querySelector('.use-btn')?.remove();
-            row.querySelector('.disclose-btn')?.remove();
+            status.textContent = 'Spent';
+            status.className = 'note-status inline-flex rounded-full border border-rose-400/30 bg-rose-400/10 px-2 py-1 text-[11px] font-medium text-rose-200';
         } else {
-            badge.textContent = 'Unspent';
-            badge.classList.add('bg-emerald-500/20', 'text-emerald-400');
-        }
-        
-        // Disclose link — opens the standalone disclosure page pre-filled with
-        // this note's commitment. Only present for unspent notes.
-        const discloseBtn = row.querySelector('.disclose-btn');
-        if (discloseBtn) {
-            const commitment = note.id.startsWith('0x') ? note.id : `0x${note.id}`;
-            discloseBtn.href = `disclosure.html?commitment=${encodeURIComponent(commitment)}`;
+            status.textContent = 'Available';
+            status.className = 'note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100';
         }
 
-        // Use button - fills note in current tab's input (or switches to withdraw if in deposit)
-        const useBtn = row.querySelector('.use-btn');
+        // A spent note can't be used as a transact input — hide its Use button.
+        const useBtn = row.querySelector('.note-use');
         if (useBtn) {
-            useBtn.addEventListener('click', () => {
-                // Determine which tab to use
-                let targetTab = App.state.activeTab;
-
-                // Deposit doesn't have input notes, redirect to withdraw
-                if (targetTab === 'deposit') {
-                    targetTab = 'withdraw';
-                    if (TabsRef) {
-                        TabsRef.switch('withdraw');
-                    }
-                }
-
-                // Map tab to input container ID
-                const containerIds = {
-                    withdraw: 'withdraw-inputs',
-                    transfer: 'transfer-inputs',
-                    transact: 'transact-inputs',
-                };
-
-                const containerId = containerIds[targetTab];
-                if (!containerId) return;
-
-                const inputs = document.querySelectorAll(`#${containerId} .note-input`);
-                if (!inputs.length) return;
-
-                // Find first empty input, or use first if all filled
-                let targetInput = inputs[0];
-                for (const input of inputs) {
-                    if (!input.value.trim()) {
-                        targetInput = input;
-                        break;
-                    }
-                }
-
-                targetInput.value = note.id;
-                targetInput.dispatchEvent(new Event('input', { bubbles: true }));
-                Toast.show('Note added to input', 'success');
-            });
+            if (note.spent) {
+                useBtn.classList.add('hidden');
+            } else {
+                useBtn.addEventListener('click', () => opts.onUse?.(note));
+            }
         }
-
-        // Copy button
-        row.querySelector('.copy-btn').addEventListener('click', () => {
-            Utils.copyToClipboard(note.id);
-        });
-
+        row.querySelector('.note-copy')?.addEventListener('click', () => opts.onCopy?.(note));
+        const disclose = row.querySelector('.note-disclose');
+        if (disclose) {
+            disclose.href = `disclosure.html?commitment=${encodeURIComponent(note.id)}`;
+        }
         return row;
-    }
+    },
 };

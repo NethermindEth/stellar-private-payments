@@ -49,13 +49,22 @@ pub struct PoolConfigEntry {
 pub enum AssetDescriptor {
     Native,
     /// Classic Stellar asset (CODE:ISSUER).
+    // `rename_all` on the enum only renames the variant tags, not the fields
+    // inside struct variants, so it must be repeated per variant to keep the
+    // JSON camelCase (e.g. `contractId`) consistent with deployments.json and
+    // the frontend.
+    #[serde(rename_all = "camelCase")]
     Classic {
         code: String,
         issuer: String,
     },
     /// Token contract address (Soroban contract id).
+    #[serde(rename_all = "camelCase")]
     Contract {
         contract_id: String,
+        /// Token `symbol()` captured at deployment time and stored in the
+        /// config.
+        symbol: String,
     },
 }
 
@@ -124,6 +133,8 @@ pub struct PublicKeyEntry {
 pub struct UserNoteSummary {
     /// Pool commitment (hex).
     pub id: Field,
+    /// Pool contract id that owns the commitment.
+    pub pool_contract_id: String,
     /// Amount in stroops.
     pub amount: NoteAmount,
     /// Commitment leaf index in the pool Merkle tree.
@@ -134,13 +145,59 @@ pub struct UserNoteSummary {
     pub spent: bool,
 }
 
-/// Aggregated pool activity for a single ledger.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BootnodeSetting {
+    pub enabled: bool,
+    pub url: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PoolLedgerActivity {
+pub struct PortfolioBalance {
+    pub pool_contract_id: String,
+    pub token_contract_id: String,
+    pub token_label: String,
+    pub amount: NoteAmount,
+    pub note_count: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecipientLookup {
+    pub entry: Option<PublicKeyEntry>,
+    pub registry_fully_synced: bool,
+    pub network_tip_ledger: u32,
+    pub registry_last_fully_indexed_ledger: u32,
+}
+
+/// A high-level operation the user performed in a pool (deposit / sent /
+/// withdraw / advanced), persisted in `user_operations` and shown as pool
+/// history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserOperation {
+    pub op_type: String,
+    /// Amount in stroops (absolute), as a decimal string.
+    pub amount: String,
+    /// "in" | "out" | "none" — used to sign/colour the amount in the UI.
+    pub direction: String,
+    pub counterparty: Option<String>,
+    pub tx_hash: Option<String>,
+    /// Unix milliseconds when the operation was recorded (client clock).
+    pub created_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OperationalFeedItem {
+    pub kind: String,
+    pub title: String,
+    pub body: String,
     pub ledger: u32,
-    pub commitments: u32,
-    pub nullifiers: u32,
+    pub contract_id: Option<String>,
+    pub pool_contract_id: Option<String>,
+    pub tx_type: Option<String>,
 }
 
 /// Wallet signature used to derive both privacy keypairs

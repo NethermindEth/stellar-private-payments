@@ -16,6 +16,7 @@ anyhow = { workspace = true }
 hex = { workspace = true }
 rusqlite = { workspace = true, optional = true }
 serde = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
 uint = { workspace = true }
 
 [dev-dependencies]

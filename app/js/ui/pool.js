@@ -6,6 +6,12 @@
 import { getHandle } from '../wasm-facade.js';
 import { App } from './core.js';
 
+App.events.addEventListener('pool:selected', () => {
+    if (App.state.wallet.connected) {
+        createAppPool().catch(err => console.warn('[pool] recreate failed:', err));
+    }
+});
+
 let cachedContractConfig = null;
 
 export async function getContractConfig() {
@@ -16,7 +22,9 @@ export async function getContractConfig() {
 
 export function getActivePoolContractId(config) {
     const pools = Array.isArray(config?.pools) ? config.pools : [];
-    const selected = pools.find(p => p?.enabled) || pools[0];
+    const selected = pools.find(p => p?.poolContractId === App.state.selectedPoolId)
+        || pools.find(p => p?.enabled)
+        || pools[0];
     const poolContractId = selected?.poolContractId;
     if (!poolContractId) throw new Error('Pool contract ID not available');
     return poolContractId;

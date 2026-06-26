@@ -9,8 +9,8 @@ use stellar_private_payments_sdk::{
     tx::flows::TransactParams,
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
-        KeyDerivationSignature, NotePublicKey, PoolLedgerActivity, PublicKeyEntry, SyncMetadata,
-        UserNoteSummary,
+        KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
+        PublicKeyEntry, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
     },
 };
 
@@ -49,13 +49,6 @@ pub struct DisclaimerStatePayload {
     pub accepted: bool,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct BootnodeConfigPayload {
-    pub enabled: bool,
-    pub url: String,
-}
-
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
@@ -70,14 +63,29 @@ pub enum StorageWorkerRequest {
     DeriveSaveUserKeys(Address, KeyDerivationSignature, String),
     DisclaimerState(Address),
     AcceptDisclaimer(Address, String),
-    BootnodeConfig,
-    SetBootnodeConfig {
-        enabled: bool,
-        url: String,
+    GetSetting(String),
+    SetSetting {
+        key: String,
+        value_json: String,
     },
     UserKeys(Address),
     AspSecret(Address),
     UserNotes(Address, u32),
+    PortfolioBalances(Address),
+    RecordOperation {
+        address: Address,
+        pool_contract_id: String,
+        op_type: String,
+        amount: String,
+        direction: String,
+        counterparty: Option<String>,
+        tx_hash: Option<String>,
+    },
+    ListOperations {
+        address: Address,
+        pool_contract_id: String,
+        limit: u32,
+    },
     UnspentUserNotes {
         user_address: Address,
         pool_contract_id: Address,
@@ -86,8 +94,16 @@ pub enum StorageWorkerRequest {
         user_address: Address,
         pool_contract_id: Address,
     },
-    RecentPoolActivity(u32),
     RecentPubKeys(u32),
+    RecipientLookup {
+        address: Address,
+        public_key_registry_contract_id: String,
+    },
+    OperationalFeed {
+        limit: u32,
+        asp_membership_contract_id: String,
+        public_key_registry_contract_id: String,
+    },
     DisclosureInputs(DisclosureInputsRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
@@ -101,12 +117,15 @@ pub enum StorageWorkerResponse {
     Saved,
     Error(String),
     DisclaimerState(DisclaimerStatePayload),
-    BootnodeConfig(BootnodeConfigPayload),
+    Setting(Option<String>),
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
-    RecentPoolActivity(Vec<PoolLedgerActivity>),
+    PortfolioBalances(Vec<PortfolioBalance>),
+    Operations(Vec<UserOperation>),
     PubKeys(Vec<PublicKeyEntry>),
+    RecipientLookup(RecipientLookup),
+    OperationalFeed(Vec<OperationalFeedItem>),
     AspMembershipSync(AspMembershipSync),
     DisclosureInputs(DisclosureInputs),
     TransactParams(TransactParams),

@@ -38,6 +38,8 @@ pub enum Error {
     UnexpectedScVal(String),
     #[error("RPC sync gap - the oldest ledger is: {0:?}")]
     RpcSyncGap(u32),
+    #[error("local sync is ahead of the RPC events tip - the newest queryable ledger is: {0:?}")]
+    RpcAhead(u32),
     #[error("invalid latestLedger value: {0}")]
     InvalidLatestLedger(i64),
     #[error("missing required contract keys for {contract_id}: {missing_keys:?}")]
@@ -350,9 +352,29 @@ impl Client {
             Ok(r) => r,
             Err(e) => {
                 if let Error::JsonRpc { message, .. } = &e
-                    && let Some(range) = parse_ledger_range(message).filter(|r| start_ledger < r.0)
+                    && let Some((oldest, newest)) = parse_ledger_range(message)
                 {
-                    return Err(Error::RpcSyncGap(range.0));
+                    // Requested a ledger older than the RPC retains: a real gap.
+                    if start_ledger < oldest {
+                        return Err(Error::RpcSyncGap(oldest));
+                    }
+                    // Requested a ledger past the RPC's queryable events tip: we
+                    // are already caught up and the RPC simply hasn't indexed
+                    // this far yet (its events tip lags the chain tip). Not an
+                    // error — callers treat this as "nothing new this round".
+                    if start_ledger > newest {
+                        return Err(Error::RpcAhead(newest));
+                    }
+                }
+                // Surface what we actually requested so range errors are diagnosable.
+                if let Error::JsonRpc { code, message } = e {
+                    return Err(Error::JsonRpc {
+                        code,
+                        message: format!(
+                            "{message} (requested startLedger={start_ledger}, cursor={})",
+                            cursor.as_deref().unwrap_or("<none>")
+                        ),
+                    });
                 }
                 return Err(e);
             }

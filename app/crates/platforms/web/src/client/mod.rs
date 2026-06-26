@@ -8,14 +8,16 @@ use crate::{
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
+use serde_json::Value as JsonValue;
 use std::{rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
     PoolError,
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
+    state::{APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER},
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
-        AspMembershipSync, ContractConfig, DisclosureReceipt, EncryptionPublicKey, ExtAmount,
-        Field, KeyDerivationSignature, NoteAmount, NotePublicKey, parse_0x_hex_32,
+        AspMembershipSync, BootnodeSetting, ContractConfig, DisclosureReceipt, EncryptionPublicKey,
+        ExtAmount, Field, KeyDerivationSignature, NoteAmount, NotePublicKey, parse_0x_hex_32,
     },
 };
 use wasm_bindgen::{JsCast, prelude::*};
@@ -297,13 +299,63 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = setBootnodeConfig)]
-    pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
-        let req = StorageWorkerRequest::SetBootnodeConfig { enabled: true, url };
-        match self.storage_request(req, 2_000).await? {
+    #[wasm_bindgen(js_name = getSetting)]
+    pub async fn get_setting(&self, key: String) -> Result<JsValue, JsError> {
+        match self
+            .storage_request(StorageWorkerRequest::GetSetting(key), 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Setting(value_json) => {
+                let parsed = value_json
+                    .map(|raw| serde_json::from_str::<JsonValue>(&raw))
+                    .transpose()
+                    .map_err(|e| JsError::new(&e.to_string()))?;
+                let serializer =
+                    serde_wasm_bindgen::Serializer::new().serialize_maps_as_objects(true);
+                Ok(serde::Serialize::serialize(&parsed, &serializer)?)
+            }
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = setSetting)]
+    pub async fn set_setting(&self, key: String, value: JsValue) -> Result<(), JsError> {
+        let value_json = serde_wasm_bindgen::from_value::<JsonValue>(value)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        match self
+            .storage_request(
+                StorageWorkerRequest::SetSetting {
+                    key,
+                    value_json: serde_json::to_string(&value_json)
+                        .map_err(|e| JsError::new(&e.to_string()))?,
+                },
+                2_000,
+            )
+            .await?
+        {
             StorageWorkerResponse::Saved => Ok(()),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
+    }
+
+    #[wasm_bindgen(js_name = setBootnodeConfig)]
+    pub async fn set_bootnode_config(&self, url: String) -> Result<(), JsError> {
+        self.set_setting(
+            APP_SETTING_BOOTNODE_CONFIG.to_string(),
+            serde_wasm_bindgen::to_value(&BootnodeSetting { enabled: true, url })?,
+        )
+        .await
+    }
+
+    #[wasm_bindgen(js_name = getBootnodeConfig)]
+    pub async fn get_bootnode_config(&self) -> Result<JsValue, JsError> {
+        self.get_setting(APP_SETTING_BOOTNODE_CONFIG.to_string())
+            .await
+    }
+
+    #[wasm_bindgen(js_name = getExplorerSetting)]
+    pub async fn get_explorer_setting(&self) -> Result<JsValue, JsError> {
+        self.get_setting(APP_SETTING_EXPLORER.to_string()).await
     }
 
     #[wasm_bindgen(js_name = getUserKeys)]
@@ -372,11 +424,93 @@ impl WebClient {
         }
     }
 
-    #[wasm_bindgen(js_name = getRecentPoolActivity)]
-    pub async fn get_recent_pool_activity(&self, limit: u32) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::RecentPoolActivity(limit);
+    #[wasm_bindgen(js_name = getPortfolioBalances)]
+    pub async fn get_portfolio_balances(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::PortfolioBalances(address);
         match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::RecentPoolActivity(list) => {
+            StorageWorkerResponse::PortfolioBalances(list) => {
+                Ok(serde_wasm_bindgen::to_value(&list)?)
+            }
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = recordOperation)]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn record_operation(
+        &self,
+        address: String,
+        pool_contract_id: String,
+        op_type: String,
+        amount: String,
+        direction: String,
+        counterparty: Option<String>,
+        tx_hash: Option<String>,
+    ) -> Result<(), JsError> {
+        let req = StorageWorkerRequest::RecordOperation {
+            address,
+            pool_contract_id,
+            op_type,
+            amount,
+            direction,
+            counterparty,
+            tx_hash,
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = listOperations)]
+    pub async fn list_operations(
+        &self,
+        address: String,
+        pool_contract_id: String,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::ListOperations {
+            address,
+            pool_contract_id,
+            limit,
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::Operations(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
+    pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::RecipientLookup {
+            address,
+            public_key_registry_contract_id: self
+                .fetcher
+                .contract_config()
+                .public_key_registry
+                .clone(),
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::RecipientLookup(lookup) => {
+                Ok(serde_wasm_bindgen::to_value(&lookup)?)
+            }
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getOperationalFeed)]
+    pub async fn get_operational_feed(&self, limit: u32) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::OperationalFeed {
+            limit,
+            asp_membership_contract_id: self.fetcher.contract_config().asp_membership.clone(),
+            public_key_registry_contract_id: self
+                .fetcher
+                .contract_config()
+                .public_key_registry
+                .clone(),
+        };
+        match self.storage_request(req, 2_000).await? {
+            StorageWorkerResponse::OperationalFeed(list) => {
                 Ok(serde_wasm_bindgen::to_value(&list)?)
             }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),

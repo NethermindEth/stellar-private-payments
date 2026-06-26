@@ -80,6 +80,27 @@ export async function connectWallet() {
 }
 
 /**
+ * Return the active address only if Freighter is already connected AND allowed
+ * for this origin, without prompting. Returns null otherwise. Lets a page
+ * restore a session already established elsewhere in the app (same origin)
+ * without showing a connection popup.
+ * @returns {Promise<string|null>}
+ */
+export async function getConnectedAddress() {
+    try {
+        const conn = await isConnected();
+        if (!conn?.isConnected) return null;
+        const allowed = await isAllowed();
+        if (!allowed?.isAllowed) return null;
+        const res = await getAddress();
+        if (res?.error || !res?.address) return null;
+        return res.address;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Fetch the currently active public key from Freighter without prompting.
  * @returns {Promise<string>}
  */
