@@ -277,8 +277,8 @@ export const Wallet = {
             if (addressDisplay) addressDisplay.textContent = address;
 
             updateSubmitButtons(true);
-            await createAppPool();
             App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+            await createAppPool();
 
             this._startWatcher();
 
@@ -438,8 +438,8 @@ export const Wallet = {
         if (dropdownIcon) dropdownIcon.classList.remove('hidden');
 
         updateSubmitButtons(true);
-        await createAppPool();
         App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
+        await createAppPool();
 
         Toast.show('Freighter account changed. Privacy keys ready.', 'info');
     },
