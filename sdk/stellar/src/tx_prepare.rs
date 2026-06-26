@@ -93,65 +93,6 @@ impl StateFetcher {
     }
 }
 
-/// Synchronous transaction preparation (native targets only).
-#[cfg(not(target_arch = "wasm32"))]
-pub mod blocking {
-    use super::*;
-    use crate::contract_state::blocking::StateFetcher;
-
-    impl StateFetcher {
-        /// Simulates `transact` and returns unsigned XDR + auth entries for the
-        /// wallet.
-        pub fn prepare_pool_transact(
-            &self,
-            pool_contract_id: &str,
-            input: &PoolTransactInput,
-            source_account: &str,
-        ) -> Result<PreparedSorobanTx> {
-            self.enabled_pool_for(pool_contract_id)?;
-            let proof_scval = pool_proof_to_scval(
-                &input.proof_uncompressed,
-                input.public.root,
-                &input.public.input_nullifiers,
-                input.public.output_commitment0,
-                input.public.output_commitment1,
-                input.public.public_amount,
-                input.public.ext_data_hash_be,
-                input.public.asp_membership_root,
-                input.public.asp_non_membership_root,
-            )?;
-            let ext_scval = pool_ext_data_to_scval(&input.ext_data)?;
-            let sender_scval = xdr::ScVal::Address(
-                source_account
-                    .parse()
-                    .map_err(|e| anyhow!("invalid source account: {e}"))?,
-            );
-
-            let seq = account_sequence(&self.client, source_account)?;
-            let raw = crate::contract_state::StateFetcher::build_invoke_contract_tx_envelope(
-                source_account,
-                seq,
-                BASE_FEE,
-                pool_contract_id,
-                "transact",
-                vec![proof_scval, ext_scval, sender_scval],
-                Vec::new(),
-            )?;
-
-            let sim = self.client.simulate_transaction(&raw)?;
-            PreparedSorobanTx::from_simulation(&raw, &sim)
-        }
-    }
-
-    fn account_sequence(
-        client: &crate::rpc::blocking::Client,
-        source_account: &str,
-    ) -> Result<xdr::SequenceNumber> {
-        let entry = client.get_account(source_account)?;
-        next_sequence(entry.seq_num)
-    }
-}
-
 /// Computes the sequence number for a new transaction from the account's
 /// current on-ledger sequence number.
 ///

@@ -28,12 +28,6 @@ pub mod chain {
         TransactionEnvelope, TxConfirmStatus, WriteXdr, auth_sign_steps, confirm_tx,
         hash_ext_data_offchain, submit_tx, unsigned_tx_for_signing, verify_tx,
     };
-
-    /// Synchronous RPC client, indexer, and state reads (native only).
-    #[cfg(not(target_arch = "wasm32"))]
-    pub mod blocking {
-        pub use stellar::blocking::{Client, StateFetcher, confirm_tx, submit_tx};
-    }
 }
 
 pub mod tx {

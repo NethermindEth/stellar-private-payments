@@ -143,10 +143,10 @@ impl WebClient {
         network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Rc<PrivatePool<StorageBridge>>, JsError> {
-        if let Some(session) = self.pool.borrow().as_ref() {
-            if session.matches(&pool_contract_id, &user_address, &network_passphrase) {
-                return Ok(session.private_pool());
-            }
+        if let Some(session) = self.pool.borrow().as_ref()
+            && session.matches(&pool_contract_id, &user_address, &network_passphrase)
+        {
+            return Ok(session.private_pool());
         }
 
         emit_progress(
