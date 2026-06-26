@@ -44,8 +44,7 @@ If you want to try it out:
       --max-deposit 1000000000 \                                                         # Maximum deposit amount (in Stroops)
       --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json                   # Verification key file
       --pool native:$(stellar contract id asset --asset native --network testnet) \      # XLM pool
-      --pool classic:CODE:ISSUE:ASSET_CONTRACT \                                         # Stellar Asset Pool
-      --pool contract:TOKEN_CONTRACT                                                     # SEP-41 pool
+      --pool classic:CODE:ISSUE:ASSET_CONTRACT                                           # Stellar Asset Pool
     ```
    If you already have deployed contracts, make sure their addresses are updated in `deployments/testnet/deployments.json`.
 

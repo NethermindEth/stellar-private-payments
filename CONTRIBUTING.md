@@ -150,8 +150,7 @@ For testnet purposes
   --max-deposit 1000000000 \
   --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json \
   --pool native:$(stellar contract id asset --asset native --network testnet) \
-  --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet) \
-  --pool contract:CAUGJT4GREIY3WHOUUU5RIUDGSPVREF5CDCYJOWMHOVT2GWQT5JEETGJ
+  --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
 ```
 
 ### End-to-End Tests
