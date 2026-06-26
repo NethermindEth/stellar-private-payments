@@ -1,0 +1,62 @@
+{
+  "name": "bignumber.js",
+  "description": "A library for arbitrary-precision decimal and non-decimal arithmetic",
+  "version": "11.1.4",
+  "author": {
+    "name": "Michael Mclaughlin",
+    "email": "M8ch88l@gmail.com"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/MikeMcl/bignumber.js.git"
+  },
+  "keywords": [
+    "arbitrary",
+    "precision",
+    "arithmetic",
+    "big",
+    "number",
+    "decimal",
+    "float",
+    "biginteger",
+    "bigdecimal",
+    "bignumber",
+    "bigint",
+    "bignum"
+  ],
+  "main": "dist/bignumber.cjs",
+  "module": "dist/bignumber.mjs",
+  "browser": "dist/bignumber.js",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/bignumber.d.mts",
+        "default": "./dist/bignumber.mjs"
+      },
+      "require": {
+        "types": "./dist/bignumber.d.cts",
+        "default": "./dist/bignumber.cjs"
+      },
+      "browser": {
+        "types": "./dist/bignumber.d.ts",
+        "default": "./dist/bignumber.js"
+      }
+    },
+    "./package.json": "./package.json"
+  }, 
+  "scripts": {
+    "build": "node build.js",
+    "clean": "node -e \"require('fs').rmSync('dist',{ recursive: true, force: true })\"",
+    "test": "node test/test.js",
+    "typecheck:cjs": "tsc -p test/typescript/tsconfig.cjs.json",
+    "typecheck:esm": "tsc -p test/typescript/tsconfig.esm.json",
+    "typecheck:global": "tsc -p test/typescript/tsconfig.global.json",
+    "typecheck:api": "tsc -p test/typescript/tsconfig.api.json",
+    "typecheck": "npm run typecheck:cjs && npm run typecheck:esm && npm run typecheck:global && npm run typecheck:api"
+  },
+  "devDependencies": {
+    "typescript": "^5.1.6"
+  },
+  "files": ["dist"]
+}

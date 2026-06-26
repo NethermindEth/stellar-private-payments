@@ -1,0 +1,1 @@
+{"version":3,"file":"axios-client.js","sources":["../../../../src/http-client/axios-client.ts"],"sourcesContent":["import axios from \"axios\";\n\nexport const axiosClient = axios;\nexport const create = axios.create;\n"],"names":[],"mappings":";;AAEO,MAAM,WAAA,GAAc;AACpB,MAAM,SAAS,KAAA,CAAM;;;;"}

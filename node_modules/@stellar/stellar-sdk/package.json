@@ -1,0 +1,194 @@
+{
+  "name": "@stellar/stellar-sdk",
+  "version": "16.0.1",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "description": "A library for working with the Stellar network, including communication with the Horizon and Soroban RPC servers.",
+  "keywords": [
+    "stellar"
+  ],
+  "homepage": "https://github.com/stellar/js-stellar-sdk",
+  "bugs": {
+    "url": "https://github.com/stellar/js-stellar-sdk/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/stellar/js-stellar-sdk.git"
+  },
+  "license": "Apache-2.0",
+  "author": "Stellar Development Foundation <hello@stellar.org>",
+  "sideEffects": [
+    "./lib/esm/base/scval.js",
+    "./lib/cjs/base/scval.js"
+  ],
+  "main": "./lib/cjs/index.js",
+  "module": "./lib/esm/index.js",
+  "types": "./lib/esm/index.d.ts",
+  "files": [
+    "/types",
+    "/lib",
+    "/dist",
+    "/bin"
+  ],
+  "bin": {
+    "stellar-js": "./bin/stellar-js"
+  },
+  "exports": {
+    ".": {
+      "types": "./lib/esm/index.d.ts",
+      "import": "./lib/esm/index.js",
+      "require": "./lib/cjs/index.js",
+      "default": "./lib/esm/index.js"
+    },
+    "./contract": {
+      "types": "./lib/esm/contract/index.d.ts",
+      "import": "./lib/esm/contract/index.js",
+      "require": "./lib/cjs/contract/index.js",
+      "default": "./lib/esm/contract/index.js"
+    },
+    "./rpc": {
+      "types": "./lib/esm/rpc/index.d.ts",
+      "import": "./lib/esm/rpc/index.js",
+      "require": "./lib/cjs/rpc/index.js",
+      "default": "./lib/esm/rpc/index.js"
+    },
+    "./axios": {
+      "types": "./lib/axios/esm/index.d.ts",
+      "import": "./lib/axios/esm/index.js",
+      "require": "./lib/axios/cjs/index.js",
+      "default": "./lib/axios/esm/index.js"
+    },
+    "./axios/contract": {
+      "types": "./lib/axios/esm/contract/index.d.ts",
+      "import": "./lib/axios/esm/contract/index.js",
+      "require": "./lib/axios/cjs/contract/index.js",
+      "default": "./lib/axios/esm/contract/index.js"
+    },
+    "./axios/rpc": {
+      "types": "./lib/axios/esm/rpc/index.d.ts",
+      "import": "./lib/axios/esm/rpc/index.js",
+      "require": "./lib/axios/cjs/rpc/index.js",
+      "default": "./lib/axios/esm/rpc/index.js"
+    },
+    "./http-client/axios": {
+      "types": "./lib/esm/http-client/axios.d.ts",
+      "import": "./lib/esm/http-client/axios.js",
+      "require": "./lib/cjs/http-client/axios.js",
+      "default": "./lib/esm/http-client/axios.js"
+    }
+  },
+  "scripts": {
+    "setup": "git config blame.ignoreRevsFile .git-blame-ignore-revs",
+    "build": "cross-env NODE_ENV=development pnpm run _build",
+    "build:prod": "cross-env NODE_ENV=production pnpm run _build",
+    "build:lib": "rollup -c",
+    "build:lib:axios": "cross-env USE_AXIOS=true rollup -c",
+    "build:lib:all": "pnpm run build:lib && pnpm run build:lib:axios",
+    "build:types": "tsc -p tsconfig.json && mkdir -p lib/esm/base/generated && cp src/base/generated/*.d.ts lib/esm/base/generated/",
+    "build:types:axios": "tsc -p config/tsconfig.axios.json && mkdir -p lib/axios/esm/base/generated && cp src/base/generated/*.d.ts lib/axios/esm/base/generated/",
+    "build:types:all": "pnpm run build:types && pnpm run build:types:axios",
+    "postbuild:lib": "node config/write-module-type.js lib/cjs commonjs",
+    "postbuild:lib:axios": "node config/write-module-type.js lib/axios/cjs commonjs",
+    "clean": "rm -rf lib/ dist/ coverage/ jsdoc/ test/e2e/.soroban",
+    "clean:bundle-size": "rm -rf node_modules lib/ dist/ coverage/ jsdoc/ test/e2e/.soroban",
+    "docs": "pnpm docs:reference && pnpm docs:llms && pnpm docs:robots && pnpm docs:htaccess && pnpm docs:site",
+    "docs:reference": "tsx scripts/build-docs.ts",
+    "docs:llms": "tsx scripts/build-llms.ts",
+    "docs:robots": "tsx scripts/build-robots.ts",
+    "docs:htaccess": "tsx scripts/build-htaccess.ts",
+    "docs:site": "astro build && tsx scripts/build-md-siblings.ts",
+    "docs:dev": "astro dev",
+    "docs:preview": "astro preview",
+    "test": "pnpm run test:node && pnpm run test:node:axios && pnpm run test:integration && pnpm run test:browser",
+    "test:all": "pnpm run test:node && pnpm run test:node:axios && pnpm run test:integration && pnpm run test:browser && pnpm run test:e2e",
+    "test:e2e": "./test/e2e/initialize.sh && vitest run --config config/vitest.config.e2e.ts --coverage",
+    "test:node": "vitest run test/unit --config config/vitest.config.ts --coverage",
+    "test:node:axios": "cross-env TRANSPORT=axios vitest run test/unit --config config/vitest.config.ts",
+    "test:e2e:noeval": "NODE_OPTIONS=--disallow-code-generation-from-strings pnpm run test:e2e",
+    "test:integration": "vitest run test/integration --config config/vitest.config.ts --coverage",
+    "test:browser": "pnpm run build:lib && vitest run --config config/vitest.config.browser.ts test/unit --coverage",
+    "test:browser:axios": "pnpm run build:lib:axios && cross-env TRANSPORT=axios vitest run --config config/vitest.config.browser.ts test/unit",
+    "fmt": "pnpm run _prettier && eslint src/ --fix",
+    "preversion": "pnpm run clean && pnpm run _prettier && pnpm run build:prod && pnpm run test",
+    "prepare": "pnpm run build:prod && pnpm run setup && husky",
+    "download-sac-spec": "node scripts/download-sac-spec.js",
+    "_build": "pnpm run clean && pnpm run build:lib:all && pnpm run build:types:all",
+    "_prettier": "prettier --ignore-path config/.prettierignore --write './src/**/*.ts' './test/**/*.{js,ts}'"
+  },
+  "lint-staged": {
+    "**/*.{js,json,ts}": [
+      "pnpm run fmt"
+    ]
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "devDependencies": {
+    "@astrojs/sitemap": "^3.7.3",
+    "@astrojs/starlight": "^0.39.2",
+    "@eslint/compat": "^1.4.1",
+    "@eslint/js": "^9.39.4",
+    "@rollup/plugin-commonjs": "^29.0.2",
+    "@rollup/plugin-inject": "^5.0.5",
+    "@rollup/plugin-node-resolve": "^16.0.1",
+    "@rollup/plugin-replace": "^6.0.2",
+    "@rollup/plugin-terser": "^1.0.0",
+    "@types/detect-node": "^2.0.2",
+    "@types/json-schema": "^7.0.15",
+    "@types/node": "^22.19.17",
+    "@types/sha.js": "^2.4.4",
+    "@vitest/browser": "^4.1.7",
+    "@vitest/browser-playwright": "^4.1.7",
+    "@vitest/coverage-istanbul": "4.1.7",
+    "@vitest/coverage-v8": "^4.1.7",
+    "@vitest/ui": "^4.1.7",
+    "astro": "^6.4.2",
+    "browserify-zlib": "^0.2.0",
+    "cross-env": "^10.1.0",
+    "dotenv": "^17.4.2",
+    "esbuild": "^0.27.7",
+    "eslint": "^9.39.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-import-resolver-typescript": "^4.4.4",
+    "eslint-plugin-import": "^2.32.0",
+    "eslint-plugin-prettier": "^5.5.6",
+    "eslint-plugin-tsdoc": "^0.5.2",
+    "github-slugger": "2.0.0",
+    "globals": "^17.5.0",
+    "husky": "^9.1.7",
+    "jsdom": "^29.1.1",
+    "lint-staged": "^15.5.1",
+    "lodash": "^4.18.1",
+    "msw": "^2.14.6",
+    "playwright": "^1.60.0",
+    "prettier": "^3.8.3",
+    "rollup": "^4.60.4",
+    "rollup-plugin-esbuild": "^6.2.1",
+    "rollup-plugin-polyfill-node": "^0.13.0",
+    "tsx": "^4.22.3",
+    "typedoc": "^0.28.19",
+    "typescript": "5.9.3",
+    "typescript-eslint": "^8.60.0",
+    "vitest": "^4.1.7"
+  },
+  "dependencies": {
+    "@noble/ed25519": "^3.1.0",
+    "@noble/hashes": "^2.2.0",
+    "@stellar/js-xdr": "4.0.0",
+    "axios": "1.16.1",
+    "base32.js": "^0.1.0",
+    "bignumber.js": "^11.1.1",
+    "buffer": "^6.0.3",
+    "commander": "^14.0.3",
+    "eventsource": "^4.1.0",
+    "feaxios": "^0.0.23",
+    "smol-toml": "^1.6.1",
+    "uint8array-extras": "^1.5.0"
+  },
+  "overrides": {
+    "chalk": "5.3.0",
+    "strip-ansi": "7.1.0",
+    "color-convert": "2.0.1",
+    "color-name": "1.1.4"
+  }
+}

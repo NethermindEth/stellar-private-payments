@@ -1,0 +1,5 @@
+#!/usr/bin/env node
+
+// Entry point for the stellar CLI
+import { runCli } from "../lib/esm/cli/index.js";
+runCli();

@@ -118,10 +118,12 @@ stellar contract deploy \
 
 | Item | Value |
 |------|-------|
-| Contract ID | `CD3VMIEISSHPRQSQPGQZ2CVCQQT4YY2BI7JAFUFCUKEX45E2XQLXRKYO` |
+| Contract ID | `CCQ3T4VKYXBGJQ3BXPUCKOW4CDFQ5YR4UY4N54QY4EJOWC2NEYIJJZQI` |
 | Network | Testnet |
-| WASM Hash | `ab7688008ec5a48c4005ab4cf792aefe228ad457a938d804711f1d2e43daa8cf` |
-| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/testnet/account/CD3VMIEISSHPRQSQPGQZ2CVCQQT4YY2BI7JAFUFCUKEX45E2XQLXRKYO) |
+| WASM Hash | `65d72125698b9235648d36adf452353fcd065946feedce1b2af87d4bef9349b4` |
+| VK Hash | `6db91d793a6518cdbb85b68483240e4275073f56faf2cce681a64b16e2900afc` |
+| Explorer | [View on Stellar Expert](https://stellar.expert/explorer/testnet/account/CCQ3T4VKYXBGJQ3BXPUCKOW4CDFQ5YR4UY4N54QY4EJOWC2NEYIJJZQI) |
+| Initialize TX | `6d5b36e106f3fce40b5f73705e8f7c66633b82a4aa5fab04ed56e5d9d1ca0707` |
 
 ### CLI Usage
 
@@ -145,13 +147,29 @@ stellar contract invoke --id spm --network testnet -- get_result
 
 ### Test Results (June 2026)
 
-| Function | Status |
-|----------|--------|
-| Deploy Contract | ✅ Passed |
-| Initialize | ✅ Passed |
-| Submit Vote | ✅ Passed |
-| Resolve Market | ✅ Passed |
-| Close Market | ✅ Passed |
+| Function | Status | Evidence |
+|----------|--------|----------|
+| Deploy Contract | ✅ Passed | TX: `cbd603a097a845...` |
+| Initialize | ✅ Passed | TX: `6d5b36e106f3f...` |
+| Submit Vote | ⏳ Pending | Requires proper VK IC array format |
+| Resolve Market | ⏳ Pending | After vote submission |
+| Close Market | ⏳ Pending | After voting period |
+
+### Voting Scripts
+
+Located in `scripts/`:
+
+- `submit_vote.js` - Submit a vote with ZK proof
+- `generate_proof.js` - Generate ZK proof data
+- `vote_with_sdk.js` - SDK-based voting helper
+
+### Verification Key
+
+The Groth16 verification key is stored at:
+- `circuits/testdata/verification_key.json` - snarkjs format
+- VK Hash: `6db91d793a6518cdbb85b68483240e4275073f56faf2cce681a64b16e2900afc`
+
+The VK is passed at vote submission time for flexibility.
 
 ### Architecture
 

@@ -1,0 +1,72 @@
+import { CallBuilder } from './call_builder.js';
+
+class TradesCallBuilder extends CallBuilder {
+  constructor(serverUrl, httpClient) {
+    super(serverUrl, httpClient, "trades");
+    this.setPath("trades");
+  }
+  /**
+   * Filter trades for a specific asset pair (orderbook)
+   * @param base - asset
+   * @param counter - asset
+   * @returns current TradesCallBuilder instance
+   */
+  forAssetPair(base, counter) {
+    const baseIssuer = base.getIssuer();
+    if (!base.isNative() && baseIssuer !== void 0) {
+      this.url.searchParams.set("base_asset_type", base.getAssetType());
+      this.url.searchParams.set("base_asset_code", base.getCode());
+      this.url.searchParams.set("base_asset_issuer", baseIssuer);
+    } else {
+      this.url.searchParams.set("base_asset_type", "native");
+    }
+    const counterIssuer = counter.getIssuer();
+    if (!counter.isNative() && counterIssuer !== void 0) {
+      this.url.searchParams.set("counter_asset_type", counter.getAssetType());
+      this.url.searchParams.set("counter_asset_code", counter.getCode());
+      this.url.searchParams.set("counter_asset_issuer", counterIssuer);
+    } else {
+      this.url.searchParams.set("counter_asset_type", "native");
+    }
+    return this;
+  }
+  /**
+   * Filter trades for a specific offer
+   * @param offerId - ID of the offer
+   * @returns current TradesCallBuilder instance
+   */
+  forOffer(offerId) {
+    this.url.searchParams.set("offer_id", offerId);
+    return this;
+  }
+  /**
+   * Filter trades by a specific type.
+   * @param tradeType - the trade type to filter by.
+   * @returns current TradesCallBuilder instance.
+   */
+  forType(tradeType) {
+    this.url.searchParams.set("trade_type", tradeType);
+    return this;
+  }
+  /**
+   * Filter trades for a specific account
+   * @see {@link https://developers.stellar.org/docs/data/horizon/api-reference/resources/get-trades-by-account-id | Trades for Account}
+   * @param accountId - For example: `GBYTR4MC5JAX4ALGUBJD7EIKZVM7CUGWKXIUJMRSMK573XH2O7VAK3SR`
+   * @returns current TradesCallBuilder instance
+   */
+  forAccount(accountId) {
+    return this.forEndpoint("accounts", accountId);
+  }
+  /**
+   * Filter trades for a specific liquidity pool
+   * @see {@link https://developers.stellar.org/docs/data/horizon/api-reference/resources/retrieve-related-trades | Trades for Liquidity Pool}
+   * @param liquidityPoolId - For example: `3b476aff8a406a6ec3b61d5c038009cef85f2ddfaf616822dc4fec92845149b4`
+   * @returns current TradesCallBuilder instance
+   */
+  forLiquidityPool(liquidityPoolId) {
+    return this.forEndpoint("liquidity_pools", liquidityPoolId);
+  }
+}
+
+export { TradesCallBuilder };
+//# sourceMappingURL=trades_call_builder.js.map

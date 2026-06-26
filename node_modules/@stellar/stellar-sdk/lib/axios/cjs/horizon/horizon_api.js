@@ -1,0 +1,84 @@
+'use strict';
+
+exports.HorizonApi = void 0;
+((HorizonApi2) => {
+  ((LiquidityPoolType2) => {
+    LiquidityPoolType2["constantProduct"] = "constant_product";
+  })(HorizonApi2.LiquidityPoolType || (HorizonApi2.LiquidityPoolType = {}));
+  ((OperationResponseType2) => {
+    OperationResponseType2["createAccount"] = "create_account";
+    OperationResponseType2["payment"] = "payment";
+    OperationResponseType2["pathPayment"] = "path_payment_strict_receive";
+    OperationResponseType2["createPassiveOffer"] = "create_passive_sell_offer";
+    OperationResponseType2["manageOffer"] = "manage_sell_offer";
+    OperationResponseType2["setOptions"] = "set_options";
+    OperationResponseType2["changeTrust"] = "change_trust";
+    OperationResponseType2["allowTrust"] = "allow_trust";
+    OperationResponseType2["accountMerge"] = "account_merge";
+    OperationResponseType2["inflation"] = "inflation";
+    OperationResponseType2["manageData"] = "manage_data";
+    OperationResponseType2["bumpSequence"] = "bump_sequence";
+    OperationResponseType2["manageBuyOffer"] = "manage_buy_offer";
+    OperationResponseType2["pathPaymentStrictSend"] = "path_payment_strict_send";
+    OperationResponseType2["createClaimableBalance"] = "create_claimable_balance";
+    OperationResponseType2["claimClaimableBalance"] = "claim_claimable_balance";
+    OperationResponseType2["beginSponsoringFutureReserves"] = "begin_sponsoring_future_reserves";
+    OperationResponseType2["endSponsoringFutureReserves"] = "end_sponsoring_future_reserves";
+    OperationResponseType2["revokeSponsorship"] = "revoke_sponsorship";
+    OperationResponseType2["clawback"] = "clawback";
+    OperationResponseType2["clawbackClaimableBalance"] = "clawback_claimable_balance";
+    OperationResponseType2["setTrustLineFlags"] = "set_trust_line_flags";
+    OperationResponseType2["liquidityPoolDeposit"] = "liquidity_pool_deposit";
+    OperationResponseType2["liquidityPoolWithdraw"] = "liquidity_pool_withdraw";
+    OperationResponseType2["invokeHostFunction"] = "invoke_host_function";
+    OperationResponseType2["bumpFootprintExpiration"] = "bump_footprint_expiration";
+    OperationResponseType2["restoreFootprint"] = "restore_footprint";
+  })(HorizonApi2.OperationResponseType || (HorizonApi2.OperationResponseType = {}));
+  ((OperationResponseTypeI2) => {
+    OperationResponseTypeI2[OperationResponseTypeI2["createAccount"] = 0] = "createAccount";
+    OperationResponseTypeI2[OperationResponseTypeI2["payment"] = 1] = "payment";
+    OperationResponseTypeI2[OperationResponseTypeI2["pathPayment"] = 2] = "pathPayment";
+    OperationResponseTypeI2[OperationResponseTypeI2["createPassiveOffer"] = 3] = "createPassiveOffer";
+    OperationResponseTypeI2[OperationResponseTypeI2["manageOffer"] = 4] = "manageOffer";
+    OperationResponseTypeI2[OperationResponseTypeI2["setOptions"] = 5] = "setOptions";
+    OperationResponseTypeI2[OperationResponseTypeI2["changeTrust"] = 6] = "changeTrust";
+    OperationResponseTypeI2[OperationResponseTypeI2["allowTrust"] = 7] = "allowTrust";
+    OperationResponseTypeI2[OperationResponseTypeI2["accountMerge"] = 8] = "accountMerge";
+    OperationResponseTypeI2[OperationResponseTypeI2["inflation"] = 9] = "inflation";
+    OperationResponseTypeI2[OperationResponseTypeI2["manageData"] = 10] = "manageData";
+    OperationResponseTypeI2[OperationResponseTypeI2["bumpSequence"] = 11] = "bumpSequence";
+    OperationResponseTypeI2[OperationResponseTypeI2["manageBuyOffer"] = 12] = "manageBuyOffer";
+    OperationResponseTypeI2[OperationResponseTypeI2["pathPaymentStrictSend"] = 13] = "pathPaymentStrictSend";
+    OperationResponseTypeI2[OperationResponseTypeI2["createClaimableBalance"] = 14] = "createClaimableBalance";
+    OperationResponseTypeI2[OperationResponseTypeI2["claimClaimableBalance"] = 15] = "claimClaimableBalance";
+    OperationResponseTypeI2[OperationResponseTypeI2["beginSponsoringFutureReserves"] = 16] = "beginSponsoringFutureReserves";
+    OperationResponseTypeI2[OperationResponseTypeI2["endSponsoringFutureReserves"] = 17] = "endSponsoringFutureReserves";
+    OperationResponseTypeI2[OperationResponseTypeI2["revokeSponsorship"] = 18] = "revokeSponsorship";
+    OperationResponseTypeI2[OperationResponseTypeI2["clawback"] = 19] = "clawback";
+    OperationResponseTypeI2[OperationResponseTypeI2["clawbackClaimableBalance"] = 20] = "clawbackClaimableBalance";
+    OperationResponseTypeI2[OperationResponseTypeI2["setTrustLineFlags"] = 21] = "setTrustLineFlags";
+    OperationResponseTypeI2[OperationResponseTypeI2["liquidityPoolDeposit"] = 22] = "liquidityPoolDeposit";
+    OperationResponseTypeI2[OperationResponseTypeI2["liquidityPoolWithdraw"] = 23] = "liquidityPoolWithdraw";
+    OperationResponseTypeI2[OperationResponseTypeI2["invokeHostFunction"] = 24] = "invokeHostFunction";
+    OperationResponseTypeI2[OperationResponseTypeI2["bumpFootprintExpiration"] = 25] = "bumpFootprintExpiration";
+    OperationResponseTypeI2[OperationResponseTypeI2["restoreFootprint"] = 26] = "restoreFootprint";
+  })(HorizonApi2.OperationResponseTypeI || (HorizonApi2.OperationResponseTypeI = {}));
+  ((TransactionFailedResultCodes2) => {
+    TransactionFailedResultCodes2["TX_FAILED"] = "tx_failed";
+    TransactionFailedResultCodes2["TX_BAD_SEQ"] = "tx_bad_seq";
+    TransactionFailedResultCodes2["TX_BAD_AUTH"] = "tx_bad_auth";
+    TransactionFailedResultCodes2["TX_BAD_AUTH_EXTRA"] = "tx_bad_auth_extra";
+    TransactionFailedResultCodes2["TX_FEE_BUMP_INNER_SUCCESS"] = "tx_fee_bump_inner_success";
+    TransactionFailedResultCodes2["TX_FEE_BUMP_INNER_FAILED"] = "tx_fee_bump_inner_failed";
+    TransactionFailedResultCodes2["TX_NOT_SUPPORTED"] = "tx_not_supported";
+    TransactionFailedResultCodes2["TX_SUCCESS"] = "tx_success";
+    TransactionFailedResultCodes2["TX_TOO_EARLY"] = "tx_too_early";
+    TransactionFailedResultCodes2["TX_TOO_LATE"] = "tx_too_late";
+    TransactionFailedResultCodes2["TX_MISSING_OPERATION"] = "tx_missing_operation";
+    TransactionFailedResultCodes2["TX_INSUFFICIENT_BALANCE"] = "tx_insufficient_balance";
+    TransactionFailedResultCodes2["TX_NO_SOURCE_ACCOUNT"] = "tx_no_source_account";
+    TransactionFailedResultCodes2["TX_INSUFFICIENT_FEE"] = "tx_insufficient_fee";
+    TransactionFailedResultCodes2["TX_INTERNAL_ERROR"] = "tx_internal_error";
+  })(HorizonApi2.TransactionFailedResultCodes || (HorizonApi2.TransactionFailedResultCodes = {}));
+})(exports.HorizonApi || (exports.HorizonApi = {}));
+//# sourceMappingURL=horizon_api.js.map
