@@ -70,101 +70,6 @@ struct JsonRpcErrorResponse {
     message: String,
 }
 
-fn normalize_rpc_base_url(base_url: &str) -> Result<String, Error> {
-    let uri = base_url.parse::<Uri>()?;
-    let mut parts = uri.into_parts();
-
-    if let (Some(scheme), Some(authority)) = (&parts.scheme, &parts.authority)
-        && authority.port().is_none()
-    {
-        let port = match scheme.as_str() {
-            "http" => Some(80),
-            "https" => Some(443),
-            _ => None,
-        };
-        if let Some(port) = port {
-            let host = authority.host();
-            parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
-        }
-    }
-
-    Ok(Uri::from_parts(parts)?.to_string())
-}
-
-fn parse_jsonrpc_result<R>(resp: JsonRpcResponse<R>, method: &'static str) -> Result<R, Error> {
-    if let Some(err) = resp.error {
-        return Err(Error::JsonRpc {
-            code: err.code,
-            message: err.message,
-        });
-    }
-
-    resp.result
-        .ok_or_else(|| Error::NotFound("RPC Result", method.to_string()))
-}
-
-fn build_contract_data_key_specs<'a>(
-    contract_id: &str,
-    enum_keys: &[&'a str],
-    valued_keys: &[(&'a str, u32)],
-) -> Result<Vec<(LedgerKey, &'a str, bool)>, Error> {
-    let contract =
-        stellar_strkey::Contract::from_str(contract_id).map_err(Error::InvalidAddress)?;
-
-    let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
-
-    let mut out = Vec::with_capacity(
-        1usize
-            .saturating_add(enum_keys.len())
-            .saturating_add(valued_keys.len()),
-    );
-
-    out.push((
-        LedgerKey::ContractData(xdr::LedgerKeyContractData {
-            contract: contract_address.clone(),
-            key: xdr::ScVal::LedgerKeyContractInstance,
-            durability: xdr::ContractDataDurability::Persistent,
-        }),
-        "__contract_instance",
-        false,
-    ));
-
-    for variant in enum_keys {
-        let symbol =
-            xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
-        let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
-
-        out.push((
-            LedgerKey::ContractData(xdr::LedgerKeyContractData {
-                contract: contract_address.clone(),
-                key: xdr::ScVal::Vec(Some(sc_vec)),
-                durability: xdr::ContractDataDurability::Persistent,
-            }),
-            *variant,
-            true,
-        ));
-    }
-
-    for (variant, value) in valued_keys {
-        let symbol =
-            xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
-        let sc_vec =
-            xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
-
-        out.push((
-            LedgerKey::ContractData(xdr::LedgerKeyContractData {
-                contract: contract_address.clone(),
-                key: xdr::ScVal::Vec(Some(sc_vec)),
-                durability: xdr::ContractDataDurability::Persistent,
-            }),
-            *variant,
-            true,
-        ));
-    }
-
-    Ok(out)
-}
-
 #[derive(serde::Deserialize, serde::Serialize, Debug, Clone)]
 pub struct GetLatestLedgerResponse {
     pub id: String,
@@ -278,9 +183,6 @@ pub struct ContractDataBulkRequest<'a> {
     pub valued_keys: Vec<(&'a str, u32)>,
 }
 
-/// Bulk contract reads keyed by contract ID and logical key name.
-pub type ContractDataBulkState = HashMap<String, HashMap<String, xdr::ScVal>>;
-
 #[derive(Default, Deserialize, Serialize, Debug, Clone)]
 pub struct SimulateHostFunctionResult {
     #[serde(deserialize_with = "deserialize_default_from_null", default)]
@@ -329,10 +231,6 @@ pub struct GetTransactionResponse {
     pub result_xdr: Option<String>,
 }
 
-const DEFAULT_TIMEOUT_SECS: u32 = 30;
-// https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries
-const MAX_LEDGER_KEYS_PER_REQUEST: usize = 200;
-
 #[derive(Debug, Clone)]
 pub struct Client {
     base_url: String,
@@ -342,14 +240,36 @@ pub struct Client {
 }
 
 impl Client {
+    const DEFAULT_TIMEOUT_SECS: u32 = 30;
+    // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getLedgerEntries
+    const MAX_LEDGER_KEYS_PER_REQUEST: usize = 200;
+
     /// Creates a client with the default 30-second timeout.
     pub fn new(base_url: &str) -> Result<Self, Error> {
-        Self::with_timeout(base_url, DEFAULT_TIMEOUT_SECS)
+        Self::with_timeout(base_url, Self::DEFAULT_TIMEOUT_SECS)
     }
 
     /// Creates a client with a custom timeout in seconds.
     pub fn with_timeout(base_url: &str, timeout_secs: u32) -> Result<Self, Error> {
-        let base_url = normalize_rpc_base_url(base_url)?;
+        let uri = base_url.parse::<Uri>()?;
+        let mut parts = uri.into_parts();
+
+        if let (Some(scheme), Some(authority)) = (&parts.scheme, &parts.authority)
+            && authority.port().is_none()
+        {
+            let port = match scheme.as_str() {
+                "http" => Some(80),
+                "https" => Some(443),
+                _ => None,
+            };
+            if let Some(port) = port {
+                let host = authority.host();
+                parts.authority = Some(Authority::from_str(&format!("{host}:{port}"))?);
+            }
+        }
+
+        let uri = Uri::from_parts(parts)?;
+        let base_url = uri.to_string();
 
         #[cfg(not(target_arch = "wasm32"))]
         let http_client = reqwest::Client::builder()
@@ -394,7 +314,15 @@ impl Client {
         #[cfg(not(target_arch = "wasm32"))]
         let resp = request.await?;
 
-        parse_jsonrpc_result(resp, method)
+        if let Some(err) = resp.error {
+            return Err(Error::JsonRpc {
+                code: err.code,
+                message: err.message,
+            });
+        }
+
+        resp.result
+            .ok_or_else(|| Error::NotFound("RPC Result", method.to_string()))
     }
 
     pub async fn get_contract_events(
@@ -501,10 +429,73 @@ impl Client {
         self.rpc_call("getLedgerEntries", params).await
     }
 
+    fn build_contract_data_key_specs<'a>(
+        &self,
+        contract_id: &str,
+        enum_keys: &[&'a str],
+        valued_keys: &[(&'a str, u32)],
+    ) -> Result<Vec<(LedgerKey, &'a str, bool)>, Error> {
+        let contract =
+            stellar_strkey::Contract::from_str(contract_id).map_err(Error::InvalidAddress)?;
+
+        let contract_address = xdr::ScAddress::Contract(ContractId(xdr::Hash(contract.0)));
+
+        let mut out = Vec::with_capacity(
+            1usize
+                .saturating_add(enum_keys.len())
+                .saturating_add(valued_keys.len()),
+        );
+
+        out.push((
+            LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                contract: contract_address.clone(),
+                key: xdr::ScVal::LedgerKeyContractInstance,
+                durability: xdr::ContractDataDurability::Persistent,
+            }),
+            "__contract_instance",
+            false,
+        ));
+
+        for variant in enum_keys {
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec = xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol)])?;
+
+            out.push((
+                LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                    contract: contract_address.clone(),
+                    key: xdr::ScVal::Vec(Some(sc_vec)),
+                    durability: xdr::ContractDataDurability::Persistent,
+                }),
+                *variant,
+                true,
+            ));
+        }
+
+        for (variant, value) in valued_keys {
+            let symbol =
+                xdr::ScSymbol::try_from(*variant).map_err(|_| Error::Xdr(XdrError::Invalid))?;
+            let sc_vec =
+                xdr::ScVec::try_from(vec![xdr::ScVal::Symbol(symbol), xdr::ScVal::U32(*value)])?;
+
+            out.push((
+                LedgerKey::ContractData(xdr::LedgerKeyContractData {
+                    contract: contract_address.clone(),
+                    key: xdr::ScVal::Vec(Some(sc_vec)),
+                    durability: xdr::ContractDataDurability::Persistent,
+                }),
+                *variant,
+                true,
+            ));
+        }
+
+        Ok(out)
+    }
+
     pub async fn get_contract_data_bulk(
         &self,
         requests: &[ContractDataBulkRequest<'_>],
-    ) -> Result<(ContractDataBulkState, u32), Error> {
+    ) -> Result<(HashMap<String, HashMap<String, xdr::ScVal>>, u32), Error> {
         #[derive(Clone)]
         struct KeyMeta {
             contract_id: String,
@@ -516,7 +507,7 @@ impl Client {
         let mut key_meta_by_xdr: HashMap<String, KeyMeta> = HashMap::new();
 
         for request in requests {
-            let specs = build_contract_data_key_specs(
+            let specs = self.build_contract_data_key_specs(
                 request.contract_id,
                 request.enum_keys.as_slice(),
                 request.valued_keys.as_slice(),
@@ -536,7 +527,7 @@ impl Client {
         }
 
         if all_keys.is_empty() {
-            return Ok((ContractDataBulkState::new(), 0));
+            return Ok((HashMap::new(), 0));
         }
 
         let mut expected_required: HashMap<String, BTreeSet<String>> = HashMap::new();
@@ -550,10 +541,10 @@ impl Client {
         }
 
         let mut latest_ledger = u32::MAX;
-        let mut result: ContractDataBulkState = HashMap::new();
+        let mut result: HashMap<String, HashMap<String, xdr::ScVal>> = HashMap::new();
         let mut actual_required: HashMap<String, BTreeSet<String>> = HashMap::new();
 
-        for chunk in all_keys.chunks(MAX_LEDGER_KEYS_PER_REQUEST) {
+        for chunk in all_keys.chunks(Self::MAX_LEDGER_KEYS_PER_REQUEST) {
             let response = self.get_ledger_entries(chunk).await?;
             let chunk_latest_ledger: u32 = response
                 .latest_ledger
