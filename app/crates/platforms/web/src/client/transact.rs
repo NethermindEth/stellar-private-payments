@@ -85,7 +85,34 @@ impl Pool {
                 }
             };
 
+            let simulate_message = if total > 1 {
+                format!("Simulating step {current}/{total}…")
+            } else {
+                "Simulating…".to_string()
+            };
+            emit_progress(
+                on_status,
+                flow,
+                "simulate",
+                simulate_message,
+                Some(current),
+                Some(total),
+            );
             pool.simulate(&mut prepared).await.map_err(pool_err)?;
+
+            let sign_message = if total > 1 {
+                format!("Signing step {current}/{total}…")
+            } else {
+                "Signing…".to_string()
+            };
+            emit_progress(
+                on_status,
+                flow,
+                "sign",
+                sign_message,
+                Some(current),
+                Some(total),
+            );
             let signed = pool.sign(&prepared).await.map_err(pool_err)?;
 
             let submit_message = if total > 1 {
