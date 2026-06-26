@@ -11,9 +11,9 @@ use crate::{
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
-use std::{cell::RefCell, rc::Rc, str::FromStr};
+use std::{rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
-    PoolError, PrivatePool, PrivatePoolConfig, Prover, ProverArtifacts, Signer,
+    PoolError,
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
     tx::{encryption::KEY_DERIVATION_MESSAGE, flows::N_OUTPUTS},
     types::{
@@ -27,8 +27,6 @@ use wasm_bindgen::{JsCast, prelude::*};
 mod pool;
 mod transact;
 
-use pool::PoolSession;
-
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 
@@ -41,13 +39,6 @@ pub(crate) fn pool_err(error: PoolError) -> JsError {
             JsError::new("indexer sync in progress; try again shortly")
         }
         _ => JsError::new(&error.to_string()),
-    }
-}
-
-fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<JsValue, JsError> {
-    match result {
-        None => Ok(JsValue::NULL),
-        Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
     }
 }
 
@@ -96,8 +87,6 @@ pub struct WebClient {
     storage: StorageBridge,
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
-    #[wasm_bindgen(skip)]
-    pool: Rc<RefCell<Option<PoolSession>>>,
 }
 
 impl Clone for WebClient {
@@ -107,7 +96,6 @@ impl Clone for WebClient {
             storage: self.storage.clone(),
             prover_bridge: self.prover_bridge.clone(),
             fetcher: self.fetcher.clone(),
-            pool: self.pool.clone(),
         }
     }
 }
@@ -127,64 +115,7 @@ impl WebClient {
                     .spawn("./js/prover-worker.js"),
             ),
             fetcher: Rc::new(StateFetcher::new(rpc_url, (*contract_config).clone())?),
-            pool: Rc::new(RefCell::new(None)),
         })
-    }
-
-    /// Drop the open pool (e.g. wallet disconnect or account switch).
-    pub fn close_pool(&self) {
-        *self.pool.borrow_mut() = None;
-    }
-
-    pub(super) async fn ensure_pool(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        network_passphrase: String,
-        on_status: Option<Function>,
-    ) -> Result<Rc<PrivatePool<StorageBridge>>, JsError> {
-        if let Some(session) = self.pool.borrow().as_ref()
-            && session.matches(&pool_contract_id, &user_address, &network_passphrase)
-        {
-            return Ok(session.private_pool());
-        }
-
-        emit_progress(
-            &on_status,
-            "pool",
-            "load_prover",
-            "Starting prover worker…",
-            None,
-            None,
-        );
-        self.ping_prover()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
-
-        let contract_config: ContractConfig = self.fetcher.contract_config().clone();
-        let config = PrivatePoolConfig {
-            rpc_url: self.rpc_url.clone(),
-            contract_config,
-            pool_contract_id: pool_contract_id.clone(),
-            user_address: user_address.clone(),
-            storage_path: String::new(),
-            prover_artifacts: ProverArtifacts::empty(),
-        };
-        let signer: Box<dyn Signer> =
-            Self::wallet_signer(network_passphrase.clone(), user_address.clone());
-        let prover: Box<dyn Prover> = Box::new(self.prover_bridge());
-        let private_pool =
-            Rc::new(PrivatePool::init(config, self.storage(), signer, prover).map_err(pool_err)?);
-
-        {
-            *self.pool.borrow_mut() = Some(PoolSession::new(
-                pool_contract_id,
-                user_address,
-                network_passphrase,
-                Rc::clone(&private_pool),
-            ));
-        }
-        Ok(private_pool)
     }
 
     pub(super) async fn confirm_with_progress(
@@ -233,13 +164,6 @@ impl WebClient {
 
     pub(crate) fn prover_bridge(&self) -> ProverBridge {
         self.prover_bridge.clone()
-    }
-
-    fn wallet_signer(network_passphrase: String, user_address: String) -> Box<dyn Signer> {
-        Box::new(crate::signer::WalletSigner::new(
-            network_passphrase,
-            user_address,
-        ))
     }
 
     pub(super) async fn submit_tx(
@@ -315,11 +239,6 @@ impl WebClient {
         Ok(serde_wasm_bindgen::to_value(
             self.fetcher.contract_config(),
         )?)
-    }
-
-    #[wasm_bindgen(js_name = closePool)]
-    pub fn close_pool_wasm(&self) {
-        self.close_pool();
     }
 
     #[wasm_bindgen(js_name = registerPublicKeys)]
@@ -476,140 +395,6 @@ impl WebClient {
             }
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
-    }
-
-    #[wasm_bindgen(js_name = executeDeposit)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn execute_deposit(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        amount: BigInt,
-        output_amounts: Array,
-        network_passphrase: String,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        let result = self
-            .execute_deposit_inner(
-                pool_contract_id,
-                user_address,
-                amount,
-                output_amounts,
-                network_passphrase,
-                on_status,
-            )
-            .await?;
-        execute_hashes_to_js(result)
-    }
-
-    #[wasm_bindgen(js_name = plan)]
-    pub async fn plan(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        amount: BigInt,
-        network_passphrase: String,
-    ) -> Result<JsValue, JsError> {
-        let preview = self
-            .plan_inner(pool_contract_id, user_address, amount, network_passphrase)
-            .await?;
-        Ok(serde_wasm_bindgen::to_value(&preview)?)
-    }
-
-    #[wasm_bindgen(js_name = executeTransfer)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn execute_transfer(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        amount: BigInt,
-        recipient_note_key_hex: String,
-        recipient_enc_key_hex: String,
-        network_passphrase: String,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        use tx_planner::SpendTarget;
-
-        let recipient_note = NotePublicKey::parse(&recipient_note_key_hex)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let recipient_enc = EncryptionPublicKey::parse(&recipient_enc_key_hex)
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let target = SpendTarget::transfer(recipient_note, recipient_enc);
-
-        let result = self
-            .execute_spend_inner(
-                pool_contract_id,
-                user_address,
-                amount,
-                target,
-                "transfer",
-                network_passphrase,
-                on_status,
-            )
-            .await?;
-        execute_hashes_to_js(result)
-    }
-
-    #[wasm_bindgen(js_name = executeWithdraw)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn execute_withdraw(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        withdraw_recipient: String,
-        amount: BigInt,
-        network_passphrase: String,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        use tx_planner::SpendTarget;
-
-        let target = SpendTarget::withdraw(withdraw_recipient);
-
-        let result = self
-            .execute_spend_inner(
-                pool_contract_id,
-                user_address,
-                amount,
-                target,
-                "withdraw",
-                network_passphrase,
-                on_status,
-            )
-            .await?;
-        execute_hashes_to_js(result)
-    }
-
-    #[wasm_bindgen(js_name = executeTransact)]
-    #[allow(clippy::too_many_arguments)]
-    pub async fn execute_transact_wasm(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        ext_recipient: String,
-        ext_amount: BigInt,
-        input_note_ids: Array,
-        output_amounts: Array,
-        out_recipient_note_keys_hex: Array,
-        out_recipient_enc_keys_hex: Array,
-        network_passphrase: String,
-        on_status: Option<Function>,
-    ) -> Result<JsValue, JsError> {
-        let result = self
-            .execute_transact_inner(
-                pool_contract_id,
-                user_address,
-                ext_recipient,
-                ext_amount,
-                input_note_ids,
-                output_amounts,
-                out_recipient_note_keys_hex,
-                out_recipient_enc_keys_hex,
-                network_passphrase,
-                on_status,
-                "transact",
-            )
-            .await?;
-        execute_hashes_to_js(result)
     }
 
     #[wasm_bindgen(js_name = generateSelectiveDisclosure)]
@@ -838,7 +623,7 @@ impl WebClient {
     }
 }
 
-fn parse_field_bigint_numeric(b: &BigInt) -> Result<Field, JsError> {
+pub(crate) fn parse_field_bigint_numeric(b: &BigInt) -> Result<Field, JsError> {
     let hex = bigint_to_string_radix(b, 16)?;
     if hex.starts_with('-') {
         return Err(JsError::new("field BigInt must be non-negative"));
@@ -859,21 +644,21 @@ fn bigint_to_string_radix(b: &BigInt, radix: u8) -> Result<String, JsError> {
         .ok_or_else(|| JsError::new("BigInt.toString() did not return a string"))
 }
 
-fn parse_ext_amount_decimal(b: &BigInt) -> Result<ExtAmount, JsError> {
+pub(crate) fn parse_ext_amount_decimal(b: &BigInt) -> Result<ExtAmount, JsError> {
     let s = bigint_to_string_radix(b, 10)?;
     ExtAmount::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
 }
 
-fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
+pub(crate) fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
     let s = bigint_to_string_radix(b, 10)?;
     NoteAmount::from_str(&s).map_err(|e| JsError::new(&e.to_string()))
 }
 
-fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
+pub(crate) fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
     Field::from_str(s).map_err(|e| JsError::new(&e.to_string()))
 }
 
-fn parse_input_note_ids(
+pub(crate) fn parse_input_note_ids(
     input_note_ids: &Array,
     min_len: u32,
     max_len: u32,
@@ -895,7 +680,9 @@ fn parse_input_note_ids(
     Ok(input_commitments)
 }
 
-fn parse_output_amounts(output_amounts: &Array) -> Result<[NoteAmount; N_OUTPUTS], JsError> {
+pub(crate) fn parse_output_amounts(
+    output_amounts: &Array,
+) -> Result<[NoteAmount; N_OUTPUTS], JsError> {
     let expected_outputs =
         u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
     if output_amounts.length() != expected_outputs {
@@ -921,7 +708,7 @@ type OutputRecipientKeys = (
     [Option<EncryptionPublicKey>; N_OUTPUTS],
 );
 
-fn parse_output_recipient_keys(
+pub(crate) fn parse_output_recipient_keys(
     out_recipient_note_keys_hex: &Array,
     out_recipient_enc_keys_hex: &Array,
 ) -> Result<OutputRecipientKeys, JsError> {

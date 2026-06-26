@@ -18,6 +18,7 @@ export const App = {
             encryptionPublicKey: null,
         },
         notes: [],
+        pool: null,
         activeTab: 'deposit',
         // Optional context for filling recipient keys from the address book.
         // null | { kind: 'transfer' } | { kind: 'transact-output', outputIndex: number }

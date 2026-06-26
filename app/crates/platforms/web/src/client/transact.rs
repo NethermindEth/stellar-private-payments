@@ -1,23 +1,20 @@
-//! Pool transaction proving and execution (`executeDeposit`, `executeTransact`,
-//! `executeTransfer`, `executeWithdraw`).
+//! Pool transaction proving and execution (`deposit`, `transact`, `transfer`,
+//! `withdraw`).
 
 use super::{
-    WebClient, emit_progress, parse_ext_amount_decimal, parse_input_note_ids,
-    parse_note_amount_decimal, parse_output_amounts, parse_output_recipient_keys, pool_err,
+    emit_progress, parse_ext_amount_decimal, parse_input_note_ids, parse_note_amount_decimal,
+    parse_output_amounts, parse_output_recipient_keys, pool::Pool, pool_err,
 };
-use crate::protocol::{StorageWorkerRequest, StorageWorkerResponse};
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
-    PoolError, PreparedTransactionPlan, PrivatePool, TransactionResult, TransferRecipient,
+    PoolError, PreparedTransactionPlan, Storage, TransferRecipient,
     tx::flows::N_OUTPUTS,
     types::{AspMembershipSync, EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey},
 };
 use tx_planner::{SpendTarget, Transact};
-use wasm_bindgen::JsError;
-
-use crate::workers::storage::StorageBridge;
+use wasm_bindgen::{JsError, prelude::*};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -25,18 +22,21 @@ pub struct SpendPlanPreview {
     pub step_count: u32,
 }
 
-fn tx_hashes(results: Vec<TransactionResult>) -> Vec<String> {
-    results.into_iter().map(|r| r.tx_hash).collect()
+fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<wasm_bindgen::JsValue, JsError> {
+    match result {
+        None => Ok(wasm_bindgen::JsValue::NULL),
+        Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
+    }
 }
 
-impl WebClient {
+impl Pool {
     async fn execute_plan(
         &self,
-        pool: &PrivatePool<StorageBridge>,
         plan: &mut PreparedTransactionPlan,
         flow: &'static str,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
+        let pool = self.inner();
         let on_status = &on_status;
         let total = plan.tx_count();
         let mut hashes = Vec::new();
@@ -102,7 +102,7 @@ impl WebClient {
                 Some(total),
             );
             let hash = pool.submit(signed).await.map_err(pool_err)?;
-            self.confirm_with_progress(&hash, flow, on_status).await?;
+            pool.confirm(&hash).await.map_err(pool_err)?;
             hashes.push(hash);
         }
 
@@ -110,15 +110,16 @@ impl WebClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn execute_deposit_inner(
+    async fn deposit_inner(
         &self,
-        pool_contract_id: String,
-        user_address: String,
         amount: BigInt,
         output_amounts: Array,
-        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
+        let pool = self.inner();
+        let pool_contract_id = pool.config().pool_contract_id.clone();
+        let user_address = pool.config().user_address.clone();
+
         let ext_amount = parse_ext_amount_decimal(&amount)?;
         if ext_amount <= ExtAmount::ZERO {
             return Err(JsError::new("amount must be > 0 for deposit"));
@@ -127,81 +128,40 @@ impl WebClient {
             .map_err(|_| JsError::new("deposit amount exceeds note amount range"))?;
         let out_amounts = parse_output_amounts(&output_amounts)?;
         if out_amounts != [note_amount, NoteAmount::ZERO] {
-            let keys = match self
-                .storage_request(StorageWorkerRequest::UserKeys(user_address.clone()), 1_000)
-                .await?
-            {
-                StorageWorkerResponse::UserKeys(keys) => {
-                    keys.ok_or_else(|| JsError::new("user keys not found in worker storage"))?
-                }
-                other => {
-                    return Err(JsError::new(&format!(
-                        "Unexpected storage response loading user keys: {:?}",
-                        other
-                    )));
-                }
-            };
-            let note_pk: NotePublicKey = keys.note_keypair.public;
-            let enc_pk: EncryptionPublicKey = keys.encryption_keypair.public;
+            let (note_pk, enc_pk) = pool
+                .storage_backend()
+                .user_public_keys(&user_address)
+                .await
+                .map_err(pool_err)?;
             let step = Transact::new(
                 Vec::new(),
                 out_amounts,
                 ext_amount,
-                pool_contract_id.clone(),
+                pool_contract_id,
                 [Some(note_pk.clone()), Some(note_pk)],
                 [Some(enc_pk.clone()), Some(enc_pk)],
             );
-            let pool = self
-                .ensure_pool(
-                    pool_contract_id,
-                    user_address,
-                    network_passphrase,
-                    on_status.clone(),
-                )
-                .await?;
             let mut plan = pool.prepare_transact(step);
-            return self
-                .execute_plan(&pool, &mut plan, "deposit", on_status)
-                .await;
+            return self.execute_plan(&mut plan, "deposit", on_status).await;
         }
 
-        let pool = self
-            .ensure_pool(
-                pool_contract_id,
-                user_address,
-                network_passphrase,
-                on_status.clone(),
-            )
-            .await?;
         let mut plan = pool.prepare_deposit(note_amount).map_err(pool_err)?;
-        self.execute_plan(&pool, &mut plan, "deposit", on_status)
-            .await
+        self.execute_plan(&mut plan, "deposit", on_status).await
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub(super) async fn execute_spend_inner(
+    async fn spend_inner(
         &self,
-        pool_contract_id: String,
-        user_address: String,
         amount: BigInt,
         target: SpendTarget,
         flow: &'static str,
-        network_passphrase: String,
         on_status: Option<Function>,
     ) -> Result<Option<Vec<String>>, JsError> {
+        let pool = self.inner();
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        let pool = self
-            .ensure_pool(
-                pool_contract_id,
-                user_address,
-                network_passphrase,
-                on_status.clone(),
-            )
-            .await?;
         let wallet = pool.spendable_notes().await.map_err(pool_err)?;
         let mut plan = match &target {
             SpendTarget::Transfer {
@@ -220,24 +180,16 @@ impl WebClient {
         }
         .map_err(pool_err)?;
 
-        self.execute_plan(&pool, &mut plan, flow, on_status).await
+        self.execute_plan(&mut plan, flow, on_status).await
     }
 
-    pub(super) async fn plan_inner(
-        &self,
-        pool_contract_id: String,
-        user_address: String,
-        amount: BigInt,
-        network_passphrase: String,
-    ) -> Result<SpendPlanPreview, JsError> {
+    async fn plan_inner(&self, amount: BigInt) -> Result<SpendPlanPreview, JsError> {
+        let pool = self.inner();
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
             return Err(JsError::new("amount must be > 0"));
         }
 
-        let pool = self
-            .ensure_pool(pool_contract_id, user_address, network_passphrase, None)
-            .await?;
         let estimate = pool.plan(amount).await.map_err(pool_err)?;
         Ok(SpendPlanPreview {
             step_count: estimate.tx_count,
@@ -245,20 +197,18 @@ impl WebClient {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(super) async fn execute_transact_inner(
+    async fn transact_inner(
         &self,
-        pool_contract_id: String,
-        user_address: String,
         ext_recipient: String,
         ext_amount: BigInt,
         input_note_ids: Array,
         output_amounts: Array,
         out_recipient_note_keys_hex: Array,
         out_recipient_enc_keys_hex: Array,
-        network_passphrase: String,
         on_status: Option<Function>,
         flow: &'static str,
     ) -> Result<Option<Vec<String>>, JsError> {
+        let pool = self.inner();
         let expected_outputs =
             u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
         if out_recipient_note_keys_hex.length() != expected_outputs {
@@ -292,15 +242,90 @@ impl WebClient {
             out_enc_pks,
         );
 
-        let pool = self
-            .ensure_pool(
-                pool_contract_id,
-                user_address,
-                network_passphrase,
-                on_status.clone(),
+        let mut plan = pool.prepare_transact(step);
+        self.execute_plan(&mut plan, flow, on_status).await
+    }
+}
+
+#[wasm_bindgen]
+impl Pool {
+    #[wasm_bindgen(js_name = plan)]
+    pub async fn plan(&self, amount: BigInt) -> Result<wasm_bindgen::JsValue, JsError> {
+        let preview = self.plan_inner(amount).await?;
+        Ok(serde_wasm_bindgen::to_value(&preview)?)
+    }
+
+    #[wasm_bindgen]
+    pub async fn deposit(
+        &self,
+        amount: BigInt,
+        output_amounts: Array,
+        on_status: Option<Function>,
+    ) -> Result<wasm_bindgen::JsValue, JsError> {
+        let result = self
+            .deposit_inner(amount, output_amounts, on_status)
+            .await?;
+        execute_hashes_to_js(result)
+    }
+
+    #[wasm_bindgen]
+    pub async fn transfer(
+        &self,
+        amount: BigInt,
+        recipient_note_key_hex: String,
+        recipient_enc_key_hex: String,
+        on_status: Option<Function>,
+    ) -> Result<wasm_bindgen::JsValue, JsError> {
+        let recipient_note = NotePublicKey::parse(&recipient_note_key_hex)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let recipient_enc = EncryptionPublicKey::parse(&recipient_enc_key_hex)
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let target = SpendTarget::transfer(recipient_note, recipient_enc);
+
+        let result = self
+            .spend_inner(amount, target, "transfer", on_status)
+            .await?;
+        execute_hashes_to_js(result)
+    }
+
+    #[wasm_bindgen]
+    pub async fn withdraw(
+        &self,
+        withdraw_recipient: String,
+        amount: BigInt,
+        on_status: Option<Function>,
+    ) -> Result<wasm_bindgen::JsValue, JsError> {
+        let target = SpendTarget::withdraw(withdraw_recipient);
+        let result = self
+            .spend_inner(amount, target, "withdraw", on_status)
+            .await?;
+        execute_hashes_to_js(result)
+    }
+
+    #[wasm_bindgen]
+    #[allow(clippy::too_many_arguments)]
+    pub async fn transact(
+        &self,
+        ext_recipient: String,
+        ext_amount: BigInt,
+        input_note_ids: Array,
+        output_amounts: Array,
+        out_recipient_note_keys_hex: Array,
+        out_recipient_enc_keys_hex: Array,
+        on_status: Option<Function>,
+    ) -> Result<wasm_bindgen::JsValue, JsError> {
+        let result = self
+            .transact_inner(
+                ext_recipient,
+                ext_amount,
+                input_note_ids,
+                output_amounts,
+                out_recipient_note_keys_hex,
+                out_recipient_enc_keys_hex,
+                on_status,
+                "transact",
             )
             .await?;
-        let mut plan = pool.prepare_transact(step);
-        self.execute_plan(&pool, &mut plan, flow, on_status).await
+        execute_hashes_to_js(result)
     }
 }

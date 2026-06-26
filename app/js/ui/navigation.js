@@ -6,6 +6,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { App, Utils, Toast } from './core.js';
+import { closeAppPool, createAppPool } from './pool.js';
 import { setTabsRef } from './templates.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 
@@ -276,6 +277,7 @@ export const Wallet = {
             if (addressDisplay) addressDisplay.textContent = address;
 
             updateSubmitButtons(true);
+            await createAppPool();
             App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
 
             this._startWatcher();
@@ -307,7 +309,7 @@ export const Wallet = {
         this._stopWatcher = null;
         this._walletChangeInFlight = null;
 
-        void getHandle().webClient.closePool();
+        closeAppPool();
 
         App.state.wallet.connected = false;
         App.state.wallet.address = null;
@@ -398,7 +400,8 @@ export const Wallet = {
                 if (addressChanged) {
                     await this._applyWalletIdentityChange(nextAddress, setButtonLoading);
                 } else if (networkChanged) {
-                    await getHandle().webClient.closePool();
+                    closeAppPool();
+                    await createAppPool();
                     if (btn) btn.disabled = false;
                 } else {
                     if (btn) btn.disabled = false;
@@ -420,7 +423,7 @@ export const Wallet = {
         const dropdownIcon = document.getElementById('wallet-dropdown-icon');
         const addressDisplay = document.getElementById('wallet-dropdown-address');
 
-        await getHandle().webClient.closePool();
+        closeAppPool();
 
         App.state.wallet.address = nextAddress;
         if (addressDisplay) addressDisplay.textContent = nextAddress;
@@ -435,6 +438,7 @@ export const Wallet = {
         if (dropdownIcon) dropdownIcon.classList.remove('hidden');
 
         updateSubmitButtons(true);
+        await createAppPool();
         App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address: nextAddress } }));
 
         Toast.show('Freighter account changed. Privacy keys ready.', 'info');

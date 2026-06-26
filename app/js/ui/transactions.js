@@ -1,33 +1,17 @@
 /**
  * Transactions UI - Deposit / Withdraw / Transfer / Transact.
  *
- * WASM-first: all proving + tx preparation happens in WebClient.
+ * WASM-first: proving + tx preparation run on the pool handle from `createPool`.
  * JS is responsible only for UI interactions; signing and submit run in WASM.
  *
  * @module ui/transactions
  */
 
-import { getHandle } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
+import { ensureAppPool, getActivePoolContractId, getContractConfig } from './pool.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
-
-let cachedContractConfig = null;
-
-async function getContractConfig() {
-    if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = await getHandle().webClient.contractConfig();
-    return cachedContractConfig;
-}
-
-function getActivePoolContractId(config) {
-    const pools = Array.isArray(config?.pools) ? config.pools : [];
-    const selected = pools.find(p => p?.enabled) || pools[0];
-    const poolContractId = selected?.poolContractId;
-    if (!poolContractId) throw new Error("Pool contract ID not available");
-    return poolContractId;
-}
 
 function noteAmountToStroopsBigInt(amount) {
     if (amount == null) return 0n;
@@ -209,24 +193,10 @@ function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId 
 
 async function prepareExecuteContext(btn) {
     requireWalletReady();
-    const userAddress = App.state.wallet.address;
-    const networkPassphrase = App.state.wallet.networkPassphrase;
-    if (!networkPassphrase) {
-        throw new Error('Wallet network passphrase unavailable');
-    }
     setLoading(btn, 'Validating…');
     const onStatus = p => p?.message && setLoadingText(btn, p.message);
-    const config = await getContractConfig();
-    const poolContractId = getActivePoolContractId(config);
-    const client = getHandle().webClient;
-    return {
-        btn,
-        userAddress,
-        poolContractId,
-        networkPassphrase,
-        onStatus,
-        client,
-    };
+    const pool = await ensureAppPool();
+    return { btn, onStatus, pool };
 }
 
 function showSubmittedToasts(hashes) {
@@ -260,13 +230,9 @@ function planHintText(stepCount) {
     return `Requires ${stepCount} on-chain transactions.`;
 }
 
-async function fetchPlanStepCount(poolContractId, userAddress, amountStroops, networkPassphrase) {
-    const plan = await getHandle().webClient.plan(
-        poolContractId,
-        userAddress,
-        amountStroops,
-        networkPassphrase,
-    );
+async function fetchPlanStepCount(amountStroops) {
+    const pool = await ensureAppPool();
+    const plan = await pool.plan(amountStroops);
     const stepCount = planStepCount(plan);
     if (stepCount == null || stepCount < 1) {
         throw new Error('Could not load plan');
@@ -274,13 +240,8 @@ async function fetchPlanStepCount(poolContractId, userAddress, amountStroops, ne
     return stepCount;
 }
 
-async function requirePlanApproval(poolContractId, userAddress, amountStroops, networkPassphrase) {
-    const stepCount = await fetchPlanStepCount(
-        poolContractId,
-        userAddress,
-        amountStroops,
-        networkPassphrase,
-    );
+async function requirePlanApproval(amountStroops) {
+    const stepCount = await fetchPlanStepCount(amountStroops);
     if (stepCount > 1) {
         const ok = window.confirm(
             `This requires ${stepCount} on-chain transactions (${stepCount} wallet approvals). Continue?`,
@@ -298,12 +259,7 @@ async function executeFromAmount(ctx, { btn, amountInputId, run }) {
     if (!amountRes.ok) throw new Error(amountRes.error);
     if (amountRes.value <= 0n) throw new Error('Amount must be greater than zero');
 
-    const stepCount = await requirePlanApproval(
-        ctx.poolContractId,
-        ctx.userAddress,
-        amountRes.value,
-        ctx.networkPassphrase,
-    );
+    const stepCount = await requirePlanApproval(amountRes.value);
     if (stepCount == null) return undefined;
 
     setLoadingText(btn, stepCount === 1 ? 'Proving…' : `Proving (1/${stepCount})…`);
@@ -344,19 +300,7 @@ function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
             return;
         }
         try {
-            const config = await getContractConfig();
-            const poolContractId = getActivePoolContractId(config);
-            const networkPassphrase = App.state.wallet.networkPassphrase;
-            if (!networkPassphrase) {
-                hide();
-                return;
-            }
-            const stepCount = await fetchPlanStepCount(
-                poolContractId,
-                App.state.wallet.address,
-                res.value,
-                networkPassphrase,
-            );
+            const stepCount = await fetchPlanStepCount(res.value);
             if (hint) {
                 hint.textContent = planHintText(stepCount);
                 hint.classList.remove('hidden');
@@ -623,12 +567,9 @@ export const Transactions = {
 
                 const ctx = await prepareExecuteContext(btn);
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.client.executeDeposit(
-                    ctx.poolContractId,
-                    ctx.userAddress,
+                const hashes = await ctx.pool.deposit(
                     amountStroops,
                     outputAmounts,
-                    ctx.networkPassphrase,
                     ctx.onStatus,
                 );
 
@@ -656,7 +597,7 @@ export const Transactions = {
                 const advanced = isAdvancedMode('withdraw-advanced-mode');
                 const ctx = await prepareExecuteContext(btn);
                 const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
-                    || ctx.userAddress;
+                    || App.state.wallet.address;
 
                 let hashes;
                 if (advanced) {
@@ -670,28 +611,22 @@ export const Transactions = {
                     }
 
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.client.executeTransact(
-                        ctx.poolContractId,
-                        ctx.userAddress,
+                    hashes = await ctx.pool.transact(
                         recipient,
                         -total,
                         inputNoteIds,
                         [0n, 0n],
                         [null, null],
                         [null, null],
-                        ctx.networkPassphrase,
                         ctx.onStatus,
                     );
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'withdraw-amount',
-                        run: (c, amountStroops) => c.client.executeWithdraw(
-                            c.poolContractId,
-                            c.userAddress,
+                        run: (c, amountStroops) => c.pool.withdraw(
                             recipient,
                             amountStroops,
-                            c.networkPassphrase,
                             c.onStatus,
                         ),
                     });
@@ -744,30 +679,27 @@ export const Transactions = {
 
                     const outputAmounts = collectOutputAmounts('transfer-outputs');
 
+                    const config = await getContractConfig();
+                    const poolContractId = getActivePoolContractId(config);
+
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.client.executeTransact(
-                        ctx.poolContractId,
-                        ctx.userAddress,
-                        ctx.poolContractId,
+                    hashes = await ctx.pool.transact(
+                        poolContractId,
                         0n,
                         inputNoteIds,
                         outputAmounts,
                         [recipientNoteKey, recipientNoteKey],
                         [recipientEncKey, recipientEncKey],
-                        ctx.networkPassphrase,
                         ctx.onStatus,
                     );
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'transfer-amount',
-                        run: (c, amountStroops) => c.client.executeTransfer(
-                            c.poolContractId,
-                            c.userAddress,
+                        run: (c, amountStroops) => c.pool.transfer(
                             amountStroops,
                             recipientNoteKey,
                             recipientEncKey,
-                            c.networkPassphrase,
                             c.onStatus,
                         ),
                     });
@@ -815,7 +747,7 @@ export const Transactions = {
                 const ctx = await prepareExecuteContext(btn);
                 const extAmountStroops = decimalToBaseUnitsBigInt(amount.value, { allowNegative: true });
                 const extRecipient = document.getElementById('transact-recipient')?.value?.trim()
-                    || ctx.userAddress;
+                    || App.state.wallet.address;
                 if (extAmountStroops < 0n && !extRecipient) {
                     throw new Error('Withdrawal recipient is required when public amount is negative');
                 }
@@ -826,16 +758,13 @@ export const Transactions = {
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.client.executeTransact(
-                    ctx.poolContractId,
-                    ctx.userAddress,
+                const hashes = await ctx.pool.transact(
                     extRecipient,
                     extAmountStroops,
                     inputNoteIds,
                     outputAmounts,
                     noteKeys,
                     encKeys,
-                    ctx.networkPassphrase,
                     ctx.onStatus,
                 );
                 showExecuteResult(hashes);
