@@ -904,8 +904,10 @@ impl Storage {
     ///   2) raw events are caught up but ASP membership leaf processing is
     ///      behind (root mismatch where the last stored leaf is from an earlier
     ///      ledger).
-    /// - `Err(_)` if local metadata is ahead of the chain tip or if the root is
-    ///   inconsistent at the same ledger (mismatched networks/corruption).
+    /// - `Err(_)` if the root is inconsistent at the same ledger (mismatched
+    ///   networks/corruption). Local metadata sitting a few ledgers *ahead* of
+    ///   `current_ledger` is normal skew between independent RPC reads and is
+    ///   tolerated, not treated as an error.
     pub fn check_asp_membership_precondition(
         &self,
         asp_membership_contract_id: &str,
@@ -928,13 +930,14 @@ impl Storage {
             return Ok(AspMembershipSync::SyncRequired(Some(gap)));
         }
 
-        if current_ledger < sync_meta.last_fully_indexed_ledger {
-            anyhow::bail!(
-                "indexer metadata is ahead of chain tip: local={}, chain={}",
-                sync_meta.last_fully_indexed_ledger,
-                current_ledger
-            );
-        }
+        // `current_ledger <= last_fully_indexed_ledger`: we have indexed at least
+        // as far as the ledger of this contract-state read, so we have the data
+        // needed to reconcile membership. The indexer tip can legitimately sit a
+        // few ledgers *ahead* of this read — the events RPC and the
+        // contract-state read advance independently — so "metadata ahead" is
+        // normal skew, not corruption, and must not be a hard error. The
+        // authoritative correctness check is the root reconciliation below, which
+        // detects any genuine divergence.
 
         // Get the last stored root for the ASP membership tree and the ledger
         // that produced it. The ledger is derived by joining with the raw event
@@ -2073,6 +2076,65 @@ mod tests {
         let status =
             storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
         assert!(!matches!(status, AspMembershipSync::SyncRequired(_)));
+        Ok(())
+    }
+
+    #[test]
+    fn asp_membership_precondition_tolerates_metadata_ahead_of_read() -> Result<()> {
+        // The events indexer can sit a few ledgers ahead of an independent
+        // contract-state read (here last_fully_indexed=15 > current_ledger=12).
+        // With a matching root this is benign skew and must resolve, not error.
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        let mut root_bytes = [0u8; 32];
+        root_bytes[0] = 1;
+        let root = Field::try_from_le_bytes(root_bytes)?;
+
+        let mut leaf_bytes = [0u8; 32];
+        leaf_bytes[0] = 3;
+        let leaf = Field::try_from_le_bytes(leaf_bytes)?;
+
+        let last_leaf_ledger = 10u32;
+        let current_ledger = 12u32;
+        let indexed_tip = 15u32;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-raw".to_string(),
+            latest_ledger: last_leaf_ledger,
+            events: vec![ContractEvent {
+                id: "asp-leaf-10".to_string(),
+                ledger: last_leaf_ledger,
+                contract_id: "CASP".to_string(),
+                topics: vec!["leaf_added".to_string()],
+                value: "dummy".to_string(),
+            }],
+        })?;
+
+        storage.save_leaf_added_events_batch(&vec![LeafAddedEvent {
+            id: "asp-leaf-10".to_string(),
+            leaf,
+            index: 0,
+            root,
+        }])?;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cur-tip".to_string(),
+            latest_ledger: indexed_tip,
+            events: vec![],
+        })?;
+        storage.save_sync_progress(
+            &[types::SyncMetadata {
+                contract_id: "CASP".to_string(),
+                cursor: "cur-tip".to_string(),
+                last_indexed_ledger: indexed_tip,
+                last_fully_indexed_ledger: 0,
+            }],
+            true,
+        )?;
+
+        let status =
+            storage.check_asp_membership_precondition("CASP", &leaf, &root, current_ledger)?;
+        assert!(matches!(status, AspMembershipSync::UserIndex(0)));
         Ok(())
     }
 
