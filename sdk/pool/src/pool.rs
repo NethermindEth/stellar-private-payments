@@ -1,4 +1,4 @@
-//! Async per-pool private payments API.
+//! Async per-pool private payments API
 
 use tx_planner::{SpendableNote, Transact};
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
@@ -31,10 +31,10 @@ use crate::{
 
 const POLL_INTERVAL_MS: u32 = 1_000;
 
-/// Main entry point for a single privacy pool.
+/// Main entry point for a single privacy pool
 pub struct PrivatePool<S> {
-    core: PoolCore,
     config: PrivatePoolConfig,
+    core: PoolCore,
     client: Client,
     fetcher: StateFetcher,
     storage: S,
@@ -70,10 +70,7 @@ impl<S> PrivatePool<S> {
 }
 
 impl<S: Storage> PrivatePool<S> {
-    pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
-        let wallet = self.spendable_notes().await?;
-        self.core.estimate(&wallet, amount)
-    }
+    // high level methods
 
     pub async fn balance(&self) -> Result<NoteAmount, PoolError> {
         let wallet = self.spendable_notes().await?;
@@ -84,12 +81,6 @@ impl<S: Storage> PrivatePool<S> {
                 sum.checked_add(amount)
                     .ok_or_else(|| PoolError::Other("wallet balance overflow".into()))
             })
-    }
-
-    pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        self.storage
-            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
-            .await
     }
 
     pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
@@ -112,6 +103,11 @@ impl<S: Storage> PrivatePool<S> {
             .map_err(|e| PoolError::Other(format!("indexer catch-up: {e:#}")))?;
 
         self.storage.process_pending_state().await
+    }
+
+    pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
+        let wallet = self.spendable_notes().await?;
+        self.core.estimate(&wallet, amount)
     }
 
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
@@ -240,6 +236,50 @@ impl<S: Storage> PrivatePool<S> {
         Ok(())
     }
 
+    // lower level methods
+
+    pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
+        self.storage
+            .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
+            .await
+    }
+
+    pub fn prepare_deposit(
+        &self,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_deposit(amount)
+    }
+
+    pub fn prepare_transfer(
+        &self,
+        wallet: &[SpendableNote],
+        recipient: TransferRecipient,
+        amount: NoteAmount,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_transfer(wallet, recipient, amount)
+    }
+
+    pub fn prepare_withdraw(
+        &self,
+        wallet: &[SpendableNote],
+        amount: NoteAmount,
+        recipient: impl Into<String>,
+    ) -> Result<PreparedTransactionPlan, PoolError> {
+        self.core.prepare_withdraw(wallet, amount, recipient)
+    }
+
+    pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
+        PreparedTransactionPlan::from_transact(step)
+    }
+
+    pub async fn prove_next(
+        &self,
+        plan: &mut PreparedTransactionPlan,
+    ) -> Result<PreparedTransaction, PoolError> {
+        self.next_prepared_transaction(plan).await
+    }
+
     pub async fn submit(&self, signed_tx: SignedTransaction) -> Result<String, PoolError> {
         let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
             .map_err(|e| PoolError::Other(format!("invalid signed transaction xdr: {e}")))?;
@@ -298,6 +338,8 @@ impl<S: Storage> PrivatePool<S> {
         self.signer.sign(prepared).await
     }
 
+    // helpers
+
     async fn next_prepared_transaction(
         &self,
         plan: &mut PreparedTransactionPlan,
@@ -326,42 +368,6 @@ impl<S: Storage> PrivatePool<S> {
 
         plan.finish_proved_tx(&prepared.prepared.output_commitments)?;
         Ok(prepared)
-    }
-
-    pub fn prepare_deposit(
-        &self,
-        amount: NoteAmount,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_deposit(amount)
-    }
-
-    pub fn prepare_transfer(
-        &self,
-        wallet: &[SpendableNote],
-        recipient: TransferRecipient,
-        amount: NoteAmount,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_transfer(wallet, recipient, amount)
-    }
-
-    pub fn prepare_withdraw(
-        &self,
-        wallet: &[SpendableNote],
-        amount: NoteAmount,
-        recipient: impl Into<String>,
-    ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_withdraw(wallet, amount, recipient)
-    }
-
-    pub fn prepare_transact(&self, step: Transact) -> PreparedTransactionPlan {
-        PreparedTransactionPlan::from_transact(step)
-    }
-
-    pub async fn prove_next(
-        &self,
-        plan: &mut PreparedTransactionPlan,
-    ) -> Result<PreparedTransaction, PoolError> {
-        self.next_prepared_transaction(plan).await
     }
 
     async fn fetch_transact_chain_context(&self) -> Result<TransactChainContext, PoolError> {
