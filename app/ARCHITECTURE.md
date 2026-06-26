@@ -21,6 +21,15 @@ The `web` platform runs Rust application logic in the browser via WASM, with hea
 
 ### Components
 
+The WASM layer exposes two JS handles with different scope:
+
+| Handle | Scope | Examples |
+|--------|-------|----------|
+| **`WebClient`** | Account and deployment (all pools) | `getUserNotes`, `contractConfig`, onboarding, `createPool` |
+| **`Pool`** (`PrivatePool`) | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose` |
+
+`WebClient` is the long-lived entry point; `Pool` is created per active pool when the user transacts.
+
 **JS UI (main thread)**
 
 The UI is written in JavaScript and calls into the WASM bundle. It does not communicate with workers directly.
@@ -39,17 +48,24 @@ The UI is written in JavaScript and calls into the WASM bundle. It does not comm
 
 **`WebClient` (WASM, wasm-bindgen API)**
 
-- `WebClient` is the only Rust API exposed to JS, via `#[wasm_bindgen]` methods.
+- Long-lived handle constructed by `mainThread(config)`; exposed to JS as `webClient`.
 - Spawns both workers and performs request/response routing internally; JS never constructs or sends worker protocol messages.
 - Implements the worker communication protocol defined in `protocol.rs`.
-- For pool transactions (deposit, transfer, withdraw, transact), builds or reuses a cached **`PrivatePool<StorageBridge>`** session (`ensure_pool`): SDK proving/signing/submit path with `WalletSigner` + `ProverBridge`.
-- Other operations (onboarding, disclosure, cross-pool note listing, admin reads) still call the Storage Worker directly via `StorageBridge::call`.
+- **Account- and deployment-wide operations** (not tied to a single active pool session):
+  - Onboarding and key derivation (`deriveAndSaveUserKeys`, `getUserKeys`, disclaimer, bootnode config).
+  - Cross-pool storage reads via `StorageBridge` (`getUserNotes`, `getRecentPublicKeys`, `getRecentPoolActivity`).
+  - Chain/config reads (`contractConfig`, `allContractsData`, `aspState`, `registerPublicKeys`).
+  - Selective-disclosure verification without a pool session (`verifySelectiveDisclosure`).
+- Creates per-pool transact sessions via `createPool({ poolContract, networkPassphrase, userAddress })`.
 
-**`PrivatePool` (SDK, web session)**
+**`Pool` / `PrivatePool` (WASM, wasm-bindgen API)**
 
-- Per-pool, per-user session: RPC client, state fetcher, `StorageBridge`, prover, and Freighter signer.
-- Exposes `deposit` / `transfer` / `withdraw` / `transact`, `spendable_notes`, `notes` (pool-scoped), `balance`, and `sync`.
-- Cached on `WebClient` until `closePool()` (wallet disconnect / account switch).
+- Per-pool, per-user session returned by `WebClient.createPool`: SDK `PrivatePool<StorageBridge>` with RPC client, state fetcher, shared `StorageBridge`, `ProverBridge`, and `WalletSigner`.
+- **Pool-scoped operations only** — JS holds the handle in app state (`createAppPool` / `closeAppPool`) until wallet disconnect or account switch.
+- WASM exports: `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`, `initialize`, `close`.
+- Proving, Freighter signing, and submit run inside this session; returns tx hashes to JS.
+
+The SDK `PrivatePool` type (native / blocking) also defines pool-scoped helpers such as `balance`, `notes`, `spendable_notes`, and `sync`. Those are **not** exported on the web `Pool` handle: the UI reads notes across pools through `WebClient.getUserNotes`, and background sync is owned by `events_listener` (see below), not by `pool.sync()` from JS.
 
 **`StorageBridge` (WASM main thread)**
 
@@ -106,7 +122,7 @@ flowchart LR
   UI -->|"calls WASM exports"| MT
   MT -->|"constructs"| WC
   WC -->|"owns"| SB
-  WC -->|"ensure_pool → transacts"| PP
+  WC -->|"createPool → transacts"| PP
   PP --> SB
   PP --> PW
 
@@ -116,15 +132,16 @@ flowchart LR
   IDX -->|"ContractDataStorage"| SB
   SB -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
 
-  UI -->|"WebClient.* calls"| WC
+  UI -->|"WebClient.* (reads, onboarding, createPool)"| WC
+  UI -->|"Pool.* (deposit, transfer, …)"| PP
   WC -->|"reads contract state"| RPCAPI
-  WC -->|"StorageWorkerRequest::* (onboarding, disclosure, …)"| DB
-  WC -->|"ProverWorkerRequest::* (disclosure, via pool prover)"| PR
-  PR -->|"ProverWorkerResponse::*"| WC
+  WC -->|"StorageWorkerRequest::* (onboarding, note list, …)"| DB
+  PP -->|"ProverWorkerRequest::*"| PR
+  PR -->|"ProverWorkerResponse::*"| PP
   DB -->|"StorageWorkerResponse::*"| SB
   SB --> WC
-  WC -->|"returns tx hashes / JSON"| UI
-  UI -->|"sign + submit (wallet)"| RPC
+  WC -->|"returns JSON"| UI
+  PP -->|"returns tx hashes"| UI
 
   classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
   style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;
