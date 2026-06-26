@@ -6,9 +6,8 @@
 //! `wasm32-unknown-unknown`.
 
 use anyhow::{Context as _, Result, bail, ensure};
-// circom-witness-rs black-box hint functions operate on its arkworks 0.5 `Fr`.
-use ark_bn254_05::Fr as BbfFr;
-use ark_ff_05::{BigInteger as _, Field as _, PrimeField as _};
+use ark_bn254::Fr as BbfFr;
+use ark_ff::{BigInteger as _, Field as _, PrimeField as _};
 use circom_witness_rs::{BlackBoxFunction, Graph, M, calculate_witness, init_graph};
 use ruint::aliases::U256;
 use std::{

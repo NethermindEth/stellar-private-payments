@@ -179,7 +179,6 @@ checksum = "d69eab57e8d2663efa5c63135b2af4f396d66424f88954c21104125ab6b3e6bc"
 dependencies = [
  "ark-ec 0.5.0",
  "ark-ff 0.5.0",
- "ark-r1cs-std 0.5.0",
  "ark-std 0.5.0",
 ]
 
@@ -205,7 +204,7 @@ dependencies = [
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-poly 0.6.0",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-std 0.6.0",
  "byteorder",
@@ -233,8 +232,8 @@ dependencies = [
  "ark-crypto-primitives-macros",
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
- "ark-r1cs-std 0.6.0",
- "ark-relations 0.6.0",
+ "ark-r1cs-std",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
@@ -480,7 +479,7 @@ dependencies = [
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
  "ark-poly 0.6.0",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
@@ -520,30 +519,13 @@ dependencies = [
 
 [[package]]
 name = "ark-r1cs-std"
-version = "0.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "941551ef1df4c7a401de7068758db6503598e6f01850bdb2cfdb614a1f9dbea1"
-dependencies = [
- "ark-ec 0.5.0",
- "ark-ff 0.5.0",
- "ark-relations 0.5.1",
- "ark-std 0.5.0",
- "educe",
- "num-bigint",
- "num-integer",
- "num-traits",
- "tracing",
-]
-
-[[package]]
-name = "ark-r1cs-std"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "291f1c6628bfcac79b0dc2adbe401aa9100e2e96daa971645e0b18fc94de9a98"
 dependencies = [
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-std 0.6.0",
  "educe",
  "itertools 0.14.0",
@@ -551,18 +533,6 @@ dependencies = [
  "num-integer",
  "num-traits",
  "tracing",
-]
-
-[[package]]
-name = "ark-relations"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ec46ddc93e7af44bcab5230937635b06fb5744464dd6a7e7b083e80ebd274384"
-dependencies = [
- "ark-ff 0.5.0",
- "ark-std 0.5.0",
- "tracing",
- "tracing-subscriber 0.2.25",
 ]
 
 [[package]]
@@ -579,7 +549,7 @@ dependencies = [
  "indexmap 2.14.0",
  "rayon",
  "tracing",
- "tracing-subscriber 0.3.23",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -659,7 +629,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5bdb461d2be9b2bd6f303c79fffc89f5858790a7b4d33257bca3178e2c071fb9"
 dependencies = [
  "ark-ff 0.6.0",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-std 0.6.0",
 ]
@@ -1088,7 +1058,7 @@ dependencies = [
  "ark-circom",
  "ark-ff 0.6.0",
  "ark-groth16",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-std 0.6.0",
  "circuit-keys",
  "contract-types",
@@ -1100,12 +1070,11 @@ dependencies = [
 [[package]]
 name = "circom-witness-rs"
 version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "35778373aee12ef3d04966187eeae7a04f1451c9226058311f21488df6f28780"
+source = "git+https://github.com/NethermindEth/circom-witness-rs.git?branch=update-ark#f001f66a79817b1de493bb9fd78816741b98a3b1"
 dependencies = [
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
- "ark-serialize 0.5.0",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-serialize 0.6.0",
  "byteorder",
  "cxx-build",
  "eyre",
@@ -1279,7 +1248,7 @@ checksum = "af491d569909a7e4dee0ad7db7f5341fef5c614d5b8ec8cf765732aba3cff681"
 dependencies = [
  "serde",
  "termcolor",
- "unicode-width 0.2.2",
+ "unicode-width 0.1.14",
 ]
 
 [[package]]
@@ -2313,7 +2282,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3203,7 +3172,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -3671,7 +3640,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4221,7 +4190,7 @@ dependencies = [
  "ark-ff 0.6.0",
  "ark-groth16",
  "ark-poly 0.6.0",
- "ark-relations 0.6.0",
+ "ark-relations",
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
@@ -4605,13 +4574,13 @@ dependencies = [
 [[package]]
 name = "ruint"
 version = "1.18.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0298da754d1395046b0afdc2f20ee76d29a8ae310cd30ffa84ed42acba9cb12a"
+source = "git+https://github.com/alloy-rs/ruint#4319f2289713d0696b4417cb0b67677c16dad061"
 dependencies = [
  "alloy-rlp",
  "ark-ff 0.3.0",
  "ark-ff 0.4.2",
  "ark-ff 0.5.0",
+ "ark-ff 0.6.0",
  "bytes",
  "fastrlp 0.3.1",
  "fastrlp 0.4.0",
@@ -4633,8 +4602,7 @@ dependencies = [
 [[package]]
 name = "ruint-macro"
 version = "1.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "48fd7bd8a6377e15ad9d42a8ec25371b94ddc67abe7c8b9127bec79bebaaae18"
+source = "git+https://github.com/alloy-rs/ruint#4319f2289713d0696b4417cb0b67677c16dad061"
 
 [[package]]
 name = "rusqlite"
@@ -4706,7 +4674,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5533,7 +5501,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -5819,7 +5787,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8b1581020d7a273442f5b45074a6a57d5757ad0a47dac0e9f0bd57b81936f3db"
 dependencies = [
  "tracing",
- "tracing-subscriber 0.3.23",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5830,15 +5798,6 @@ checksum = "ee855f1f400bd0e5c02d150ae5de3840039a3f54b025156404e34c23c03f47c3"
 dependencies = [
  "log",
  "once_cell",
- "tracing-core",
-]
-
-[[package]]
-name = "tracing-subscriber"
-version = "0.2.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e0d2eaa99c3c2e41547cfa109e910a68ea03823cccad4a0525dcbc9b01e8c71"
-dependencies = [
  "tracing-core",
 ]
 
@@ -6533,7 +6492,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -6823,8 +6782,8 @@ name = "witness"
 version = "0.1.0"
 dependencies = [
  "anyhow",
- "ark-bn254 0.5.0",
- "ark-ff 0.5.0",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
  "circom-witness-rs",
  "getrandom 0.2.17",
  "ruint",

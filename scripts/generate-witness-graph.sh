@@ -45,7 +45,7 @@ cat > "$work_dir/Cargo.toml" <<'EOF'
 [package]
 name = "witness-graph-builder"
 version = "0.0.0"
-edition = "2021"
+edition = "2026"
 publish = false
 
 [dependencies]
@@ -98,7 +98,7 @@ prepare_patched_witness_builder() {
 [package]
 name = "witness-graph-builder"
 version = "0.0.0"
-edition = "2021"
+edition = "2026"
 publish = false
 
 [dependencies]
