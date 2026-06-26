@@ -5920,7 +5920,6 @@ dependencies = [
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
  "tokio",
- "tx-planner",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",

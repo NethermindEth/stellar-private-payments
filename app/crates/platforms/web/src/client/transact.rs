@@ -9,11 +9,10 @@ use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
-    PoolError, PreparedTransactionPlan, Storage, TransferRecipient,
+    PoolError, PreparedTransactionPlan, SpendTarget, Storage, Transact, TransferRecipient,
     tx::flows::N_OUTPUTS,
     types::{AspMembershipSync, EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey},
 };
-use tx_planner::{SpendTarget, Transact};
 use wasm_bindgen::{JsError, prelude::*};
 
 #[derive(Serialize)]

@@ -12,7 +12,7 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, PoolError, Storage, TransactRequest, build_transact_params,
+    BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest, build_transact_params,
     build_validated_pool_tree,
     chain::ContractDataStorage,
     load_user_key_material,
@@ -27,7 +27,6 @@ use stellar_private_payments_sdk::{
         ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
     },
 };
-use tx_planner::SpendableNote;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
