@@ -11,6 +11,7 @@ crate-type = ["lib"]
 doctest = false
 
 [dependencies]
+# external
 soroban-sdk = { workspace = true, features = ["alloc"] }
 
 [lints]

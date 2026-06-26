@@ -7,6 +7,7 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+# external
 anyhow = { workspace = true }
 ark-bn254 = { workspace = true }
 ark-ff = { workspace = true }
@@ -17,4 +18,3 @@ serde_json = { workspace = true, features = ["std"] }
 
 [lints]
 workspace = true
-

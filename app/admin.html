@@ -204,6 +204,18 @@
         Insert Non-Membership Leaf
       </button>
       <p class="text-xs text-dark-400">Leaf hash uses Poseidon2(key, value, domain=1).</p>
+
+      <div class="border-t border-dark-700 pt-4 space-y-4">
+        <h3 class="text-sm uppercase tracking-[0.25em] text-rose-400">Remove Non-Membership Leaf</h3>
+        <p class="text-xs text-dark-400">Unblock a user by removing their key from the non-membership tree. Requires admin authorization.</p>
+        <div class="space-y-3">
+          <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="removeNonMembershipKey">Key (public key to unblock)</label>
+          <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500" id="removeNonMembershipKey" type="text" placeholder="0x..." />
+        </div>
+        <button class="w-full px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-semibold shadow-lg shadow-rose-600/20 hover:bg-rose-500 transition" id="removeNonMembershipLeafBtn" type="button">
+          Remove Non-Membership Leaf
+        </button>
+      </div>
     </section>
 
     <section class="xl:col-span-3 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="activity-heading">

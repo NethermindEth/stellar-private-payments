@@ -11,15 +11,20 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
-
+# workspace
 contract-types.workspace = true
-soroban-sdk.workspace = true
 soroban-utils.workspace = true
 
+# external
+soroban-sdk.workspace = true
+
 [dev-dependencies]
+# workspace
 asp-membership = { workspace = true }
 asp-non-membership = { workspace = true }
 circom-groth16-verifier = { workspace = true }
+
+# external
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
 [lints]

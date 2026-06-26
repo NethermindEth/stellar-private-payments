@@ -8,8 +8,11 @@ publish.workspace = true
 description = "Transaction planning for private pool operations"
 
 [dependencies]
-thiserror = { workspace = true }
+# workspace
 types = { workspace = true }
+
+# external
+thiserror = { workspace = true }
 
 [lints]
 workspace = true
