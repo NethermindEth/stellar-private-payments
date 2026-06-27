@@ -177,9 +177,9 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
 
     // main rpc event listening loop
     loop {
-        match indexer.catch_up().await {
-            Ok(()) => {}
-            Err(e) => log::error!("[EVENTS] catch-up failed: {e}"),
+        match indexer.fetch_contract_events().await {
+            Ok(_) => {}
+            Err(e) => log::error!("[EVENTS] round failed: {e}"),
         }
         TimeoutFuture::new(INDEXER_INTERVAL_MS).await;
     }
