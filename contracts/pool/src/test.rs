@@ -289,7 +289,10 @@ fn pool_is_known_root_returns_false_for_zero_root() {
     assert!(!pool.is_known_root(&zero_root));
 }
 
-#[cfg_attr(miri, ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit")]
+#[cfg_attr(
+    miri,
+    ignore = "too slow under Miri: 90 Merkle insertions exceed the 6h job limit"
+)]
 #[test]
 fn pool_is_known_root_returns_false_for_evicted_root() {
     let env = test_env();
