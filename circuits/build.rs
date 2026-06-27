@@ -51,11 +51,6 @@ const GROTH16_KEY_CIRCUITS: &[&str] = &["policy_tx_2_2", "selectiveDisclosure_1"
 /// changed.
 const GROTH16_TESTDATA_SUFFIXES: &[&str] = &["_proving_key.bin", "_vk.json", "_vk_soroban.bin"];
 
-/// Test circuits required by non-`#[ignore]` unit tests. Built even when
-/// `BUILD_TESTS` is unset so `cargo test -p circuits` works after a normal
-/// build.
-const ALWAYS_BUILD_TEST_CIRCUITS: &[&str] = &["keypair_test"];
-
 fn circuit_needs_groth16_keys(name: &str) -> bool {
     GROTH16_KEY_CIRCUITS.contains(&name)
 }
@@ -163,7 +158,6 @@ fn main() -> Result<()> {
         circom_files = find_circom_files_impl(&src_dir, false);
     } else {
         println!("cargo:warning=Skipping test circuits (set BUILD_TESTS=1 to include)");
-        append_always_build_test_circuits(&src_dir, &mut circom_files);
     }
 
     // Skip circom compilation if no files to compile
@@ -532,28 +526,6 @@ fn check_dependencies_need_rebuild(
 /// Returns a vector of paths to Circom files that contain a main component.
 fn find_circom_files(dir: &Path) -> Vec<PathBuf> {
     find_circom_files_impl(dir, true)
-}
-
-fn append_always_build_test_circuits(src_dir: &Path, circom_files: &mut Vec<PathBuf>) {
-    for name in ALWAYS_BUILD_TEST_CIRCUITS {
-        let path = src_dir.join("test/circuits").join(format!("{name}.circom"));
-        if !path.is_file() || !has_main_component(&path) {
-            println!(
-                "cargo:warning=Always-build test circuit not found: {}",
-                path.display()
-            );
-            continue;
-        }
-        let entry = PathBuf::from("./").join(&path);
-        if circom_files
-            .iter()
-            .any(|existing| existing.file_stem().and_then(|s| s.to_str()) == Some(name))
-        {
-            continue;
-        }
-        println!("cargo:rerun-if-changed={}", path.display());
-        circom_files.push(entry);
-    }
 }
 
 /// Internal implementation that allows controlling whether to skip test

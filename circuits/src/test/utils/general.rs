@@ -99,8 +99,7 @@ pub fn scalar_to_bigint(s: Scalar) -> BigInt {
 
 /// Load the compiled WASM and R1CS artifacts for a circuit by name.
 /// This expects files to be located under the `CIRCUIT_OUT_DIR` tree
-/// as produced by the build system, with a fallback to the deterministic
-/// `target/circuits-artifacts/<profile>/` publish directory.
+/// as produced by the build system.
 ///
 /// # Arguments
 ///
@@ -114,27 +113,7 @@ pub fn load_artifacts(name: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
     let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
     let wasm = out_dir.join(format!("wasm/{name}_js/{name}.wasm"));
     let r1cs = out_dir.join(format!("{name}.r1cs"));
-    if wasm.exists() && r1cs.exists() {
-        return Ok((wasm, r1cs));
-    }
-
-    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".to_string());
-    let publish_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../target/circuits-artifacts")
-        .join(profile);
-    let pub_wasm = publish_dir.join(format!("{name}.wasm"));
-    let pub_r1cs = publish_dir.join(format!("{name}.r1cs"));
-    anyhow::ensure!(
-        pub_wasm.exists(),
-        "WASM file not found at {} or {}",
-        wasm.display(),
-        pub_wasm.display()
-    );
-    anyhow::ensure!(
-        pub_r1cs.exists(),
-        "R1CS file not found at {} or {}",
-        r1cs.display(),
-        pub_r1cs.display()
-    );
-    Ok((pub_wasm, pub_r1cs))
+    anyhow::ensure!(wasm.exists(), "WASM file not found at {}", wasm.display());
+    anyhow::ensure!(r1cs.exists(), "R1CS file not found at {}", r1cs.display());
+    Ok((wasm, r1cs))
 }
