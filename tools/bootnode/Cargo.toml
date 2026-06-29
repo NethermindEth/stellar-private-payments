@@ -16,7 +16,7 @@ path = "bin/bootnode.rs"
 
 [dependencies]
 # workspace
-types = { path = "../../app/crates/core/types", version = "0.1.0" }
+types = { path = "../../sdk/types", version = "0.1.0" }
 
 # external
 anyhow = { version = "1", default-features = false }
@@ -48,7 +48,7 @@ url = "2.5.8"
 
 [dev-dependencies]
 # workspace
-types = { path = "../../app/crates/core/types", version = "0.1.0" }
+types = { path = "../../sdk/types", version = "0.1.0" }
 
 # external
 serde = { version = "1", default-features = false, features = ["derive"] }

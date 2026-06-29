@@ -20,13 +20,7 @@ path = "src/bin/prover_worker.rs"
 
 [dependencies]
 # workspace
-disclosure = { workspace = true }
-prover = { workspace = true }
-state = { workspace = true }
-stellar = { workspace = true }
-tx-planner = { workspace = true }
-types = { workspace = true }
-witness = { workspace = true }
+stellar-private-payments-sdk = { workspace = true }
 
 # external
 anyhow = { workspace = true }

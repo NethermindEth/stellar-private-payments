@@ -2222,6 +2222,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "037711b3d59c33004d3856fbdc83b99d4ff37a24768fa1be9ce3538a1cde4393"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968"
+
+[[package]]
 name = "futures-util"
 version = "0.3.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3639,6 +3645,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
+name = "pollster"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
+
+[[package]]
 name = "poly1305"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4234,6 +4246,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "sdk-tests"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "rusqlite",
+ "serde_json",
+ "stellar-private-payments-sdk",
+ "types",
+]
+
+[[package]]
 name = "sealed"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4799,6 +4822,28 @@ dependencies = [
  "thiserror 2.0.18",
  "types",
  "wasm-bindgen-test",
+]
+
+[[package]]
+name = "stellar-private-payments-sdk"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "disclosure",
+ "futures-timer",
+ "gloo-timers",
+ "log",
+ "pollster",
+ "prover",
+ "serde",
+ "serde_json",
+ "state",
+ "stellar",
+ "thiserror 2.0.18",
+ "tx-planner",
+ "types",
+ "witness",
 ]
 
 [[package]]
@@ -5864,30 +5909,24 @@ dependencies = [
  "anyhow",
  "async-trait",
  "console_error_panic_hook",
- "disclosure",
  "futures",
  "gloo-timers",
  "gloo-worker",
  "js-sys",
  "log",
- "prover",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "state",
- "stellar",
+ "stellar-private-payments-sdk",
  "tokio",
- "tx-planner",
- "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
  "wiremock",
- "witness",
 ]
 
 [[package]]
