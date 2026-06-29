@@ -1,12 +1,12 @@
 [workspace]
 members = [
-    "app/crates/core/disclosure",
-    "app/crates/core/prover",
-    "app/crates/core/state",
-    "app/crates/core/stellar",
-    "app/crates/core/tx-planner",
-    "app/crates/core/types",
-    "app/crates/core/witness",
+    "sdk/disclosure",
+    "sdk/prover",
+    "sdk/state",
+    "sdk/stellar",
+    "sdk/tx-planner",
+    "sdk/types",
+    "sdk/witness",
     "app/crates/platforms/web",
     "circuit-keys",
     "circuits",
@@ -33,16 +33,16 @@ circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 contract-types = { path = "contracts/types" }
-disclosure = { path = "app/crates/core/disclosure" }
+disclosure = { path = "sdk/disclosure" }
 pool = { path = "contracts/pool" }
-prover = { path = "app/crates/core/prover" }
+prover = { path = "sdk/prover" }
 public-key-registry = { path = "contracts/public-key-registry" }
 soroban-utils = { path = "contracts/soroban-utils" }
-state = { path = "app/crates/core/state" }
-stellar = { path = "app/crates/core/stellar" }
-tx-planner = { path = "app/crates/core/tx-planner" }
-types = { path = "app/crates/core/types" }
-witness = { path = "app/crates/core/witness" }
+state = { path = "sdk/state" }
+stellar = { path = "sdk/stellar" }
+tx-planner = { path = "sdk/tx-planner" }
+types = { path = "sdk/types" }
+witness = { path = "sdk/witness" }
 zkhash = { path = "poseidon2" }
 
 # external
