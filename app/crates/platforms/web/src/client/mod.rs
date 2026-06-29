@@ -746,18 +746,19 @@ impl WebClient {
         &self,
         pool_contract_id: String,
         user_address: String,
-        selected_commitment_hex: String,
+        selected_commitment_hexes: Array,
         authority_label: String,
         authority_identity_payload_hex: String,
         purpose: String,
         context_nonce: BigInt,
         on_status: Option<Function>,
     ) -> Result<JsValue, JsError> {
+        let selected_commitments = parse_disclosure_commitments(&selected_commitment_hexes)?;
         let receipt = self
             .generate_selective_disclosure_inner(
                 &pool_contract_id,
                 &user_address,
-                selected_commitment_hex,
+                selected_commitments,
                 authority_label,
                 authority_identity_payload_hex,
                 purpose,
@@ -776,14 +777,18 @@ impl WebClient {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-        selected_commitment_hex: String,
+        selected_commitments: Vec<Field>,
         authority_label: String,
         authority_identity_payload_hex: String,
         purpose: String,
         context_nonce: BigInt,
         on_status: Option<Function>,
     ) -> Result<Option<DisclosureReceipt>, JsError> {
-        let selected_commitment = parse_field_hex_str(&selected_commitment_hex)?;
+        if selected_commitments.is_empty() || selected_commitments.len() > 4 {
+            return Err(JsError::new(
+                "selective disclosure requires 1..=4 selected commitments",
+            ));
+        }
         let context_nonce = parse_field_bigint_numeric(&context_nonce)?;
 
         emit_progress(
@@ -818,7 +823,7 @@ impl WebClient {
             let req = DisclosureInputsRequest {
                 user_address: user_address.to_string(),
                 pool_address: pool_contract_id.to_string(),
-                selected_commitment,
+                selected_commitments: selected_commitments.clone(),
                 pool_root,
                 pool_next_index,
                 tree_depth: pool.merkle_levels,
@@ -877,7 +882,7 @@ impl WebClient {
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let prover_req = DisclosureProverRequest {
-            inputs,
+            inputs: inputs.notes,
             network,
             pool_address,
             authority_label,
@@ -1035,6 +1040,24 @@ fn parse_note_amount_decimal(b: &BigInt) -> Result<NoteAmount, JsError> {
 
 fn parse_field_hex_str(s: &str) -> Result<Field, JsError> {
     Field::from_str(s).map_err(|e| JsError::new(&e.to_string()))
+}
+
+fn parse_disclosure_commitments(arr: &Array) -> Result<Vec<Field>, JsError> {
+    let len = arr.length();
+    if len == 0 || len > 4 {
+        return Err(JsError::new(
+            "selected_commitment_hexes must contain 1..=4 commitment strings",
+        ));
+    }
+    let mut commitments = Vec::with_capacity(len as usize);
+    for i in 0..len {
+        let v = arr.get(i);
+        let s = v
+            .as_string()
+            .ok_or_else(|| JsError::new("selected_commitment_hexes must be string[]"))?;
+        commitments.push(parse_field_hex_str(&s)?);
+    }
+    Ok(commitments)
 }
 
 fn parse_input_note_ids(

@@ -146,7 +146,7 @@ pub enum ProverWorkerResponse {
 pub struct DisclosureInputsRequest {
     pub user_address: Address,
     pub pool_address: Address,
-    pub selected_commitment: Field,
+    pub selected_commitments: Vec<Field>,
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,
     pub tree_depth: u32,
@@ -154,7 +154,7 @@ pub struct DisclosureInputsRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct DisclosureInputs {
+pub struct DisclosureNoteInputs {
     pub root: Field,
     pub note_commitment: Field,
     pub note_amount: NoteAmount,
@@ -162,6 +162,13 @@ pub struct DisclosureInputs {
     pub note_blinding: Field,
     pub merkle_path_indices: Field,
     pub merkle_path_elements: Vec<Field>,
+}
+
+/// Inputs for a multi-note selective-disclosure proof.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureInputs {
+    pub notes: Vec<DisclosureNoteInputs>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -222,7 +229,7 @@ pub struct AdminASPRequest {
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureProverRequest {
-    pub inputs: DisclosureInputs,
+    pub inputs: Vec<DisclosureNoteInputs>,
     pub network: String,
     pub pool_address: String,
     pub authority_label: String,

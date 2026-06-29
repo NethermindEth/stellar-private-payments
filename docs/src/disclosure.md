@@ -1,8 +1,8 @@
 # Selective Disclosure
 
-Selective disclosure lets a privacy-pool note owner prove ownership of a specific unspent note to a third-party authority without revealing the note's secret spending key or linking the proof to any other transaction.
+Selective disclosure lets a privacy-pool note owner prove ownership of one or more unspent notes to a third-party authority without revealing the notes' secret spending keys or linking the proof to any other transaction.
 
-The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash.
+The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash for the circuit named in the receipt.
 
 > **Scope**: This page documents the disclosure receipt format, the standalone `disclosure.html` page, and the three-check verification semantics. Circuit and cryptography details are in the [API Reference](./api.md) and crate-level rustdocs.
 
@@ -16,10 +16,10 @@ A receipt is a JSON object with the following schema:
 {
   "version": 1,
   "circuit": {
-    "name": "selectiveDisclosure_1",
+    "name": "selectiveDisclosure_2",
     "levels": 10,
-    "nNotes": 1,
-    "vkHash": "0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af"
+    "nNotes": 2,
+    "vkHash": "0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1"
   },
   "context": {
     "network": "testnet",
@@ -45,7 +45,7 @@ A receipt is a JSON object with the following schema:
 |---|---|
 | `circuit` | Metadata binding the proof to a specific registered circuit and verifying key. |
 | `context` | Human-readable authority, purpose, and nonce bound into `extContextHash`. |
-| `publicInputs` | Values the proof commits to: the Merkle root, the note commitment, and the hashed context. |
+| `publicInputs` | Values the proof commits to: the Merkle roots, the note commitments, and the hashed context. |
 | `proofCompressedHex` | A 128-byte compressed Groth16 proof (BN254) encoded as `0x`-prefixed hex. |
 | `issuedAt` | ISO-8601 timestamp when the receipt was created. |
 
@@ -65,7 +65,7 @@ Note owners generate receipts through the standalone **Disclosure** page at `/di
 ### Steps
 1. Open `/disclosure.html` and connect your wallet.
 2. The page loads your unspent notes automatically from local storage.
-3. Select the note you want to disclose.
+3. Select 1–4 notes you want to disclose.
 4. Fill in the context form:
    - **Authority label** — human-readable name of the requesting party.
    - **Authority identity payload** — an arbitrary `0x`-prefixed hex payload the authority can use to identify the request.
@@ -82,7 +82,7 @@ A per-row "Disclose" button in the main app's notes table (planned post-merge) l
 /disclosure.html?commitment=0x<note-commitment>
 ```
 
-This pre-selects the matching note if it is owned and unspent.
+This pre-selects the matching notes if they are owned and unspent. Multiple `commitment` parameters may be provided to select up to four notes.
 
 ---
 
@@ -104,9 +104,14 @@ Anyone with the receipt JSON can verify it at `/disclosure.html`, **no wallet re
 
 | Location | Contents |
 |---|---|
-| This page | `0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af` |
-| `deployments/testnet/circuit_keys/README.md` | Canonical hash + artifact provenance |
-| `app/js/disclosure.js` | Hard-coded constant `CANONICAL_SELECTIVE_DISCLOSURE_1_VK_HASH` |
+| Circuit | Canonical `vk_hash` |
+|---|---|
+| `selectiveDisclosure_1` | `0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af` |
+| `selectiveDisclosure_2` | `0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1` |
+| `selectiveDisclosure_3` | `0x0902ecd9e05270b8f68073d8b05b44c1a9bfd2ebd349699374ab3e6f614d7f73` |
+| `selectiveDisclosure_4` | `0xfc1f2648fba94e325de3022ec380401b617ef0653f12acb91d2e5f9431d5134c` |
+| `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
+| `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
 
 The verifier **must not** trust the `vkHash` value embedded inside the receipt itself. The canonical hash must come from an out-of-band source such as the table above.
 
@@ -118,7 +123,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 1. Open the main app and connect your Freighter wallet on Testnet.
 2. Scroll to **Your Notes** and find an unspent note you want to disclose.
-3. Click **Disclose** in the note's Actions column. This opens `/disclosure.html?commitment=0x<note-commitment>` with the note preselected.
+3. Click **Disclose** in the note's Actions column. This opens `/disclosure.html?commitment=0x<note-commitment>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
 4. Enter the context requested by the authority:
    - **Authority label** — e.g. the company or regulator name.
    - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.
@@ -134,7 +139,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 1. Open `/disclosure.html?verify=1` (or click **Verify** in the main app header).
 2. No wallet is required. The page initializes against the Testnet RPC automatically.
 3. Upload the receipt JSON or paste it into the import area and click **Load Receipt**.
-4. Confirm the **Expected VK hash** field matches the canonical hash published above. If you pin a different disclosure key, click **Override** and enter your hash.
+4. Confirm the **Expected VK hash** field matches the canonical hash for the receipt's `circuit.name`. If you pin a different disclosure key, click **Override** and enter your hash.
 5. Review the receipt context summary to ensure it describes the attestation you requested.
 6. Click **Verify Receipt**.
 7. Read the three independent checks:
@@ -162,7 +167,7 @@ A receipt is trustworthy **only when all three checks pass**. Each check can fai
 |---|---|---|---|
 | **Proof valid** | The Groth16 proof verifies cryptographically against the registered circuit's verifying key and the receipt's public inputs. | "The cryptographic proof verifies against the registered circuit's verifying key." | The proof is forged, tampered with, or the verifier is using a mismatched verifying key. |
 | **Context valid** | The declared context (authority, purpose, nonce, network, pool address) re-derives to the `extContextHash` committed in the public inputs. | "The declared authority/purpose/nonce context re-derives to the hash the proof committed to." | The context was altered or re-bound after the proof was created. The authority/purpose may have been swapped without invalidating the cryptographic proof. |
-| **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (root rolled out of history) or refers to a different pool entirely. |
+| **Root fresh** | Every Merkle root in the receipt is still present in the pool contract's on-chain root history (`is_known_root`). | "Every root in the receipt is still in the pool's on-chain root history." | The receipt is stale (a root rolled out of history) or refers to a different pool entirely. |
 
 ### Interpretation
 
@@ -177,7 +182,8 @@ A receipt is trustworthy **only when all three checks pass**. Each check can fai
 
 - **No secret exposure** — The receipt contains only public commitments, roots, and context. The note's spending key, blinding factor, and Merkle path remain secret.
 - **Binding** — The proof is bound to the specific context hash. Changing any context field invalidates the context check.
-- **Non-transferable** — A receipt proves ownership of a specific note commitment at a specific root. It cannot be replayed against a different note or a different pool.
+- **Non-transferable** — A receipt proves ownership of specific note commitments at specific roots. It cannot be replayed against different notes or a different pool.
+- **Correlation** — A multi-note receipt attests that all selected notes are controlled by the same prover for the same context. Verifiers should consider this correlation when interpreting the receipt.
 - **Off-chain only** — Disclosure verification is entirely off-chain. No contract call is required beyond the root-history check, which reads public pool state.
 
 ---
