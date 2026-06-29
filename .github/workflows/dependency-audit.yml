@@ -5,6 +5,7 @@ on:
     paths:
       - "**/Cargo.toml"
       - "**/Cargo.lock"
+      - "deny.toml"
 
 concurrency:
   group: "${{ github.workflow }}-${{ github.ref }}"
