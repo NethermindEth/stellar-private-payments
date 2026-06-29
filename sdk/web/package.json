@@ -1,0 +1,43 @@
+{
+  "name": "private-payments-sdk",
+  "version": "0.1.0",
+  "description": "Stellar Private Payments browser SDK — Rust/WASM with PrivatePool as the main entry point",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NethermindEth/stellar-private-transactions",
+    "directory": "sdk/web"
+  },
+  "main": "./dist/private_payments_web.js",
+  "types": "./dist/private_payments_web.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/private_payments_web.d.ts",
+      "import": "./dist/private_payments_web.js"
+    },
+    "./freighter": {
+      "import": "./js/freighter.js"
+    },
+    "./wallet-bridge": {
+      "import": "./js/wallet-bridge.js"
+    },
+    "./workers/*": "./dist/workers/*"
+  },
+  "files": [
+    "dist/",
+    "js/"
+  ],
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "clean": "rm -rf dist/"
+  },
+  "peerDependencies": {
+    "@stellar/freighter-api": "^6.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@stellar/freighter-api": {
+      "optional": true
+    }
+  }
+}

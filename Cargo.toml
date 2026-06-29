@@ -14,6 +14,7 @@ members = [
     "sdk/tests",
     "sdk/tx-planner",
     "sdk/types",
+    "sdk/web",
     "sdk/witness",
     "tools/ceremony-cli",
 ]
