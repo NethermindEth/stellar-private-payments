@@ -1,28 +1,22 @@
-use crate::{
-    circuits::fetch_circuit_file,
-    protocol::{ProverWorkerRequest, ProverWorkerResponse},
+use crate::protocol::{
+    PreparedProverTx, PreparedTxPublic, ProverWorkerRequest, ProverWorkerResponse,
 };
-use anyhow::{Context as _, Result, anyhow};
-use futures::{FutureExt, try_join};
+use anyhow::{Context as _, Result};
+use futures::try_join;
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{
-    Registrable,
-    oneshot::{OneshotBridge, oneshot},
+use gloo_worker::{Registrable, oneshot::oneshot};
+use prover::{
+    flows::{TransactArtifacts, transact},
+    prover::Prover,
 };
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
-use stellar_private_payments_sdk::{
-    PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
-    proving::{Prover as Groth16Prover, WitnessCalculator},
-    tx::flows::{SelectiveDisclosure1Params, TransactParams, selective_disclosure_1},
-    types::{
-        DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
-        DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
-        SELECTIVE_DISCLOSURE_1_N_NOTES,
-    },
-};
-use wasm_bindgen::JsError;
-use wasm_bindgen_futures::spawn_local;
+use stellar::hash_ext_data_offchain;
+use types::{SELECTIVE_DISCLOSURE_1_LEVELS, SELECTIVE_DISCLOSURE_1_N_NOTES};
+use wasm_bindgen::{JsCast, JsError, JsValue};
+use wasm_bindgen_futures::{JsFuture, spawn_local};
+use web_sys::{Request, RequestInit, RequestMode};
+use witness::WitnessCalculator;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
@@ -80,16 +74,14 @@ fn ensure_sha256_matches(
 // wasm threads?
 
 thread_local! {
-    static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
+    static WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
+    static PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
     static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
-    static DISCLOSURE_PROVER: RefCell<Option<Groth16Prover>> = const { RefCell::new(None) };
+    static DISCLOSURE_PROVER: RefCell<Option<Prover>> = const { RefCell::new(None) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
-    if TRANSACT_PROVER.with(|s| s.borrow().is_some())
-        && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
-        && DISCLOSURE_PROVER.with(|s| s.borrow().is_some())
-    {
+    if WITNESS_CALC.with(|s| s.borrow().is_some()) && PROVER.with(|s| s.borrow().is_some()) {
         return Ok(());
     }
     let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
@@ -169,8 +161,9 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
     )?;
 
-    let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
+    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init witness calculator: {e:#}")))?;
+    let prover = Prover::new(PROVING_KEY, &r1cs_bytes).expect("FAILED Prover");
 
     let disc_witness_calc =
         WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
@@ -178,11 +171,14 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
                 "failed to init disclosure witness calculator: {e:#}"
             ))
         })?;
-    let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
-        .expect("FAILED Disclosure Prover");
+    let disc_prover =
+        Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes).expect("FAILED Disclosure Prover");
 
-    TRANSACT_PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(transact_prover);
+    WITNESS_CALC.with(|cell| {
+        *cell.borrow_mut() = Some(witness_calc);
+    });
+    PROVER.with(|cell| {
+        *cell.borrow_mut() = Some(prover);
     });
     DISCLOSURE_WITNESS_CALC.with(|cell| {
         *cell.borrow_mut() = Some(disc_witness_calc);
@@ -226,9 +222,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Ping => {
             log::trace!("[{WORKER_NAME}] ping");
             loop {
-                let ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
-                    && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
-                    && DISCLOSURE_PROVER.with(|s| s.borrow().is_some());
+                let ready = WITNESS_CALC.with(|s| s.borrow().is_some())
+                    && PROVER.with(|s| s.borrow().is_some());
 
                 if ready {
                     log::trace!("[{WORKER_NAME}] pong");
@@ -240,22 +235,24 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
-            let prepared = TRANSACT_PROVER.with(|cell| {
-                let mut borrow = cell.borrow_mut();
-                let engine = borrow
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("transact prover is not initialized"))?;
-                engine.prove_transact(params)
-            })?;
-            ProverWorkerResponse::TransactPrepared(prepared)
+            let artifacts = transact(params, hash_ext_data_offchain)?;
+            log::debug!("[{WORKER_NAME}] prove_from_artifacts");
+            ProverWorkerResponse::TransactPrepared(prove_from_artifacts(artifacts)?)
         }
         ProverWorkerRequest::Disclosure(req) => {
             log::debug!("[{WORKER_NAME}] disclosure");
 
-            let context = req.context;
+            let context = types::DisclosureContext {
+                network: req.network,
+                pool_address: req.pool_address,
+                authority_label: req.authority_label,
+                authority_identity_payload_hex: req.authority_identity_payload_hex,
+                purpose: req.purpose,
+                context_nonce: req.context_nonce,
+            };
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
-            let params = SelectiveDisclosure1Params {
+            let params = prover::flows::SelectiveDisclosure1Params {
                 root: req.inputs.root,
                 note_commitment: req.inputs.note_commitment,
                 note_amount: req.inputs.note_amount,
@@ -266,7 +263,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                 ext_context_hash,
             };
 
-            let artifacts = selective_disclosure_1(params)?;
+            let artifacts = prover::flows::selective_disclosure_1(params)?;
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
             let witness_bytes = DISCLOSURE_WITNESS_CALC.with(|cell| {
@@ -293,16 +290,16 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
 
-            let receipt = DisclosureReceipt {
-                version: DISCLOSURE_RECEIPT_VERSION,
-                circuit: DisclosureCircuitMetadata {
-                    name: SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
+            let receipt = types::DisclosureReceipt {
+                version: types::DISCLOSURE_RECEIPT_VERSION,
+                circuit: types::DisclosureCircuitMetadata {
+                    name: types::SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
                     levels: SELECTIVE_DISCLOSURE_1_LEVELS,
                     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
                     vk_hash: vk_hash_hex,
                 },
                 context,
-                public_inputs: DisclosurePublicInputs {
+                public_inputs: types::DisclosurePublicInputs {
                     roots: vec![req.inputs.root],
                     note_commitments: vec![req.inputs.note_commitment],
                     ext_context_hash,
@@ -316,9 +313,14 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::Disclosure(receipt)
         }
+        // TODO: Consider extracting disclosure proof verification into a separate
+        // interface/crate. Verification is initiated by a receipt holder outside
+        // the app, while proving is app-initiated, so the responsibilities differ.
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             log::debug!("[{WORKER_NAME}] verify disclosure proof");
 
+            // Early metadata validation for clear error messages. The actual
+            // VK-byte trust binding lives inside disclosure::verify_receipt_proof.
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
             let proof_verified = DISCLOSURE_PROVER.with(|cell| {
@@ -337,109 +339,119 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
     Ok(resp)
 }
 
-const PROVE_TIMEOUT_MS: u32 = 20_000;
+fn prove_from_artifacts(transact_artifacts: TransactArtifacts) -> Result<PreparedProverTx> {
+    let circuit_inputs_json = serde_json::to_string(&transact_artifacts.circuit_inputs)?;
+    let ext_data = transact_artifacts.ext_data.clone();
+    log::debug!("[{WORKER_NAME}] compute witness");
+    let witness_bytes = WITNESS_CALC.with(|cell| {
+        let mut borrow = cell.borrow_mut();
+        let calc = borrow
+            .as_mut()
+            .ok_or_else(|| anyhow::anyhow!("witness calculator is not initialized"))?;
+        calc.compute_witness(&circuit_inputs_json)
+            .context("witness calculation failed")
+    })?;
 
-/// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
-pub(crate) struct ProverBridge {
-    bridge: OneshotBridge<ProverWorker>,
-}
+    let (proof_uncompressed, prepared_public) = PROVER.with(|cell| {
+        let borrow = cell.borrow();
+        let prover = borrow
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("prover is not initialized"))?;
 
-impl Clone for ProverBridge {
-    fn clone(&self) -> Self {
-        Self {
-            bridge: self.bridge.fork(),
+        log::debug!("[{WORKER_NAME}] prove");
+        let proof_compressed = prover.prove_bytes(&witness_bytes)?;
+        let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
+        log::debug!("[{WORKER_NAME}] verify");
+        let ok = prover.verify(&proof_compressed, &public_inputs)?;
+        if !ok {
+            return Err(anyhow::anyhow!("proof verification failed"));
         }
-    }
-}
 
-impl ProverBridge {
-    pub(crate) fn new(bridge: OneshotBridge<ProverWorker>) -> Self {
-        Self { bridge }
-    }
+        let proof_uncompressed = prover.proof_bytes_to_uncompressed(&proof_compressed)?;
+        if proof_uncompressed.len() != 256 {
+            return Err(anyhow::anyhow!(
+                "unexpected uncompressed proof length: {}",
+                proof_uncompressed.len()
+            ));
+        }
 
-    pub(crate) async fn call(
-        &self,
-        req: ProverWorkerRequest,
-        timeout_ms: u32,
-    ) -> anyhow::Result<ProverWorkerResponse> {
-        let mut bridge = self.bridge.fork();
-        let fut = bridge.run(req).fuse();
-        let timeout = TimeoutFuture::new(timeout_ms).fuse();
-
-        futures::pin_mut!(fut, timeout);
-
-        let resp = futures::select! {
-            value = fut => value,
-            _ = timeout => {
-                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
-            }
+        let p = transact_artifacts.prepared;
+        let prepared_public = PreparedTxPublic {
+            pool_root: p.pool_root,
+            input_nullifiers: p.input_nullifiers,
+            output_commitments: p.output_commitments,
+            public_amount: p.public_amount_field,
+            ext_data_hash_be: p.ext_data_hash_be,
+            asp_membership_root: p.asp_membership_root,
+            asp_non_membership_root: p.asp_non_membership_root,
         };
 
-        match resp {
-            ProverWorkerResponse::Error(e) => Err(anyhow!(e)),
-            other => Ok(other),
-        }
-    }
+        Ok::<_, anyhow::Error>((proof_uncompressed, prepared_public))
+    })?;
 
-    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self.call(ProverWorkerRequest::Ping, 5_000).await? {
-            ProverWorkerResponse::Pong => Ok(()),
-            other => Err(anyhow!("unexpected response: {other:?}")),
-        }
-    }
+    Ok(PreparedProverTx {
+        proof_uncompressed,
+        ext_data,
+        prepared: prepared_public,
+        soroban_tx: Default::default(),
+    })
 }
 
-#[async_trait::async_trait(?Send)]
-impl Prover for ProverBridge {
-    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
-        match self
-            .call(ProverWorkerRequest::Transact(params), PROVE_TIMEOUT_MS)
-            .await
-        {
-            Ok(ProverWorkerResponse::TransactPrepared(prepared)) => Ok(prepared),
-            Ok(other) => Err(PoolError::Other(format!(
-                "unexpected prover worker response: {other:?}"
-            ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
-        }
+async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
+    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
+    let global = js_sys::global();
+
+    let location = js_sys::Reflect::get(&global, &JsValue::from_str("location"))
+        .map_err(|_| JsError::new("Accessing self.location failed"))?;
+
+    let origin = js_sys::Reflect::get(&location, &JsValue::from_str("origin"))
+        .map_err(|_| JsError::new("Accessing self.location.origin failed"))?
+        .as_string()
+        .ok_or_else(|| JsError::new("Origin is not a string"))?;
+
+    let public_url = PUBLIC_URL.unwrap_or("/");
+
+    let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
+        format!("{public_url}{path}")
+    } else if public_url == "/" {
+        format!("{origin}/{path}")
+    } else {
+        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
+    };
+
+    log::debug!("[{WORKER_NAME}] Fetching from: {}", url_string);
+
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+
+    let request = Request::new_with_str_and_init(&url_string, &opts)
+        .map_err(|e| JsError::new(&format!("Request failed for {}: {:?}", url_string, e)))?;
+
+    let global_scope = global.unchecked_into::<web_sys::WorkerGlobalScope>();
+    let resp_value = JsFuture::from(global_scope.fetch_with_request(&request))
+        .await
+        .map_err(|e| JsError::new(&format!("Network error: {:?}", e)))?;
+
+    let resp: web_sys::Response = resp_value
+        .dyn_into()
+        .map_err(|_| JsError::new("Failed to cast response"))?;
+
+    if !resp.ok() {
+        return Err(JsError::new(&format!(
+            "HTTP {} for {}",
+            resp.status(),
+            url_string
+        )));
     }
 
-    async fn prove_disclosure(
-        &self,
-        params: stellar_private_payments_sdk::DisclosureProveParams,
-    ) -> Result<DisclosureReceipt, PoolError> {
-        match self
-            .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)
-            .await
-        {
-            Ok(ProverWorkerResponse::Disclosure(receipt)) => Ok(receipt),
-            Ok(other) => Err(PoolError::Other(format!(
-                "unexpected prover worker response: {other:?}"
-            ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
-        }
-    }
+    let array_buffer_promise = resp
+        .array_buffer()
+        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
+    let array_buffer_value = JsFuture::from(array_buffer_promise)
+        .await
+        .map_err(|e| JsError::new(&format!("{:?}", e)))?;
 
-    async fn verify_disclosure_proof(
-        &self,
-        receipt: &DisclosureReceipt,
-        expected_vk_hash: &str,
-    ) -> Result<bool, PoolError> {
-        match self
-            .call(
-                ProverWorkerRequest::VerifyDisclosureProof(
-                    receipt.clone(),
-                    expected_vk_hash.to_string(),
-                ),
-                PROVE_TIMEOUT_MS,
-            )
-            .await
-        {
-            Ok(ProverWorkerResponse::DisclosureProofVerified(v)) => Ok(v),
-            Ok(other) => Err(PoolError::Other(format!(
-                "unexpected prover worker response: {other:?}"
-            ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
-        }
-    }
+    let type_array = js_sys::Uint8Array::new(&array_buffer_value);
+    Ok(type_array.to_vec())
 }

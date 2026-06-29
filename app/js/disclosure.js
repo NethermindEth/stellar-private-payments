@@ -681,16 +681,15 @@ async function generateReceipt(form) {
   const config = await getHandle().webClient.contractConfig();
   const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
 
-  const { ensureAppPool } = await import('./ui/pool.js');
-  const pool = await ensureAppPool();
-
-  const receipt = await pool.disclose(
+  const receipt = await getHandle().webClient.generateSelectiveDisclosure(
+    poolContractId,
+    state.address,
     state.selectedNote.id,
     form.authority,
     form.payload,
     form.purpose,
     BigInt(form.nonce),
-    onStatus,
+    onStatus
   );
 
   // receipt is a JS object (already deserialized by wasm_bindgen) or null

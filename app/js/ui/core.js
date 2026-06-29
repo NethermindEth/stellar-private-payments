@@ -25,9 +25,6 @@ export const App = {
         pools: [],
         selectedPoolId: null,
         notes: [],
-        pool: null,
-        activeTab: 'deposit',
-        addressBookFillTarget: null,
         balances: [],
         feed: [],
         profile: {
