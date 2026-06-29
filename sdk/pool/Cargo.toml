@@ -13,24 +13,24 @@ name = "stellar_private_payments_sdk"
 [dependencies]
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+disclosure = { workspace = true }
 log = { workspace = true }
 prover = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
-disclosure = { workspace = true }
 thiserror = { workspace = true }
 tx-planner = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 witness = { workspace = true }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-gloo-timers = { workspace = true }
-
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 futures-timer = "3"
 tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+gloo-timers = { workspace = true }
 
 [lints]
 workspace = true
