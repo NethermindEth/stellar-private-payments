@@ -6,14 +6,14 @@ This document describes how the application manages local state, including persi
 
 **Core vs platforms**
 
-Core application logic is implemented in Rust `app/crates/core` crates which define sync and async primitives and building blocks.
+Core application logic is implemented in Rust `sdk/` crates which define sync and async primitives and building blocks.
 Platforms `app/crates/platforms` (`web`, in the future - `cli`, `mcp` etc) provide compilation target specific dependencies, setup runtime (asynchronous/threaded), ui interaction protocol (e.g. FFI/http), order of operations.
 
 Other directories in `app` directory mostly define interfaces for the `web` platform but probably can be restructured in the future to include other platforms interfaces as well.
 
 **Storage:**
 
-Local storage is implemented upon SQLite (`app/crates/core/state/src/storage.rs`) with the schema `app/crates/core/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
+Local storage is implemented upon SQLite (`sdk/state/src/storage.rs`) with the schema `sdk/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
 
 ## Web platform (WASM + Web Workers)
 
@@ -114,7 +114,7 @@ flowchart LR
 **Keypair Derivation:**
 
 Keys are derived deterministically from Freighter wallet signatures:
-1. User signs the message defined by `KEY_DERIVATION_MESSAGE` from `app/crates/core/prover/src/encryption.rs`
+1. User signs the message defined by `KEY_DERIVATION_MESSAGE` from `sdk/prover/src/encryption.rs`
 2. The app derives the BN254 note identity keypair and the X25519 encryption keypair from that single signature using separate domain-separated hashes
 
 **When are signatures prompted?**
