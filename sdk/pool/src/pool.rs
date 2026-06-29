@@ -91,7 +91,7 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn sync(&self) -> Result<(), PoolError> {
-        let indexer = Indexer::init(
+        let indexer = Indexer::init_with_client(
             self.client.clone(),
             self.storage.fork()?,
             &self.config.contract_config,

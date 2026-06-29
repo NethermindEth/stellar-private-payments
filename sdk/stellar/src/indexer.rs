@@ -15,7 +15,16 @@ pub struct Indexer<S: ContractDataStorage> {
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(client: Client, storage: S, config: &ContractConfig) -> Result<Self> {
+    pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
+        let client = Client::new(rpc_url)?;
+        Self::init_with_client(client, storage, config).await
+    }
+
+    pub async fn init_with_client(
+        client: Client,
+        storage: S,
+        config: &ContractConfig,
+    ) -> Result<Self> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
 
@@ -57,10 +66,14 @@ impl<S: ContractDataStorage> Indexer<S> {
     }
 
     /// Fetch up to [`MAX_PAGES_PER_ROUND`] event pages from RPC into storage.
-    ///
-    /// Returns `true` when the round ended on a non-empty page (caller may want
-    /// another round).
-    pub async fn fetch_contract_events(&self) -> Result<bool> {
+    pub async fn fetch_contract_events(&self) -> Result<()> {
+        let _ = self.fetch_contract_events_round().await?;
+        Ok(())
+    }
+
+    /// Like [`Self::fetch_contract_events`], but returns whether another round
+    /// may be needed (used by [`Self::catch_up`]).
+    async fn fetch_contract_events_round(&self) -> Result<bool> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
@@ -180,7 +193,7 @@ impl<S: ContractDataStorage> Indexer<S> {
     /// Ingest contract events from RPC until pagination reaches the network
     /// tip.
     pub async fn catch_up(&self) -> Result<()> {
-        while self.fetch_contract_events().await? {}
+        while self.fetch_contract_events_round().await? {}
         Ok(())
     }
 }
