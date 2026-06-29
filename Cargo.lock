@@ -3645,12 +3645,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b4596b6d070b27117e987119b4dac604f3c58cfb0b191112e24771b2faeac1a6"
 
 [[package]]
-name = "pollster"
-version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f3a9f18d041e6d0e102a0a46750538147e5e8992d3b4873aaafee2520b00ce3"
-
-[[package]]
 name = "poly1305"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4834,13 +4828,13 @@ dependencies = [
  "futures-timer",
  "gloo-timers",
  "log",
- "pollster",
  "prover",
  "serde",
  "serde_json",
  "state",
  "stellar",
  "thiserror 2.0.18",
+ "tokio",
  "tx-planner",
  "types",
  "witness",
@@ -5909,24 +5903,30 @@ dependencies = [
  "anyhow",
  "async-trait",
  "console_error_panic_hook",
+ "disclosure",
  "futures",
  "gloo-timers",
  "gloo-worker",
  "js-sys",
  "log",
+ "prover",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "stellar-private-payments-sdk",
+ "state",
+ "stellar",
  "tokio",
+ "tx-planner",
+ "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
  "wiremock",
+ "witness",
 ]
 
 [[package]]
