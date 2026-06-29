@@ -225,6 +225,10 @@ mod tests {
         })
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "tokio I/O driver / network mock unsupported under Miri"
+    )]
     #[tokio::test]
     async fn get_contract_events_surfaces_handoff_as_jsonrpc_error() {
         let server = MockServer::start().await;
@@ -242,6 +246,10 @@ mod tests {
         assert!(is_retention_handoff(&err));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "tokio I/O driver / network mock unsupported under Miri"
+    )]
     #[tokio::test]
     async fn get_contract_events_maps_sync_gap_to_rpc_sync_gap() {
         let server = MockServer::start().await;
@@ -259,6 +267,10 @@ mod tests {
         assert!(matches!(err, RpcError::RpcSyncGap(100)));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "tokio I/O driver / network mock unsupported under Miri"
+    )]
     #[tokio::test]
     async fn get_contract_events_maps_ahead_of_tip_to_rpc_ahead() {
         let server = MockServer::start().await;
@@ -278,6 +290,10 @@ mod tests {
         assert!(matches!(err, RpcError::RpcAhead(3_000_000)));
     }
 
+    #[cfg_attr(
+        miri,
+        ignore = "tokio I/O driver / network mock unsupported under Miri"
+    )]
     #[tokio::test]
     async fn bootnode_handoff_round_trip() {
         let config = test_config();
