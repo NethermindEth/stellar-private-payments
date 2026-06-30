@@ -8,6 +8,11 @@ import {
   signTransaction,
 } from '@stellar/freighter-api';
 
+/**
+ * Freighter wallet adapter for {@link PrivatePool.new}.
+ *
+ * Pass an instance as the second argument: `PrivatePool.new(config, signer)`.
+ */
 export class FreighterSigner {
   async ensureReady() {
     const conn = await isConnected();

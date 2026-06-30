@@ -4,25 +4,25 @@ use std::rc::Rc;
 
 use serde::Deserialize;
 use stellar_private_payments_sdk::{
-    DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig, Signer,
+    DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig,
     types::{
-        ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, TransactionResult,
-        TransferRecipient,
+        ContractConfig, DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey,
+        TransactionResult, TransferRecipient,
     },
 };
 use wasm_bindgen::prelude::*;
 
 use crate::{
     amounts::{format_token_amount, parse_token_amount},
-    client::{SdkClient, pool_err, transact::parse_transact_step},
+    client::{Client, pool_err, transact::parse_transact_step},
+    signer::WalletSigner,
     workers::storage::StorageBridge,
 };
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct PoolCreateConfig {
+pub(crate) struct PoolCreateConfig {
     pub pool_contract: String,
-    pub network_passphrase: String,
     pub user_address: String,
 }
 
@@ -41,22 +41,19 @@ struct NewConfig {
 #[wasm_bindgen]
 pub struct PrivatePool {
     inner: Rc<SdkPrivatePool<StorageBridge>>,
-    client: Rc<SdkClient>,
-    network_passphrase: String,
+    client: Rc<Client>,
     user_address: String,
 }
 
 impl PrivatePool {
     pub(crate) fn from_parts(
         inner: Rc<SdkPrivatePool<StorageBridge>>,
-        client: Rc<SdkClient>,
-        network_passphrase: String,
+        client: Rc<Client>,
         user_address: String,
     ) -> Self {
         Self {
             inner,
             client,
-            network_passphrase,
             user_address,
         }
     }
@@ -65,8 +62,17 @@ impl PrivatePool {
         &self.inner
     }
 
-    pub(crate) fn client(&self) -> &SdkClient {
+    pub(crate) fn client(&self) -> &Client {
         &self.client
+    }
+
+    async fn resolve_recipient(&self, recipient: &str) -> Result<(String, String), JsError> {
+        if recipient.starts_with('G') {
+            return self.client().recipient_keys(recipient).await;
+        }
+        Err(JsError::new(
+            "recipient must be a Stellar address (G...); lookup uses the on-chain public key registry",
+        ))
     }
 
     fn parse_note_amount(amount: &str) -> Result<NoteAmount, JsError> {
@@ -81,10 +87,11 @@ impl PrivatePool {
 
 #[wasm_bindgen]
 impl PrivatePool {
-    /// Create a pool session. Install `window.__walletSignBridge` first (see
-    /// `js/wallet-bridge.js`).
+    /// Create a pool session. `signer` must expose `signMessage`,
+    /// `signTransaction`, and `signAuthEntry` (see `FreighterSigner` in the
+    /// npm package).
     #[wasm_bindgen(js_name = new)]
-    pub async fn new_session(config: JsValue) -> Result<PrivatePool, JsError> {
+    pub async fn new_session(config: JsValue, signer: JsValue) -> Result<PrivatePool, JsError> {
         let cfg: NewConfig = serde_wasm_bindgen::from_value(config)?;
         let storage_worker_url = cfg
             .storage_worker_url
@@ -93,41 +100,27 @@ impl PrivatePool {
             .prover_worker_url
             .unwrap_or_else(|| "./workers/prover-worker.js".to_string());
 
+        let wallet_signer = WalletSigner::new(
+            signer,
+            cfg.network_passphrase.clone(),
+            cfg.user_address.clone(),
+        )?;
+
         let client =
-            Rc::new(SdkClient::connect(cfg.rpc_url, storage_worker_url, prover_worker_url).await?);
+            Rc::new(Client::connect(cfg.rpc_url, storage_worker_url, prover_worker_url).await?);
 
         let pool_cfg = PoolCreateConfig {
             pool_contract: cfg.pool_contract,
-            network_passphrase: cfg.network_passphrase.clone(),
             user_address: cfg.user_address.clone(),
         };
-        let inner = Rc::new(client.create_pool_internal(&pool_cfg).await?);
+        let inner = Rc::new(
+            client
+                .create_pool_internal(&pool_cfg, &wallet_signer)
+                .await?,
+        );
 
-        Ok(Self::from_parts(
-            inner,
-            client,
-            cfg.network_passphrase,
-            cfg.user_address,
-        ))
+        Ok(Self::from_parts(inner, client, cfg.user_address))
     }
-
-    /// Derive privacy keys from a wallet signature and persist them locally.
-    pub async fn initialize(&self) -> Result<(), JsError> {
-        let message = self.client().key_derivation_message();
-        let sig_hex = crate::signer::sign_wallet_message(
-            &message,
-            &self.network_passphrase,
-            &self.user_address,
-        )
-        .await?;
-        let signature = crate::signer::hex_signature_to_bytes(&sig_hex)?;
-        self.client()
-            .derive_save_user_keys(self.user_address.clone(), signature)
-            .await
-    }
-
-    #[wasm_bindgen(js_name = close)]
-    pub fn close(self) {}
 
     pub async fn sync(&self) -> Result<(), JsError> {
         self.inner().sync().await.map_err(pool_err)
@@ -224,24 +217,21 @@ impl PrivatePool {
             Some(receipt) => Ok(serde_wasm_bindgen::to_value(&receipt)?),
         }
     }
-}
 
-impl PrivatePool {
-    async fn resolve_recipient(&self, recipient: &str) -> Result<(String, String), JsError> {
-        if recipient.starts_with('G') {
-            return self.client().recipient_keys(recipient).await;
-        }
-        Err(JsError::new(
-            "recipient must be a Stellar address (G...); lookup uses the on-chain public key registry",
-        ))
+    #[wasm_bindgen(js_name = verifyDisclosure)]
+    pub async fn verify_disclosure(
+        &self,
+        receipt: JsValue,
+        expected_vk_hash: &str,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_wasm_bindgen::from_value(receipt)?;
+        let report = self
+            .inner()
+            .verify_disclosure(&receipt, expected_vk_hash)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&report)?)
     }
-}
-
-pub(crate) fn wallet_signer(network_passphrase: String, user_address: String) -> Box<dyn Signer> {
-    Box::new(crate::signer::WalletSigner::new(
-        network_passphrase,
-        user_address,
-    ))
 }
 
 pub(crate) fn build_pool_config(

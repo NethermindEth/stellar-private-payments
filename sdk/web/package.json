@@ -9,18 +9,19 @@
     "url": "https://github.com/NethermindEth/stellar-private-transactions",
     "directory": "sdk/web"
   },
-  "main": "./dist/private_payments_web.js",
+  "main": "./js/index.js",
   "types": "./dist/private_payments_web.d.ts",
   "exports": {
     ".": {
+      "types": "./dist/private_payments_web.d.ts",
+      "import": "./js/index.js"
+    },
+    "./wasm": {
       "types": "./dist/private_payments_web.d.ts",
       "import": "./dist/private_payments_web.js"
     },
     "./freighter": {
       "import": "./js/freighter.js"
-    },
-    "./wallet-bridge": {
-      "import": "./js/wallet-bridge.js"
     },
     "./workers/*": "./dist/workers/*"
   },

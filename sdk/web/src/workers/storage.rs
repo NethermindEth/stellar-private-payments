@@ -480,9 +480,6 @@ impl StorageBridge {
         Self { bridge }
     }
 
-    /// Send a request to the storage worker and return its response.
-    ///
-    /// Worker-level [`StorageWorkerResponse::Error`] is mapped to `Err`.
     pub(crate) async fn call(
         &self,
         req: StorageWorkerRequest,

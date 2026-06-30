@@ -4,8 +4,10 @@
 //! Published as the `private-payments-sdk` npm package from this crate
 //! directory.
 
+mod account;
 mod amounts;
 mod client;
+mod deployment;
 mod protocol;
 mod signer;
 pub mod workers;
@@ -18,7 +20,7 @@ pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/d
 
 use wasm_bindgen::prelude::*;
 
-pub use client::{PrivatePool, SdkClient, SdkConfig};
+pub use client::PrivatePool;
 
 #[wasm_bindgen(start)]
 pub fn wasm_start() {
