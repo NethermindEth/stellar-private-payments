@@ -7,10 +7,11 @@ import type {
   PoolOptions,
   RegisterPublicKeysOptions,
 } from './options.js';
+import type { Storage, StorageOpenOptions } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
 export { default } from '../../dist/private_payments_web.js';
-export { PrivatePool } from '../../dist/private_payments_web.js';
+export { PrivatePool, Storage } from '../../dist/private_payments_web.js';
 export type { Client as WasmClient } from '../../dist/private_payments_web.js';
 
 export type {
@@ -18,6 +19,7 @@ export type {
   PoolOptions,
   RegisterPublicKeysOptions,
 } from './options.js';
+export type { StorageOpenOptions } from './storage.js';
 export type {
   SignAuthEntryResult,
   SignMessageResult,

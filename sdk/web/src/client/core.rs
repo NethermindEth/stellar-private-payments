@@ -1,10 +1,8 @@
 use crate::{
     deployment::deployment_config,
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
-    workers::{
-        prover::{ProverBridge, ProverWorker},
-        storage::{StorageBridge, StorageWorker},
-    },
+    storage::Storage,
+    workers::prover::{ProverBridge, ProverWorker},
 };
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
@@ -16,12 +14,13 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::prelude::*;
 
+use crate::workers::storage::StorageBridge;
+
 use super::{PoolCreateConfig, build_pool_config, pool_err};
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 
-const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js";
 const DEFAULT_PROVER_WORKER_URL: &str = "./workers/prover-worker.js";
 
 /// Workers, RPC fetcher, and tx submission shared by [`super::Client`] and
@@ -47,16 +46,27 @@ impl Clone for ClientCore {
 impl ClientCore {
     pub(crate) async fn connect(
         rpc_url: String,
+        storage: Option<Storage>,
         storage_worker_url: Option<String>,
         prover_worker_url: Option<String>,
     ) -> Result<Self, JsError> {
         crate::wasm_start();
 
-        let core = Self::new_internal(
+        let contract_config = deployment_config()?;
+        let storage_bridge = match storage {
+            Some(storage) => storage.bridge(),
+            None => {
+                let worker_url = storage_worker_url
+                    .unwrap_or_else(|| crate::storage::DEFAULT_STORAGE_WORKER_URL.to_string());
+                Storage::open_internal(worker_url).await?.bridge()
+            }
+        };
+
+        let core = Self::new_with_storage(
             rpc_url,
-            storage_worker_url.unwrap_or_else(|| DEFAULT_STORAGE_WORKER_URL.to_string()),
+            storage_bridge,
             prover_worker_url.unwrap_or_else(|| DEFAULT_PROVER_WORKER_URL.to_string()),
-            deployment_config()?,
+            contract_config,
         )
         .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -253,19 +263,15 @@ impl ClientCore {
         Ok(hash)
     }
 
-    fn new_internal(
+    fn new_with_storage(
         rpc_url: String,
-        storage_worker_url: String,
+        storage: StorageBridge,
         prover_worker_url: String,
         contract_config: &'static ContractConfig,
     ) -> anyhow::Result<Self> {
         Ok(Self {
             rpc_url: rpc_url.clone(),
-            storage: StorageBridge::new(
-                StorageWorker::spawner()
-                    .as_module(true)
-                    .spawn(&storage_worker_url),
-            ),
+            storage,
             prover_bridge: ProverBridge::new(
                 ProverWorker::spawner()
                     .as_module(true)

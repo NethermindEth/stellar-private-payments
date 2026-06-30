@@ -5,7 +5,7 @@ use std::rc::Rc;
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
-use crate::{deployment::deployment_config, signer::WalletSigner};
+use crate::{deployment::deployment_config, signer::WalletSigner, storage::Storage};
 
 use super::core::ClientCore;
 
@@ -47,12 +47,23 @@ impl Client {
     /// Connect workers and bind a wallet signer for this account session.
     #[wasm_bindgen(js_name = connect)]
     pub async fn connect(options: JsValue, signer: JsValue) -> Result<Client, JsError> {
+        let storage = js_sys::Reflect::get(&options, &JsValue::from_str("storage"))
+            .ok()
+            .filter(|value| !value.is_null() && !value.is_undefined())
+            .map(|value| {
+                value
+                    .dyn_into::<Storage>()
+                    .map_err(|_| JsError::new("options.storage must be a Storage instance"))
+            })
+            .transpose()?;
+
         let opts: ConnectOptions = serde_wasm_bindgen::from_value(options)?;
         let wallet_signer =
             WalletSigner::new(signer, opts.network_passphrase, opts.user_address.clone())?;
         let core = Rc::new(
             ClientCore::connect(
                 opts.rpc_url,
+                storage,
                 opts.storage_worker_url,
                 opts.prover_worker_url,
             )

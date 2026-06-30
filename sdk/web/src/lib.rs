@@ -7,6 +7,7 @@ mod client;
 mod deployment;
 mod protocol;
 mod signer;
+mod storage;
 pub mod workers;
 
 pub(crate) mod artifact_hashes {
@@ -18,6 +19,7 @@ pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/d
 use wasm_bindgen::prelude::*;
 
 pub use client::{Client, PrivatePool};
+pub use storage::Storage;
 
 #[wasm_bindgen(start)]
 pub fn wasm_start() {

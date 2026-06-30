@@ -2,20 +2,21 @@
 
 Browser SDK for Stellar Private Payments.
 
-**`Client.connect`** → account ops → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
+**`Storage.open`** → **`Client.connect`** → account ops → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
 ## Usage
 
 ```js
-import init, { Client, FreighterSigner } from 'private-payments-sdk';
+import init, { Storage, Client, FreighterSigner } from 'private-payments-sdk';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const signer = new FreighterSigner();
 
 await init();
 
+const storage = await Storage.open();
 const client = await Client.connect(
-  { rpcUrl: 'https://soroban-testnet.stellar.org', networkPassphrase },
+  { rpcUrl: 'https://soroban-testnet.stellar.org', networkPassphrase, storage },
   signer,
 );
 
@@ -33,11 +34,19 @@ const cfg = Client.contractConfig();
 const chain = await client.allContractsData();
 ```
 
+### `Storage`
+
+| Method | Description |
+|--------|-------------|
+| `open({ workerUrl? })` | Spawn storage worker once per page (`poolstellar.sqlite` on OPFS) |
+| `fork()` | Extra handle to the same worker (app + SDK can share one DB) |
+| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence (disclaimer, settings, …) |
+
 ### `Client`
 
 | Method | Description |
 |--------|-------------|
-| `connect(options, signer)` | Workers + wallet session (one account) |
+| `connect(options, signer)` | Wallet session; pass `storage` from `Storage.open()` or omit for a default worker |
 | `contractConfig()` | Static deployment config |
 | `initialize()` | Derive and save privacy keys |
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
@@ -58,7 +67,7 @@ Bound at `Client.connect`. Must implement `signMessage`, `signTransaction`, `sig
 Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'private-payments-sdk'`) is fully typed; wasm-bindgen types are also available via `private-payments-sdk/wasm`.
 
 ```ts
-import init, { Client, FreighterSigner, type WalletSigner } from 'private-payments-sdk';
+import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'private-payments-sdk';
 ```
 
 After building WASM:
@@ -82,4 +91,4 @@ Published tarball: `dist/` (wasm + workers) and `js/` (entry + types).
 
 ## Workers
 
-Worker URLs default via `import.meta.url` in the JS entry. Override with `storageWorkerUrl` / `proverWorkerUrl` on `Client.connect()`.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.connect()` when storage is omitted. Prover worker URL defaults similarly on `Client.connect()`.

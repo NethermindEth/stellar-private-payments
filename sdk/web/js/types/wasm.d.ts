@@ -7,6 +7,12 @@ declare module '../../dist/private_payments_web.js' {
     module_or_path?: string | URL | Request | Response | BufferSource | WebAssembly.Module,
   ): Promise<void>;
 
+  export class Storage {
+    static open(options?: unknown): Promise<Storage>;
+    fork(): Storage;
+    call(request: unknown, timeoutMs?: number): Promise<unknown>;
+  }
+
   export class Client {
     static connect(options: unknown, signer: unknown): Promise<Client>;
     static contractConfig(): unknown;
