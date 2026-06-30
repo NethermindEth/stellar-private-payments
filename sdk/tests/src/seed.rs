@@ -22,6 +22,13 @@ fn test_derivation_signature() -> KeyDerivationSignature {
     KeyDerivationSignature(vec![42u8; 64])
 }
 
+pub fn seeded_user_public_keys() -> Result<(types::NotePublicKey, types::EncryptionPublicKey)> {
+    let signature = test_derivation_signature();
+    let (note_keypair, encryption_keypair) =
+        encryption::derive_encryption_and_note_keypairs(signature)?;
+    Ok((note_keypair.public, encryption_keypair.public))
+}
+
 /// Open (or create) `path` with schema migrations applied.
 pub fn ensure_schema(storage_path: &Path) -> Result<()> {
     let _storage = SqliteStorage::connect_file(storage_path).context("apply storage migrations")?;

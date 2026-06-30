@@ -1,7 +1,7 @@
 //! Sync wrapper around [`crate::PrivatePool`] via a shared Tokio runtime.
 
 use tx_planner::SpendableNote;
-use types::{NoteAmount, UserNoteSummary};
+use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use crate::{
     PreparedTransaction, PreparedTransactionPlan,
@@ -124,6 +124,13 @@ impl PrivatePool {
 
     pub fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
         block_on(self.inner.notes())
+    }
+
+    pub fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        block_on(self.inner.user_public_keys(user_address))
     }
 
     pub fn balance(&self) -> Result<NoteAmount, PoolError> {
