@@ -54,20 +54,18 @@ impl PrivatePool {
 
     pub fn transfer(
         &self,
-        wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        block_on(self.inner.transfer(wallet, recipient, amount))
+        block_on(self.inner.transfer(recipient, amount))
     }
 
     pub fn withdraw(
         &self,
-        wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        block_on(self.inner.withdraw(wallet, amount, recipient))
+        block_on(self.inner.withdraw(amount, recipient))
     }
 
     pub fn transact(&self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {

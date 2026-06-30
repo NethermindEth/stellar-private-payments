@@ -122,21 +122,21 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn transfer(
         &self,
-        wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        let mut plan = self.prepare_transfer(wallet, recipient, amount)?;
+        let wallet = self.spendable_notes().await?;
+        let mut plan = self.prepare_transfer(&wallet, recipient, amount)?;
         self.execute(&mut plan).await
     }
 
     pub async fn withdraw(
         &self,
-        wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        let mut plan = self.prepare_withdraw(wallet, amount, recipient)?;
+        let wallet = self.spendable_notes().await?;
+        let mut plan = self.prepare_withdraw(&wallet, amount, recipient)?;
         self.execute(&mut plan).await
     }
 
