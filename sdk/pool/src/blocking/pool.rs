@@ -15,7 +15,7 @@ use crate::{
 
 use super::runtime::block_on;
 
-/// Native sync wallet — [`AsyncPrivatePool`] with blocking method names.
+/// Native sync wallet — [`crate::PrivatePool`] with blocking method names.
 pub struct PrivatePool {
     inner: AsyncPrivatePool<LocalStorage>,
 }
