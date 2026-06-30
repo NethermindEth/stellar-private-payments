@@ -113,9 +113,3 @@ debug-assertions = true
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
-
-# Local iteration on circom-witness-rs: use the working checkout instead of the
-# pinned git rev. Remove once the build.rs circuit-resolution fix is pushed to
-# the feat/multiple-circuits branch and the rev re-pinned.
-[patch."https://github.com/NethermindEth/circom-witness-rs.git"]
-circom-witness-rs = { path = "../circom-witness-rs" }

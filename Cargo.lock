@@ -1071,6 +1071,7 @@ dependencies = [
 [[package]]
 name = "circom-witness-rs"
 version = "0.2.3"
+source = "git+https://github.com/NethermindEth/circom-witness-rs.git?branch=feat%2Fmultiple-circuits#70b0d471d3843ffb7954217cc86795deb224ab2e"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",

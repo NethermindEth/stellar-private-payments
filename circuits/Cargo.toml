@@ -63,8 +63,7 @@ program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 regex = "1"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 wast = "248.0.0"
-#circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs.git", branch = "feat/multiple-circuits", default-features = false, features = ["build-witness"] }
-circom-witness-rs = { path = "../../circom-witness-rs", default-features = false, features = ["build-witness"] }
+circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs.git", branch = "feat/multiple-circuits", default-features = false, features = ["build-witness"] }
 
 [dev-dependencies]
 # Witness backends for the graph-vs-wasm equivalence test
