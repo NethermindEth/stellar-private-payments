@@ -1,8 +1,7 @@
-//! [`PrivatePool`] — main wasm-bindgen entry point for the npm SDK.
+//! [`PrivatePool`] — per-pool session (Rust SDK high-level API).
 
 use std::rc::Rc;
 
-use serde::Deserialize;
 use stellar_private_payments_sdk::{
     DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig,
     types::{
@@ -14,46 +13,33 @@ use wasm_bindgen::prelude::*;
 
 use crate::{
     amounts::{format_token_amount, parse_token_amount},
-    client::{Client, pool_err, transact::parse_transact_step},
-    signer::WalletSigner,
+    client::{core::ClientCore, pool_err, transact::parse_transact_step},
     workers::storage::StorageBridge,
 };
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone)]
 pub(crate) struct PoolCreateConfig {
     pub pool_contract: String,
     pub user_address: String,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NewConfig {
-    rpc_url: String,
-    network_passphrase: String,
-    pool_contract: String,
-    user_address: String,
-    storage_worker_url: Option<String>,
-    prover_worker_url: Option<String>,
 }
 
 /// Per-pool session for deposits, transfers, and withdrawals.
 #[wasm_bindgen]
 pub struct PrivatePool {
     inner: Rc<SdkPrivatePool<StorageBridge>>,
-    client: Rc<Client>,
+    core: Rc<ClientCore>,
     user_address: String,
 }
 
 impl PrivatePool {
     pub(crate) fn from_parts(
         inner: Rc<SdkPrivatePool<StorageBridge>>,
-        client: Rc<Client>,
+        core: Rc<ClientCore>,
         user_address: String,
     ) -> Self {
         Self {
             inner,
-            client,
+            core,
             user_address,
         }
     }
@@ -62,13 +48,9 @@ impl PrivatePool {
         &self.inner
     }
 
-    pub(crate) fn client(&self) -> &Client {
-        &self.client
-    }
-
     async fn resolve_recipient(&self, recipient: &str) -> Result<(String, String), JsError> {
         if recipient.starts_with('G') {
-            return self.client().recipient_keys(recipient).await;
+            return self.core.recipient_keys(recipient).await;
         }
         Err(JsError::new(
             "recipient must be a Stellar address (G...); lookup uses the on-chain public key registry",
@@ -87,41 +69,6 @@ impl PrivatePool {
 
 #[wasm_bindgen]
 impl PrivatePool {
-    /// Create a pool session. `signer` must expose `signMessage`,
-    /// `signTransaction`, and `signAuthEntry` (see `FreighterSigner` in the
-    /// npm package).
-    #[wasm_bindgen(js_name = new)]
-    pub async fn new_session(config: JsValue, signer: JsValue) -> Result<PrivatePool, JsError> {
-        let cfg: NewConfig = serde_wasm_bindgen::from_value(config)?;
-        let storage_worker_url = cfg
-            .storage_worker_url
-            .unwrap_or_else(|| "./workers/storage-worker.js".to_string());
-        let prover_worker_url = cfg
-            .prover_worker_url
-            .unwrap_or_else(|| "./workers/prover-worker.js".to_string());
-
-        let wallet_signer = WalletSigner::new(
-            signer,
-            cfg.network_passphrase.clone(),
-            cfg.user_address.clone(),
-        )?;
-
-        let client =
-            Rc::new(Client::connect(cfg.rpc_url, storage_worker_url, prover_worker_url).await?);
-
-        let pool_cfg = PoolCreateConfig {
-            pool_contract: cfg.pool_contract,
-            user_address: cfg.user_address.clone(),
-        };
-        let inner = Rc::new(
-            client
-                .create_pool_internal(&pool_cfg, &wallet_signer)
-                .await?,
-        );
-
-        Ok(Self::from_parts(inner, client, cfg.user_address))
-    }
-
     pub async fn sync(&self) -> Result<(), JsError> {
         self.inner().sync().await.map_err(pool_err)
     }

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build private-payments-web WASM artifacts into sdk/web/dist/
+# Build private-payments-web into sdk/web/dist/ (needs wasm-bindgen on PATH).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -7,6 +7,7 @@ WEB="$ROOT/sdk/web"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
+WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.120}"
 
 echo "==> Building circuit artifacts (if needed)..."
 if [[ ! -d "$ROOT/target/circuits-artifacts/$PROFILE" ]]; then
@@ -19,7 +20,7 @@ cargo build -p private-payments-web --"$PROFILE" --target "$TARGET" --bin storag
 cargo build -p private-payments-web --"$PROFILE" --target "$TARGET" --bin prover-worker
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
-  echo "error: wasm-bindgen not found (cargo install wasm-bindgen-cli)" >&2
+  echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked" >&2
   exit 1
 fi
 

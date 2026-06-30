@@ -1,10 +1,7 @@
 //! Browser SDK — wasm-bindgen bindings over [`stellar_private_payments_sdk`].
 //!
-//! The main entry point is [`PrivatePool`] (exported to JS as `PrivatePool`).
-//! Published as the `private-payments-sdk` npm package from this crate
-//! directory.
+//! Connect with [`Client`], then open per-pool sessions via [`Client::pool`].
 
-mod account;
 mod amounts;
 mod client;
 mod deployment;
@@ -20,7 +17,7 @@ pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/d
 
 use wasm_bindgen::prelude::*;
 
-pub use client::PrivatePool;
+pub use client::{Client, PrivatePool};
 
 #[wasm_bindgen(start)]
 pub fn wasm_start() {

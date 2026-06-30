@@ -1,7 +1,7 @@
 {
-  "name": "private-payments-sdk",
+  "name": "stellar-private-payments-sdk",
   "version": "0.1.0",
-  "description": "Stellar Private Payments browser SDK — Rust/WASM with PrivatePool as the main entry point",
+  "description": "Stellar Private Payments browser SDK",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
@@ -10,10 +10,10 @@
     "directory": "sdk/web"
   },
   "main": "./js/index.js",
-  "types": "./dist/private_payments_web.d.ts",
+  "types": "./js/types/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/private_payments_web.d.ts",
+      "types": "./js/types/index.d.ts",
       "import": "./js/index.js"
     },
     "./wasm": {
@@ -21,6 +21,7 @@
       "import": "./dist/private_payments_web.js"
     },
     "./freighter": {
+      "types": "./js/types/freighter.d.ts",
       "import": "./js/freighter.js"
     },
     "./workers/*": "./dist/workers/*"
@@ -31,7 +32,9 @@
   ],
   "scripts": {
     "build": "bash scripts/build.sh",
-    "clean": "rm -rf dist/"
+    "check:artifacts": "node scripts/check-wasm-types.js",
+    "check:types": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build && npm run check:artifacts"
   },
   "peerDependencies": {
     "@stellar/freighter-api": "^6.0.1"
@@ -40,5 +43,8 @@
     "@stellar/freighter-api": {
       "optional": true
     }
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
   }
 }

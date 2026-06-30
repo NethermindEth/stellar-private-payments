@@ -33,6 +33,7 @@ install:
 	@npm install --prefix app
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
+	@command -v wasm-bindgen >/dev/null 2>&1 || cargo install wasm-bindgen-cli --version 0.2.120 --locked
 
 .PHONY: clean
 clean:
