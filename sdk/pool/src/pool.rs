@@ -31,6 +31,7 @@ use crate::{
 
 const POLL_INTERVAL_MS: u32 = 1_000;
 const SYNC_MAX_RETRIES: u32 = 30;
+const DISCLOSE_MAX_RETRIES: u32 = 30;
 
 /// Main entry point for a single privacy pool
 pub struct PrivatePool<S> {
@@ -151,6 +152,7 @@ impl<S: Storage> PrivatePool<S> {
         &self,
         req: DisclosureRequest,
     ) -> Result<Option<DisclosureReceipt>, PoolError> {
+        let mut sync_waits = 0u32;
         loop {
             let data = self
                 .fetcher
@@ -200,7 +202,13 @@ impl<S: Storage> PrivatePool<S> {
                 Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
                     return Ok(None);
                 }
-                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(_gap))) => {
+                Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
+                    sync_waits = sync_waits.saturating_add(1);
+                    if sync_waits > DISCLOSE_MAX_RETRIES {
+                        return Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(
+                            gap,
+                        )));
+                    }
                     sleep(POLL_INTERVAL_MS).await;
                 }
                 Err(error) => return Err(error),
