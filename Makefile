@@ -28,11 +28,16 @@ circuits-build:
 	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
 
 # Regenerate the committed circom-witness-rs graphs. Requires circom 2.2.3 and a C++ toolchain on PATH.
+#
+# The first build injects the bbf_* black-box hints into the in-tree circomlib;
+# `cargo clean -p circom-witness-rs` then forces the witness generator to be
+# recompiled from that hinted circomlib before REGEN_GRAPHS runs build_witness().
 .PHONY: witness-graphs
 witness-graphs:
-	@echo "Generating witness graphs (requires circom 2.2.3 + a C++ toolchain)..."
-	scripts/generate-witness-graph.sh policy_tx_2_2
-	scripts/generate-witness-graph.sh selectiveDisclosure_1
+	@echo "Regenerating witness graphs (requires circom and a C++ toolchain)..."
+	cargo build -p circuits
+	cargo clean -p circom-witness-rs
+	REGEN_GRAPHS=1 cargo build -p circuits
 
 .PHONY: install
 install:

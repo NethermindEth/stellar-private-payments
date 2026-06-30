@@ -5,6 +5,14 @@
 [env]
 VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_vk.json", relative = true }
 
+# Circuits whose witness-generator C++ circom-witness-rs builds into its graph
+# runtime. Keep this stem list in sync with GROTH16_KEY_CIRCUITS in
+# circuits/build.rs.
+WITNESS_CPP = "policy_tx_2_2.circom:selectiveDisclosure_1.circom"
+# Directory holding the entry circuits and circomlib.
+# `relative = true` anchors it to this config's directory (the workspace root)
+CIRCOM_LIBRARY_PATH = { value = "circuits/src", relative = true }
+
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
 rustflags = [

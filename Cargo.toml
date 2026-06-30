@@ -41,7 +41,7 @@ asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.89", default-features = false }
 cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs.git", branch = "update-ark", default-features = false }
+circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs.git", branch = "feat/multiple-circuits", default-features = false }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
@@ -113,3 +113,9 @@ debug-assertions = true
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
+
+# Local iteration on circom-witness-rs: use the working checkout instead of the
+# pinned git rev. Remove once the build.rs circuit-resolution fix is pushed to
+# the feat/multiple-circuits branch and the rev re-pinned.
+[patch."https://github.com/NethermindEth/circom-witness-rs.git"]
+circom-witness-rs = { path = "../circom-witness-rs" }

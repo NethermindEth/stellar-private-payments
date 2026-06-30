@@ -40,6 +40,8 @@ use std::{
 };
 use type_analysis::check_types::check_types;
 
+use circom_witness_rs::generate::build_witness;
+
 const CURVE_ID: &str = "bn128";
 
 /// Circom stems whose Groth16 artifacts live under `testdata/`
@@ -123,6 +125,7 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
+    println!("cargo:rerun-if-env-changed=REGEN_GRAPHS");
 
     // Rerun if testdata key files are missing or changed
     let testdata_dir = crate_dir.join("../testdata");
@@ -373,6 +376,40 @@ fn main() -> Result<()> {
                         );
                     }
                 }
+            }
+        }
+    }
+
+    // === WITNESS GRAPH REGENERATION ===
+    // The committed circom-witness-rs operation graphs
+    // (`deployments/testnet/circuit_keys/<stem>.graph.bin`) are consumed by the
+    // app and verified by SHA-256 in `app/crates/platforms/web/build.rs`.
+    // Regenerated only on demand (REGEN_GRAPHS=1).
+    //
+    // Because a build script
+    // runs after its build-dependencies, regeneration needs the generator
+    // rebuilt from the alreadyhinted circomlib:
+    //   cargo build -p circuits \
+    //     && cargo clean -p circom-witness-rs \
+    //     && REGEN_GRAPHS=1 cargo build -p circuits   (see `make witness-graphs`)
+    if env::var("REGEN_GRAPHS").is_ok() {
+        println!("cargo:warning=REGEN_GRAPHS=1 detected - regenerating witness graphs");
+        build_witness().map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
+
+        // Move each into the committed location.
+        let graph_dest_dir = crate_dir.join("../deployments/testnet/circuit_keys");
+        for entry in fs::read_dir(&crate_dir)? {
+            let path = entry?.path();
+            if let Some(stem) = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .and_then(|n| n.strip_prefix("graph_"))
+                .and_then(|n| n.strip_suffix(".bin"))
+            {
+                let dst = graph_dest_dir.join(format!("{stem}.graph.bin"));
+                copy(&path, &dst)?;
+                fs::remove_file(&path)?;
+                println!("cargo:warning=Wrote witness graph {}", dst.display());
             }
         }
     }
@@ -766,6 +803,7 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if head == locked_rev {
             println!("cargo:warning=circomlib already at locked revision {locked_rev}");
+            inject_black_box_hints(&circomlib_path)?;
             return Ok(());
         }
     }
@@ -797,6 +835,106 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
     }
 
+    inject_black_box_hints(&circomlib_path)?;
+    Ok(())
+}
+
+/// Inject the `bbf_inv` / `bbf_bit` black-box hint functions into
+/// circomlib and route the non-quadratic (`<--`) assignments through them.
+///
+/// circom-witness-rs only hooks unconstrained/dynamic control flow when it
+/// lives in a `bbf*`-prefixed circom *function* (see https://github.com/NethermindEth/circom-witness-rs/blob/master/README.md).
+/// Stock circomlib computes `1/in` (`IsZero`) and the bit decomposition (`Num2Bits`)
+/// inline inside templates, which the graph runtime cannot evaluate (the native
+/// `Inv` op is `a.inv_mod(M).unwrap()`, panicking on `in == 0`).
+fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
+    let circuits_dir = circomlib_path.join("circuits");
+
+    inject_hint(
+        &circuits_dir.join("comparators.circom"),
+        "function bbf_inv",
+        "include \"binsum.circom\";",
+        "\n\nfunction bbf_inv(in) {\n    return in!=0 ? 1/in : 0;\n}",
+        &[(
+            "    inv <-- in!=0 ? 1/in : 0;",
+            "    inv <-- bbf_inv(in);",
+        )],
+    )?;
+
+    inject_hint(
+        &circuits_dir.join("bitify.circom"),
+        "function bbf_bit",
+        "include \"aliascheck.circom\";",
+        "\n\nfunction bbf_bit(in, bit) {\n    return (in >> bit) & 1;\n}",
+        &[
+            (
+                "        out[i] <-- (in >> i) & 1;",
+                "        out[i] <-- bbf_bit(in, i);",
+            ),
+            (
+                "        out[i] <-- (neg >> i) & 1;",
+                "        out[i] <-- bbf_bit(neg, i);",
+            ),
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// Apply a single circomlib black-box hint patch (one `bbf_*` function).
+///
+/// # Arguments
+///
+/// * `file` - circomlib source file to patch.
+/// * `marker` - if already present, the file is treated as patched (idempotent).
+/// * `anchor` - the `include` line after which `fn_def` is inserted.
+/// * `fn_def` - the `bbf_*` function definition text to insert.
+/// * `rewrites` - `(from, to)` assignment-line substitutions; each `from` must
+///   be present or the patch fails loudly (the upstream circomlib changed).
+fn inject_hint(
+    file: &Path,
+    marker: &str,
+    anchor: &str,
+    fn_def: &str,
+    rewrites: &[(&str, &str)],
+) -> Result<()> {
+    let content =
+        fs::read_to_string(file).with_context(|| format!("Failed to read {}", file.display()))?;
+
+    if content.contains(marker) {
+        return Ok(());
+    }
+
+    // Insert the function definition right after the anchor include line.
+    let anchor_idx = content
+        .find(anchor)
+        .ok_or_else(|| anyhow!("anchor {anchor:?} not found in {}", file.display()))?;
+    let insert_at = content[anchor_idx..]
+        .find('\n')
+        .map(|nl| anchor_idx + nl)
+        .ok_or_else(|| anyhow!("no newline after anchor {anchor:?} in {}", file.display()))?;
+
+    let mut patched = String::with_capacity(content.len() + fn_def.len() + 64);
+    patched.push_str(&content[..insert_at]);
+    patched.push_str(fn_def);
+    patched.push_str(&content[insert_at..]);
+
+    // Route the unconstrained assignments through the bbf function.
+    for (from, to) in rewrites {
+        if !patched.contains(from) {
+            bail!(
+                "expected assignment {from:?} not found in {} (circomlib changed?)",
+                file.display()
+            );
+        }
+        patched = patched.replace(from, to);
+    }
+
+    fs::write(file, &patched).with_context(|| format!("Failed to write {}", file.display()))?;
+    println!(
+        "cargo:warning=Injected black-box hints into {}",
+        file.display()
+    );
     Ok(())
 }
 
