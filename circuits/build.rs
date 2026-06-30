@@ -290,10 +290,10 @@ fn main() -> Result<()> {
         // === BUILD CONFIG ===
         // Controls which outputs to generate (R1CS + SYM). The WASM is done later
         let build_config = BuildConfig {
-            no_rounds: 1,
+            no_rounds: usize::MAX,  // Max number of rounds to ensure the optimization gets enough rounds
             flag_json_sub: false,
             json_substitutions: "Not used".to_string(),
-            flag_s: true,
+            flag_s: false,          // We set linear substitution to false to enable  full (--02) optimization
             flag_f: false,
             flag_p: false,
             flag_verbose: false,
