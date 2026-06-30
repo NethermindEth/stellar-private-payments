@@ -1,9 +1,6 @@
-/** Options for {@link Client.connect}. */
-export interface ConnectOptions {
+/** Options for {@link Client.new}. */
+export interface ClientNewOptions {
   rpcUrl: string;
-  networkPassphrase: string;
-  /** Optional when `signer.getPublicKey()` is implemented. */
-  userAddress?: string;
   /**
    * Injected local persistence. When omitted, the SDK opens a default storage
    * worker (see `storageWorkerUrl`). Prefer {@link Storage.open} once per page
@@ -12,6 +9,18 @@ export interface ConnectOptions {
   storage?: import('./storage.js').Storage;
   /** Used only when `storage` is omitted. */
   storageWorkerUrl?: string;
+}
+
+/** Options for {@link AccountClient.checkEventSync} and {@link AccountClient.startEventSync}. */
+export interface EventSyncOptions {
+  bootnodeUrl?: string;
+}
+
+/** Options for {@link AccountClient.initialize}. */
+export interface InitializeOptions {
+  networkPassphrase: string;
+  /** Optional when `signer.getPublicKey()` is implemented. */
+  userAddress?: string;
   proverWorkerUrl?: string;
 }
 

@@ -9,9 +9,9 @@ import {
 } from '@stellar/freighter-api';
 
 /**
- * Freighter wallet adapter for {@link Client.connect}.
+ * Freighter wallet adapter for {@link AccountClient.initialize}.
  *
- * Pass an instance as the second argument: `Client.connect(options, signer)`.
+ * Pass an instance as the second argument: `client.initialize(options, signer)`.
  */
 export class FreighterSigner {
   async ensureReady() {

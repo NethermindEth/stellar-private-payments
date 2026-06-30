@@ -5,6 +5,7 @@
 mod amounts;
 mod client;
 mod deployment;
+mod events;
 mod protocol;
 mod signer;
 mod storage;

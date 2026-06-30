@@ -7,7 +7,7 @@ export interface StorageOpenOptions {
  * Worker-backed local persistence (`poolstellar.sqlite` on OPFS).
  *
  * Open once per page. {@link Storage.fork} for additional handles (e.g. app
- * code alongside {@link Client.connect}).
+ * code alongside {@link Client.new}).
  */
 export declare class Storage {
   static open(options?: StorageOpenOptions | null): Promise<Storage>;

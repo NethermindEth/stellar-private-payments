@@ -114,6 +114,15 @@ impl ClientCore {
         }
     }
 
+    pub(crate) async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
+        let req = StorageWorkerRequest::UserKeys(address.to_string());
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::UserKeys(Some(_)) => Ok(true),
+            StorageWorkerResponse::UserKeys(None) => Ok(false),
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
     pub(crate) async fn derive_save_user_keys(
         &self,
         address: String,

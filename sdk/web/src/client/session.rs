@@ -1,11 +1,13 @@
-//! Wasm [`Client`] — one account session (workers + signer) and pool factory.
+//! Wasm [`Client`] — `new` → `startEventSync` → `initialize`, then pool
+//! factory.
 
 use std::rc::Rc;
 
 use serde::Deserialize;
 use wasm_bindgen::prelude::*;
+use wasm_bindgen_futures::JsFuture;
 
-use crate::{deployment::deployment_config, signer::WalletSigner, storage::Storage};
+use crate::{deployment::deployment_config, events, signer::WalletSigner, storage::Storage};
 
 use super::core::ClientCore;
 
@@ -13,11 +15,21 @@ use super::pool::{PoolCreateConfig, PrivatePool};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct ConnectOptions {
+struct NewOptions {
     rpc_url: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EventSyncOptions {
+    bootnode_url: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct InitializeOptions {
     network_passphrase: String,
-    user_address: String,
-    storage_worker_url: Option<String>,
+    user_address: Option<String>,
     prover_worker_url: Option<String>,
 }
 
@@ -37,42 +49,31 @@ struct RegisterPublicKeysOptions {
 /// Browser SDK session for one Stellar account (workers, RPC, wallet signer).
 #[wasm_bindgen]
 pub struct Client {
-    core: Rc<ClientCore>,
-    signer: WalletSigner,
-    user_address: String,
+    rpc_url: String,
+    storage: Storage,
+    core: Option<Rc<ClientCore>>,
+    signer: Option<WalletSigner>,
+    user_address: Option<String>,
 }
 
 #[wasm_bindgen]
 impl Client {
-    /// Connect workers and bind a wallet signer for this account session.
-    #[wasm_bindgen(js_name = connect)]
-    pub async fn connect(options: JsValue, signer: JsValue) -> Result<Client, JsError> {
+    /// Create a client shell (storage + RPC URL). Call
+    /// [`Client::start_event_sync`] then [`Client::initialize`] before pool
+    /// or account operations.
+    #[wasm_bindgen(js_name = new)]
+    pub fn new(options: JsValue) -> Result<Client, JsError> {
         let storage = js_sys::Reflect::get(&options, &JsValue::from_str("storage"))
-            .ok()
-            .filter(|value| !value.is_null() && !value.is_undefined())
-            .map(|value| {
-                value
-                    .dyn_into::<Storage>()
-                    .map_err(|_| JsError::new("options.storage must be a Storage instance"))
-            })
-            .transpose()?;
+            .map_err(|_| JsError::new("options.storage is required"))?;
+        let storage = Storage::from_js(storage)?;
+        let opts: NewOptions = serde_wasm_bindgen::from_value(options)?;
 
-        let opts: ConnectOptions = serde_wasm_bindgen::from_value(options)?;
-        let wallet_signer =
-            WalletSigner::new(signer, opts.network_passphrase, opts.user_address.clone())?;
-        let core = Rc::new(
-            ClientCore::connect(
-                opts.rpc_url,
-                storage,
-                opts.storage_worker_url,
-                opts.prover_worker_url,
-            )
-            .await?,
-        );
         Ok(Self {
-            core,
-            signer: wallet_signer,
-            user_address: opts.user_address,
+            rpc_url: opts.rpc_url,
+            storage,
+            core: None,
+            signer: None,
+            user_address: None,
         })
     }
 
@@ -82,20 +83,92 @@ impl Client {
         Ok(serde_wasm_bindgen::to_value(deployment_config()?)?)
     }
 
+    /// Probe wallet RPC retention. Returns `null` when sufficient, or a
+    /// bootnode URL when historical sync requires one.
+    ///
+    /// Throws when the RPC has a sync gap and no bootnode URL is available
+    /// (message contains `RPC_SYNC_GAP`).
+    #[wasm_bindgen(js_name = checkEventSync)]
+    pub async fn check_event_sync(&self, options: JsValue) -> Result<JsValue, JsError> {
+        let opts: EventSyncOptions = if options.is_null() || options.is_undefined() {
+            EventSyncOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+        let config = deployment_config()?;
+        match events::bootnode_check(
+            &self.rpc_url,
+            self.storage.bridge(),
+            config,
+            opts.bootnode_url.as_deref(),
+        )
+        .await
+        {
+            Ok(None) => Ok(JsValue::NULL),
+            Ok(Some(url)) => Ok(JsValue::from_str(&url)),
+            Err(e) => Err(JsError::new(&e.to_string())),
+        }
+    }
+
+    /// Start background contract-event sync into local storage (idempotent per
+    /// page).
+    #[wasm_bindgen(js_name = startEventSync)]
+    pub async fn start_event_sync(&self, options: JsValue) -> Result<(), JsError> {
+        let opts: EventSyncOptions = if options.is_null() || options.is_undefined() {
+            EventSyncOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+        let config = deployment_config()?;
+        events::start_indexer(
+            self.rpc_url.clone(),
+            opts.bootnode_url,
+            self.storage.bridge(),
+            config,
+        )
+        .await
+    }
+
+    /// Bind a wallet signer, spawn workers, and derive privacy keys when
+    /// missing.
+    pub async fn initialize(&mut self, options: JsValue, signer: JsValue) -> Result<(), JsError> {
+        if self.core.is_some() {
+            return Err(JsError::new("client already initialized"));
+        }
+
+        let opts: InitializeOptions = serde_wasm_bindgen::from_value(options)?;
+        let user_address = resolve_user_address(&signer, opts.user_address).await?;
+        let wallet_signer =
+            WalletSigner::new(signer, opts.network_passphrase, user_address.clone())?;
+
+        let core = Rc::new(
+            ClientCore::connect(
+                self.rpc_url.clone(),
+                Some(self.storage.clone()),
+                None,
+                opts.prover_worker_url,
+            )
+            .await?,
+        );
+
+        if !core.user_keys_exist(&user_address).await? {
+            let message = core.key_derivation_message();
+            let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
+            let signature = crate::signer::hex_signature_to_bytes(&sig_hex)?;
+            core.derive_save_user_keys(user_address.clone(), signature)
+                .await?;
+        }
+
+        self.core = Some(core);
+        self.signer = Some(wallet_signer);
+        self.user_address = Some(user_address);
+        Ok(())
+    }
+
     /// On-chain state for all enabled pools plus shared ASP contracts.
     #[wasm_bindgen(js_name = allContractsData)]
     pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        self.core.all_contracts_data().await
-    }
-
-    /// Derive privacy keys from the bound wallet signature and persist locally.
-    pub async fn initialize(&self) -> Result<(), JsError> {
-        let message = self.core.key_derivation_message();
-        let sig_hex = self.signer.sign_wallet_message(&message).await?;
-        let signature = crate::signer::hex_signature_to_bytes(&sig_hex)?;
-        self.core
-            .derive_save_user_keys(self.user_address.clone(), signature)
-            .await
+        self.session()?.0.all_contracts_data().await
     }
 
     /// Register this account's public keys on the deployment-wide registry.
@@ -104,6 +177,7 @@ impl Client {
     /// [`Client::initialize`].
     #[wasm_bindgen(js_name = registerPublicKeys)]
     pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {
+        let (core, signer, user_address) = self.session()?;
         let opts: RegisterPublicKeysOptions = if options.is_null() || options.is_undefined() {
             RegisterPublicKeysOptions::default()
         } else {
@@ -115,7 +189,7 @@ impl Client {
             opts.encryption_public_key_hex,
         ) {
             (Some(note), Some(enc)) => (note, enc),
-            (None, None) => self.core.user_public_keys_hex(&self.user_address).await?,
+            (None, None) => core.user_public_keys_hex(user_address).await?,
             _ => {
                 return Err(JsError::new(
                     "notePublicKeyHex and encryptionPublicKeyHex must both be set or both omitted",
@@ -123,38 +197,94 @@ impl Client {
             }
         };
 
-        self.core
-            .register_public_keys(
-                &self.signer,
-                self.user_address.clone(),
-                note_public_key_hex,
-                encryption_public_key_hex,
-            )
-            .await
+        core.register_public_keys(
+            signer,
+            user_address.to_string(),
+            note_public_key_hex,
+            encryption_public_key_hex,
+        )
+        .await
     }
 
     /// Look up a recipient's registered note and encryption public keys.
     #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
     pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
-        self.core.lookup_registered_public_key(address).await
+        self.session()?
+            .0
+            .lookup_registered_public_key(address)
+            .await
     }
 
     /// Open a private pool session for this account.
     pub async fn pool(&self, options: JsValue) -> Result<PrivatePool, JsError> {
+        let (core, signer, user_address) = self.session()?;
         let opts: PoolOptions = serde_wasm_bindgen::from_value(options)?;
         let pool_cfg = PoolCreateConfig {
             pool_contract: opts.pool_contract,
-            user_address: self.user_address.clone(),
+            user_address: user_address.to_string(),
         };
-        let inner = Rc::new(
-            self.core
-                .create_pool_internal(&pool_cfg, &self.signer)
-                .await?,
-        );
+        let inner = Rc::new(core.create_pool_internal(&pool_cfg, signer).await?);
         Ok(PrivatePool::from_parts(
             inner,
-            self.core.clone(),
-            self.user_address.clone(),
+            core.clone(),
+            user_address.to_string(),
         ))
     }
+}
+
+impl Client {
+    fn session(&self) -> Result<(&Rc<ClientCore>, &WalletSigner, &str), JsError> {
+        let core = self
+            .core
+            .as_ref()
+            .ok_or_else(|| JsError::new("call initialize() first"))?;
+        let signer = self
+            .signer
+            .as_ref()
+            .ok_or_else(|| JsError::new("call initialize() first"))?;
+        let user_address = self
+            .user_address
+            .as_ref()
+            .ok_or_else(|| JsError::new("call initialize() first"))?;
+        Ok((core, signer, user_address))
+    }
+}
+
+async fn resolve_user_address(
+    signer: &JsValue,
+    options_address: Option<String>,
+) -> Result<String, JsError> {
+    if let Some(addr) = options_address {
+        return Ok(addr);
+    }
+
+    let get_pk = js_sys::Reflect::get(signer, &JsValue::from_str("getPublicKey"))
+        .map_err(|_| JsError::new("userAddress required or signer.getPublicKey"))?;
+    if !get_pk.is_function() {
+        return Err(JsError::new(
+            "userAddress required or signer must implement getPublicKey",
+        ));
+    }
+
+    let value = get_pk
+        .dyn_ref::<js_sys::Function>()
+        .unwrap()
+        .call0(signer)
+        .map_err(|_| JsError::new("getPublicKey failed"))?;
+
+    let resolved = if value.is_instance_of::<js_sys::Promise>() {
+        JsFuture::from(
+            value
+                .dyn_into::<js_sys::Promise>()
+                .map_err(|_| JsError::new("getPublicKey failed"))?,
+        )
+        .await
+        .map_err(|_| JsError::new("getPublicKey failed"))?
+    } else {
+        value
+    };
+
+    resolved
+        .as_string()
+        .ok_or_else(|| JsError::new("getPublicKey did not return a string"))
 }

@@ -14,9 +14,11 @@ declare module '../../dist/private_payments_web.js' {
   }
 
   export class Client {
-    static connect(options: unknown, signer: unknown): Promise<Client>;
+    static new(options: unknown): Promise<Client>;
     static contractConfig(): unknown;
-    initialize(): Promise<void>;
+    checkEventSync(options?: unknown): Promise<string | null>;
+    startEventSync(options?: unknown): Promise<void>;
+    initialize(options: unknown, signer: unknown): Promise<void>;
     registerPublicKeys(options?: unknown): Promise<string>;
     lookupRegisteredPublicKey(address: string): Promise<unknown>;
     allContractsData(): Promise<unknown>;

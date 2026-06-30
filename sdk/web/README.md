@@ -2,7 +2,7 @@
 
 Browser SDK for Stellar Private Payments.
 
-**`Storage.open`** → **`Client.connect`** → account ops → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
+**`Storage.open`** → **`Client.new`** → **`checkEventSync`** → **`startEventSync`** → **`initialize`** → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
 ## Usage
 
@@ -15,12 +15,14 @@ const signer = new FreighterSigner();
 await init();
 
 const storage = await Storage.open();
-const client = await Client.connect(
-  { rpcUrl: 'https://soroban-testnet.stellar.org', networkPassphrase, storage },
-  signer,
-);
+const client = await Client.new({
+  storage,
+  rpcUrl: 'https://soroban-testnet.stellar.org',
+});
 
-await client.initialize();
+const bootnodeUrl = await client.checkEventSync();
+await client.startEventSync({ bootnodeUrl: bootnodeUrl ?? undefined });
+await client.initialize({ networkPassphrase }, signer);
 await client.registerPublicKeys();
 
 const pool = await client.pool({ poolContract: 'CA2TZ...' });
@@ -39,16 +41,18 @@ const chain = await client.allContractsData();
 | Method | Description |
 |--------|-------------|
 | `open({ workerUrl? })` | Spawn storage worker once per page (`poolstellar.sqlite` on OPFS) |
-| `fork()` | Extra handle to the same worker (app + SDK can share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence (disclaimer, settings, …) |
+| `fork()` | Extra handle to the same worker (app + SDK share one DB) |
+| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence |
 
 ### `Client`
 
 | Method | Description |
 |--------|-------------|
-| `connect(options, signer)` | Wallet session; pass `storage` from `Storage.open()` or omit for a default worker |
+| `new({ storage, rpcUrl })` | Client shell (no wallet yet) |
+| `checkEventSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
+| `startEventSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
+| `initialize({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, derive keys if missing |
 | `contractConfig()` | Static deployment config |
-| `initialize()` | Derive and save privacy keys |
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
 | `lookupRegisteredPublicKey(address)` | Recipient key lookup |
 | `allContractsData()` | On-chain pool + ASP state |
@@ -60,7 +64,7 @@ Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `note
 
 ### Signer
 
-Bound at `Client.connect`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
+Bound at `client.initialize`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
 
 ## TypeScript
 
@@ -91,4 +95,4 @@ Published tarball: `dist/` (wasm + workers) and `js/` (entry + types).
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.connect()` when storage is omitted. Prover worker URL defaults similarly on `Client.connect()`.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.initialize()`.

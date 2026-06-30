@@ -3741,10 +3741,12 @@ dependencies = [
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
+ "tokio",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
+ "wiremock",
 ]
 
 [[package]]

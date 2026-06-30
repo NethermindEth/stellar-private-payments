@@ -7,7 +7,7 @@ use serde::Deserialize;
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    protocol::{StorageWorkerRequest, StorageWorkerResponse},
+    protocol::StorageWorkerRequest,
     workers::storage::{StorageBridge, StorageWorker},
 };
 use gloo_worker::Spawnable;
@@ -28,12 +28,34 @@ pub struct Storage {
     bridge: StorageBridge,
 }
 
+impl Clone for Storage {
+    fn clone(&self) -> Self {
+        Self {
+            bridge: self.bridge.clone(),
+        }
+    }
+}
+
 impl Storage {
     pub(crate) fn bridge(&self) -> StorageBridge {
         self.bridge.clone()
     }
 
-    async fn open_internal(worker_url: String) -> Result<Self, JsError> {
+    pub(crate) fn from_js(value: JsValue) -> Result<Self, JsError> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            value
+                .dyn_into()
+                .map_err(|_| JsError::new("options.storage must be a Storage instance"))
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = value;
+            Err(JsError::new("Storage is only available on wasm32"))
+        }
+    }
+
+    pub(crate) async fn open_internal(worker_url: String) -> Result<Self, JsError> {
         crate::wasm_start();
 
         let storage = Self {

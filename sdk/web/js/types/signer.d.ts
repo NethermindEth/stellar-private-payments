@@ -26,7 +26,7 @@ export type SignAuthEntryResult =
     };
 
 /**
- * Wallet adapter for {@link Client.connect}.
+ * Wallet adapter for {@link AccountClient.initialize}.
  *
  * Must expose `signMessage`, `signTransaction`, and `signAuthEntry`.
  * Optional `getPublicKey` lets the JS wrapper resolve `userAddress`.

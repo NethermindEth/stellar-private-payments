@@ -9,7 +9,7 @@ const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.
 
 /**
  * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
- * then pass the instance (or a fork) to {@link Client.connect}.
+ * then pass the instance (or a fork) to {@link Client.new}.
  */
 async function openStorage(options = {}) {
   return WasmStorage.open({
@@ -17,40 +17,57 @@ async function openStorage(options = {}) {
   });
 }
 
+function wrapClient(wasmClient) {
+  return {
+    checkEventSync: (options) => wasmClient.checkEventSync(options),
+    startEventSync: (options) => wasmClient.startEventSync(options),
+    initialize: async (options, signer) => {
+      const userAddress =
+        options.userAddress ??
+        (typeof signer?.getPublicKey === 'function' ? await signer.getPublicKey() : undefined);
+
+      if (!userAddress) {
+        throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
+      }
+
+      return wasmClient.initialize(
+        {
+          proverWorkerUrl,
+          ...options,
+          userAddress,
+        },
+        signer,
+      );
+    },
+    registerPublicKeys: (options) => wasmClient.registerPublicKeys(options),
+    lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
+    allContractsData: () => wasmClient.allContractsData(),
+    pool: (options) => wasmClient.pool(options),
+  };
+}
+
 /**
- * Connect a wallet session. `options.userAddress` is optional when
- * `signer.getPublicKey()` exists (e.g. `FreighterSigner`).
+ * Create a client shell. Call `startEventSync` then `initialize` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
  */
-async function connect(options, signer) {
-  const userAddress =
-    options.userAddress ??
-    (typeof signer?.getPublicKey === 'function' ? await signer.getPublicKey() : undefined);
-
-  if (!userAddress) {
-    throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
-  }
-
+async function newClient(options) {
   const storage =
     options.storage ??
     (await openStorage({
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
     }));
 
-  return WasmClient.connect(
-    {
-      proverWorkerUrl,
-      ...options,
-      userAddress,
+  return wrapClient(
+    await WasmClient.new({
       storage,
-    },
-    signer,
+      rpcUrl: options.rpcUrl,
+    }),
   );
 }
 
 export const Storage = { open: openStorage };
-export const Client = { connect, contractConfig: WasmClient.contractConfig };
+export const Client = { new: newClient, contractConfig: WasmClient.contractConfig };
 export { PrivatePool };
 export { default } from '../dist/private_payments_web.js';
 export { FreighterSigner } from './freighter.js';
