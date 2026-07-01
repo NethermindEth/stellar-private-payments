@@ -3,9 +3,12 @@ mod toml;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use stellar_private_payments_sdk::types::ContractConfig;
+use stellar_private_payments_sdk::{state::SqliteStorage, types::ContractConfig};
 
-use crate::account::{Account, resolve_account};
+use crate::{
+    account::{Account, resolve},
+    stellar_cli::{self, StellarNetwork},
+};
 
 pub use toml::{
     FileConfig, default_config_path, load_file_config, resolve_config_path, write_config_template,
@@ -19,27 +22,22 @@ pub const DEFAULT_DEPLOYMENT_JSON: &str =
 pub const EMBEDDED_DEPLOYMENT_LABEL: &str = "embedded:testnet";
 
 /// CLI flag overrides used to build a [`CliConfig`].
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct CliConfigOverrides {
     pub deployment_path: Option<PathBuf>,
-    pub rpc_url: Option<String>,
+    pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
     pub source_account: Option<String>,
     pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
 }
 
-/// Resolved global settings used to build a [`CliConfig`].
-#[derive(Debug)]
-pub struct CliConfigLoad {
-    pub deployment_path: Option<PathBuf>,
-    pub rpc_url: Option<String>,
-    pub data_dir: PathBuf,
-    pub source_account: Option<String>,
-    pub stellar_config_dir: Option<PathBuf>,
-    pub circuits_dir: Option<PathBuf>,
-}
-
+/// Resolved (offline) CLI configuration.
+///
+/// Loading never calls the `stellar` binary; the RPC/passphrase (via
+/// [`CliConfig::resolve_network`]) and the signing account (via
+/// [`CliConfig::require_account`]) are resolved on demand by the commands that
+/// need them.
 #[derive(Debug, Clone)]
 pub struct CliConfig {
     /// TOML config file when loaded; otherwise None.
@@ -47,15 +45,13 @@ pub struct CliConfig {
     /// File path when overridden; otherwise [`EMBEDDED_DEPLOYMENT_LABEL`].
     pub deployment_source: String,
     pub deployment: ContractConfig,
-    pub rpc_url: String,
+    /// Stellar CLI network name (built-in like `testnet`, or a custom one).
+    pub network: String,
     pub data_dir: PathBuf,
-    /// `stellar keys` alias supplied via `--source-account`.
-    pub source_account: Option<String>,
     /// Config dir passed through to the `stellar` CLI (`--config-dir`).
     pub stellar_config_dir: Option<PathBuf>,
-    /// Account resolved from `source_account` via the Stellar CLI.
-    pub account: Option<Account>,
-    pub pool: Option<String>,
+    /// `stellar keys` alias supplied via `--source-account`.
+    pub source_account: Option<String>,
     pub circuits_dir: Option<PathBuf>,
 }
 
@@ -68,7 +64,7 @@ impl CliConfig {
         let file = file.unwrap_or_default();
         let CliConfigOverrides {
             deployment_path,
-            rpc_url,
+            network,
             data_dir,
             source_account,
             stellar_config_dir,
@@ -79,73 +75,55 @@ impl CliConfig {
         let data_dir = data_dir
             .or(file.defaults.data_dir.map(toml::expand_path))
             .unwrap_or_else(default_data_dir);
-        let rpc_url = rpc_url.or(file.defaults.rpc_url);
         let circuits_dir = circuits_dir.or(file.defaults.circuits_dir.map(toml::expand_path));
         let stellar_config_dir =
             stellar_config_dir.or(file.defaults.stellar_config_dir.map(toml::expand_path));
 
-        let source_account = source_account.or(file.wallet.source_account);
-
-        let load = CliConfigLoad {
-            deployment_path,
-            rpc_url,
-            data_dir,
-            source_account,
-            stellar_config_dir,
-            circuits_dir,
-        };
-        Self::from_resolved(config_file, load)
-    }
-
-    fn from_resolved(config_file: Option<PathBuf>, input: CliConfigLoad) -> Result<Self> {
-        let CliConfigLoad {
-            deployment_path,
-            rpc_url,
-            data_dir,
-            source_account,
-            stellar_config_dir,
-            circuits_dir,
-        } = input;
         let (deployment_source, deployment) = load_deployment(deployment_path.as_deref())?;
-        let rpc_url = rpc_url.unwrap_or_else(|| default_rpc_url(&deployment.network));
-        let account = resolve_account(source_account.as_deref(), stellar_config_dir.as_deref())?;
+        // Network name: --network > config default > the deployment's network
+        // (which matches a Stellar CLI built-in like `testnet`).
+        let network = network
+            .or(file.defaults.network)
+            .unwrap_or_else(|| deployment.network.clone());
+
         Ok(Self {
             config_file,
             deployment_source,
             deployment,
-            rpc_url,
+            network,
             data_dir,
-            source_account,
             stellar_config_dir,
-            account,
-            pool: None,
+            source_account,
             circuits_dir,
         })
     }
 
-    pub fn require_account(&self) -> Result<&Account> {
-        self.account.as_ref().ok_or_else(|| {
-            anyhow::anyhow!("pool commands require --source-account <stellar keys alias>")
-        })
+    /// Resolve the RPC URL + network passphrase from the Stellar CLI.
+    pub fn resolve_network(&self) -> Result<StellarNetwork> {
+        stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())
     }
 
-    pub fn require_pool(&self) -> Result<&str> {
-        self.pool
-            .as_deref()
-            .ok_or_else(|| anyhow::anyhow!("pool id required"))
-    }
-
-    pub fn with_pool(mut self, pool_id: String) -> Self {
-        self.pool = Some(pool_id);
-        self
-    }
-
-    pub fn network_passphrase(&self) -> &'static str {
-        network_passphrase_for(&self.deployment.network)
+    /// Resolve the signing account from its `--source-account` alias.
+    pub fn require_account(&self) -> Result<Account> {
+        let alias = self.source_account.as_deref().ok_or_else(|| {
+            anyhow::anyhow!(
+                "this command requires --source-account <stellar keys alias> \
+                 (spp works with Stellar CLI identities; see `stellar keys`)"
+            )
+        })?;
+        resolve(alias, self.stellar_config_dir.as_deref())
     }
 
     pub fn wallet_db_path(&self) -> PathBuf {
-        self.data_dir.join("wallet.sqlite")
+        self.data_dir.join("spp.db")
+    }
+
+    /// Open (creating if needed) the local sqlite database (`spp.db`).
+    pub fn open_storage(&self) -> Result<SqliteStorage> {
+        std::fs::create_dir_all(&self.data_dir)
+            .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
+        let path = self.wallet_db_path();
+        SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
     }
 }
 
@@ -154,20 +132,6 @@ pub fn default_data_dir() -> PathBuf {
         .map(PathBuf::from)
         .map(|home| home.join(".local/share/stellar-private-payments"))
         .unwrap_or_else(|| PathBuf::from(".stellar-pp"))
-}
-
-pub fn default_rpc_url(network: &str) -> String {
-    match network {
-        "mainnet" | "public" => "https://soroban.stellar.org".into(),
-        _ => "https://soroban-testnet.stellar.org".into(),
-    }
-}
-
-pub fn network_passphrase_for(network: &str) -> &'static str {
-    match network {
-        "mainnet" | "public" => "Public Global Stellar Network ; September 2015",
-        _ => "Test SDF Network ; September 2015",
-    }
 }
 
 fn load_deployment(path: Option<&Path>) -> Result<(String, ContractConfig)> {

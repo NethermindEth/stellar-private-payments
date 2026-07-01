@@ -53,8 +53,9 @@ pub mod state {
     //! SQLite-backed local wallet and indexer state.
     pub use crate::core::process_local_state_batch;
     pub use ::state::{
-        APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, AccountKeys, DerivedUserNoteRow,
-        PoolCommitmentRow, SqliteStorage, StoredUserKeys, process_events, process_notes,
+        APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, AccountKeys, CURRENT_DISCLAIMER_HASH_HEX,
+        CURRENT_DISCLAIMER_TEXT_MD, DerivedUserNoteRow, PoolCommitmentRow, SqliteStorage,
+        StoredUserKeys, process_events, process_notes,
     };
 }
 

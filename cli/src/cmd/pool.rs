@@ -1,151 +1,101 @@
+//! Core value operations: deposit, transfer, withdraw. Each takes the pool
+//! contract id and requires a ready account.
+
 use anyhow::Result;
-use serde::Serialize;
-use stellar_private_payments_sdk::types::{TransactionResult, UserNoteSummary};
+use stellar_private_payments_sdk::types::TransactionResult;
 
 use crate::{
-    config::CliConfig,
-    output,
-    session::{PoolSession, TransferRecipientCmd, parse_amount, resolve_transfer_recipient_cmd},
+    config::{CliConfig, validate_pool},
+    explorer::Explorer,
+    onboard, output,
+    session::{PoolSession, parse_amount, resolve_transfer_recipient},
 };
 
-pub fn balance(
-    config: &CliConfig,
-    json: bool,
-    circuits_dir: Option<&std::path::Path>,
-) -> Result<()> {
-    let session = PoolSession::open(config, circuits_dir)?;
-    let balance = session
-        .pool()
-        .balance()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    #[derive(Serialize)]
-    struct BalanceOut {
-        pool: String,
-        account: String,
-        balance_stroops: String,
-    }
-
-    let payload = BalanceOut {
-        pool: config.require_pool()?.to_string(),
-        account: config.require_account()?.address.clone(),
-        balance_stroops: balance.to_string(),
-    };
-
-    if json {
-        output::emit(&payload, true)?;
-        return Ok(());
-    }
-
-    output::print_section("Pool balance");
-    output::print_kv("pool", &payload.pool);
-    output::print_kv("account", &payload.account);
-    output::print_kv("balance_stroops", &payload.balance_stroops);
-    Ok(())
+fn open(config: &CliConfig, pool: &str) -> Result<PoolSession> {
+    let account = config.require_account()?;
+    onboard::ensure_ready(config, &account)?;
+    validate_pool(pool, &config.deployment)?;
+    let network = config.resolve_network()?;
+    PoolSession::open(
+        config,
+        &account,
+        &network,
+        pool,
+        config.circuits_dir.as_deref(),
+    )
 }
 
-pub fn notes(config: &CliConfig, json: bool, circuits_dir: Option<&std::path::Path>) -> Result<()> {
-    let session = PoolSession::open(config, circuits_dir)?;
-    let notes = session.pool().notes().map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    if json {
-        output::emit(&notes, true)?;
-        return Ok(());
-    }
-
-    print_notes(&notes);
-    Ok(())
-}
-
-pub fn deposit(
-    config: &CliConfig,
-    amount: &str,
-    json: bool,
-    circuits_dir: Option<&std::path::Path>,
-) -> Result<()> {
-    let session = PoolSession::open(config, circuits_dir)?;
+pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
+    let session = open(config, pool)?;
     let amount = parse_amount(amount)?;
     let result = session
         .pool()
         .deposit(amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    print_tx_result("Deposit submitted", &result, json)
+    print_tx_results(config, "Deposit submitted", std::slice::from_ref(&result), json)
 }
 
 pub fn transfer(
     config: &CliConfig,
+    pool: &str,
     amount: &str,
-    recipient: &TransferRecipientCmd,
+    to: Option<&str>,
+    note_key: Option<&str>,
+    encryption_key: Option<&str>,
     json: bool,
-    circuits_dir: Option<&std::path::Path>,
 ) -> Result<()> {
-    let session = PoolSession::open(config, circuits_dir)?;
-    let recipient = resolve_transfer_recipient_cmd(config, recipient)?;
+    let recipient = resolve_transfer_recipient(config, to, note_key, encryption_key)?;
+    let session = open(config, pool)?;
     let amount = parse_amount(amount)?;
     let results = session
         .pool()
         .transfer(recipient, amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    print_tx_results("Transfer submitted", &results, json)
+    print_tx_results(config, "Transfer submitted", &results, json)
 }
 
 pub fn withdraw(
     config: &CliConfig,
+    pool: &str,
     amount: &str,
     to: Option<&str>,
     json: bool,
-    circuits_dir: Option<&std::path::Path>,
 ) -> Result<()> {
-    let to = match to {
+    let recipient = match to {
         Some(address) => address.to_string(),
-        None => config.require_account()?.address.clone(),
+        None => config.require_account()?.address,
     };
-
-    let session = PoolSession::open(config, circuits_dir)?;
+    let session = open(config, pool)?;
     let amount = parse_amount(amount)?;
     let results = session
         .pool()
-        .withdraw(amount, to)
+        .withdraw(amount, recipient)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-
-    print_tx_results("Withdraw submitted", &results, json)
+    print_tx_results(config, "Withdraw submitted", &results, json)
 }
 
-fn print_notes(notes: &[UserNoteSummary]) {
-    output::print_section("Pool notes");
-    if notes.is_empty() {
-        println!("(none)");
-        return;
-    }
-
-    for note in notes {
-        output::print_kv("commitment", note.id.to_string());
-        output::print_kv("  amount_stroops", note.amount.to_string());
-        output::print_kv("  leaf_index", note.leaf_index);
-        output::print_kv("  spent", note.spent);
-        output::print_kv("  created_at_ledger", note.created_at_ledger);
-        println!();
-    }
-}
-
-fn print_tx_result(title: &str, result: &TransactionResult, json: bool) -> Result<()> {
-    print_tx_results(title, std::slice::from_ref(result), json)
-}
-
-fn print_tx_results(title: &str, results: &[TransactionResult], json: bool) -> Result<()> {
+fn print_tx_results(
+    config: &CliConfig,
+    title: &str,
+    results: &[TransactionResult],
+    json: bool,
+) -> Result<()> {
     if json {
-        output::emit(results, true)?;
-        return Ok(());
+        return output::emit(results, true);
     }
-
+    let explorer = config
+        .open_storage()
+        .and_then(|s| crate::explorer::base_url(&s))
+        .map(Explorer::new)
+        .ok();
     output::print_section(title);
-    for (index, result) in results.iter().enumerate() {
-        if results.len() > 1 {
-            output::print_kv(&format!("tx_{index}_hash"), &result.tx_hash);
-        } else {
-            output::print_kv("tx_hash", &result.tx_hash);
+    for result in results {
+        match &explorer {
+            Some(explorer) => output::print_kv(
+                "tx_hash",
+                format!("{} → {}", result.tx_hash, explorer.tx(&result.tx_hash)),
+            ),
+            None => output::print_kv("tx_hash", &result.tx_hash),
         }
     }
     Ok(())

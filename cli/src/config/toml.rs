@@ -5,42 +5,39 @@ use serde::Deserialize;
 
 /// User settings loaded from a TOML file (`~/.config/spp/config.toml` by
 /// default).
+///
+/// Accounts and the network (RPC URL + passphrase) are managed by the Stellar
+/// CLI, and the explorer/bootnode settings live in the local database — so this
+/// file only carries offline `[defaults]`.
 #[derive(Debug, Default, Deserialize)]
 pub struct FileConfig {
     #[serde(default)]
     pub defaults: DefaultsSection,
-    #[serde(default)]
-    pub wallet: WalletSection,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct DefaultsSection {
     pub deployment: Option<PathBuf>,
-    pub rpc_url: Option<String>,
+    /// Stellar CLI network name (default: the deployment's network).
+    pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
     pub stellar_config_dir: Option<PathBuf>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-pub struct WalletSection {
-    /// `stellar keys` alias name (identities are managed by the Stellar CLI).
-    pub source_account: Option<String>,
-}
-
 pub const CONFIG_TEMPLATE: &str = r#"# Stellar Private Payments CLI configuration
+#
+# Accounts are managed by the Stellar CLI (`stellar keys`) and passed per-command
+# with --source-account <alias>. The network (RPC URL + passphrase) is resolved
+# from the Stellar CLI (`stellar network`). Explorer and bootnode settings live in
+# the local database (edit via `spp config set-explorer` / `set-bootnode`).
 
 [defaults]
 # deployment = "/path/to/deployments.json"  # omit for embedded testnet
-# rpc_url = "https://soroban-testnet.stellar.org"
+# network = "testnet"                        # a `stellar network` name
 # data_dir = "~/.local/share/stellar-private-payments"
 # circuits_dir = "target/circuits-artifacts/release"
-# stellar_config_dir = "~/.config/stellar"  # passed to the `stellar` CLI (--config-dir)
-
-[wallet]
-# Accounts are managed by the Stellar CLI. Register one with
-# `stellar keys generate my-alias` (or `stellar keys add my-alias`), then:
-# source_account = "my-alias"
+# stellar_config_dir = "~/.config/stellar"   # passed to the `stellar` CLI (--config-dir)
 "#;
 
 pub fn default_config_path() -> PathBuf {

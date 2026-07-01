@@ -23,19 +23,12 @@ pub struct Account {
     pub address: String,
 }
 
-/// Resolve `--source-account` (an alias) to an [`Account`], or `None` when no
-/// account was supplied.
-pub fn resolve_account(
-    source_account: Option<&str>,
-    config_dir: Option<&Path>,
-) -> Result<Option<Account>> {
-    let Some(alias) = source_account else {
-        return Ok(None);
-    };
+/// Resolve a `--source-account` alias to an [`Account`] via the Stellar CLI.
+pub fn resolve(alias: &str, config_dir: Option<&Path>) -> Result<Account> {
     stellar_cli::validate_alias(alias)?;
     let address = stellar_cli::public_key(alias, config_dir)?;
-    Ok(Some(Account {
+    Ok(Account {
         alias: alias.to_string(),
         address,
-    }))
+    })
 }

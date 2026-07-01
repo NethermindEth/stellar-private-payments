@@ -1,3 +1,8 @@
-pub mod chain;
 pub mod config;
+pub mod disclaimer;
+pub mod feed;
+pub mod keys;
+pub mod license;
+pub mod overview;
 pub mod pool;
+pub mod register;

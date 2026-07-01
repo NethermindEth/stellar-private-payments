@@ -90,6 +90,75 @@ pub fn secret(alias: &str, config_dir: Option<&Path>) -> Result<String> {
     run(&args, config_dir)
 }
 
+/// A network's connection parameters, resolved from the Stellar CLI.
+#[derive(Debug, Clone)]
+pub struct StellarNetwork {
+    pub rpc_url: String,
+    pub passphrase: String,
+}
+
+/// Confirm the `stellar` binary is available, returning its version line.
+pub fn ensure_installed() -> Result<String> {
+    run(&["--version".to_string()], None).map_err(|e| {
+        anyhow::anyhow!(
+            "{e}\n\nInstall the Stellar CLI: https://github.com/stellar/stellar-cli#install"
+        )
+    })
+}
+
+/// Resolve a network's RPC URL and passphrase from the Stellar CLI's own
+/// network config (built-in networks like `testnet` and any custom ones added
+/// via `stellar network add`), by parsing `stellar network ls --long`.
+pub fn network(name: &str, config_dir: Option<&Path>) -> Result<StellarNetwork> {
+    let listing = run(
+        &[
+            "network".to_string(),
+            "ls".to_string(),
+            "--long".to_string(),
+        ],
+        config_dir,
+    )?;
+
+    // Blocks are separated by blank lines; each has `Name:`, `RPC url:`,
+    // `Network passphrase:` fields.
+    for block in listing.split("\n\n") {
+        let mut block_name = None;
+        let mut rpc_url = None;
+        let mut passphrase = None;
+        for line in block.lines() {
+            let line = line.trim();
+            if let Some(v) = line.strip_prefix("Name:") {
+                block_name = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("RPC url:") {
+                rpc_url = Some(v.trim().to_string());
+            } else if let Some(v) = line.strip_prefix("Network passphrase:") {
+                passphrase = Some(v.trim().to_string());
+            }
+        }
+        if block_name.as_deref() != Some(name) {
+            continue;
+        }
+        let (Some(rpc_url), Some(passphrase)) = (rpc_url, passphrase) else {
+            bail!("network `{name}` is missing an RPC url or passphrase in the Stellar CLI config");
+        };
+        if !(rpc_url.starts_with("http://") || rpc_url.starts_with("https://")) {
+            bail!(
+                "network `{name}` has no usable RPC url (`{rpc_url}`). \
+                 Configure one with `stellar network add {name} --rpc-url <URL> --network-passphrase <PHRASE>`"
+            );
+        }
+        return Ok(StellarNetwork {
+            rpc_url,
+            passphrase,
+        });
+    }
+    bail!(
+        "network `{name}` is not known to the Stellar CLI; add it with \
+         `stellar network add {name} --rpc-url <URL> --network-passphrase <PHRASE>` \
+         or pick another with --network"
+    )
+}
+
 /// Enforce alias-only usage: reject raw secret keys and seed phrases so secrets
 /// never appear on the command line or in config.
 pub fn validate_alias(value: &str) -> Result<()> {

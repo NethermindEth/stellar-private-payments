@@ -4,60 +4,43 @@ use anyhow::{Context, Result};
 use stellar_private_payments_sdk::{
     PrivatePoolConfig, Signer, TransferRecipient,
     blocking::PrivatePool,
-    state::SqliteStorage,
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
 use crate::{
-    artifacts::load_prover_artifacts, config::CliConfig, onboard::ensure_onboarded,
-    signer::AliasSigner,
+    account::Account, artifacts::load_prover_artifacts, config::CliConfig, signer::AliasSigner,
+    stellar_cli::StellarNetwork,
 };
-
-/// How the CLI names a private transfer recipient.
-#[derive(Debug, clap::Subcommand)]
-pub enum TransferRecipientCmd {
-    /// Look up recipient privacy keys from the on-chain public key registry
-    To {
-        /// Recipient Stellar address (G…)
-        address: String,
-    },
-    /// Provide recipient privacy keys directly
-    Keys {
-        /// Recipient BN254 note public key (hex)
-        #[arg(long)]
-        note_key: String,
-        /// Recipient X25519 encryption public key (hex)
-        #[arg(long)]
-        encryption_key: String,
-    },
-}
 
 pub struct PoolSession {
     pool: PrivatePool,
 }
 
 impl PoolSession {
-    pub fn open(config: &CliConfig, circuits_dir: Option<&Path>) -> Result<Self> {
-        let account = config.require_account()?;
-        let pool_contract_id = config.require_pool()?.to_string();
-
-        std::fs::create_dir_all(&config.data_dir)
-            .with_context(|| format!("create data dir {}", config.data_dir.display()))?;
-
-        ensure_onboarded(config)?;
-
+    /// Open and sync one pool. `account` and `network` are resolved once by the
+    /// caller (so overview/feed can reuse them across pools). Loads circuit
+    /// artifacts — callers that only read balances still pay this, which is
+    /// acceptable since the artifacts ship with the tool.
+    pub fn open(
+        config: &CliConfig,
+        account: &Account,
+        network: &StellarNetwork,
+        pool_contract_id: &str,
+        circuits_dir: Option<&Path>,
+    ) -> Result<Self> {
         let signer: Box<dyn Signer> = Box::new(AliasSigner {
             alias: account.alias.clone(),
-            network_passphrase: config.network_passphrase().to_string(),
+            network_passphrase: network.passphrase.clone(),
             user_address: account.address.clone(),
             config_dir: config.stellar_config_dir.clone(),
         });
 
+        log::info!("Opening pool {pool_contract_id}");
         let pool = PrivatePool::open(
             PrivatePoolConfig {
-                rpc_url: config.rpc_url.clone(),
+                rpc_url: network.rpc_url.clone(),
                 contract_config: config.deployment.clone(),
-                pool_contract_id,
+                pool_contract_id: pool_contract_id.to_string(),
                 user_address: account.address.clone(),
                 storage_path: config.wallet_db_path().to_string_lossy().into_owned(),
                 prover_artifacts: load_prover_artifacts(circuits_dir)?,
@@ -66,7 +49,9 @@ impl PoolSession {
         )
         .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
 
+        log::info!("Syncing pool {pool_contract_id}…");
         pool.sync().map_err(|e| anyhow::anyhow!("sync pool: {e}"))?;
+        log::info!("Synced pool {pool_contract_id}");
 
         Ok(Self { pool })
     }
@@ -81,26 +66,31 @@ pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
         .map_err(|e| anyhow::anyhow!("invalid amount (stroops): {e}"))
 }
 
-pub fn resolve_transfer_recipient_cmd(
+/// Recipient of a private transfer: either an address (looked up in the local
+/// registry index) or explicit note + encryption keys.
+pub fn resolve_transfer_recipient(
     config: &CliConfig,
-    recipient: &TransferRecipientCmd,
+    to: Option<&str>,
+    note_key: Option<&str>,
+    encryption_key: Option<&str>,
 ) -> Result<TransferRecipient> {
-    match recipient {
-        TransferRecipientCmd::To { address } => resolve_transfer_recipient(config, address),
-        TransferRecipientCmd::Keys {
-            note_key,
-            encryption_key,
-        } => transfer_recipient_from_keys(note_key, encryption_key),
+    match (to, note_key, encryption_key) {
+        (Some(address), None, None) => recipient_from_address(config, address),
+        (None, Some(note_key), Some(encryption_key)) => {
+            recipient_from_keys(note_key, encryption_key)
+        }
+        _ => anyhow::bail!(
+            "specify the recipient with --to <G…>, or both --note-key <hex> and --encryption-key <hex>"
+        ),
     }
 }
 
-pub fn resolve_transfer_recipient(config: &CliConfig, to: &str) -> Result<TransferRecipient> {
-    let storage = SqliteStorage::connect_file(config.wallet_db_path())
-        .context("open wallet database for recipient lookup")?;
+fn recipient_from_address(config: &CliConfig, to: &str) -> Result<TransferRecipient> {
+    let storage = config.open_storage()?;
     let entry = storage.lookup_public_key_by_address(to)?.with_context(|| {
         format!(
             "recipient {to} not found in the public key registry; \
-                 they must register keys on-chain"
+             they must register keys on-chain (`spp register`)"
         )
     })?;
     Ok(TransferRecipient {
@@ -109,10 +99,7 @@ pub fn resolve_transfer_recipient(config: &CliConfig, to: &str) -> Result<Transf
     })
 }
 
-pub fn transfer_recipient_from_keys(
-    note_key: &str,
-    encryption_key: &str,
-) -> Result<TransferRecipient> {
+fn recipient_from_keys(note_key: &str, encryption_key: &str) -> Result<TransferRecipient> {
     Ok(TransferRecipient {
         note_public_key: NotePublicKey::parse(note_key)
             .map_err(|e| anyhow::anyhow!("invalid recipient note key: {e}"))?,
