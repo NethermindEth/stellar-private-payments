@@ -28,7 +28,7 @@ pub fn balance(
 
     let payload = BalanceOut {
         pool: config.require_pool()?.to_string(),
-        account: config.require_wallet()?.address.clone(),
+        account: config.require_account()?.address.clone(),
         balance_stroops: balance.to_string(),
     };
 
@@ -100,7 +100,7 @@ pub fn withdraw(
 ) -> Result<()> {
     let to = match to {
         Some(address) => address.to_string(),
-        None => config.require_wallet()?.address.clone(),
+        None => config.require_account()?.address.clone(),
     };
 
     let session = PoolSession::open(config, circuits_dir)?;

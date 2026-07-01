@@ -1,46 +1,48 @@
 use anyhow::{Context, Result};
-use ed25519_dalek::{Signer as _, SigningKey};
-use sha2::{Digest, Sha256};
 use stellar_private_payments_sdk::{
     state::SqliteStorage,
     tx::encryption::{
         KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
     },
-    types::KeyDerivationSignature,
 };
-use stellar_strkey::ed25519::PrivateKey;
 
-use crate::{config::CliConfig, signing::WalletCredentials};
-
-/// SEP-53 prefix used by Freighter `signMessage` (must match the web app).
-const SEP53_MESSAGE_PREFIX: &[u8] = b"Stellar Signed Message:\n";
+use crate::{account::Account, config::CliConfig, stellar_cli};
 
 pub fn ensure_onboarded(config: &CliConfig) -> Result<()> {
-    let wallet = config.require_wallet()?;
+    let account = config.require_account()?;
     let path = config.wallet_db_path();
     let mut storage =
         SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))?;
 
-    if storage.get_user_keys(&wallet.address)?.is_some() {
+    if storage.get_user_keys(&account.address)?.is_some() {
         return Ok(());
     }
 
-    save_privacy_keys(config, wallet, &mut storage)
+    save_privacy_keys(config, account, &mut storage)
 }
 
 fn save_privacy_keys(
     config: &CliConfig,
-    wallet: &WalletCredentials,
+    account: &Account,
     storage: &mut SqliteStorage,
 ) -> Result<()> {
-    let signature = wallet_derivation_signature(&wallet.secret_key)?;
+    // Delegate the SEP-53 key-derivation signature to the Stellar CLI so the
+    // secret never enters this process. The CLI prefixes, hashes, and signs
+    // exactly like Freighter / the web app, yielding identical privacy keys.
+    let signature = stellar_cli::sign_message(
+        &account.alias,
+        KEY_DERIVATION_MESSAGE,
+        config.stellar_config_dir.as_deref(),
+    )
+    .context("derive privacy-key signature via stellar CLI")?;
+
     let (note_keypair, encryption_keypair) = derive_encryption_and_note_keypairs(signature.clone())
         .context("derive privacy keypairs from wallet signature")?;
     let membership_blinding = derive_membership_blinding(&signature, &config.deployment.network)?;
 
     storage
         .save_encryption_and_note_keypairs(
-            &wallet.address,
+            &account.address,
             &note_keypair,
             &encryption_keypair,
             &membership_blinding,
@@ -48,23 +50,4 @@ fn save_privacy_keys(
         .context("save privacy keys to local wallet database")?;
 
     Ok(())
-}
-
-fn wallet_derivation_signature(secret: &str) -> Result<KeyDerivationSignature> {
-    let private_key: PrivateKey = secret
-        .parse()
-        .map_err(|e| anyhow::anyhow!("invalid secret key: {e}"))?;
-    let signing_key = SigningKey::from_bytes(&private_key.0);
-
-    // Match Freighter / web: SEP-53 hash then ed25519 sign (not raw message sign).
-    let capacity = SEP53_MESSAGE_PREFIX
-        .len()
-        .saturating_add(KEY_DERIVATION_MESSAGE.len());
-    let mut payload = Vec::with_capacity(capacity);
-    payload.extend_from_slice(SEP53_MESSAGE_PREFIX);
-    payload.extend_from_slice(KEY_DERIVATION_MESSAGE.as_bytes());
-    let digest: [u8; 32] = Sha256::digest(payload).into();
-    let signature = signing_key.sign(&digest);
-
-    Ok(KeyDerivationSignature(signature.to_bytes().to_vec()))
 }

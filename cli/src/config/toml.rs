@@ -19,14 +19,13 @@ pub struct DefaultsSection {
     pub rpc_url: Option<String>,
     pub data_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
+    pub stellar_config_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Default, Deserialize)]
 pub struct WalletSection {
-    pub account_index: Option<u32>,
-    pub account: Option<String>,
-    pub mnemonic: Option<String>,
-    pub mnemonic_passphrase: Option<String>,
+    /// `stellar keys` alias name (identities are managed by the Stellar CLI).
+    pub source_account: Option<String>,
 }
 
 pub const CONFIG_TEMPLATE: &str = r#"# Stellar Private Payments CLI configuration
@@ -36,12 +35,12 @@ pub const CONFIG_TEMPLATE: &str = r#"# Stellar Private Payments CLI configuratio
 # rpc_url = "https://soroban-testnet.stellar.org"
 # data_dir = "~/.local/share/stellar-private-payments"
 # circuits_dir = "target/circuits-artifacts/release"
+# stellar_config_dir = "~/.config/stellar"  # passed to the `stellar` CLI (--config-dir)
 
 [wallet]
-# account_index = 0   # SEP-5: m/44'/148'/INDEX' (Freighter: 1st account = 0, 2nd = 1, …)
-# account = "G..."    # optional: expected address for validation only
-# mnemonic = "word1 word2 ..."
-# mnemonic_passphrase = ""  # optional BIP39 passphrase (Freighter “password”)
+# Accounts are managed by the Stellar CLI. Register one with
+# `stellar keys generate my-alias` (or `stellar keys add my-alias`), then:
+# source_account = "my-alias"
 "#;
 
 pub fn default_config_path() -> PathBuf {

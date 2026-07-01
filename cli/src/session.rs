@@ -2,13 +2,16 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use stellar_private_payments_sdk::{
-    LocalSigner, PrivatePoolConfig, Signer, TransferRecipient,
+    PrivatePoolConfig, Signer, TransferRecipient,
     blocking::PrivatePool,
     state::SqliteStorage,
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
-use crate::{artifacts::load_prover_artifacts, config::CliConfig, onboard::ensure_onboarded};
+use crate::{
+    artifacts::load_prover_artifacts, config::CliConfig, onboard::ensure_onboarded,
+    signer::AliasSigner,
+};
 
 /// How the CLI names a private transfer recipient.
 #[derive(Debug, clap::Subcommand)]
@@ -35,7 +38,7 @@ pub struct PoolSession {
 
 impl PoolSession {
     pub fn open(config: &CliConfig, circuits_dir: Option<&Path>) -> Result<Self> {
-        let wallet = config.require_wallet()?;
+        let account = config.require_account()?;
         let pool_contract_id = config.require_pool()?.to_string();
 
         std::fs::create_dir_all(&config.data_dir)
@@ -43,21 +46,19 @@ impl PoolSession {
 
         ensure_onboarded(config)?;
 
-        let signer: Box<dyn Signer> = Box::new(
-            LocalSigner::new(
-                &wallet.secret_key,
-                config.network_passphrase(),
-                &wallet.address,
-            )
-            .map_err(|e| anyhow::anyhow!("{e}"))?,
-        );
+        let signer: Box<dyn Signer> = Box::new(AliasSigner {
+            alias: account.alias.clone(),
+            network_passphrase: config.network_passphrase().to_string(),
+            user_address: account.address.clone(),
+            config_dir: config.stellar_config_dir.clone(),
+        });
 
         let pool = PrivatePool::open(
             PrivatePoolConfig {
                 rpc_url: config.rpc_url.clone(),
                 contract_config: config.deployment.clone(),
                 pool_contract_id,
-                user_address: wallet.address.clone(),
+                user_address: account.address.clone(),
                 storage_path: config.wallet_db_path().to_string_lossy().into_owned(),
                 prover_artifacts: load_prover_artifacts(circuits_dir)?,
             },

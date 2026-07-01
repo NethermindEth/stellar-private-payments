@@ -1,10 +1,12 @@
+mod account;
 mod artifacts;
 mod cmd;
 mod config;
 mod onboard;
 mod output;
 mod session;
-mod signing;
+mod signer;
+mod stellar_cli;
 
 use std::path::PathBuf;
 
@@ -39,28 +41,15 @@ struct Cli {
     #[arg(long, global = true)]
     data_dir: Option<PathBuf>,
 
-    /// Expected Stellar address (G…); optional sanity check that derived keys
-    /// match
-    #[arg(long, global = true)]
-    account: Option<String>,
+    /// `stellar keys` alias to sign with (register via `stellar keys generate`).
+    /// Required for pool commands.
+    #[arg(long, global = true, env = "STELLAR_ACCOUNT")]
+    source_account: Option<String>,
 
-    /// Stellar secret key (S…)
+    /// Config directory for the `stellar` CLI (passed as --config-dir; default:
+    /// ~/.config/stellar)
     #[arg(long, global = true)]
-    secret: Option<String>,
-
-    /// BIP39 recovery phrase (12/24 words, as shown in Freighter)
-    #[arg(long, global = true)]
-    mnemonic: Option<String>,
-
-    /// Optional BIP39 passphrase (Freighter “password”, separate from the word
-    /// list)
-    #[arg(long, global = true)]
-    mnemonic_passphrase: Option<String>,
-
-    /// SEP-5 account index for --mnemonic (path m/44'/148'/INDEX').
-    /// Use `config show` to verify the derived G… address matches your wallet.
-    #[arg(long, global = true)]
-    account_index: Option<u32>,
+    stellar_config_dir: Option<PathBuf>,
 
     /// Directory with policy_tx_2_2.{wasm,r1cs} (default:
     /// target/circuits-artifacts/<profile>)
@@ -87,7 +76,7 @@ enum Commands {
         #[command(subcommand)]
         command: ChainCommands,
     },
-    /// Pool wallet operations (requires --secret or --mnemonic)
+    /// Pool wallet operations (requires --source-account)
     Pool {
         /// Pool contract id (C…)
         pool_id: String,
@@ -157,11 +146,8 @@ fn main() -> Result<()> {
             deployment_path: cli.deployment,
             rpc_url: cli.rpc_url,
             data_dir: cli.data_dir,
-            account: cli.account,
-            secret: cli.secret,
-            mnemonic: cli.mnemonic,
-            mnemonic_passphrase: cli.mnemonic_passphrase,
-            account_index: cli.account_index,
+            source_account: cli.source_account,
+            stellar_config_dir: cli.stellar_config_dir,
             circuits_dir: cli.circuits_dir,
         },
     )?;

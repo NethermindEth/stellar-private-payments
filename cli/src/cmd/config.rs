@@ -16,8 +16,8 @@ struct ConfigShow<'a> {
     rpc_url: &'a str,
     data_dir: &'a str,
     wallet_db: &'a str,
+    source_account: Option<&'a str>,
     account: Option<&'a str>,
-    account_index: u32,
     asp_membership: &'a str,
     asp_non_membership: &'a str,
     verifier: &'a str,
@@ -37,8 +37,8 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         rpc_url: &config.rpc_url,
         data_dir: &config.data_dir.display().to_string(),
         wallet_db: &config.wallet_db_path().display().to_string(),
-        account: config.account.as_deref(),
-        account_index: config.account_index,
+        source_account: config.source_account.as_deref(),
+        account: config.account.as_ref().map(|a| a.address.as_str()),
         asp_membership: &config.deployment.asp_membership,
         asp_non_membership: &config.deployment.asp_non_membership,
         verifier: &config.deployment.verifier,
@@ -65,10 +65,12 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     output::print_kv("rpc_url", payload.rpc_url);
     output::print_kv("data_dir", payload.data_dir);
     output::print_kv("wallet_db", payload.wallet_db);
+    if let Some(source_account) = payload.source_account {
+        output::print_kv("source_account", source_account);
+    }
     if let Some(account) = payload.account {
         output::print_kv("account", account);
     }
-    output::print_kv("account_index", payload.account_index);
     output::print_kv("asp_membership", payload.asp_membership);
     output::print_kv("asp_non_membership", payload.asp_non_membership);
     output::print_kv("verifier", payload.verifier);

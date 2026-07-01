@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result, bail};
 use stellar_private_payments_sdk::types::ContractConfig;
 
-use crate::signing::WalletCredentials;
+use crate::account::{Account, resolve_account};
 
 pub use toml::{
     FileConfig, default_config_path, load_file_config, resolve_config_path, write_config_template,
@@ -24,25 +24,19 @@ pub struct CliConfigOverrides {
     pub deployment_path: Option<PathBuf>,
     pub rpc_url: Option<String>,
     pub data_dir: Option<PathBuf>,
-    pub account: Option<String>,
-    pub secret: Option<String>,
-    pub mnemonic: Option<String>,
-    pub mnemonic_passphrase: Option<String>,
-    pub account_index: Option<u32>,
+    pub source_account: Option<String>,
+    pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
 }
 
-/// CLI global flags used to build a [`CliConfig`].
+/// Resolved global settings used to build a [`CliConfig`].
 #[derive(Debug)]
 pub struct CliConfigLoad {
     pub deployment_path: Option<PathBuf>,
     pub rpc_url: Option<String>,
     pub data_dir: PathBuf,
-    pub account: Option<String>,
-    pub secret: Option<String>,
-    pub mnemonic: Option<String>,
-    pub mnemonic_passphrase: Option<String>,
-    pub account_index: u32,
+    pub source_account: Option<String>,
+    pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
 }
 
@@ -55,12 +49,12 @@ pub struct CliConfig {
     pub deployment: ContractConfig,
     pub rpc_url: String,
     pub data_dir: PathBuf,
-    pub account_index: u32,
-    /// Explicit `--account`, or the address derived from `--secret` /
-    /// `--mnemonic`.
-    pub account: Option<String>,
-    /// Resolved signing material when `--secret` or `--mnemonic` is provided.
-    pub wallet: Option<WalletCredentials>,
+    /// `stellar keys` alias supplied via `--source-account`.
+    pub source_account: Option<String>,
+    /// Config dir passed through to the `stellar` CLI (`--config-dir`).
+    pub stellar_config_dir: Option<PathBuf>,
+    /// Account resolved from `source_account` via the Stellar CLI.
+    pub account: Option<Account>,
     pub pool: Option<String>,
     pub circuits_dir: Option<PathBuf>,
 }
@@ -76,11 +70,8 @@ impl CliConfig {
             deployment_path,
             rpc_url,
             data_dir,
-            account,
-            secret,
-            mnemonic,
-            mnemonic_passphrase,
-            account_index,
+            source_account,
+            stellar_config_dir,
             circuits_dir,
         } = overrides;
 
@@ -90,22 +81,17 @@ impl CliConfig {
             .unwrap_or_else(default_data_dir);
         let rpc_url = rpc_url.or(file.defaults.rpc_url);
         let circuits_dir = circuits_dir.or(file.defaults.circuits_dir.map(toml::expand_path));
+        let stellar_config_dir =
+            stellar_config_dir.or(file.defaults.stellar_config_dir.map(toml::expand_path));
 
-        let account_index = account_index.or(file.wallet.account_index).unwrap_or(0);
-        let account = account.or(file.wallet.account);
-
-        let mnemonic = mnemonic.or(file.wallet.mnemonic);
-        let mnemonic_passphrase = mnemonic_passphrase.or(file.wallet.mnemonic_passphrase);
+        let source_account = source_account.or(file.wallet.source_account);
 
         let load = CliConfigLoad {
             deployment_path,
             rpc_url,
             data_dir,
-            account,
-            secret,
-            mnemonic,
-            mnemonic_passphrase,
-            account_index,
+            source_account,
+            stellar_config_dir,
             circuits_dir,
         };
         Self::from_resolved(config_file, load)
@@ -116,41 +102,31 @@ impl CliConfig {
             deployment_path,
             rpc_url,
             data_dir,
-            account,
-            secret,
-            mnemonic,
-            mnemonic_passphrase,
-            account_index,
+            source_account,
+            stellar_config_dir,
             circuits_dir,
         } = input;
         let (deployment_source, deployment) = load_deployment(deployment_path.as_deref())?;
         let rpc_url = rpc_url.unwrap_or_else(|| default_rpc_url(&deployment.network));
-        let wallet = crate::signing::resolve_wallet(
-            secret.as_deref(),
-            mnemonic.as_deref(),
-            mnemonic_passphrase.as_deref(),
-            account.as_deref(),
-            account_index,
-        )?;
-        let account = account.or_else(|| wallet.as_ref().map(|w| w.address.clone()));
+        let account = resolve_account(source_account.as_deref(), stellar_config_dir.as_deref())?;
         Ok(Self {
             config_file,
             deployment_source,
             deployment,
             rpc_url,
             data_dir,
-            account_index,
+            source_account,
+            stellar_config_dir,
             account,
-            wallet,
             pool: None,
             circuits_dir,
         })
     }
 
-    pub fn require_wallet(&self) -> Result<&WalletCredentials> {
-        self.wallet
-            .as_ref()
-            .ok_or_else(|| anyhow::anyhow!("pool commands require --secret or --mnemonic"))
+    pub fn require_account(&self) -> Result<&Account> {
+        self.account.as_ref().ok_or_else(|| {
+            anyhow::anyhow!("pool commands require --source-account <stellar keys alias>")
+        })
     }
 
     pub fn require_pool(&self) -> Result<&str> {
@@ -177,7 +153,7 @@ pub fn default_data_dir() -> PathBuf {
     std::env::var_os("HOME")
         .map(PathBuf::from)
         .map(|home| home.join(".local/share/stellar-private-payments"))
-        .unwrap_or_else(|| PathBuf::from(".spp"))
+        .unwrap_or_else(|| PathBuf::from(".stellar-pp"))
 }
 
 pub fn default_rpc_url(network: &str) -> String {
