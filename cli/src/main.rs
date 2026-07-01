@@ -119,14 +119,14 @@ enum Commands {
     Deposit {
         /// Pool contract id (C…)
         pool: String,
-        /// Amount in stroops
+        /// Amount in token units (e.g. 1 or 0.0001)
         amount: String,
     },
     /// Private transfer to a recipient
     Transfer {
         /// Pool contract id (C…)
         pool: String,
-        /// Amount in stroops
+        /// Amount in token units (e.g. 1 or 0.0001)
         amount: String,
         /// Recipient Stellar address (G…); looked up in the registry
         #[arg(long)]
@@ -142,7 +142,7 @@ enum Commands {
     Withdraw {
         /// Pool contract id (C…)
         pool: String,
-        /// Amount in stroops
+        /// Amount in token units (e.g. 1 or 0.0001)
         amount: String,
         /// Public recipient (G…); defaults to the signing account
         #[arg(long)]

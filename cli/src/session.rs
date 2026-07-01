@@ -62,8 +62,53 @@ impl PoolSession {
 }
 
 pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
-    raw.parse::<NoteAmount>()
-        .map_err(|e| anyhow::anyhow!("invalid amount (stroops): {e}"))
+    const DECIMALS: u32 = 7;
+    let raw = raw.trim();
+    if raw.is_empty() {
+        return Err(anyhow::anyhow!("invalid amount: empty input"));
+    }
+
+    let (negative, digits) = match raw.as_bytes()[0] {
+        b'+' => (false, &raw[1..]),
+        b'-' => (true, &raw[1..]),
+        _ => (false, raw),
+    };
+    let (int_part, frac_part) = match digits.split_once('.') {
+        Some((int_part, frac_part)) => (if int_part.is_empty() { "0" } else { int_part }, frac_part),
+        None => (if digits.is_empty() { "0" } else { digits }, ""),
+    };
+
+    if int_part.is_empty() || !int_part.chars().all(|c| c.is_ascii_digit()) {
+        return Err(anyhow::anyhow!("invalid amount: {raw}"));
+    }
+    if !frac_part.chars().all(|c| c.is_ascii_digit()) {
+        return Err(anyhow::anyhow!("invalid amount: {raw}"));
+    }
+    if frac_part.len() > DECIMALS as usize {
+        return Err(anyhow::anyhow!("too many decimal places (max {DECIMALS})"));
+    }
+
+    let scale = 10u128.pow(DECIMALS);
+    let int_units = int_part
+        .parse::<u128>()
+        .map_err(|e| anyhow::anyhow!("invalid amount: {e}"))?;
+    let frac_units = if frac_part.is_empty() {
+        0u128
+    } else {
+        let padded = format!("{frac_part:0<width$}", width = DECIMALS as usize);
+        padded
+            .parse::<u128>()
+            .map_err(|e| anyhow::anyhow!("invalid amount: {e}"))?
+    };
+
+    let amount = int_units
+        .checked_mul(scale)
+        .and_then(|v| v.checked_add(frac_units))
+        .ok_or_else(|| anyhow::anyhow!("amount is too large"))?;
+    if negative && amount != 0 {
+        return Err(anyhow::anyhow!("amount must be non-negative"));
+    }
+    Ok(NoteAmount::from(amount))
 }
 
 /// Recipient of a private transfer: either an address (looked up in the local
@@ -106,4 +151,25 @@ fn recipient_from_keys(note_key: &str, encryption_key: &str) -> Result<TransferR
         encryption_public_key: EncryptionPublicKey::parse(encryption_key)
             .map_err(|e| anyhow::anyhow!("invalid recipient encryption key: {e}"))?,
     })
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::parse_amount;
+    use stellar_private_payments_sdk::types::NoteAmount;
+
+    #[test]
+    fn parses_token_units_with_decimals() {
+        assert_eq!(parse_amount("1").unwrap(), NoteAmount::from(10_000_000u128));
+        assert_eq!(parse_amount("1.").unwrap(), NoteAmount::from(10_000_000u128));
+        assert_eq!(parse_amount(".5").unwrap(), NoteAmount::from(5_000_000u128));
+        assert_eq!(parse_amount("0.0000001").unwrap(), NoteAmount::from(1u128));
+        assert_eq!(parse_amount("12.3456789").unwrap(), NoteAmount::from(123_456_789u128));
+    }
+
+    #[test]
+    fn rejects_too_many_decimals() {
+        assert!(parse_amount("0.00000001").is_err());
+    }
 }
