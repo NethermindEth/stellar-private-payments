@@ -114,6 +114,8 @@ function renderWallet() {
     renderSyncStatus();
 }
 
+// Sync indicator lives inside the network pill: grey/Offline when disconnected,
+// pulsing amber/Syncing until the registry is caught up, green/Synced after.
 function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
@@ -175,6 +177,7 @@ export const Shell = {
             e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
             renderSettingsDrawer();
         });
+        // Click any identity value to copy it (copies the real value, even when masked).
         const identityCopyTargets = {
             'settings-wallet-address': () => App.state.wallet.address,
             'settings-note-key': () => App.state.keys.notePublicKey,
@@ -288,6 +291,8 @@ export const Wallet = {
                 this.disconnect();
                 const message = error?.message || '';
                 if (isDbLockedError(message)) {
+                    // Blocking condition: another tab/window holds the local DB lock.
+                    // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
                 } else if (!auto) {
                     Toast.show(message || 'Failed to connect wallet', 'error');
@@ -368,7 +373,7 @@ export const Wallet = {
 
     async registerPublicKey() {
         const btn = document.getElementById('settings-register-btn');
-        if (btn?.disabled) return;
+        if (btn?.disabled) return; // already in-flight or already registered
         try {
             if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
                 throw new Error('Connect wallet first');
@@ -377,7 +382,7 @@ export const Wallet = {
                 throw new Error('Privacy keys are not ready yet');
             }
 
-            if (btn) btn.disabled = true;
+            if (btn) btn.disabled = true; // prevent duplicate registrations
             const hash = await getHandle().webClient.registerPublicKeys(
                 App.state.wallet.address,
                 App.state.keys.notePublicKey,
@@ -394,7 +399,7 @@ export const Wallet = {
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
             Toast.show(error?.message || 'Registration failed', 'error');
-            if (btn) btn.disabled = false;
+            if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },
 };

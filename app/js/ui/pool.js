@@ -13,28 +13,29 @@ App.events.addEventListener('pool:selected', () => {
 });
 
 let cachedContractConfig = null;
+let activeSession = null;
+let activeSessionContractId = null;
 
-export async function getContractConfig() {
-    if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = await getHandle().webClient.contractConfig();
-    return cachedContractConfig;
-}
-
-export function getActivePoolContractId(config) {
-    const pools = Array.isArray(config?.pools) ? config.pools : [];
+function expectedPoolContractId(config = null) {
+    const pools = Array.isArray(config?.pools) ? config.pools : (App.state.pools || []);
     const selected = pools.find(p => p?.poolContractId === App.state.selectedPoolId)
         || pools.find(p => p?.enabled)
         || pools[0];
-    const poolContractId = selected?.poolContractId;
-    if (!poolContractId) throw new Error('Pool contract ID not available');
-    return poolContractId;
+    return selected?.poolContractId || App.state.selectedPoolId || null;
 }
 
 export function closeAppPool() {
-    if (App.state.pool) {
-        App.state.pool.close();
-        App.state.pool = null;
+    if (activeSession) {
+        activeSession.close();
+        activeSession = null;
+        activeSessionContractId = null;
     }
+}
+
+async function getContractConfig() {
+    if (cachedContractConfig) return cachedContractConfig;
+    cachedContractConfig = await getHandle().webClient.contractConfig();
+    return cachedContractConfig;
 }
 
 export async function createAppPool() {
@@ -48,18 +49,22 @@ export async function createAppPool() {
     closeAppPool();
 
     const config = await getContractConfig();
-    const poolContract = getActivePoolContractId(config);
+    const poolContract = expectedPoolContractId(config);
+    if (!poolContract) throw new Error('Pool contract ID not available');
     const pool = await getHandle().webClient.createPool({
         poolContract,
         networkPassphrase: App.state.wallet.networkPassphrase,
         userAddress: App.state.wallet.address,
     });
     await pool.initialize();
-    App.state.pool = pool;
+    activeSession = pool;
+    activeSessionContractId = poolContract;
     return pool;
 }
 
 export async function ensureAppPool() {
-    if (App.state.pool) return App.state.pool;
+    const poolContract = expectedPoolContractId();
+    if (!poolContract) throw new Error('Pool contract ID not available');
+    if (activeSession && activeSessionContractId === poolContract) return activeSession;
     return createAppPool();
 }

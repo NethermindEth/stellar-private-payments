@@ -649,14 +649,6 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
-function getActivePoolContractId(config) {
-  const pools = Array.isArray(config?.pools) ? config.pools : [];
-  const selected = pools.find((p) => p?.enabled) || pools[0];
-  const poolContractId = selected?.poolContractId;
-  if (!poolContractId) throw new Error('Pool contract ID not available');
-  return poolContractId;
-}
-
 async function generateReceipt(form) {
   const onStatus = (obj) => {
     const stage = obj?.stage || '';
@@ -676,11 +668,6 @@ async function generateReceipt(form) {
     }
   };
 
-  // Disclose against the pool the selected note actually belongs to (there can
-  // be multiple pools); falling back to the first enabled pool only if unknown.
-  const config = await getHandle().webClient.contractConfig();
-  const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
-
   const { ensureAppPool } = await import('./ui/pool.js');
   const pool = await ensureAppPool();
 
@@ -690,7 +677,7 @@ async function generateReceipt(form) {
     form.payload,
     form.purpose,
     BigInt(form.nonce),
-    onStatus,
+    onStatus
   );
 
   // receipt is a JS object (already deserialized by wasm_bindgen) or null
