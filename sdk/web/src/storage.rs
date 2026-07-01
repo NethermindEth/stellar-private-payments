@@ -14,6 +14,8 @@ use gloo_worker::Spawnable;
 
 pub(crate) const DEFAULT_STORAGE_WORKER_URL: &str = "./workers/storage-worker.js";
 const DEFAULT_CALL_TIMEOUT_MS: u32 = 5_000;
+/// Cold wasm compile + OPFS/SQLite init can exceed the default RPC timeout.
+const STORAGE_OPEN_PING_TIMEOUT_MS: u32 = 15_000;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -41,30 +43,21 @@ impl Storage {
         self.bridge.clone()
     }
 
-    pub(crate) fn from_js(value: JsValue) -> Result<Self, JsError> {
-        #[cfg(target_arch = "wasm32")]
-        {
-            value
-                .dyn_into()
-                .map_err(|_| JsError::new("options.storage must be a Storage instance"))
-        }
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let _ = value;
-            Err(JsError::new("Storage is only available on wasm32"))
-        }
-    }
-
     pub(crate) async fn open_internal(worker_url: String) -> Result<Self, JsError> {
         crate::wasm_start();
 
         let storage = Self {
-            bridge: StorageBridge::new(StorageWorker::spawner().as_module(true).spawn(&worker_url)),
+            bridge: StorageBridge::new(
+                StorageWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&worker_url),
+            ),
         };
 
         storage
             .bridge
-            .ping()
+            .ping_ms(STORAGE_OPEN_PING_TIMEOUT_MS)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
 

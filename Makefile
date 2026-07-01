@@ -10,14 +10,14 @@ release: RELEASE := 1
 release: build
 
 .PHONY: serve
-serve: install circuits-build
+serve: install circuits-build sdk-web-build
 	# --dist $(DIST_DIR) overrides the dist_dir set in the trunk.toml
 	# it's useful for generating a different serving path
 	unset NO_COLOR && export PUBLIC_URL=$(PUBLIC_URL) && \
 	trunk serve --dist $(DIST_DIR) --public-url $(PUBLIC_URL)
 
 .PHONY: build
-build: install circuits-build
+build: install circuits-build sdk-web-build
 	@echo "Building frontend with trunk..."
 	unset NO_COLOR && export PUBLIC_URL=$(PUBLIC_URL) && \
 	trunk build --dist $(DIST_DIR) $(if $(RELEASE),--release) --public-url $(PUBLIC_URL)
@@ -27,10 +27,16 @@ circuits-build:
 	@echo "Building circuits (this may take a while)..."
 	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
 
+.PHONY: sdk-web-build
+sdk-web-build:
+	@echo "Building stellar-private-payments-sdk (sdk/web/dist)..."
+	@npm run build --prefix sdk/web
+
 .PHONY: install
 install:
 	@echo "Installing frontend dependencies..."
 	@npm install --prefix app
+	@npm install --prefix sdk/web
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
 	@command -v wasm-bindgen >/dev/null 2>&1 || cargo install wasm-bindgen-cli --version 0.2.120 --locked
@@ -38,6 +44,7 @@ install:
 .PHONY: clean
 clean:
 	trunk clean --dist $(DIST_DIR)
+	rm -rf sdk/web/dist
 	cargo clean
 
 .PHONY: doc

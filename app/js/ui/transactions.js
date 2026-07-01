@@ -1,7 +1,7 @@
 /**
  * Transactions UI - Deposit / Withdraw / Transfer / Transact.
  *
- * WASM-first: proving + tx preparation run on the pool handle from `createPool`.
+ * WASM-first: proving + tx preparation run on the SDK pool handle (via pool-adapter).
  * JS is responsible only for UI interactions; signing and submit run in WASM.
  *
  * @module ui/transactions

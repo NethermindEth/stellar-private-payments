@@ -42,6 +42,8 @@ function wrapClient(wasmClient) {
     registerPublicKeys: (options) => wasmClient.registerPublicKeys(options),
     lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
     allContractsData: () => wasmClient.allContractsData(),
+    verifySelectiveDisclosure: (receiptJson, expectedVkHash, options) =>
+      wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, options),
     pool: (options) => wasmClient.pool(options),
   };
 }
@@ -58,12 +60,7 @@ async function newClient(options) {
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
     }));
 
-  return wrapClient(
-    await WasmClient.new({
-      storage,
-      rpcUrl: options.rpcUrl,
-    }),
-  );
+  return wrapClient(await WasmClient.new(storage, options.rpcUrl));
 }
 
 export const Storage = { open: openStorage };

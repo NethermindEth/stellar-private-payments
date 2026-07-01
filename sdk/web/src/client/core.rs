@@ -10,7 +10,11 @@ use std::rc::Rc;
 use stellar_private_payments_sdk::{
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
     tx::encryption::KEY_DERIVATION_MESSAGE,
-    types::{ContractConfig, KeyDerivationSignature, parse_0x_hex_32},
+    types::{
+        ContractConfig, DisclosureReceipt, DisclosureVerificationReport, KeyDerivationSignature,
+        parse_0x_hex_32,
+    },
+    verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
 
@@ -283,6 +287,7 @@ impl ClientCore {
             storage,
             prover_bridge: ProverBridge::new(
                 ProverWorker::spawner()
+                    .with_loader(true)
                     .as_module(true)
                     .spawn(&prover_worker_url),
             ),
@@ -307,6 +312,25 @@ impl ClientCore {
 
     async fn ping_prover(&self) -> anyhow::Result<()> {
         self.prover_bridge.ping().await
+    }
+
+    /// Walletless selective-disclosure verification (Groth16 + context +
+    /// roots).
+    pub(crate) async fn verify_selective_disclosure(
+        &self,
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<DisclosureVerificationReport, stellar_private_payments_sdk::PoolError> {
+        self.ping_prover().await.map_err(|e| {
+            stellar_private_payments_sdk::PoolError::Other(format!("failed to load prover: {e:?}"))
+        })?;
+        verify_disclosure_receipt(
+            &self.fetcher,
+            &self.prover_bridge,
+            receipt,
+            expected_vk_hash,
+        )
+        .await
     }
 }
 

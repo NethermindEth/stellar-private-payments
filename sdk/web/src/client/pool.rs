@@ -103,6 +103,32 @@ impl PrivatePool {
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
 
+    /// Transfer privately to explicit recipient keys (note + encryption hex).
+    #[wasm_bindgen(js_name = transferToKeys)]
+    pub async fn transfer_to_keys(
+        &self,
+        note_public_key_hex: &str,
+        encryption_public_key_hex: &str,
+        amount: &str,
+    ) -> Result<JsValue, JsError> {
+        self.sync().await?;
+        let note_amount = Self::parse_note_amount(amount)?;
+        let recipient = TransferRecipient {
+            note_public_key: NotePublicKey::parse(note_public_key_hex)
+                .map_err(|e| JsError::new(&e.to_string()))?,
+            encryption_public_key: EncryptionPublicKey::parse(encryption_public_key_hex)
+                .map_err(|e| JsError::new(&e.to_string()))?,
+        };
+        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+        let results = self
+            .inner()
+            .transfer(&wallet, recipient, note_amount)
+            .await
+            .map_err(pool_err)?;
+        self.sync().await?;
+        Self::tx_results_to_js(results)
+    }
+
     /// Transfer privately. `recipient` is a Stellar `G...` address.
     pub async fn transfer(&self, recipient: &str, amount: &str) -> Result<JsValue, JsError> {
         self.sync().await?;

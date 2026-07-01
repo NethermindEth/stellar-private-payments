@@ -4,6 +4,7 @@ import { Transactions } from './ui/transactions.js';
 import { NotesTable } from './ui/notes-table.js';
 import { Dashboard } from './ui/dashboard.js';
 import { updateLastVisit, registerServiceWorker } from './ui/push-notifications.js';
+import { getConnectedAddress } from './wallet.js';
 
 document.addEventListener('DOMContentLoaded', async () => {
     Templates.init();
@@ -16,5 +17,8 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateLastVisit();
     registerServiceWorker();
 
-    Wallet.connect({ auto: true }).catch(() => {});
+    const existingAddress = await getConnectedAddress();
+    if (existingAddress) {
+        Wallet.connect({ auto: true }).catch(() => {});
+    }
 });

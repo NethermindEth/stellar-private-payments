@@ -8,6 +8,7 @@ export const App = {
     state: {
         wallet: {
             connected: false,
+            connecting: false,
             address: null,
             sorobanRpcUrl: null,
             network: null,

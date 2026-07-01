@@ -1,13 +1,16 @@
-use crate::protocol::{ProverWorkerRequest, ProverWorkerResponse};
+use crate::{
+    circuits::fetch_circuit_file,
+    protocol::{ProverWorkerRequest, ProverWorkerResponse},
+};
 use anyhow::{Context as _, Result, anyhow};
-use futures::FutureExt;
+use futures::{FutureExt, try_join};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
     Registrable,
     oneshot::{OneshotBridge, oneshot},
 };
 use sha2::{Digest as _, Sha256};
-use std::{cell::RefCell, fmt::Write as _, path::PathBuf};
+use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
     PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
@@ -29,17 +32,6 @@ const PROVING_KEY: &[u8] =
 const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
     "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
 );
-
-fn embedded_circuit_bytes(name: &str) -> &'static [u8] {
-    let path = PathBuf::from(env!("OUT_DIR")).join(name);
-    let bytes = std::fs::read(&path).unwrap_or_else(|e| {
-        panic!(
-            "sdk/wasm prover worker: missing embedded circuit {}: {e}",
-            path.display()
-        )
-    });
-    Box::leak(bytes.into_boxed_slice())
-}
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -100,27 +92,42 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         return Ok(());
     }
 
-    let wasm_bytes = embedded_circuit_bytes("policy_tx_2_2.wasm");
-    let r1cs_bytes = embedded_circuit_bytes("policy_tx_2_2.r1cs");
-    let disc_wasm_bytes = embedded_circuit_bytes("selectiveDisclosure_1.wasm");
-    let disc_r1cs_bytes = embedded_circuit_bytes("selectiveDisclosure_1.r1cs");
-
-    log::debug!(
-        "[{WORKER_NAME}] loaded policy_tx_2_2.wasm: {} bytes",
-        wasm_bytes.len()
-    );
-    log::debug!(
-        "[{WORKER_NAME}] loaded policy_tx_2_2.r1cs: {} bytes",
-        r1cs_bytes.len()
-    );
-    log::debug!(
-        "[{WORKER_NAME}] loaded selectiveDisclosure_1.wasm: {} bytes",
-        disc_wasm_bytes.len()
-    );
-    log::debug!(
-        "[{WORKER_NAME}] loaded selectiveDisclosure_1.r1cs: {} bytes",
-        disc_r1cs_bytes.len()
-    );
+    let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
+        async {
+            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
+                wasm_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(wasm_bytes)
+        },
+        async {
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+        },
+        async {
+            let wasm_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.wasm").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
+                wasm_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(wasm_bytes)
+        },
+        async {
+            let r1cs_bytes: Vec<u8> =
+                fetch_circuit_file("circuits/selectiveDisclosure_1.r1cs").await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched selectiveDisclosure_1.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+        }
+    )?;
 
     // Integrity checks (regular builds): ensure we are using the exact
     // artifact versions this binary was built against.
@@ -132,13 +139,13 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     )?;
     ensure_sha256_matches(
         "policy_tx_2_2.wasm",
-        wasm_bytes,
+        &wasm_bytes,
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
     )?;
     ensure_sha256_matches(
         "policy_tx_2_2.r1cs",
-        r1cs_bytes,
+        &r1cs_bytes,
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_LEN,
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
     )?;
@@ -151,27 +158,27 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     )?;
     ensure_sha256_matches(
         "selectiveDisclosure_1.wasm",
-        disc_wasm_bytes,
+        &disc_wasm_bytes,
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
     )?;
     ensure_sha256_matches(
         "selectiveDisclosure_1.r1cs",
-        disc_r1cs_bytes,
+        &disc_r1cs_bytes,
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
         crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
     )?;
 
-    let transact_prover = ProverEngine::new(PROVING_KEY, wasm_bytes, r1cs_bytes)
+    let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
 
     let disc_witness_calc =
-        WitnessCalculator::new(disc_wasm_bytes, disc_r1cs_bytes).map_err(|e| {
+        WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
             JsError::new(&format!(
                 "failed to init disclosure witness calculator: {e:#}"
             ))
         })?;
-    let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, disc_r1cs_bytes)
+    let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
         .expect("FAILED Disclosure Prover");
 
     TRANSACT_PROVER.with(|cell| {
