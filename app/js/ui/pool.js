@@ -1,9 +1,10 @@
 /**
- * App pool session — `createPool` handle for deposits, transfers, and withdrawals.
+ * App pool session — `openPool` handle for deposits, transfers, and withdrawals.
  * @module ui/pool
  */
 
-import { getHandle } from '../wasm-facade.js';
+import { contractConfig, openPool } from '../wasm-facade.js';
+import { wrapSdkPool } from '../pool-adapter.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -16,7 +17,7 @@ let cachedContractConfig = null;
 
 export async function getContractConfig() {
     if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = await getHandle().webClient.contractConfig();
+    cachedContractConfig = contractConfig();
     return cachedContractConfig;
 }
 
@@ -31,10 +32,7 @@ export function getActivePoolContractId(config) {
 }
 
 export function closeAppPool() {
-    if (App.state.pool) {
-        App.state.pool.close();
-        App.state.pool = null;
-    }
+    App.state.pool = null;
 }
 
 export async function createAppPool() {
@@ -49,12 +47,11 @@ export async function createAppPool() {
 
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
-    const pool = await getHandle().webClient.createPool({
-        poolContract,
-        networkPassphrase: App.state.wallet.networkPassphrase,
+    const sdkPool = await openPool({ poolContract });
+    const pool = wrapSdkPool(sdkPool, {
+        poolContractId: poolContract,
         userAddress: App.state.wallet.address,
     });
-    await pool.initialize();
     App.state.pool = pool;
     return pool;
 }

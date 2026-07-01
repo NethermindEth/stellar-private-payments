@@ -505,7 +505,11 @@ impl StorageBridge {
     }
 
     pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self.call(StorageWorkerRequest::Ping, 5_000).await? {
+        self.ping_ms(5_000).await
+    }
+
+    pub(crate) async fn ping_ms(&self, timeout_ms: u32) -> anyhow::Result<()> {
+        match self.call(StorageWorkerRequest::Ping, timeout_ms).await? {
             StorageWorkerResponse::Pong => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }

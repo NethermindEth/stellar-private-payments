@@ -16,7 +16,7 @@ Zero-knowledge proof generation for private Stellar payments. This application a
 
 ## Architecture
 
-see [ARCHITECTURE.md](ARCHITECTURE.md)
+See [architecture](architecture.md) in this book, or [`app/ARCHITECTURE.md`](../../app/ARCHITECTURE.md) in the repo.
 
 ## Building
 

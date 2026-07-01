@@ -4,6 +4,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
+export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
@@ -25,8 +26,8 @@ if ! command -v wasm-bindgen >/dev/null 2>&1; then
 fi
 
 MAIN_WASM="$ARTIFACTS/private_payments_web.wasm"
-STORAGE_WASM="$ARTIFACTS/storage_worker.wasm"
-PROVER_WASM="$ARTIFACTS/prover_worker.wasm"
+STORAGE_WASM="$ARTIFACTS/storage-worker.wasm"
+PROVER_WASM="$ARTIFACTS/prover-worker.wasm"
 
 for f in "$MAIN_WASM" "$STORAGE_WASM" "$PROVER_WASM"; do
   [[ -f "$f" ]] || { echo "error: missing $f" >&2; exit 1; }
@@ -36,7 +37,18 @@ rm -rf "$WEB/dist"
 mkdir -p "$WEB/dist/workers"
 
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name private_payments_web "$MAIN_WASM"
-wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker "$STORAGE_WASM"
-wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker "$PROVER_WASM"
+wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"
+wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker-module "$PROVER_WASM"
+
+write_worker_loader() {
+  local name="$1"
+  cat >"$WEB/dist/workers/${name}.js" <<EOF
+import init from './${name}-module.js';
+await init();
+EOF
+}
+
+write_worker_loader storage-worker
+write_worker_loader prover-worker
 
 echo "==> Built sdk/web/dist/"

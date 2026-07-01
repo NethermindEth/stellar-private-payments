@@ -10,10 +10,14 @@ import { fileURLToPath } from 'node:url';
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const required = [
   'dist/private_payments_web.js',
-  'dist/private_payments_web.wasm',
+  'dist/private_payments_web_bg.wasm',
   'dist/private_payments_web.d.ts',
   'dist/workers/storage-worker.js',
+  'dist/workers/storage-worker-module.js',
+  'dist/workers/storage-worker-module_bg.wasm',
   'dist/workers/prover-worker.js',
+  'dist/workers/prover-worker-module.js',
+  'dist/workers/prover-worker-module_bg.wasm',
 ];
 
 let failed = false;

@@ -5,7 +5,7 @@ edition.workspace = true
 repository.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Web/WASM bindings for the Stellar Private Payments SDK (@private-payments-sdk on npm)"
+description = "Web/WASM bindings for the Stellar Private Payments SDK (stellar-private-payments-sdk on npm)"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -23,6 +23,7 @@ stellar-private-payments-sdk = { workspace = true }
 
 anyhow = { workspace = true }
 async-trait = { workspace = true }
+base64 = "0.22"
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }

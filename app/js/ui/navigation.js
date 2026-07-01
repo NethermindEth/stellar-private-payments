@@ -1,5 +1,20 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
-import { getHandle, initializeWasm } from '../wasm-facade.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk';
+import {
+    contractConfig,
+    getBootnodeConfig,
+    getExplorerSetting,
+    getStoredBootnodeUrl,
+    initializeRuntime,
+    initializeWallet,
+    loadWalletKeys,
+    lookupRegisteredPublicKey,
+    registerPublicKeys,
+    resetWalletSession,
+    setBootnodeConfig,
+    setSetting,
+    startEventSync,
+} from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -75,8 +90,30 @@ function setMoveFlow(flow) {
     });
 }
 
+async function ensureEventSync(rpcUrl) {
+    const storedBootnodeUrl = await getStoredBootnodeUrl();
+    try {
+        await startEventSync({ bootnodeUrl: storedBootnodeUrl });
+        return { bootnodeRequired: false };
+    } catch (error) {
+        const message = error?.message || 'Failed to start event sync';
+        if (!isRpcSyncGapError(message)) throw error;
+
+        const modal = await showBootnodeConsentModal({
+            defaultUrl: storedBootnodeUrl || '',
+            rpcUrl,
+            errorMessage: message,
+        });
+        if (!modal.accepted || !modal.url) throw error;
+
+        await setBootnodeConfig(modal.url);
+        await startEventSync({ bootnodeUrl: modal.url });
+        return { bootnodeRequired: true };
+    }
+}
+
 async function loadRuntimeState() {
-    const config = await getHandle().webClient.contractConfig();
+    const config = contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
@@ -91,11 +128,17 @@ async function loadRuntimeState() {
         select.value = App.state.selectedPoolId || '';
     });
 
-    const explorerSetting = await getHandle().webClient.getExplorerSetting();
+    const explorerSetting = await getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await getHandle().webClient.getBootnodeConfig();
+    const bootnodeSetting = await getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
+
+    if (App.state.wallet.address) {
+        const lookup = await lookupRegisteredPublicKey(App.state.wallet.address).catch(() => null);
+        App.state.profile.registryLookup = lookup;
+        App.state.profile.registered = !!lookup?.entry;
+    }
 
     App.events.dispatchEvent(new CustomEvent('pool:config'));
     App.events.dispatchEvent(new CustomEvent('settings:updated'));
@@ -118,6 +161,11 @@ function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
     if (!dot || !text) return;
+    if (App.state.wallet.connecting) {
+        text.textContent = 'Connecting';
+        dot.className = 'h-2 w-2 rounded-full bg-amber-300 animate-pulse-dot';
+        return;
+    }
     if (!App.state.wallet.connected) {
         text.textContent = 'Offline';
         dot.className = 'h-2 w-2 rounded-full bg-slate-500';
@@ -240,6 +288,8 @@ export const Wallet = {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
+            const signer = new FreighterSigner();
+
             try {
                 const address = await connectWallet();
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
@@ -248,48 +298,45 @@ export const Wallet = {
                     throw new Error('This app supports Stellar testnet only.');
                 }
 
-                App.state.wallet.connected = true;
+                App.state.wallet.connecting = true;
                 App.state.wallet.address = address;
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
-                let bootnodeRequired = false;
-                try {
-                    await initializeWasm(rpcUrl);
-                } catch (error) {
-                    const message = error?.message || 'Failed to initialize app runtime';
-                    if (!isRpcSyncGapError(message)) throw error;
-                    const modal = await showBootnodeConsentModal({ defaultUrl: '', rpcUrl, errorMessage: message });
-                    if (!modal.accepted || !modal.url) throw error;
-                    await initializeWasm(rpcUrl, modal.url);
-                    await getHandle().webClient.setBootnodeConfig(modal.url);
-                    bootnodeRequired = true;
-                }
+                await initializeRuntime(rpcUrl);
+                const { bootnodeRequired } = await ensureEventSync(rpcUrl);
 
-                const keys = await runOnboardingWizard({
+                await runOnboardingWizard({
                     address,
                     networkPassphrase,
                     bootnodeRequired,
+                    signer,
                 });
-                App.state.keys.notePublicKey = keys?.pubKey || null;
-                App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
-                App.state.keys.aspSecret = keys?.aspSecret || null;
+
+                await initializeWallet({ networkPassphrase, userAddress: address }, signer);
+                const keys = await loadWalletKeys(address);
+                App.state.keys.notePublicKey = keys.pubKey;
+                App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
+                App.state.keys.aspSecret = keys.aspSecret;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
+                App.state.wallet.connected = true;
+                App.state.wallet.connecting = false;
                 renderWallet();
                 App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
                 await createAppPool();
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
-                this.disconnect();
                 const message = error?.message || '';
+                console.warn('[Wallet] connect failed:', message || error);
+                this.disconnect();
                 if (isDbLockedError(message)) {
                     showDbLockedModal(message);
-                } else if (!auto) {
+                } else if (!auto || (message && message !== 'Onboarding cancelled')) {
                     Toast.show(message || 'Failed to connect wallet', 'error');
                 }
                 throw error;
@@ -319,14 +366,17 @@ export const Wallet = {
         this._stopWatcher?.();
         this._stopWatcher = null;
         closeAppPool();
+        resetWalletSession().catch(() => {});
         App.state.wallet = {
             connected: false,
+            connecting: false,
             address: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,
         };
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null, aspSecret: null };
+        App.state.profile = { registered: false, registryLookup: null };
         renderWallet();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
@@ -351,8 +401,8 @@ export const Wallet = {
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-            await getHandle().webClient.setSetting('explorer', { baseUrl: explorerBaseUrl });
-            await getHandle().webClient.setSetting('bootnode_config', {
+            await setSetting('explorer', { baseUrl: explorerBaseUrl });
+            await setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
@@ -378,13 +428,10 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true;
-            const hash = await getHandle().webClient.registerPublicKeys(
-                App.state.wallet.address,
-                App.state.keys.notePublicKey,
-                App.state.keys.encryptionPublicKey,
-                App.state.wallet.networkPassphrase,
-                null,
-            );
+            const hash = await registerPublicKeys({
+                notePublicKeyHex: App.state.keys.notePublicKey,
+                encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
+            });
             App.state.profile.registered = true;
             renderSettingsDrawer();
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {

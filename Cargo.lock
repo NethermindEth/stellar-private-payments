@@ -3728,6 +3728,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "async-trait",
+ "base64",
  "console_error_panic_hook",
  "futures",
  "gloo-timers",
@@ -5927,33 +5928,6 @@ dependencies = [
  "memchr",
  "unicode-width 0.2.2",
  "wasm-encoder 0.248.0",
-]
-
-[[package]]
-name = "web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "console_error_panic_hook",
- "futures",
- "gloo-timers",
- "gloo-worker",
- "js-sys",
- "log",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "sha2 0.11.0",
- "sqlite-wasm-rs",
- "sqlite-wasm-vfs",
- "stellar-private-payments-sdk",
- "tokio",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-log",
- "web-sys",
- "wiremock",
 ]
 
 [[package]]

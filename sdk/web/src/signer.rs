@@ -179,9 +179,23 @@ impl Signer for WalletSigner {
     }
 }
 
+/// Parse a Freighter `signMessage` signature (base64) into raw bytes.
+///
+/// Freighter returns base64-encoded signature bytes. Hex is accepted as a
+/// fallback for custom signers.
+pub(crate) fn wallet_message_signature_to_bytes(signature: &str) -> Result<Vec<u8>, JsError> {
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    let trimmed = signature.trim();
+    if let Ok(bytes) = STANDARD.decode(trimmed) {
+        return Ok(bytes);
+    }
+
+    hex_signature_to_bytes(trimmed)
+}
 /// Parse a hex signature string (with or without `0x`) into bytes.
-pub(crate) fn hex_signature_to_bytes(hex: &str) -> Result<Vec<u8>, JsError> {
-    let clean = hex.trim().strip_prefix("0x").unwrap_or(hex.trim());
+fn hex_signature_to_bytes(hex: &str) -> Result<Vec<u8>, JsError> {
+    let clean = hex.strip_prefix("0x").unwrap_or(hex);
     if !clean.len().is_multiple_of(2) {
         return Err(JsError::new("signature hex must have even length"));
     }
@@ -195,4 +209,20 @@ pub(crate) fn hex_signature_to_bytes(hex: &str) -> Result<Vec<u8>, JsError> {
                 .map_err(|e| JsError::new(&format!("invalid signature hex: {e}")))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use base64::{Engine as _, engine::general_purpose::STANDARD};
+
+    #[test]
+    fn wallet_message_signature_accepts_freighter_base64() {
+        let bytes = vec![1u8, 2, 3, 4];
+        let b64 = STANDARD.encode(&bytes);
+        assert_eq!(
+            wallet_message_signature_to_bytes(&b64).expect("base64"),
+            bytes
+        );
+    }
 }

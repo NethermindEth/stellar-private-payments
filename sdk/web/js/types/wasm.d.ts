@@ -14,7 +14,7 @@ declare module '../../dist/private_payments_web.js' {
   }
 
   export class Client {
-    static new(options: unknown): Promise<Client>;
+    static new(storage: Storage, rpcUrl: string): Promise<Client>;
     static contractConfig(): unknown;
     checkEventSync(options?: unknown): Promise<string | null>;
     startEventSync(options?: unknown): Promise<void>;
@@ -22,6 +22,11 @@ declare module '../../dist/private_payments_web.js' {
     registerPublicKeys(options?: unknown): Promise<string>;
     lookupRegisteredPublicKey(address: string): Promise<unknown>;
     allContractsData(): Promise<unknown>;
+    verifySelectiveDisclosure(
+      receiptJson: string,
+      expectedVkHash: string,
+      options?: unknown,
+    ): Promise<unknown>;
     pool(options: unknown): Promise<PrivatePool>;
   }
 
@@ -32,6 +37,11 @@ declare module '../../dist/private_payments_web.js' {
     estimate(amount: string): Promise<unknown>;
     deposit(amount: string): Promise<unknown>;
     transfer(recipient: string, amount: string): Promise<unknown>;
+    transferToKeys(
+      notePublicKeyHex: string,
+      encryptionPublicKeyHex: string,
+      amount: string,
+    ): Promise<unknown>;
     withdraw(amount: string, recipient?: string): Promise<unknown>;
     transact(config: unknown): Promise<unknown>;
     disclose(config: unknown): Promise<unknown>;

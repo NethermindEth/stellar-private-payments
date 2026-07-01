@@ -1,4 +1,4 @@
-# private-payments-sdk (`sdk/web`)
+# stellar-private-payments-sdk (`sdk/web`)
 
 Browser SDK for Stellar Private Payments.
 
@@ -7,7 +7,7 @@ Browser SDK for Stellar Private Payments.
 ## Usage
 
 ```js
-import init, { Storage, Client, FreighterSigner } from 'private-payments-sdk';
+import init, { Storage, Client, FreighterSigner } from 'stellar-private-payments-sdk';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const signer = new FreighterSigner();
@@ -68,10 +68,10 @@ Bound at `client.initialize`. Must implement `signMessage`, `signTransaction`, `
 
 ## TypeScript
 
-Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'private-payments-sdk'`) is fully typed; wasm-bindgen types are also available via `private-payments-sdk/wasm`.
+Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments-sdk'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments-sdk/wasm`.
 
 ```ts
-import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'private-payments-sdk';
+import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'stellar-private-payments-sdk';
 ```
 
 After building WASM:

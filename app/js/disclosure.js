@@ -1,9 +1,18 @@
-import { initializeWasm, getHandle } from './wasm-facade.js';
+import {
+    contractConfig,
+    getUserNotes,
+    initializeRuntime,
+    initializeWallet,
+    loadWalletKeys,
+    openPool,
+    startEventSync,
+    verifySelectiveDisclosure,
+} from './wasm-facade.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk';
 import {
   connectWallet,
   getConnectedAddress,
   getWalletNetwork,
-  deriveKeysFromWallet,
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
@@ -128,9 +137,9 @@ async function loadNotes() {
 
   try {
     const LIMIT = 200;
-    const config = await getHandle().webClient.contractConfig();
+    const config = contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await getHandle().webClient.getUserNotes(state.address, LIMIT);
+    const list = await getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -168,6 +177,13 @@ async function loadNotes() {
   }
 }
 
+const TESTNET_RPC = 'https://soroban-testnet.stellar.org';
+
+async function ensureDisclosureRuntime(rpcUrl = TESTNET_RPC) {
+  await initializeRuntime(rpcUrl);
+  await startEventSync();
+}
+
 async function connect() {
   try {
     const address = await connectWallet();
@@ -192,8 +208,8 @@ async function connect() {
 
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
-    // Derive keys (cached keys load instantly)
-    await deriveKeys();
+    await ensureDisclosureRuntime(net.sorobanRpcUrl || TESTNET_RPC);
+    await initializeWalletSession(address, net.networkPassphrase);
 
     // Load notes and render generate section
     await loadNotes();
@@ -206,19 +222,10 @@ async function connect() {
   }
 }
 
-async function deriveKeys() {
-  try {
-    const result = await deriveKeysFromWallet(state.address, {
-      onStatus: (msg) => console.log('[Disclosure]', msg),
-      signDelay: 300,
-      skipCacheCheck: false,
-    });
-    state.derivedKeys = result;
-    showToast('Privacy keys ready', 'success');
-  } catch (err) {
-    showToast(err.message || 'Key derivation failed', 'error');
-    throw err;
-  }
+async function initializeWalletSession(address, networkPassphrase) {
+  await initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
+  state.derivedKeys = await loadWalletKeys(address);
+  showToast('Privacy keys ready', 'success');
 }
 
 // ---------------------------------------------------------------------------
@@ -678,20 +685,18 @@ async function generateReceipt(form) {
 
   // Disclose against the pool the selected note actually belongs to (there can
   // be multiple pools); falling back to the first enabled pool only if unknown.
-  const config = await getHandle().webClient.contractConfig();
+  const config = contractConfig();
   const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
 
-  const { ensureAppPool } = await import('./ui/pool.js');
-  const pool = await ensureAppPool();
+  const pool = await openPool({ poolContract: poolContractId });
 
-  const receipt = await pool.disclose(
-    state.selectedNote.id,
-    form.authority,
-    form.payload,
-    form.purpose,
-    BigInt(form.nonce),
-    onStatus,
-  );
+  const receipt = await pool.disclose({
+    selectedCommitment: state.selectedNote.id,
+    authorityLabel: form.authority,
+    authorityIdentityPayloadHex: form.payload,
+    purpose: form.purpose,
+    contextNonce: form.nonce,
+  });
 
   // receipt is a JS object (already deserialized by wasm_bindgen) or null
   return receipt || null;
@@ -967,7 +972,7 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await getHandle().webClient.verifySelectiveDisclosure(
+      const report = await verifySelectiveDisclosure(
         JSON.stringify(receipt),
         expectedVkHash
       );
@@ -1064,7 +1069,7 @@ async function init() {
   // section works immediately. Wallet connect is gated on Testnet (see
   // connect()), so the default RPC is always correct for this page.
   try {
-    await initializeWasm('https://soroban-testnet.stellar.org');
+    await ensureDisclosureRuntime(TESTNET_RPC);
     networkChip.textContent = 'TESTNET';
   } catch (e) {
     console.error('WASM init failed:', e);

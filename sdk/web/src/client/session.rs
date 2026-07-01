@@ -4,20 +4,21 @@
 use std::rc::Rc;
 
 use serde::Deserialize;
+use stellar_private_payments_sdk::types::DisclosureReceipt;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
-use crate::{deployment::deployment_config, events, signer::WalletSigner, storage::Storage};
+use crate::{
+    deployment::deployment_config,
+    events,
+    protocol::{StorageWorkerRequest, StorageWorkerResponse},
+    signer::WalletSigner,
+    storage::Storage,
+};
 
-use super::core::ClientCore;
+use super::{core::ClientCore, pool_err};
 
 use super::pool::{PoolCreateConfig, PrivatePool};
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NewOptions {
-    rpc_url: String,
-}
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -37,6 +38,12 @@ struct InitializeOptions {
 #[serde(rename_all = "camelCase")]
 struct PoolOptions {
     pool_contract: String,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyDisclosureOptions {
+    prover_worker_url: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -62,15 +69,10 @@ impl Client {
     /// [`Client::start_event_sync`] then [`Client::initialize`] before pool
     /// or account operations.
     #[wasm_bindgen(js_name = new)]
-    pub fn new(options: JsValue) -> Result<Client, JsError> {
-        let storage = js_sys::Reflect::get(&options, &JsValue::from_str("storage"))
-            .map_err(|_| JsError::new("options.storage is required"))?;
-        let storage = Storage::from_js(storage)?;
-        let opts: NewOptions = serde_wasm_bindgen::from_value(options)?;
-
+    pub fn new(storage: &Storage, rpc_url: String) -> Result<Client, JsError> {
         Ok(Self {
-            rpc_url: opts.rpc_url,
-            storage,
+            rpc_url,
+            storage: storage.fork(),
             core: None,
             signer: None,
             user_address: None,
@@ -154,7 +156,7 @@ impl Client {
         if !core.user_keys_exist(&user_address).await? {
             let message = core.key_derivation_message();
             let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
-            let signature = crate::signer::hex_signature_to_bytes(&sig_hex)?;
+            let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
             core.derive_save_user_keys(user_address.clone(), signature)
                 .await?;
         }
@@ -209,10 +211,67 @@ impl Client {
     /// Look up a recipient's registered note and encryption public keys.
     #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
     pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
-        self.session()?
-            .0
-            .lookup_registered_public_key(address)
+        if let Some(core) = &self.core {
+            return core.lookup_registered_public_key(address).await;
+        }
+
+        let config = deployment_config()?;
+        let req = StorageWorkerRequest::RecipientLookup {
+            address,
+            public_key_registry_contract_id: config.public_key_registry.clone(),
+        };
+        match self
+            .storage
+            .bridge()
+            .call(req, 2_000)
             .await
+            .map_err(|e| JsError::new(&e.to_string()))?
+        {
+            StorageWorkerResponse::RecipientLookup(lookup) => {
+                Ok(serde_wasm_bindgen::to_value(&lookup)?)
+            }
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    /// Verify a selective-disclosure receipt without a wallet session.
+    ///
+    /// Spawns the prover worker on demand when [`Client::initialize`] has not
+    /// been called (e.g. the disclosure verify page).
+    #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+    pub async fn verify_selective_disclosure(
+        &self,
+        receipt_json: String,
+        expected_vk_hash: String,
+        options: JsValue,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+            VerifyDisclosureOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+
+        let core = if let Some(core) = &self.core {
+            core.clone()
+        } else {
+            Rc::new(
+                ClientCore::connect(
+                    self.rpc_url.clone(),
+                    Some(self.storage.clone()),
+                    None,
+                    opts.prover_worker_url,
+                )
+                .await?,
+            )
+        };
+
+        let report = core
+            .verify_selective_disclosure(&receipt, &expected_vk_hash)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 
     /// Open a private pool session for this account.
@@ -266,9 +325,11 @@ async fn resolve_user_address(
         ));
     }
 
-    let value = get_pk
-        .dyn_ref::<js_sys::Function>()
-        .unwrap()
+    let func = get_pk.dyn_ref::<js_sys::Function>().ok_or_else(|| {
+        JsError::new("userAddress required or signer must implement getPublicKey")
+    })?;
+
+    let value = func
         .call0(signer)
         .map_err(|_| JsError::new("getPublicKey failed"))?;
 
