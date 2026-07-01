@@ -9,18 +9,18 @@ description = "Circom witness generation via circom-witness-rs operation graphs"
 
 [dependencies]
 anyhow = { workspace = true }
+ark-bn254 = { workspace = true }
+ark-ff = { workspace = true }
 
 # Graph-based witness generation
 circom-witness-rs = { workspace = true }
 ruint = { workspace = true }
-ark-bn254 = { workspace = true }
-ark-ff = { workspace = true }
 
 # JSON parsing
 serde_json = { workspace = true, default-features = false, features = ["alloc", "std"] }
 # circom-witness-rs pulls rand -> getrandom 0.2, which needs the "js" feature for web
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-getrandom = { workspace = true, features = ["js"] }
+#[target.'cfg(target_arch = "wasm32")'.dependencies]
+#getrandom = { workspace = true, features = ["js"] }
 
 [lints]
 workspace = true

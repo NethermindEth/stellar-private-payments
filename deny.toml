@@ -86,7 +86,8 @@ unused = 'warn'
 unknown-registry = "deny"
 unknown-git = "deny"
 allow-git = [
-    "https://github.com/wasmerio/wasmer"
+    "https://github.com/wasmerio/wasmer",
+    "https://github.com/alloy-rs/ruint",
 ]
 
 [sources.allow-org]

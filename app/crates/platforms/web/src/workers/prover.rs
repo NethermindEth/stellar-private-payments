@@ -30,7 +30,8 @@ const POLICY_GRAPH: &[u8] =
 const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
 );
-// Disclosure witness is generated from a committed graph (regenerate via `make witness-graphs`).
+// Disclosure witness is generated from a committed graph (regenerate via `make
+// witness-graphs`).
 const DISCLOSURE_GRAPH: &[u8] = include_bytes!(
     "../../../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1.graph.bin"
 );

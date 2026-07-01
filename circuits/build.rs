@@ -293,10 +293,12 @@ fn main() -> Result<()> {
         // === BUILD CONFIG ===
         // Controls which outputs to generate (R1CS + SYM). The WASM is done later
         let build_config = BuildConfig {
-            no_rounds: usize::MAX,  // Max number of rounds to ensure the optimization gets enough rounds
+            no_rounds: usize::MAX, /* Max number of rounds to ensure the optimization gets enough
+                                    * rounds */
             flag_json_sub: false,
             json_substitutions: "Not used".to_string(),
-            flag_s: false,          // We set linear substitution to false to enable  full (--02) optimization
+            flag_s: false, /* We set linear substitution to false to enable  full (--02)
+                            * optimization */
             flag_f: false,
             flag_p: false,
             flag_verbose: false,
@@ -844,9 +846,10 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
 ///
 /// circom-witness-rs only hooks unconstrained/dynamic control flow when it
 /// lives in a `bbf*`-prefixed circom *function* (see https://github.com/NethermindEth/circom-witness-rs/blob/master/README.md).
-/// Stock circomlib computes `1/in` (`IsZero`) and the bit decomposition (`Num2Bits`)
-/// inline inside templates, which the graph runtime cannot evaluate (the native
-/// `Inv` op is `a.inv_mod(M).unwrap()`, panicking on `in == 0`).
+/// Stock circomlib computes `1/in` (`IsZero`) and the bit decomposition
+/// (`Num2Bits`) inline inside templates, which the graph runtime cannot
+/// evaluate (the native `Inv` op is `a.inv_mod(M).unwrap()`, panicking on `in
+/// == 0`).
 fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
     let circuits_dir = circomlib_path.join("circuits");
 
@@ -855,10 +858,7 @@ fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
         "function bbf_inv",
         "include \"binsum.circom\";",
         "\n\nfunction bbf_inv(in) {\n    return in!=0 ? 1/in : 0;\n}",
-        &[(
-            "    inv <-- in!=0 ? 1/in : 0;",
-            "    inv <-- bbf_inv(in);",
-        )],
+        &[("    inv <-- in!=0 ? 1/in : 0;", "    inv <-- bbf_inv(in);")],
     )?;
 
     inject_hint(
@@ -886,7 +886,8 @@ fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
 /// # Arguments
 ///
 /// * `file` - circomlib source file to patch.
-/// * `marker` - if already present, the file is treated as patched (idempotent).
+/// * `marker` - if already present, the file is treated as patched
+///   (idempotent).
 /// * `anchor` - the `include` line after which `fn_def` is inserted.
 /// * `fn_def` - the `bbf_*` function definition text to insert.
 /// * `rewrites` - `(from, to)` assignment-line substitutions; each `from` must
@@ -911,10 +912,17 @@ fn inject_hint(
         .ok_or_else(|| anyhow!("anchor {anchor:?} not found in {}", file.display()))?;
     let insert_at = content[anchor_idx..]
         .find('\n')
-        .map(|nl| anchor_idx + nl)
+        .map(|nl| anchor_idx.checked_add(nl).expect("anchor lines overflow"))
         .ok_or_else(|| anyhow!("no newline after anchor {anchor:?} in {}", file.display()))?;
 
-    let mut patched = String::with_capacity(content.len() + fn_def.len() + 64);
+    let mut patched = String::with_capacity(
+        content
+            .len()
+            .checked_add(fn_def.len())
+            .expect("Overflow in string capacity fn_def")
+            .checked_add(64)
+            .expect("Overflow in string capacity constant"),
+    );
     patched.push_str(&content[..insert_at]);
     patched.push_str(fn_def);
     patched.push_str(&content[insert_at..]);

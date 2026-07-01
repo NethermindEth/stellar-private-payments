@@ -1,6 +1,7 @@
 //! Circom's Groth16 QAP reduction.
 //!
-//! Ported logic from arkworks `circom-compat`, so we can drop the `ark-circom` dependency (browser problems)
+//! Ported logic from arkworks `circom-compat`, so we can drop the `ark-circom`
+//! dependency (browser problems)
 //!
 //! The only deliberate change is replacing the upstream `rayon` parallel
 //! iterators with serial ones. Proofs are unchanged
@@ -27,7 +28,7 @@ impl R1CSToQAP for CircomReduction {
     ) -> Result<(Vec<F>, Vec<F>, Vec<F>, F, usize, usize), SynthesisError> {
         LibsnarkReduction::instance_map_with_evaluation::<F, D>(cs, t)
     }
-    
+
     #[allow(clippy::arithmetic_side_effects)]
     fn witness_map_from_matrices<F: PrimeField, D: EvaluationDomain<F>>(
         matrices: &[Vec<Vec<(F, usize)>>],
