@@ -81,22 +81,12 @@ pub(crate) fn emit_progress(
 }
 
 #[wasm_bindgen]
+#[derive(Clone)]
 pub struct WebClient {
     rpc_url: String,
     storage: StorageBridge,
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
-}
-
-impl Clone for WebClient {
-    fn clone(&self) -> Self {
-        Self {
-            rpc_url: self.rpc_url.clone(),
-            storage: self.storage.clone(),
-            prover_bridge: self.prover_bridge.clone(),
-            fetcher: self.fetcher.clone(),
-        }
-    }
 }
 
 impl WebClient {
