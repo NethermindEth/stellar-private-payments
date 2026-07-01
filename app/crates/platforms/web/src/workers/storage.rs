@@ -350,14 +350,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
-        StorageWorkerRequest::RecentPubKeys(limit) => {
-            log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
-            let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
+        StorageWorkerRequest::RecentPubKeys { offset, limit } => {
+            log::trace!(
+                "[{WORKER_NAME}] fetch pub keys for the address book (offset={offset}, limit={limit})"
+            );
+            let list = with_storage!(s => s.get_recent_public_keys(offset, limit)?)?;
             log::trace!(
                 "[{WORKER_NAME}] fetched {} pub keys for the address book",
                 list.len()
             );
             StorageWorkerResponse::PubKeys(list)
+        }
+        StorageWorkerRequest::CountPubKeys => {
+            log::trace!("[{WORKER_NAME}] count total public keys");
+            let count = with_storage!(s => s.count_public_keys()?)?;
+            log::trace!("[{WORKER_NAME}] total public keys: {count}");
+            StorageWorkerResponse::PubKeysCount(count)
         }
         StorageWorkerRequest::RecipientLookup {
             address,

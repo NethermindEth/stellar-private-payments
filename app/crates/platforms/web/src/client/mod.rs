@@ -496,11 +496,25 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = getRecentPublicKeys)]
-    pub async fn get_recent_public_keys(&self, limit: u32) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::RecentPubKeys(limit);
+    pub async fn get_recent_public_keys(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::RecentPubKeys { offset, limit };
 
         match self.storage_request(req, 1_000).await? {
             StorageWorkerResponse::PubKeys(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getPublicKeysCount)]
+    pub async fn get_public_keys_count(&self) -> Result<u32, JsError> {
+        let req = StorageWorkerRequest::CountPubKeys;
+
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::PubKeysCount(count) => Ok(count),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }

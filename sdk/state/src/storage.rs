@@ -416,9 +416,13 @@ impl Storage {
         Ok(id)
     }
 
-    /// Returns $limit public keys ordered by ledger descending.
+    /// Returns $limit public keys ordered by ledger descending, starting at $offset.
     /// for an address book
-    pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
+    pub fn get_recent_public_keys(
+        &self,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<types::PublicKeyEntry>> {
         let mut stmt = self
             .conn
             .prepare(
@@ -430,10 +434,11 @@ impl Storage {
                     GROUP BY p.owner
                  )
                  ORDER BY ledger DESC
-                 LIMIT ?1",
+                 LIMIT ?1
+                 OFFSET ?2",
             )
             .context("prepare get_recent_public_keys")?;
-        stmt.query_map([limit], map_public_key_entry)
+        stmt.query_map(params![limit, offset], map_public_key_entry)
             .context("get_recent_public_keys")?
             .collect::<Result<Vec<_>, _>>()
             .context("get_recent_public_keys collect")
@@ -458,6 +463,17 @@ impl Storage {
             )
             .optional()
             .context("lookup_public_key_by_address")
+    }
+
+    /// Returns the total number of distinct registered public key owners.
+    pub fn count_public_keys(&self) -> Result<u32> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(DISTINCT owner) FROM public_keys",
+                [],
+                |row| row.get::<_, u32>(0),
+            )
+            .context("count_public_keys")
     }
 
     /// List notes derived for `address` (newest first).
@@ -1627,7 +1643,7 @@ mod tests {
             note_key: NotePublicKey([2u8; 32]),
         }])?;
 
-        let list = storage.get_recent_public_keys(1)?;
+        let list = storage.get_recent_public_keys(0, 1)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].address, "GTESTOWNER");
         assert_eq!(list[0].ledger, 42);
@@ -1674,12 +1690,146 @@ mod tests {
             },
         ])?;
 
-        let list = storage.get_recent_public_keys(10)?;
+        let list = storage.get_recent_public_keys(0, 10)?;
         assert_eq!(list.len(), 1);
         assert_eq!(list[0].address, "GTESTOWNER");
         assert_eq!(list[0].ledger, 43);
         assert_eq!(list[0].encryption_key.0, [3u8; 32]);
         assert_eq!(list[0].note_key.0, [4u8; 32]);
+        Ok(())
+    }
+
+    #[test]
+    fn count_public_keys_returns_zero_for_empty_db() -> Result<()> {
+        let storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        assert_eq!(storage.count_public_keys()?, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn count_public_keys_counts_distinct_owners() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        // ev1 and ev2 belong to the same owner — should count as one distinct owner.
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cursor".to_string(),
+            latest_ledger: 20,
+            events: vec![
+                ContractEvent {
+                    id: "ev1".to_string(),
+                    ledger: 10,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+                ContractEvent {
+                    id: "ev2".to_string(),
+                    ledger: 15,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+                ContractEvent {
+                    id: "ev3".to_string(),
+                    ledger: 20,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+            ],
+        })?;
+        storage.save_public_key_events_batch(&vec![
+            PublicKeyEvent {
+                id: "ev1".to_string(),
+                owner: "GOWNER_A".to_string(),
+                encryption_key: EncryptionPublicKey([1u8; 32]),
+                note_key: NotePublicKey([1u8; 32]),
+            },
+            PublicKeyEvent {
+                id: "ev2".to_string(),
+                owner: "GOWNER_A".to_string(),
+                encryption_key: EncryptionPublicKey([2u8; 32]),
+                note_key: NotePublicKey([2u8; 32]),
+            },
+            PublicKeyEvent {
+                id: "ev3".to_string(),
+                owner: "GOWNER_B".to_string(),
+                encryption_key: EncryptionPublicKey([3u8; 32]),
+                note_key: NotePublicKey([3u8; 32]),
+            },
+        ])?;
+
+        assert_eq!(storage.count_public_keys()?, 2);
+        Ok(())
+    }
+
+    #[test]
+    fn get_recent_public_keys_offset_skips_rows() -> Result<()> {
+        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+
+        storage.save_events_batch(&ContractsEventData {
+            cursor: "cursor".to_string(),
+            latest_ledger: 30,
+            events: vec![
+                ContractEvent {
+                    id: "ev1".to_string(),
+                    ledger: 10,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+                ContractEvent {
+                    id: "ev2".to_string(),
+                    ledger: 20,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+                ContractEvent {
+                    id: "ev3".to_string(),
+                    ledger: 30,
+                    contract_id: "CREG".to_string(),
+                    topics: vec!["pk".to_string()],
+                    value: "dummy".to_string(),
+                },
+            ],
+        })?;
+        storage.save_public_key_events_batch(&vec![
+            PublicKeyEvent {
+                id: "ev1".to_string(),
+                owner: "GOWNER_A".to_string(),
+                encryption_key: EncryptionPublicKey([1u8; 32]),
+                note_key: NotePublicKey([1u8; 32]),
+            },
+            PublicKeyEvent {
+                id: "ev2".to_string(),
+                owner: "GOWNER_B".to_string(),
+                encryption_key: EncryptionPublicKey([2u8; 32]),
+                note_key: NotePublicKey([2u8; 32]),
+            },
+            PublicKeyEvent {
+                id: "ev3".to_string(),
+                owner: "GOWNER_C".to_string(),
+                encryption_key: EncryptionPublicKey([3u8; 32]),
+                note_key: NotePublicKey([3u8; 32]),
+            },
+        ])?;
+
+        // First page: most recent two owners (ledger 30 then 20).
+        let page1 = storage.get_recent_public_keys(0, 2)?;
+        assert_eq!(page1.len(), 2);
+        assert_eq!(page1[0].address, "GOWNER_C");
+        assert_eq!(page1[1].address, "GOWNER_B");
+
+        // Second page: one remaining owner (ledger 10).
+        let page2 = storage.get_recent_public_keys(2, 2)?;
+        assert_eq!(page2.len(), 1);
+        assert_eq!(page2[0].address, "GOWNER_A");
+
+        // Offset beyond total returns empty.
+        let past_end = storage.get_recent_public_keys(10, 2)?;
+        assert_eq!(past_end.len(), 0);
+
         Ok(())
     }
 
