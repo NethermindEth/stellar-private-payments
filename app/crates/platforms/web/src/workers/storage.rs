@@ -448,8 +448,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 )?
                 .ok_or_else(|| {
                     anyhow::anyhow!(
-                        "unspent note not found for commitment {}",
-                        commitment
+                        "unspent note not found for commitment {} in pool {} \
+                         (note may be spent, not owned, or belong to a different pool)",
+                        commitment,
+                        req.pool_address
                     )
                 })?;
 

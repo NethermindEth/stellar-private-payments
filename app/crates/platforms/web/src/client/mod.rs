@@ -12,7 +12,7 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use js_sys::{Array, BigInt, Function, Object, Reflect};
 use serde_json::Value as JsonValue;
-use std::{rc::Rc, str::FromStr};
+use std::{collections::HashSet, rc::Rc, str::FromStr};
 use stellar_private_payments_sdk::{
     PoolError,
     chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
@@ -769,12 +769,19 @@ fn parse_disclosure_commitments(arr: &Array) -> Result<Vec<Field>, JsError> {
         ));
     }
     let mut commitments = Vec::with_capacity(len as usize);
+    let mut seen = HashSet::with_capacity(len as usize);
     for i in 0..len {
         let v = arr.get(i);
         let s = v
             .as_string()
             .ok_or_else(|| JsError::new("selected_commitment_hexes must be string[]"))?;
-        commitments.push(parse_field_hex_str(&s)?);
+        let commitment = parse_field_hex_str(&s)?;
+        if !seen.insert(commitment) {
+            return Err(JsError::new(&format!(
+                "duplicate commitment in selected_commitment_hexes at index {i}"
+            )));
+        }
+        commitments.push(commitment);
     }
     Ok(commitments)
 }

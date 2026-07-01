@@ -687,6 +687,15 @@ function getActivePoolContractId(config) {
 }
 
 async function generateReceipt(form) {
+  if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+    throw new Error('Please select 1 to 4 notes');
+  }
+
+  const firstPool = state.selectedNotes[0]?.poolContractId;
+  if (state.selectedNotes.some((n) => n.poolContractId !== firstPool)) {
+    throw new Error('All selected notes must belong to the same pool');
+  }
+
   const onStatus = (obj) => {
     const stage = obj?.stage || '';
     const message = obj?.message || '';
