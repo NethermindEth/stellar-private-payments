@@ -51,10 +51,9 @@ impl<S> PrivatePool<S> {
         signer: Box<dyn Signer>,
         prover: Box<dyn Prover>,
     ) -> Result<Self, PoolError> {
-        let client = Client::new(&config.rpc_url)
-            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
-        let fetcher = StateFetcher::with_client(client.clone(), config.contract_config.clone())
+        let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())
             .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
+        let client = fetcher.rpc().clone();
         Ok(Self {
             core: PoolCore::new(config.chain_config())?,
             config,
@@ -92,7 +91,7 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn sync(&self) -> Result<(), PoolError> {
-        let indexer = Indexer::init_with_client(
+        let indexer = Indexer::init(
             self.client.clone(),
             self.storage.fork()?,
             &self.config.contract_config,

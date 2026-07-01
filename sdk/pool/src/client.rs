@@ -13,7 +13,7 @@ impl Client {
     /// Connect to Stellar RPC with the given deployment config
     pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
         Ok(Self {
-            fetcher: StateFetcher::new(rpc_url, &config)?,
+            fetcher: StateFetcher::new(rpc_url, config)?,
         })
     }
 
