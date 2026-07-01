@@ -84,7 +84,8 @@ pub enum StorageWorkerRequest {
         user_address: Address,
         pool_contract_id: Address,
     },
-    RecentPubKeys(u32),
+    RecentPubKeys { offset: u32, limit: u32 },
+    CountPubKeys,
     RecipientLookup {
         address: Address,
         public_key_registry_contract_id: String,
@@ -114,6 +115,7 @@ pub enum StorageWorkerResponse {
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),
     PubKeys(Vec<PublicKeyEntry>),
+    PubKeysCount(u32),
     RecipientLookup(RecipientLookup),
     OperationalFeed(Vec<OperationalFeedItem>),
     AspMembershipSync(AspMembershipSync),

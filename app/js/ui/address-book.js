@@ -8,9 +8,16 @@
 import { getHandle } from '../wasm-facade.js';
 import { App, Utils, Toast } from './core.js';
 
+const PAGE_SIZE = 20;
+const SEARCH_FETCH_LIMIT = 5000;
+
 export const AddressBook = {
     _filterDebounceTimer: null,
     _cached: null,
+    _currentPage: 0,
+    _totalCount: 0,
+    _searchMode: false,
+    _searchCache: null,
 
     init() {
         document.querySelectorAll('.section-tab-btn').forEach(btn => {
@@ -32,6 +39,23 @@ export const AddressBook = {
 
         document.getElementById('addressbook-refresh-btn')?.addEventListener('click', async () => {
             await this.refresh();
+        });
+
+        document.getElementById('addressbook-prev-btn')?.addEventListener('click', async () => {
+            if (this._currentPage > 0) {
+                this._currentPage--;
+                this._cached = null;
+                await this.render();
+            }
+        });
+
+        document.getElementById('addressbook-next-btn')?.addEventListener('click', async () => {
+            const maxPage = Math.max(0, Math.ceil(this._totalCount / PAGE_SIZE) - 1);
+            if (this._currentPage < maxPage) {
+                this._currentPage++;
+                this._cached = null;
+                await this.render();
+            }
         });
 
         App.events.addEventListener('wallet:ready', () => {
@@ -67,6 +91,10 @@ export const AddressBook = {
 
     async refresh() {
         this._cached = null;
+        this._searchCache = null;
+        this._searchMode = false;
+        this._currentPage = 0;
+        this._totalCount = 0;
         await this.render();
         Toast.show('Address book refreshed', 'success');
     },
@@ -81,9 +109,27 @@ export const AddressBook = {
     async _loadIfNeeded() {
         if (this._cached) return this._cached;
         if (!App.state.wallet.connected) return [];
-        const list = await getHandle().webClient.getRecentPublicKeys(100);
+        const offset = this._currentPage * PAGE_SIZE;
+        const [list, count] = await Promise.all([
+            getHandle().webClient.getRecentPublicKeys(offset, PAGE_SIZE),
+            getHandle().webClient.getPublicKeysCount(),
+        ]);
+        this._totalCount = Number(count) || 0;
         this._cached = Array.isArray(list) ? list : [];
         return this._cached;
+    },
+
+    async _loadAllForSearch() {
+        if (this._searchCache) return this._searchCache;
+        if (!App.state.wallet.connected) return [];
+        if (!this._totalCount) {
+            const count = await getHandle().webClient.getPublicKeysCount();
+            this._totalCount = Number(count) || 0;
+        }
+        const limit = this._totalCount > 0 ? this._totalCount : SEARCH_FETCH_LIMIT;
+        const list = await getHandle().webClient.getRecentPublicKeys(0, limit);
+        this._searchCache = Array.isArray(list) ? list : [];
+        return this._searchCache;
     },
 
     async _ensureLocalKeysLoaded(address) {
@@ -119,6 +165,12 @@ export const AddressBook = {
         const searchInput = document.getElementById('addressbook-search');
 
         if (!tbody) return;
+
+        const currentTerm = searchInput?.value.trim() || '';
+        if (this._searchMode && currentTerm) {
+            await this.filterTable(currentTerm);
+            return;
+        }
 
         loading?.classList.remove('hidden');
         empty?.classList.add('hidden');
@@ -166,6 +218,7 @@ export const AddressBook = {
         if (filtered.length === 0 && tbody.children.length === 0) {
             empty?.classList.remove('hidden');
             empty?.classList.add('flex');
+            this._updatePaginationControls();
             return;
         }
 
@@ -176,18 +229,33 @@ export const AddressBook = {
             if (renderedSelfRow && selfAddress && String(record.address || '') === String(selfAddress)) return;
             tbody.appendChild(this._createRow(record));
         });
+
+        this._updatePaginationControls();
     },
 
     async filterTable(searchTerm) {
+        const term = String(searchTerm || '').toUpperCase();
+
+        if (!term) {
+            if (this._searchMode) {
+                this._searchMode = false;
+                this._searchCache = null;
+                this._cached = null;
+                await this.render();
+            }
+            return;
+        }
+
+        this._searchMode = true;
+
         const tbody = document.getElementById('addressbook-tbody');
         const empty = document.getElementById('empty-addressbook');
         const searchResult = document.getElementById('addressbook-search-result');
         if (!tbody) return;
 
         searchResult?.classList.add('hidden');
-        const registrations = await this._loadIfNeeded();
+        const registrations = await this._loadAllForSearch();
 
-        const term = String(searchTerm || '').toUpperCase();
         const matches = term
             ? registrations.filter(r => String(r.address || '').toUpperCase().startsWith(term))
             : registrations;
@@ -227,6 +295,7 @@ export const AddressBook = {
         if (matches.length === 0 && tbody.children.length === 0) {
             empty?.classList.remove('hidden');
             empty?.classList.add('flex');
+            this._updatePaginationControls();
             return;
         }
 
@@ -237,6 +306,26 @@ export const AddressBook = {
             if (renderedSelfRow && selfAddress && String(record.address || '') === String(selfAddress)) return;
             tbody.appendChild(this._createRow(record));
         });
+
+        this._updatePaginationControls();
+    },
+
+    _updatePaginationControls() {
+        const prevBtn = document.getElementById('addressbook-prev-btn');
+        const nextBtn = document.getElementById('addressbook-next-btn');
+        const pageInfo = document.getElementById('addressbook-page-info');
+
+        if (this._searchMode) {
+            if (prevBtn) prevBtn.disabled = true;
+            if (nextBtn) nextBtn.disabled = true;
+            if (pageInfo) pageInfo.textContent = 'Search results';
+            return;
+        }
+
+        const totalPages = Math.max(1, Math.ceil(this._totalCount / PAGE_SIZE));
+        if (prevBtn) prevBtn.disabled = this._currentPage === 0;
+        if (nextBtn) nextBtn.disabled = this._currentPage >= totalPages - 1;
+        if (pageInfo) pageInfo.textContent = `Page ${this._currentPage + 1} of ${totalPages}`;
     },
 
     _createRow(record) {
