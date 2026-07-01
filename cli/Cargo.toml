@@ -1,0 +1,31 @@
+[package]
+name = "stellar-private-payments-cli"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "CLI for Stellar Private Payments"
+
+[[bin]]
+name = "spp"
+path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+clap = { version = "4.6.1", features = ["derive"] }
+ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
+sep5 = "0.1.0"
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+# Not referenced directly, but pulls in reqwest's rustls TLS backend for the
+# binary (the `stellar` crate depends on reqwest without a TLS feature).
+reqwest = { workspace = true, features = ["rustls"] }
+stellar-private-payments-sdk.workspace = true
+stellar-strkey = "0.0.16"
+tokio = { workspace = true, features = ["rt-multi-thread"] }
+toml = "0.8"
+
+[lints]
+workspace = true

@@ -3,6 +3,7 @@ members = [
     "app/crates/platforms/web",
     "circuit-keys",
     "circuits",
+    "cli",
     "contracts/*",
     "e2e-tests",
     "poseidon2",
