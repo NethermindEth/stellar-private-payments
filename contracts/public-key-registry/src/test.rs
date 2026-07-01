@@ -4,6 +4,20 @@ use soroban_sdk::{
     testutils::{Address as _, Events as _},
 };
 
+fn test_env() -> Env {
+    #[cfg(miri)]
+    {
+        use soroban_sdk::testutils::EnvTestConfig;
+        Env::new_with_config(EnvTestConfig {
+            capture_snapshot_at_drop: false,
+        })
+    }
+    #[cfg(not(miri))]
+    {
+        Env::default()
+    }
+}
+
 fn account(env: &Env, owner: Address, enc_fill: u8, note_fill: u8) -> Account {
     Account {
         owner,
@@ -14,7 +28,7 @@ fn account(env: &Env, owner: Address, enc_fill: u8, note_fill: u8) -> Account {
 
 #[test]
 fn register_saves_registration() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
@@ -35,7 +49,7 @@ fn register_saves_registration() {
 
 #[test]
 fn duplicate_registration_is_noop() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
@@ -61,7 +75,7 @@ fn duplicate_registration_is_noop() {
 
 #[test]
 fn key_rotation_overwrites_registration() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
@@ -89,7 +103,7 @@ fn key_rotation_overwrites_registration() {
 #[test]
 #[should_panic(expected = "Error(Auth, InvalidAction)")]
 fn register_requires_owner_auth() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
@@ -101,7 +115,7 @@ fn register_requires_owner_auth() {
 #[test]
 #[should_panic]
 fn register_rejects_short_encryption_key() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);
@@ -118,7 +132,7 @@ fn register_rejects_short_encryption_key() {
 #[test]
 #[should_panic]
 fn register_rejects_short_note_key() {
-    let env = Env::default();
+    let env = test_env();
     let contract_id = env.register(PublicKeyRegistry, ());
     let client = PublicKeyRegistryClient::new(&env, &contract_id);
     let owner = Address::generate(&env);

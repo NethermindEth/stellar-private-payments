@@ -1,1 +1,2 @@
 mod plan;
+mod wallet;

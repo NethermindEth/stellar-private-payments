@@ -22,26 +22,35 @@ Unified project documentation is available at https://nethermindeth.github.io/st
 
 ```
 stellar-private-payments/
-├── app/                        # Application (see app/README.md, app/ARCHITECTURE.md)
+├── app/                        # Web application (see app/README.md, app/ARCHITECTURE.md)
 │   ├── crates/
-│   │   ├── core/               # Platform-agnostic Rust logic (storage, prover flows, indexer, types, witness)
-│   │   │   ├── prover/
-│   │   │   ├── state/
-│   │   │   ├── stellar/
-│   │   │   ├── types/
-│   │   │   └── witness/
 │   │   └── platforms/
-│   │       └── web/            # WASM entrypoint + WebClient (sign/submit in sign.rs)
+│   │       └── web/            # WASM entrypoint + WebClient (sign/submit in sign.rs, prover/storage workers)
 │   ├── js/                     # JavaScript frontend code (web interface)
 │   │   ├── ui/                 # UI components
 │   │   ├── admin.js            # Admin UI entry
 │   │   ├── ui.js               # Main UI entry
+│   │   ├── disclosure.js       # Selective disclosure UI entry
+│   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
 │   │   ├── wallet.js           # Freighter integration + WASM signing bridge
-│   │   └── wasm-facade.js      # Thin wrapper over WASM exports
+│   │   ├── wasm-facade.js      # Thin wrapper over WASM exports
+│   │   └── sw.js               # Service worker
+│   ├── css/                    # Stylesheets
+│   ├── assets/                 # Static assets (logo, favicon)
 │   ├── index.html              # Main web application entry
-│   └── admin.html              # Admin entry
+│   ├── admin.html              # Admin entry
+│   └── disclosure.html         # Selective disclosure entry
+├── sdk/                        # Platform-agnostic Rust SDK crates
+│   ├── disclosure/             # Selective disclosure
+│   ├── prover/                 # Proving flows
+│   ├── state/                  # Storage and indexer
+│   ├── stellar/                # Stellar/Soroban client
+│   ├── tx-planner/             # Transaction planning
+│   ├── types/                  # Shared types
+│   └── witness/                # Witness generation
 ├── circuits/                   # Circom ZK circuits
 │   ├── src/
+│   │   ├── core/               # Rust circuit helpers (Merkle, ...)
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
 │   │   ├── smt/                # Sparse Merkle tree circuits
 │   │   ├── test/               # Circuit test utilities
@@ -54,11 +63,18 @@ stellar-private-payments/
 │   ├── asp-non-membership/     # ASP non-membership sparse Merkle tree
 │   ├── circom-groth16-verifier/# On-chain Groth16 proof verifier
 │   ├── pool/                   # Main privacy pool contract
+│   ├── public-key-registry/    # On-chain public key registry
 │   ├── soroban-utils/          # Shared utilities (Poseidon2, etc.)
 │   └── types/                  # Shared contract types
-├── e2e-tests/                  # End-to-end integration tests
 ├── poseidon2/                  # Poseidon2 hash implementation
-├── deployments/                # Deployment and utility scripts
+├── tools/                      # Auxiliary tools
+│   ├── bootnode/               # HTTPS JSON-RPC getEvents service (excluded from workspace)
+│   └── ceremony-cli/           # Groth16 BN254 trusted-setup ceremony CLI (wraps snarkjs)
+├── e2e-tests/                  # End-to-end integration tests
+├── deployments/                # Deployment scripts, testnet config, legal notices
+├── docs/                       # Project documentation (mdBook source)
+├── scripts/                    # Helper scripts
+├── vendor/                     # Vendored/patched dependencies (cranelift-control)
 ├── dist/                       # Built static site output (generated)
 └── Makefile                    # Build automation
 ```
@@ -174,7 +190,6 @@ git config core.hooksPath .githooks
 
 * Node.js
 * npm
-* python3 (for the static server)
 
 The whole app:
 

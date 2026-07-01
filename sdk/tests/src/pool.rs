@@ -42,8 +42,12 @@ const TEST_SIGNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOB
 pub use crate::seed::TEST_NETWORK;
 
 pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
-    let db_path =
-        std::env::temp_dir().join(format!("stellar-sdk-test-{}.sqlite", std::process::id()));
+    static RUN: AtomicUsize = AtomicUsize::new(0);
+    let db_path = std::env::temp_dir().join(format!(
+        "stellar-sdk-test-{}-{}.sqlite",
+        std::process::id(),
+        RUN.fetch_add(1, Ordering::Relaxed),
+    ));
     let _ = std::fs::remove_file(&db_path);
 
     let amounts: Vec<u64> = wallet.unwrap_or_default().to_vec();

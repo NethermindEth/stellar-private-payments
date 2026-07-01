@@ -1,7 +1,7 @@
-//! Sync wrapper around [`crate::PrivatePool`] via pollster.
+//! Sync wrapper around [`crate::PrivatePool`] via a shared Tokio runtime.
 
 use tx_planner::SpendableNote;
-use types::{NoteAmount, UserNoteSummary};
+use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use crate::{
     PreparedTransaction, PreparedTransactionPlan,
@@ -13,7 +13,9 @@ use crate::{
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
 };
 
-/// Native sync wallet — [`AsyncPrivatePool`] with blocking method names.
+use super::runtime::block_on;
+
+/// Native sync wallet — [`crate::PrivatePool`] with blocking method names.
 pub struct PrivatePool {
     inner: AsyncPrivatePool<LocalStorage>,
 }
@@ -43,37 +45,35 @@ impl PrivatePool {
     }
 
     pub fn estimate(&self, amount: NoteAmount) -> Result<Estimate, PoolError> {
-        pollster::block_on(self.inner.estimate(amount))
+        block_on(self.inner.estimate(amount))
     }
 
     pub fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.inner.deposit(amount))
+        block_on(self.inner.deposit(amount))
     }
 
     pub fn transfer(
         &self,
-        wallet: &[SpendableNote],
         recipient: TransferRecipient,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        pollster::block_on(self.inner.transfer(wallet, recipient, amount))
+        block_on(self.inner.transfer(recipient, amount))
     }
 
     pub fn withdraw(
         &self,
-        wallet: &[SpendableNote],
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, PoolError> {
-        pollster::block_on(self.inner.withdraw(wallet, amount, recipient))
+        block_on(self.inner.withdraw(amount, recipient))
     }
 
     pub fn transact(&self, step: tx_planner::Transact) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.inner.transact(step))
+        block_on(self.inner.transact(step))
     }
 
     pub fn sync(&self) -> Result<(), PoolError> {
-        pollster::block_on(self.inner.sync())
+        block_on(self.inner.sync())
     }
 
     pub fn prepare_deposit(
@@ -109,42 +109,49 @@ impl PrivatePool {
         &self,
         plan: &mut PreparedTransactionPlan,
     ) -> Result<PreparedTransaction, PoolError> {
-        pollster::block_on(self.inner.prove_next(plan))
+        block_on(self.inner.prove_next(plan))
     }
 
     pub fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
-        pollster::block_on(self.inner.sign(prepared))
+        block_on(self.inner.sign(prepared))
     }
 
     pub fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
-        pollster::block_on(self.inner.spendable_notes())
+        block_on(self.inner.spendable_notes())
     }
 
     pub fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
-        pollster::block_on(self.inner.notes())
+        block_on(self.inner.notes())
+    }
+
+    pub fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        block_on(self.inner.user_public_keys(user_address))
     }
 
     pub fn balance(&self) -> Result<NoteAmount, PoolError> {
-        pollster::block_on(self.inner.balance())
+        block_on(self.inner.balance())
     }
 
     pub fn simulate(&self, prepared: &mut PreparedTransaction) -> Result<(), PoolError> {
-        pollster::block_on(self.inner.simulate(prepared))
+        block_on(self.inner.simulate(prepared))
     }
 
     pub fn submit(&self, signed_tx: SignedTransaction) -> Result<String, PoolError> {
-        pollster::block_on(self.inner.submit(signed_tx))
+        block_on(self.inner.submit(signed_tx))
     }
 
     pub fn confirm(&self, hash: &str) -> Result<TransactionResult, PoolError> {
-        pollster::block_on(self.inner.confirm(hash))
+        block_on(self.inner.confirm(hash))
     }
 
     pub fn disclose(
         &self,
         req: crate::DisclosureRequest,
     ) -> Result<Option<types::DisclosureReceipt>, PoolError> {
-        pollster::block_on(self.inner.disclose(req))
+        block_on(self.inner.disclose(req))
     }
 
     pub fn verify_disclosure(
@@ -152,6 +159,6 @@ impl PrivatePool {
         receipt: &types::DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<types::DisclosureVerificationReport, PoolError> {
-        pollster::block_on(self.inner.verify_disclosure(receipt, expected_vk_hash))
+        block_on(self.inner.verify_disclosure(receipt, expected_vk_hash))
     }
 }
