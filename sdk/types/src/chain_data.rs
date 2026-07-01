@@ -110,6 +110,47 @@ pub struct AspNonMembershipProof {
     pub root: Field,
 }
 
+/// On-chain anchors required to build a pool `transact` witness.
+#[derive(Debug, Clone)]
+pub struct TransactChainContext {
+    pub pool_root: Field,
+    pub pool_next_index: u32,
+    pub pool_merkle_levels: u32,
+    pub asp_membership_root: Field,
+    pub asp_membership_contract_id: String,
+    pub asp_membership_ledger: u32,
+    pub non_membership_proof: AspNonMembershipProof,
+}
+
+pub fn transact_chain_context_from_state(
+    data: ContractsStateData,
+    pool_contract_id: &str,
+    non_membership_proof: AspNonMembershipProof,
+) -> anyhow::Result<TransactChainContext> {
+    let pool = data
+        .pools
+        .into_iter()
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("pool data not fetched for {pool_contract_id}"))?;
+    let pool_root = pool
+        .merkle_root
+        .ok_or_else(|| anyhow::anyhow!("pool merkle_root not fetched"))?;
+    let pool_next_index = pool
+        .merkle_next_index
+        .parse::<u32>()
+        .map_err(|e| anyhow::anyhow!("invalid pool merkle_next_index: {e}"))?;
+
+    Ok(TransactChainContext {
+        pool_root,
+        pool_next_index,
+        pool_merkle_levels: pool.merkle_levels,
+        asp_membership_root: data.asp_membership.root,
+        asp_membership_contract_id: data.asp_membership.contract_id,
+        asp_membership_ledger: data.asp_membership.ledger,
+        non_membership_proof,
+    })
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ContractEvent {

@@ -77,7 +77,7 @@ impl StateFetcher {
             source_account,
             seq,
             BASE_FEE,
-            &self.config.public_key_registry,
+            &self.contract_config().public_key_registry,
             "register",
             vec![account_scval],
             Vec::new(),

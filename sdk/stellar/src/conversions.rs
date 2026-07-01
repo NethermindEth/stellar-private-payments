@@ -5,6 +5,26 @@ use stellar_strkey::ed25519;
 use stellar_xdr::curr::{self as xdr, Int256Parts, ReadXdr};
 use types::{ContractEvent, Field, U256};
 
+impl From<crate::rpc::Event> for ContractEvent {
+    fn from(val: crate::rpc::Event) -> Self {
+        let crate::rpc::Event {
+            id,
+            ledger,
+            contract_id,
+            topic,
+            value,
+            ..
+        } = val;
+        ContractEvent {
+            id,
+            ledger,
+            contract_id,
+            topics: topic,
+            value,
+        }
+    }
+}
+
 /// Helper to convert ScVal Address to G... or C... string
 pub fn scval_to_address_string(val: &xdr::ScVal) -> Result<String, Error> {
     if let xdr::ScVal::Address(addr) = val {

@@ -1,7 +1,7 @@
 use crate::rpc::{Client, Error as RpcError};
 use anyhow::{Result, anyhow};
 use std::collections::HashSet;
-use types::{ContractConfig, ContractEvent, ContractsEventData, SyncMetadata};
+use types::{ContractConfig, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
 const PAGE_SIZE: usize = 300;
@@ -17,6 +17,14 @@ pub struct Indexer<S: ContractDataStorage> {
 impl<S: ContractDataStorage> Indexer<S> {
     pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
         let client = Client::new(rpc_url)?;
+        Self::init_with_client(client, storage, config).await
+    }
+
+    pub async fn init_with_client(
+        client: Client,
+        storage: S,
+        config: &ContractConfig,
+    ) -> Result<Self> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
 
@@ -57,7 +65,15 @@ impl<S: ContractDataStorage> Indexer<S> {
         })
     }
 
+    /// Fetch up to [`MAX_PAGES_PER_ROUND`] event pages from RPC into storage.
     pub async fn fetch_contract_events(&self) -> Result<()> {
+        let _ = self.fetch_contract_events_round().await?;
+        Ok(())
+    }
+
+    /// Like [`Self::fetch_contract_events`], but returns whether another round
+    /// may be needed (used by [`Self::catch_up`]).
+    async fn fetch_contract_events_round(&self) -> Result<bool> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
@@ -71,7 +87,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             .iter()
             .map(|meta| meta.last_indexed_ledger)
             .min()
-            .unwrap_or(self.min_pool_ledger);
+            .unwrap_or(self.min_pool_ledger)
+            .min(network_tip);
 
         if active_sync
             .iter()
@@ -102,6 +119,8 @@ impl<S: ContractDataStorage> Indexer<S> {
             None
         };
 
+        let mut may_have_more = false;
+
         for page in 0..MAX_PAGES_PER_ROUND {
             log::trace!(
                 "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
@@ -119,7 +138,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                     log::debug!(
                         "[INDEXER] local sync (start_ledger={start_ledger}) is ahead of RPC events tip (newest={newest}); waiting for RPC to catch up"
                     );
-                    return Ok(());
+                    return Ok(false);
                 }
                 Err(e) => return Err(e.into()),
             };
@@ -163,10 +182,18 @@ impl<S: ContractDataStorage> Indexer<S> {
 
             cursor = Some(new_cursor);
             if is_empty {
-                break;
+                return Ok(may_have_more);
             }
+            may_have_more = true;
         }
 
+        Ok(may_have_more)
+    }
+
+    /// Ingest contract events from RPC until pagination reaches the network
+    /// tip.
+    pub async fn catch_up(&self) -> Result<()> {
+        while self.fetch_contract_events_round().await? {}
         Ok(())
     }
 }
@@ -184,23 +211,4 @@ pub trait ContractDataStorage {
         metadata: Vec<SyncMetadata>,
         fully_indexed: bool,
     ) -> anyhow::Result<()>;
-}
-impl From<crate::rpc::Event> for ContractEvent {
-    fn from(val: crate::rpc::Event) -> Self {
-        let crate::rpc::Event {
-            id,
-            ledger,
-            contract_id,
-            topic,
-            value,
-            ..
-        } = val;
-        ContractEvent {
-            id,
-            ledger,
-            contract_id,
-            topics: topic,
-            value,
-        }
-    }
 }

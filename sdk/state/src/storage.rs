@@ -3,6 +3,7 @@ use anyhow::{Context, Result, anyhow};
 use rusqlite::{Connection, Error as SqlError, OptionalExtension, params};
 use rusqlite_migration::{M, Migrations};
 use serde::{Serialize, de::DeserializeOwned};
+use std::path::Path;
 use types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
     EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
@@ -65,7 +66,15 @@ pub type DeriveNoteFn<'a> =
 
 impl Storage {
     pub fn connect() -> Result<Self> {
-        Self::connect_with_connection(Connection::open(DB_NAME)?)
+        Self::connect_file(DB_NAME)
+    }
+
+    pub fn connect_file(path: impl AsRef<Path>) -> Result<Self> {
+        Self::connect_with_connection(Connection::open(path.as_ref())?)
+    }
+
+    pub fn connect_in_memory() -> Result<Self> {
+        Self::connect_with_connection(Connection::open_in_memory()?)
     }
 
     fn connect_with_connection(mut conn: Connection) -> Result<Self> {
@@ -484,6 +493,55 @@ impl Storage {
             Ok(UserNoteSummary {
                 id,
                 pool_contract_id,
+                amount,
+                leaf_index,
+                created_at_ledger,
+                spent: spent_i64 != 0,
+            })
+        })?;
+
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
+    }
+
+    /// All notes for `address` in `pool_contract_id` (newest first), spent and
+    /// unspent.
+    pub fn list_pool_user_notes(
+        &self,
+        pool_contract_id: &str,
+        address: &str,
+    ) -> Result<Vec<UserNoteSummary>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT
+                n.id,
+                n.amount,
+                c.leaf_index,
+                r.ledger,
+                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+             FROM user_notes n
+             JOIN accounts a ON a.id = n.account_id
+             JOIN pool_commitments c ON c.id = n.commitment_id
+             JOIN raw_contract_events r ON r.id = c.event_id
+             JOIN contracts pool ON pool.contract_id = r.contract_id
+             WHERE a.address = ?1 AND pool.address = ?2
+             ORDER BY r.ledger DESC",
+        )?;
+
+        let rows = stmt.query_map(params![address, pool_contract_id], |row| {
+            let id: Field = row.get(0)?;
+            let amount: NoteAmount = row.get(1)?;
+            let leaf_index_i64: i64 = row.get(2)?;
+            let leaf_index = col_u32(leaf_index_i64, 2)?;
+            let created_at_ledger_i64: i64 = row.get(3)?;
+            let created_at_ledger = col_u32(created_at_ledger_i64, 3)?;
+            let spent_i64: i64 = row.get(4)?;
+
+            Ok(UserNoteSummary {
+                id,
+                pool_contract_id: pool_contract_id.to_string(),
                 amount,
                 leaf_index,
                 created_at_ledger,
@@ -1547,7 +1605,7 @@ mod tests {
 
     #[test]
     fn get_recent_public_keys_reads_public_keys_with_ledger() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let event_id = "pk_event_1";
         storage.save_events_batch(&ContractsEventData {
@@ -1627,7 +1685,7 @@ mod tests {
 
     #[test]
     fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         // Create an account with keypairs.
         let signature = KeyDerivationSignature(vec![1u8; 64]);
@@ -1752,7 +1810,7 @@ mod tests {
 
     #[test]
     fn sync_metadata_tracks_progress_and_caught_up_tip() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         storage.save_events_batch(&ContractsEventData {
             cursor: "c1".to_string(),
@@ -1817,7 +1875,7 @@ mod tests {
 
     #[test]
     fn get_user_keys_returns_latest_keypair() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let signature_1 = KeyDerivationSignature(vec![1u8; 64]);
         let signature_2 = KeyDerivationSignature(vec![3u8; 64]);
@@ -1858,7 +1916,7 @@ mod tests {
 
     #[test]
     fn save_keypairs_does_not_duplicate_accounts() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let signature = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
@@ -1890,7 +1948,7 @@ mod tests {
 
     #[test]
     fn asp_membership_precondition_partial_processing_returns_sync_required() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let mut root_old_bytes = [0u8; 32];
         root_old_bytes[0] = 1;
@@ -1967,7 +2025,7 @@ mod tests {
 
     #[test]
     fn asp_membership_precondition_root_mismatch_at_same_ledger_errors() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let mut root_old_bytes = [0u8; 32];
         root_old_bytes[0] = 1;
@@ -2026,7 +2084,7 @@ mod tests {
 
     #[test]
     fn asp_membership_precondition_allows_tip_without_recent_asp_events() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let mut root_bytes = [0u8; 32];
         root_bytes[0] = 1;
@@ -2140,7 +2198,7 @@ mod tests {
 
     #[test]
     fn get_unspent_user_note_by_commitment_finds_unspent_note() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
@@ -2215,7 +2273,7 @@ mod tests {
 
     #[test]
     fn get_unspent_user_note_by_commitment_rejects_spent_note() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
@@ -2313,7 +2371,7 @@ mod tests {
 
     #[test]
     fn get_unspent_user_note_by_commitment_rejects_wrong_commitment() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let sig = KeyDerivationSignature(vec![1u8; 64]);
         let (note_keypair, enc_keypair) =
@@ -2384,7 +2442,7 @@ mod tests {
 
     #[test]
     fn get_pool_commitment_leaves_ordered_returns_ordered_leaves() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
         let leaf1 = Field::try_from_le_bytes([1u8; 32])?;
@@ -2431,7 +2489,7 @@ mod tests {
 
     #[test]
     fn get_pool_commitment_leaves_ordered_detects_gaps() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
+        let mut storage = Storage::connect_in_memory()?;
 
         let leaf0 = Field::try_from_le_bytes([0u8; 32])?;
         let leaf2 = Field::try_from_le_bytes([2u8; 32])?;
