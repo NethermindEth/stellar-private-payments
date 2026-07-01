@@ -109,10 +109,9 @@ enum Commands {
         command: ConfigCommands,
     },
     /// Show your note and encryption public keys
-    Keys {
-        #[command(subcommand)]
-        command: Option<KeysCommands>,
-    },
+    Keys,
+    /// Reveal the ASP secret (keep it private)
+    AspSecret,
     /// Register your public keys in the on-chain address book
     Register,
     /// Deposit public tokens into a pool
@@ -175,12 +174,6 @@ enum ConfigCommands {
     },
 }
 
-#[derive(Debug, Subcommand)]
-enum KeysCommands {
-    /// Reveal the ASP secret (keep it private)
-    AspSecret,
-}
-
 fn main() -> Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.json);
@@ -238,10 +231,8 @@ fn main() -> Result<()> {
                 cmd::config::set_bootnode(&config, url.as_deref(), disable, json)
             }
         },
-        Commands::Keys { command } => match command {
-            Some(KeysCommands::AspSecret) => cmd::keys::asp_secret(&config, json),
-            None => cmd::keys::show(&config, json),
-        },
+        Commands::Keys => cmd::keys::show(&config, json),
+        Commands::AspSecret => cmd::keys::asp_secret(&config, json),
         Commands::Register => cmd::register::run(&config, json),
         Commands::Deposit { pool, amount } => cmd::pool::deposit(&config, &pool, &amount, json),
         Commands::Transfer {

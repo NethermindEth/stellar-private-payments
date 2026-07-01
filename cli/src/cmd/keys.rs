@@ -1,4 +1,4 @@
-//! `keys` — show the account's privacy public keys; `keys asp-secret` reveals
+//! `keys` — show the account's privacy public keys; `asp-secret` reveals
 //! the ASP secret (membership blinding).
 
 use anyhow::{Context, Result};
