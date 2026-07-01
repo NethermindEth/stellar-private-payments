@@ -29,16 +29,20 @@ mod transact;
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 
-pub(crate) fn pool_err(error: PoolError) -> JsError {
+pub(crate) fn pool_err_message(error: PoolError) -> String {
     match &error {
         PoolError::MembershipSync(AspMembershipSync::RegisterAtASP) => {
-            JsError::new("register at ASP before transacting")
+            "register at ASP before transacting".into()
         }
         PoolError::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
-            JsError::new("indexer sync in progress; try again shortly")
+            "indexer sync in progress; try again shortly".into()
         }
-        _ => JsError::new(&error.to_string()),
+        _ => error.to_string(),
     }
+}
+
+pub(crate) fn pool_err(error: PoolError) -> JsError {
+    JsError::new(&pool_err_message(error))
 }
 
 pub(crate) fn emit_progress(

@@ -3,10 +3,11 @@
 
 use super::{
     emit_progress, parse_ext_amount_decimal, parse_input_note_ids, parse_note_amount_decimal,
-    parse_output_amounts, parse_output_recipient_keys, pool::Pool, pool_err,
+    parse_output_amounts, parse_output_recipient_keys, pool::Pool, pool_err, pool_err_message,
 };
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
+use serde::Serialize;
 use stellar_private_payments_sdk::{
     PoolError, PreparedTransactionPlan, SpendTarget, Transact, TransferRecipient,
     tx::flows::N_OUTPUTS,
@@ -16,10 +17,52 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsError, prelude::*};
 
-fn execute_hashes_to_js(result: Option<Vec<String>>) -> Result<wasm_bindgen::JsValue, JsError> {
-    match result {
-        None => Ok(wasm_bindgen::JsValue::NULL),
-        Some(hashes) => Ok(serde_wasm_bindgen::to_value(&hashes)?),
+type ExecuteOutcome = Result<Vec<String>, ExecuteFailure>;
+
+enum ExecuteFailure {
+    PlanFailed {
+        hashes: Vec<String>,
+        error: PoolError,
+    },
+    AspNotReady,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+enum ExecuteJsResponse {
+    #[serde(rename = "ok")]
+    Complete {
+        hashes: Vec<String>,
+    },
+    Failed {
+        hashes: Vec<String>,
+        message: String,
+    },
+    AspNotReady,
+}
+
+impl ExecuteFailure {
+    fn plan(hashes: Vec<String>, error: PoolError) -> ExecuteOutcome {
+        Err(Self::PlanFailed { hashes, error })
+    }
+}
+
+impl From<ExecuteOutcome> for ExecuteJsResponse {
+    fn from(outcome: ExecuteOutcome) -> Self {
+        match outcome {
+            Ok(hashes) => Self::Complete { hashes },
+            Err(ExecuteFailure::PlanFailed { hashes, error }) => Self::Failed {
+                hashes,
+                message: pool_err_message(error),
+            },
+            Err(ExecuteFailure::AspNotReady) => Self::AspNotReady,
+        }
+    }
+}
+
+impl ExecuteJsResponse {
+    fn to_value(&self) -> Result<wasm_bindgen::JsValue, JsError> {
+        Ok(serde_wasm_bindgen::to_value(&self)?)
     }
 }
 
@@ -29,7 +72,7 @@ impl Pool {
         plan: &mut PreparedTransactionPlan,
         flow: &'static str,
         on_status: Option<Function>,
-    ) -> Result<Option<Vec<String>>, JsError> {
+    ) -> ExecuteOutcome {
         let pool = self.inner();
         let on_status = &on_status;
         let total = plan.tx_count();
@@ -55,9 +98,12 @@ impl Pool {
 
                 match pool.prove_next(plan).await {
                     Ok(prepared) => break prepared,
-                    Err(PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
+                    Err(error @ PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
                         log::warn!("[{flow}] account should register within ASP");
-                        return Ok(None);
+                        if hashes.is_empty() {
+                            return Err(ExecuteFailure::AspNotReady);
+                        }
+                        return ExecuteFailure::plan(hashes, error);
                     }
                     Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
                         log::info!("[{flow}] sync is needed - waiting the indexer");
@@ -75,7 +121,7 @@ impl Pool {
                         );
                         TimeoutFuture::new(1_000).await;
                     }
-                    Err(error) => return Err(pool_err(error)),
+                    Err(error) => return ExecuteFailure::plan(hashes, error),
                 }
             };
 
@@ -92,7 +138,9 @@ impl Pool {
                 Some(current),
                 Some(total),
             );
-            pool.simulate(&mut prepared).await.map_err(pool_err)?;
+            if let Err(error) = pool.simulate(&mut prepared).await {
+                return ExecuteFailure::plan(hashes, error);
+            }
 
             let sign_message = if total > 1 {
                 format!("Signing step {current}/{total}…")
@@ -107,7 +155,10 @@ impl Pool {
                 Some(current),
                 Some(total),
             );
-            let signed = pool.sign(&prepared).await.map_err(pool_err)?;
+            let signed = match pool.sign(&prepared).await {
+                Ok(signed) => signed,
+                Err(error) => return ExecuteFailure::plan(hashes, error),
+            };
 
             let submit_message = if total > 1 {
                 format!("Submitting step {current}/{total}…")
@@ -122,12 +173,17 @@ impl Pool {
                 Some(current),
                 Some(total),
             );
-            let hash = pool.submit(signed).await.map_err(pool_err)?;
-            pool.confirm(&hash).await.map_err(pool_err)?;
+            let hash = match pool.submit(signed).await {
+                Ok(hash) => hash,
+                Err(error) => return ExecuteFailure::plan(hashes, error),
+            };
+            if let Err(error) = pool.confirm(&hash).await {
+                return ExecuteFailure::plan(hashes, error);
+            }
             hashes.push(hash);
         }
 
-        Ok(Some(hashes))
+        Ok(hashes)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -136,7 +192,7 @@ impl Pool {
         amount: BigInt,
         output_amounts: Array,
         on_status: Option<Function>,
-    ) -> Result<Option<Vec<String>>, JsError> {
+    ) -> Result<ExecuteOutcome, JsError> {
         let pool = self.inner();
         let pool_contract_id = pool.config().pool_contract_id.clone();
         let user_address = pool.config().user_address.clone();
@@ -162,11 +218,11 @@ impl Pool {
                 [Some(enc_pk.clone()), Some(enc_pk)],
             );
             let mut plan = pool.prepare_transact(step);
-            return self.execute_plan(&mut plan, "deposit", on_status).await;
+            return Ok(self.execute_plan(&mut plan, "deposit", on_status).await);
         }
 
         let mut plan = pool.prepare_deposit(note_amount).map_err(pool_err)?;
-        self.execute_plan(&mut plan, "deposit", on_status).await
+        Ok(self.execute_plan(&mut plan, "deposit", on_status).await)
     }
 
     async fn spend_inner(
@@ -175,7 +231,7 @@ impl Pool {
         target: SpendTarget,
         flow: &'static str,
         on_status: Option<Function>,
-    ) -> Result<Option<Vec<String>>, JsError> {
+    ) -> Result<ExecuteOutcome, JsError> {
         let pool = self.inner();
         let amount = parse_note_amount_decimal(&amount)?;
         if amount.is_zero() {
@@ -200,7 +256,7 @@ impl Pool {
         }
         .map_err(pool_err)?;
 
-        self.execute_plan(&mut plan, flow, on_status).await
+        Ok(self.execute_plan(&mut plan, flow, on_status).await)
     }
 
     async fn estimate_inner(&self, amount: BigInt) -> Result<Estimate, JsError> {
@@ -224,7 +280,7 @@ impl Pool {
         out_recipient_enc_keys_hex: Array,
         on_status: Option<Function>,
         flow: &'static str,
-    ) -> Result<Option<Vec<String>>, JsError> {
+    ) -> Result<ExecuteOutcome, JsError> {
         let pool = self.inner();
         let expected_outputs =
             u32::try_from(N_OUTPUTS).map_err(|_| JsError::new("N_OUTPUTS exceeds u32"))?;
@@ -260,7 +316,7 @@ impl Pool {
         );
 
         let mut plan = pool.prepare_transact(step);
-        self.execute_plan(&mut plan, flow, on_status).await
+        Ok(self.execute_plan(&mut plan, flow, on_status).await)
     }
 }
 
@@ -279,10 +335,10 @@ impl Pool {
         output_amounts: Array,
         on_status: Option<Function>,
     ) -> Result<wasm_bindgen::JsValue, JsError> {
-        let result = self
+        let outcome = self
             .deposit_inner(amount, output_amounts, on_status)
             .await?;
-        execute_hashes_to_js(result)
+        ExecuteJsResponse::from(outcome).to_value()
     }
 
     #[wasm_bindgen]
@@ -299,10 +355,10 @@ impl Pool {
             .map_err(|e| JsError::new(&e.to_string()))?;
         let target = SpendTarget::transfer(recipient_note, recipient_enc);
 
-        let result = self
+        let outcome = self
             .spend_inner(amount, target, "transfer", on_status)
             .await?;
-        execute_hashes_to_js(result)
+        ExecuteJsResponse::from(outcome).to_value()
     }
 
     #[wasm_bindgen]
@@ -313,10 +369,10 @@ impl Pool {
         on_status: Option<Function>,
     ) -> Result<wasm_bindgen::JsValue, JsError> {
         let target = SpendTarget::withdraw(withdraw_recipient);
-        let result = self
+        let outcome = self
             .spend_inner(amount, target, "withdraw", on_status)
             .await?;
-        execute_hashes_to_js(result)
+        ExecuteJsResponse::from(outcome).to_value()
     }
 
     #[wasm_bindgen]
@@ -331,7 +387,7 @@ impl Pool {
         out_recipient_enc_keys_hex: Array,
         on_status: Option<Function>,
     ) -> Result<wasm_bindgen::JsValue, JsError> {
-        let result = self
+        let outcome = self
             .transact_inner(
                 ext_recipient,
                 ext_amount,
@@ -343,6 +399,6 @@ impl Pool {
                 "transact",
             )
             .await?;
-        execute_hashes_to_js(result)
+        ExecuteJsResponse::from(outcome).to_value()
     }
 }

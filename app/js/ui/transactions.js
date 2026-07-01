@@ -266,12 +266,21 @@ async function executeFromAmount(ctx, { btn, amountInputId, run }) {
     return run(ctx, amountRes.value);
 }
 
-function showExecuteResult(hashes) {
-    if (hashes == null) {
+function showExecuteResult(result) {
+    if (result?.status === 'aspNotReady') {
         Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
         return;
     }
-    showSubmittedToasts(hashes);
+    if (result?.status === 'failed') {
+        if (Array.isArray(result.hashes) && result.hashes.length > 0) {
+            showSubmittedToasts(result.hashes);
+        }
+        Toast.show(result.message || 'Transaction failed', 'error', 7000);
+        return;
+    }
+    if (result?.status === 'ok') {
+        showSubmittedToasts(result.hashes);
+    }
 }
 
 function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
@@ -567,13 +576,13 @@ export const Transactions = {
 
                 const ctx = await prepareExecuteContext(btn);
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.pool.deposit(
+                const result = await ctx.pool.deposit(
                     amountStroops,
                     outputAmounts,
                     ctx.onStatus,
                 );
 
-                showExecuteResult(hashes);
+                showExecuteResult(result);
             } catch (e) {
                 Toast.show(e?.message || 'Deposit failed', 'error', 7000);
             } finally {
@@ -599,7 +608,7 @@ export const Transactions = {
                 const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
                     || App.state.wallet.address;
 
-                let hashes;
+                let result;
                 if (advanced) {
                     const inputNoteIds = collectNoteIds('withdraw-inputs');
                     if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
@@ -611,7 +620,7 @@ export const Transactions = {
                     }
 
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.pool.transact(
+                    result = await ctx.pool.transact(
                         recipient,
                         -total,
                         inputNoteIds,
@@ -621,7 +630,7 @@ export const Transactions = {
                         ctx.onStatus,
                     );
                 } else {
-                    hashes = await executeFromAmount(ctx, {
+                    result = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'withdraw-amount',
                         run: (c, amountStroops) => c.pool.withdraw(
@@ -630,10 +639,10 @@ export const Transactions = {
                             c.onStatus,
                         ),
                     });
-                    if (hashes === undefined) return;
+                    if (result === undefined) return;
                 }
 
-                showExecuteResult(hashes);
+                showExecuteResult(result);
             } catch (e) {
                 Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
             } finally {
@@ -670,7 +679,7 @@ export const Transactions = {
                 const advanced = isAdvancedMode('transfer-advanced-mode');
                 const ctx = await prepareExecuteContext(btn);
 
-                let hashes;
+                let result;
                 if (advanced) {
                     const inputNoteIds = collectNoteIds('transfer-inputs');
                     if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
@@ -683,7 +692,7 @@ export const Transactions = {
                     const poolContractId = getActivePoolContractId(config);
 
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.pool.transact(
+                    result = await ctx.pool.transact(
                         poolContractId,
                         0n,
                         inputNoteIds,
@@ -693,7 +702,7 @@ export const Transactions = {
                         ctx.onStatus,
                     );
                 } else {
-                    hashes = await executeFromAmount(ctx, {
+                    result = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'transfer-amount',
                         run: (c, amountStroops) => c.pool.transfer(
@@ -703,10 +712,10 @@ export const Transactions = {
                             c.onStatus,
                         ),
                     });
-                    if (hashes === undefined) return;
+                    if (result === undefined) return;
                 }
 
-                showExecuteResult(hashes);
+                showExecuteResult(result);
             } catch (e) {
                 Toast.show(e?.message || 'Transfer failed', 'error', 7000);
             } finally {
@@ -758,7 +767,7 @@ export const Transactions = {
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.pool.transact(
+                const result = await ctx.pool.transact(
                     extRecipient,
                     extAmountStroops,
                     inputNoteIds,
@@ -767,7 +776,7 @@ export const Transactions = {
                     encKeys,
                     ctx.onStatus,
                 );
-                showExecuteResult(hashes);
+                showExecuteResult(result);
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
             } finally {
