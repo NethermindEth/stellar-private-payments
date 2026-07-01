@@ -20,7 +20,7 @@ struct PoolRow {
     token_contract_id: String,
     token_link: String,
     asset: String,
-    balance_stroops: String,
+    balance: String,
 }
 
 #[derive(Serialize)]
@@ -61,7 +61,7 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
             token_contract_id: entry.token_contract_id.clone(),
             token_link: explorer.contract(&entry.token_contract_id),
             asset: asset_label(&entry.asset),
-            balance_stroops: balance.to_string(),
+            balance: output::format_token_amount(u128::from(balance), &asset_symbol(&entry.asset), 7),
         });
     }
 
@@ -117,7 +117,7 @@ fn print_human(o: &Overview, alias: &str) {
             format!("{} → {}", pool.token_contract_id, pool.token_link),
         );
         output::print_kv("  asset", &pool.asset);
-        output::print_kv("  balance_stroops", &pool.balance_stroops);
+        output::print_kv("  balance", &pool.balance);
         println!();
     }
 
@@ -141,6 +141,18 @@ fn contract_ref(explorer: &Explorer, contract_id: &str) -> ContractRef {
 fn explorer_base(config: &CliConfig) -> Result<String> {
     let storage = config.open_storage()?;
     crate::explorer::base_url(&storage)
+}
+
+fn asset_symbol(asset: &AssetDescriptor) -> String {
+    match asset {
+        AssetDescriptor::Native => "XLM".to_string(),
+        AssetDescriptor::Classic { code, .. } => {
+            if code.is_empty() { "Asset".to_string() } else { code.clone() }
+        }
+        AssetDescriptor::Contract { symbol, .. } => {
+            if symbol.is_empty() { "Token".to_string() } else { symbol.clone() }
+        }
+    }
 }
 
 fn asset_label(asset: &AssetDescriptor) -> String {

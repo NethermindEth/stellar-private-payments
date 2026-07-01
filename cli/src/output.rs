@@ -10,6 +10,23 @@ pub fn emit<T: Serialize + ?Sized>(value: &T, json: bool) -> Result<()> {
     Ok(())
 }
 
+pub fn format_token_amount(amount: u128, symbol: &str, decimals: u32) -> String {
+    let decimals = decimals as usize;
+    if decimals == 0 {
+        return format!("{amount} {symbol}");
+    }
+
+    let abs = format!("{amount:0>width$}", width = decimals + 1);
+    let int_part = &abs[..abs.len() - decimals];
+    let frac = abs[abs.len() - decimals..].trim_end_matches('0');
+    let formatted = if frac.is_empty() {
+        int_part.to_string()
+    } else {
+        format!("{int_part}.{frac}")
+    };
+    format!("{formatted} {symbol}")
+}
+
 fn print_human<T: Serialize + ?Sized>(value: &T) -> Result<()> {
     let json = serde_json::to_value(value)?;
     match json {
