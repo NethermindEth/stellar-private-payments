@@ -21,6 +21,15 @@ The `web` platform runs Rust application logic in the browser via WASM, with hea
 
 ### Components
 
+The WASM layer exposes two JS handles with different scope:
+
+| Handle | Scope | Examples |
+|--------|-------|----------|
+| **`WebClient`** | Account and deployment (all pools) | `getUserNotes`, `contractConfig`, onboarding, `createPool` |
+| **`Pool`** (`PrivatePool`) | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose` |
+
+`WebClient` is the long-lived entry point; `Pool` is created per active pool when the user transacts.
+
 **JS UI (main thread)**
 
 The UI is written in JavaScript and calls into the WASM bundle. It does not communicate with workers directly.
@@ -28,19 +37,40 @@ The UI is written in JavaScript and calls into the WASM bundle. It does not comm
 **Main thread (WASM)**
 
 - Entry point is `mainThread(config)` (WASM export).
-- Initializes logging / panic hooks, constructs `WebClient`, and starts an indexer polling loop.
+- Initializes logging / panic hooks, constructs `WebClient`, and starts the background events listener (`events_listener`).
 
-**Indexer (core Rust)**
+**Indexer (SDK + web platform)**
 
 - The indexer is generic over a storage backend (`Indexer<S: ContractDataStorage>`).
-- On web, the storage backend is `WebClient`, which implements the `ContractDataStorage` trait by forwarding calls to the Storage Worker.
-- The indexer polls Stellar RPC for contract events and persists them as raw events.
+- On web, the storage backend is **`StorageBridge`**, which implements `ContractDataStorage` (and the SDK `Storage` trait) by forwarding calls to the Storage Worker.
+- `events_listener` (in `events.rs`) owns the long-running indexer loop: it constructs `Indexer::init(...)`, calls `catch_up()` on an interval, and handles bootnode handoff when the wallet RPC has a retention gap.
+- `WebClient` does **not** implement `ContractDataStorage`; it holds a `StorageBridge` and passes clones of it to the listener and to `PrivatePool`.
 
 **`WebClient` (WASM, wasm-bindgen API)**
 
-- `WebClient` is the only Rust API exposed to JS, via `#[wasm_bindgen]` methods.
+- Long-lived handle constructed by `mainThread(config)`; exposed to JS as `webClient`.
 - Spawns both workers and performs request/response routing internally; JS never constructs or sends worker protocol messages.
 - Implements the worker communication protocol defined in `protocol.rs`.
+- **Account- and deployment-wide operations** (not tied to a single active pool session):
+  - Onboarding and key derivation (`deriveAndSaveUserKeys`, `getUserKeys`, disclaimer, bootnode config).
+  - Cross-pool storage reads via `StorageBridge` (`getUserNotes`, `getRecentPublicKeys`, `getRecentPoolActivity`).
+  - Chain/config reads (`contractConfig`, `allContractsData`, `aspState`, `registerPublicKeys`).
+  - Selective-disclosure verification without a pool session (`verifySelectiveDisclosure`).
+- Creates per-pool transact sessions via `createPool({ poolContract, networkPassphrase, userAddress })`.
+
+**`Pool` / `PrivatePool` (WASM, wasm-bindgen API)**
+
+- Per-pool, per-user session returned by `WebClient.createPool`: SDK `PrivatePool<StorageBridge>` with RPC client, state fetcher, shared `StorageBridge`, `ProverBridge`, and `WalletSigner`.
+- **Pool-scoped operations only** — JS holds the handle in app state (`createAppPool` / `closeAppPool`) until wallet disconnect or account switch.
+- WASM exports: `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`, `initialize`, `close`.
+- Proving, Freighter signing, and submit run inside this session; returns tx hashes to JS.
+
+The SDK `PrivatePool` type (native / blocking) also defines pool-scoped helpers such as `balance`, `notes`, `spendable_notes`, and `sync`. Those are **not** exported on the web `Pool` handle: the UI reads notes across pools through `WebClient.getUserNotes`, and background sync is owned by `events_listener` (see below), not by `pool.sync()` from JS.
+
+**`StorageBridge` (WASM main thread)**
+
+- Typed async bridge to the Storage Worker (`StorageWorkerRequest` / `StorageWorkerResponse`).
+- Used by the indexer, `PrivatePool`, and ad-hoc `WebClient` storage reads/writes.
 
 **Storage Worker (Web Worker)**
 
@@ -69,7 +99,10 @@ flowchart LR
   subgraph WASM["Main thread (WASM)"]
     MT["mainThread(config)"]
     WC["WebClient (wasm-bindgen API)"]
-    IDX["Indexer loop"]
+    PP["PrivatePool session"]
+    SB["StorageBridge"]
+    EL["events_listener"]
+    IDX["Indexer"]
   end
 
   %% Workers
@@ -88,23 +121,27 @@ flowchart LR
 
   UI -->|"calls WASM exports"| MT
   MT -->|"constructs"| WC
+  WC -->|"owns"| SB
+  WC -->|"createPool → transacts"| PP
+  PP --> SB
+  PP --> PW
 
-  WC -->|"spawns"| SW
-  WC -->|"spawns"| PW
+  MT -->|"spawn_local"| EL
+  EL --> IDX
+  IDX -->|"catch_up()"| RPCAPI
+  IDX -->|"ContractDataStorage"| SB
+  SB -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
 
-  MT -->|"starts"| IDX
-  IDX -->|"fetch_contract_events()"| RPCAPI
-  IDX -->|"save_events_batch() via ContractDataStorage"| WC
-  WC -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
-
-  UI -->|"WebClient.* calls"| WC
+  UI -->|"WebClient.* (reads, onboarding, createPool)"| WC
+  UI -->|"Pool.* (deposit, transfer, …)"| PP
   WC -->|"reads contract state"| RPCAPI
-  WC -->|"StorageWorkerRequest::*"| DB
-  WC -->|"ProverWorkerRequest::*"| PR
-  PR -->|"ProverWorkerResponse::*"| WC
-  DB -->|"StorageWorkerResponse::*"| WC
-  WC -->|"returns proved tx + PreparedSorobanTx"| UI
-  UI -->|"sign + submit (JS)"| RPC
+  WC -->|"StorageWorkerRequest::* (onboarding, note list, …)"| DB
+  PP -->|"ProverWorkerRequest::*"| PR
+  PR -->|"ProverWorkerResponse::*"| PP
+  DB -->|"StorageWorkerResponse::*"| SB
+  SB --> WC
+  WC -->|"returns JSON"| UI
+  PP -->|"returns tx hashes"| UI
 
   classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
   style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;

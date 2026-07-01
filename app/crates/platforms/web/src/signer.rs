@@ -1,10 +1,13 @@
-//! Wallet signing (Freighter).
+//! Freighter wallet bridge and [`Signer`] for [`PrivatePool`].
 
-use super::emit_progress;
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use stellar::{
-    Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, auth_sign_steps,
-    unsigned_tx_for_signing,
+use stellar_private_payments_sdk::{
+    PoolError, PreparedTransaction, Signer,
+    chain::{
+        Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
+        auth_sign_steps, unsigned_tx_for_signing,
+    },
+    types::SignedTransaction,
 };
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
@@ -71,27 +74,16 @@ async fn wallet_call(method: &str, args: &[JsValue]) -> Result<String, JsError> 
 }
 
 /// Signs a prepared Soroban transaction via Freighter.
-pub async fn sign_prepared_transaction(
+pub(crate) async fn sign_prepared_transaction(
     prepared: &PreparedSorobanTx,
     network_passphrase: &str,
     user_address: &str,
-    flow: &'static str,
-    on_status: &Option<Function>,
 ) -> Result<TransactionEnvelope, JsError> {
     let steps = auth_sign_steps(prepared, network_passphrase, user_address)
         .map_err(|e| JsError::new(&e.to_string()))?;
-    let total = u32::try_from(steps.len()).map_err(|_| JsError::new("too many auth steps"))?;
 
     let mut auth_signatures = Vec::with_capacity(steps.len());
-    for (i, step) in steps.iter().enumerate() {
-        let current = u32::try_from(i.saturating_add(1))
-            .map_err(|_| JsError::new("auth step exceeds u32"))?;
-        emit_progress(
-            on_status,
-            flow,
-            "sign_auth",
-            format!("Approve authorization ({current}/{total})…"),
-        );
+    for step in &steps {
         let preimage_b64 = step
             .wallet_preimage_b64()
             .map_err(|e| JsError::new(&e.to_string()))?;
@@ -112,8 +104,6 @@ pub async fn sign_prepared_transaction(
     let tx_b64 = unsigned_tx_for_signing(prepared, user_address, &auth_signatures)
         .map_err(|e| JsError::new(&e.to_string()))?;
 
-    emit_progress(on_status, flow, "sign_tx", "Approve transaction…");
-
     let signed_b64 = wallet_call(
         "signTransaction",
         &[
@@ -124,4 +114,46 @@ pub async fn sign_prepared_transaction(
     .await?;
     TransactionEnvelope::from_xdr_base64(&signed_b64, Limits::none())
         .map_err(|e| JsError::new(&format!("invalid transaction envelope xdr: {e}")))
+}
+
+/// Signs simulated pool transactions via the JS wallet bridge (Freighter).
+pub struct WalletSigner {
+    network_passphrase: String,
+    user_address: String,
+}
+
+impl WalletSigner {
+    pub fn new(network_passphrase: impl Into<String>, user_address: impl Into<String>) -> Self {
+        Self {
+            network_passphrase: network_passphrase.into(),
+            user_address: user_address.into(),
+        }
+    }
+
+    pub fn network_passphrase(&self) -> &str {
+        &self.network_passphrase
+    }
+
+    pub fn user_address(&self) -> &str {
+        &self.user_address
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Signer for WalletSigner {
+    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
+        let envelope = sign_prepared_transaction(
+            &prepared.soroban_tx,
+            &self.network_passphrase,
+            &self.user_address,
+        )
+        .await
+        .map_err(|e| PoolError::Other(format!("{e:?}")))?;
+
+        let signed_xdr = envelope
+            .to_xdr_base64(Limits::none())
+            .map_err(|e| PoolError::Other(format!("encode signed transaction xdr: {e}")))?;
+
+        Ok(SignedTransaction { signed_xdr })
+    }
 }

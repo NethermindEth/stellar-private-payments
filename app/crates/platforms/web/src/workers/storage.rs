@@ -1,27 +1,29 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, PublicEncryptionKeyPair,
-    PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
+    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
 };
-use anyhow::Result;
-use futures::{channel::mpsc, stream::StreamExt};
+use anyhow::{Result, anyhow};
+use futures::{FutureExt, channel::mpsc, stream::StreamExt};
 use gloo_timers::future::TimeoutFuture;
-use gloo_worker::{Registrable, oneshot::oneshot};
-use prover::{
-    crypto::asp_membership_leaf,
-    encryption::{
-        derive_encryption_and_note_keypairs, derive_membership_blinding, generate_random_blinding,
-    },
-    flows::{N_OUTPUTS, TransactInputNote, TransactOutput, TransactParams},
-    merkle::{MerklePrefixTree, MerklePrefixTreeBuilt, MerkleProof},
-};
-use state::{
-    AccountKeys, DerivedUserNoteRow, PoolCommitmentRow, Storage, StoredUserKeys, process_events,
-    process_notes,
+use gloo_worker::{
+    Registrable,
+    oneshot::{OneshotBridge, oneshot},
 };
 use std::cell::RefCell;
-use types::{
-    AspMembershipProof, AspMembershipSync, EncryptionKeyPair, Field, NoteAmount, NoteKeyPair,
-    NotePublicKey,
+use stellar_private_payments_sdk::{
+    BuildDisclosureInputs, BuildTransactParams, DisclosureInputs, PoolError, SpendableNote,
+    Storage, TransactRequest, build_disclosure_inputs, build_transact_params,
+    chain::ContractDataStorage,
+    state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
+    tx::{
+        crypto::asp_membership_leaf,
+        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
+        flows::TransactParams,
+    },
+    types::{
+        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata,
+        UserNoteSummary,
+    },
 };
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
@@ -47,8 +49,7 @@ fn is_opfs_locked_error(message: &str) -> bool {
 }
 
 thread_local! {
-    static STORAGE: RefCell<Option<Storage>> = const { RefCell::new(None) };
-    // signalling the events processor
+    static STORAGE: RefCell<Option<SqliteStorage>> = const { RefCell::new(None) };
     static PROCESSOR_TX: RefCell<Option<mpsc::Sender<()>>> = const { RefCell::new(None) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
@@ -122,7 +123,7 @@ async fn init() -> Result<(), JsError> {
         return Err(JsError::new(&msg));
     }
 
-    let storage = match state::Storage::connect() {
+    let storage = match SqliteStorage::connect() {
         Ok(storage) => storage,
         Err(e) => {
             let msg = format!("Failed to open local database: {e}");
@@ -195,9 +196,6 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 events_data.events.len()
             );
             with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
-            // We could pass the events_data here further for the processing but
-            // for the sake of the sequential processing we drop it here
-            // the storage is the single source of raw events for the processors
             log::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
@@ -302,7 +300,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             // receiving it over the worker bridge: ContractConfig contains the
             // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
             // cannot deserialize (panics with DeserializeAnyNotSupported).
-            let config: types::ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
+            let config: ContractConfig = serde_json::from_str(crate::DEPLOYMENT)?;
             let list = with_storage!(s => s.list_portfolio_balances(&address, &config)?)?;
             StorageWorkerResponse::PortfolioBalances(list)
         }
@@ -350,6 +348,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
             StorageWorkerResponse::UserNotes(list)
         }
+        StorageWorkerRequest::PoolUserNotes {
+            user_address,
+            pool_contract_id,
+        } => {
+            log::trace!(
+                "[{WORKER_NAME}] list all notes for the account {user_address} in pool {pool_contract_id}"
+            );
+            let list = with_storage!(s =>
+                s.list_pool_user_notes(&pool_contract_id, &user_address)?
+            )?;
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} notes for the account {user_address}",
+                list.len()
+            );
+            StorageWorkerResponse::UserNotes(list)
+        }
         StorageWorkerRequest::RecentPubKeys(limit) => {
             log::trace!("[{WORKER_NAME}] fetch pub keys for the address book");
             let list = with_storage!(s => s.get_recent_public_keys(limit)?)?;
@@ -390,48 +404,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 req.user_address
             );
 
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-            let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
-                load_user_key_material(&req.user_address)?;
-
-            let tree = match build_validated_pool_tree(
-                &req.pool_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-            )? {
-                Ok(tree) => tree,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let (amount, blinding, leaf_index) = with_storage!(
-                s => s.get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, &req.selected_commitment)?
-            )?
-            .ok_or_else(|| {
-                anyhow::anyhow!(
-                    "unspent note not found for commitment {}",
-                    req.selected_commitment
-                )
-            })?;
-
-            let MerkleProof {
-                path_elements,
-                path_indices,
-                root,
-                ..
-            } = tree.proof(leaf_index)?;
-
-            StorageWorkerResponse::DisclosureInputs(DisclosureInputs {
-                root,
-                note_commitment: req.selected_commitment,
-                note_amount: amount,
-                note_private_key: note_privkey,
-                note_blinding: blinding,
-                merkle_path_indices: path_indices,
-                merkle_path_elements: path_elements,
-            })
+            with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
+                BuildDisclosureInputs::Ready(inputs) => {
+                    StorageWorkerResponse::DisclosureInputs(inputs)
+                }
+                BuildDisclosureInputs::MembershipSync(status) => {
+                    StorageWorkerResponse::AspMembershipSync(status)
+                }
+            })?
         }
         StorageWorkerRequest::DeriveASPleaf(AdminASPRequest {
             membership_blinding,
@@ -444,240 +424,15 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         }
         StorageWorkerRequest::Transact(req) => {
             log::trace!("[{WORKER_NAME}] transact");
-
-            if req.input_commitments.len() > 2 {
-                return Ok(StorageWorkerResponse::Error(
-                    "transact input_commitments must have length 0..=2".to_string(),
-                ));
-            }
-
-            let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
-                load_user_key_material(&req.user_address)?;
-
-            let membership_proof = match build_membership_proof(
-                &req.aspmem_contract_id,
-                &note_pubkey,
-                membership_blinding,
-                req.aspmem_root,
-                req.aspmem_ledger,
-                req.tree_depth,
-            )? {
-                Ok(p) => p,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let pool_root = req
-                .pool_root
-                .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
-
-            let inputs = match build_pool_inputs(
-                &req.user_address,
-                &req.pool_address,
-                req.pool_next_index,
-                req.tree_depth,
-                pool_root,
-                &req.input_commitments,
-            )? {
-                Ok(v) => v,
-                Err(status) => return Ok(StorageWorkerResponse::AspMembershipSync(status)),
-            };
-
-            let mut outputs = Vec::with_capacity(N_OUTPUTS);
-            for i in 0..N_OUTPUTS {
-                let note_pk = req.out_recipient_note_pubkeys[i].clone();
-                let enc_pk = req.out_recipient_encryption_pubkeys[i].clone();
-                if note_pk.is_some() != enc_pk.is_some() {
-                    return Ok(StorageWorkerResponse::Error(format!(
-                        "output {i}: recipient_note_pubkey and recipient_encryption_pubkey must both be set or both be null"
-                    )));
+            with_storage_mut!(storage => match build_transact_params(storage, &req)? {
+                BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
+                BuildTransactParams::MembershipSync(status) => {
+                    StorageWorkerResponse::AspMembershipSync(status)
                 }
-                outputs.push(TransactOutput {
-                    amount: req.output_amounts[i],
-                    blinding: generate_random_blinding()?,
-                    recipient_note_pubkey: note_pk,
-                    recipient_encryption_pubkey: enc_pk,
-                });
-            }
-
-            let params = TransactParams {
-                priv_key: note_privkey,
-                encryption_pubkey,
-                pool_root,
-                ext_recipient: req.ext_recipient,
-                ext_amount: req.ext_amount,
-                inputs,
-                outputs,
-                membership_proof,
-                non_membership_proof: req.non_membership_proof,
-                tree_depth: req.tree_depth,
-                smt_depth: req.smt_depth,
-            };
-
-            StorageWorkerResponse::TransactParams(params)
+            })?
         }
     };
     Ok(resp)
-}
-
-fn load_user_key_material(
-    user_address: &str,
-) -> Result<(
-    types::NotePrivateKey,
-    NotePublicKey,
-    types::EncryptionPublicKey,
-    Field,
-)> {
-    with_storage!(s => {
-        let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
-            match s.get_user_keys(user_address)? {
-                Some(StoredUserKeys {
-                    note_keypair:
-                        NoteKeyPair {
-                            private,
-                            public: note_pub,
-                        },
-                    encryption_keypair: EncryptionKeyPair { public: enc_pub, .. },
-                    membership_blinding,
-                }) => (private, note_pub, enc_pub, membership_blinding),
-                None => {
-                    anyhow::bail!(
-                        "address {user_address} should generate privacy keys and ASP secret first"
-                    );
-                }
-            };
-        Ok::<_, anyhow::Error>((
-            note_privkey,
-            note_pubkey,
-            encryption_pubkey,
-            membership_blinding,
-        ))
-    })?
-}
-
-fn build_membership_proof(
-    aspmem_contract_id: &str,
-    note_pubkey: &NotePublicKey,
-    membership_blinding: Field,
-    aspmem_root: Field,
-    aspmem_ledger: u32,
-    tree_depth: u32,
-) -> Result<std::result::Result<AspMembershipProof, AspMembershipSync>> {
-    let user_leaf = asp_membership_leaf(note_pubkey, &membership_blinding)?;
-    let user_leaf_index = match with_storage!(s => s.check_asp_membership_precondition(
-        aspmem_contract_id,
-        &user_leaf,
-        &aspmem_root,
-        aspmem_ledger
-    )?)? {
-        AspMembershipSync::UserIndex(user_leaf_index) => user_leaf_index,
-        status => {
-            log::debug!("[{WORKER_NAME}] asp membership check is not fully synced");
-            return Ok(Err(status));
-        }
-    };
-
-    let asp_membership_merkle_tree_leaves =
-        with_storage!(s => s.get_all_asp_membership_leaves_ordered(aspmem_contract_id)?)?;
-    let aspmembership_tree =
-        MerklePrefixTree::new(tree_depth, &asp_membership_merkle_tree_leaves)?.into_built();
-    let MerkleProof {
-        path_indices,
-        path_elements,
-        root,
-        ..
-    } = aspmembership_tree.proof(user_leaf_index)?;
-
-    Ok(Ok(AspMembershipProof {
-        leaf: user_leaf,
-        blinding: membership_blinding,
-        path_elements,
-        path_indices,
-        root,
-    }))
-}
-
-fn build_pool_inputs(
-    user_address: &str,
-    pool_address: &str,
-    pool_next_index: u32,
-    tree_depth: u32,
-    expected_pool_root: Field,
-    input_commitments: &[Field],
-) -> Result<std::result::Result<Vec<TransactInputNote>, AspMembershipSync>> {
-    if input_commitments.is_empty() {
-        return Ok(Ok(Vec::new()));
-    }
-
-    let tree = match build_validated_pool_tree(
-        pool_address,
-        pool_next_index,
-        tree_depth,
-        expected_pool_root,
-    )? {
-        Ok(tree) => tree,
-        Err(status) => return Ok(Err(status)),
-    };
-
-    let mut out = Vec::with_capacity(input_commitments.len());
-    for commitment in input_commitments {
-        let Some((amount, blinding, leaf_index)) = with_storage!(s => s.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?)?
-        else {
-            log::info!(
-                "[{WORKER_NAME}] unspent note not found for commitment {commitment}; waiting for note derivation"
-            );
-            return Ok(Err(AspMembershipSync::SyncRequired(None)));
-        };
-
-        out.push(build_pool_input_note(amount, blinding, leaf_index, &tree)?);
-    }
-
-    Ok(Ok(out))
-}
-
-fn build_validated_pool_tree(
-    pool_address: &str,
-    pool_next_index: u32,
-    tree_depth: u32,
-    expected_pool_root: Field,
-) -> Result<std::result::Result<MerklePrefixTreeBuilt, AspMembershipSync>> {
-    let leaves = with_storage!(s => s.get_pool_commitment_leaves_ordered(pool_address)?)?;
-
-    if leaves.len() != pool_next_index as usize {
-        log::info!(
-            "[{WORKER_NAME}] pool commitments not synced: local={}, chain={}",
-            leaves.len(),
-            pool_next_index
-        );
-        return Ok(Err(AspMembershipSync::SyncRequired(None)));
-    }
-
-    let tree = MerklePrefixTree::new(tree_depth, &leaves)?.into_built();
-    let computed_root = tree.root()?;
-    if computed_root != expected_pool_root {
-        anyhow::bail!("pool root mismatch: local computed root does not match on-chain root");
-    }
-
-    Ok(Ok(tree))
-}
-
-fn build_pool_input_note(
-    amount: NoteAmount,
-    blinding: Field,
-    leaf_index: u32,
-    tree: &MerklePrefixTreeBuilt,
-) -> Result<TransactInputNote> {
-    let MerkleProof {
-        path_elements,
-        path_indices,
-        ..
-    } = tree.proof(leaf_index)?;
-
-    Ok(TransactInputNote {
-        amount,
-        blinding,
-        merkle_path_elements: path_elements,
-        merkle_path_indices: path_indices,
-    })
 }
 
 fn kick_processor() {
@@ -697,32 +452,281 @@ async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
 }
 
 async fn process_until_empty() -> anyhow::Result<()> {
-    const FETCH_LIMIT: u32 = 50; // small chunks to stay responsive
-
     loop {
-        let did_raw = with_storage_mut!(s => process_events(s, FETCH_LIMIT)?)?;
-        let mut derive = |account: &AccountKeys,
-                          row: &PoolCommitmentRow|
-         -> anyhow::Result<Option<DerivedUserNoteRow>> {
-            let opt = prover::notes::try_decrypt_and_derive_user_note(
-                &account.note_keypair,
-                &account.encryption_keypair.private,
-                &row.commitment,
-                row.leaf_index,
-                &row.encrypted_output,
-            )?;
-            Ok(opt.map(|d| DerivedUserNoteRow {
-                amount: d.amount,
-                blinding: d.blinding,
-                expected_nullifier: d.expected_nullifier,
-            }))
-        };
-        let did_notes = with_storage_mut!(s => process_notes(s, FETCH_LIMIT, &mut derive)?)?;
-        if !did_raw && !did_notes {
+        let did_work = with_storage_mut!(storage => process_local_state_batch(storage)?)?;
+        if !did_work {
             break;
         }
-        // Yield to avoid blocking the worker for a long time
-        gloo_timers::future::TimeoutFuture::new(0).await;
+        TimeoutFuture::new(0).await;
     }
     Ok(())
+}
+
+/// Storage worker bridge — single entry point for all main-thread ↔ worker I/O.
+pub(crate) struct StorageBridge {
+    bridge: OneshotBridge<StorageWorker>,
+}
+
+impl Clone for StorageBridge {
+    fn clone(&self) -> Self {
+        Self {
+            bridge: self.bridge.fork(),
+        }
+    }
+}
+
+impl StorageBridge {
+    pub(crate) fn new(bridge: OneshotBridge<StorageWorker>) -> Self {
+        Self { bridge }
+    }
+
+    /// Send a request to the storage worker and return its response.
+    ///
+    /// Worker-level [`StorageWorkerResponse::Error`] is mapped to `Err`.
+    pub(crate) async fn call(
+        &self,
+        req: StorageWorkerRequest,
+        timeout_ms: u32,
+    ) -> anyhow::Result<StorageWorkerResponse> {
+        let mut bridge = self.bridge.fork();
+        let fut = bridge.run(req).fuse();
+        let timeout = TimeoutFuture::new(timeout_ms).fuse();
+
+        futures::pin_mut!(fut, timeout);
+
+        let resp = futures::select! {
+            value = fut => value,
+            _ = timeout => {
+                return Err(anyhow!("operation timed out after {timeout_ms} ms"));
+            }
+        };
+
+        match resp {
+            StorageWorkerResponse::Error(e) => Err(anyhow!(e)),
+            other => Ok(other),
+        }
+    }
+
+    pub(crate) async fn ping(&self) -> anyhow::Result<()> {
+        match self.call(StorageWorkerRequest::Ping, 5_000).await? {
+            StorageWorkerResponse::Pong => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn clear_indexing_cursors(&self) -> anyhow::Result<()> {
+        match self
+            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
+        match self
+            .call(
+                StorageWorkerRequest::GetSetting(
+                    stellar_private_payments_sdk::state::APP_SETTING_BOOTNODE_CONFIG.to_string(),
+                ),
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::Setting(Some(json))) => {
+                serde_json::from_str::<stellar_private_payments_sdk::types::BootnodeSetting>(&json)
+                    .ok()
+                    .filter(|config| config.enabled && !config.url.is_empty())
+                    .map(|config| config.url)
+            }
+            _ => None,
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl ContractDataStorage for StorageBridge {
+    async fn get_sync_state(&self) -> anyhow::Result<Vec<SyncMetadata>> {
+        match self.call(StorageWorkerRequest::SyncState, 5_000).await? {
+            StorageWorkerResponse::SyncState(state) => Ok(state),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    async fn save_events_batch(&self, data: ContractsEventData) -> anyhow::Result<()> {
+        match self
+            .call(StorageWorkerRequest::SaveEvents(data), 10_000)
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+
+    async fn save_sync_progress(
+        &self,
+        metadata: Vec<SyncMetadata>,
+        fully_indexed: bool,
+    ) -> anyhow::Result<()> {
+        match self
+            .call(
+                StorageWorkerRequest::SaveSyncProgress {
+                    metadata,
+                    fully_indexed,
+                },
+                10_000,
+            )
+            .await?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(anyhow!("unexpected response: {other:?}")),
+        }
+    }
+}
+
+#[async_trait::async_trait(?Send)]
+impl Storage for StorageBridge {
+    fn fork(&self) -> Result<Self, PoolError> {
+        Ok(Self {
+            bridge: self.bridge.fork(),
+        })
+    }
+
+    async fn process_pending_state(&self) -> Result<(), PoolError> {
+        // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
+        // in the worker background loop without blocking this bridge.
+        Ok(())
+    }
+
+    async fn ensure_ready(&self) -> Result<(), PoolError> {
+        self.ping()
+            .await
+            .map_err(|e| PoolError::Other(e.to_string()))
+    }
+
+    async fn spendable_notes(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<SpendableNote>, PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::UnspentUserNotes {
+                    user_address: user_address.to_string(),
+                    pool_contract_id: pool_contract_id.to_string(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes
+                .into_iter()
+                .map(|n| SpendableNote {
+                    commitment: n.id,
+                    amount: n.amount,
+                })
+                .collect()),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading spendable notes: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn notes(
+        &self,
+        pool_contract_id: &str,
+        user_address: &str,
+    ) -> Result<Vec<UserNoteSummary>, PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::PoolUserNotes {
+                    user_address: user_address.to_string(),
+                    pool_contract_id: pool_contract_id.to_string(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading notes: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn build_transact_params(
+        &self,
+        req: &TransactRequest,
+    ) -> Result<TransactParams, PoolError> {
+        match self
+            .call(StorageWorkerRequest::Transact(req.clone()), 5_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::TransactParams(params)) => Ok(params),
+            Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
+                Err(PoolError::MembershipSync(status))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response building transact params: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn build_disclosure_inputs(
+        &self,
+        req: &stellar_private_payments_sdk::DisclosureInputsRequest,
+    ) -> Result<DisclosureInputs, PoolError> {
+        match self
+            .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
+            .await
+        {
+            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => Ok(inputs),
+            Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
+                Err(PoolError::MembershipSync(status))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response building disclosure inputs: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {
+        let _ = user_address;
+        Err(PoolError::Other(
+            "full user keys are not available on the storage bridge; use user_public_keys".into(),
+        ))
+    }
+
+    async fn user_public_keys(
+        &self,
+        user_address: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::UserKeys(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserKeys(keys)) => {
+                let keys = keys.ok_or_else(|| {
+                    PoolError::Other("user keys not found in worker storage".into())
+                })?;
+                Ok((keys.note_keypair.public, keys.encryption_keypair.public))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response loading user keys: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
+
+    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
+        Ok(self.user_public_keys(user_address).await?.0)
+    }
 }

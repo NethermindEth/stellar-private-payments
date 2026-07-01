@@ -1,6 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
+import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
@@ -283,6 +284,7 @@ export const Wallet = {
                 renderSettingsDrawer();
                 renderWallet();
                 App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
+                await createAppPool();
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
@@ -321,6 +323,7 @@ export const Wallet = {
     disconnect() {
         this._stopWatcher?.();
         this._stopWatcher = null;
+        closeAppPool();
         App.state.wallet = {
             connected: false,
             address: null,

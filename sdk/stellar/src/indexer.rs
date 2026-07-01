@@ -15,16 +15,7 @@ pub struct Indexer<S: ContractDataStorage> {
 }
 
 impl<S: ContractDataStorage> Indexer<S> {
-    pub async fn init(rpc_url: &str, storage: S, config: &'static ContractConfig) -> Result<Self> {
-        let client = Client::new(rpc_url)?;
-        Self::init_with_client(client, storage, config).await
-    }
-
-    pub async fn init_with_client(
-        client: Client,
-        storage: S,
-        config: &ContractConfig,
-    ) -> Result<Self> {
+    pub async fn init(client: Client, storage: S, config: &ContractConfig) -> Result<Self> {
         let min_pool_ledger = config.min_deployment_ledger()?;
         let contract_ids = config.all_contract_ids();
 
