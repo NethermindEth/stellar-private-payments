@@ -179,7 +179,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             ))
         })?;
     let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
-        .expect("FAILED Disclosure Prover");
+        .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))?;
 
     TRANSACT_PROVER.with(|cell| {
         *cell.borrow_mut() = Some(transact_prover);
