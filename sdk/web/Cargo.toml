@@ -28,28 +28,28 @@ base64 = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
-gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
-js-sys = "0.3"
+gloo-worker = { workspace = true }
+js-sys = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 sha2 = { workspace = true }
 wasm-bindgen = { workspace = true }
-wasm-bindgen-futures = { version = "0.4", default-features = false }
+wasm-bindgen-futures = { workspace = true }
 wasm-log = { workspace = true }
-web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event"] }
+web-sys = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-sqlite-wasm-rs = { version = "0.5.3", default-features = false }
-sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
+sqlite-wasm-rs = { workspace = true }
+sqlite-wasm-vfs = { workspace = true }
 
 [build-dependencies]
 sha2 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 tokio = { workspace = true, features = ["macros", "rt"] }
-wiremock = "0.6"
+wiremock = { workspace = true }
 
 [lints]
 workspace = true
