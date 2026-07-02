@@ -43,14 +43,44 @@ pub fn transfer(
     encryption_key: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let recipient = resolve_transfer_recipient(config, to, note_key, encryption_key)?;
-    let session = open(config, pool)?;
+    let (session, recipient) = prepare_transfer(
+        config,
+        pool,
+        to,
+        note_key,
+        encryption_key,
+        open,
+        resolve_transfer_recipient,
+    )?;
     let amount = parse_amount(amount)?;
     let results = session
         .pool()
         .transfer(recipient, amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     print_tx_results(config, "Transfer submitted", &results, json)
+}
+
+fn prepare_transfer<C, S, FOpen, FResolve>(
+    config: &C,
+    pool: &str,
+    to: Option<&str>,
+    note_key: Option<&str>,
+    encryption_key: Option<&str>,
+    open_fn: FOpen,
+    resolve_fn: FResolve,
+) -> Result<(S, stellar_private_payments_sdk::TransferRecipient)>
+where
+    FOpen: FnOnce(&C, &str) -> Result<S>,
+    FResolve: FnOnce(
+        &C,
+        Option<&str>,
+        Option<&str>,
+        Option<&str>,
+    ) -> Result<stellar_private_payments_sdk::TransferRecipient>,
+{
+    let session = open_fn(config, pool)?;
+    let recipient = resolve_fn(config, to, note_key, encryption_key)?;
+    Ok((session, recipient))
 }
 
 pub fn withdraw(
@@ -98,4 +128,44 @@ fn print_tx_results(
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::prepare_transfer;
+    use std::{cell::RefCell, rc::Rc};
+    use stellar_private_payments_sdk::{
+        TransferRecipient,
+        types::{EncryptionPublicKey, NotePublicKey},
+    };
+
+    #[test]
+    fn transfer_opens_before_resolving_recipient() {
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let open_calls = Rc::clone(&calls);
+        let resolve_calls = Rc::clone(&calls);
+
+        let (_, recipient) = prepare_transfer(
+            &(),
+            "pool",
+            Some("GCEXAMPLE"),
+            None,
+            None,
+            move |_, _| {
+                open_calls.borrow_mut().push("open");
+                Ok(())
+            },
+            move |_, _, _, _| {
+                resolve_calls.borrow_mut().push("resolve");
+                Ok(TransferRecipient {
+                    note_public_key: NotePublicKey([0u8; 32]),
+                    encryption_public_key: EncryptionPublicKey([1u8; 32]),
+                })
+            },
+        )
+        .unwrap();
+
+        assert_eq!(recipient.note_public_key.0, [0u8; 32]);
+        assert_eq!(calls.borrow().as_slice(), ["open", "resolve"]);
+    }
 }
