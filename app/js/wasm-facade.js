@@ -17,7 +17,7 @@ let wrappedClient = null;
 let wasmReady = false;
 let eventSyncStarted = false;
 let currentRpcUrl = null;
-let walletInitialized = false;
+let boundUserAddress = null;
 
 export { PROVER_WORKER_URL, STORAGE_WORKER_URL };
 
@@ -141,6 +141,7 @@ export async function initializeRuntime(rpcUrl) {
         wrappedClient = await openWrappedClient(storage, rpcUrl);
         currentRpcUrl = rpcUrl;
         eventSyncStarted = false;
+        boundUserAddress = null;
     }
 
     return { storage: appStorage(), client: client() };
@@ -164,12 +165,16 @@ export async function startEventSync({ bootnodeUrl } = {}) {
     eventSyncStarted = true;
 }
 
-/** Bind wallet signer, spawn workers, derive privacy keys when missing. Idempotent. */
+/** Bind wallet signer, spawn workers, derive privacy keys when missing. Idempotent per address. */
 export async function initializeWallet(
     { networkPassphrase, userAddress },
     signer = new FreighterSigner(),
 ) {
-    if (walletInitialized) return;
+    if (boundUserAddress === userAddress) return;
+
+    if (boundUserAddress != null) {
+        wrappedClient = await openWrappedClient(storage, currentRpcUrl);
+    }
 
     await client().initialize(
         {
@@ -179,17 +184,7 @@ export async function initializeWallet(
         },
         signer,
     );
-    walletInitialized = true;
-}
-
-/**
- * Drop the wallet session shell so a later connect can call `initializeWallet` again.
- * Keeps the storage worker and event sync running.
- */
-export async function resetWalletSession() {
-    if (!storage || !currentRpcUrl) return;
-    wrappedClient = await openWrappedClient(storage, currentRpcUrl);
-    walletInitialized = false;
+    boundUserAddress = userAddress;
 }
 
 /**

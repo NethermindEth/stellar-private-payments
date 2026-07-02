@@ -8,7 +8,6 @@ import {
     initializeWallet,
     lookupRegisteredPublicKey,
     registerPublicKeys,
-    resetWalletSession,
     startEventSync,
 } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
@@ -364,7 +363,6 @@ export const Wallet = {
         this._stopWatcher?.();
         this._stopWatcher = null;
         closeAppPool();
-        resetWalletSession().catch(() => {});
         App.state.wallet = {
             connected: false,
             connecting: false,
