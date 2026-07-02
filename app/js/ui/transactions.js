@@ -14,6 +14,38 @@ import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 
 const N_OUTPUTS = 2;
+const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
+
+function bindTxProgress(btn, flow) {
+    const handler = (e) => {
+        const d = e.detail;
+        if (d?.flow !== flow || !d?.message) return;
+        setLoadingText(btn, d.message);
+    };
+    window.addEventListener(TX_PROGRESS_EVENT, handler);
+    return () => window.removeEventListener(TX_PROGRESS_EVENT, handler);
+}
+
+async function withTxProgress(flow, btn, fn) {
+    const unbind = btn ? bindTxProgress(btn, flow) : () => {};
+    try {
+        return await fn();
+    } finally {
+        unbind();
+    }
+}
+
+function parseExecuteResult(result) {
+    if (result == null) return null;
+    if (result.status === 'aspNotReady') return null;
+    if (result.status === 'failed') {
+        throw new Error(result.message || 'Transaction failed');
+    }
+    if (result.status === 'ok') {
+        return result.hashes ?? [];
+    }
+    return txResultsToHashes(result);
+}
 
 function txResultsToHashes(results) {
     if (results == null) return null;
@@ -48,20 +80,20 @@ function buildTransactConfig({
     };
 }
 
-async function poolTransact(pool, config) {
-    const result = await pool.transact(config);
-    return txResultsToHashes(result);
+async function poolTransact(pool, config, btn, flow = 'transact') {
+    const result = await withTxProgress(flow, btn, () => pool.transact(config));
+    return parseExecuteResult(result);
 }
 
-async function poolDeposit(pool, amountStroops, outputAmounts, poolContractId) {
+async function poolDeposit(pool, amountStroops, outputAmounts, poolContractId, btn) {
     const outputs = Array.isArray(outputAmounts) ? outputAmounts : [];
     const splitDeposit =
         outputs.length >= N_OUTPUTS
         && (outputs[0] !== amountStroops || outputs[1] !== 0n);
 
     if (!splitDeposit) {
-        const results = await pool.deposit(amountStroops);
-        return txResultsToHashes(results);
+        const result = await withTxProgress('deposit', btn, () => pool.deposit(amountStroops));
+        return parseExecuteResult(result);
     }
 
     const keys = await client().loadWalletKeys(App.state.wallet.address);
@@ -75,7 +107,7 @@ async function poolDeposit(pool, amountStroops, outputAmounts, poolContractId) {
             keys.encryptionKeypair.publicKey,
             keys.encryptionKeypair.publicKey,
         ],
-    }));
+    }), btn, 'deposit');
 }
 
 function noteAmountToStroopsBigInt(amount) {
@@ -315,7 +347,7 @@ async function requirePlanApproval(amountStroops) {
     return stepCount;
 }
 
-async function executeFromAmount(ctx, { btn, amountInputId, run }) {
+async function executeFromAmount(ctx, { btn, amountInputId, run, flow }) {
     const amountRes = tryParseXlmToStroopsBigInt(
         document.getElementById(amountInputId)?.value,
         { allowNegative: false },
@@ -327,7 +359,10 @@ async function executeFromAmount(ctx, { btn, amountInputId, run }) {
     if (stepCount == null) return undefined;
 
     setLoadingText(btn, stepCount === 1 ? 'Proving…' : `Proving (1/${stepCount})…`);
-    return run(ctx, amountRes.value);
+    return withTxProgress(flow, btn, async () => {
+        const result = await run(ctx, amountRes.value);
+        return parseExecuteResult(result);
+    });
 }
 
 function showExecuteResult(hashes) {
@@ -650,6 +685,7 @@ export const Transactions = {
                     amountStroops,
                     outputAmounts,
                     poolContractId,
+                    btn,
                 );
 
                 if (showExecuteResult(hashes)) {
@@ -708,17 +744,15 @@ export const Transactions = {
                         outputAmounts: [0n, 0n],
                         outRecipientNoteKeysHex: [null, null],
                         outRecipientEncKeysHex: [null, null],
-                    }));
+                    }), btn, 'withdraw');
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'withdraw-amount',
+                        flow: 'withdraw',
                         run: (c, amountStroops) => {
                             withdrawAmount = amountStroops;
-                            return c.pool.withdraw(
-                                amountStroops,
-                                recipient,
-                            ).then(txResultsToHashes);
+                            return c.pool.withdraw(amountStroops, recipient);
                         },
                     });
                     if (hashes === undefined) return;
@@ -789,18 +823,19 @@ export const Transactions = {
                         outputAmounts,
                         outRecipientNoteKeysHex: [recipientNoteKey, recipientNoteKey],
                         outRecipientEncKeysHex: [recipientEncKey, recipientEncKey],
-                    }));
+                    }), btn, 'transfer');
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'transfer-amount',
+                        flow: 'transfer',
                         run: (c, amountStroops) => {
                             transferAmount = amountStroops;
                             return c.pool.transferToKeys(
                                 recipientNoteKey,
                                 recipientEncKey,
                                 amountStroops,
-                            ).then(txResultsToHashes);
+                            );
                         },
                     });
                     if (hashes === undefined) return;
@@ -875,7 +910,7 @@ export const Transactions = {
                     outputAmounts,
                     outRecipientNoteKeysHex: noteKeys,
                     outRecipientEncKeysHex: encKeys,
-                }));
+                }), btn, 'transact');
                 if (showExecuteResult(hashes)) {
                     recordSuccessfulOp(hashes, poolContractId, {
                         type: 'Advanced transaction',

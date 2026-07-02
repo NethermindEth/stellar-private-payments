@@ -1,4 +1,5 @@
 mod core;
+mod execute;
 mod pool;
 mod session;
 mod transact;
@@ -23,4 +24,8 @@ pub(crate) fn pool_err(error: PoolError) -> JsError {
         }
         _ => JsError::new(&error.to_string()),
     }
+}
+
+pub(crate) fn pool_err_message(error: PoolError) -> String {
+    error.to_string()
 }

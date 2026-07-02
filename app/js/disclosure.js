@@ -657,42 +657,43 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
+const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
+
 async function generateReceipt(form) {
-  const onStatus = (obj) => {
-    const stage = obj?.stage || '';
-    const message = obj?.message || '';
-    const progressArea = document.getElementById('generate-progress');
-    if (progressArea) {
-      progressArea.classList.remove('hidden');
-      const wrap = document.createElement('div');
-      wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
-      const spinner = document.createElement('span');
-      spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
-      wrap.appendChild(spinner);
-      const msg = document.createElement('span');
-      msg.textContent = message;
-      wrap.appendChild(msg);
-      progressArea.replaceChildren(wrap);
-    }
+  const progressArea = document.getElementById('generate-progress');
+  const handler = (e) => {
+    const d = e.detail;
+    if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
+    progressArea.classList.remove('hidden');
+    const wrap = document.createElement('div');
+    wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
+    const spinner = document.createElement('span');
+    spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+    wrap.appendChild(spinner);
+    const msg = document.createElement('span');
+    msg.textContent = d.message;
+    wrap.appendChild(msg);
+    progressArea.replaceChildren(wrap);
   };
+  window.addEventListener(TX_PROGRESS_EVENT, handler);
 
-  // Disclose against the pool the selected note actually belongs to (there can
-  // be multiple pools); falling back to the first enabled pool only if unknown.
-  const config = contractConfig();
-  const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
+  try {
+    const config = contractConfig();
+    const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
+    const pool = await openPool({ poolContract: poolContractId });
 
-  const pool = await openPool({ poolContract: poolContractId });
+    const receipt = await pool.disclose({
+      selectedCommitment: state.selectedNote.id,
+      authorityLabel: form.authority,
+      authorityIdentityPayloadHex: form.payload,
+      purpose: form.purpose,
+      contextNonce: form.nonce,
+    });
 
-  const receipt = await pool.disclose({
-    selectedCommitment: state.selectedNote.id,
-    authorityLabel: form.authority,
-    authorityIdentityPayloadHex: form.payload,
-    purpose: form.purpose,
-    contextNonce: form.nonce,
-  });
-
-  // receipt is a JS object (already deserialized by wasm_bindgen) or null
-  return receipt || null;
+    return receipt || null;
+  } finally {
+    window.removeEventListener(TX_PROGRESS_EVENT, handler);
+  }
 }
 
 // ---------------------------------------------------------------------------

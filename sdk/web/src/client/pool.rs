@@ -6,13 +6,13 @@ use stellar_private_payments_sdk::{
     DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig,
     types::{
         ContractConfig, DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey,
-        TransactionResult, TransferRecipient,
+        TransferRecipient,
     },
 };
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    client::{core::ClientCore, pool_err, transact::parse_transact_step},
+    client::{core::ClientCore, execute::emit, pool_err, transact::parse_transact_step},
     workers::storage::StorageBridge,
 };
 
@@ -55,10 +55,6 @@ impl PrivatePool {
             "recipient must be a Stellar address (G...); lookup uses the on-chain public key registry",
         ))
     }
-
-    fn tx_results_to_js(results: Vec<TransactionResult>) -> Result<JsValue, JsError> {
-        Ok(serde_wasm_bindgen::to_value(&results)?)
-    }
 }
 
 #[wasm_bindgen]
@@ -94,13 +90,13 @@ impl PrivatePool {
     /// Deposit tokens. `amount` is stroops (`bigint` in JS).
     pub async fn deposit(&self, amount: u128) -> Result<JsValue, JsError> {
         self.sync().await?;
-        let result = self
+        let mut plan = self
             .inner()
-            .deposit(NoteAmount::from(amount))
-            .await
+            .prepare_deposit(NoteAmount::from(amount))
             .map_err(pool_err)?;
+        let value = self.execute_plan(&mut plan, "deposit").await?;
         self.sync().await?;
-        Ok(serde_wasm_bindgen::to_value(&result)?)
+        Ok(value)
     }
 
     /// Transfer privately to explicit recipient keys (note + encryption hex).
@@ -118,13 +114,16 @@ impl PrivatePool {
             encryption_public_key: EncryptionPublicKey::parse(encryption_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
         };
-        let results = self
-            .inner()
-            .transfer(recipient, NoteAmount::from(amount))
-            .await
-            .map_err(pool_err)?;
+        let value = {
+            let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+            let mut plan = self
+                .inner()
+                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+                .map_err(pool_err)?;
+            self.execute_plan(&mut plan, "transfer").await?
+        };
         self.sync().await?;
-        Self::tx_results_to_js(results)
+        Ok(value)
     }
 
     /// Transfer privately. `recipient` is a Stellar `G...` address.
@@ -137,13 +136,14 @@ impl PrivatePool {
             encryption_public_key: EncryptionPublicKey::parse(&enc_key)
                 .map_err(|e| JsError::new(&e.to_string()))?,
         };
-        let results = self
+        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+        let mut plan = self
             .inner()
-            .transfer(recipient, NoteAmount::from(amount))
-            .await
+            .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
             .map_err(pool_err)?;
+        let value = self.execute_plan(&mut plan, "transfer").await?;
         self.sync().await?;
-        Self::tx_results_to_js(results)
+        Ok(value)
     }
 
     /// Withdraw to `recipient`, or the connected wallet when omitted.
@@ -154,13 +154,14 @@ impl PrivatePool {
     ) -> Result<JsValue, JsError> {
         self.sync().await?;
         let to = recipient.unwrap_or_else(|| self.user_address.clone());
-        let results = self
+        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+        let mut plan = self
             .inner()
-            .withdraw(NoteAmount::from(amount), to)
-            .await
+            .prepare_withdraw(&wallet, NoteAmount::from(amount), to)
             .map_err(pool_err)?;
+        let value = self.execute_plan(&mut plan, "withdraw").await?;
         self.sync().await?;
-        Self::tx_results_to_js(results)
+        Ok(value)
     }
 
     /// Low-level pool `transact` call. See SDK [`Transact`] for field
@@ -168,9 +169,10 @@ impl PrivatePool {
     pub async fn transact(&self, config: JsValue) -> Result<JsValue, JsError> {
         self.sync().await?;
         let step = parse_transact_step(config)?;
-        let result = self.inner().transact(step).await.map_err(pool_err)?;
+        let mut plan = self.inner().prepare_transact(step);
+        let value = self.execute_plan(&mut plan, "transact").await?;
         self.sync().await?;
-        Ok(serde_wasm_bindgen::to_value(&result)?)
+        Ok(value)
     }
 
     /// Generate a selective-disclosure proof for a note commitment.
@@ -179,6 +181,7 @@ impl PrivatePool {
     /// the account must register at the ASP before disclosing.
     pub async fn disclose(&self, config: JsValue) -> Result<JsValue, JsError> {
         let req: DisclosureRequest = serde_wasm_bindgen::from_value(config)?;
+        emit("disclose", "prove", "Generating proof…", None, None);
         match self.inner().disclose(req).await.map_err(pool_err)? {
             None => Ok(JsValue::NULL),
             Some(receipt) => Ok(serde_wasm_bindgen::to_value(&receipt)?),
