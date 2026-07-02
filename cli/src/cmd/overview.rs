@@ -5,7 +5,7 @@ use anyhow::Result;
 use serde::Serialize;
 use stellar_private_payments_sdk::types::AssetDescriptor;
 
-use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::PoolSession};
+use crate::{config::{CliConfig, validate_pool}, explorer::Explorer, onboard, output, session::PoolSession};
 
 #[derive(Serialize)]
 struct ContractRef {
@@ -36,14 +36,27 @@ struct Overview {
     public_key_registry: ContractRef,
 }
 
-pub fn run(config: &CliConfig, json: bool) -> Result<()> {
+pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;
     let explorer = Explorer::new(explorer_base(config)?);
 
+    let entries: Vec<_> = match pool {
+        Some(pool) => {
+            validate_pool(pool, &config.deployment)?;
+            config
+                .deployment
+                .pools
+                .iter()
+                .filter(|entry| entry.enabled && entry.pool_contract_id == pool)
+                .collect()
+        }
+        None => config.deployment.pools.iter().filter(|p| p.enabled).collect(),
+    };
+
     let mut pools = Vec::new();
-    for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
+    for entry in entries {
         let session = PoolSession::open(config, &account, &network, &entry.pool_contract_id)?;
         let balance = session
             .pool()
@@ -104,7 +117,7 @@ fn print_human(o: &Overview, alias: &str) {
     }
 
     println!();
-    output::print_section("Pools");
+    output::print_section(if o.pools.len() == 1 { "Pool" } else { "Pools" });
     if o.pools.is_empty() {
         println!("(none)");
     }

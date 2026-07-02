@@ -96,7 +96,11 @@ enum Commands {
         no_register: bool,
     },
     /// Pools, balances, contracts, network, and registration status
-    Overview,
+    /// Omit the pool to show all enabled pools, or pass one pool contract id
+    Overview {
+        /// Pool contract id (C…); omit for all enabled pools
+        pool: Option<String>,
+    },
     /// Latest operational events
     Feed {
         /// Number of items to show (default 5)
@@ -220,7 +224,7 @@ fn main() -> Result<()> {
             },
             json,
         ),
-        Commands::Overview => cmd::overview::run(&config, json),
+        Commands::Overview { pool } => cmd::overview::run(&config, pool.as_deref(), json),
         Commands::Feed { limit } => cmd::feed::run(&config, limit, json),
         Commands::Config { command } => match command {
             ConfigCommands::Show => cmd::config::show(&config, json),
