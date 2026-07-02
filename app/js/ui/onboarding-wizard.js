@@ -462,8 +462,8 @@ export async function runOnboardingWizard({
             });
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
-                title: 'Set up privacy keys',
-                body: 'Your wallet is requested to sign one message. That derives your privacy keys locally plus your ASP secret. This does not move funds.',
+                title: 'Derive note keys and ASP secret',
+                body: 'Your wallet is requested to sign one message. That signature derives your privacy keys locally plus your ASP secret. This does not move funds.',
                 aside: secretWrap,
             });
             renderContent(panel);
@@ -471,7 +471,7 @@ export async function runOnboardingWizard({
             await waitForStep((resolve, reject) => {
                 const cancel = makeButton({ text: 'Cancel', variant: 'ghost', onClick: cancelOnboarding });
                 const derive = makeButton({
-                    text: 'Set up keys',
+                    text: 'Derive and store keys',
                     variant: 'primary',
                     onClick: async () => {
                         try {
@@ -487,7 +487,7 @@ export async function runOnboardingWizard({
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
-                            setError(error?.message || 'Failed to set up privacy keys');
+                            setError(error?.message || 'Failed to derive privacy keys');
                         }
                     },
                 });

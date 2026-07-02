@@ -6,7 +6,6 @@
 
 import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
 
-import { PROVER_WORKER_URL, STORAGE_WORKER_URL } from './runtime-paths.js';
 import { AppStorage, storageCall } from './app-storage.js';
 
 const KEY_DERIVATION_MESSAGE = 'Privacy Pool Key Derivation [v1]';
@@ -18,8 +17,6 @@ let wasmReady = false;
 let eventSyncStarted = false;
 let currentRpcUrl = null;
 let boundUserAddress = null;
-
-export { PROVER_WORKER_URL, STORAGE_WORKER_URL };
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
@@ -68,16 +65,13 @@ function wrapSdkClient(sdk, sdkStorage) {
                 {
                     networkPassphrase,
                     userAddress,
-                    proverWorkerUrl: PROVER_WORKER_URL,
                 },
                 signer,
             );
             boundUserAddress = userAddress;
         },
         verifySelectiveDisclosure(receiptJson, expectedVkHash) {
-            return sdk.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
-                proverWorkerUrl: PROVER_WORKER_URL,
-            });
+            return sdk.verifySelectiveDisclosure(receiptJson, expectedVkHash);
         },
         async getUserKeys(address) {
             const response = await storageCall(sdkStorage, { UserKeys: address });
@@ -175,7 +169,7 @@ export async function initializeRuntime(rpcUrl) {
     await ensureWasmInit();
 
     if (!storageHandle || currentRpcUrl !== rpcUrl) {
-        storageHandle = await Storage.open({ workerUrl: STORAGE_WORKER_URL });
+        storageHandle = await Storage.open();
         bindAppStorage(storageHandle);
         wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
         currentRpcUrl = rpcUrl;
