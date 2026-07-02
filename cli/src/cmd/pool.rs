@@ -163,7 +163,7 @@ mod tests {
                 })
             },
         )
-        .unwrap();
+        .expect("transfer ordering test should not fail");
 
         assert_eq!(recipient.note_public_key.0, [0u8; 32]);
         assert_eq!(calls.borrow().as_slice(), ["open", "resolve"]);

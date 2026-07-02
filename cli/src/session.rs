@@ -161,15 +161,24 @@ mod tests {
 
     #[test]
     fn parses_token_units_with_decimals() {
-        assert_eq!(parse_amount("1").unwrap(), NoteAmount::from(10_000_000u128));
         assert_eq!(
-            parse_amount("1.").unwrap(),
+            parse_amount("1").expect("1 should parse as 1 token"),
             NoteAmount::from(10_000_000u128)
         );
-        assert_eq!(parse_amount(".5").unwrap(), NoteAmount::from(5_000_000u128));
-        assert_eq!(parse_amount("0.0000001").unwrap(), NoteAmount::from(1u128));
         assert_eq!(
-            parse_amount("12.3456789").unwrap(),
+            parse_amount("1.").expect("1. should parse as 1 token"),
+            NoteAmount::from(10_000_000u128)
+        );
+        assert_eq!(
+            parse_amount(".5").expect(".5 should parse as 0.5 token"),
+            NoteAmount::from(5_000_000u128)
+        );
+        assert_eq!(
+            parse_amount("0.0000001").expect("smallest unit should parse"),
+            NoteAmount::from(1u128)
+        );
+        assert_eq!(
+            parse_amount("12.3456789").expect("12.3456789 should parse"),
             NoteAmount::from(123_456_789u128)
         );
     }
