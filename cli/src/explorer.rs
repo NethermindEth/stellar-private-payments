@@ -1,8 +1,8 @@
 //! Explorer link building + the persisted explorer base-URL setting.
 //!
 //! Mirrors the web app: a single explorer base URL (stored in sqlite under
-//! `APP_SETTING_EXPLORER` as `{"baseUrl": …}`) drives account/contract/tx/ledger
-//! links.
+//! `APP_SETTING_EXPLORER` as `{"baseUrl": …}`) drives
+//! account/contract/tx/ledger links.
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

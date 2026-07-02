@@ -1,8 +1,8 @@
 //! Onboarding wizard + the readiness gate for account commands.
 //!
 //! Mirrors the web app's onboarding, in this order: tooling check → resolve the
-//! Stellar CLI account → consent (disclaimer) → derive privacy keys → bootnode →
-//! explorer → optional public-key registration. Consent gates every protocol
+//! Stellar CLI account → consent (disclaimer) → derive privacy keys → bootnode
+//! → explorer → optional public-key registration. Consent gates every protocol
 //! operation; resolving an address via `stellar keys` is not itself an
 //! operation. Step texts are reused from the app.
 

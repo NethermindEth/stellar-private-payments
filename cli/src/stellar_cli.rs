@@ -46,7 +46,8 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
     Ok(stdout.trim().to_string())
 }
 
-/// Resolve an alias to its Stellar address (`G…`) via `stellar keys public-key`.
+/// Resolve an alias to its Stellar address (`G…`) via `stellar keys
+/// public-key`.
 pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
     let args = vec![
         "keys".to_string(),

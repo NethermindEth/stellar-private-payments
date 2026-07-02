@@ -40,7 +40,8 @@ struct Cli {
     #[arg(long, global = true)]
     deployment: Option<PathBuf>,
 
-    /// Stellar CLI network name (default: the deployment's network, e.g. testnet)
+    /// Stellar CLI network name (default: the deployment's network, e.g.
+    /// testnet)
     #[arg(long, global = true)]
     network: Option<String>,
 
@@ -52,7 +53,9 @@ struct Cli {
     #[arg(long, global = true)]
     stellar_config_dir: Option<PathBuf>,
 
-    /// Directory with policy_tx_2_2.{wasm,r1cs} (default: target/circuits-artifacts/release in debug builds, data_dir/circuits-artifacts/release otherwise)
+    /// Directory with policy_tx_2_2.{wasm,r1cs} (default:
+    /// target/circuits-artifacts/release in debug builds,
+    /// data_dir/circuits-artifacts/release otherwise)
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,
 
@@ -74,7 +77,8 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Commands {
-    /// Accept the disclaimer, derive keys, and configure bootnode/explorer/registration
+    /// Accept the disclaimer, derive keys, and configure
+    /// bootnode/explorer/registration
     Onboard {
         /// Accept the disclaimer non-interactively
         #[arg(long)]

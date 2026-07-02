@@ -22,8 +22,8 @@ pub fn load_prover_artifacts(circuits_dir: Option<&Path>) -> Result<ProverArtifa
 /// Read the `policy_tx_2_2` proving key.
 ///
 /// Installed builds ship the key alongside the r1cs/wasm in the data-dir `dist`
-/// (`<circuits_dir>/policy_tx_2_2_proving_key.bin`). When it is absent — e.g. an
-/// in-repo `cargo run` before the dist is provisioned — fall back to the
+/// (`<circuits_dir>/policy_tx_2_2_proving_key.bin`). When it is absent — e.g.
+/// an in-repo `cargo run` before the dist is provisioned — fall back to the
 /// canonical key committed under `deployments/testnet/circuit_keys/`.
 fn read_proving_key(circuits: &Path) -> Result<Vec<u8>> {
     let runtime = circuits.join("policy_tx_2_2_proving_key.bin");

@@ -61,6 +61,11 @@ ark-snark = { version = "0.6.0", default-features = false }
 ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1.89", default-features = false }
 cfg-if = { version = "1", default-features = false }
+clap = { version = "4.6.1", default-features = false, features = ["std", "color",
+  "help",
+  "usage",
+  "error-context",
+  "suggestions", "derive", "env"] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false }
