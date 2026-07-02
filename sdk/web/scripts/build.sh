@@ -8,7 +8,7 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
-WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.120}"
+WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
 WASM_OUT_NAME="stellar_private_payments_sdk_web"
 
 echo "==> Building circuit artifacts (if needed)..."

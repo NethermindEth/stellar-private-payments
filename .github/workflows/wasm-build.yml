@@ -39,7 +39,7 @@ jobs:
         run: cargo build -p circuits
 
       - name: Check the wasm build
-        run: cargo build -p web --target wasm32-unknown-unknown
+        run: cargo build -p stellar-private-payments-sdk-web --target wasm32-unknown-unknown
 
   wasm-test:
     timeout-minutes: 30
@@ -62,7 +62,7 @@ jobs:
           cache-targets: "true"
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.120 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar

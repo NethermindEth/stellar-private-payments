@@ -113,7 +113,7 @@ so you need it available on your `PATH` (typically by installing `wasm-bindgen-c
 
 ```bash
 # Install a compatible wasm-bindgen toolchain (adjust the version if `Cargo.lock` changes)
-cargo install wasm-bindgen-cli --version 0.2.120
+cargo install wasm-bindgen-cli --version 0.2.126
 
 # Example: run wasm tests for the Stellar core crate
 cargo test --target wasm32-unknown-unknown -p stellar
