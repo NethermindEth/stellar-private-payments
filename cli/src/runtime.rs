@@ -1,7 +1,7 @@
 //! Drive async SDK calls to completion from the synchronous CLI.
 //!
 //! The SDK's blocking wrapper keeps its runtime private, so commands that use
-//! the async `Client`/`StateFetcher` directly (e.g. `register`) own a
+//! the async `StateFetcher` directly (e.g. `register`) own a
 //! short-lived Tokio runtime for their RPC round-trips.
 
 use std::future::Future;

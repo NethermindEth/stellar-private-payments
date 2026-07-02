@@ -5,8 +5,7 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
-    Client,
-    chain::{LocalSigner, confirm_tx, submit_tx},
+    chain::{LocalSigner, StateFetcher, confirm_tx, submit_tx},
     state::SqliteStorage,
 };
 
@@ -56,9 +55,8 @@ pub fn register_account(
     let note_key = keys.note_keypair.public.0;
     let encryption_key = keys.encryption_keypair.public.0;
 
-    let client = Client::new(&network.rpc_url, config.deployment.clone())
-        .map_err(|e| anyhow::anyhow!("rpc client: {e}"))?;
-    let fetcher = client.state_fetcher();
+    let fetcher = StateFetcher::new(&network.rpc_url, config.deployment.clone())
+        .map_err(|e| anyhow::anyhow!("state fetcher: {e}"))?;
 
     log::info!("Preparing registration for {}", account.address);
     let prepared = block_on(fetcher.prepare_register(&account.address, note_key, encryption_key))??;
