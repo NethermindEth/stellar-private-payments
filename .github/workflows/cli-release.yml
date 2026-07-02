@@ -1,0 +1,188 @@
+name: CLI release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  dist:
+    name: Build dist bundle
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: "1.92.0"
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Verify tag matches crate version
+        run: |
+          crate_ver="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          tag="${GITHUB_REF_NAME}"
+          core="${tag#v}"
+          core="${core%%-*}"
+          echo "tag=$tag crate_version=$crate_ver core=$core"
+          if [ "$core" != "$crate_ver" ]; then
+            echo "::error::tag $tag does not match workspace crate version $crate_ver (expected v$crate_ver[-pre])"
+            exit 1
+          fi
+
+      - name: Provide canonical keys (skip trusted setup)
+        run: |
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Build circuits (release) — produces r1cs/wasm
+        run: cargo build -p circuits --release
+
+      - name: Assemble dist
+        run: |
+          set -eu
+          STAGING="$(mktemp -d)"
+          BUNDLE_URL="https://github.com/${GITHUB_REPOSITORY}/releases/download/${GITHUB_REF_NAME}/source-bundle.tar.gz"
+
+          # Legal set: LICENSE.txt, NOTICE.txt, licenses/{LGPL,GPL}, circuits/NOTICE.txt.
+          sh deployments/scripts/stage-dist-legal.sh "$STAGING" "$BUNDLE_URL"
+          # The CLI dist mirrors the app layout minus the disclaimer file.
+          rm -f "$STAGING/DISCLAIMER.txt"
+
+          # Compiled circuit artifacts + proving keys the CLI loads at runtime.
+          CIRCUITS="target/circuits-artifacts/release"
+          cp "$CIRCUITS/policy_tx_2_2.r1cs" "$CIRCUITS/policy_tx_2_2.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/selectiveDisclosure_1.r1cs" "$CIRCUITS/selectiveDisclosure_1.wasm" "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin "$STAGING/circuits/"
+
+          # Corresponding Source bundle (LGPL-3.0).
+          sh deployments/scripts/package-circuits-source-bundle.sh "$STAGING/circuits/source-bundle.tar.gz"
+
+          mkdir -p out
+          tar -C "$STAGING" -czf out/dist.tar.gz .
+          cp "$STAGING/circuits/source-bundle.tar.gz" out/source-bundle.tar.gz
+          for f in dist.tar.gz source-bundle.tar.gz; do
+            sha256sum "out/$f" | sed "s| out/| |" > "out/$f.sha256"
+          done
+          ls -l out
+
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: dist
+          path: out/*
+
+  build-cli:
+    name: Build spp (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, target: x86_64-unknown-linux-musl, cross: true }
+          - { os: ubuntu-latest, target: aarch64-unknown-linux-musl, cross: true }
+          - { os: macos-latest, target: x86_64-apple-darwin, cross: false }
+          - { os: macos-latest, target: aarch64-apple-darwin, cross: false }
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: "1.92.0"
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          key: ${{ matrix.target }}
+
+      - name: Prepare circuits inputs (avoid in-build git fetch / keygen)
+        shell: bash
+        run: |
+          set -eu
+          # Check out circomlib at the locked rev so circuits/build.rs skips fetching.
+          LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          if [ ! -d circuits/src/circomlib/.git ]; then
+            git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
+          fi
+          git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
+          git -C circuits/src/circomlib checkout --detach FETCH_HEAD
+          # Canonical keys so build.rs does not run a (random) trusted setup.
+          mkdir -p testdata
+          cp deployments/testnet/circuit_keys/*.bin testdata/
+          cp deployments/testnet/circuit_keys/*.json testdata/
+
+      - name: Install cross
+        if: matrix.cross
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cross
+
+      - name: Build
+        shell: bash
+        run: |
+          set -eu
+          if [ "${{ matrix.cross }}" = "true" ]; then
+            cross build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          else
+            cargo build -p stellar-private-payments-cli --bin spp --release --target ${{ matrix.target }}
+          fi
+
+      - name: Package
+        shell: bash
+        run: |
+          set -eu
+          mkdir -p out
+          BIN="target/${{ matrix.target }}/release/spp"
+          test -f "$BIN"
+          tar -C "$(dirname "$BIN")" -czf "out/spp-${{ matrix.target }}.tar.gz" spp
+          cd out
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"
+          else
+            shasum -a 256 "spp-${{ matrix.target }}.tar.gz" > "spp-${{ matrix.target }}.tar.gz.sha256"
+          fi
+
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: spp-${{ matrix.target }}
+          path: out/*
+
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    needs: [dist, build-cli]
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p out
+          find artifacts -type f -exec cp {} out/ \;
+          ls -l out
+
+      - name: Determine prerelease
+        id: pre
+        run: |
+          case "${GITHUB_REF_NAME}" in
+            *-*) echo "prerelease=true" >> "$GITHUB_OUTPUT" ;;
+            *)   echo "prerelease=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
+        with:
+          files: out/*
+          prerelease: ${{ steps.pre.outputs.prerelease }}
+          fail_on_unmatched_files: true

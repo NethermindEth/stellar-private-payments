@@ -5,7 +5,12 @@ use anyhow::Result;
 use serde::Serialize;
 use stellar_private_payments_sdk::types::AssetDescriptor;
 
-use crate::{config::{CliConfig, validate_pool}, explorer::Explorer, onboard, output, session::PoolSession};
+use crate::{
+    config::{CliConfig, validate_pool},
+    explorer::Explorer,
+    onboard, output,
+    session::PoolSession,
+};
 
 #[derive(Serialize)]
 struct ContractRef {
@@ -52,7 +57,12 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
                 .filter(|entry| entry.enabled && entry.pool_contract_id == pool)
                 .collect()
         }
-        None => config.deployment.pools.iter().filter(|p| p.enabled).collect(),
+        None => config
+            .deployment
+            .pools
+            .iter()
+            .filter(|p| p.enabled)
+            .collect(),
     };
 
     let mut pools = Vec::new();
