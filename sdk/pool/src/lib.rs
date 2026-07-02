@@ -1,17 +1,58 @@
-//! Stellar Private Payments SDK.
+//! Stellar Private Payments SDK
 //!
-//! Facade over the `sdk/` crates. Re-exports domain types, chain reads,
-//! transaction builders, local storage, and proving behind a single crate.
+//! The main entry point is [`PrivatePool`], one
+//! session per pool contract and Stellar account (deposit, transfer, withdraw,
+//! transact, disclose).
 //!
 //! # Example
 //!
 //! ```no_run
-//! use stellar_private_payments_sdk::{Client, types::ContractConfig};
+//! use stellar_private_payments_sdk::{
+//!     LocalProver, LocalSigner, LocalStorage, PrivatePool, PrivatePoolConfig, ProverArtifacts,
+//!     types::{
+//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient,
+//!     },
+//! };
 //!
-//! # async fn example(deployment: ContractConfig) -> anyhow::Result<()> {
-//! let client = Client::new("https://soroban-testnet.stellar.org", deployment)?;
-//! let state = client.all_contracts_data().await?;
-//! println!("pools: {}", state.pools.len());
+//! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
+//! let storage_path = "wallet.sqlite";
+//! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
+//!
+//! let config = PrivatePoolConfig {
+//!     rpc_url: "https://soroban-testnet.stellar.org".into(),
+//!     contract_config: deployment,
+//!     pool_contract_id: "CA2TZ...".into(),
+//!     user_address: "G...".into(),
+//!     storage_path: storage_path.into(),
+//!     prover_artifacts: artifacts.clone(),
+//! };
+//!
+//! let pool = PrivatePool::init(
+//!     config,
+//!     LocalStorage::open(storage_path)?,
+//!     Box::new(LocalSigner::new(
+//!         "S...",
+//!         "Test SDF Network ; September 2015",
+//!         "G...",
+//!     )?),
+//!     Box::new(LocalProver::from_artifacts(&artifacts)?),
+//! )?;
+//!
+//! pool.sync().await?;
+//! pool.deposit(10_000_000u128.into()).await?;
+//!
+//! let recipient = TransferRecipient {
+//!     note_public_key: NotePublicKey::parse(
+//!         "0x0000000000000000000000000000000000000000000000000000000000000001",
+//!     )?,
+//!     encryption_public_key: EncryptionPublicKey::parse(
+//!         "0x0000000000000000000000000000000000000000000000000000000000000002",
+//!     )?,
+//! };
+//! pool.transfer(recipient, 5_000_000u128.into()).await?;
+//! pool.withdraw(3_000_000u128.into(), "G...").await?;
+//!
+//! let balance = pool.balance().await?;
 //! # Ok(())
 //! # }
 //! ```
@@ -60,7 +101,6 @@ pub mod state {
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking;
-mod client;
 mod core;
 mod error;
 mod plan;
@@ -71,7 +111,6 @@ mod sleep;
 mod storage;
 mod transact;
 
-pub use client::Client;
 pub use core::PoolCore;
 pub use disclosure::{
     BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
