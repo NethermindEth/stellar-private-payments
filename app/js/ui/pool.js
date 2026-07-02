@@ -13,6 +13,8 @@ App.events.addEventListener('pool:selected', () => {
 });
 
 let cachedContractConfig = null;
+let activeSession = null;
+let activeSessionContractId = null;
 
 export async function getContractConfig() {
     if (cachedContractConfig) return cachedContractConfig;
@@ -20,18 +22,17 @@ export async function getContractConfig() {
     return cachedContractConfig;
 }
 
-export function getActivePoolContractId(config) {
-    const pools = Array.isArray(config?.pools) ? config.pools : [];
+export function getActivePoolContractId(config = null) {
+    const pools = Array.isArray(config?.pools) ? config.pools : (App.state.pools || []);
     const selected = pools.find(p => p?.poolContractId === App.state.selectedPoolId)
         || pools.find(p => p?.enabled)
         || pools[0];
-    const poolContractId = selected?.poolContractId;
-    if (!poolContractId) throw new Error('Pool contract ID not available');
-    return poolContractId;
+    return selected?.poolContractId || App.state.selectedPoolId || null;
 }
 
 export function closeAppPool() {
-    App.state.pool = null;
+    activeSession = null;
+    activeSessionContractId = null;
 }
 
 export async function createAppPool() {
@@ -46,12 +47,16 @@ export async function createAppPool() {
 
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
+    if (!poolContract) throw new Error('Pool contract ID not available');
     const pool = await openPool({ poolContract });
-    App.state.pool = pool;
+    activeSession = pool;
+    activeSessionContractId = poolContract;
     return pool;
 }
 
 export async function ensureAppPool() {
-    if (App.state.pool) return App.state.pool;
+    const poolContract = getActivePoolContractId();
+    if (!poolContract) throw new Error('Pool contract ID not available');
+    if (activeSession && activeSessionContractId === poolContract) return activeSession;
     return createAppPool();
 }

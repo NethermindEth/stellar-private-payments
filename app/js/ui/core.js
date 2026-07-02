@@ -8,7 +8,6 @@ export const App = {
     state: {
         wallet: {
             connected: false,
-            connecting: false,
             address: null,
             sorobanRpcUrl: null,
             network: null,
@@ -26,9 +25,6 @@ export const App = {
         pools: [],
         selectedPoolId: null,
         notes: [],
-        pool: null,
-        activeTab: 'deposit',
-        addressBookFillTarget: null,
         balances: [],
         feed: [],
         profile: {

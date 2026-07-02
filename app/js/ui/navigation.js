@@ -6,7 +6,6 @@ import {
     client,
     initializeRuntime,
     initializeWallet,
-    lookupRegisteredPublicKey,
     registerPublicKeys,
     startEventSync,
 } from '../wasm-facade.js';
@@ -131,12 +130,6 @@ async function loadRuntimeState() {
     const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
-    if (App.state.wallet.address) {
-        const lookup = await lookupRegisteredPublicKey(App.state.wallet.address).catch(() => null);
-        App.state.profile.registryLookup = lookup;
-        App.state.profile.registered = !!lookup?.entry;
-    }
-
     App.events.dispatchEvent(new CustomEvent('pool:config'));
     App.events.dispatchEvent(new CustomEvent('settings:updated'));
 }
@@ -158,11 +151,6 @@ function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
     if (!dot || !text) return;
-    if (App.state.wallet.connecting) {
-        text.textContent = 'Connecting';
-        dot.className = 'h-2 w-2 rounded-full bg-amber-300 animate-pulse-dot';
-        return;
-    }
     if (!App.state.wallet.connected) {
         text.textContent = 'Offline';
         dot.className = 'h-2 w-2 rounded-full bg-slate-500';
@@ -295,7 +283,7 @@ export const Wallet = {
                     throw new Error('This app supports Stellar testnet only.');
                 }
 
-                App.state.wallet.connecting = true;
+                App.state.wallet.connected = true;
                 App.state.wallet.address = address;
                 App.state.wallet.sorobanRpcUrl = rpcUrl;
                 App.state.wallet.network = network;
@@ -320,8 +308,6 @@ export const Wallet = {
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
-                App.state.wallet.connected = true;
-                App.state.wallet.connecting = false;
                 renderWallet();
                 App.events.dispatchEvent(new CustomEvent('wallet:ready', { detail: { address } }));
                 await createAppPool();
@@ -329,11 +315,10 @@ export const Wallet = {
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
                 const message = error?.message || '';
-                console.warn('[Wallet] connect failed:', message || error);
                 this.disconnect();
                 if (isDbLockedError(message)) {
                     showDbLockedModal(message);
-                } else if (!auto || (message && message !== 'Onboarding cancelled')) {
+                } else if (!auto) {
                     Toast.show(message || 'Failed to connect wallet', 'error');
                 }
                 throw error;
@@ -365,14 +350,12 @@ export const Wallet = {
         closeAppPool();
         App.state.wallet = {
             connected: false,
-            connecting: false,
             address: null,
             sorobanRpcUrl: null,
             network: null,
             networkPassphrase: null,
         };
         App.state.keys = { notePublicKey: null, encryptionPublicKey: null, aspSecret: null };
-        App.state.profile = { registered: false, registryLookup: null };
         renderWallet();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));

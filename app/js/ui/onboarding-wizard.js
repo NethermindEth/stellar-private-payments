@@ -298,7 +298,7 @@ export async function runOnboardingWizard({
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
-        ...(needsNotificationStep || bootnodeRequired ? ['retention'] : []),
+        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
@@ -312,7 +312,11 @@ export async function runOnboardingWizard({
     // e.g. it keeps reappearing while permanent storage hasn't been granted.
     const hasRequiredStep = steps.some(step => step !== 'registration');
     if (!hasRequiredStep) {
-        return;
+        return {
+            pubKey: existingKeys.noteKeypair.public,
+            encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
+            aspSecret: existingAspSecret.membershipBlinding,
+        };
     }
 
     showModal();
