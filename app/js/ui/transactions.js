@@ -1,5 +1,6 @@
 import { getHandle } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
+import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 
@@ -216,17 +217,15 @@ export const Transactions = {
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
                 setLoading(button, true, 'Preparing deposit…');
                 const pool = selectedPool();
-                const hashes = await getHandle().webClient.executeDeposit(
-                    pool.poolContractId,
-                    App.state.wallet.address,
+                const session = await ensureAppPool();
+                const result = await session.deposit(
                     amount.value,
                     [amount.value, 0n],
-                    App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                if (this.showHashes(hashes, 'Deposit')) {
+                if (this.showExecuteResult(result, 'Deposit')) {
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Deposit', amount: amount.value, direction: 'in', hashes,
+                        type: 'Deposit', amount: amount.value, direction: 'in', hashes: result.hashes,
                     });
                     document.getElementById('deposit-amount').value = '';
                 }
@@ -271,19 +270,17 @@ export const Transactions = {
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
                 setLoading(button, true, 'Preparing transfer…');
                 const pool = selectedPool();
-                const hashes = await getHandle().webClient.executeTransfer(
-                    pool.poolContractId,
-                    App.state.wallet.address,
+                const session = await ensureAppPool();
+                const result = await session.transfer(
                     amount.value,
                     noteKey,
                     encKey,
-                    App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                if (this.showHashes(hashes, 'Transfer')) {
+                if (this.showExecuteResult(result, 'Transfer')) {
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
                         type: 'Sent', amount: amount.value, direction: 'out',
-                        counterparty: transferAddress.value.trim() || noteKey, hashes,
+                        counterparty: transferAddress.value.trim() || noteKey, hashes: result.hashes,
                     });
                     document.getElementById('transfer-amount').value = '';
                     transferAddress.value = '';
@@ -309,18 +306,16 @@ export const Transactions = {
                 const recipient = document.getElementById('withdraw-recipient')?.value?.trim() || App.state.wallet.address;
                 setLoading(button, true, 'Preparing withdrawal…');
                 const pool = selectedPool();
-                const hashes = await getHandle().webClient.executeWithdraw(
-                    pool.poolContractId,
-                    App.state.wallet.address,
+                const session = await ensureAppPool();
+                const result = await session.withdraw(
                     recipient,
                     amount.value,
-                    App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                if (this.showHashes(hashes, 'Withdrawal')) {
+                if (this.showExecuteResult(result, 'Withdrawal')) {
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
                         type: 'Withdraw', amount: amount.value, direction: 'out',
-                        counterparty: recipient, hashes,
+                        counterparty: recipient, hashes: result.hashes,
                     });
                     document.getElementById('withdraw-amount').value = '';
                     document.getElementById('withdraw-recipient').value = '';
@@ -352,24 +347,22 @@ export const Transactions = {
                 const recipient = document.getElementById('advanced-public-recipient')?.value?.trim() || App.state.wallet.address;
 
                 setLoading(button, true, 'Preparing advanced transaction…');
-                const hashes = await getHandle().webClient.executeTransact(
-                    pool.poolContractId,
-                    App.state.wallet.address,
+                const session = await ensureAppPool();
+                const result = await session.transact(
                     recipient,
                     publicAmount,
                     inputNoteIds,
                     amounts,
                     noteKeys,
                     encKeys,
-                    App.state.wallet.networkPassphrase,
                     statusUpdater(button),
                 );
-                if (this.showHashes(hashes, 'Advanced transaction')) {
+                if (this.showExecuteResult(result, 'Advanced transaction')) {
                     const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
                     const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
                         type: 'Advanced', amount: absAmount, direction,
-                        counterparty: direction === 'out' ? recipient : null, hashes,
+                        counterparty: direction === 'out' ? recipient : null, hashes: result.hashes,
                     });
                     this.buildAdvancedComposer();
                     document.getElementById('advanced-public-deposit').value = '';
@@ -384,18 +377,37 @@ export const Transactions = {
         });
     },
 
-    // Returns true when a real submission happened (hashes present), so callers
-    // can clear their form only on success.
-    showHashes(hashes, label = 'Transaction') {
-        if (!Array.isArray(hashes) || !hashes.length) {
-            // The backend returns no transaction hashes when the account is not yet
-            // in the ASP allow-list (RegisterAtASP). Nothing was submitted, so warn
-            // the user instead of reporting success.
-            Toast.show('Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.', 'error', 8000);
+    // Returns true when a real submission happened, so callers can clear their form only on success.
+    showExecuteResult(result, label = 'Transaction') {
+        if (result?.status === 'aspNotReady') {
+            Toast.show(
+                'Your account is not registered with the ASP yet. Share your note public key and ASP secret with the ASP provider, then try again.',
+                'error',
+                8000,
+            );
             return false;
         }
+        if (result?.status === 'failed') {
+            if (Array.isArray(result.hashes) && result.hashes.length) {
+                this.showSubmittedToasts(result.hashes, label);
+            }
+            Toast.show(result.message || `${label} failed`, 'error', 7000);
+            return false;
+        }
+        if (result?.status === 'ok') {
+            return this.showSubmittedToasts(result.hashes, label);
+        }
+        Toast.show(`${label} failed`, 'error');
+        return false;
+    },
+
+    showSubmittedToasts(hashes, label = 'Transaction') {
+        if (!Array.isArray(hashes) || !hashes.length) return false;
         const lastHash = hashes[hashes.length - 1];
-        Toast.show(`${label} submitted: ${Utils.truncateHex(lastHash, 10, 8)}`, 'success', 7000, {
+        const message = hashes.length === 1
+            ? `${label} submitted: ${Utils.truncateHex(lastHash, 10, 8)}`
+            : `${label}: ${hashes.length} transactions submitted. Last: ${Utils.truncateHex(lastHash, 10, 8)}`;
+        Toast.show(message, 'success', 7000, {
             linkUrl: Utils.explorerTxUrl(lastHash),
             linkAriaLabel: 'Open transaction in explorer',
         });

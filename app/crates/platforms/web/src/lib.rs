@@ -1,7 +1,9 @@
+mod circuits;
 mod client;
 mod config;
 mod events;
 mod protocol;
+pub mod signer;
 pub mod workers;
 
 pub(crate) mod artifact_hashes {
@@ -14,7 +16,7 @@ pub(crate) const DEPLOYMENT: &str =
 use client::WebClient;
 use config::Config;
 use events::{bootnode_check, events_listener};
-use types::ContractConfig;
+use stellar_private_payments_sdk::types::ContractConfig;
 use wasm_bindgen::{JsError, prelude::*};
 use wasm_bindgen_futures::spawn_local;
 
@@ -45,9 +47,11 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
+    let storage = client.storage();
+
     let bootnode_url = bootnode_check(
         config.rpc_url(),
-        client.clone(),
+        storage.clone(),
         contract_config,
         config.bootnode_url(),
     )
@@ -57,7 +61,7 @@ pub async fn main_thread(config: Config) -> Result<MainThreadHandle, JsError> {
     spawn_local(events_listener(
         config.rpc_url().to_string(),
         bootnode_url,
-        client.clone(),
+        storage,
         contract_config,
     ));
     log::debug!("[MAIN THREAD] initialized");
