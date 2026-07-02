@@ -91,7 +91,7 @@ fn resolve_dist_dir(config: &CliConfig) -> Result<PathBuf> {
         if cfg!(debug_assertions) {
             "build the dist first"
         } else {
-            "install the CLI (deployments/scripts/install.sh)"
+            "install the CLI (curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh)"
         }
     );
 }
