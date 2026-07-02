@@ -97,8 +97,10 @@ fn ensure_sha256_matches(
 
 thread_local! {
     static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
-    static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> = RefCell::new([None, None, None, None]);
-    static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> = RefCell::new([None, None, None, None]);
+    static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> =
+        const { RefCell::new([None, None, None, None]) };
+    static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
+        const { RefCell::new([None, None, None, None]) };
 }
 
 /// Expected artifact hashes and lengths for a disclosure circuit variant.
@@ -163,7 +165,9 @@ fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
     if n_notes == 0 || n_notes > 4 {
         return Err(JsError::new("selective disclosure supports 1..=4 notes"));
     }
-    Ok(n_notes - 1)
+    n_notes
+        .checked_sub(1)
+        .ok_or_else(|| JsError::new("selective disclosure supports 1..=4 notes"))
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
@@ -251,7 +255,9 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     let mut provers: [Option<Groth16Prover>; 4] = [None, None, None, None];
 
     for (idx, (wasm_bytes, r1cs_bytes)) in disclosure_artifacts.iter().enumerate() {
-        let n_notes = idx + 1;
+        let n_notes = idx
+            .checked_add(1)
+            .expect("disclosure artifacts index is at most 3");
         let hashes = disclosure_hashes(n_notes);
 
         log::debug!(

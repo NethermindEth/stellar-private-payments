@@ -125,7 +125,10 @@ pub const EXPECTED_POLICY_TX_2_2_R1CS_LEN: usize = {r1cs_len};
 
         // The stem is e.g. "selectiveDisclosure_1"; uppercase with underscore
         // separation gives "SELECTIVE_DISCLOSURE_1".
-        let const_prefix = format!("SELECTIVE_DISCLOSURE_{}", &stem[stem.len() - 1..]);
+        let suffix = stem
+            .strip_prefix("selectiveDisclosure_")
+            .expect("stem must start with 'selectiveDisclosure_'");
+        let const_prefix = format!("SELECTIVE_DISCLOSURE_{suffix}");
 
         out.push_str(&format!(
             "

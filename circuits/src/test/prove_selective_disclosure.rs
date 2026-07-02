@@ -107,6 +107,7 @@ mod tests {
         prepopulated_leaves(LEVELS, 0xD15C_105E_u64, &indices, 24)
     }
 
+    #[allow(clippy::arithmetic_side_effects)]
     fn run_valid_note_test(n_notes: usize) -> Result<()> {
         let circuit = format!("selectiveDisclosure_{n_notes}");
         let (wasm, r1cs) = load_artifacts(&circuit).expect("Cannot find {circuit} artifacts");
@@ -155,9 +156,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(14, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inPrivateKey", vec![Scalar::from(9999u64)]);
 
         assert!(
@@ -174,9 +179,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(18, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inAmount", vec![Scalar::from(9999u64)]);
 
         assert!(
@@ -193,9 +202,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(25, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inBlinding", vec![Scalar::from(8888u64)]);
 
         assert!(
@@ -212,9 +225,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(21, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         let zeros: Vec<BigInt> = (0..LEVELS).map(|_| BigInt::from(0u32)).collect();
         inputs.set("inPathElements", zeros);
 
@@ -232,9 +249,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(28, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("roots", vec![scalar_to_bigint(Scalar::from(12345u64))]);
 
         assert!(
@@ -251,9 +272,13 @@ mod tests {
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         let note = sample_note(35, 4242, 5151, 17);
-        let mut leaves = sample_leaves(&[note.clone()]);
-        let mut inputs = build_inputs(&[note.clone()], &mut leaves, Scalar::from(EXT_CONTEXT_HASH))
-            .expect("witness inputs");
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set(
             "noteCommitments",
             vec![scalar_to_bigint(Scalar::from(99999u64))],

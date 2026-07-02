@@ -616,6 +616,7 @@ mod tests {
         );
     }
 
+    #[allow(clippy::arithmetic_side_effects)]
     fn receipt_for_circuit(circuit: &'static RegisteredCircuit) -> DisclosureReceipt {
         DisclosureReceipt {
             version: DISCLOSURE_RECEIPT_VERSION,
