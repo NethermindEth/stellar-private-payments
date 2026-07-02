@@ -122,3 +122,6 @@ debug-assertions = true
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
+
+[package.metadata.cargo-shear]
+ignored = ["reqwest"]
