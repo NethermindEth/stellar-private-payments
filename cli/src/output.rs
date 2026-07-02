@@ -18,7 +18,10 @@ pub fn format_token_amount(amount: u128, symbol: &str, decimals: u32) -> String 
 
     let width = decimals.checked_add(1).expect("token decimals overflow");
     let abs = format!("{amount:0>width$}", width = width);
-    let split_at = abs.len().checked_sub(decimals).expect("formatted amount shorter than decimals");
+    let split_at = abs
+        .len()
+        .checked_sub(decimals)
+        .expect("formatted amount shorter than decimals");
     let (int_part, frac_part) = abs.split_at(split_at);
     let frac = frac_part.trim_end_matches('0');
     let formatted = if frac.is_empty() {

@@ -1,12 +1,12 @@
 //! `license` — the distribution/license notice, mirroring the app footer, plus
 //! the full license texts and NOTICEs.
 //!
-//! The texts are read at runtime from the data-dir `dist` bundle
-//! (`<data_dir>/dist`, provisioned by the installer), which mirrors the web
-//! app's dist layout. In-repo runs fall back to the repository's `dist/`. This
-//! keeps the compiled circuit artifacts accompanied by the LGPL-3.0/GPL-3.0
-//! texts, the circuits NOTICE, and the Corresponding Source pointer required by
-//! LGPL-3.0 §4.
+//! The texts are read at runtime from a `dist` bundle that mirrors the web
+//! app's dist layout: release builds read the installed `<data_dir>/dist`
+//! (provisioned by the installer), while debug builds read the repository's
+//! `dist/`. This keeps the compiled circuit artifacts accompanied by the
+//! LGPL-3.0/GPL-3.0 texts, the circuits NOTICE, and the Corresponding Source
+//! pointer required by LGPL-3.0 §4.
 
 use std::path::{Path, PathBuf};
 
@@ -73,21 +73,26 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Locate the `dist` directory holding the license/notice texts: the installed
-/// data-dir bundle, else (for in-repo runs) the repository's `dist/`.
+/// Locate the `dist` directory holding the license/notice texts. Mirrors
+/// `default_circuits_dir` in `artifacts.rs`: debug builds read the repository's
+/// `dist/`; release builds read the installed `<data_dir>/dist`.
 fn resolve_dist_dir(config: &CliConfig) -> Result<PathBuf> {
-    let installed = config.data_dir.join("dist");
-    if installed.is_dir() {
-        return Ok(installed);
-    }
-    let repo_dist = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist");
-    if repo_dist.is_dir() {
-        return Ok(repo_dist);
+    let dist = if cfg!(debug_assertions) {
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../dist")
+    } else {
+        config.data_dir.join("dist")
+    };
+    if dist.is_dir() {
+        return Ok(dist);
     }
     bail!(
-        "license/notice files not found under {} — install the CLI \
-         (deployments/scripts/install.sh) or build the dist",
-        installed.display()
+        "license/notice files not found under {} — {}",
+        dist.display(),
+        if cfg!(debug_assertions) {
+            "build the dist first"
+        } else {
+            "install the CLI (deployments/scripts/install.sh)"
+        }
     );
 }
 
