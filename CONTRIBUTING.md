@@ -203,3 +203,13 @@ Prepare a production build (TODO: enable optimizations and minification)
 ```sh
 $ make dist
 ```
+
+## CLI development
+
+Build it in a debug mode
+
+```sh
+cargo build -p stellar-private-payments-cli
+```
+
+If you build it in a release mode, then ensure that proper data directory is configured.
