@@ -7,6 +7,9 @@ license.workspace = true
 publish.workspace = true
 description = "CLI for Stellar Private Payments"
 
+[package.metadata.cargo-shear]
+ignored = ["reqwest"]
+
 [[bin]]
 name = "spp"
 path = "src/main.rs"
