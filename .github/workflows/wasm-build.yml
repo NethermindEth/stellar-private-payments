@@ -36,9 +36,30 @@ jobs:
           cache-targets: "true"
 
       - name: Build circuit artifacts
-        run: cargo build -p circuits
+        run: cargo build -p circuits --release
 
-      - name: Check the wasm build
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@39370e3970a6d05c55b1809bdece33fbbda7dfbc # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+
+      - name: Install SDK npm dependencies
+        run: npm ci --prefix sdk/web
+
+      - name: Build npm package
+        run: npm run build --prefix sdk/web
+
+      - name: Check SDK artifacts and types
+        run: |
+          npm run check:artifacts --prefix sdk/web
+          npm run check:types --prefix sdk/web
+
+      - name: Check the wasm build (debug)
         run: cargo build -p stellar-private-payments-sdk-web --target wasm32-unknown-unknown
 
   wasm-test:
