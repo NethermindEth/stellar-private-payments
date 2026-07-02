@@ -220,3 +220,9 @@ A CLI *prerelease* can be done with
 git tag v0.1.0-rc.1 # with a proper new version
 git push origin v0.1.0-rc.1
 ```
+
+then you can install it from the Github with
+
+```sh
+./deployments/scripts/install.sh --pre
+```
