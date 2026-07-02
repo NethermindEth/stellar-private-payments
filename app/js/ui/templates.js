@@ -47,9 +47,11 @@ export const Templates = {
         const el = App.templates.feedCard.content.cloneNode(true).firstElementChild;
         el.querySelector('.feed-title').textContent = item.title;
         el.querySelector('.feed-body').textContent = item.body;
-        el.querySelector('.feed-meta').textContent = poolLabel
+        const feedMeta = el.querySelector('.feed-meta');
+        feedMeta.textContent = poolLabel
             ? `${poolLabel} · Ledger ${item.ledger}`
             : `Ledger ${item.ledger}`;
+        feedMeta.href = Utils.explorerLedgerUrl(item.ledger);
         return el;
     },
 

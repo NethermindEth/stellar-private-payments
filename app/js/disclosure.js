@@ -15,6 +15,7 @@ import {
   getWalletNetwork,
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { getActivePoolContractId } from './ui/pool.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -654,14 +655,6 @@ export function mountGenerate(container) {
   });
 
   container.appendChild(formWrap);
-}
-
-function getActivePoolContractId(config) {
-  const pools = Array.isArray(config?.pools) ? config.pools : [];
-  const selected = pools.find((p) => p?.enabled) || pools[0];
-  const poolContractId = selected?.poolContractId;
-  if (!poolContractId) throw new Error('Pool contract ID not available');
-  return poolContractId;
 }
 
 async function generateReceipt(form) {

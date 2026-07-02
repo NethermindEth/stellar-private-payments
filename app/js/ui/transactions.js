@@ -11,6 +11,7 @@ import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool, getActivePoolContractId, getContractConfig } from './pool.js';
 import { Templates } from './templates.js';
+import { OpHistory } from './op-history.js';
 
 const N_OUTPUTS = 2;
 
@@ -332,9 +333,21 @@ async function executeFromAmount(ctx, { btn, amountInputId, run }) {
 function showExecuteResult(hashes) {
     if (hashes == null) {
         Toast.show(ASP_NOT_READY_MSG, 'error', 7000);
-        return;
+        return false;
     }
     showSubmittedToasts(hashes);
+    return true;
+}
+
+function recordSuccessfulOp(hashes, poolContractId, { type, amount, direction, counterparty } = {}) {
+    if (!hashes || !App.state.wallet?.address || !poolContractId) return;
+    void OpHistory.record(App.state.wallet.address, poolContractId, {
+        type,
+        amount,
+        direction,
+        counterparty,
+        hashes,
+    });
 }
 
 function wirePlanHint(amountInputId, hintId, advancedCheckboxId) {
@@ -639,7 +652,13 @@ export const Transactions = {
                     poolContractId,
                 );
 
-                showExecuteResult(hashes);
+                if (showExecuteResult(hashes)) {
+                    recordSuccessfulOp(hashes, poolContractId, {
+                        type: 'Deposit',
+                        amount: amountStroops,
+                        direction: 'in',
+                    });
+                }
             } catch (e) {
                 Toast.show(e?.message || 'Deposit failed', 'error', 7000);
             } finally {
@@ -665,7 +684,11 @@ export const Transactions = {
                 const recipient = document.getElementById('withdraw-recipient')?.value?.trim()
                     || App.state.wallet.address;
 
+                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
+
                 let hashes;
+                let withdrawAmount = 0n;
                 if (advanced) {
                     const inputNoteIds = collectNoteIds('withdraw-inputs');
                     if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
@@ -675,6 +698,7 @@ export const Transactions = {
                     if (total <= 0n) {
                         throw new Error('Selected notes must have a positive total');
                     }
+                    withdrawAmount = total;
 
                     setLoadingText(btn, 'Proving…');
                     hashes = await poolTransact(ctx.pool, buildTransactConfig({
@@ -689,15 +713,25 @@ export const Transactions = {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'withdraw-amount',
-                        run: (c, amountStroops) => c.pool.withdraw(
-                            amountStroops,
-                            recipient,
-                        ).then(txResultsToHashes),
+                        run: (c, amountStroops) => {
+                            withdrawAmount = amountStroops;
+                            return c.pool.withdraw(
+                                amountStroops,
+                                recipient,
+                            ).then(txResultsToHashes);
+                        },
                     });
                     if (hashes === undefined) return;
                 }
 
-                showExecuteResult(hashes);
+                if (showExecuteResult(hashes)) {
+                    recordSuccessfulOp(hashes, poolContractId, {
+                        type: 'Withdrawal',
+                        amount: withdrawAmount,
+                        direction: 'out',
+                        counterparty: recipient,
+                    });
+                }
             } catch (e) {
                 Toast.show(e?.message || 'Withdraw failed', 'error', 7000);
             } finally {
@@ -733,8 +767,11 @@ export const Transactions = {
 
                 const advanced = isAdvancedMode('transfer-advanced-mode');
                 const ctx = await prepareExecuteContext(btn);
+                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
 
                 let hashes;
+                let transferAmount = 0n;
                 if (advanced) {
                     const inputNoteIds = collectNoteIds('transfer-inputs');
                     if (inputNoteIds.length === 0) throw new Error('Provide at least 1 input note');
@@ -742,9 +779,7 @@ export const Transactions = {
                     if (!updateTransferBalance()) throw new Error('Input notes must equal output amounts');
 
                     const outputAmounts = collectOutputAmounts('transfer-outputs');
-
-                    const config = await getContractConfig();
-                    const poolContractId = getActivePoolContractId(config);
+                    transferAmount = outputAmounts.reduce((sum, v) => sum + v, 0n);
 
                     setLoadingText(btn, 'Proving…');
                     hashes = await poolTransact(ctx.pool, buildTransactConfig({
@@ -759,16 +794,26 @@ export const Transactions = {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'transfer-amount',
-                        run: (c, amountStroops) => c.pool.transferToKeys(
-                            recipientNoteKey,
-                            recipientEncKey,
-                            amountStroops,
-                        ).then(txResultsToHashes),
+                        run: (c, amountStroops) => {
+                            transferAmount = amountStroops;
+                            return c.pool.transferToKeys(
+                                recipientNoteKey,
+                                recipientEncKey,
+                                amountStroops,
+                            ).then(txResultsToHashes);
+                        },
                     });
                     if (hashes === undefined) return;
                 }
 
-                showExecuteResult(hashes);
+                if (showExecuteResult(hashes)) {
+                    recordSuccessfulOp(hashes, poolContractId, {
+                        type: 'Transfer',
+                        amount: transferAmount,
+                        direction: 'out',
+                        counterparty: recipientNoteKey,
+                    });
+                }
             } catch (e) {
                 Toast.show(e?.message || 'Transfer failed', 'error', 7000);
             } finally {
@@ -819,6 +864,9 @@ export const Transactions = {
                 const outputAmounts = collectOutputAmounts('transact-outputs');
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
+                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
+
                 setLoadingText(btn, 'Proving…');
                 const hashes = await poolTransact(ctx.pool, buildTransactConfig({
                     extRecipient,
@@ -828,7 +876,14 @@ export const Transactions = {
                     outRecipientNoteKeysHex: noteKeys,
                     outRecipientEncKeysHex: encKeys,
                 }));
-                showExecuteResult(hashes);
+                if (showExecuteResult(hashes)) {
+                    recordSuccessfulOp(hashes, poolContractId, {
+                        type: 'Advanced transaction',
+                        amount: extAmountStroops < 0n ? -extAmountStroops : extAmountStroops,
+                        direction: extAmountStroops < 0n ? 'out' : 'in',
+                        counterparty: extRecipient,
+                    });
+                }
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);
             } finally {

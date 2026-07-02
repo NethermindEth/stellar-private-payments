@@ -118,10 +118,9 @@ impl PrivatePool {
             encryption_public_key: EncryptionPublicKey::parse(encryption_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
         };
-        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .transfer(&wallet, recipient, NoteAmount::from(amount))
+            .transfer(recipient, NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
         self.sync().await?;
@@ -138,10 +137,9 @@ impl PrivatePool {
             encryption_public_key: EncryptionPublicKey::parse(&enc_key)
                 .map_err(|e| JsError::new(&e.to_string()))?,
         };
-        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .transfer(&wallet, recipient, NoteAmount::from(amount))
+            .transfer(recipient, NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
         self.sync().await?;
@@ -156,10 +154,9 @@ impl PrivatePool {
     ) -> Result<JsValue, JsError> {
         self.sync().await?;
         let to = recipient.unwrap_or_else(|| self.user_address.clone());
-        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .withdraw(&wallet, NoteAmount::from(amount), to)
+            .withdraw(NoteAmount::from(amount), to)
             .await
             .map_err(pool_err)?;
         self.sync().await?;

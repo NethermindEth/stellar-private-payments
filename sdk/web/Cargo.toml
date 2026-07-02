@@ -48,7 +48,7 @@ sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 sha2 = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-tokio = { version = "1", features = ["macros", "rt"] }
+tokio = { workspace = true, features = ["macros", "rt"] }
 wiremock = "0.6"
 
 [lints]

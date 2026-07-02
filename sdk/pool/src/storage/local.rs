@@ -1,4 +1,4 @@
-use std::{cell::RefCell, path::PathBuf, sync::Arc};
+use std::{cell::RefCell, path::PathBuf};
 
 use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
@@ -20,7 +20,7 @@ use crate::{
 
 /// In-process SQLite wallet storage (native only).
 pub struct LocalStorage {
-    path: Arc<PathBuf>,
+    path: PathBuf,
     db: RefCell<SqliteStorage>,
 }
 
@@ -30,7 +30,7 @@ impl LocalStorage {
         let db = SqliteStorage::connect_file(&path)
             .map_err(|e| PoolError::Other(format!("open storage: {e:#}")))?;
         Ok(Self {
-            path: Arc::new(path),
+            path,
             db: RefCell::new(db),
         })
     }
@@ -70,7 +70,7 @@ impl Storage for LocalStorage {
         let db = SqliteStorage::connect_file(self.path.as_path())
             .map_err(|e| PoolError::Other(format!("fork storage: {e:#}")))?;
         Ok(Self {
-            path: Arc::clone(&self.path),
+            path: self.path.clone(),
             db: RefCell::new(db),
         })
     }
