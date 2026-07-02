@@ -21,34 +21,15 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
-mkdir -p $TRUNK_STAGING_DIR/circuits
-
-# Circuit artifacts from a deterministic publish directory
-#
-# `circuits/build.rs` publishes to:
-#   target/circuits-artifacts/<profile>/{name}.r1cs
-#   target/circuits-artifacts/<profile>/{name}.wasm
-#
-# Prefer the artifacts which match the active Trunk build profile. Trunk exposes
-# the selected profile to hooks via `TRUNK_PROFILE`.
-PROFILE="${TRUNK_PROFILE:-release}"
-CIRCUIT_OUT="target/circuits-artifacts/$PROFILE"
-
-if [ ! -d "$CIRCUIT_OUT" ]; then
-    echo "trunk:error: missing circuit artifacts dir: $CIRCUIT_OUT" >&2
-    if [ "$PROFILE" = "release" ]; then
-        echo "trunk:error: run 'cargo build -p circuits --release' to generate them" >&2
-    else
-        echo "trunk:error: run 'cargo build -p circuits' to generate them" >&2
-    fi
+# Compiled circuits ship inside sdk/web/dist/ (npm package). Proving loads them via
+# the prover worker's __STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__ (see sdk/web/scripts/build.sh).
+if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ]; then
+    echo "trunk:error: missing sdk/web/dist — run 'make sdk-web-build'" >&2
     exit 1
 fi
 
-cp "$CIRCUIT_OUT"/*.r1cs "$TRUNK_STAGING_DIR/circuits/"
-cp "$CIRCUIT_OUT"/*.wasm "$TRUNK_STAGING_DIR/circuits/"
-
-if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ]; then
-    echo "trunk:error: missing sdk/web/dist — run 'make sdk-web-build'" >&2
+if [ ! -f "sdk/web/dist/circuits/source-bundle.tar.gz" ]; then
+    echo "trunk:error: missing sdk/web/dist/circuits — run 'make sdk-web-build'" >&2
     exit 1
 fi
 
@@ -67,11 +48,11 @@ cp -R sdk/web/dist/. "$SDK/dist/"
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 cp app/disclosure.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 
-# Distribution legal files (licenses + notices).
+# Top-level legal files (NOTICE, LICENSE, circuits/NOTICE for footer links).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
 
-# Bundle corresponding source for LGPL compliance (served as a downloadable archive).
-sh deployments/scripts/package-circuits-source-bundle.sh "$TRUNK_STAGING_DIR/circuits/source-bundle.tar.gz"
+# Footer download link only — same tarball already bundled under SDK dist/circuits/.
+cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/source-bundle.tar.gz"
 """]
 
 # Bundle JS with esbuild

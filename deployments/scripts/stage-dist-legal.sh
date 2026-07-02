@@ -13,7 +13,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 mkdir -p "$STAGING_DIR/licenses"
 mkdir -p "$STAGING_DIR/circuits"
 
-# Top-level distribution license (Apache-2.0 for this project’s code/assets).
+# Top-level distribution license (Apache-2.0 for this project's code/assets).
 cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE.txt"
 
 # Aggregate distribution notices.

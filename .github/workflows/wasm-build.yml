@@ -35,9 +35,6 @@ jobs:
         with:
           cache-targets: "true"
 
-      - name: Build circuit artifacts
-        run: cargo build -p circuits --release
-
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
@@ -58,6 +55,15 @@ jobs:
         run: |
           npm run check:artifacts --prefix sdk/web
           npm run check:types --prefix sdk/web
+
+      - name: Install app npm dependencies
+        run: npm ci --prefix app
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Smoke-test Trunk app build
+        run: trunk build --release --dist /tmp/app-dist
 
   wasm-test:
     timeout-minutes: 30

@@ -23,17 +23,15 @@ Unified project documentation is available at https://nethermindeth.github.io/st
 ```
 stellar-private-payments/
 ├── app/                        # Web application (see app/README.md, app/ARCHITECTURE.md)
-│   ├── crates/
-│   │   └── platforms/
-│   │       └── web/            # WASM entrypoint + WebClient (sign/submit in sign.rs, prover/storage workers)
 │   ├── js/                     # JavaScript frontend code (web interface)
 │   │   ├── ui/                 # UI components
 │   │   ├── admin.js            # Admin UI entry
 │   │   ├── ui.js               # Main UI entry
 │   │   ├── disclosure.js       # Selective disclosure UI entry
+│   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
-│   │   ├── wallet.js           # Freighter integration + WASM signing bridge
-│   │   ├── wasm-facade.js      # Thin wrapper over WASM exports
+│   │   ├── wallet.js           # Freighter connect/watch/sign UX
+│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments-sdk-web
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
 │   ├── assets/                 # Static assets (logo, favicon)
@@ -41,6 +39,7 @@ stellar-private-payments/
 │   ├── admin.html              # Admin entry
 │   └── disclosure.html         # Selective disclosure entry
 ├── sdk/                        # Platform-agnostic Rust SDK crates
+│   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
 │   ├── disclosure/             # Selective disclosure
 │   ├── prover/                 # Proving flows
 │   ├── state/                  # Storage and indexer
