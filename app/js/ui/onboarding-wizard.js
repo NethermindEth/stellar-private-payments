@@ -1,5 +1,5 @@
-import { getHandle } from '../wasm-facade.js';
-import { deriveKeysFromWallet } from '../wallet.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { client } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
@@ -256,27 +256,31 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ client, address, notePublicKey, encryptionPublicKey, networkPassphrase }) {
+async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
-    return client.registerPublicKeys(
-        address,
-        notePublicKey,
-        encryptionPublicKey,
-        networkPassphrase,
-        null,
-    );
+    await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
+    return client().registerPublicKeys({
+        notePublicKeyHex: notePublicKey,
+        encryptionPublicKeyHex: encryptionPublicKey,
+    });
 }
 
-export async function runOnboardingWizard({ address, networkPassphrase, bootnodeRequired = false } = {}) {
-    const client = getHandle().webClient;
+export async function runOnboardingWizard({
+    address,
+    networkPassphrase,
+    bootnodeRequired = false,
+    signer = new FreighterSigner(),
+} = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
-    const disclaimerState = await client.getDisclaimerState(address);
-    const existingKeys = await client.getUserKeys(address);
-    const existingAspSecret = await client.getASPSecret(address);
-    const explorerSetting = await client.getExplorerSetting();
-    const bootnodeSetting = await client.getBootnodeConfig();
-    const registryLookup = await client.lookupRegisteredPublicKey(address).catch(() => null);
+    const storage = client().storage();
+    const session = client();
+    const disclaimerState = await storage.getDisclaimerState(address);
+    const existingKeys = await session.getUserKeys(address);
+    const existingAspSecret = await session.getAspSecret(address);
+    const explorerSetting = await storage.getExplorerSetting();
+    const bootnodeSetting = await storage.getBootnodeConfig();
+    const registryLookup = await client().lookupRegisteredPublicKey(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
@@ -381,7 +385,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                     onClick: async () => {
                         try {
                             accept.disabled = true;
-                            await client.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
+                            await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
@@ -472,10 +476,11 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                     onClick: async () => {
                         try {
                             derive.disabled = true;
-                            const result = await deriveKeysFromWallet(address, {
-                                onStatus: () => {},
-                                skipCacheCheck: false,
-                            });
+                            await client().initializeWallet(
+                                { networkPassphrase, userAddress: address },
+                                signer,
+                            );
+                            const result = await session.loadWalletKeys(address);
                             state.keys = result;
                             noteField.textContent = result.pubKey;
                             aspField.textContent = maskSecret(result.aspSecret);
@@ -571,7 +576,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
                             }
-                            await client.setSetting('bootnode_config', { enabled, url });
+                            await storage.setSetting('bootnode_config', { enabled, url });
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();
@@ -601,7 +606,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
-                    await client.setSetting('explorer', { baseUrl });
+                    await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();
                 } catch (error) {
@@ -652,11 +657,11 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                             }
                             register.disabled = true;
                             await registerNow({
-                                client,
                                 address,
                                 notePublicKey: state.keys.pubKey,
                                 encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
                                 networkPassphrase,
+                                signer,
                             });
                             state.registered = true;
                             resolve();
@@ -673,7 +678,4 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
     }
 
     hideModal();
-
-    const finalKeys = state.keys || await deriveKeysFromWallet(address, { onStatus: () => {}, skipCacheCheck: false });
-    return finalKeys;
 }

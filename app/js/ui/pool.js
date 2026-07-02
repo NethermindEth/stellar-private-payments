@@ -1,9 +1,9 @@
 /**
- * App pool session — `createPool` handle for deposits, transfers, and withdrawals.
+ * App pool session — SDK `PrivatePool` handle for deposits, transfers, and withdrawals.
  * @module ui/pool
  */
 
-import { getHandle } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -16,7 +16,13 @@ let cachedContractConfig = null;
 let activeSession = null;
 let activeSessionContractId = null;
 
-function expectedPoolContractId(config = null) {
+export async function getContractConfig() {
+    if (cachedContractConfig) return cachedContractConfig;
+    cachedContractConfig = client().contractConfig();
+    return cachedContractConfig;
+}
+
+export function getActivePoolContractId(config = null) {
     const pools = Array.isArray(config?.pools) ? config.pools : (App.state.pools || []);
     const selected = pools.find(p => p?.poolContractId === App.state.selectedPoolId)
         || pools.find(p => p?.enabled)
@@ -25,17 +31,8 @@ function expectedPoolContractId(config = null) {
 }
 
 export function closeAppPool() {
-    if (activeSession) {
-        activeSession.close();
-        activeSession = null;
-        activeSessionContractId = null;
-    }
-}
-
-async function getContractConfig() {
-    if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = await getHandle().webClient.contractConfig();
-    return cachedContractConfig;
+    activeSession = null;
+    activeSessionContractId = null;
 }
 
 export async function createAppPool() {
@@ -49,21 +46,16 @@ export async function createAppPool() {
     closeAppPool();
 
     const config = await getContractConfig();
-    const poolContract = expectedPoolContractId(config);
+    const poolContract = getActivePoolContractId(config);
     if (!poolContract) throw new Error('Pool contract ID not available');
-    const pool = await getHandle().webClient.createPool({
-        poolContract,
-        networkPassphrase: App.state.wallet.networkPassphrase,
-        userAddress: App.state.wallet.address,
-    });
-    await pool.initialize();
+    const pool = await client().pool({ poolContract });
     activeSession = pool;
     activeSessionContractId = poolContract;
     return pool;
 }
 
 export async function ensureAppPool() {
-    const poolContract = expectedPoolContractId();
+    const poolContract = getActivePoolContractId();
     if (!poolContract) throw new Error('Pool contract ID not available');
     if (activeSession && activeSessionContractId === poolContract) return activeSession;
     return createAppPool();
