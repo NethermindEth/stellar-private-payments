@@ -25,8 +25,9 @@ pub struct AliasSigner {
 #[async_trait::async_trait(?Send)]
 impl Signer for AliasSigner {
     async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
-        let secret = stellar_cli::secret(&self.alias, self.config_dir.as_deref())
-            .map_err(|e| PoolError::Other(format!("fetch secret for alias `{}`: {e:#}", self.alias)))?;
+        let secret = stellar_cli::secret(&self.alias, self.config_dir.as_deref()).map_err(|e| {
+            PoolError::Other(format!("fetch secret for alias `{}`: {e:#}", self.alias))
+        })?;
         let inner = LocalSigner::new(
             &secret,
             self.network_passphrase.clone(),

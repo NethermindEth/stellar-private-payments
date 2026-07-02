@@ -104,7 +104,6 @@ pub fn write_config_template(path: &Path) -> Result<()> {
         .with_context(|| format!("write config template {}", path.display()))
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::config_template;

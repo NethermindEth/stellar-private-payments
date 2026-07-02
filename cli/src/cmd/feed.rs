@@ -15,12 +15,7 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
 
     // Sync every enabled pool so the local event tables are current.
     for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
-        PoolSession::open(
-            config,
-            &account,
-            &network,
-            &entry.pool_contract_id,
-        )?;
+        PoolSession::open(config, &account, &network, &entry.pool_contract_id)?;
     }
 
     let storage = config.open_storage()?;

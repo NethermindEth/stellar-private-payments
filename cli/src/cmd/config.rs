@@ -128,7 +128,12 @@ pub fn set_explorer(config: &CliConfig, url: &str, json: bool) -> Result<()> {
     report_setting(json, "explorer_base_url", url)
 }
 
-pub fn set_bootnode(config: &CliConfig, url: Option<&str>, disable: bool, json: bool) -> Result<()> {
+pub fn set_bootnode(
+    config: &CliConfig,
+    url: Option<&str>,
+    disable: bool,
+    json: bool,
+) -> Result<()> {
     let mut storage = config.open_storage()?;
     if disable {
         storage.set_bootnode_setting(false, "")?;
@@ -146,7 +151,13 @@ fn report_setting(json: bool, key: &str, value: &str) -> Result<()> {
         value: &'a str,
     }
     if json {
-        return output::emit(&SettingOut { setting: key, value }, true);
+        return output::emit(
+            &SettingOut {
+                setting: key,
+                value,
+            },
+            true,
+        );
     }
     output::print_section("Setting updated");
     output::print_kv(key, value);

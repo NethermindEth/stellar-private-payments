@@ -1,4 +1,3 @@
-
 use anyhow::{Context, Result};
 use stellar_private_payments_sdk::{
     PrivatePoolConfig, Signer, TransferRecipient,
@@ -41,7 +40,9 @@ impl PoolSession {
                 pool_contract_id: pool_contract_id.to_string(),
                 user_address: account.address.clone(),
                 storage_path: config.wallet_db_path().to_string_lossy().into_owned(),
-                prover_artifacts: load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?,
+                prover_artifacts: load_prover_artifacts(Some(
+                    config.circuits_dir_path().as_path(),
+                ))?,
             },
             signer,
         )
@@ -72,7 +73,9 @@ pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
         _ => (false, raw),
     };
     let (int_part, frac_part) = match digits.split_once('.') {
-        Some((int_part, frac_part)) => (if int_part.is_empty() { "0" } else { int_part }, frac_part),
+        Some((int_part, frac_part)) => {
+            (if int_part.is_empty() { "0" } else { int_part }, frac_part)
+        }
         None => (if digits.is_empty() { "0" } else { digits }, ""),
     };
 
@@ -151,7 +154,6 @@ fn recipient_from_keys(note_key: &str, encryption_key: &str) -> Result<TransferR
     })
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::parse_amount;
@@ -160,10 +162,16 @@ mod tests {
     #[test]
     fn parses_token_units_with_decimals() {
         assert_eq!(parse_amount("1").unwrap(), NoteAmount::from(10_000_000u128));
-        assert_eq!(parse_amount("1.").unwrap(), NoteAmount::from(10_000_000u128));
+        assert_eq!(
+            parse_amount("1.").unwrap(),
+            NoteAmount::from(10_000_000u128)
+        );
         assert_eq!(parse_amount(".5").unwrap(), NoteAmount::from(5_000_000u128));
         assert_eq!(parse_amount("0.0000001").unwrap(), NoteAmount::from(1u128));
-        assert_eq!(parse_amount("12.3456789").unwrap(), NoteAmount::from(123_456_789u128));
+        assert_eq!(
+            parse_amount("12.3456789").unwrap(),
+            NoteAmount::from(123_456_789u128)
+        );
     }
 
     #[test]

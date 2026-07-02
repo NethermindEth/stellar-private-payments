@@ -16,12 +16,7 @@ fn open(config: &CliConfig, pool: &str) -> Result<PoolSession> {
     onboard::ensure_ready(config, &account)?;
     validate_pool(pool, &config.deployment)?;
     let network = config.resolve_network()?;
-    PoolSession::open(
-        config,
-        &account,
-        &network,
-        pool,
-    )
+    PoolSession::open(config, &account, &network, pool)
 }
 
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
@@ -31,7 +26,12 @@ pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Resu
         .pool()
         .deposit(amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
-    print_tx_results(config, "Deposit submitted", std::slice::from_ref(&result), json)
+    print_tx_results(
+        config,
+        "Deposit submitted",
+        std::slice::from_ref(&result),
+        json,
+    )
 }
 
 pub fn transfer(

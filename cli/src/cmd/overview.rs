@@ -44,12 +44,7 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
 
     let mut pools = Vec::new();
     for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
-        let session = PoolSession::open(
-            config,
-            &account,
-            &network,
-            &entry.pool_contract_id,
-        )?;
+        let session = PoolSession::open(config, &account, &network, &entry.pool_contract_id)?;
         let balance = session
             .pool()
             .balance()
@@ -60,7 +55,11 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
             token_contract_id: entry.token_contract_id.clone(),
             token_link: explorer.contract(&entry.token_contract_id),
             asset: asset_label(&entry.asset),
-            balance: output::format_token_amount(u128::from(balance), &asset_symbol(&entry.asset), 7),
+            balance: output::format_token_amount(
+                u128::from(balance),
+                &asset_symbol(&entry.asset),
+                7,
+            ),
         });
     }
 
@@ -110,7 +109,10 @@ fn print_human(o: &Overview, alias: &str) {
         println!("(none)");
     }
     for pool in &o.pools {
-        output::print_kv("pool", format!("{} → {}", pool.pool_contract_id, pool.pool_link));
+        output::print_kv(
+            "pool",
+            format!("{} → {}", pool.pool_contract_id, pool.pool_link),
+        );
         output::print_kv(
             "  token",
             format!("{} → {}", pool.token_contract_id, pool.token_link),
@@ -146,10 +148,18 @@ fn asset_symbol(asset: &AssetDescriptor) -> String {
     match asset {
         AssetDescriptor::Native => "XLM".to_string(),
         AssetDescriptor::Classic { code, .. } => {
-            if code.is_empty() { "Asset".to_string() } else { code.clone() }
+            if code.is_empty() {
+                "Asset".to_string()
+            } else {
+                code.clone()
+            }
         }
         AssetDescriptor::Contract { symbol, .. } => {
-            if symbol.is_empty() { "Token".to_string() } else { symbol.clone() }
+            if symbol.is_empty() {
+                "Token".to_string()
+            } else {
+                symbol.clone()
+            }
         }
     }
 }
