@@ -2,7 +2,6 @@
 //!
 //! Connect with [`Client`], then open per-pool sessions via [`Client::pool`].
 
-mod amounts;
 mod circuits;
 mod client;
 mod deployment;

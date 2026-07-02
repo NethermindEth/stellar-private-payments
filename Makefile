@@ -29,7 +29,7 @@ circuits-build:
 
 .PHONY: sdk-web-build
 sdk-web-build:
-	@echo "Building stellar-private-payments-sdk (sdk/web/dist)..."
+	@echo "Building stellar-private-payments-sdk-web (sdk/web/dist)..."
 	@npm run build --prefix sdk/web
 
 .PHONY: install

@@ -3723,34 +3723,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "private-payments-web"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "base64",
- "console_error_panic_hook",
- "futures",
- "gloo-timers",
- "gloo-worker",
- "js-sys",
- "log",
- "serde",
- "serde-wasm-bindgen",
- "serde_json",
- "sha2 0.11.0",
- "sqlite-wasm-rs",
- "sqlite-wasm-vfs",
- "stellar-private-payments-sdk",
- "tokio",
- "wasm-bindgen",
- "wasm-bindgen-futures",
- "wasm-log",
- "web-sys",
- "wiremock",
-]
-
-[[package]]
 name = "proc-macro-crate"
 version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4872,6 +4844,34 @@ dependencies = [
  "tx-planner",
  "types",
  "witness",
+]
+
+[[package]]
+name = "stellar-private-payments-sdk-web"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "base64",
+ "console_error_panic_hook",
+ "futures",
+ "gloo-timers",
+ "gloo-worker",
+ "js-sys",
+ "log",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.11.0",
+ "sqlite-wasm-rs",
+ "sqlite-wasm-vfs",
+ "stellar-private-payments-sdk",
+ "tokio",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "wasm-log",
+ "web-sys",
+ "wiremock",
 ]
 
 [[package]]

@@ -6,9 +6,9 @@ This document describes how the browser application manages local state, WASM ru
 
 **SDK vs app**
 
-Core logic lives in `sdk/` (Rust). The browser consumes **`stellar-private-payments-sdk`** (`sdk/web` on npm, staged under `/js/stellar-private-payments-sdk/` by Trunk).
+Core logic lives in `sdk/` (Rust). The browser consumes **`stellar-private-payments-sdk-web`** (`sdk/web` on npm, staged under `/js/stellar-private-payments-sdk-web/` by Trunk).
 
-App-specific persistence (disclaimer, settings, portfolio, operation history, etc.) stays in **`app/js/storage-app.js`**, called through `Storage.call()` from **`app/js/wasm-facade.js`**.
+App-specific persistence (settings, disclaimer, operation history) stays in **`app/js/app-storage.js`** (`AppStorage`), accessed via **`appStorage()`**. SDK session + storage-backed reads (keys, notes, feeds, ASP helpers) go through **`client()`** — the wrapped SDK `Client` from **`app/js/wasm-facade.js`**.
 
 **Lifecycle (main app)**
 
@@ -25,9 +25,8 @@ Local state uses SQLite (`sdk/state`) with OPFS in the browser storage worker.
 
 | Layer | Role |
 |-------|------|
-| **`wasm-facade.js`** | Single JS entry: runtime init, wallet session, client ops, storage wrappers |
-| **`pool-adapter.js`** | Compatibility shim: stroops ↔ decimal strings, legacy tx hash arrays |
-| **`storage-app.js`** | App-only `storage.call()` protocol helpers |
+| **`wasm-facade.js`** | Runtime init, `client()` (SDK + session reads), `appStorage()` |
+| **`app-storage.js`** | `AppStorage` — settings, disclaimer, op history |
 | **SDK `Client`** | Event sync, wallet init, registry, `allContractsData`, `pool()` factory |
 | **SDK `PrivatePool`** | Per-pool deposits, transfers, withdrawals, transact, disclose |
 | **Storage worker** | SQLite + note scan / decrypt / derived state |
@@ -43,8 +42,8 @@ JS never talks to workers directly; the SDK WASM layer owns worker spawning and 
 ### Admin page
 
 - `initializeWasm` opens storage + event sync without a wallet session.
-- `deriveAspUserLeaf` works via storage only.
-- `aspState()` / `allContractsData()` require `initializeWallet` (known limitation).
+- `deriveAspUserLeaf` works via `client()` (storage worker, no wallet).
+- `client().aspState()` / `client().allContractsData()` require `initializeWallet` (known limitation).
 
 ## Data flow (high level)
 

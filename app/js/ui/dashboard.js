@@ -1,6 +1,6 @@
 import {
-    getPortfolioBalances,
-    getOperationalFeed,
+    appStorage,
+    client,
     lookupRegisteredPublicKey,
 } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
@@ -64,8 +64,8 @@ export const Dashboard = {
         if (!App.state.wallet.address) return;
         const address = App.state.wallet.address;
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
-            getPortfolioBalances(address),
-            getOperationalFeed(5),
+            client().getPortfolioBalances(address),
+            client().getOperationalFeed(5),
             lookupRegisteredPublicKey(address),
         ]);
 

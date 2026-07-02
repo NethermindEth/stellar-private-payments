@@ -12,7 +12,6 @@ use stellar_private_payments_sdk::{
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    amounts::{format_token_amount, parse_token_amount},
     client::{core::ClientCore, pool_err, transact::parse_transact_step},
     workers::storage::StorageBridge,
 };
@@ -57,11 +56,6 @@ impl PrivatePool {
         ))
     }
 
-    fn parse_note_amount(amount: &str) -> Result<NoteAmount, JsError> {
-        let stroops = parse_token_amount(amount)?;
-        Ok(NoteAmount::from(stroops))
-    }
-
     fn tx_results_to_js(results: Vec<TransactionResult>) -> Result<JsValue, JsError> {
         Ok(serde_wasm_bindgen::to_value(&results)?)
     }
@@ -73,11 +67,11 @@ impl PrivatePool {
         self.inner().sync().await.map_err(pool_err)
     }
 
-    /// Balance in human-readable token units (e.g. `"10.5"`).
+    /// Balance in stroops (`bigint` in JS).
     #[wasm_bindgen(js_name = getBalance)]
-    pub async fn get_balance(&self) -> Result<String, JsError> {
+    pub async fn get_balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;
-        Ok(format_token_amount(u128::from(amount)))
+        Ok(u128::from(amount))
     }
 
     /// User notes for this pool (commitments, amounts, spent status).
@@ -86,19 +80,25 @@ impl PrivatePool {
         Ok(serde_wasm_bindgen::to_value(&notes)?)
     }
 
-    /// Estimate how many on-chain transactions a spend of `amount` would
-    /// require.
-    pub async fn estimate(&self, amount: &str) -> Result<JsValue, JsError> {
-        let note_amount = Self::parse_note_amount(amount)?;
-        let estimate = self.inner().estimate(note_amount).await.map_err(pool_err)?;
+    /// Estimate how many on-chain transactions a spend of `amount` stroops
+    /// would require.
+    pub async fn estimate(&self, amount: u128) -> Result<JsValue, JsError> {
+        let estimate = self
+            .inner()
+            .estimate(NoteAmount::from(amount))
+            .await
+            .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&estimate)?)
     }
 
-    /// Deposit tokens. `amount` is a decimal string (e.g. `"10"` or `"10.5"`).
-    pub async fn deposit(&self, amount: &str) -> Result<JsValue, JsError> {
+    /// Deposit tokens. `amount` is stroops (`bigint` in JS).
+    pub async fn deposit(&self, amount: u128) -> Result<JsValue, JsError> {
         self.sync().await?;
-        let note_amount = Self::parse_note_amount(amount)?;
-        let result = self.inner().deposit(note_amount).await.map_err(pool_err)?;
+        let result = self
+            .inner()
+            .deposit(NoteAmount::from(amount))
+            .await
+            .map_err(pool_err)?;
         self.sync().await?;
         Ok(serde_wasm_bindgen::to_value(&result)?)
     }
@@ -109,10 +109,9 @@ impl PrivatePool {
         &self,
         note_public_key_hex: &str,
         encryption_public_key_hex: &str,
-        amount: &str,
+        amount: u128,
     ) -> Result<JsValue, JsError> {
         self.sync().await?;
-        let note_amount = Self::parse_note_amount(amount)?;
         let recipient = TransferRecipient {
             note_public_key: NotePublicKey::parse(note_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
@@ -122,7 +121,7 @@ impl PrivatePool {
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .transfer(&wallet, recipient, note_amount)
+            .transfer(&wallet, recipient, NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
         self.sync().await?;
@@ -130,9 +129,8 @@ impl PrivatePool {
     }
 
     /// Transfer privately. `recipient` is a Stellar `G...` address.
-    pub async fn transfer(&self, recipient: &str, amount: &str) -> Result<JsValue, JsError> {
+    pub async fn transfer(&self, recipient: &str, amount: u128) -> Result<JsValue, JsError> {
         self.sync().await?;
-        let note_amount = Self::parse_note_amount(amount)?;
         let (note_key, enc_key) = self.resolve_recipient(recipient).await?;
         let recipient = TransferRecipient {
             note_public_key: NotePublicKey::parse(&note_key)
@@ -143,7 +141,7 @@ impl PrivatePool {
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .transfer(&wallet, recipient, note_amount)
+            .transfer(&wallet, recipient, NoteAmount::from(amount))
             .await
             .map_err(pool_err)?;
         self.sync().await?;
@@ -153,16 +151,15 @@ impl PrivatePool {
     /// Withdraw to `recipient`, or the connected wallet when omitted.
     pub async fn withdraw(
         &self,
-        amount: &str,
+        amount: u128,
         recipient: Option<String>,
     ) -> Result<JsValue, JsError> {
         self.sync().await?;
-        let note_amount = Self::parse_note_amount(amount)?;
         let to = recipient.unwrap_or_else(|| self.user_address.clone());
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let results = self
             .inner()
-            .withdraw(&wallet, note_amount, to)
+            .withdraw(&wallet, NoteAmount::from(amount), to)
             .await
             .map_err(pool_err)?;
         self.sync().await?;

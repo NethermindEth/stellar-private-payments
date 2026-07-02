@@ -5,7 +5,7 @@
  * No JS state/DB layer.
  */
 
-import { getRecentPublicKeys, getUserKeys } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App, Utils, Toast } from './core.js';
 
 export const AddressBook = {
@@ -81,7 +81,7 @@ export const AddressBook = {
     async _loadIfNeeded() {
         if (this._cached) return this._cached;
         if (!App.state.wallet.connected) return [];
-        const list = await getRecentPublicKeys(100);
+        const list = await client().getRecentPublicKeys(100);
         this._cached = Array.isArray(list) ? list : [];
         return this._cached;
     },
@@ -92,7 +92,7 @@ export const AddressBook = {
         if (!App.state.wallet.connected) return;
 
         try {
-            const keys = await getUserKeys(address);
+            const keys = await client().getUserKeys(address);
             if (!keys) return;
 
             const notePub =

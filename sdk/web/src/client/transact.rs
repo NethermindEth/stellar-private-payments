@@ -9,18 +9,16 @@ use stellar_private_payments_sdk::{
 };
 use wasm_bindgen::{JsError, JsValue};
 
-use crate::amounts::parse_token_amount;
-
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct TransactConfig {
     ext_recipient: String,
-    /// Signed external amount in stroops (decimal string).
-    ext_amount: String,
+    /// Signed external amount in stroops (`bigint` in JS).
+    ext_amount: i128,
     /// Pool commitment hex strings (0–2 entries).
     input_note_ids: Vec<String>,
-    /// Output note amounts in stroops (exactly 2).
-    output_amounts: Vec<String>,
+    /// Output note amounts in stroops (`bigint` in JS, exactly 2).
+    output_amounts: Vec<u128>,
     /// Recipient note public keys per output (`null` when unused).
     out_recipient_note_keys_hex: Vec<Option<String>>,
     out_recipient_enc_keys_hex: Vec<Option<String>>,
@@ -48,8 +46,7 @@ pub(crate) fn parse_transact_step(config: JsValue) -> Result<Transact, JsError> 
         )));
     }
 
-    let ext_amount =
-        ExtAmount::from_str(cfg.ext_amount.trim()).map_err(|e| JsError::new(&e.to_string()))?;
+    let ext_amount = ExtAmount::from(cfg.ext_amount);
 
     let input_commitments = cfg
         .input_note_ids
@@ -59,8 +56,7 @@ pub(crate) fn parse_transact_step(config: JsValue) -> Result<Transact, JsError> 
         .map_err(|e| JsError::new(&e.to_string()))?;
 
     let mut output_amounts = [NoteAmount::ZERO; N_OUTPUTS];
-    for (out, s) in output_amounts.iter_mut().zip(cfg.output_amounts) {
-        let stroops = parse_token_amount(&s)?;
+    for (out, stroops) in output_amounts.iter_mut().zip(cfg.output_amounts) {
         *out = NoteAmount::from(stroops);
     }
 

@@ -1,10 +1,9 @@
 /**
- * App pool session — `openPool` handle for deposits, transfers, and withdrawals.
+ * App pool session — SDK `PrivatePool` handle for deposits, transfers, and withdrawals.
  * @module ui/pool
  */
 
 import { contractConfig, openPool } from '../wasm-facade.js';
-import { wrapSdkPool } from '../pool-adapter.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -47,11 +46,7 @@ export async function createAppPool() {
 
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
-    const sdkPool = await openPool({ poolContract });
-    const pool = wrapSdkPool(sdkPool, {
-        poolContractId: poolContract,
-        userAddress: App.state.wallet.address,
-    });
+    const pool = await openPool({ poolContract });
     App.state.pool = pool;
     return pool;
 }

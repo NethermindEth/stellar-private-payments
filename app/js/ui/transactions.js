@@ -1,17 +1,81 @@
 /**
  * Transactions UI - Deposit / Withdraw / Transfer / Transact.
  *
- * WASM-first: proving + tx preparation run on the SDK pool handle (via pool-adapter).
+ * WASM-first: proving + tx preparation run on the SDK `PrivatePool` handle.
  * JS is responsible only for UI interactions; signing and submit run in WASM.
  *
  * @module ui/transactions
  */
 
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool, getActivePoolContractId, getContractConfig } from './pool.js';
 import { Templates } from './templates.js';
 
 const N_OUTPUTS = 2;
+
+function txResultsToHashes(results) {
+    if (results == null) return null;
+    const list = Array.isArray(results) ? results : [results];
+    return list.map((r) => (typeof r === 'string' ? r : r?.txHash)).filter(Boolean);
+}
+
+function normalizeOptionalHex(value) {
+    if (value == null || value === '') return null;
+    return String(value).trim();
+}
+
+function buildTransactConfig({
+    extRecipient,
+    extAmountStroops,
+    inputNoteIds,
+    outputAmounts,
+    outRecipientNoteKeysHex,
+    outRecipientEncKeysHex,
+}) {
+    return {
+        extRecipient,
+        extAmount: extAmountStroops,
+        inputNoteIds: inputNoteIds ?? [],
+        outputAmounts: (outputAmounts ?? []).slice(0, N_OUTPUTS),
+        outRecipientNoteKeysHex: (outRecipientNoteKeysHex ?? [])
+            .slice(0, N_OUTPUTS)
+            .map(normalizeOptionalHex),
+        outRecipientEncKeysHex: (outRecipientEncKeysHex ?? [])
+            .slice(0, N_OUTPUTS)
+            .map(normalizeOptionalHex),
+    };
+}
+
+async function poolTransact(pool, config) {
+    const result = await pool.transact(config);
+    return txResultsToHashes(result);
+}
+
+async function poolDeposit(pool, amountStroops, outputAmounts, poolContractId) {
+    const outputs = Array.isArray(outputAmounts) ? outputAmounts : [];
+    const splitDeposit =
+        outputs.length >= N_OUTPUTS
+        && (outputs[0] !== amountStroops || outputs[1] !== 0n);
+
+    if (!splitDeposit) {
+        const results = await pool.deposit(amountStroops);
+        return txResultsToHashes(results);
+    }
+
+    const keys = await client().loadWalletKeys(App.state.wallet.address);
+    return poolTransact(pool, buildTransactConfig({
+        extRecipient: poolContractId,
+        extAmountStroops: amountStroops,
+        inputNoteIds: [],
+        outputAmounts: outputs,
+        outRecipientNoteKeysHex: [keys.pubKey, keys.pubKey],
+        outRecipientEncKeysHex: [
+            keys.encryptionKeypair.publicKey,
+            keys.encryptionKeypair.publicKey,
+        ],
+    }));
+}
 
 function noteAmountToStroopsBigInt(amount) {
     if (amount == null) return 0n;
@@ -194,9 +258,8 @@ function wireSpendAdvancedToggle(checkboxId, advancedSectionId, amountSectionId 
 async function prepareExecuteContext(btn) {
     requireWalletReady();
     setLoading(btn, 'Validating…');
-    const onStatus = p => p?.message && setLoadingText(btn, p.message);
     const pool = await ensureAppPool();
-    return { btn, onStatus, pool };
+    return { btn, pool };
 }
 
 function showSubmittedToasts(hashes) {
@@ -566,11 +629,14 @@ export const Transactions = {
                 }
 
                 const ctx = await prepareExecuteContext(btn);
+                const config = await getContractConfig();
+                const poolContractId = getActivePoolContractId(config);
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.pool.deposit(
+                const hashes = await poolDeposit(
+                    ctx.pool,
                     amountStroops,
                     outputAmounts,
-                    ctx.onStatus,
+                    poolContractId,
                 );
 
                 showExecuteResult(hashes);
@@ -611,24 +677,22 @@ export const Transactions = {
                     }
 
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.pool.transact(
-                        recipient,
-                        -total,
+                    hashes = await poolTransact(ctx.pool, buildTransactConfig({
+                        extRecipient: recipient,
+                        extAmountStroops: -total,
                         inputNoteIds,
-                        [0n, 0n],
-                        [null, null],
-                        [null, null],
-                        ctx.onStatus,
-                    );
+                        outputAmounts: [0n, 0n],
+                        outRecipientNoteKeysHex: [null, null],
+                        outRecipientEncKeysHex: [null, null],
+                    }));
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'withdraw-amount',
                         run: (c, amountStroops) => c.pool.withdraw(
-                            recipient,
                             amountStroops,
-                            c.onStatus,
-                        ),
+                            recipient,
+                        ).then(txResultsToHashes),
                     });
                     if (hashes === undefined) return;
                 }
@@ -683,25 +747,23 @@ export const Transactions = {
                     const poolContractId = getActivePoolContractId(config);
 
                     setLoadingText(btn, 'Proving…');
-                    hashes = await ctx.pool.transact(
-                        poolContractId,
-                        0n,
+                    hashes = await poolTransact(ctx.pool, buildTransactConfig({
+                        extRecipient: poolContractId,
+                        extAmountStroops: 0n,
                         inputNoteIds,
                         outputAmounts,
-                        [recipientNoteKey, recipientNoteKey],
-                        [recipientEncKey, recipientEncKey],
-                        ctx.onStatus,
-                    );
+                        outRecipientNoteKeysHex: [recipientNoteKey, recipientNoteKey],
+                        outRecipientEncKeysHex: [recipientEncKey, recipientEncKey],
+                    }));
                 } else {
                     hashes = await executeFromAmount(ctx, {
                         btn,
                         amountInputId: 'transfer-amount',
-                        run: (c, amountStroops) => c.pool.transfer(
-                            amountStroops,
+                        run: (c, amountStroops) => c.pool.transferToKeys(
                             recipientNoteKey,
                             recipientEncKey,
-                            c.onStatus,
-                        ),
+                            amountStroops,
+                        ).then(txResultsToHashes),
                     });
                     if (hashes === undefined) return;
                 }
@@ -758,15 +820,14 @@ export const Transactions = {
                 const { noteKeys, encKeys } = collectAdvancedRecipients('transact-outputs');
 
                 setLoadingText(btn, 'Proving…');
-                const hashes = await ctx.pool.transact(
+                const hashes = await poolTransact(ctx.pool, buildTransactConfig({
                     extRecipient,
                     extAmountStroops,
                     inputNoteIds,
                     outputAmounts,
-                    noteKeys,
-                    encKeys,
-                    ctx.onStatus,
-                );
+                    outRecipientNoteKeysHex: noteKeys,
+                    outRecipientEncKeysHex: encKeys,
+                }));
                 showExecuteResult(hashes);
             } catch (e) {
                 Toast.show(e?.message || 'Transact failed', 'error', 7000);

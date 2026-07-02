@@ -59,6 +59,7 @@ ark-serialize = { version = "0.6.0", default-features = false }
 ark-snark = { version = "0.6.0", default-features = false }
 ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1.89", default-features = false }
+base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 cfg-if = { version = "1", default-features = false }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 futures = { version = "0.3.32", default-features = false, features = ["async-await"] }

@@ -1,16 +1,10 @@
-import { FreighterSigner } from 'stellar-private-payments-sdk';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
-    acceptDisclaimer,
-    getAspSecret,
-    getBootnodeConfig,
-    getDisclaimerState,
-    getExplorerSetting,
-    getUserKeys,
+    appStorage,
+    client,
     initializeWallet,
-    loadWalletKeys,
     lookupRegisteredPublicKey,
     registerPublicKeys,
-    setSetting,
 } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';
 import {
@@ -285,11 +279,13 @@ export async function runOnboardingWizard({
 } = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
-    const disclaimerState = await getDisclaimerState(address);
-    const existingKeys = await getUserKeys(address);
-    const existingAspSecret = await getAspSecret(address);
-    const explorerSetting = await getExplorerSetting();
-    const bootnodeSetting = await getBootnodeConfig();
+    const storage = appStorage();
+    const session = client();
+    const disclaimerState = await storage.getDisclaimerState(address);
+    const existingKeys = await session.getUserKeys(address);
+    const existingAspSecret = await session.getAspSecret(address);
+    const explorerSetting = await storage.getExplorerSetting();
+    const bootnodeSetting = await storage.getBootnodeConfig();
     const registryLookup = await lookupRegisteredPublicKey(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
@@ -391,7 +387,7 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             accept.disabled = true;
-                            await acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
+                            await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
@@ -486,7 +482,7 @@ export async function runOnboardingWizard({
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await loadWalletKeys(address);
+                            const result = await session.loadWalletKeys(address);
                             state.keys = result;
                             noteField.textContent = result.pubKey;
                             aspField.textContent = maskSecret(result.aspSecret);
@@ -582,7 +578,7 @@ export async function runOnboardingWizard({
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
                             }
-                            await setSetting('bootnode_config', { enabled, url });
+                            await storage.setSetting('bootnode_config', { enabled, url });
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();
@@ -612,7 +608,7 @@ export async function runOnboardingWizard({
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
-                    await setSetting('explorer', { baseUrl });
+                    await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();
                 } catch (error) {

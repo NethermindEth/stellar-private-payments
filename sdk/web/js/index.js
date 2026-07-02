@@ -2,7 +2,7 @@ import init, {
   Client as WasmClient,
   PrivatePool,
   Storage as WasmStorage,
-} from '../dist/private_payments_web.js';
+} from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
@@ -66,5 +66,5 @@ async function newClient(options) {
 export const Storage = { open: openStorage };
 export const Client = { new: newClient, contractConfig: WasmClient.contractConfig };
 export { PrivatePool };
-export { default } from '../dist/private_payments_web.js';
+export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

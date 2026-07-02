@@ -1,4 +1,4 @@
-import { getUserNotes } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
@@ -56,7 +56,7 @@ export const NotesTable = {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
         try {
-            const list = await getUserNotes(App.state.wallet.address, 200);
+            const list = await client().getUserNotes(App.state.wallet.address, 200);
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
                 id: note.id,
                 poolContractId: note.poolContractId,

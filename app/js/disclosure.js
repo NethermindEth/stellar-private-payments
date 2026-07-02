@@ -1,14 +1,14 @@
 import {
     contractConfig,
-    getUserNotes,
+    appStorage,
+    client,
     initializeRuntime,
     initializeWallet,
-    loadWalletKeys,
     openPool,
     startEventSync,
     verifySelectiveDisclosure,
 } from './wasm-facade.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
   getConnectedAddress,
@@ -139,7 +139,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await getUserNotes(state.address, LIMIT);
+    const list = await client().getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -224,7 +224,7 @@ async function connect() {
 
 async function initializeWalletSession(address, networkPassphrase) {
   await initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
-  state.derivedKeys = await loadWalletKeys(address);
+  state.derivedKeys = await client().loadWalletKeys(address);
   showToast('Privacy keys ready', 'success');
 }
 

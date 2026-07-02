@@ -1,4 +1,4 @@
-# stellar-private-payments-sdk (`sdk/web`)
+# stellar-private-payments-sdk-web (`sdk/web`)
 
 Browser SDK for Stellar Private Payments.
 
@@ -7,7 +7,7 @@ Browser SDK for Stellar Private Payments.
 ## Usage
 
 ```js
-import init, { Storage, Client, FreighterSigner } from 'stellar-private-payments-sdk';
+import init, { Storage, Client, FreighterSigner } from 'stellar-private-payments-sdk-web';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const signer = new FreighterSigner();
@@ -27,10 +27,10 @@ await client.registerPublicKeys();
 
 const pool = await client.pool({ poolContract: 'CA2TZ...' });
 await pool.sync();
-await pool.deposit('10');
-console.log(await pool.getBalance());
-await pool.transfer('G...', '5');
-await pool.withdraw('3');
+await pool.deposit(10_000_000n); // stroops (1 XLM)
+console.log(await pool.getBalance()); // bigint stroops
+await pool.transfer('G...', 5_000_000n);
+await pool.withdraw(3_000_000n);
 
 const cfg = Client.contractConfig();
 const chain = await client.allContractsData();
@@ -60,7 +60,7 @@ const chain = await client.allContractsData();
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
+Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Amount parameters and `getBalance` use **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount` / `ExtAmount`).
 
 ### Signer
 
@@ -68,10 +68,10 @@ Bound at `client.initialize`. Must implement `signMessage`, `signTransaction`, `
 
 ## TypeScript
 
-Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments-sdk'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments-sdk/wasm`.
+Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments-sdk-web'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments-sdk-web/wasm`.
 
 ```ts
-import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'stellar-private-payments-sdk';
+import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'stellar-private-payments-sdk-web';
 ```
 
 After building WASM:

@@ -1,6 +1,6 @@
 /// <reference path="./wasm.d.ts" />
 
-import type { PrivatePool } from '../../dist/private_payments_web.js';
+import type { PrivatePool } from '../../dist/stellar_private_payments_sdk_web.js';
 
 import type {
   ClientNewOptions,
@@ -12,9 +12,9 @@ import type {
 import type { Storage, StorageOpenOptions } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
-export { default } from '../../dist/private_payments_web.js';
-export { PrivatePool, Storage } from '../../dist/private_payments_web.js';
-export type { Client as WasmClient } from '../../dist/private_payments_web.js';
+export { default } from '../../dist/stellar_private_payments_sdk_web.js';
+export { PrivatePool, Storage } from '../../dist/stellar_private_payments_sdk_web.js';
+export type { Client as WasmClient } from '../../dist/stellar_private_payments_sdk_web.js';
 
 export type {
   ClientNewOptions,

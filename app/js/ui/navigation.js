@@ -1,18 +1,14 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
     contractConfig,
-    getBootnodeConfig,
-    getExplorerSetting,
-    getStoredBootnodeUrl,
+    appStorage,
+    client,
     initializeRuntime,
     initializeWallet,
-    loadWalletKeys,
     lookupRegisteredPublicKey,
     registerPublicKeys,
     resetWalletSession,
-    setBootnodeConfig,
-    setSetting,
     startEventSync,
 } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
@@ -91,7 +87,8 @@ function setMoveFlow(flow) {
 }
 
 async function ensureEventSync(rpcUrl) {
-    const storedBootnodeUrl = await getStoredBootnodeUrl();
+    const storage = appStorage();
+    const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
     try {
         await startEventSync({ bootnodeUrl: storedBootnodeUrl });
         return { bootnodeRequired: false };
@@ -106,7 +103,7 @@ async function ensureEventSync(rpcUrl) {
         });
         if (!modal.accepted || !modal.url) throw error;
 
-        await setBootnodeConfig(modal.url);
+        await storage.setBootnodeConfig(modal.url);
         await startEventSync({ bootnodeUrl: modal.url });
         return { bootnodeRequired: true };
     }
@@ -128,10 +125,11 @@ async function loadRuntimeState() {
         select.value = App.state.selectedPoolId || '';
     });
 
-    const explorerSetting = await getExplorerSetting();
+    const storage = appStorage();
+    const explorerSetting = await storage.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await getBootnodeConfig();
+    const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
     if (App.state.wallet.address) {
@@ -316,7 +314,7 @@ export const Wallet = {
                 });
 
                 await initializeWallet({ networkPassphrase, userAddress: address }, signer);
-                const keys = await loadWalletKeys(address);
+                const keys = await client().loadWalletKeys(address);
                 App.state.keys.notePublicKey = keys.pubKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
                 App.state.keys.aspSecret = keys.aspSecret;
@@ -401,8 +399,9 @@ export const Wallet = {
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-            await setSetting('explorer', { baseUrl: explorerBaseUrl });
-            await setSetting('bootnode_config', {
+            const storage = appStorage();
+            await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
+            await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
