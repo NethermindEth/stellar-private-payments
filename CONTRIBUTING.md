@@ -213,3 +213,10 @@ cargo build -p stellar-private-payments-cli
 ```
 
 If you build it in a release mode, then ensure that proper data directory is configured.
+
+A CLI *prerelease* can be done with 
+
+```sh
+git tag v0.1.0-rc.1 # with a proper new version
+git push origin v0.1.0-rc.1
+```

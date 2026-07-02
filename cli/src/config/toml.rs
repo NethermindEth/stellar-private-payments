@@ -32,7 +32,7 @@ fn config_template(debug_build: bool) -> String {
     let circuits_dir = if debug_build {
         DEBUG_CIRCUITS_DIR_TEMPLATE.to_string()
     } else {
-        format!("{DEFAULT_DATA_DIR_TEMPLATE}/circuits-artifacts/release")
+        format!("{DEFAULT_DATA_DIR_TEMPLATE}/dist/circuits")
     };
 
     format!(
@@ -118,7 +118,7 @@ mod tests {
     fn release_template_uses_data_dir_based_circuits_dir() {
         let template = config_template(false);
         assert!(template.contains(r#"# data_dir = "~/.local/share/stellar-private-payments""#));
-        assert!(template.contains(r#"# circuits_dir = "~/.local/share/stellar-private-payments/circuits-artifacts/release""#));
+        assert!(template.contains(r#"# circuits_dir = "~/.local/share/stellar-private-payments/dist/circuits""#));
         assert!(!template.contains(r#"target/circuits-artifacts/release"#));
     }
 }
