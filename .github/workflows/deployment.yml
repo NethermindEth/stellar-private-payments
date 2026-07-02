@@ -41,6 +41,9 @@ jobs:
       - name: Package circuits source bundle
         run: sh deployments/scripts/package-circuits-source-bundle.sh site/circuits/source-bundle.tar.gz
 
+      - name: Publish install script
+        run: cp deployments/scripts/install.sh site/install.sh
+
       - name: Resolve symlinks in docs
         run: |
           cd docs/src

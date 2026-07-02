@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Installer for the `spp` CLI (Stellar Private Payments).
 #
-#   curl -fsSL https://raw.githubusercontent.com/NethermindEth/stellar-private-payments/main/deployments/scripts/install.sh | sh
+#   curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh
 #
 # Picks the release binary for this platform, installs it, and provisions the
 # data-dir `dist` (circuits, proving key, license/notice texts) that the CLI
