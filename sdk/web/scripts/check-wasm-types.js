@@ -14,6 +14,14 @@ const required = [
   'dist/stellar_private_payments_sdk_web.d.ts',
   'dist/workers/storage-worker.js',
   'dist/workers/prover-worker.js',
+  'dist/circuits/policy_tx_2_2.wasm',
+  'dist/circuits/policy_tx_2_2.r1cs',
+  'dist/circuits/selectiveDisclosure_1.wasm',
+  'dist/circuits/selectiveDisclosure_1.r1cs',
+  'dist/circuits/NOTICE.txt',
+  'dist/circuits/source-bundle.tar.gz',
+  'dist/licenses/LGPL-3.0.txt',
+  'dist/licenses/GPL-3.0.txt',
 ];
 
 for (const rel of required) {

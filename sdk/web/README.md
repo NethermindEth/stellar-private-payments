@@ -56,6 +56,7 @@ const chain = await client.allContractsData();
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
 | `lookupRegisteredPublicKey(address)` | Recipient key lookup |
 | `allContractsData()` | On-chain pool + ASP state |
+| `verifySelectiveDisclosure(receiptJson, expectedVkHash, options?)` | Walletless disclosure receipt verification |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`
@@ -81,9 +82,9 @@ npm run build
 npm run check:types
 ```
 
-## Build & publish
+## Build & publish (maintainers)
 
-From repo root, `make install` sets up npm deps and trunk. Install `wasm-bindgen-cli` separately (see CONTRIBUTING.md); version must match `Cargo.lock`.
+Building the npm package from source requires the monorepo and `wasm-bindgen-cli` (see CONTRIBUTING.md):
 
 ```bash
 cargo build -p circuits --release
@@ -91,8 +92,29 @@ npm run build
 npm pack
 ```
 
-Published tarball: `dist/` (wasm + workers) and `js/` (entry + types).
+Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
+
+## npm install (app developers)
+
+```bash
+npm install stellar-private-payments-sdk-web
+```
+
+One package — no separate circuit hosting or Cargo build. Circuit artifacts ship under `dist/circuits/` and load automatically from the prover worker. Your bundler must serve static files from the package `dist/` tree (same as WASM and workers).
+
+### Licensing (compiled circuits)
+
+Compiled `.wasm` / `.r1cs` files incorporate [iden3/circomlib](https://github.com/iden3/circomlib) (LGPL-3.0). The npm package includes:
+
+| Path | Purpose |
+|------|---------|
+| `dist/circuits/NOTICE.txt` | Circuit licensing notice |
+| `dist/circuits/source-bundle.tar.gz` | Corresponding source to rebuild artifacts |
+| `dist/licenses/LGPL-3.0.txt`, `GPL-3.0.txt` | License texts |
+| `dist/LICENSE.txt` | Apache-2.0 (this SDK) |
+
+The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scripts/stage-dist-legal.sh`). If you redistribute the compiled circuits, comply with LGPL-3.0 (see NOTICE).
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.initialize()`.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.initialize()`. Circuit artifacts default to `dist/circuits/` via the prover worker loader.

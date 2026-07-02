@@ -52,11 +52,22 @@ write_worker_loader() {
   local name="$1"
   cat >"$WEB/dist/workers/${name}.js" <<EOF
 import init from './${name}-module.js';
+EOF
+  if [[ "$name" == "prover-worker" ]]; then
+    cat >>"$WEB/dist/workers/${name}.js" <<'EOF'
+globalThis.__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__ =
+  new URL('../circuits/', import.meta.url).href;
+EOF
+  fi
+  cat >>"$WEB/dist/workers/${name}.js" <<EOF
 await init();
 EOF
 }
 
 write_worker_loader storage-worker
 write_worker_loader prover-worker
+
+echo "==> Staging bundled circuit artifacts..."
+bash "$WEB/scripts/stage-circuits-dist.sh"
 
 echo "==> Built sdk/web/dist/"

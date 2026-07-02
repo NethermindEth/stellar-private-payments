@@ -11,6 +11,9 @@ use super::{pool::PrivatePool, pool_err_message};
 
 pub(crate) use progress::emit;
 
+const POLL_INTERVAL_MS: u32 = 1_000;
+const SYNC_MAX_RETRIES: u32 = 30;
+
 #[derive(Serialize)]
 #[serde(tag = "status", rename_all = "camelCase")]
 enum ExecuteJsResponse {
@@ -46,46 +49,61 @@ impl PrivatePool {
         while !plan.is_complete() {
             let current = plan.current_tx().saturating_add(1);
 
-            let mut prepared = loop {
-                let prove_message = if total > 1 {
-                    format!("Proving step {current}/{total}…")
-                } else {
-                    "Proving…".to_string()
-                };
-                progress::emit(flow, "prove", prove_message, Some(current), Some(total));
+            let mut prepared = {
+                let mut sync_waits = 0u32;
+                loop {
+                    let prove_message = if total > 1 {
+                        format!("Proving step {current}/{total}…")
+                    } else {
+                        "Proving…".to_string()
+                    };
+                    progress::emit(flow, "prove", prove_message, Some(current), Some(total));
 
-                match pool.prove_next(plan).await {
-                    Ok(prepared) => break prepared,
-                    Err(error @ PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
-                        if hashes.is_empty() {
-                            return ExecuteJsResponse::AspNotReady.try_into();
+                    match pool.prove_next(plan).await {
+                        Ok(prepared) => break prepared,
+                        Err(
+                            error @ PoolError::MembershipSync(AspMembershipSync::RegisterAtASP),
+                        ) => {
+                            if hashes.is_empty() {
+                                return ExecuteJsResponse::AspNotReady.try_into();
+                            }
+                            return ExecuteJsResponse::Failed {
+                                hashes,
+                                message: pool_err_message(error),
+                            }
+                            .try_into();
                         }
-                        return ExecuteJsResponse::Failed {
-                            hashes,
-                            message: pool_err_message(error),
+                        Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
+                            sync_waits = sync_waits.saturating_add(1);
+                            if sync_waits > SYNC_MAX_RETRIES {
+                                return ExecuteJsResponse::Failed {
+                                    hashes,
+                                    message: pool_err_message(PoolError::MembershipSync(
+                                        AspMembershipSync::SyncRequired(gap),
+                                    )),
+                                }
+                                .try_into();
+                            }
+                            progress::emit(
+                                flow,
+                                "sync_wait",
+                                if let Some(gap) = gap {
+                                    format!("Waiting to sync {gap} ledger(s) from the chain…")
+                                } else {
+                                    "Waiting to sync ledgers from the chain…".to_string()
+                                },
+                                Some(current),
+                                Some(total),
+                            );
+                            TimeoutFuture::new(POLL_INTERVAL_MS).await;
                         }
-                        .try_into();
-                    }
-                    Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
-                        progress::emit(
-                            flow,
-                            "sync_wait",
-                            if let Some(gap) = gap {
-                                format!("Waiting to sync {gap} ledger(s) from the chain…")
-                            } else {
-                                "Waiting to sync ledgers from the chain…".to_string()
-                            },
-                            Some(current),
-                            Some(total),
-                        );
-                        TimeoutFuture::new(1_000).await;
-                    }
-                    Err(error) => {
-                        return ExecuteJsResponse::Failed {
-                            hashes,
-                            message: pool_err_message(error),
+                        Err(error) => {
+                            return ExecuteJsResponse::Failed {
+                                hashes,
+                                message: pool_err_message(error),
+                            }
+                            .try_into();
                         }
-                        .try_into();
                     }
                 }
             };

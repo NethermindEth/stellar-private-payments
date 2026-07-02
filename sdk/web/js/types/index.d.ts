@@ -8,7 +8,9 @@ import type {
   PoolOptions,
   RegisterPublicKeysOptions,
   EventSyncOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
+import type { DisclosureVerificationReport } from './disclosure.js';
 import type { Storage, StorageOpenOptions } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
@@ -22,7 +24,9 @@ export type {
   PoolOptions,
   RegisterPublicKeysOptions,
   EventSyncOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
+export type { DisclosureVerificationReport } from './disclosure.js';
 export type { StorageOpenOptions } from './storage.js';
 export type {
   SignAuthEntryResult,
@@ -42,6 +46,11 @@ export interface AccountClient {
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;
   allContractsData(): Promise<unknown>;
+  verifySelectiveDisclosure(
+    receiptJson: string,
+    expectedVkHash: string,
+    options?: VerifyDisclosureOptions | null,
+  ): Promise<DisclosureVerificationReport>;
   pool(options: PoolOptions): Promise<PrivatePool>;
 }
 

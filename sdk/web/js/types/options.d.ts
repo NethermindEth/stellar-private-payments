@@ -34,3 +34,8 @@ export interface RegisterPublicKeysOptions {
   notePublicKeyHex?: string;
   encryptionPublicKeyHex?: string;
 }
+
+/** Options for {@link AccountClient.verifySelectiveDisclosure}. */
+export interface VerifyDisclosureOptions {
+  proverWorkerUrl?: string;
+}

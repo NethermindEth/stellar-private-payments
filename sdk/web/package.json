@@ -24,6 +24,7 @@
       "types": "./js/types/freighter.d.ts",
       "import": "./js/freighter.js"
     },
+    "./circuits/*": "./dist/circuits/*",
     "./workers/*": "./dist/workers/*"
   },
   "files": [

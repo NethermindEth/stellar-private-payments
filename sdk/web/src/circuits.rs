@@ -1,13 +1,24 @@
-//! Fetch compiled circuit artifacts from the app static server.
+//! Fetch compiled circuit artifacts bundled with the npm package or from the
+//! host app.
 
 use js_sys::{ArrayBuffer, Reflect, Uint8Array};
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
 use web_sys::{Request, RequestInit, RequestMode};
 
-pub(crate) async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
-    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
+const CIRCUITS_BASE_GLOBAL: &str = "__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__";
+
+fn circuit_fetch_url(filename: &str) -> Result<String, JsError> {
     let global = js_sys::global();
+
+    if let Ok(value) = Reflect::get(&global, &JsValue::from_str(CIRCUITS_BASE_GLOBAL))
+        && let Some(base) = value.as_string()
+        && !base.is_empty()
+    {
+        return Ok(format!("{base}{filename}"));
+    }
+
+    const PUBLIC_URL: Option<&str> = option_env!("PUBLIC_URL");
 
     let location = Reflect::get(&global, &JsValue::from_str("location"))
         .map_err(|_| JsError::new("accessing self.location failed"))?;
@@ -18,14 +29,19 @@ pub(crate) async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
         .ok_or_else(|| JsError::new("origin is not a string"))?;
 
     let public_url = PUBLIC_URL.unwrap_or("/");
+    let path = format!("circuits/{filename}");
 
-    let url_string = if public_url.starts_with("http://") || public_url.starts_with("https://") {
-        format!("{public_url}{path}")
+    if public_url.starts_with("http://") || public_url.starts_with("https://") {
+        Ok(format!("{public_url}{path}"))
     } else if public_url == "/" {
-        format!("{origin}/{path}")
+        Ok(format!("{origin}/{path}"))
     } else {
-        return Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"));
-    };
+        Err(JsError::new("PUBLIC_URL must be an absolute URL or '/'"))
+    }
+}
+
+pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsError> {
+    let url_string = circuit_fetch_url(filename)?;
 
     log::debug!("[circuits] fetching {url_string}");
 
@@ -36,6 +52,7 @@ pub(crate) async fn fetch_circuit_file(path: &str) -> Result<Vec<u8>, JsError> {
     let request = Request::new_with_str_and_init(&url_string, &opts)
         .map_err(|e| JsError::new(&format!("request failed for {url_string}: {e:?}")))?;
 
+    let global = js_sys::global();
     let resp_value = if let Some(window) = web_sys::window() {
         JsFuture::from(window.fetch_with_request(&request))
             .await
