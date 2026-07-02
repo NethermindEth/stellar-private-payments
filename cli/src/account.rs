@@ -1,6 +1,6 @@
 //! Account identity resolved from a `stellar keys` alias.
 //!
-//! Replaces the old plaintext `--secret`/`--mnemonic` handling: the account is
+//! The account is
 //! named by an alias and resolved to an address through the Stellar CLI. The
 //! secret is never read here — only at transaction-signing time (see
 //! [`crate::signer::AliasSigner`]).
