@@ -112,6 +112,8 @@ enum Commands {
     Keys,
     /// Reveal the ASP secret (keep it private)
     AspSecret,
+    /// Print the CLI version
+    Version,
     /// Register your public keys in the on-chain address book
     Register,
     /// Deposit public tokens into a pool
@@ -233,6 +235,7 @@ fn main() -> Result<()> {
         },
         Commands::Keys => cmd::keys::show(&config, json),
         Commands::AspSecret => cmd::keys::asp_secret(&config, json),
+        Commands::Version => cmd::version::run(json),
         Commands::Register => cmd::register::run(&config, json),
         Commands::Deposit { pool, amount } => cmd::pool::deposit(&config, &pool, &amount, json),
         Commands::Transfer {

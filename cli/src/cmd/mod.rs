@@ -6,3 +6,4 @@ pub mod license;
 pub mod overview;
 pub mod pool;
 pub mod register;
+pub mod version;
