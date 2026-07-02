@@ -23,7 +23,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
 
     let config_file = config.config_file.as_ref().map(|p| p.display().to_string());
     let data_dir = config.data_dir.display().to_string();
-    let wallet_db = config.wallet_db_path().display().to_string();
+    let db = config.db_path().display().to_string();
 
     #[derive(Serialize)]
     struct ConfigShow<'a> {
@@ -51,7 +51,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         rpc_url: rpc_url.as_deref(),
         network_passphrase: network_passphrase.as_deref(),
         data_dir: &data_dir,
-        database: &wallet_db,
+        database: &db,
         source_account: config.source_account.as_deref(),
         explorer_base_url: &explorer_base,
         bootnode_enabled: bootnode.enabled,

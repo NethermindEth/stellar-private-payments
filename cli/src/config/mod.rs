@@ -114,7 +114,7 @@ impl CliConfig {
         resolve(alias, self.stellar_config_dir.as_deref())
     }
 
-    pub fn wallet_db_path(&self) -> PathBuf {
+    pub fn db_path(&self) -> PathBuf {
         self.data_dir.join("spp.db")
     }
 
@@ -128,7 +128,7 @@ impl CliConfig {
     pub fn open_storage(&self) -> Result<SqliteStorage> {
         std::fs::create_dir_all(&self.data_dir)
             .with_context(|| format!("create data dir {}", self.data_dir.display()))?;
-        let path = self.wallet_db_path();
+        let path = self.db_path();
         SqliteStorage::connect_file(&path).with_context(|| format!("open {}", path.display()))
     }
 }

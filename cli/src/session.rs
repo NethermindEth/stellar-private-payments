@@ -39,7 +39,7 @@ impl PoolSession {
                 contract_config: config.deployment.clone(),
                 pool_contract_id: pool_contract_id.to_string(),
                 user_address: account.address.clone(),
-                storage_path: config.wallet_db_path().to_string_lossy().into_owned(),
+                storage_path: config.db_path().to_string_lossy().into_owned(),
                 prover_artifacts: load_prover_artifacts(Some(
                     config.circuits_dir_path().as_path(),
                 ))?,

@@ -17,7 +17,7 @@ use crate::{config::CliConfig, output};
 
 const REPOSITORY: &str = "https://github.com/NethermindEth/stellar-private-payments";
 const COPYRIGHT: &str = "Copyright 2025 Stellar Development Foundation";
-const PRODUCT: &str = "Stellar Private Payments — Proof of Concept Demo";
+const PRODUCT: &str = "Stellar Private Payments";
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     let dist = resolve_dist_dir(config)?;
