@@ -19,6 +19,8 @@ use config::{
     CliConfig, CliConfigOverrides, default_config_path, load_file_config, resolve_config_path,
 };
 use onboard::OnboardArgs;
+// we need to pull rustls for the reqwest in the non-web
+use reqwest as _;
 
 #[derive(Debug, Parser)]
 #[command(
