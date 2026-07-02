@@ -1,14 +1,6 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import {
-    contractConfig,
-    appStorage,
-    client,
-    initializeRuntime,
-    initializeWallet,
-    registerPublicKeys,
-    startEventSync,
-} from '../wasm-facade.js';
+import { client, initializeRuntime } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -85,10 +77,10 @@ function setMoveFlow(flow) {
 }
 
 async function ensureEventSync(rpcUrl) {
-    const storage = appStorage();
+    const storage = client().storage();
     const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
     try {
-        await startEventSync({ bootnodeUrl: storedBootnodeUrl });
+        await client().startEventSync({ bootnodeUrl: storedBootnodeUrl });
         return { bootnodeRequired: false };
     } catch (error) {
         const message = error?.message || 'Failed to start event sync';
@@ -102,13 +94,13 @@ async function ensureEventSync(rpcUrl) {
         if (!modal.accepted || !modal.url) throw error;
 
         await storage.setBootnodeConfig(modal.url);
-        await startEventSync({ bootnodeUrl: modal.url });
+        await client().startEventSync({ bootnodeUrl: modal.url });
         return { bootnodeRequired: true };
     }
 }
 
 async function loadRuntimeState() {
-    const config = contractConfig();
+    const config = client().contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
@@ -123,7 +115,7 @@ async function loadRuntimeState() {
         select.value = App.state.selectedPoolId || '';
     });
 
-    const storage = appStorage();
+    const storage = client().storage();
     const explorerSetting = await storage.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
@@ -300,7 +292,7 @@ export const Wallet = {
                     signer,
                 });
 
-                await initializeWallet({ networkPassphrase, userAddress: address }, signer);
+                await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
                 const keys = await client().loadWalletKeys(address);
                 App.state.keys.notePublicKey = keys.pubKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
@@ -380,7 +372,7 @@ export const Wallet = {
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-            const storage = appStorage();
+            const storage = client().storage();
             await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
             await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
@@ -408,7 +400,7 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true;
-            const hash = await registerPublicKeys({
+            const hash = await client().registerPublicKeys({
                 notePublicKeyHex: App.state.keys.notePublicKey,
                 encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
             });

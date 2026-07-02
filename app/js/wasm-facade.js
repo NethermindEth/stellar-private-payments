@@ -1,7 +1,7 @@
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, and app persistence.
  *
- * Lifecycle: `initializeRuntime` → `startEventSync` → `initializeWallet` → pool ops.
+ * Lifecycle: `initializeRuntime` → `client().startEventSync` → `client().initializeWallet` → pool ops.
  */
 
 import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
@@ -11,7 +11,7 @@ import { AppStorage, storageCall } from './app-storage.js';
 
 const KEY_DERIVATION_MESSAGE = 'Privacy Pool Key Derivation [v1]';
 
-let storage = null;
+let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let wasmReady = false;
@@ -20,10 +20,6 @@ let currentRpcUrl = null;
 let boundUserAddress = null;
 
 export { PROVER_WORKER_URL, STORAGE_WORKER_URL };
-
-export function contractConfig() {
-    return Client.contractConfig();
-}
 
 export async function ensureWasmInit() {
     if (!wasmReady) {
@@ -37,9 +33,52 @@ function bindAppStorage(sdkStorage) {
 }
 
 function wrapSdkClient(sdk, sdkStorage) {
-    const cfg = contractConfig;
     return {
         ...sdk,
+        contractConfig() {
+            return Client.contractConfig();
+        },
+        storage() {
+            if (!appStorageInstance) {
+                throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
+            }
+            return appStorageInstance;
+        },
+        async startEventSync({ bootnodeUrl } = {}) {
+            let resolvedBootnode = bootnodeUrl;
+            if (resolvedBootnode === undefined) {
+                resolvedBootnode = await sdk.checkEventSync();
+            }
+            await sdk.startEventSync({
+                bootnodeUrl: resolvedBootnode ?? undefined,
+            });
+            eventSyncStarted = true;
+        },
+        async initializeWallet(
+            { networkPassphrase, userAddress },
+            signer = new FreighterSigner(),
+        ) {
+            if (boundUserAddress === userAddress) return;
+
+            if (boundUserAddress != null) {
+                wrappedClient = await openWrappedClient(storageHandle, currentRpcUrl);
+            }
+
+            await client().initialize(
+                {
+                    networkPassphrase,
+                    userAddress,
+                    proverWorkerUrl: PROVER_WORKER_URL,
+                },
+                signer,
+            );
+            boundUserAddress = userAddress;
+        },
+        verifySelectiveDisclosure(receiptJson, expectedVkHash) {
+            return sdk.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
+                proverWorkerUrl: PROVER_WORKER_URL,
+            });
+        },
         async getUserKeys(address) {
             const response = await storageCall(sdkStorage, { UserKeys: address });
             return response.UserKeys ?? null;
@@ -65,7 +104,7 @@ function wrapSdkClient(sdk, sdkStorage) {
             return response.PortfolioBalances ?? [];
         },
         async getOperationalFeed(limit) {
-            const config = cfg();
+            const config = Client.contractConfig();
             const response = await storageCall(sdkStorage, {
                 OperationalFeed: {
                     limit,
@@ -135,93 +174,36 @@ async function openWrappedClient(sdkStorage, rpcUrl) {
 export async function initializeRuntime(rpcUrl) {
     await ensureWasmInit();
 
-    if (!storage || currentRpcUrl !== rpcUrl) {
-        storage = await Storage.open({ workerUrl: STORAGE_WORKER_URL });
-        bindAppStorage(storage);
-        wrappedClient = await openWrappedClient(storage, rpcUrl);
+    if (!storageHandle || currentRpcUrl !== rpcUrl) {
+        storageHandle = await Storage.open({ workerUrl: STORAGE_WORKER_URL });
+        bindAppStorage(storageHandle);
+        wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
         currentRpcUrl = rpcUrl;
         eventSyncStarted = false;
         boundUserAddress = null;
     }
 
-    return { storage: appStorage(), client: client() };
-}
-
-/**
- * Probe RPC retention and start background event sync.
- * Throws when the RPC has a sync gap and no bootnode URL is available.
- */
-export async function startEventSync({ bootnodeUrl } = {}) {
-    const activeClient = client();
-
-    let resolvedBootnode = bootnodeUrl;
-    if (resolvedBootnode === undefined) {
-        resolvedBootnode = await activeClient.checkEventSync();
-    }
-
-    await activeClient.startEventSync({
-        bootnodeUrl: resolvedBootnode ?? undefined,
-    });
-    eventSyncStarted = true;
-}
-
-/** Bind wallet signer, spawn workers, derive privacy keys when missing. Idempotent per address. */
-export async function initializeWallet(
-    { networkPassphrase, userAddress },
-    signer = new FreighterSigner(),
-) {
-    if (boundUserAddress === userAddress) return;
-
-    if (boundUserAddress != null) {
-        wrappedClient = await openWrappedClient(storage, currentRpcUrl);
-    }
-
-    await client().initialize(
-        {
-            networkPassphrase,
-            userAddress,
-            proverWorkerUrl: PROVER_WORKER_URL,
-        },
-        signer,
-    );
-    boundUserAddress = userAddress;
+    return client();
 }
 
 /**
  * Legacy entry for admin/disclosure pages: runtime + event sync, no wallet.
- * Prefer `initializeRuntime` + `startEventSync` in new code.
+ * Prefer `initializeRuntime` + `client().startEventSync` in new code.
  */
 export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
-    if (storage && currentRpcUrl === rpcUrl && eventSyncStarted && bootnodeUrl == null) {
-        return { storage: appStorage(), client: client() };
+    if (storageHandle && currentRpcUrl === rpcUrl && eventSyncStarted && bootnodeUrl == null) {
+        return client();
     }
 
-    await initializeRuntime(rpcUrl);
+    const activeClient = await initializeRuntime(rpcUrl);
 
     if (bootnodeUrl) {
-        await client().startEventSync({ bootnodeUrl });
-        eventSyncStarted = true;
+        await activeClient.startEventSync({ bootnodeUrl });
     } else if (!eventSyncStarted) {
-        await startEventSync();
+        await activeClient.startEventSync();
     }
 
-    return { storage: appStorage(), client: client() };
-}
-
-/** SDK storage worker handle (for low-level use). */
-export function getStorage() {
-    if (!storage) {
-        throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
-    }
-    return storage;
-}
-
-/** App persistence: settings, disclaimer, operation history. */
-export function appStorage() {
-    if (!appStorageInstance) {
-        throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
-    }
-    return appStorageInstance;
+    return client();
 }
 
 /** SDK session + storage-backed reads (keys, notes, feeds, ASP helpers). */
@@ -230,28 +212,4 @@ export function client() {
         throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
     }
     return wrappedClient;
-}
-
-// --- Client (requires `initializeWallet` for chain + pool ops) ---
-
-export async function allContractsData() {
-    return client().allContractsData();
-}
-
-export async function lookupRegisteredPublicKey(address) {
-    return client().lookupRegisteredPublicKey(address);
-}
-
-export async function registerPublicKeys(options) {
-    return client().registerPublicKeys(options);
-}
-
-export async function openPool({ poolContract }) {
-    return client().pool({ poolContract });
-}
-
-export async function verifySelectiveDisclosure(receiptJson, expectedVkHash) {
-    return client().verifySelectiveDisclosure(receiptJson, expectedVkHash, {
-        proverWorkerUrl: PROVER_WORKER_URL,
-    });
 }

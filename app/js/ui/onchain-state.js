@@ -7,7 +7,7 @@
  * @module ui/onchain-state
  */
 
-import { allContractsData } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 
 function setText(id, value) {
@@ -133,7 +133,7 @@ export const OnchainState = {
         this._refreshing = true;
         try {
             hideError();
-            const data = await allContractsData();
+            const data = await client().allContractsData();
             const pools = Array.isArray(data?.pools) ? data.pools : [];
             const primaryPool = pools.find(p => p?.enabled) || pools[0] || null;
 

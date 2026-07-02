@@ -3,7 +3,7 @@
  * @module ui/pool
  */
 
-import { contractConfig, openPool } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -18,7 +18,7 @@ let activeSessionContractId = null;
 
 export async function getContractConfig() {
     if (cachedContractConfig) return cachedContractConfig;
-    cachedContractConfig = contractConfig();
+    cachedContractConfig = client().contractConfig();
     return cachedContractConfig;
 }
 
@@ -48,7 +48,7 @@ export async function createAppPool() {
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
     if (!poolContract) throw new Error('Pool contract ID not available');
-    const pool = await openPool({ poolContract });
+    const pool = await client().pool({ poolContract });
     activeSession = pool;
     activeSessionContractId = poolContract;
     return pool;

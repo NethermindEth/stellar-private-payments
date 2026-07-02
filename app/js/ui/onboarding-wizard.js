@@ -1,11 +1,5 @@
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import {
-    appStorage,
-    client,
-    initializeWallet,
-    lookupRegisteredPublicKey,
-    registerPublicKeys,
-} from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
@@ -264,8 +258,8 @@ async function persistStorageIfWanted() {
 
 async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
-    await initializeWallet({ networkPassphrase, userAddress: address }, signer);
-    return registerPublicKeys({
+    await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
+    return client().registerPublicKeys({
         notePublicKeyHex: notePublicKey,
         encryptionPublicKeyHex: encryptionPublicKey,
     });
@@ -279,14 +273,14 @@ export async function runOnboardingWizard({
 } = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
-    const storage = appStorage();
+    const storage = client().storage();
     const session = client();
     const disclaimerState = await storage.getDisclaimerState(address);
     const existingKeys = await session.getUserKeys(address);
     const existingAspSecret = await session.getAspSecret(address);
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
-    const registryLookup = await lookupRegisteredPublicKey(address).catch(() => null);
+    const registryLookup = await client().lookupRegisteredPublicKey(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
@@ -482,7 +476,7 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             derive.disabled = true;
-                            await initializeWallet(
+                            await client().initializeWallet(
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );

@@ -1,13 +1,4 @@
-import {
-    contractConfig,
-    appStorage,
-    client,
-    initializeRuntime,
-    initializeWallet,
-    openPool,
-    startEventSync,
-    verifySelectiveDisclosure,
-} from './wasm-facade.js';
+import { client, initializeRuntime } from './wasm-facade.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
@@ -138,7 +129,7 @@ async function loadNotes() {
 
   try {
     const LIMIT = 200;
-    const config = contractConfig();
+    const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
     const list = await client().getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
@@ -182,7 +173,7 @@ const TESTNET_RPC = 'https://soroban-testnet.stellar.org';
 
 async function ensureDisclosureRuntime(rpcUrl = TESTNET_RPC) {
   await initializeRuntime(rpcUrl);
-  await startEventSync();
+  await client().startEventSync();
 }
 
 async function connect() {
@@ -224,7 +215,7 @@ async function connect() {
 }
 
 async function initializeWalletSession(address, networkPassphrase) {
-  await initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
+  await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
   state.derivedKeys = await client().loadWalletKeys(address);
   showToast('Privacy keys ready', 'success');
 }
@@ -678,9 +669,9 @@ async function generateReceipt(form) {
   window.addEventListener(TX_PROGRESS_EVENT, handler);
 
   try {
-    const config = contractConfig();
+    const config = client().contractConfig();
     const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
-    const pool = await openPool({ poolContract: poolContractId });
+    const pool = await client().pool({ poolContract: poolContractId });
 
     const receipt = await pool.disclose({
       selectedCommitment: state.selectedNote.id,
@@ -966,7 +957,7 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await verifySelectiveDisclosure(
+      const report = await client().verifySelectiveDisclosure(
         JSON.stringify(receipt),
         expectedVkHash
       );
