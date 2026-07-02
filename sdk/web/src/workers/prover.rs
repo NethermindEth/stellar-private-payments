@@ -26,6 +26,13 @@ use wasm_bindgen_futures::spawn_local;
 
 const WORKER_NAME: &str = "WORKER-PROVER";
 
+#[derive(Clone, Debug)]
+enum InitState {
+    Pending,
+    Ready,
+    Failed(String),
+}
+
 // TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] =
     include_bytes!("../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
@@ -82,6 +89,7 @@ thread_local! {
     static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
     static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
     static DISCLOSURE_PROVER: RefCell<Option<Groth16Prover>> = const { RefCell::new(None) };
+    static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
@@ -94,7 +102,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
 
     let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
         async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.wasm").await?;
+            let wasm_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.wasm").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
                 wasm_bytes.len()
@@ -102,7 +110,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("circuits/policy_tx_2_2.r1cs").await?;
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
                 r1cs_bytes.len()
@@ -110,8 +118,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
         },
         async {
-            let wasm_bytes: Vec<u8> =
-                fetch_circuit_file("circuits/selectiveDisclosure_1.wasm").await?;
+            let wasm_bytes: Vec<u8> = fetch_circuit_file("selectiveDisclosure_1.wasm").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
                 wasm_bytes.len()
@@ -119,8 +126,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             Ok::<Vec<u8>, JsError>(wasm_bytes)
         },
         async {
-            let r1cs_bytes: Vec<u8> =
-                fetch_circuit_file("circuits/selectiveDisclosure_1.r1cs").await?;
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file("selectiveDisclosure_1.r1cs").await?;
             log::debug!(
                 "[{WORKER_NAME}] fetched selectiveDisclosure_1.r1cs: {} bytes",
                 r1cs_bytes.len()
@@ -179,7 +185,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
             ))
         })?;
     let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
-        .expect("FAILED Disclosure Prover");
+        .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))?;
 
     TRANSACT_PROVER.with(|cell| {
         *cell.borrow_mut() = Some(transact_prover);
@@ -206,10 +212,20 @@ pub fn worker_main() {
 }
 
 async fn init() -> Result<(), JsError> {
-    load_circuit_artifacts().await?;
-    log::debug!("[{WORKER_NAME}] initialized");
+    INIT_STATE.with(|s| *s.borrow_mut() = InitState::Pending);
 
-    Ok(())
+    match load_circuit_artifacts().await {
+        Ok(()) => {
+            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
+            log::debug!("[{WORKER_NAME}] initialized");
+            Ok(())
+        }
+        Err(e) => {
+            let msg = format!("{e:?}");
+            INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
+            Err(e)
+        }
+    }
 }
 
 #[oneshot]
@@ -226,13 +242,16 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         ProverWorkerRequest::Ping => {
             log::trace!("[{WORKER_NAME}] ping");
             loop {
-                let ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
-                    && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
-                    && DISCLOSURE_PROVER.with(|s| s.borrow().is_some());
-
-                if ready {
-                    log::trace!("[{WORKER_NAME}] pong");
-                    return Ok(ProverWorkerResponse::Pong);
+                match INIT_STATE.with(|s| s.borrow().clone()) {
+                    InitState::Ready => {
+                        log::trace!("[{WORKER_NAME}] pong");
+                        return Ok(ProverWorkerResponse::Pong);
+                    }
+                    InitState::Failed(msg) => {
+                        log::debug!("[{WORKER_NAME}] ping -> init failed");
+                        return Ok(ProverWorkerResponse::Error(msg));
+                    }
+                    InitState::Pending => {}
                 }
 
                 TimeoutFuture::new(50).await;

@@ -65,7 +65,9 @@ console_error_panic_hook = { version = "0.1.7", default-features = false }
 futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
+gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
+js-sys = "0.3"
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
@@ -76,14 +78,19 @@ serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "26", default-features = false, features = ["hazmat"] }
+sqlite-wasm-rs = { version = "0.5.3", default-features = false }
+sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
 thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
+wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
 wasm-log = { version = "0.3", default-features = false }
 # see also https://github.com/NethermindEth/stellar-private-payments/issues/192
 wasmer = { git = "https://github.com/wasmerio/wasmer", rev = "763e9f2800644f51ce27f6f5c1752776da16ddd1", shallow = true, default-features = false }
+web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event"] }
+wiremock = "0.6"
 
 [workspace.lints.rust]
 missing_docs = "allow"
