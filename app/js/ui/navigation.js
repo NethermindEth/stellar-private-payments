@@ -1,6 +1,5 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import { client, initializeRuntime } from '../wasm-facade.js';
+import { getHandle, initializeWasm } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -76,31 +75,8 @@ function setMoveFlow(flow) {
     });
 }
 
-async function ensureEventSync(rpcUrl) {
-    const storage = client().storage();
-    const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
-    try {
-        await client().startEventSync({ bootnodeUrl: storedBootnodeUrl });
-        return { bootnodeRequired: false };
-    } catch (error) {
-        const message = error?.message || 'Failed to start event sync';
-        if (!isRpcSyncGapError(message)) throw error;
-
-        const modal = await showBootnodeConsentModal({
-            defaultUrl: storedBootnodeUrl || '',
-            rpcUrl,
-            errorMessage: message,
-        });
-        if (!modal.accepted || !modal.url) throw error;
-
-        await storage.setBootnodeConfig(modal.url);
-        await client().startEventSync({ bootnodeUrl: modal.url });
-        return { bootnodeRequired: true };
-    }
-}
-
 async function loadRuntimeState() {
-    const config = client().contractConfig();
+    const config = await getHandle().webClient.contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
@@ -115,11 +91,10 @@ async function loadRuntimeState() {
         select.value = App.state.selectedPoolId || '';
     });
 
-    const storage = client().storage();
-    const explorerSetting = await storage.getExplorerSetting();
+    const explorerSetting = await getHandle().webClient.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await storage.getBootnodeConfig();
+    const bootnodeSetting = await getHandle().webClient.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
     App.events.dispatchEvent(new CustomEvent('pool:config'));
@@ -139,6 +114,8 @@ function renderWallet() {
     renderSyncStatus();
 }
 
+// Sync indicator lives inside the network pill: grey/Offline when disconnected,
+// pulsing amber/Syncing until the registry is caught up, green/Synced after.
 function renderSyncStatus() {
     const dot = document.getElementById('sync-dot');
     const text = document.getElementById('sync-status');
@@ -200,6 +177,7 @@ export const Shell = {
             e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
             renderSettingsDrawer();
         });
+        // Click any identity value to copy it (copies the real value, even when masked).
         const identityCopyTargets = {
             'settings-wallet-address': () => App.state.wallet.address,
             'settings-note-key': () => App.state.keys.notePublicKey,
@@ -265,8 +243,6 @@ export const Wallet = {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
-            const signer = new FreighterSigner();
-
             try {
                 const address = await connectWallet();
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
@@ -282,21 +258,27 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
-                await initializeRuntime(rpcUrl);
-                const { bootnodeRequired } = await ensureEventSync(rpcUrl);
+                let bootnodeRequired = false;
+                try {
+                    await initializeWasm(rpcUrl);
+                } catch (error) {
+                    const message = error?.message || 'Failed to initialize app runtime';
+                    if (!isRpcSyncGapError(message)) throw error;
+                    const modal = await showBootnodeConsentModal({ defaultUrl: '', rpcUrl, errorMessage: message });
+                    if (!modal.accepted || !modal.url) throw error;
+                    await initializeWasm(rpcUrl, modal.url);
+                    await getHandle().webClient.setBootnodeConfig(modal.url);
+                    bootnodeRequired = true;
+                }
 
-                await runOnboardingWizard({
+                const keys = await runOnboardingWizard({
                     address,
                     networkPassphrase,
                     bootnodeRequired,
-                    signer,
                 });
-
-                await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
-                const keys = await client().loadWalletKeys(address);
-                App.state.keys.notePublicKey = keys.pubKey;
-                App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
-                App.state.keys.aspSecret = keys.aspSecret;
+                App.state.keys.notePublicKey = keys?.pubKey || null;
+                App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
+                App.state.keys.aspSecret = keys?.aspSecret || null;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
@@ -306,9 +288,11 @@ export const Wallet = {
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
-                const message = error?.message || '';
                 this.disconnect();
+                const message = error?.message || '';
                 if (isDbLockedError(message)) {
+                    // Blocking condition: another tab/window holds the local DB lock.
+                    // Surface it even on auto-connect (the common multi-tab trigger).
                     showDbLockedModal(message);
                 } else if (!auto) {
                     Toast.show(message || 'Failed to connect wallet', 'error');
@@ -372,9 +356,8 @@ export const Wallet = {
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-            const storage = client().storage();
-            await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
-            await storage.setSetting('bootnode_config', {
+            await getHandle().webClient.setSetting('explorer', { baseUrl: explorerBaseUrl });
+            await getHandle().webClient.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
@@ -390,7 +373,7 @@ export const Wallet = {
 
     async registerPublicKey() {
         const btn = document.getElementById('settings-register-btn');
-        if (btn?.disabled) return;
+        if (btn?.disabled) return; // already in-flight or already registered
         try {
             if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
                 throw new Error('Connect wallet first');
@@ -399,11 +382,14 @@ export const Wallet = {
                 throw new Error('Privacy keys are not ready yet');
             }
 
-            if (btn) btn.disabled = true;
-            const hash = await client().registerPublicKeys({
-                notePublicKeyHex: App.state.keys.notePublicKey,
-                encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
-            });
+            if (btn) btn.disabled = true; // prevent duplicate registrations
+            const hash = await getHandle().webClient.registerPublicKeys(
+                App.state.wallet.address,
+                App.state.keys.notePublicKey,
+                App.state.keys.encryptionPublicKey,
+                App.state.wallet.networkPassphrase,
+                null,
+            );
             App.state.profile.registered = true;
             renderSettingsDrawer();
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {
@@ -413,7 +399,7 @@ export const Wallet = {
             App.events.dispatchEvent(new CustomEvent('profile:updated'));
         } catch (error) {
             Toast.show(error?.message || 'Registration failed', 'error');
-            if (btn) btn.disabled = false;
+            if (btn) btn.disabled = false; // re-enable so the user can retry
         }
     },
 };

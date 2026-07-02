@@ -6,8 +6,8 @@ filehash = false
 release = true
 
 [watch]
-watch = ["app", "circuits", "sdk/web"]
-ignore = ["app/node_modules", "dist", "sdk/web/node_modules"]
+watch = ["app", "circuits"]
+ignore = ["app/node_modules", "dist"]
 
 [serve]
 addresses = ["0.0.0.0"]
@@ -16,7 +16,7 @@ port = 8000
 [tools]
 tailwindcss = "4.1.18"
 
-# Copy static files and stage browser SDK artifacts
+# Copy all static assets to staging
 [[hooks]]
 stage = "pre_build"
 command = "sh"
@@ -47,22 +47,6 @@ fi
 cp "$CIRCUIT_OUT"/*.r1cs "$TRUNK_STAGING_DIR/circuits/"
 cp "$CIRCUIT_OUT"/*.wasm "$TRUNK_STAGING_DIR/circuits/"
 
-if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ]; then
-    echo "trunk:error: missing sdk/web/dist — run 'make sdk-web-build'" >&2
-    exit 1
-fi
-
-SDK="$TRUNK_STAGING_DIR/js/stellar-private-payments-sdk-web"
-mkdir -p "$SDK/dist" "$SDK/js"
-cp -R sdk/web/dist/. "$SDK/dist/"
-
-# Bundle SDK JS (inlines @stellar/freighter-api); wasm stays external.
-./app/node_modules/.bin/esbuild sdk/web/js/index.js \
-  --bundle --format=esm \
-  --outfile="$SDK/js/index.js" \
-  --external:../dist/stellar_private_payments_sdk_web.js \
-  --alias:@stellar/freighter-api=./app/node_modules/@stellar/freighter-api/build/index.min.js
-
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 cp app/disclosure.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
@@ -79,9 +63,9 @@ sh deployments/scripts/package-circuits-source-bundle.sh "$TRUNK_STAGING_DIR/cir
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/ui.js --external:./web.js --bundle --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --external:./web.js --bundle --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/disclosure.js --external:./web.js --bundle --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
 
 # Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
 cp app/js/sw.js "$TRUNK_STAGING_DIR/sw.js"

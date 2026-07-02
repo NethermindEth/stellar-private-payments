@@ -59,6 +59,9 @@ jobs:
           npm run check:artifacts --prefix sdk/web
           npm run check:types --prefix sdk/web
 
+      - name: Check the app wasm build
+        run: cargo build -p web --target wasm32-unknown-unknown --release
+
   wasm-test:
     timeout-minutes: 30
     runs-on: ubuntu-latest

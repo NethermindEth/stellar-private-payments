@@ -1,12 +1,11 @@
-import { client, initializeRuntime } from './wasm-facade.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { initializeWasm, getHandle } from './wasm-facade.js';
 import {
   connectWallet,
   getConnectedAddress,
   getWalletNetwork,
+  deriveKeysFromWallet,
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
-import { getActivePoolContractId } from './ui/pool.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -129,9 +128,9 @@ async function loadNotes() {
 
   try {
     const LIMIT = 200;
-    const config = client().contractConfig();
+    const config = await getHandle().webClient.contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await client().getUserNotes(state.address, LIMIT);
+    const list = await getHandle().webClient.getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -169,13 +168,6 @@ async function loadNotes() {
   }
 }
 
-const TESTNET_RPC = 'https://soroban-testnet.stellar.org';
-
-async function ensureDisclosureRuntime(rpcUrl = TESTNET_RPC) {
-  await initializeRuntime(rpcUrl);
-  await client().startEventSync();
-}
-
 async function connect() {
   try {
     const address = await connectWallet();
@@ -200,8 +192,8 @@ async function connect() {
 
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
-    await ensureDisclosureRuntime(net.sorobanRpcUrl || TESTNET_RPC);
-    await initializeWalletSession(address, net.networkPassphrase);
+    // Derive keys (cached keys load instantly)
+    await deriveKeys();
 
     // Load notes and render generate section
     await loadNotes();
@@ -214,10 +206,19 @@ async function connect() {
   }
 }
 
-async function initializeWalletSession(address, networkPassphrase) {
-  await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
-  state.derivedKeys = await client().loadWalletKeys(address);
-  showToast('Privacy keys ready', 'success');
+async function deriveKeys() {
+  try {
+    const result = await deriveKeysFromWallet(state.address, {
+      onStatus: (msg) => console.log('[Disclosure]', msg),
+      signDelay: 300,
+      skipCacheCheck: false,
+    });
+    state.derivedKeys = result;
+    showToast('Privacy keys ready', 'success');
+  } catch (err) {
+    showToast(err.message || 'Key derivation failed', 'error');
+    throw err;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -648,43 +649,39 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
-const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
-
 async function generateReceipt(form) {
-  const progressArea = document.getElementById('generate-progress');
-  const handler = (e) => {
-    const d = e.detail;
-    if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
-    progressArea.classList.remove('hidden');
-    const wrap = document.createElement('div');
-    wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
-    const spinner = document.createElement('span');
-    spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
-    wrap.appendChild(spinner);
-    const msg = document.createElement('span');
-    msg.textContent = d.message;
-    wrap.appendChild(msg);
-    progressArea.replaceChildren(wrap);
+  const onStatus = (obj) => {
+    const stage = obj?.stage || '';
+    const message = obj?.message || '';
+    const progressArea = document.getElementById('generate-progress');
+    if (progressArea) {
+      progressArea.classList.remove('hidden');
+      const wrap = document.createElement('div');
+      wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
+      const spinner = document.createElement('span');
+      spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+      wrap.appendChild(spinner);
+      const msg = document.createElement('span');
+      msg.textContent = message;
+      wrap.appendChild(msg);
+      progressArea.replaceChildren(wrap);
+    }
   };
-  window.addEventListener(TX_PROGRESS_EVENT, handler);
 
-  try {
-    const config = client().contractConfig();
-    const poolContractId = state.selectedNote.poolContractId || getActivePoolContractId(config);
-    const pool = await client().pool({ poolContract: poolContractId });
+  const { ensureAppPool } = await import('./ui/pool.js');
+  const pool = await ensureAppPool();
 
-    const receipt = await pool.disclose({
-      selectedCommitment: state.selectedNote.id,
-      authorityLabel: form.authority,
-      authorityIdentityPayloadHex: form.payload,
-      purpose: form.purpose,
-      contextNonce: form.nonce,
-    });
+  const receipt = await pool.disclose(
+    state.selectedNote.id,
+    form.authority,
+    form.payload,
+    form.purpose,
+    BigInt(form.nonce),
+    onStatus
+  );
 
-    return receipt || null;
-  } finally {
-    window.removeEventListener(TX_PROGRESS_EVENT, handler);
-  }
+  // receipt is a JS object (already deserialized by wasm_bindgen) or null
+  return receipt || null;
 }
 
 // ---------------------------------------------------------------------------
@@ -957,7 +954,7 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await client().verifySelectiveDisclosure(
+      const report = await getHandle().webClient.verifySelectiveDisclosure(
         JSON.stringify(receipt),
         expectedVkHash
       );
@@ -1054,7 +1051,7 @@ async function init() {
   // section works immediately. Wallet connect is gated on Testnet (see
   // connect()), so the default RPC is always correct for this page.
   try {
-    await ensureDisclosureRuntime(TESTNET_RPC);
+    await initializeWasm('https://soroban-testnet.stellar.org');
     networkChip.textContent = 'TESTNET';
   } catch (e) {
     console.error('WASM init failed:', e);

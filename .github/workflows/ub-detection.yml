@@ -41,7 +41,7 @@ jobs:
             cargo_args: "--lib -p pool"
           - group: app-core
             miri_flags: "-Zmiri-strict-provenance"
-            cargo_args: "--lib -p disclosure -p prover -p types -p stellar -p tx-planner -p witness -p stellar-private-payments-sdk-web"
+            cargo_args: "--lib -p disclosure -p prover -p types -p stellar -p tx-planner -p witness -p web -p stellar-private-payments-sdk-web"
           - group: contracts-light
             miri_flags: "-Zmiri-strict-provenance"
             cargo_args: "--lib -p contract-types -p soroban-utils -p public-key-registry -p circuit-keys -p e2e-tests -p zkhash"

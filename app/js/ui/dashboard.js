@@ -1,4 +1,4 @@
-import { client } from '../wasm-facade.js';
+import { getHandle } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
@@ -60,9 +60,9 @@ export const Dashboard = {
         if (!App.state.wallet.address) return;
         const address = App.state.wallet.address;
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
-            client().getPortfolioBalances(address),
-            client().getOperationalFeed(5),
-            client().lookupRegisteredPublicKey(address),
+            getHandle().webClient.getPortfolioBalances(address),
+            getHandle().webClient.getOperationalFeed(5),
+            getHandle().webClient.lookupRegisteredPublicKey(address),
         ]);
 
         if (balancesRes.status === 'fulfilled') {

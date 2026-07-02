@@ -10,6 +10,8 @@ import {
     signTransaction,
     signMessage
 } from '@stellar/freighter-api';
+
+import { getHandle } from './wasm-facade.js';
 /**
  * Request wallet access and return the active public key.
  *
@@ -249,4 +251,96 @@ export async function signWalletMessage(message, opts = {}) {
     }
 
     return { signedMessage, signerAddress };
+}
+
+/**
+ * Derives spending and encryption keys from a single Freighter wallet signature.
+ * Consolidates the repeated pattern used by Deposit, Withdraw, Transact, and Transfer modules.
+ *
+ * @param {account} string
+ * @param {Object} options
+ * @param {function} options.onStatus - Callback for status updates (e.g., setLoadingText)
+ * @param {Object} [options.signOptions] - Options to pass to signWalletMessage
+ * @param {boolean} [options.skipCacheCheck=false] - Skip existing-key lookup before signature prompts
+ * @returns {Promise<{pubKey: string, encryptionKeypair: {publicKey: string}, aspSecret: string}>}
+ * @throws {Error} If user rejects signature requests
+ */
+export async function deriveKeysFromWallet(
+    account,
+    { onStatus, signOptions = {}, skipCacheCheck = false }
+) {
+    const client = getHandle().webClient;
+    let data = null;
+    let aspSecret = null;
+    if (!skipCacheCheck) {
+        data = await client.getUserKeys(account);
+        aspSecret = await client.getASPSecret(account);
+        if (data && aspSecret?.membershipBlinding) {
+            onStatus?.('Loaded privacy keys and ASP secret from local storage');
+            return {
+                pubKey: data.noteKeypair.public,
+                encryptionKeypair: {
+                    publicKey: data.encryptionKeypair.public,
+                },
+                aspSecret: aspSecret.membershipBlinding,
+            };
+        }
+    }
+
+    onStatus?.('Signature: derive privacy keys and ASP secret (does not move funds)...');
+
+    let derivationResult;
+    try {
+        derivationResult = await signWalletMessage(client.keyDerivationMessage(), {
+            ...signOptions,
+            skipEnsureReady: true,
+        });
+    } catch (e) {
+        if (e.code === 'USER_REJECTED') {
+            throw new Error('Please approve the message signature to derive your privacy keys and ASP secret');
+        }
+        throw e;
+    }
+
+    if (!derivationResult?.signedMessage) {
+        throw new Error('Key derivation signature rejected');
+    }
+
+    const signatureBytes = Uint8Array.from(atob(derivationResult.signedMessage), c => c.charCodeAt(0));
+    await client.deriveAndSaveUserKeys(account, signatureBytes);
+
+    data = await client.getUserKeys(account);
+    aspSecret = await client.getASPSecret(account);
+    if (!data || !aspSecret?.membershipBlinding) {
+        throw new Error('Derived privacy keys or ASP secret are unavailable');
+    }
+
+    return {
+        pubKey: data.noteKeypair.public,
+        encryptionKeypair: {
+            publicKey: data.encryptionKeypair.public,
+        },
+        aspSecret: aspSecret.membershipBlinding,
+    };
+}
+
+/** WASM signing bridge (`window.__walletSignBridge`). */
+if (typeof window !== 'undefined') {
+    window.__walletSignBridge = {
+        async signAuthEntry(preimageXdr, opts = {}) {
+            const { signedAuthEntry } = await signWalletAuthEntry(preimageXdr, opts);
+            if (!signedAuthEntry) {
+                throw new Error('Auth entry signature was not returned');
+            }
+            return signedAuthEntry;
+        },
+
+        async signTransaction(txXdr, opts = {}) {
+            const { signedTxXdr } = await signWalletTransaction(txXdr, opts);
+            if (!signedTxXdr) {
+                throw new Error('Transaction signature was not returned');
+            }
+            return signedTxXdr;
+        },
+    };
 }
