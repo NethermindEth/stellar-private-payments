@@ -1,6 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
+
+use crate::config::default_data_dir;
 use stellar_private_payments_sdk::ProverArtifacts;
 
 pub fn load_prover_artifacts(circuits_dir: Option<&Path>) -> Result<ProverArtifacts> {
@@ -22,9 +24,9 @@ pub fn load_prover_artifacts(circuits_dir: Option<&Path>) -> Result<ProverArtifa
 }
 
 fn default_circuits_dir() -> PathBuf {
-    let repo_root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..");
-    let profile = std::env::var("STELLAR_PP_BUILD_PROFILE")
-        .or_else(|_| std::env::var("PROFILE"))
-        .unwrap_or_else(|_| "release".into());
-    repo_root.join("target/circuits-artifacts").join(profile)
+    if cfg!(debug_assertions) {
+        PathBuf::from("target/circuits-artifacts/release")
+    } else {
+        default_data_dir().join("circuits-artifacts/release")
+    }
 }

@@ -118,6 +118,12 @@ impl CliConfig {
         self.data_dir.join("spp.db")
     }
 
+    pub fn circuits_dir_path(&self) -> PathBuf {
+        self.circuits_dir
+            .clone()
+            .unwrap_or_else(|| default_circuits_dir(&self.data_dir))
+    }
+
     /// Open (creating if needed) the local sqlite database (`spp.db`).
     pub fn open_storage(&self) -> Result<SqliteStorage> {
         std::fs::create_dir_all(&self.data_dir)
@@ -132,6 +138,14 @@ pub fn default_data_dir() -> PathBuf {
         .map(PathBuf::from)
         .map(|home| home.join(".local/share/stellar-private-payments"))
         .unwrap_or_else(|| PathBuf::from(".stellar-pp"))
+}
+
+pub fn default_circuits_dir(data_dir: &Path) -> PathBuf {
+    if cfg!(debug_assertions) {
+        PathBuf::from("target/circuits-artifacts/release")
+    } else {
+        data_dir.join("circuits-artifacts/release")
+    }
 }
 
 fn load_deployment(path: Option<&Path>) -> Result<(String, ContractConfig)> {

@@ -1,4 +1,3 @@
-use std::path::Path;
 
 use anyhow::{Context, Result};
 use stellar_private_payments_sdk::{
@@ -26,7 +25,6 @@ impl PoolSession {
         account: &Account,
         network: &StellarNetwork,
         pool_contract_id: &str,
-        circuits_dir: Option<&Path>,
     ) -> Result<Self> {
         let signer: Box<dyn Signer> = Box::new(AliasSigner {
             alias: account.alias.clone(),
@@ -43,7 +41,7 @@ impl PoolSession {
                 pool_contract_id: pool_contract_id.to_string(),
                 user_address: account.address.clone(),
                 storage_path: config.wallet_db_path().to_string_lossy().into_owned(),
-                prover_artifacts: load_prover_artifacts(circuits_dir)?,
+                prover_artifacts: load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?,
             },
             signer,
         )

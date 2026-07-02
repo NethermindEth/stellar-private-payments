@@ -21,7 +21,6 @@ fn open(config: &CliConfig, pool: &str) -> Result<PoolSession> {
         &account,
         &network,
         pool,
-        config.circuits_dir.as_deref(),
     )
 }
 

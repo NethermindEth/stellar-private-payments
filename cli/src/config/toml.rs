@@ -25,7 +25,18 @@ pub struct DefaultsSection {
     pub stellar_config_dir: Option<PathBuf>,
 }
 
-pub const CONFIG_TEMPLATE: &str = r#"# Stellar Private Payments CLI configuration
+const DEFAULT_DATA_DIR_TEMPLATE: &str = "~/.local/share/stellar-private-payments";
+const DEBUG_CIRCUITS_DIR_TEMPLATE: &str = "target/circuits-artifacts/release";
+
+fn config_template(debug_build: bool) -> String {
+    let circuits_dir = if debug_build {
+        DEBUG_CIRCUITS_DIR_TEMPLATE.to_string()
+    } else {
+        format!("{DEFAULT_DATA_DIR_TEMPLATE}/circuits-artifacts/release")
+    };
+
+    format!(
+        r#"# Stellar Private Payments CLI configuration
 #
 # Accounts are managed by the Stellar CLI (`stellar keys`) and passed per-command
 # with --source-account <alias>. The network (RPC URL + passphrase) is resolved
@@ -35,10 +46,12 @@ pub const CONFIG_TEMPLATE: &str = r#"# Stellar Private Payments CLI configuratio
 [defaults]
 # deployment = "/path/to/deployments.json"  # omit for embedded testnet
 # network = "testnet"                        # a `stellar network` name
-# data_dir = "~/.local/share/stellar-private-payments"
-# circuits_dir = "target/circuits-artifacts/release"
+# data_dir = "{DEFAULT_DATA_DIR_TEMPLATE}"
+# circuits_dir = "{circuits_dir}"
 # stellar_config_dir = "~/.config/stellar"   # passed to the `stellar` CLI (--config-dir)
-"#;
+"#
+    )
+}
 
 pub fn default_config_path() -> PathBuf {
     std::env::var_os("HOME")
@@ -87,6 +100,26 @@ pub fn write_config_template(path: &Path) -> Result<()> {
         std::fs::create_dir_all(parent)
             .with_context(|| format!("create config directory {}", parent.display()))?;
     }
-    std::fs::write(path, CONFIG_TEMPLATE)
+    std::fs::write(path, config_template(cfg!(debug_assertions)))
         .with_context(|| format!("write config template {}", path.display()))
+}
+
+
+#[cfg(test)]
+mod tests {
+    use super::config_template;
+
+    #[test]
+    fn debug_template_keeps_repo_circuits_dir() {
+        let template = config_template(true);
+        assert!(template.contains(r#"# circuits_dir = "target/circuits-artifacts/release""#));
+    }
+
+    #[test]
+    fn release_template_uses_data_dir_based_circuits_dir() {
+        let template = config_template(false);
+        assert!(template.contains(r#"# data_dir = "~/.local/share/stellar-private-payments""#));
+        assert!(template.contains(r#"# circuits_dir = "~/.local/share/stellar-private-payments/circuits-artifacts/release""#));
+        assert!(!template.contains(r#"target/circuits-artifacts/release"#));
+    }
 }

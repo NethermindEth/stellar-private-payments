@@ -20,7 +20,6 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
             &account,
             &network,
             &entry.pool_contract_id,
-            config.circuits_dir.as_deref(),
         )?;
     }
 

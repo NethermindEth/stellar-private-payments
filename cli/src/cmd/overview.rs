@@ -49,7 +49,6 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
             &account,
             &network,
             &entry.pool_contract_id,
-            config.circuits_dir.as_deref(),
         )?;
         let balance = session
             .pool()
