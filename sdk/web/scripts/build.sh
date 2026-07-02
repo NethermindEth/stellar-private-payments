@@ -22,7 +22,14 @@ cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET" 
 cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET" --bin prover-worker
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
-  echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked" >&2
+  echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
+  exit 1
+fi
+
+installed_version="$(wasm-bindgen --version 2>/dev/null | awk '{print $2}')"
+if [[ "${installed_version}" != "${WASM_BINDGEN_VERSION}" ]]; then
+  echo "error: wasm-bindgen ${installed_version} on PATH; need ${WASM_BINDGEN_VERSION}" >&2
+  echo "  cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
   exit 1
 fi
 

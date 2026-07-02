@@ -39,7 +39,7 @@ jobs:
         run: cargo build -p circuits --release
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Setup Node.js
         uses: actions/setup-node@39370e3970a6d05c55b1809bdece33fbbda7dfbc # v4
@@ -83,7 +83,7 @@ jobs:
           cache-targets: "true"
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar

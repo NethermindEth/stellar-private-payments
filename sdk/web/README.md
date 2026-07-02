@@ -83,7 +83,7 @@ npm run check:types
 
 ## Build & publish
 
-From repo root, `make install` installs `wasm-bindgen-cli` (see CONTRIBUTING.md).
+From repo root, `make install` sets up npm deps and trunk. Install `wasm-bindgen-cli` separately (see CONTRIBUTING.md); version must match `Cargo.lock`.
 
 ```bash
 cargo build -p circuits --release

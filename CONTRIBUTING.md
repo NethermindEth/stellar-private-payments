@@ -112,8 +112,8 @@ The workspace is configured to use `wasm-bindgen-test-runner` as the wasm test r
 so you need it available on your `PATH` (typically by installing `wasm-bindgen-cli`).
 
 ```bash
-# Install a compatible wasm-bindgen toolchain (adjust the version if `Cargo.lock` changes)
-cargo install wasm-bindgen-cli --version 0.2.126
+# Install wasm-bindgen-cli (version must match `wasm-bindgen` in Cargo.lock)
+cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
 # Example: run wasm tests for the Stellar core crate
 cargo test --target wasm32-unknown-unknown -p stellar
