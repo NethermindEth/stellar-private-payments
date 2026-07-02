@@ -42,7 +42,7 @@ jobs:
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Setup Node.js
-        uses: actions/setup-node@39370e3970a6d05c55b1809bdece33fbbda7dfbc # v4
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
         with:
           node-version: "22"
           cache: npm
