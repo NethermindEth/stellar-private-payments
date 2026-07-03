@@ -27,31 +27,25 @@ See [CONTRIBUTING.md](../CONTRIBUTING.md) for the prerequisites.
 From the repository root:
 
 ```bash
-# Install all dependencies (app + sdk/web npm, trunk, wasm targets)
+# Install all dependencies
 make install
 
-# Build browser SDK (WASM, workers, bundled circuits) and serve the app
+# Build circuits (required the first time)
+make circuits-build
+
+# Build WASM modules and serve
 make serve
 ```
 
 This will:
-1. Build `sdk/web/dist/` via `npm run build` (includes compiled circuits + LGPL source bundle)
-2. Stage the SDK into the Trunk output and bundle app JS
+1. Build WASM modules
+2. Install npm dependencies
 3. Serve the application at `http://localhost:8000`
-
-To build circuits only (without the full web stack):
-
-```bash
-make circuits-build
-```
 
 ### Individual Build Steps
 
 ```bash
-# Browser SDK only (sdk/web/dist/)
-make sdk-web-build
-
-# Full static site without serving
+# Build everything without serving
 make build
 
 # Clean build artifacts

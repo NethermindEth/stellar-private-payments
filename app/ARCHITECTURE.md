@@ -25,10 +25,10 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.open() → Client.new() → checkEventSync() → startEventSync() → initialize(signer) → client.pool() → PrivatePool ops
+init() → Storage.open() → Client.new() → checkSync() → startSync() → initialize(signer) → client.pool() → PrivatePool ops
 ```
 
-The app wraps this in `wasm-facade.js` (`initializeRuntime` → `startEventSync` → `initializeWallet` → `openPool`).
+The app wraps this in `wasm-facade.js` and `ui/pool.js`: `initializeRuntime` → `client().startSync` → `client().initializeWallet` → `createAppPool()` / `ensureAppPool()`.
 
 ### Components
 
@@ -78,7 +78,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 **`PrivatePool` (WASM, wasm-bindgen API)**
 
 - Per-pool session: pool SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
-- **Pool-scoped operations** — the app holds the handle in `App.state.pool` (`createAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
+- **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
 - Exports: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
 - Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
 - Proving, signing, and submit run inside this session; returns tx hashes to JS.
@@ -158,9 +158,9 @@ flowchart LR
 Single entry for the main app pages. Owns singleton lifecycle:
 
 1. `initializeRuntime(rpcUrl)` — `init()`, `Storage.open`, `Client.new`
-2. `startEventSync({ bootnodeUrl? })` — retention probe + background indexer
-3. `initializeWallet({ networkPassphrase, userAddress }, signer)` — `Client.initialize`
-4. `openPool({ poolContract })` — `client.pool()`
+2. `client().startSync({ bootnodeUrl? })` — `checkSync` when bootnode omitted, then background indexer
+3. `client().initializeWallet({ networkPassphrase, userAddress }, signer)` — `Client.initialize`
+4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `client().pool({ poolContract })`
 
 Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadWalletKeys`, `aspState`, etc.) via `Storage.call`.
 
@@ -210,4 +210,4 @@ Freighter account change triggers disconnect. The user reconnects and re-runs on
 
 ### RPC sync gap
 
-When the wallet RPC cannot serve the full event history, `checkEventSync` / `startEventSync` surface `RPC_SYNC_GAP`. The app prompts for a bootnode URL, persists it in app settings, and the indexer catches up via bootnode before handing off to the wallet RPC.
+When the wallet RPC cannot serve the full event history, `checkSync` / `startSync` surface `RPC_SYNC_GAP`. The app prompts for a bootnode URL, persists it in app settings, and the indexer catches up via bootnode before handing off to the wallet RPC.
