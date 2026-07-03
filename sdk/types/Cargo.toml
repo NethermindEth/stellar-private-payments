@@ -14,15 +14,29 @@ rusqlite = ["dep:rusqlite"]
 # external
 anyhow = { workspace = true }
 hex = { workspace = true }
-rusqlite = { workspace = true, optional = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 uint = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# external
+rusqlite = { workspace = true, optional = true, features = ["bundled"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# external
+rusqlite = { workspace = true, optional = true }
+
 [dev-dependencies]
 # external
-rusqlite = { workspace = true, features = ["buildtime_bindgen", "bundled"] }
 serde_json = { workspace = true, features = ["alloc"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# external
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[target.'cfg(target_arch = "wasm32")'.dev-dependencies]
+# external
+rusqlite = { workspace = true }
 
 [lints]
 workspace = true

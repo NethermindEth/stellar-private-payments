@@ -13,10 +13,17 @@ path = "src/lib.rs"
 
 [dependencies]
 anyhow = { workspace = true }
-rusqlite = { workspace = true }
 serde_json = { workspace = true }
 stellar-private-payments-sdk = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# external
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# external
+rusqlite = { workspace = true }
 
 [lints]
 workspace = true
