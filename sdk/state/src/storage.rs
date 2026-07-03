@@ -416,29 +416,6 @@ impl Storage {
         Ok(id)
     }
 
-    /// Returns $limit public keys ordered by ledger descending.
-    /// for an address book
-    pub fn get_recent_public_keys(&self, limit: u32) -> Result<Vec<types::PublicKeyEntry>> {
-        let mut stmt = self
-            .conn
-            .prepare(
-                "SELECT owner, encryption_key, note_key, ledger
-                 FROM (
-                    SELECT p.owner, p.encryption_key, p.note_key, MAX(r.ledger) AS ledger
-                    FROM public_keys p
-                    JOIN raw_contract_events r ON r.id = p.event_id
-                    GROUP BY p.owner
-                 )
-                 ORDER BY ledger DESC
-                 LIMIT ?1",
-            )
-            .context("prepare get_recent_public_keys")?;
-        stmt.query_map([limit], map_public_key_entry)
-            .context("get_recent_public_keys")?
-            .collect::<Result<Vec<_>, _>>()
-            .context("get_recent_public_keys collect")
-    }
-
     pub fn lookup_public_key_by_address(
         &self,
         address: &str,
@@ -1588,10 +1565,7 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry
 mod tests {
     use super::*;
     use prover::{crypto, encryption};
-    use types::{
-        ContractEvent, ContractsEventData, EncryptionPublicKey, KeyDerivationSignature, NoteAmount,
-        NotePublicKey, PublicKeyEvent,
-    };
+    use types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount};
 
     fn dummy_event(id: &str) -> ContractEvent {
         ContractEvent {
@@ -1601,86 +1575,6 @@ mod tests {
             topics: vec!["dummy".to_string()],
             value: "dummy".to_string(),
         }
-    }
-
-    #[test]
-    fn get_recent_public_keys_reads_public_keys_with_ledger() -> Result<()> {
-        let mut storage = Storage::connect_in_memory()?;
-
-        let event_id = "pk_event_1";
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cursor".to_string(),
-            latest_ledger: 42,
-            events: vec![ContractEvent {
-                id: event_id.to_string(),
-                ledger: 42,
-                contract_id: "CPOOL".to_string(),
-                topics: vec!["pk".to_string()],
-                value: "dummy".to_string(),
-            }],
-        })?;
-
-        storage.save_public_key_events_batch(&vec![PublicKeyEvent {
-            id: event_id.to_string(),
-            owner: "GTESTOWNER".to_string(),
-            encryption_key: EncryptionPublicKey([1u8; 32]),
-            note_key: NotePublicKey([2u8; 32]),
-        }])?;
-
-        let list = storage.get_recent_public_keys(1)?;
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].address, "GTESTOWNER");
-        assert_eq!(list[0].ledger, 42);
-        Ok(())
-    }
-
-    #[test]
-    fn get_recent_public_keys_returns_latest_registration_per_owner() -> Result<()> {
-        let mut storage = Storage::connect_with_connection(Connection::open_in_memory()?)?;
-
-        storage.save_events_batch(&ContractsEventData {
-            cursor: "cursor".to_string(),
-            latest_ledger: 43,
-            events: vec![
-                ContractEvent {
-                    id: "pk_event_old".to_string(),
-                    ledger: 42,
-                    contract_id: "CREG".to_string(),
-                    topics: vec!["pk".to_string()],
-                    value: "dummy".to_string(),
-                },
-                ContractEvent {
-                    id: "pk_event_new".to_string(),
-                    ledger: 43,
-                    contract_id: "CREG".to_string(),
-                    topics: vec!["pk".to_string()],
-                    value: "dummy".to_string(),
-                },
-            ],
-        })?;
-
-        storage.save_public_key_events_batch(&vec![
-            PublicKeyEvent {
-                id: "pk_event_old".to_string(),
-                owner: "GTESTOWNER".to_string(),
-                encryption_key: EncryptionPublicKey([1u8; 32]),
-                note_key: NotePublicKey([2u8; 32]),
-            },
-            PublicKeyEvent {
-                id: "pk_event_new".to_string(),
-                owner: "GTESTOWNER".to_string(),
-                encryption_key: EncryptionPublicKey([3u8; 32]),
-                note_key: NotePublicKey([4u8; 32]),
-            },
-        ])?;
-
-        let list = storage.get_recent_public_keys(10)?;
-        assert_eq!(list.len(), 1);
-        assert_eq!(list[0].address, "GTESTOWNER");
-        assert_eq!(list[0].ledger, 43);
-        assert_eq!(list[0].encryption_key.0, [3u8; 32]);
-        assert_eq!(list[0].note_key.0, [4u8; 32]);
-        Ok(())
     }
 
     #[test]
