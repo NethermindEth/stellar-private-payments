@@ -41,6 +41,7 @@ stellar-private-payments/
 │   ├── admin.html              # Admin entry
 │   └── disclosure.html         # Selective disclosure entry
 ├── sdk/                        # Platform-agnostic Rust SDK crates
+│   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
 │   ├── disclosure/             # Selective disclosure
 │   ├── prover/                 # Proving flows
 │   ├── state/                  # Storage and indexer
@@ -191,15 +192,30 @@ git config core.hooksPath .githooks
 * Node.js
 * npm
 
-The whole app:
+The web application:
 
 ```sh
-$ make install
-$ make serve
+make install
+make serve
 ```
 
-Prepare a production build (TODO: enable optimizations and minification)
+Production build:
 
 ```sh
-$ make dist
+make release
 ```
+
+### Browser SDK (`sdk/web`)
+
+Standalone npm package (`stellar-private-payments-sdk-web`). See [`sdk/web/README.md`](sdk/web/README.md).
+
+Requires [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (version must match `Cargo.lock`).
+
+```sh
+make install
+make sdk-web-build
+npm run check:artifacts --prefix sdk/web
+npm run check:types --prefix sdk/web
+```
+
+CI runs these checks in `.github/workflows/wasm-build.yml`.
