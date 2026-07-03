@@ -3,7 +3,8 @@
 
 use super::{
     emit_progress, parse_ext_amount_decimal, parse_input_note_ids, parse_note_amount_decimal,
-    parse_output_amounts, parse_output_recipient_keys, pool::Pool, pool_err, pool_err_message,
+    parse_output_amounts, parse_output_recipient_keys, pool::PrivatePool, pool_err,
+    pool_err_message,
 };
 use gloo_timers::future::TimeoutFuture;
 use js_sys::{Array, BigInt, Function};
@@ -66,7 +67,7 @@ impl ExecuteJsResponse {
     }
 }
 
-impl Pool {
+impl PrivatePool {
     async fn execute_plan(
         &self,
         plan: &mut PreparedTransactionPlan,
@@ -321,7 +322,7 @@ impl Pool {
 }
 
 #[wasm_bindgen]
-impl Pool {
+impl PrivatePool {
     #[wasm_bindgen(js_name = estimate)]
     pub async fn estimate(&self, amount: BigInt) -> Result<wasm_bindgen::JsValue, JsError> {
         let estimate = self.estimate_inner(amount).await?;

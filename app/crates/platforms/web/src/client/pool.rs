@@ -23,12 +23,12 @@ pub struct PoolCreateConfig {
 }
 
 /// Per-pool session for deposits, transfers, and withdrawals.
-#[wasm_bindgen(js_name = PrivatePool)]
-pub struct Pool {
+#[wasm_bindgen]
+pub struct PrivatePool {
     inner: Rc<SdkPrivatePool<StorageBridge>>,
 }
 
-impl Pool {
+impl PrivatePool {
     pub(crate) fn new(inner: Rc<SdkPrivatePool<StorageBridge>>) -> Self {
         Self { inner }
     }
@@ -39,7 +39,7 @@ impl Pool {
 }
 
 #[wasm_bindgen]
-impl Pool {
+impl PrivatePool {
     /// Warm prover worker (idempotent). `createPool` already pings once.
     pub async fn initialize(&self) -> Result<(), JsError> {
         Ok(())
@@ -80,7 +80,7 @@ impl WebClient {
 #[wasm_bindgen]
 impl WebClient {
     #[wasm_bindgen(js_name = createPool)]
-    pub async fn create_pool(&self, config: JsValue) -> Result<Pool, JsError> {
+    pub async fn create_pool(&self, config: JsValue) -> Result<PrivatePool, JsError> {
         let cfg: PoolCreateConfig = serde_wasm_bindgen::from_value(config)?;
 
         self.ping_prover()
@@ -96,6 +96,6 @@ impl WebClient {
             SdkPrivatePool::init(pool_config, self.storage(), signer, prover)
                 .map_err(super::pool_err)?,
         );
-        Ok(Pool::new(inner))
+        Ok(PrivatePool::new(inner))
     }
 }
