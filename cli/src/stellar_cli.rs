@@ -165,13 +165,13 @@ pub fn network(name: &str, config_dir: Option<&Path>) -> Result<StellarNetwork> 
 pub fn validate_alias(value: &str) -> Result<()> {
     if value.chars().any(char::is_whitespace) {
         bail!(
-            "--source-account must be a `stellar keys` alias name, not a seed phrase; \
+            "--account must be a `stellar keys` alias name, not a seed phrase; \
              register one with `stellar keys add`/`stellar keys generate`"
         );
     }
     if value.len() == 56 && value.starts_with('S') {
         bail!(
-            "--source-account must be a `stellar keys` alias name, not a raw secret key; \
+            "--account must be a `stellar keys` alias name, not a raw secret key; \
              register one with `stellar keys add`"
         );
     }

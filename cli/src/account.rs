@@ -23,7 +23,7 @@ pub struct Account {
     pub address: String,
 }
 
-/// Resolve a `--source-account` alias to an [`Account`] via the Stellar CLI.
+/// Resolve a `--account` alias to an [`Account`] via the Stellar CLI.
 pub fn resolve(alias: &str, config_dir: Option<&Path>) -> Result<Account> {
     stellar_cli::validate_alias(alias)?;
     let address = stellar_cli::public_key(alias, config_dir)?;

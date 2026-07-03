@@ -36,7 +36,7 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     match accepted {
         Some(true) => println!("\nStatus: accepted by this account."),
         Some(false) => println!("\nStatus: not yet accepted. Run `spp onboard` to accept."),
-        None => println!("\n(Pass --source-account to see whether an account has accepted.)"),
+        None => println!("\n(Pass --account to see whether an account has accepted.)"),
     }
     Ok(())
 }

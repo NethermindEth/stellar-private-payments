@@ -58,7 +58,7 @@ pub fn register_account(
     let fetcher = StateFetcher::new(&network.rpc_url, config.deployment.clone())
         .map_err(|e| anyhow::anyhow!("state fetcher: {e}"))?;
 
-    log::info!("Preparing registration for {}", account.address);
+    log::info!("Preparing address registration for {}", account.address);
     let prepared = prepare_register(&fetcher, &account.address, note_key, encryption_key)?;
 
     let secret = stellar_cli::secret(&account.alias, config.stellar_config_dir.as_deref())?;

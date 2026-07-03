@@ -145,11 +145,11 @@ fn print_human(o: &Overview, alias: &str) {
     output::print_kv("rpc_url", &o.rpc_url);
     output::print_kv("account", format!("{} → {}", o.account, o.account_link));
     if o.registered {
-        output::print_kv("registration", "registered");
+        output::print_kv("registration", "address is publicly registered");
     } else {
         output::print_kv(
             "registration",
-            format!("not registered (run: spp register --source-account {alias})"),
+            format!("address is not publicly registered (run: spp register --account {alias})"),
         );
     }
 
