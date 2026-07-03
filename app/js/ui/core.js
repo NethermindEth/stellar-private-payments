@@ -16,7 +16,6 @@ export const App = {
         keys: {
             notePublicKey: null,
             encryptionPublicKey: null,
-            aspSecret: null,
         },
         views: {
             active: 'dashboard',

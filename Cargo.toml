@@ -1,6 +1,5 @@
 [workspace]
 members = [
-    "app/crates/platforms/web",
     "circuit-keys",
     "circuits",
     "contracts/*",
