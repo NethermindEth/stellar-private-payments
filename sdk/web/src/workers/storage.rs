@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
-    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureInputsRequest,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -11,8 +12,8 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildDisclosureInputs, BuildTransactParams, PoolError, SpendableNote,
-    Storage, TransactRequest, build_disclosure_inputs, build_transact_params,
+    BuildDisclosureInputs, BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest,
+    build_disclosure_inputs, build_transact_params,
     chain::ContractDataStorage,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
@@ -679,8 +680,8 @@ impl Storage for StorageBridge {
 
     async fn build_disclosure_inputs(
         &self,
-        req: &stellar_private_payments_sdk::DisclosureInputsRequest,
-    ) -> Result<Vec<stellar_private_payments_sdk::DisclosureInputs>, PoolError> {
+        req: &DisclosureInputsRequest,
+    ) -> Result<Vec<DisclosureInputs>, PoolError> {
         match self
             .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
             .await

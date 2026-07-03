@@ -168,7 +168,9 @@ fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
     if n_notes == 0 || n_notes > 4 {
         return Err(JsError::new("selective disclosure supports 1..=4 notes"));
     }
-    Ok(n_notes - 1)
+    n_notes
+        .checked_sub(1)
+        .ok_or_else(|| JsError::new("selective disclosure supports 1..=4 notes"))
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
@@ -223,20 +225,21 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         *cell.borrow_mut() = Some(transact_prover);
     });
 
-    let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> = futures::future::try_join_all(
-        (1..=4).map(|n_notes| async move {
+    let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
+        futures::future::try_join_all((1..=4).map(|n_notes| async move {
             let wasm = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.wasm")).await?;
             let r1cs = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.r1cs")).await?;
             Ok::<_, JsError>((wasm, r1cs))
-        }),
-    )
-    .await?;
+        }))
+        .await?;
 
     let mut witness_calcs: [Option<WitnessCalculator>; 4] = [None, None, None, None];
     let mut provers: [Option<Groth16Prover>; 4] = [None, None, None, None];
 
     for (idx, (wasm_bytes, r1cs_bytes)) in disclosure_artifacts.iter().enumerate() {
-        let n_notes = idx + 1;
+        let n_notes = idx
+            .checked_add(1)
+            .expect("disclosure artifact index maps to 1..=4 note count");
         let hashes = disclosure_hashes(n_notes);
 
         ensure_sha256_matches(

@@ -94,11 +94,7 @@ pub fn build_disclosure_inputs(
     let mut notes = Vec::with_capacity(req.selected_commitments.len());
     for commitment in &req.selected_commitments {
         let (amount, blinding, leaf_index) = storage
-            .get_unspent_user_note_by_commitment(
-                &req.pool_address,
-                &req.user_address,
-                commitment,
-            )?
+            .get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
             .ok_or_else(|| {
                 anyhow::anyhow!(
                     "unspent note not found for commitment {commitment} in pool {}",

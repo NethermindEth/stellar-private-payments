@@ -1,7 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureNoteInputs,
-    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
-    UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureInputsRequest,
+    DisclosureNoteInputs, PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest,
+    StorageWorkerResponse, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -12,8 +12,9 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest, build_transact_params,
-    build_validated_pool_tree,
+    BuildTransactParams, DisclosureInputs as SdkDisclosureInputs,
+    DisclosureInputsRequest as SdkDisclosureInputsRequest, PoolError, SpendableNote, Storage,
+    TransactRequest, build_transact_params, build_validated_pool_tree,
     chain::ContractDataStorage,
     load_user_key_material,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
@@ -735,12 +736,12 @@ impl Storage for StorageBridge {
 
     async fn build_disclosure_inputs(
         &self,
-        req: &stellar_private_payments_sdk::DisclosureInputsRequest,
-    ) -> Result<stellar_private_payments_sdk::DisclosureInputs, PoolError> {
-        let local_req = crate::protocol::DisclosureInputsRequest {
+        req: &SdkDisclosureInputsRequest,
+    ) -> Result<Vec<SdkDisclosureInputs>, PoolError> {
+        let local_req = DisclosureInputsRequest {
             user_address: req.user_address.clone(),
             pool_address: req.pool_address.clone(),
-            selected_commitments: vec![req.selected_commitment],
+            selected_commitments: req.selected_commitments.clone(),
             pool_root: req.pool_root,
             pool_next_index: req.pool_next_index,
             tree_depth: req.tree_depth,
@@ -749,11 +750,10 @@ impl Storage for StorageBridge {
             .call(StorageWorkerRequest::DisclosureInputs(local_req), 5_000)
             .await
         {
-            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => {
-                let note = inputs.notes.into_iter().next().ok_or_else(|| {
-                    PoolError::Other("disclosure inputs returned no notes".into())
-                })?;
-                Ok(stellar_private_payments_sdk::DisclosureInputs {
+            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => Ok(inputs
+                .notes
+                .into_iter()
+                .map(|note| SdkDisclosureInputs {
                     root: note.root,
                     note_commitment: note.note_commitment,
                     note_amount: note.note_amount,
@@ -762,7 +762,7 @@ impl Storage for StorageBridge {
                     merkle_path_indices: note.merkle_path_indices,
                     merkle_path_elements: note.merkle_path_elements,
                 })
-            }
+                .collect()),
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
                 Err(PoolError::MembershipSync(status))
             }

@@ -576,15 +576,19 @@ impl Prover for ProverBridge {
         params: stellar_private_payments_sdk::DisclosureProveParams,
     ) -> Result<DisclosureReceipt, PoolError> {
         let prover_req = crate::protocol::DisclosureProverRequest {
-            inputs: vec![crate::protocol::DisclosureNoteInputs {
-                root: params.inputs.root,
-                note_commitment: params.inputs.note_commitment,
-                note_amount: params.inputs.note_amount,
-                note_private_key: params.inputs.note_private_key,
-                note_blinding: params.inputs.note_blinding,
-                merkle_path_indices: params.inputs.merkle_path_indices,
-                merkle_path_elements: params.inputs.merkle_path_elements,
-            }],
+            inputs: params
+                .notes
+                .into_iter()
+                .map(|note| crate::protocol::DisclosureNoteInputs {
+                    root: note.root,
+                    note_commitment: note.note_commitment,
+                    note_amount: note.note_amount,
+                    note_private_key: note.note_private_key,
+                    note_blinding: note.note_blinding,
+                    merkle_path_indices: note.merkle_path_indices,
+                    merkle_path_elements: note.merkle_path_elements,
+                })
+                .collect(),
             network: params.context.network,
             pool_address: params.context.pool_address,
             authority_label: params.context.authority_label,

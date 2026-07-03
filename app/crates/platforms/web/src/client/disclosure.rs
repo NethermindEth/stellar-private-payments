@@ -82,7 +82,7 @@ impl PrivatePool {
         );
 
         let req = DisclosureRequest {
-            selected_commitment: parse_field_hex_str(&selected_commitment_hex)?,
+            selected_commitments: vec![parse_field_hex_str(&selected_commitment_hex)?],
             authority_label,
             authority_identity_payload_hex,
             purpose,
