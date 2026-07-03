@@ -13,9 +13,15 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;
 
-    // Sync every enabled pool so the local event tables are current.
+    // Sync every enabled pool so the local event tables are current. A
+    // read-only session skips the prover load; sync is best-effort, so one
+    // unreachable pool warns and we still render the feed from what synced.
     for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
-        PoolSession::open(config, &account, &network, &entry.pool_contract_id)?;
+        if let Err(e) =
+            PoolSession::open_readonly(config, &account, &network, &entry.pool_contract_id)
+        {
+            log::warn!("pool {}: {e:#}", entry.pool_contract_id);
+        }
     }
 
     let storage = config.open_storage()?;

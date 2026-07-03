@@ -29,6 +29,12 @@ struct PoolRow {
 }
 
 #[derive(Serialize)]
+struct PoolErrorRow {
+    pool_contract_id: String,
+    error: String,
+}
+
+#[derive(Serialize)]
 struct Overview {
     network: String,
     rpc_url: String,
@@ -36,6 +42,8 @@ struct Overview {
     account_link: String,
     registered: bool,
     pools: Vec<PoolRow>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    errors: Vec<PoolErrorRow>,
     asp_membership: ContractRef,
     asp_non_membership: ContractRef,
     public_key_registry: ContractRef,
@@ -66,24 +74,42 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
     };
 
     let mut pools = Vec::new();
+    let mut errors = Vec::new();
     for entry in entries {
-        let session = PoolSession::open(config, &account, &network, &entry.pool_contract_id)?;
-        let balance = session
-            .pool()
-            .balance()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        pools.push(PoolRow {
-            pool_contract_id: entry.pool_contract_id.clone(),
-            pool_link: explorer.contract(&entry.pool_contract_id),
-            token_contract_id: entry.token_contract_id.clone(),
-            token_link: explorer.contract(&entry.token_contract_id),
-            asset: asset_label(&entry.asset),
-            balance: output::format_token_amount(
-                u128::from(balance),
-                &asset_symbol(&entry.asset),
-                7,
-            ),
-        });
+        // A read-only session: no prover is built, so we skip the ~8MB proving
+        // key deserialization + circuit-WASM compile that a transact open pays.
+        let row = (|| -> Result<PoolRow> {
+            let session =
+                PoolSession::open_readonly(config, &account, &network, &entry.pool_contract_id)?;
+            let balance = session
+                .pool()
+                .balance()
+                .map_err(|e| anyhow::anyhow!("balance: {e}"))?;
+            Ok(PoolRow {
+                pool_contract_id: entry.pool_contract_id.clone(),
+                pool_link: explorer.contract(&entry.pool_contract_id),
+                token_contract_id: entry.token_contract_id.clone(),
+                token_link: explorer.contract(&entry.token_contract_id),
+                asset: asset_label(&entry.asset),
+                balance: output::format_token_amount(
+                    u128::from(balance),
+                    &asset_symbol(&entry.asset),
+                    7,
+                ),
+            })
+        })();
+        match row {
+            Ok(row) => pools.push(row),
+            // One unreachable/misconfigured pool should not blank the whole
+            // dashboard: report it and keep rendering the rest.
+            Err(e) => {
+                log::warn!("pool {}: {e:#}", entry.pool_contract_id);
+                errors.push(PoolErrorRow {
+                    pool_contract_id: entry.pool_contract_id.clone(),
+                    error: format!("{e:#}"),
+                });
+            }
+        }
     }
 
     // Pools were just synced, so the local registry index is current.
@@ -100,6 +126,7 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
         account_link: explorer.account(&account.address),
         registered,
         pools,
+        errors,
         asp_membership: contract_ref(&explorer, &dep.asp_membership),
         asp_non_membership: contract_ref(&explorer, &dep.asp_non_membership),
         public_key_registry: contract_ref(&explorer, &dep.public_key_registry),
@@ -142,6 +169,14 @@ fn print_human(o: &Overview, alias: &str) {
         );
         output::print_kv("  asset", &pool.asset);
         output::print_kv("  balance", &pool.balance);
+        println!();
+    }
+
+    if !o.errors.is_empty() {
+        output::print_section("Unavailable pools");
+        for err in &o.errors {
+            output::print_kv(&err.pool_contract_id, &err.error);
+        }
         println!();
     }
 

@@ -120,7 +120,7 @@ pub use disclosure::{
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;
-pub use prover::{LocalProver, Prover, ProverEngine};
+pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
 pub use transact::{

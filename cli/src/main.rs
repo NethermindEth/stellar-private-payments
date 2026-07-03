@@ -6,7 +6,6 @@ mod explorer;
 mod logging;
 mod onboard;
 mod output;
-mod runtime;
 mod session;
 mod signer;
 mod stellar_cli;

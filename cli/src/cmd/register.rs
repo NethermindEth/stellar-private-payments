@@ -5,12 +5,13 @@
 use anyhow::{Context, Result};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
-    chain::{LocalSigner, StateFetcher, confirm_tx, submit_tx},
+    blocking::{confirm_tx, prepare_register, submit_tx},
+    chain::{LocalSigner, StateFetcher},
     state::SqliteStorage,
 };
 
 use crate::{
-    account::Account, config::CliConfig, onboard, output, runtime::block_on, stellar_cli,
+    account::Account, config::CliConfig, onboard, output, stellar_cli,
     stellar_cli::StellarNetwork,
 };
 
@@ -59,7 +60,7 @@ pub fn register_account(
         .map_err(|e| anyhow::anyhow!("state fetcher: {e}"))?;
 
     log::info!("Preparing registration for {}", account.address);
-    let prepared = block_on(fetcher.prepare_register(&account.address, note_key, encryption_key))??;
+    let prepared = prepare_register(&fetcher, &account.address, note_key, encryption_key)?;
 
     let secret = stellar_cli::secret(&account.alias, config.stellar_config_dir.as_deref())?;
     let signer = LocalSigner::from_secret(&secret).context("build signer for registration")?;
@@ -68,8 +69,8 @@ pub fn register_account(
         .context("sign registration transaction")?;
 
     log::info!("Submitting registration…");
-    let hash = block_on(submit_tx(&envelope, fetcher.rpc()))??;
-    block_on(confirm_tx(&hash, fetcher.rpc()))??;
+    let hash = submit_tx(&envelope, fetcher.rpc())?;
+    confirm_tx(&hash, fetcher.rpc())?;
     log::info!("Registration confirmed: {hash}");
     Ok(hash)
 }

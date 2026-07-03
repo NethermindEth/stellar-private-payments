@@ -1,8 +1,10 @@
 //! Groth16 transact proving — local in-process or pluggable async backend.
 
 mod local;
+mod noop;
 
 pub use local::LocalProver;
+pub use noop::NoopProver;
 
 use anyhow::{Context, Result};
 use prover::{
