@@ -112,10 +112,6 @@ function wrapSdkClient(sdk, sdkStorage) {
             const response = await storageCall(sdkStorage, { UserNotes: [address, limit] });
             return response.UserNotes ?? [];
         },
-        async getRecentPublicKeys(limit) {
-            const response = await storageCall(sdkStorage, { RecentPubKeys: limit });
-            return response.PubKeys ?? [];
-        },
         async deriveAspUserLeaf(membershipBlinding, pubkeyHex) {
             const response = await storageCall(sdkStorage, {
                 DeriveASPleaf: {
