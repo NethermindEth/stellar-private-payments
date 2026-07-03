@@ -11,8 +11,7 @@ use stellar_private_payments_sdk::{
 };
 
 use crate::{
-    account::Account, config::CliConfig, onboard, output, stellar_cli,
-    stellar_cli::StellarNetwork,
+    account::Account, config::CliConfig, onboard, output, stellar_cli, stellar_cli::StellarNetwork,
 };
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {

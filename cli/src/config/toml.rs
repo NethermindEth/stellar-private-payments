@@ -39,7 +39,7 @@ fn config_template(debug_build: bool) -> String {
         r#"# Stellar Private Payments CLI configuration
 #
 # Accounts are managed by the Stellar CLI (`stellar keys`) and passed per-command
-# with --source-account <alias>. The network (RPC URL + passphrase) is resolved
+# with --account <alias>. The network (RPC URL + passphrase) is resolved
 # from the Stellar CLI (`stellar network`). Explorer and bootnode settings live in
 # the local database (edit via `spp config set-explorer` / `set-bootnode`).
 

@@ -19,10 +19,7 @@ pub struct NoopProver;
 
 #[async_trait::async_trait(?Send)]
 impl Prover for NoopProver {
-    async fn prove_transact(
-        &self,
-        _params: TransactParams,
-    ) -> Result<PreparedProverTx, PoolError> {
+    async fn prove_transact(&self, _params: TransactParams) -> Result<PreparedProverTx, PoolError> {
         Err(PoolError::Other(READ_ONLY.into()))
     }
 

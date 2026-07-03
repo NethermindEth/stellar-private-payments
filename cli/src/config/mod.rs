@@ -27,7 +27,7 @@ pub struct CliConfigOverrides {
     pub deployment_path: Option<PathBuf>,
     pub network: Option<String>,
     pub data_dir: Option<PathBuf>,
-    pub source_account: Option<String>,
+    pub account: Option<String>,
     pub stellar_config_dir: Option<PathBuf>,
     pub circuits_dir: Option<PathBuf>,
 }
@@ -50,8 +50,8 @@ pub struct CliConfig {
     pub data_dir: PathBuf,
     /// Config dir passed through to the `stellar` CLI (`--config-dir`).
     pub stellar_config_dir: Option<PathBuf>,
-    /// `stellar keys` alias supplied via `--source-account`.
-    pub source_account: Option<String>,
+    /// `stellar keys` alias supplied via `--account`.
+    pub account: Option<String>,
     pub circuits_dir: Option<PathBuf>,
 }
 
@@ -66,7 +66,7 @@ impl CliConfig {
             deployment_path,
             network,
             data_dir,
-            source_account,
+            account,
             stellar_config_dir,
             circuits_dir,
         } = overrides;
@@ -93,7 +93,7 @@ impl CliConfig {
             network,
             data_dir,
             stellar_config_dir,
-            source_account,
+            account,
             circuits_dir,
         })
     }
@@ -103,11 +103,11 @@ impl CliConfig {
         stellar_cli::network(&self.network, self.stellar_config_dir.as_deref())
     }
 
-    /// Resolve the signing account from its `--source-account` alias.
+    /// Resolve the signing account from its `--account` alias.
     pub fn require_account(&self) -> Result<Account> {
-        let alias = self.source_account.as_deref().ok_or_else(|| {
+        let alias = self.account.as_deref().ok_or_else(|| {
             anyhow::anyhow!(
-                "this command requires --source-account <stellar keys alias> \
+                "this command requires --account <stellar keys alias> \
                  (spp works with Stellar CLI identities; see `stellar keys`)"
             )
         })?;

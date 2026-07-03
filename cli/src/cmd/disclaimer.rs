@@ -8,7 +8,7 @@ use stellar_private_payments_sdk::state::CURRENT_DISCLAIMER_TEXT_MD;
 use crate::{config::CliConfig, output};
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
-    let accepted = match &config.source_account {
+    let accepted = match &config.account {
         Some(_) => {
             let account = config.require_account()?;
             let mut storage = config.open_storage()?;

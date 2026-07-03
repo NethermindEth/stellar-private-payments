@@ -25,7 +25,7 @@ use onboard::OnboardArgs;
     about = "CLI for Stellar Private Payments",
     long_about = "CLI for Stellar Private Payments.\n\n\
         Accounts are managed by the Stellar CLI (`stellar keys`) and passed with \
-        --source-account <alias>; the network (RPC + passphrase) is resolved from the Stellar CLI \
+        --account <alias>; the network (RPC + passphrase) is resolved from the Stellar CLI \
         (`stellar network`). Run `spp onboard` first to accept the disclaimer and derive your keys.\n\n\
         Repository: https://github.com/NethermindEth/stellar-private-payments",
     version
@@ -60,7 +60,7 @@ struct Cli {
 
     /// `stellar keys` alias to act as (required by account commands)
     #[arg(long, global = true, env = "STELLAR_ACCOUNT")]
-    source_account: Option<String>,
+    account: Option<String>,
 
     /// Emit JSON instead of human-readable output
     #[arg(long, global = true)]
@@ -201,7 +201,7 @@ fn main() -> Result<()> {
             deployment_path: cli.deployment,
             network: cli.network,
             data_dir: cli.data_dir,
-            source_account: cli.source_account,
+            account: cli.account,
             stellar_config_dir: cli.stellar_config_dir,
             circuits_dir: cli.circuits_dir,
         },

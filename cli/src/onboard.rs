@@ -51,13 +51,13 @@ pub fn ensure_ready(config: &CliConfig, account: &Account) -> Result<()> {
     let mut storage = config.open_storage()?;
     if !storage.get_disclaimer_state(&account.address)?.accepted {
         bail!(
-            "You must accept the disclaimer first. Run: spp onboard --source-account {}",
+            "You must accept the disclaimer first. Run: spp onboard --account {}",
             account.alias
         );
     }
     if storage.get_user_keys(&account.address)?.is_none() {
         bail!(
-            "Privacy keys are not set up. Run: spp onboard --source-account {}",
+            "Privacy keys are not set up. Run: spp onboard --account {}",
             account.alias
         );
     }

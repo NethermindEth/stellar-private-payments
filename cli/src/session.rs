@@ -32,8 +32,9 @@ impl PoolSession {
 
     /// Open and sync one pool without a prover. Skips loading the circuit
     /// artifacts entirely (no proving-key deserialization, no WASM compile), so
-    /// read-only commands (`overview`, `feed`) are cheap. The resulting pool can
-    /// read balances/notes and sync, but any transact/prove call errors.
+    /// read-only commands (`overview`, `feed`) are cheap. The resulting pool
+    /// can read balances/notes and sync, but any transact/prove call
+    /// errors.
     pub fn open_readonly(
         config: &CliConfig,
         account: &Account,

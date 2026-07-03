@@ -34,7 +34,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         network_passphrase: Option<&'a str>,
         data_dir: &'a str,
         database: &'a str,
-        source_account: Option<&'a str>,
+        account: Option<&'a str>,
         explorer_base_url: &'a str,
         bootnode_enabled: bool,
         bootnode_url: &'a str,
@@ -52,7 +52,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         network_passphrase: network_passphrase.as_deref(),
         data_dir: &data_dir,
         database: &db,
-        source_account: config.source_account.as_deref(),
+        account: config.account.as_deref(),
         explorer_base_url: &explorer_base,
         bootnode_enabled: bootnode.enabled,
         bootnode_url: &bootnode.url,
@@ -80,8 +80,8 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     );
     output::print_kv("data_dir", payload.data_dir);
     output::print_kv("database", payload.database);
-    if let Some(source_account) = payload.source_account {
-        output::print_kv("source_account", source_account);
+    if let Some(account) = payload.account {
+        output::print_kv("account", account);
     }
     output::print_kv("explorer_base_url", payload.explorer_base_url);
     output::print_kv(
