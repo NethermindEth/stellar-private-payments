@@ -14,11 +14,15 @@ use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
     PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
-    tx::flows::{SelectiveDisclosure1Params, TransactParams, selective_disclosure_1},
+    tx::flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
         DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
-        SELECTIVE_DISCLOSURE_1_N_NOTES,
+        SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT,
+        SELECTIVE_DISCLOSURE_2_LEVELS, SELECTIVE_DISCLOSURE_2_N_NOTES,
+        SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
+        SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT,
+        SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
     },
 };
 use wasm_bindgen::JsError;
@@ -33,12 +37,23 @@ enum InitState {
     Failed(String),
 }
 
-// TODO make it dependent on the network during the compilation
 const PROVING_KEY: &[u8] =
     include_bytes!("../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
-const DISCLOSURE_PROVING_KEY: &[u8] = include_bytes!(
-    "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
-);
+
+const DISCLOSURE_PROVING_KEYS: [&[u8]; 4] = [
+    include_bytes!(
+        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
+    ),
+    include_bytes!(
+        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_2_proving_key.bin"
+    ),
+    include_bytes!(
+        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_3_proving_key.bin"
+    ),
+    include_bytes!(
+        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_4_proving_key.bin"
+    ),
+];
 
 fn sha256(bytes: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -87,20 +102,86 @@ fn ensure_sha256_matches(
 
 thread_local! {
     static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
-    static DISCLOSURE_WITNESS_CALC: RefCell<Option<WitnessCalculator>> = const { RefCell::new(None) };
-    static DISCLOSURE_PROVER: RefCell<Option<Groth16Prover>> = const { RefCell::new(None) };
+    static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> =
+        const { RefCell::new([None, None, None, None]) };
+    static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
+        const { RefCell::new([None, None, None, None]) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
 }
 
+struct DisclosureArtifactHashes {
+    proving_key_len: usize,
+    proving_key_sha256: [u8; 32],
+    wasm_len: usize,
+    wasm_sha256: [u8; 32],
+    r1cs_len: usize,
+    r1cs_sha256: [u8; 32],
+}
+
+fn disclosure_hashes(n_notes: usize) -> DisclosureArtifactHashes {
+    match n_notes {
+        1 => DisclosureArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
+        },
+        2 => DisclosureArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_R1CS_SHA256,
+        },
+        3 => DisclosureArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_R1CS_SHA256,
+        },
+        4 => DisclosureArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_R1CS_SHA256,
+        },
+        _ => panic!("unsupported disclosure note count: {n_notes}"),
+    }
+}
+
+fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
+    if n_notes == 0 || n_notes > 4 {
+        return Err(JsError::new("selective disclosure supports 1..=4 notes"));
+    }
+    n_notes
+        .checked_sub(1)
+        .ok_or_else(|| JsError::new("selective disclosure supports 1..=4 notes"))
+}
+
 async fn load_circuit_artifacts() -> Result<(), JsError> {
-    if TRANSACT_PROVER.with(|s| s.borrow().is_some())
-        && DISCLOSURE_WITNESS_CALC.with(|s| s.borrow().is_some())
-        && DISCLOSURE_PROVER.with(|s| s.borrow().is_some())
-    {
+    let all_ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
+        && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow().iter().all(|c| c.is_some()))
+        && DISCLOSURE_PROVERS.with(|s| s.borrow().iter().all(|p| p.is_some()));
+    if all_ready {
         return Ok(());
     }
 
-    let (wasm_bytes, r1cs_bytes, disc_wasm_bytes, disc_r1cs_bytes) = try_join!(
+    let (wasm_bytes, r1cs_bytes) = try_join!(
         async {
             let wasm_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.wasm").await?;
             log::debug!(
@@ -116,27 +197,9 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
                 r1cs_bytes.len()
             );
             Ok::<Vec<u8>, JsError>(r1cs_bytes)
-        },
-        async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("selectiveDisclosure_1.wasm").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched selectiveDisclosure_1.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
-        },
-        async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("selectiveDisclosure_1.r1cs").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched selectiveDisclosure_1.r1cs: {} bytes",
-                r1cs_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(r1cs_bytes)
         }
     )?;
 
-    // Integrity checks (regular builds): ensure we are using the exact
-    // artifact versions this binary was built against.
     ensure_sha256_matches(
         "policy_tx_2_2_proving_key.bin",
         PROVING_KEY,
@@ -156,46 +219,67 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
     )?;
 
-    ensure_sha256_matches(
-        "selectiveDisclosure_1_proving_key.bin",
-        DISCLOSURE_PROVING_KEY,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "selectiveDisclosure_1.wasm",
-        &disc_wasm_bytes,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "selectiveDisclosure_1.r1cs",
-        &disc_r1cs_bytes,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
-        crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
-    )?;
-
     let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
-
-    let disc_witness_calc =
-        WitnessCalculator::new(&disc_wasm_bytes, &disc_r1cs_bytes).map_err(|e| {
-            JsError::new(&format!(
-                "failed to init disclosure witness calculator: {e:#}"
-            ))
-        })?;
-    let disc_prover = Groth16Prover::new(DISCLOSURE_PROVING_KEY, &disc_r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))?;
-
     TRANSACT_PROVER.with(|cell| {
         *cell.borrow_mut() = Some(transact_prover);
     });
-    DISCLOSURE_WITNESS_CALC.with(|cell| {
-        *cell.borrow_mut() = Some(disc_witness_calc);
+
+    let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
+        futures::future::try_join_all((1..=4).map(|n_notes| async move {
+            let wasm = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.wasm")).await?;
+            let r1cs = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.r1cs")).await?;
+            Ok::<_, JsError>((wasm, r1cs))
+        }))
+        .await?;
+
+    let mut witness_calcs: [Option<WitnessCalculator>; 4] = [None, None, None, None];
+    let mut provers: [Option<Groth16Prover>; 4] = [None, None, None, None];
+
+    for (idx, (wasm_bytes, r1cs_bytes)) in disclosure_artifacts.iter().enumerate() {
+        let n_notes = idx
+            .checked_add(1)
+            .expect("disclosure artifact index maps to 1..=4 note count");
+        let hashes = disclosure_hashes(n_notes);
+
+        ensure_sha256_matches(
+            &format!("selectiveDisclosure_{n_notes}_proving_key.bin"),
+            DISCLOSURE_PROVING_KEYS[idx],
+            hashes.proving_key_len,
+            hashes.proving_key_sha256,
+        )?;
+        ensure_sha256_matches(
+            &format!("selectiveDisclosure_{n_notes}.wasm"),
+            wasm_bytes,
+            hashes.wasm_len,
+            hashes.wasm_sha256,
+        )?;
+        ensure_sha256_matches(
+            &format!("selectiveDisclosure_{n_notes}.r1cs"),
+            r1cs_bytes,
+            hashes.r1cs_len,
+            hashes.r1cs_sha256,
+        )?;
+
+        let witness_calc = WitnessCalculator::new(wasm_bytes, r1cs_bytes).map_err(|e| {
+            JsError::new(&format!(
+                "failed to init selectiveDisclosure_{n_notes} witness calculator: {e:#}"
+            ))
+        })?;
+        let prover = Groth16Prover::new(DISCLOSURE_PROVING_KEYS[idx], r1cs_bytes)
+            .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))?;
+
+        witness_calcs[idx] = Some(witness_calc);
+        provers[idx] = Some(prover);
+    }
+
+    DISCLOSURE_WITNESS_CALCS.with(|cell| {
+        *cell.borrow_mut() = witness_calcs;
     });
-    DISCLOSURE_PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(disc_prover);
+    DISCLOSURE_PROVERS.with(|cell| {
+        *cell.borrow_mut() = provers;
     });
+
     Ok(())
 }
 
@@ -274,32 +358,50 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             let context = req.context;
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
-            let params = SelectiveDisclosure1Params {
-                root: req.inputs.root,
-                note_commitment: req.inputs.note_commitment,
-                note_amount: req.inputs.note_amount,
-                note_private_key: req.inputs.note_private_key,
-                note_blinding: req.inputs.note_blinding,
-                merkle_path_indices: req.inputs.merkle_path_indices,
-                merkle_path_elements: req.inputs.merkle_path_elements,
+            let n_notes = req.notes.len();
+            let idx = disclosure_index(n_notes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+            let roots: Vec<_> = req.notes.iter().map(|input| input.root).collect();
+            let note_commitments: Vec<_> = req
+                .notes
+                .iter()
+                .map(|input| input.note_commitment)
+                .collect();
+
+            let notes: Vec<DisclosureNote> = req
+                .notes
+                .into_iter()
+                .map(|input| DisclosureNote {
+                    root: input.root,
+                    note_commitment: input.note_commitment,
+                    note_amount: input.note_amount,
+                    note_private_key: input.note_private_key,
+                    note_blinding: input.note_blinding,
+                    merkle_path_indices: input.merkle_path_indices,
+                    merkle_path_elements: input.merkle_path_elements,
+                })
+                .collect();
+
+            let params = SelectiveDisclosureParams {
+                notes,
                 ext_context_hash,
             };
 
-            let artifacts = selective_disclosure_1(params)?;
+            let artifacts = selective_disclosure(params)?;
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
-            let witness_bytes = DISCLOSURE_WITNESS_CALC.with(|cell| {
+            let witness_bytes = DISCLOSURE_WITNESS_CALCS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
-                let calc = borrow.as_mut().ok_or_else(|| {
+                let calc = borrow[idx].as_mut().ok_or_else(|| {
                     anyhow::anyhow!("disclosure witness calculator is not initialized")
                 })?;
                 calc.compute_witness(&circuit_inputs_json)
                     .context("disclosure witness calculation failed")
             })?;
 
-            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVER.with(|cell| {
+            let (proof_compressed, vk_hash_hex) = DISCLOSURE_PROVERS.with(|cell| {
                 let borrow = cell.borrow();
-                let prover = borrow
+                let prover = borrow[idx]
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
                 let proved = disclosure::prove_receipt_proof_with_prover(prover, &witness_bytes)?;
@@ -312,18 +414,42 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             let proof_compressed_hex = format!("0x{}", to_hex(&proof_compressed));
 
+            let (circuit_name, levels, n_notes_const) = match n_notes {
+                1 => (
+                    SELECTIVE_DISCLOSURE_1_CIRCUIT,
+                    SELECTIVE_DISCLOSURE_1_LEVELS,
+                    SELECTIVE_DISCLOSURE_1_N_NOTES,
+                ),
+                2 => (
+                    SELECTIVE_DISCLOSURE_2_CIRCUIT,
+                    SELECTIVE_DISCLOSURE_2_LEVELS,
+                    SELECTIVE_DISCLOSURE_2_N_NOTES,
+                ),
+                3 => (
+                    SELECTIVE_DISCLOSURE_3_CIRCUIT,
+                    SELECTIVE_DISCLOSURE_3_LEVELS,
+                    SELECTIVE_DISCLOSURE_3_N_NOTES,
+                ),
+                4 => (
+                    SELECTIVE_DISCLOSURE_4_CIRCUIT,
+                    SELECTIVE_DISCLOSURE_4_LEVELS,
+                    SELECTIVE_DISCLOSURE_4_N_NOTES,
+                ),
+                _ => anyhow::bail!("unsupported disclosure note count: {n_notes}"),
+            };
+
             let receipt = DisclosureReceipt {
                 version: DISCLOSURE_RECEIPT_VERSION,
                 circuit: DisclosureCircuitMetadata {
-                    name: SELECTIVE_DISCLOSURE_1_CIRCUIT.to_string(),
-                    levels: SELECTIVE_DISCLOSURE_1_LEVELS,
-                    n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
+                    name: circuit_name.to_string(),
+                    levels,
+                    n_notes: n_notes_const,
                     vk_hash: vk_hash_hex,
                 },
                 context,
                 public_inputs: DisclosurePublicInputs {
-                    roots: vec![req.inputs.root],
-                    note_commitments: vec![req.inputs.note_commitment],
+                    roots,
+                    note_commitments,
                     ext_context_hash,
                 },
                 proof_compressed_hex,
@@ -340,9 +466,13 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
-            let proof_verified = DISCLOSURE_PROVER.with(|cell| {
+            let n_notes = usize::try_from(receipt.circuit.n_notes)
+                .map_err(|e| anyhow::anyhow!("invalid n_notes: {e}"))?;
+            let idx = disclosure_index(n_notes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
+
+            let proof_verified = DISCLOSURE_PROVERS.with(|cell| {
                 let borrow = cell.borrow();
-                let prover = borrow
+                let prover = borrow[idx]
                     .as_ref()
                     .ok_or_else(|| anyhow::anyhow!("disclosure prover is not initialized"))?;
 

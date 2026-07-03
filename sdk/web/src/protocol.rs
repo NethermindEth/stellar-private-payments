@@ -127,7 +127,7 @@ pub enum StorageWorkerResponse {
     RecipientLookup(RecipientLookup),
     OperationalFeed(Vec<OperationalFeedItem>),
     AspMembershipSync(AspMembershipSync),
-    DisclosureInputs(DisclosureInputs),
+    DisclosureNotes(Vec<DisclosureInputs>),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
 }
