@@ -1,12 +1,14 @@
-//! WASM selective-disclosure methods on [`Pool`].
+//! WASM selective-disclosure methods on [`PrivatePool`].
 
-use super::{emit_progress, parse_field_bigint_numeric, parse_field_hex_str, pool::Pool, pool_err};
+use super::{
+    emit_progress, parse_field_bigint_numeric, parse_field_hex_str, pool::PrivatePool, pool_err,
+};
 use js_sys::{BigInt, Function};
 use stellar_private_payments_sdk::DisclosureRequest;
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-impl Pool {
+impl PrivatePool {
     #[wasm_bindgen(js_name = disclose)]
     #[allow(clippy::too_many_arguments)]
     pub async fn disclose_wasm(
@@ -51,7 +53,7 @@ impl Pool {
     }
 }
 
-impl Pool {
+impl PrivatePool {
     async fn disclose_inner(
         &self,
         selected_commitment_hex: String,
