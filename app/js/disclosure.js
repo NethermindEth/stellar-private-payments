@@ -238,7 +238,11 @@ async function connect() {
 
 async function initializeWalletSession(address, networkPassphrase) {
   await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
-  state.derivedKeys = await client().loadWalletKeys(address);
+  const keys = await client().getUserKeys(address);
+  if (!keys?.noteKeypair?.public) {
+    throw new Error('Privacy keys not found in local storage');
+  }
+  state.derivedKeys = true;
   showToast('Privacy keys ready', 'success');
 }
 

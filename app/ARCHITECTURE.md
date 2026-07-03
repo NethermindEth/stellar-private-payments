@@ -162,7 +162,7 @@ Single entry for the main app pages. Owns singleton lifecycle:
 3. `client().initializeWallet({ networkPassphrase, userAddress }, signer)` — `Client.initialize`
 4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `client().pool({ poolContract })`
 
-Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadWalletKeys`, `aspState`, etc.) via `Storage.call`.
+Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadPublicKeys`, `aspState`, etc.) via `Storage.call`.
 
 **`app-storage.js`**
 

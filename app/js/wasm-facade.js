@@ -125,16 +125,14 @@ function wrapSdkClient(sdk, sdkStorage) {
             }
             return typeof leaf === 'string' ? leaf : String(leaf);
         },
-        async loadWalletKeys(address) {
+        async loadPublicKeys(address) {
             const data = await this.getUserKeys(address);
-            const aspSecret = await this.getAspSecret(address);
-            if (!data?.noteKeypair?.public || !aspSecret?.membershipBlinding) {
+            if (!data?.noteKeypair?.public) {
                 throw new Error('Privacy keys not found in local storage');
             }
             return {
                 pubKey: data.noteKeypair.public,
                 encryptionKeypair: { publicKey: data.encryptionKeypair.public },
-                aspSecret: aspSecret.membershipBlinding,
             };
         },
         async aspState() {

@@ -159,10 +159,7 @@ function setStepState(stepId, state) {
     }
 }
 
-function maskSecret(secret) {
-    if (!secret) return 'Not available';
-    return `${'*'.repeat(12)}${secret.slice(-6)}`;
-}
+const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 
 function renderDisclaimerMarkdown(md, container) {
     container.textContent = '';
@@ -277,7 +274,6 @@ export async function runOnboardingWizard({
     const session = client();
     const disclaimerState = await storage.getDisclaimerState(address);
     const existingKeys = await session.getUserKeys(address);
-    const existingAspSecret = await session.getAspSecret(address);
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
     const registryLookup = await client().lookupRegisteredPublicKey(address).catch(() => null);
@@ -291,7 +287,7 @@ export async function runOnboardingWizard({
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
+        ...(!existingKeys?.noteKeypair?.public ? ['keys'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
@@ -309,7 +305,6 @@ export async function runOnboardingWizard({
         return {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-            aspSecret: existingAspSecret.membershipBlinding,
         };
     }
 
@@ -329,7 +324,6 @@ export async function runOnboardingWizard({
         keys: existingKeys ? {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-            aspSecret: existingAspSecret?.membershipBlinding || '',
         } : null,
         explorerBaseUrl: explorerSetting?.baseUrl || DEFAULT_EXPLORER_BASE_URL,
         bootnode: bootnodeSetting || { enabled: false, url: '' },
@@ -453,12 +447,18 @@ export async function runOnboardingWizard({
             const noteField = secretWrap.querySelector('[data-field="note"]');
             const aspField = secretWrap.querySelector('[data-field="asp"]');
             noteField.textContent = state.keys?.pubKey || 'Not available';
-            aspField.textContent = maskSecret(state.keys?.aspSecret || '');
+            aspField.textContent = state.keys?.pubKey ? HIDDEN_SECRET_PLACEHOLDER : 'Not available';
             secretWrap.querySelector('[data-copy="note"]').addEventListener('click', () => {
                 if (state.keys?.pubKey) Utils.copyToClipboard(state.keys.pubKey);
             });
-            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', () => {
-                if (state.keys?.aspSecret) Utils.copyToClipboard(state.keys.aspSecret);
+            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', async () => {
+                try {
+                    const asp = await session.getAspSecret(address);
+                    const secret = asp?.membershipBlinding;
+                    if (secret != null) Utils.copyToClipboard(String(secret));
+                } catch (error) {
+                    setError(error?.message || 'Failed to load ASP secret');
+                }
             });
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
@@ -480,10 +480,10 @@ export async function runOnboardingWizard({
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await session.loadWalletKeys(address);
+                            const result = await session.loadPublicKeys(address);
                             state.keys = result;
                             noteField.textContent = result.pubKey;
-                            aspField.textContent = maskSecret(result.aspSecret);
+                            aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;

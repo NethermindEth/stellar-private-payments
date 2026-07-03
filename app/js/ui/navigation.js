@@ -6,6 +6,21 @@ import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
 
+const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
+let revealedAspSecret = null;
+
+function clearRevealedAspSecret() {
+    revealedAspSecret = null;
+    const revealBtn = document.getElementById('settings-reveal-secret');
+    if (revealBtn) revealBtn.dataset.revealed = 'false';
+}
+
+async function fetchAspSecretForUser(address) {
+    const asp = await client().getAspSecret(address);
+    const secret = asp?.membershipBlinding;
+    return secret != null ? String(secret) : null;
+}
+
 function isRpcSyncGapError(message) {
     return typeof message === 'string' && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
 }
@@ -160,11 +175,13 @@ function renderSyncStatus() {
 function renderSettingsDrawer() {
     document.getElementById('settings-note-key').textContent = App.state.keys.notePublicKey || '—';
     document.getElementById('settings-enc-key').textContent = App.state.keys.encryptionPublicKey || '—';
-    const aspMasked = App.state.keys.aspSecret ? `${'*'.repeat(12)}${App.state.keys.aspSecret.slice(-6)}` : '—';
+    const hasKeys = !!App.state.keys.notePublicKey;
+    const aspMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
     const aspValue = document.getElementById('settings-asp-secret');
     const revealBtn = document.getElementById('settings-reveal-secret');
     const revealed = revealBtn?.dataset.revealed === 'true';
-    aspValue.textContent = revealed ? (App.state.keys.aspSecret || '—') : aspMasked;
+    aspValue.textContent = revealed ? (revealedAspSecret || '—') : aspMasked;
+    revealBtn?.classList.toggle('hidden', !hasKeys);
     revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
     revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
     if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
@@ -198,8 +215,26 @@ export const Shell = {
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
         document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
-        document.getElementById('settings-reveal-secret')?.addEventListener('click', (e) => {
-            e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
+        document.getElementById('settings-reveal-secret')?.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const revealing = btn.dataset.revealed !== 'true';
+            if (revealing) {
+                const address = App.state.wallet.address;
+                if (!address) return;
+                try {
+                    revealedAspSecret = await fetchAspSecretForUser(address);
+                    if (!revealedAspSecret) {
+                        Toast.show('ASP secret not found', 'error');
+                        return;
+                    }
+                    btn.dataset.revealed = 'true';
+                } catch (error) {
+                    Toast.show(error?.message || 'Failed to load ASP secret', 'error');
+                    return;
+                }
+            } else {
+                clearRevealedAspSecret();
+            }
             renderSettingsDrawer();
         });
         // Click any identity value to copy it (copies the real value, even when masked).
@@ -207,11 +242,16 @@ export const Shell = {
             'settings-wallet-address': () => App.state.wallet.address,
             'settings-note-key': () => App.state.keys.notePublicKey,
             'settings-enc-key': () => App.state.keys.encryptionPublicKey,
-            'settings-asp-secret': () => App.state.keys.aspSecret,
+            'settings-asp-secret': async () => {
+                if (revealedAspSecret) return revealedAspSecret;
+                const address = App.state.wallet.address;
+                if (!address) return null;
+                return fetchAspSecretForUser(address);
+            },
         };
         Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
-            document.getElementById(id)?.addEventListener('click', () => {
-                const value = getValue();
+            document.getElementById(id)?.addEventListener('click', async () => {
+                const value = await getValue();
                 if (value) Utils.copyToClipboard(value);
             });
         });
@@ -296,10 +336,9 @@ export const Wallet = {
                 });
 
                 await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
-                const keys = await client().loadWalletKeys(address);
+                const keys = await client().loadPublicKeys(address);
                 App.state.keys.notePublicKey = keys.pubKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
-                App.state.keys.aspSecret = keys.aspSecret;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
@@ -346,6 +385,7 @@ export const Wallet = {
         this._stopWatcher = null;
         resetWalletSession();
         closeAppPool();
+        clearRevealedAspSecret();
         App.state.wallet = {
             connected: false,
             address: null,
@@ -353,7 +393,7 @@ export const Wallet = {
             network: null,
             networkPassphrase: null,
         };
-        App.state.keys = { notePublicKey: null, encryptionPublicKey: null, aspSecret: null };
+        App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
         renderWallet();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
@@ -370,6 +410,7 @@ export const Wallet = {
         App.state.ui.settingsOpen = false;
         document.getElementById('settings-drawer')?.classList.add('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.add('hidden');
+        clearRevealedAspSecret();
     },
 
     async saveSettings() {
