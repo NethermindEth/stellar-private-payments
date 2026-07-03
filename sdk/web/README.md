@@ -63,6 +63,8 @@ const chain = await client.allContractsData();
 
 Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Mutating methods do **not** call `sync` automatically — use `startSync` for background indexing and call `pool.sync()` when you need an explicit catch-up (same as the Rust SDK). Amount parameters and `getBalance` use **stroops** as JavaScript `bigint`.
 
+`disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
+
 ### Signer
 
 Bound at `client.initialize`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).

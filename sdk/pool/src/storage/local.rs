@@ -105,7 +105,7 @@ impl Storage for LocalStorage {
     async fn build_disclosure_inputs(
         &self,
         req: &DisclosureInputsRequest,
-    ) -> Result<DisclosureInputs, PoolError> {
+    ) -> Result<Vec<DisclosureInputs>, PoolError> {
         map_build_disclosure_inputs(crate::disclosure::build_disclosure_inputs(
             &self.storage(),
             req,
