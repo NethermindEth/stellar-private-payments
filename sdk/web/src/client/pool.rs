@@ -89,14 +89,11 @@ impl PrivatePool {
 
     /// Deposit tokens. `amount` is stroops (`bigint` in JS).
     pub async fn deposit(&self, amount: u128) -> Result<JsValue, JsError> {
-        self.sync().await?;
         let mut plan = self
             .inner()
             .prepare_deposit(NoteAmount::from(amount))
             .map_err(pool_err)?;
-        let value = self.execute_plan(&mut plan, "deposit").await?;
-        self.sync().await?;
-        Ok(value)
+        self.execute_plan(&mut plan, "deposit").await
     }
 
     /// Transfer privately to explicit recipient keys (note + encryption hex).
@@ -107,28 +104,22 @@ impl PrivatePool {
         encryption_public_key_hex: &str,
         amount: u128,
     ) -> Result<JsValue, JsError> {
-        self.sync().await?;
         let recipient = TransferRecipient {
             note_public_key: NotePublicKey::parse(note_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
             encryption_public_key: EncryptionPublicKey::parse(encryption_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
         };
-        let value = {
-            let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
-            let mut plan = self
-                .inner()
-                .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
-                .map_err(pool_err)?;
-            self.execute_plan(&mut plan, "transfer").await?
-        };
-        self.sync().await?;
-        Ok(value)
+        let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
+        let mut plan = self
+            .inner()
+            .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+            .map_err(pool_err)?;
+        self.execute_plan(&mut plan, "transfer").await
     }
 
     /// Transfer privately. `recipient` is a Stellar `G...` address.
     pub async fn transfer(&self, recipient: &str, amount: u128) -> Result<JsValue, JsError> {
-        self.sync().await?;
         let (note_key, enc_key) = self.resolve_recipient(recipient).await?;
         let recipient = TransferRecipient {
             note_public_key: NotePublicKey::parse(&note_key)
@@ -141,9 +132,7 @@ impl PrivatePool {
             .inner()
             .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
             .map_err(pool_err)?;
-        let value = self.execute_plan(&mut plan, "transfer").await?;
-        self.sync().await?;
-        Ok(value)
+        self.execute_plan(&mut plan, "transfer").await
     }
 
     /// Withdraw to `recipient`, or the connected wallet when omitted.
@@ -152,27 +141,21 @@ impl PrivatePool {
         amount: u128,
         recipient: Option<String>,
     ) -> Result<JsValue, JsError> {
-        self.sync().await?;
         let to = recipient.unwrap_or_else(|| self.user_address.clone());
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let mut plan = self
             .inner()
             .prepare_withdraw(&wallet, NoteAmount::from(amount), to)
             .map_err(pool_err)?;
-        let value = self.execute_plan(&mut plan, "withdraw").await?;
-        self.sync().await?;
-        Ok(value)
+        self.execute_plan(&mut plan, "withdraw").await
     }
 
     /// Low-level pool `transact` call. See SDK [`Transact`] for field
     /// semantics.
     pub async fn transact(&self, config: JsValue) -> Result<JsValue, JsError> {
-        self.sync().await?;
         let step = parse_transact_step(config)?;
         let mut plan = self.inner().prepare_transact(step);
-        let value = self.execute_plan(&mut plan, "transact").await?;
-        self.sync().await?;
-        Ok(value)
+        self.execute_plan(&mut plan, "transact").await
     }
 
     /// Generate a selective-disclosure proof for a note commitment.

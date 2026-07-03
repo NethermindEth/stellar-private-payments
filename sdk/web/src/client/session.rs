@@ -1,4 +1,4 @@
-//! Wasm [`Client`] — `new` → `startEventSync` → `initialize`, then pool
+//! Wasm [`Client`] — `new` → `startSync` → `initialize`, then pool
 //! factory.
 
 use std::rc::Rc;
@@ -22,7 +22,7 @@ use super::pool::{PoolCreateConfig, PrivatePool};
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct EventSyncOptions {
+struct SyncOptions {
     bootnode_url: Option<String>,
 }
 
@@ -66,7 +66,7 @@ pub struct Client {
 #[wasm_bindgen]
 impl Client {
     /// Create a client shell (storage + RPC URL). Call
-    /// [`Client::start_event_sync`] then [`Client::initialize`] before pool
+    /// [`Client::start_sync`] then [`Client::initialize`] before pool
     /// or account operations.
     #[wasm_bindgen(js_name = new)]
     pub fn new(storage: &Storage, rpc_url: String) -> Result<Client, JsError> {
@@ -90,10 +90,10 @@ impl Client {
     ///
     /// Throws when the RPC has a sync gap and no bootnode URL is available
     /// (message contains `RPC_SYNC_GAP`).
-    #[wasm_bindgen(js_name = checkEventSync)]
-    pub async fn check_event_sync(&self, options: JsValue) -> Result<JsValue, JsError> {
-        let opts: EventSyncOptions = if options.is_null() || options.is_undefined() {
-            EventSyncOptions::default()
+    #[wasm_bindgen(js_name = checkSync)]
+    pub async fn check_sync(&self, options: JsValue) -> Result<JsValue, JsError> {
+        let opts: SyncOptions = if options.is_null() || options.is_undefined() {
+            SyncOptions::default()
         } else {
             serde_wasm_bindgen::from_value(options)?
         };
@@ -114,10 +114,10 @@ impl Client {
 
     /// Start background contract-event sync into local storage (idempotent per
     /// page).
-    #[wasm_bindgen(js_name = startEventSync)]
-    pub async fn start_event_sync(&self, options: JsValue) -> Result<(), JsError> {
-        let opts: EventSyncOptions = if options.is_null() || options.is_undefined() {
-            EventSyncOptions::default()
+    #[wasm_bindgen(js_name = startSync)]
+    pub async fn start_sync(&self, options: JsValue) -> Result<(), JsError> {
+        let opts: SyncOptions = if options.is_null() || options.is_undefined() {
+            SyncOptions::default()
         } else {
             serde_wasm_bindgen::from_value(options)?
         };

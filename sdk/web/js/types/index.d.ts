@@ -7,7 +7,7 @@ import type {
   InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
-  EventSyncOptions,
+  SyncOptions,
   VerifyDisclosureOptions,
 } from './options.js';
 import type { DisclosureVerificationReport } from './disclosure.js';
@@ -23,7 +23,7 @@ export type {
   InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
-  EventSyncOptions,
+  SyncOptions,
   VerifyDisclosureOptions,
 } from './options.js';
 export type { DisclosureVerificationReport } from './disclosure.js';
@@ -40,8 +40,8 @@ export { FreighterSigner } from './freighter.js';
 
 /** Account session returned by {@link Client.new}. */
 export interface AccountClient {
-  checkEventSync(options?: EventSyncOptions | null): Promise<string | null>;
-  startEventSync(options?: EventSyncOptions | null): Promise<void>;
+  checkSync(options?: SyncOptions | null): Promise<string | null>;
+  startSync(options?: SyncOptions | null): Promise<void>;
   initialize(options: InitializeOptions, signer: WalletSigner): Promise<void>;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;

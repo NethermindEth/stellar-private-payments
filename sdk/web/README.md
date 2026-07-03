@@ -2,7 +2,7 @@
 
 Browser SDK for Stellar Private Payments.
 
-**`Storage.open`** → **`Client.new`** → **`checkEventSync`** → **`startEventSync`** → **`initialize`** → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
+**`Storage.open`** → **`Client.new`** → **`checkSync`** → **`startSync`** → **`initialize`** → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
 ## Usage
 
@@ -20,13 +20,13 @@ const client = await Client.new({
   rpcUrl: 'https://soroban-testnet.stellar.org',
 });
 
-const bootnodeUrl = await client.checkEventSync();
-await client.startEventSync({ bootnodeUrl: bootnodeUrl ?? undefined });
+const bootnodeUrl = await client.checkSync();
+await client.startSync({ bootnodeUrl: bootnodeUrl ?? undefined });
 await client.initialize({ networkPassphrase }, signer);
 await client.registerPublicKeys();
 
 const pool = await client.pool({ poolContract: 'CA2TZ...' });
-await pool.sync();
+await pool.sync(); // optional foreground catch-up; prefer startSync for background indexing
 await pool.deposit(10_000_000n); // stroops (1 XLM)
 console.log(await pool.getBalance()); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
@@ -49,8 +49,8 @@ const chain = await client.allContractsData();
 | Method | Description |
 |--------|-------------|
 | `new({ storage, rpcUrl })` | Client shell (no wallet yet) |
-| `checkEventSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
-| `startEventSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
+| `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
+| `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
 | `initialize({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, derive keys if missing |
 | `contractConfig()` | Static deployment config |
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
@@ -61,7 +61,7 @@ const chain = await client.allContractsData();
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Amount parameters and `getBalance` use **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount` / `ExtAmount`).
+Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Mutating methods do **not** call `sync` automatically — use `startSync` for background indexing and call `pool.sync()` when you need an explicit catch-up (same as the Rust SDK). Amount parameters and `getBalance` use **stroops** as JavaScript `bigint`.
 
 ### Signer
 
