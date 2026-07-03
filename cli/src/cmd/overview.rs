@@ -224,7 +224,7 @@ fn asset_symbol(asset: &AssetDescriptor) -> String {
 
 fn asset_label(asset: &AssetDescriptor) -> String {
     match asset {
-        AssetDescriptor::Native => "native (XLM)".to_string(),
+        AssetDescriptor::Native => "XLM (native)".to_string(),
         AssetDescriptor::Classic { code, .. } => format!("{code} (classic)"),
         AssetDescriptor::Contract { symbol, .. } => format!("{symbol} (contract)"),
     }
