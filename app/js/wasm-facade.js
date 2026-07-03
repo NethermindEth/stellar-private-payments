@@ -164,6 +164,13 @@ async function openWrappedClient(sdkStorage, rpcUrl) {
     return wrapSdkClient(sdk, sdkStorage);
 }
 
+/** Drop the in-memory SDK client shell (e.g. on wallet disconnect). Storage worker stays open. */
+export function resetWalletSession() {
+    boundUserAddress = null;
+    wrappedClient = null;
+    syncStarted = false;
+}
+
 /** Open storage + client shell for the given Soroban RPC URL. */
 export async function initializeRuntime(rpcUrl) {
     await ensureWasmInit();
@@ -171,10 +178,14 @@ export async function initializeRuntime(rpcUrl) {
     if (!storageHandle || currentRpcUrl !== rpcUrl) {
         storageHandle = await Storage.open();
         bindAppStorage(storageHandle);
-        wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
+        wrappedClient = null;
         currentRpcUrl = rpcUrl;
         syncStarted = false;
         boundUserAddress = null;
+    }
+
+    if (!wrappedClient) {
+        wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
     }
 
     return client();

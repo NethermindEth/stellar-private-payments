@@ -1,6 +1,6 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import { client, initializeRuntime } from '../wasm-facade.js';
+import { client, initializeRuntime, resetWalletSession } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -339,6 +339,7 @@ export const Wallet = {
     disconnect() {
         this._stopWatcher?.();
         this._stopWatcher = null;
+        resetWalletSession();
         closeAppPool();
         App.state.wallet = {
             connected: false,
