@@ -4,175 +4,210 @@ This document describes how the application manages local state, including persi
 
 ## Overview
 
-**Core vs platforms**
+**Core vs browser SDK vs app**
 
-Core application logic is implemented in Rust `sdk/` crates which define sync and async primitives and building blocks.
-Platforms `app/crates/platforms` (`web`, in the future - `cli`, `mcp` etc) provide compilation target specific dependencies, setup runtime (asynchronous/threaded), ui interaction protocol (e.g. FFI/http), order of operations.
+| Layer | Location | Role |
+|-------|----------|------|
+| **Pool SDK** | `sdk/pool` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
+| **Web SDK** | `sdk/web` | npm package `stellar-private-payments-sdk-web` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
+| **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
-Other directories in `app` directory mostly define interfaces for the `web` platform but probably can be restructured in the future to include other platforms interfaces as well.
+Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx builders, proving, SQLite schema). The browser SDK (`sdk/web`) compiles that logic to WASM and exposes a typed JavaScript API. The `app/` directory is the web UI and a thin runtime facade — it does not embed its own WASM crate.
 
-**Storage:**
+**Storage**
 
-Local storage is implemented upon SQLite (`sdk/state/src/storage.rs`) with the schema `sdk/state/src/schema.sql` to have a unified storage across different platforms allowing future data syncs across platforms.
+Local storage is SQLite (`sdk/state/src/storage.rs`, schema in `sdk/state/src/schema.sql`), shared across platforms. In the browser the database file (`poolstellar.sqlite`) lives on OPFS behind the storage worker.
 
-## Web platform (WASM + Web Workers)
+## Browser SDK (`sdk/web`)
 
-The `web` platform runs Rust application logic in the browser via WASM, with heavy and/or blocking work offloaded to Web Workers.
+The web SDK runs Rust on the main thread via WASM, with blocking work offloaded to Web Workers. It is built with `npm run build` in `sdk/web` and consumed by the app as a local npm dependency (`app/package.json` → `file:../sdk/web`).
+
+### Lifecycle
+
+```
+init() → Storage.open() → Client.new() → checkSync() → startSync() → initialize(signer) → client.pool() → PrivatePool ops
+```
+
+The app wraps this in `wasm-facade.js` and `ui/pool.js`: `initializeRuntime` → `client().startSync` → `client().initializeWallet` → `createAppPool()` / `ensureAppPool()`.
 
 ### Components
 
-The WASM layer exposes two JS handles with different scope:
+The WASM layer exposes three JS handles with different scope:
 
 | Handle | Scope | Examples |
 |--------|-------|----------|
-| **`WebClient`** | Account and deployment (all pools) | `getUserNotes`, `contractConfig`, onboarding, `createPool` |
-| **`Pool`** (`PrivatePool`) | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose` |
+| **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (raw worker RPC) |
+| **`Client`** | Account + deployment (all pools) | `contractConfig`, `allContractsData`, `registerPublicKeys`, `pool()` |
+| **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `sync`, `getBalance` |
 
-`WebClient` is the long-lived entry point; `Pool` is created per active pool when the user transacts.
+`Client` is the long-lived session shell; `PrivatePool` is created per active pool when the user transacts.
 
 **JS UI (main thread)**
 
-The UI is written in JavaScript and calls into the WASM bundle. It does not communicate with workers directly.
+The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) and does not talk to workers directly.
 
 **Main thread (WASM)**
 
-- Entry point is `mainThread(config)` (WASM export).
-- Initializes logging / panic hooks, constructs `WebClient`, and starts the background events listener (`events_listener`).
+- Entry: `init()` from `stellar-private-payments-sdk-web` (wasm-bindgen module init).
+- `Client::new` forks a `Storage` handle and holds RPC URL; wallet binding happens at `initialize`.
+- `events::start_indexer` spawns the background contract-event loop (`events_listener`).
 
-**Indexer (SDK + web platform)**
+**Indexer (pool SDK + web SDK)**
 
-- The indexer is generic over a storage backend (`Indexer<S: ContractDataStorage>`).
-- On web, the storage backend is **`StorageBridge`**, which implements `ContractDataStorage` (and the SDK `Storage` trait) by forwarding calls to the Storage Worker.
-- `events_listener` (in `events.rs`) owns the long-running indexer loop: it constructs `Indexer::init(...)`, calls `catch_up()` on an interval, and handles bootnode handoff when the wallet RPC has a retention gap.
-- `WebClient` does **not** implement `ContractDataStorage`; it holds a `StorageBridge` and passes clones of it to the listener and to `PrivatePool`.
+- Generic over a storage backend (`Indexer<S: ContractDataStorage>`).
+- On web, the backend is **`StorageBridge`**, implementing `ContractDataStorage` and the pool SDK `Storage` trait by forwarding to the storage worker.
+- `events_listener` (`sdk/web/src/events.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap.
+- Background sync is owned by the indexer, not by the UI calling `pool.sync()` on every page load (though pool ops call `sync` before/after mutations for freshness).
 
-**`WebClient` (WASM, wasm-bindgen API)**
+**`Storage` (WASM, wasm-bindgen API)**
 
-- Long-lived handle constructed by `mainThread(config)`; exposed to JS as `webClient`.
-- Spawns both workers and performs request/response routing internally; JS never constructs or sends worker protocol messages.
-- Implements the worker communication protocol defined in `protocol.rs`.
-- **Account- and deployment-wide operations** (not tied to a single active pool session):
-  - Onboarding and key derivation (`deriveAndSaveUserKeys`, `getUserKeys`, disclaimer, bootnode config).
-  - Cross-pool storage reads via `StorageBridge` (`getUserNotes`, `getRecentPublicKeys`, `getRecentPoolActivity`).
-  - Chain/config reads (`contractConfig`, `allContractsData`, `aspState`, `registerPublicKeys`).
-  - Selective-disclosure verification without a pool session (`verifySelectiveDisclosure`).
-- Creates per-pool transact sessions via `createPool({ poolContract, networkPassphrase, userAddress })`.
+- Spawns the storage worker once per page (`Storage.open({ workerUrl? })`).
+- `fork()` returns another handle to the same worker/DB (used internally by `Client::new`).
+- `call(request, timeoutMs?)` exposes the typed worker protocol for advanced/app-layer use.
 
-**`Pool` / `PrivatePool` (WASM, wasm-bindgen API)**
+**`Client` (WASM, wasm-bindgen API)**
 
-- Per-pool, per-user session returned by `WebClient.createPool`: SDK `PrivatePool<StorageBridge>` with RPC client, state fetcher, shared `StorageBridge`, `ProverBridge`, and `WalletSigner`.
-- **Pool-scoped operations only** — JS holds the handle in app state (`createAppPool` / `closeAppPool`) until wallet disconnect or account switch.
-- WASM exports: `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`, `initialize`, `close`.
-- Proving, Freighter signing, and submit run inside this session; returns tx hashes to JS.
+- Constructed by `Client.new({ storage, rpcUrl })` — shell only, no wallet yet.
+- Spawns the prover worker at `initialize`; routes storage requests through `StorageBridge`.
+- **Account- and deployment-wide operations:**
+  - Wallet bind + key derivation at `initialize` (Freighter `signMessage` when keys missing in local DB).
+  - Chain reads: `contractConfig`, `allContractsData`, `lookupRegisteredPublicKey`, `registerPublicKeys`.
+  - Selective-disclosure verification without a wallet session (`verifySelectiveDisclosure`).
+  - Per-pool sessions via `pool({ poolContract })`.
 
-The SDK `PrivatePool` type (native / blocking) also defines pool-scoped helpers such as `balance`, `notes`, `spendable_notes`, and `sync`. Those are **not** exported on the web `Pool` handle: the UI reads notes across pools through `WebClient.getUserNotes`, and background sync is owned by `events_listener` (see below), not by `pool.sync()` from JS.
+**`PrivatePool` (WASM, wasm-bindgen API)**
+
+- Per-pool session: pool SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
+- **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
+- Exports: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
+- Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
+- Proving, signing, and submit run inside this session; returns tx hashes to JS.
 
 **`StorageBridge` (WASM main thread)**
 
-- Typed async bridge to the Storage Worker (`StorageWorkerRequest` / `StorageWorkerResponse`).
-- Used by the indexer, `PrivatePool`, and ad-hoc `WebClient` storage reads/writes.
+- Typed async bridge to the storage worker (`StorageWorkerRequest` / `StorageWorkerResponse` in `protocol.rs`).
+- Used by the indexer, `PrivatePool`, and `ClientCore` storage reads.
 
-**Storage Worker (Web Worker)**
+**Storage worker (Web Worker)**
 
-- Owns local persistent state: SQLite via OPFS-backed VFS (browser storage).
-- Performs local “logic operations”: saving raw events, processing events, scanning/decrypting notes, and maintaining derived state.
-- Designed to stay responsive by processing in small chunks and yielding between batches.
+- Owns SQLite on OPFS.
+- Saves raw contract events, processes events, scans/decrypts notes, maintains derived state.
+- Processes in small chunks and yields between batches to stay responsive.
 
-**Prover Worker (Web Worker)**
+**Prover worker (Web Worker)**
 
-- Runs long/blocking proving so it cannot block the Storage Worker’s background processing or other app requests from the main thread.
-- Does not persist any user state; it loads/caches proving artifacts in memory and returns proof results.
+- Long-running Groth16 proving and witness calculation.
+- Does not persist user state; caches circuit artifacts in memory.
 
-### Worker protocol and isolation
+### Worker protocol
 
-The Rust `web` platform crate owns worker spawning and communication. Worker messages are strongly typed and serialized using enums in `protocol.rs` (e.g. `StorageWorkerRequest/Response`, `ProverWorkerRequest/Response`). This protocol is intentionally not exposed to JS.
+The `sdk/web` crate owns worker spawning and communication. Messages are strongly typed enums in `protocol.rs` (`StorageWorkerRequest/Response`, `ProverWorkerRequest/Response`). The protocol is not part of the public JS API except via `Storage.call` for app-layer extensions.
 
-### Data flow (high level)
+### Data flow
 
 ```mermaid
 flowchart LR
-  %% Main thread
   subgraph JS["JS UI (main thread)"]
-    UI["UI code (JS)"]
+    UI["UI + wasm-facade.js"]
+    AS["AppStorage (settings, disclaimer, op history)"]
   end
 
-  subgraph WASM["Main thread (WASM)"]
-    MT["mainThread(config)"]
-    WC["WebClient (wasm-bindgen API)"]
-    PP["PrivatePool session"]
+  subgraph PKG["stellar-private-payments-sdk-web"]
+    ST["Storage"]
+    CL["Client"]
+    PP["PrivatePool"]
     SB["StorageBridge"]
     EL["events_listener"]
     IDX["Indexer"]
   end
 
-  %% Workers
-  subgraph SW["Storage Worker (Web Worker)"]
-    DB["SQLite (OPFS) + processors"]
+  subgraph SW["Storage worker"]
+    DB["SQLite (OPFS)"]
   end
 
-  subgraph PW["Prover Worker (Web Worker)"]
-    PR["Prover + witness calc"]
+  subgraph PW["Prover worker"]
+    PR["Prover + witness"]
   end
 
-  %% Remote dependency (not local)
-  subgraph RPC["Stellar RPC (remote)"]
-    RPCAPI["Contracts state + events"]
+  subgraph RPC["Stellar RPC"]
+    RPCAPI["State + events"]
   end
 
-  UI -->|"calls WASM exports"| MT
-  MT -->|"constructs"| WC
-  WC -->|"owns"| SB
-  WC -->|"createPool → transacts"| PP
+  UI --> ST
+  UI --> CL
+  UI --> PP
+  AS -->|"Storage.call"| ST
+  CL --> ST
+  CL --> SB
+  CL -->|"pool()"| PP
   PP --> SB
   PP --> PW
-
-  MT -->|"spawn_local"| EL
   EL --> IDX
-  IDX -->|"catch_up()"| RPCAPI
-  IDX -->|"ContractDataStorage"| SB
-  SB -->|"StorageWorkerRequest::SaveEvents (protocol.rs)"| DB
-
-  UI -->|"WebClient.* (reads, onboarding, createPool)"| WC
-  UI -->|"Pool.* (deposit, transfer, …)"| PP
-  WC -->|"reads contract state"| RPCAPI
-  WC -->|"StorageWorkerRequest::* (onboarding, note list, …)"| DB
-  PP -->|"ProverWorkerRequest::*"| PR
-  PR -->|"ProverWorkerResponse::*"| PP
-  DB -->|"StorageWorkerResponse::*"| SB
-  SB --> WC
-  WC -->|"returns JSON"| UI
-  PP -->|"returns tx hashes"| UI
-
-  classDef remote fill:#fff0f0,stroke:#d33,stroke-width:2px,color:#000;
-  style RPC fill:#fff0f0,stroke:#d33,stroke-width:2px;
-  class RPCAPI remote;
+  IDX --> RPCAPI
+  IDX --> SB
+  SB --> SW
+  PW --> PR
+  CL --> RPCAPI
+  PP --> RPCAPI
 ```
 
-**Keypair Derivation:**
+## App runtime (`app/js`)
+
+**`wasm-facade.js`**
+
+Single entry for the main app pages. Owns singleton lifecycle:
+
+1. `initializeRuntime(rpcUrl)` — `init()`, `Storage.open`, `Client.new`
+2. `client().startSync({ bootnodeUrl? })` — `checkSync` when bootnode omitted, then background indexer
+3. `client().initializeWallet({ networkPassphrase, userAddress }, signer)` — `Client.initialize`
+4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `client().pool({ poolContract })`
+
+Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadPublicKeys`, `aspState`, etc.) via `Storage.call`.
+
+**`app-storage.js`**
+
+App-only persistence on top of `Storage.call`: explorer settings, bootnode config, disclaimer acceptance, operation history. Not part of the published SDK.
+
+**`app/js/wallet.js`**
+
+Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.initialize`.
+
+**Build (Trunk)**
+
+`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` into `js/stellar-private-payments-sdk-web/`. App bundles (`ui.js`, etc.) import `stellar-private-payments-sdk-web` as an external package via import maps in `index.html`.
+
+Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
+
+## Keypair derivation
 
 Keys are derived deterministically from Freighter wallet signatures:
-1. User signs the message defined by `KEY_DERIVATION_MESSAGE` from `sdk/prover/src/encryption.rs`
-2. The app derives the BN254 note identity keypair and the X25519 encryption keypair from that single signature using separate domain-separated hashes
 
-**When are signatures prompted?**
+1. User signs `KEY_DERIVATION_MESSAGE` from `sdk/prover/src/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`).
+2. The worker derives the BN254 note identity keypair and the X25519 encryption keypair from that signature using domain-separated hashes.
+3. Derived keys are stored in SQLite; the signature is not persisted.
 
-At the user onboarding to allow to scan for notes addressed to the user. The derived keys are stored permanently.
+Signatures are prompted during onboarding so the app can scan for notes addressed to the user.
 
-### Public Key Store
+## Public key registry
 
-Maintains an address book of registered public keys in the pool contract for sending private transfers.
+Registered note + encryption public keys on-chain enable private transfers to `G...` addresses. `Client.lookupRegisteredPublicKey` / `PrivatePool.transfer` resolve recipients through the local registry index (backed by synced contract events).
 
-## Recovery Scenarios
+## Recovery scenarios
 
-### Clearing Browser Data
+### Clearing browser data
 
-All stored data is lost. On next load:
-1. Full sync from RPC (limited by RPC retention window, typically [7 days](https://developers.stellar.org/docs/data/apis/rpc)).
+All local data is lost. On next load:
+
+1. Full sync from RPC (limited by RPC retention, typically [~7 days](https://developers.stellar.org/docs/data/apis/rpc)).
 2. Merkle trees rebuilt from synced events.
-3. User must re-authenticate for keypair derivation.
+3. User must re-sign for key derivation.
 4. Note scanning rediscovers received notes.
-5. If events are older than retention window, they cannot be recovered.
+5. Events older than the retention window cannot be recovered without a bootnode.
 
-### Account Switch
+### Account switch
 
-If the keys derivation is required, a user will be asked for that. From that moment on, this new account is as well used to scan new notes in the background events processing.
+Freighter account change triggers disconnect. The user reconnects and re-runs onboarding if keys for the new account are not in local storage. Background indexing uses the connected account's derived keys for decryption.
+
+### RPC sync gap
+
+When the wallet RPC cannot serve the full event history, `checkSync` / `startSync` surface `RPC_SYNC_GAP`. The app prompts for a bootnode URL, persists it in app settings, and the indexer catches up via bootnode before handing off to the wallet RPC.

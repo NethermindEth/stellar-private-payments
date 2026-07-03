@@ -1,11 +1,12 @@
-import { initializeWasm, getHandle } from './wasm-facade.js';
+import { client, initializeRuntime } from './wasm-facade.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
   getConnectedAddress,
   getWalletNetwork,
-  deriveKeysFromWallet,
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { getActivePoolContractId } from './ui/pool.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -31,6 +32,7 @@ const BN254_PRIME = 218882428718392752222464057452572750885483644004160343436982
 const state = {
   address: null,
   networkPassphrase: null,
+  sorobanRpcUrl: null,
   derivedKeys: null,
   notes: [],
   pools: [],
@@ -136,9 +138,9 @@ async function loadNotes() {
 
   try {
     const LIMIT = 200;
-    const config = await getHandle().webClient.contractConfig();
+    const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await getHandle().webClient.getUserNotes(state.address, LIMIT);
+    const list = await client().getUserNotes(state.address, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -174,16 +176,37 @@ async function loadNotes() {
   }
 }
 
+async function ensureDisclosureRuntime(rpcUrl) {
+  if (!rpcUrl) {
+    throw new Error('Soroban RPC URL is required. Configure a testnet RPC in Freighter.');
+  }
+  await initializeRuntime(rpcUrl);
+  await client().startSync();
+}
+
+// Read the user's Soroban RPC preference from Freighter (not a hardcoded default).
+async function loadWalletRpcPreference() {
+  const net = await getWalletNetwork();
+  const rpcUrl = (net.sorobanRpcUrl || '').trim();
+  if (!rpcUrl.toLowerCase().includes('testnet')) {
+    throw new Error(
+      'This page supports Stellar testnet only. Configure a testnet Soroban RPC in Freighter.',
+    );
+  }
+  state.sorobanRpcUrl = rpcUrl;
+  return { rpcUrl, network: net.network, networkPassphrase: net.networkPassphrase };
+}
+
 async function connect() {
   try {
     const address = await connectWallet();
-    const net = await getWalletNetwork();
+    const { rpcUrl, network, networkPassphrase } = await loadWalletRpcPreference();
 
     // This page is testnet-only. Refuse connection from wallets on other networks.
     const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
-    if (net.networkPassphrase !== TESTNET_PASSPHRASE) {
+    if (networkPassphrase !== TESTNET_PASSPHRASE) {
       showToast(
-        `Network mismatch: expected Testnet, got ${net.network || 'unknown network'}. Please switch your wallet to Testnet.`,
+        `Network mismatch: expected Testnet, got ${network || 'unknown network'}. Please switch your wallet to Testnet.`,
         'error',
         8000
       );
@@ -191,15 +214,16 @@ async function connect() {
     }
 
     state.address = address;
-    state.networkPassphrase = net.networkPassphrase;
+    state.networkPassphrase = networkPassphrase;
 
     walletChip.textContent = shortAddress(address);
-    networkChip.textContent = net.network || 'Testnet';
+    networkChip.textContent = network || 'Testnet';
 
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
-    // Derive keys (cached keys load instantly)
-    await deriveKeys();
+    await ensureDisclosureRuntime(rpcUrl);
+    // Load derived keys (cached keys load instantly).
+    await initializeWalletSession(address, networkPassphrase);
 
     // Load notes and render generate section
     await loadNotes();
@@ -212,19 +236,14 @@ async function connect() {
   }
 }
 
-async function deriveKeys() {
-  try {
-    const result = await deriveKeysFromWallet(state.address, {
-      onStatus: (msg) => console.log('[Disclosure]', msg),
-      signDelay: 300,
-      skipCacheCheck: false,
-    });
-    state.derivedKeys = result;
-    showToast('Privacy keys ready', 'success');
-  } catch (err) {
-    showToast(err.message || 'Key derivation failed', 'error');
-    throw err;
+async function initializeWalletSession(address, networkPassphrase) {
+  await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
+  const keys = await client().getUserKeys(address);
+  if (!keys?.noteKeypair?.public) {
+    throw new Error('Privacy keys not found in local storage');
   }
+  state.derivedKeys = true;
+  showToast('Privacy keys ready', 'success');
 }
 
 // ---------------------------------------------------------------------------
@@ -678,17 +697,11 @@ export function mountGenerate(container) {
   container.appendChild(formWrap);
 }
 
-function getActivePoolContractId(config) {
-  const pools = Array.isArray(config?.pools) ? config.pools : [];
-  const selected = pools.find((p) => p?.enabled) || pools[0];
-  const poolContractId = selected?.poolContractId;
-  if (!poolContractId) throw new Error('Pool contract ID not available');
-  return poolContractId;
-}
+const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
 async function generateReceipt(form) {
   if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
-    throw new Error('Please select 1 to 4 notes');
+    throw new Error('Select 1 to 4 notes');
   }
 
   const firstPool = state.selectedNotes[0]?.poolContractId;
@@ -696,42 +709,44 @@ async function generateReceipt(form) {
     throw new Error('All selected notes must belong to the same pool');
   }
 
-  const onStatus = (obj) => {
-    const stage = obj?.stage || '';
-    const message = obj?.message || '';
-    const progressArea = document.getElementById('generate-progress');
-    if (progressArea) {
-      progressArea.classList.remove('hidden');
-      const wrap = document.createElement('div');
-      wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
-      const spinner = document.createElement('span');
-      spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
-      wrap.appendChild(spinner);
-      const msg = document.createElement('span');
-      msg.textContent = message;
-      wrap.appendChild(msg);
-      progressArea.replaceChildren(wrap);
-    }
+  const progressArea = document.getElementById('generate-progress');
+  const handler = (e) => {
+    const d = e.detail;
+    if (d?.flow !== 'disclose' || !d?.message || !progressArea) return;
+    progressArea.classList.remove('hidden');
+    const wrap = document.createElement('div');
+    wrap.className = 'flex items-center gap-2 text-sm text-dark-300';
+    const spinner = document.createElement('span');
+    spinner.className = 'w-4 h-4 border-2 border-brand-500 border-t-transparent rounded-full animate-spin';
+    wrap.appendChild(spinner);
+    const msg = document.createElement('span');
+    msg.textContent = d.message;
+    wrap.appendChild(msg);
+    progressArea.replaceChildren(wrap);
   };
+  window.addEventListener(TX_PROGRESS_EVENT, handler);
 
-  // Disclose against the pool the selected note actually belongs to (there can
-  // be multiple pools); falling back to the first enabled pool only if unknown.
-  const config = await getHandle().webClient.contractConfig();
-  const poolContractId = state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
+  try {
+    // Disclose against the pool the selected note actually belongs to (there can
+    // be multiple pools); falling back to the first enabled pool only if unknown.
+    const config = client().contractConfig();
+    const poolContractId =
+      state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
+    const pool = await client().pool({ poolContract: poolContractId });
 
-  const receipt = await getHandle().webClient.generateSelectiveDisclosure(
-    poolContractId,
-    state.address,
-    state.selectedNotes.map((n) => n.id),
-    form.authority,
-    form.payload,
-    form.purpose,
-    BigInt(form.nonce),
-    onStatus
-  );
+    const receipt = await pool.disclose({
+      selectedCommitments: state.selectedNotes.map((n) => n.id),
+      authorityLabel: form.authority,
+      authorityIdentityPayloadHex: form.payload,
+      purpose: form.purpose,
+      contextNonce: form.nonce,
+    });
 
-  // receipt is a JS object (already deserialized by wasm_bindgen) or null
-  return receipt || null;
+    // Receipt is a JS object (already deserialized by wasm_bindgen) or null.
+    return receipt || null;
+  } finally {
+    window.removeEventListener(TX_PROGRESS_EVENT, handler);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1012,7 +1027,7 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await getHandle().webClient.verifySelectiveDisclosure(
+      const report = await client().verifySelectiveDisclosure(
         JSON.stringify(receipt),
         expectedVkHash
       );
@@ -1105,19 +1120,19 @@ async function init() {
 
   connectBtn?.addEventListener('click', () => connect());
 
-  // Initialize wasm eagerly with a testnet RPC so the walletless verify
-  // section works immediately. Wallet connect is gated on Testnet (see
-  // connect()), so the default RPC is always correct for this page.
+  // Initialize wasm eagerly so the walletless verify section works immediately.
+  // RPC comes from the user's Freighter network settings (see connect()).
   try {
-    await initializeWasm('https://soroban-testnet.stellar.org');
-    networkChip.textContent = 'TESTNET';
+    const { rpcUrl, network } = await loadWalletRpcPreference();
+    await ensureDisclosureRuntime(rpcUrl);
+    networkChip.textContent = (network || 'Testnet').toUpperCase();
   } catch (e) {
     console.error('WASM init failed:', e);
     if (isDbLockedError(e?.message)) {
       showDbLockedModal(e.message);
       return;
     }
-    showToast('Failed to initialize cryptography', 'error', 8000);
+    showToast(e?.message || 'Failed to initialize cryptography', 'error', 8000);
   }
 
   const query = parseQueryParams();

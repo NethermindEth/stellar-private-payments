@@ -38,9 +38,6 @@ jobs:
           rm -rf site
           make release DIST_DIR=site PUBLIC_URL="${{ steps.pages.outputs.base_url }}/"
 
-      - name: Package circuits source bundle
-        run: sh deployments/scripts/package-circuits-source-bundle.sh site/circuits/source-bundle.tar.gz
-
       - name: Publish install script
         run: cp deployments/scripts/install.sh site/install.sh
 

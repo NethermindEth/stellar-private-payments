@@ -1,6 +1,6 @@
 import { contract } from '@stellar/stellar-sdk';
-import { initializeWasm, getHandle } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
+import { client, initializeWasm } from './wasm-facade.js';
+import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
 // DOM element references
@@ -265,9 +265,7 @@ async function connect() {
 async function refreshState() {
   try {
     setStatus('Loading contract state...', 'info');
-    const client = getHandle().webClient;
-
-    const state = await client.aspState();
+    const state = await client().aspState();
     const membershipState = state.aspMembership;
     const nonMembershipState = state.aspNonMembership;
 
@@ -310,8 +308,7 @@ async function computeMembershipLeaf() {
     }
 
     const pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
-    const client = getHandle().webClient;
-    const leafHex = await client.deriveAspUserLeaf(blindingValue, pubKey);
+    const leafHex = await client().deriveAspUserLeaf(blindingValue, pubKey);
     const leafDec = BigInt(leafHex).toString();
 
     derivedPubKeyEl.textContent = pubKey;
@@ -447,9 +444,7 @@ async function computeNonMembershipLeaf() {
     if (valueValue === null) {
       throw new Error('Value is required');
     }
-    const client = getHandle().webClient;
-
-    const leafBytes = await client.deriveAspUserLeaf(valueValue, keyValue.toString(16).padStart(64, '0'));
+    const leafBytes = await client().deriveAspUserLeaf(valueValue, keyValue.toString(16).padStart(64, '0'));
     computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {

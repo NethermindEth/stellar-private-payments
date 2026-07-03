@@ -59,8 +59,14 @@ jobs:
           npm run check:artifacts --prefix sdk/web
           npm run check:types --prefix sdk/web
 
-      - name: Check the app wasm build
-        run: cargo build -p web --target wasm32-unknown-unknown --release
+      - name: Install app npm dependencies
+        run: npm ci --prefix app
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Smoke-test Trunk app build
+        run: trunk build --release --dist /tmp/app-dist
 
   wasm-test:
     timeout-minutes: 30

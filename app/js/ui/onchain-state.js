@@ -1,13 +1,13 @@
 /**
  * On-chain state panel wiring (WASM-first).
  *
- * Populates the "On-Chain State" and basic Stats fields using `webClient.allContractsData()`.
+ * Populates the "On-Chain State" and basic Stats fields using `allContractsData()`.
  * Keeps HTML/CSS intact; this module only updates existing DOM IDs.
  *
  * @module ui/onchain-state
  */
 
-import { getHandle } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 
 function setText(id, value) {
@@ -133,7 +133,7 @@ export const OnchainState = {
         this._refreshing = true;
         try {
             hideError();
-            const data = await getHandle().webClient.allContractsData();
+            const data = await client().allContractsData();
             const pools = Array.isArray(data?.pools) ? data.pools : [];
             const primaryPool = pools.find(p => p?.enabled) || pools[0] || null;
 
