@@ -27,16 +27,23 @@ circuits-build:
 	@echo "Building circuits (this may take a while)..."
 	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
 
+.PHONY: sdk-web-build
+sdk-web-build:
+	@echo "Building stellar-private-payments-sdk-web (sdk/web/dist)..."
+	@npm run build --prefix sdk/web
+
 .PHONY: install
 install:
 	@echo "Installing frontend dependencies..."
 	@npm install --prefix app
+	@npm install --prefix sdk/web
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
 
 .PHONY: clean
 clean:
 	trunk clean --dist $(DIST_DIR)
+	rm -rf sdk/web/dist
 	cargo clean
 
 .PHONY: doc
