@@ -226,3 +226,10 @@ then you can install it from the Github with
 ```sh
 ./deployments/scripts/install.sh --pre
 ```
+
+To make a production release of CLI
+
+```sh
+git tag v0.1.0 # with a proper new version
+git push origin v0.1.0
+```
