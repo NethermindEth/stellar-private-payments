@@ -1565,9 +1565,7 @@ fn map_public_key_entry(row: &rusqlite::Row<'_>) -> Result<types::PublicKeyEntry
 mod tests {
     use super::*;
     use prover::{crypto, encryption};
-    use types::{
-        ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount,
-    };
+    use types::{ContractEvent, ContractsEventData, KeyDerivationSignature, NoteAmount};
 
     fn dummy_event(id: &str) -> ContractEvent {
         ContractEvent {
