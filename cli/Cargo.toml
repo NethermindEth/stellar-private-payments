@@ -25,7 +25,6 @@ reqwest = { workspace = true, features = ["rustls"] }
 serde.workspace = true
 serde_json.workspace = true
 stellar-private-payments-sdk.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
 toml = "0.8"
 
 [lints]

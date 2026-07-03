@@ -5215,7 +5215,6 @@ dependencies = [
  "serde",
  "serde_json",
  "stellar-private-payments-sdk",
- "tokio",
  "toml",
 ]
 
