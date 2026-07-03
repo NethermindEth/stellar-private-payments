@@ -1,7 +1,7 @@
 /**
  * Address Book UI - shows registered public keys for private transfers.
  *
- * Data source: WASM WebClient.getRecentPublicKeys().
+ * Data source: SDK client via wasm-facade `client().getRecentPublicKeys()`.
  * No JS state/DB layer.
  */
 

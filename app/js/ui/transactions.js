@@ -347,6 +347,7 @@ async function requirePlanApproval(amountStroops) {
     return stepCount;
 }
 
+/** @param {{ btn: HTMLElement|null, pool: object }} ctx - From {@link prepareExecuteContext}. */
 async function executeFromAmount(ctx, { btn, amountInputId, run, flow }) {
     const amountRes = tryParseXlmToStroopsBigInt(
         document.getElementById(amountInputId)?.value,
@@ -750,9 +751,9 @@ export const Transactions = {
                         btn,
                         amountInputId: 'withdraw-amount',
                         flow: 'withdraw',
-                        run: (c, amountStroops) => {
+                        run: (ctx, amountStroops) => {
                             withdrawAmount = amountStroops;
-                            return c.pool.withdraw(amountStroops, recipient);
+                            return ctx.pool.withdraw(amountStroops, recipient);
                         },
                     });
                     if (hashes === undefined) return;
@@ -829,9 +830,9 @@ export const Transactions = {
                         btn,
                         amountInputId: 'transfer-amount',
                         flow: 'transfer',
-                        run: (c, amountStroops) => {
+                        run: (ctx, amountStroops) => {
                             transferAmount = amountStroops;
-                            return c.pool.transferToKeys(
+                            return ctx.pool.transferToKeys(
                                 recipientNoteKey,
                                 recipientEncKey,
                                 amountStroops,
