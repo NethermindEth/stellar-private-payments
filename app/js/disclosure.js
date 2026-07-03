@@ -680,8 +680,8 @@ export function mountGenerate(container) {
 const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
 async function generateReceipt(form) {
-  if (state.selectedNotes.length !== 1) {
-    throw new Error('Select exactly one note (multi-note disclosure coming soon)');
+  if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+    throw new Error('Select 1 to 4 notes');
   }
 
   const firstPool = state.selectedNotes[0]?.poolContractId;
@@ -713,7 +713,7 @@ async function generateReceipt(form) {
     const pool = await client().pool({ poolContract: poolContractId });
 
     const receipt = await pool.disclose({
-      selectedCommitment: state.selectedNotes[0].id,
+      selectedCommitments: state.selectedNotes.map((n) => n.id),
       authorityLabel: form.authority,
       authorityIdentityPayloadHex: form.payload,
       purpose: form.purpose,
