@@ -13,6 +13,12 @@ ARTIFACTS=(
   policy_tx_2_2.r1cs
   selectiveDisclosure_1.wasm
   selectiveDisclosure_1.r1cs
+  selectiveDisclosure_2.wasm
+  selectiveDisclosure_2.r1cs
+  selectiveDisclosure_3.wasm
+  selectiveDisclosure_3.r1cs
+  selectiveDisclosure_4.wasm
+  selectiveDisclosure_4.r1cs
 )
 
 if [[ ! -d "$CIRCUITS_OUT" ]]; then

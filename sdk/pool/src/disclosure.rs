@@ -21,7 +21,7 @@ use stellar::StateFetcher;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureRequest {
-    pub selected_commitment: Field,
+    pub selected_commitments: Vec<Field>,
     pub authority_label: String,
     pub authority_identity_payload_hex: String,
     pub purpose: String,
@@ -33,7 +33,7 @@ pub struct DisclosureRequest {
 pub struct DisclosureInputsRequest {
     pub user_address: String,
     pub pool_address: String,
-    pub selected_commitment: Field,
+    pub selected_commitments: Vec<Field>,
     pub pool_root: Option<Field>,
     pub pool_next_index: u32,
     pub tree_depth: u32,
@@ -54,12 +54,12 @@ pub struct DisclosureInputs {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DisclosureProveParams {
-    pub inputs: DisclosureInputs,
+    pub notes: Vec<DisclosureInputs>,
     pub context: DisclosureContext,
 }
 
 pub enum BuildDisclosureInputs {
-    Ready(DisclosureInputs),
+    Ready(Vec<DisclosureInputs>),
     MembershipSync(AspMembershipSync),
 }
 
@@ -67,11 +67,17 @@ pub fn build_disclosure_inputs(
     storage: &SqliteStorage,
     req: &DisclosureInputsRequest,
 ) -> anyhow::Result<BuildDisclosureInputs> {
+    if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
+        return Err(anyhow::anyhow!(
+            "selective disclosure requires 1..=4 selected commitments"
+        ));
+    }
+
     let pool_root = req
         .pool_root
         .ok_or_else(|| anyhow::anyhow!("missing pool_root"))?;
 
-    let (_note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
+    let (note_privkey, _note_pubkey, _encryption_pubkey, _membership_blinding) =
         load_user_key_material(storage, &req.user_address)?;
 
     let tree = match build_validated_pool_tree(
@@ -85,40 +91,41 @@ pub fn build_disclosure_inputs(
         Err(status) => return Ok(BuildDisclosureInputs::MembershipSync(status)),
     };
 
-    let (amount, blinding, leaf_index) = storage
-        .get_unspent_user_note_by_commitment(
-            &req.pool_address,
-            &req.user_address,
-            &req.selected_commitment,
-        )?
-        .ok_or_else(|| {
-            anyhow::anyhow!(
-                "unspent note not found for commitment {}",
-                req.selected_commitment
-            )
-        })?;
+    let mut notes = Vec::with_capacity(req.selected_commitments.len());
+    for commitment in &req.selected_commitments {
+        let (amount, blinding, leaf_index) = storage
+            .get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "unspent note not found for commitment {commitment} in pool {}",
+                    req.pool_address
+                )
+            })?;
 
-    let MerkleProof {
-        path_elements,
-        path_indices,
-        root,
-        ..
-    } = tree.proof(leaf_index)?;
+        let MerkleProof {
+            path_elements,
+            path_indices,
+            root,
+            ..
+        } = tree.proof(leaf_index)?;
 
-    Ok(BuildDisclosureInputs::Ready(DisclosureInputs {
-        root,
-        note_commitment: req.selected_commitment,
-        note_amount: amount,
-        note_private_key: _note_privkey,
-        note_blinding: blinding,
-        merkle_path_indices: path_indices,
-        merkle_path_elements: path_elements,
-    }))
+        notes.push(DisclosureInputs {
+            root,
+            note_commitment: *commitment,
+            note_amount: amount,
+            note_private_key: note_privkey.clone(),
+            note_blinding: blinding,
+            merkle_path_indices: path_indices,
+            merkle_path_elements: path_elements,
+        });
+    }
+
+    Ok(BuildDisclosureInputs::Ready(notes))
 }
 
 pub(crate) fn map_build_disclosure_inputs(
     result: anyhow::Result<BuildDisclosureInputs>,
-) -> Result<DisclosureInputs, PoolError> {
+) -> Result<Vec<DisclosureInputs>, PoolError> {
     match result.map_err(|e| PoolError::Other(e.to_string()))? {
         BuildDisclosureInputs::Ready(inputs) => Ok(inputs),
         BuildDisclosureInputs::MembershipSync(status) => Err(PoolError::MembershipSync(status)),
