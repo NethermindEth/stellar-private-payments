@@ -2,6 +2,8 @@ import { getHandle } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
+const PAGE_SIZE = 20;
+
 function noteWithLabels(note) {
     const pool = App.state.pools.find(item => item.poolContractId === note.poolContractId);
     return {
@@ -12,6 +14,8 @@ function noteWithLabels(note) {
 
 export const NotesTable = {
     filter: 'all',
+    page: 0,
+    totalCount: 0,
     _timer: null,
     _refreshing: false,
 
@@ -25,13 +29,30 @@ export const NotesTable = {
                     item.classList.toggle('text-cyan-100', active);
                     item.classList.toggle('text-slate-400', !active);
                 });
-                this.render();
+                this.page = 0;
+                this.refreshOnce().catch(() => {});
             });
+        });
+
+        document.getElementById('advanced-notes-prev')?.addEventListener('click', () => {
+            if (this.page > 0) {
+                this.page--;
+                this.refreshOnce().catch(() => {});
+            }
+        });
+
+        document.getElementById('advanced-notes-next')?.addEventListener('click', () => {
+            if ((this.page + 1) * PAGE_SIZE < this.totalCount) {
+                this.page++;
+                this.refreshOnce().catch(() => {});
+            }
         });
 
         App.events.addEventListener('wallet:ready', () => this.startPolling());
         App.events.addEventListener('wallet:disconnected', () => {
             this.stopPolling();
+            this.page = 0;
+            this.totalCount = 0;
             App.state.notes = [];
             this.render();
         });
@@ -56,7 +77,13 @@ export const NotesTable = {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
         try {
-            const list = await getHandle().webClient.getUserNotes(App.state.wallet.address, 200);
+            const address = App.state.wallet.address;
+            const offset = this.page * PAGE_SIZE;
+            const [list, count] = await Promise.all([
+                getHandle().webClient.getUserNotes(address, offset, PAGE_SIZE),
+                getHandle().webClient.getUserNotesCount(address),
+            ]);
+            this.totalCount = count ?? 0;
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
                 id: note.id,
                 poolContractId: note.poolContractId,
@@ -77,6 +104,10 @@ export const NotesTable = {
     render() {
         const tbody = document.getElementById('advanced-notes-tbody');
         const empty = document.getElementById('advanced-notes-empty');
+        const pagination = document.getElementById('advanced-notes-pagination');
+        const prevBtn = document.getElementById('advanced-notes-prev');
+        const nextBtn = document.getElementById('advanced-notes-next');
+        const pageLabel = document.getElementById('advanced-notes-page');
         if (!tbody || !empty) return;
 
         tbody.replaceChildren();
@@ -87,6 +118,8 @@ export const NotesTable = {
 
         if (!filtered.length) {
             empty.classList.remove('hidden');
+            pagination?.classList.add('hidden');
+            pagination?.classList.remove('flex');
             return;
         }
 
@@ -97,5 +130,17 @@ export const NotesTable = {
                 onCopy: (selected) => Utils.copyToClipboard(selected.id),
             }));
         });
+
+        const totalPages = Math.max(1, Math.ceil(this.totalCount / PAGE_SIZE));
+        if (totalPages > 1) {
+            pagination?.classList.remove('hidden');
+            pagination?.classList.add('flex');
+            if (prevBtn) prevBtn.disabled = this.page === 0;
+            if (nextBtn) nextBtn.disabled = (this.page + 1) >= totalPages;
+            if (pageLabel) pageLabel.textContent = `Page ${this.page + 1} of ${totalPages}`;
+        } else {
+            pagination?.classList.add('hidden');
+            pagination?.classList.remove('flex');
+        }
     },
 };

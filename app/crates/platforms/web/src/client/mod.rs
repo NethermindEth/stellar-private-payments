@@ -424,10 +424,24 @@ impl WebClient {
     }
 
     #[wasm_bindgen(js_name = getUserNotes)]
-    pub async fn get_user_notes(&self, address: String, limit: u32) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::UserNotes(address, limit);
+    pub async fn get_user_notes(
+        &self,
+        address: String,
+        offset: u32,
+        limit: u32,
+    ) -> Result<JsValue, JsError> {
+        let req = StorageWorkerRequest::UserNotes { address, offset, limit };
         match self.storage_request(req, 2_000).await? {
             StorageWorkerResponse::UserNotes(list) => Ok(serde_wasm_bindgen::to_value(&list)?),
+            other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
+        }
+    }
+
+    #[wasm_bindgen(js_name = getUserNotesCount)]
+    pub async fn get_user_notes_count(&self, address: String) -> Result<u32, JsError> {
+        let req = StorageWorkerRequest::CountUserNotes(address);
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::UserNotesCount(count) => Ok(count),
             other => Err(JsError::new(&format!("Unexpected response: {:?}", other))),
         }
     }

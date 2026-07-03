@@ -68,7 +68,8 @@ pub enum StorageWorkerRequest {
     },
     UserKeys(Address),
     AspSecret(Address),
-    UserNotes(Address, u32),
+    UserNotes { address: Address, offset: u32, limit: u32 },
+    CountUserNotes(Address),
     PortfolioBalances(Address),
     RecordOperation {
         address: Address,
@@ -119,6 +120,7 @@ pub enum StorageWorkerResponse {
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
+    UserNotesCount(u32),
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),
     PubKeys(Vec<PublicKeyEntry>),

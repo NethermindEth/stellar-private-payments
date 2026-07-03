@@ -28,6 +28,8 @@ const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
 
 const BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
+const PICKER_PAGE_SIZE = 10;
+
 const state = {
   address: null,
   networkPassphrase: null,
@@ -35,6 +37,7 @@ const state = {
   notes: [],
   pools: [],
   selectedNotes: [],
+  pickerPage: 0,
   notesLoading: false,
   notesError: null,
   generating: false,
@@ -138,7 +141,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = await getHandle().webClient.contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await getHandle().webClient.getUserNotes(state.address, LIMIT);
+    const list = await getHandle().webClient.getUserNotes(state.address, 0, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -332,20 +335,27 @@ export function mountGenerate(container) {
   }
 
   // Note picker
+  const totalPickerPages = Math.max(1, Math.ceil(unspent.length / PICKER_PAGE_SIZE));
+  if (state.pickerPage >= totalPickerPages) state.pickerPage = totalPickerPages - 1;
+  const pageUnspent = unspent.slice(
+    state.pickerPage * PICKER_PAGE_SIZE,
+    (state.pickerPage + 1) * PICKER_PAGE_SIZE,
+  );
+
   const pickerLabel = document.createElement('label');
   pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
   pickerLabel.textContent = `Select up to 4 unspent notes (${unspent.length})`;
   container.appendChild(pickerLabel);
 
   const list = document.createElement('div');
-  list.className = 'space-y-2 mb-4';
+  list.className = 'space-y-2 mb-2';
   list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'Unspent notes');
 
   const isSelected = (note) => state.selectedNotes.some((n) => n.id === note.id);
   const atMaxSelection = () => state.selectedNotes.length >= 4;
 
-  unspent.forEach((note) => {
+  pageUnspent.forEach((note) => {
     const selected = isSelected(note);
 
     const row = document.createElement('label');
@@ -391,6 +401,19 @@ export function mountGenerate(container) {
   });
 
   container.appendChild(list);
+
+  if (totalPickerPages > 1) {
+    const pickerPagination = el('div', 'flex items-center justify-between mb-4');
+    const prevBtn = el('button', 'text-xs text-dark-400 hover:text-dark-200 disabled:opacity-40 disabled:cursor-not-allowed', '← Prev');
+    const nextBtn = el('button', 'text-xs text-dark-400 hover:text-dark-200 disabled:opacity-40 disabled:cursor-not-allowed', 'Next →');
+    const pageInfo = el('span', 'text-[10px] text-dark-500', `Page ${state.pickerPage + 1} of ${totalPickerPages}`);
+    prevBtn.disabled = state.pickerPage === 0;
+    nextBtn.disabled = state.pickerPage + 1 >= totalPickerPages;
+    prevBtn.addEventListener('click', () => { state.pickerPage--; mountGenerate(container); });
+    nextBtn.addEventListener('click', () => { state.pickerPage++; mountGenerate(container); });
+    pickerPagination.append(prevBtn, pageInfo, nextBtn);
+    container.appendChild(pickerPagination);
+  }
 
   // Selection summary
   const selectedChip = el('div', 'text-xs text-brand-400 mb-4');

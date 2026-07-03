@@ -287,14 +287,20 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 membership_blinding: keys.membership_blinding,
             }))
         }
-        StorageWorkerRequest::UserNotes(address, limit) => {
-            log::trace!("[{WORKER_NAME}] list user notes for the account {address}");
-            let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
+        StorageWorkerRequest::UserNotes { address, offset, limit } => {
+            log::trace!("[{WORKER_NAME}] list user notes for the account {address} (offset={offset}, limit={limit})");
+            let list = with_storage!(s => s.list_user_notes(&address, offset, limit)?)?;
             log::trace!(
                 "[{WORKER_NAME}] fetched {} notes for the account {address}",
                 list.len()
             );
             StorageWorkerResponse::UserNotes(list)
+        }
+        StorageWorkerRequest::CountUserNotes(address) => {
+            log::trace!("[{WORKER_NAME}] count user notes for the account {address}");
+            let count = with_storage!(s => s.count_user_notes(&address)?)?;
+            log::trace!("[{WORKER_NAME}] total notes for {address}: {count}");
+            StorageWorkerResponse::UserNotesCount(count)
         }
         StorageWorkerRequest::PortfolioBalances(address) => {
             log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");

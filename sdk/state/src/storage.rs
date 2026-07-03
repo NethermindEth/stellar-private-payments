@@ -460,8 +460,13 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
-    /// List notes derived for `address` (newest first).
-    pub fn list_user_notes(&self, address: &str, limit: u32) -> Result<Vec<UserNoteSummary>> {
+    /// List notes derived for `address` (newest first), with pagination.
+    pub fn list_user_notes(
+        &self,
+        address: &str,
+        offset: u32,
+        limit: u32,
+    ) -> Result<Vec<UserNoteSummary>> {
         let mut stmt = self.conn.prepare(
             "SELECT
                 n.id,
@@ -477,10 +482,10 @@ impl Storage {
              JOIN contracts pool ON pool.contract_id = r.contract_id
              WHERE a.address = ?1
              ORDER BY r.ledger DESC
-             LIMIT ?2",
+             LIMIT ?2 OFFSET ?3",
         )?;
 
-        let rows = stmt.query_map(params![address, limit], |row| {
+        let rows = stmt.query_map(params![address, limit, offset], |row| {
             let id: Field = row.get(0)?;
             let pool_contract_id: String = row.get(1)?;
             let amount: NoteAmount = row.get(2)?;
@@ -505,6 +510,21 @@ impl Storage {
             out.push(r?);
         }
         Ok(out)
+    }
+
+    /// Total number of notes derived for `address`.
+    pub fn count_user_notes(&self, address: &str) -> Result<u32> {
+        self.conn
+            .query_row(
+                "SELECT COUNT(*)
+                 FROM user_notes n
+                 JOIN accounts a ON a.id = n.account_id
+                 WHERE a.address = ?1",
+                params![address],
+                |row| row.get::<_, i64>(0),
+            )
+            .map(|n| n as u32)
+            .context("count_user_notes")
     }
 
     /// All notes for `address` in `pool_contract_id` (newest first), spent and
