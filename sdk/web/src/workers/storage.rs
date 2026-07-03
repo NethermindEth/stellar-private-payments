@@ -1,6 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, PublicEncryptionKeyPair, PublicNoteKeyPair,
-    StorageWorkerRequest, StorageWorkerResponse, UserKeys,
+    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureInputsRequest,
+    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
+    UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -11,8 +12,8 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildDisclosureInputs, BuildTransactParams, DisclosureInputs, PoolError, SpendableNote,
-    Storage, TransactRequest, build_disclosure_inputs, build_transact_params,
+    BuildDisclosureInputs, BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest,
+    build_disclosure_inputs, build_transact_params,
     chain::ContractDataStorage,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
@@ -405,8 +406,8 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             );
 
             with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
-                BuildDisclosureInputs::Ready(inputs) => {
-                    StorageWorkerResponse::DisclosureInputs(inputs)
+                BuildDisclosureInputs::Ready(notes) => {
+                    StorageWorkerResponse::DisclosureNotes(notes)
                 }
                 BuildDisclosureInputs::MembershipSync(status) => {
                     StorageWorkerResponse::AspMembershipSync(status)
@@ -679,13 +680,13 @@ impl Storage for StorageBridge {
 
     async fn build_disclosure_inputs(
         &self,
-        req: &stellar_private_payments_sdk::DisclosureInputsRequest,
-    ) -> Result<DisclosureInputs, PoolError> {
+        req: &DisclosureInputsRequest,
+    ) -> Result<Vec<DisclosureInputs>, PoolError> {
         match self
             .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
             .await
         {
-            Ok(StorageWorkerResponse::DisclosureInputs(inputs)) => Ok(inputs),
+            Ok(StorageWorkerResponse::DisclosureNotes(notes)) => Ok(notes),
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
                 Err(PoolError::MembershipSync(status))
             }

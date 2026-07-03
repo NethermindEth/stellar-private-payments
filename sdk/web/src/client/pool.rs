@@ -160,8 +160,9 @@ impl PrivatePool {
 
     /// Generate a selective-disclosure proof for a note commitment.
     ///
-    /// `config` matches [`DisclosureRequest`] (camelCase). Returns `null` when
-    /// the account must register at the ASP before disclosing.
+    /// `config` matches [`DisclosureRequest`] (camelCase; `selectedCommitments`
+    /// array with 1..=4 entries). Returns `null` when the account must register
+    /// at the ASP before disclosing.
     pub async fn disclose(&self, config: JsValue) -> Result<JsValue, JsError> {
         let req: DisclosureRequest = serde_wasm_bindgen::from_value(config)?;
         emit("disclose", "prove", "Generating proof…", None, None);

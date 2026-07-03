@@ -151,6 +151,13 @@ impl<S: Storage> PrivatePool<S> {
         &self,
         req: DisclosureRequest,
     ) -> Result<Option<DisclosureReceipt>, PoolError> {
+        if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
+            return Err(PoolError::Other(
+                "selective disclosure requires 1..=4 selected commitments".into(),
+            ));
+        }
+
+        let selected_commitments = req.selected_commitments;
         let mut sync_waits = 0u32;
         loop {
             let data = self
@@ -176,14 +183,14 @@ impl<S: Storage> PrivatePool<S> {
             let inputs_req = DisclosureInputsRequest {
                 user_address: self.config.user_address.clone(),
                 pool_address: self.config.pool_contract_id.clone(),
-                selected_commitment: req.selected_commitment,
+                selected_commitments: selected_commitments.clone(),
                 pool_root: Some(pool_root),
                 pool_next_index,
                 tree_depth: pool.merkle_levels,
             };
 
             match self.storage.build_disclosure_inputs(&inputs_req).await {
-                Ok(inputs) => {
+                Ok(notes) => {
                     let context = DisclosureContext {
                         network: self.fetcher.contract_config().network.clone(),
                         pool_address: pool.contract_id,
@@ -194,7 +201,7 @@ impl<S: Storage> PrivatePool<S> {
                     };
                     let receipt = self
                         .prover
-                        .prove_disclosure(DisclosureProveParams { inputs, context })
+                        .prove_disclosure(DisclosureProveParams { notes, context })
                         .await?;
                     return Ok(Some(receipt));
                 }

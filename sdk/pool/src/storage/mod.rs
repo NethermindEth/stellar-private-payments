@@ -97,7 +97,7 @@ pub trait Storage: stellar::ContractDataStorage {
     async fn build_disclosure_inputs(
         &self,
         req: &DisclosureInputsRequest,
-    ) -> Result<DisclosureInputs, PoolError>;
+    ) -> Result<Vec<DisclosureInputs>, PoolError>;
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError>;
 
