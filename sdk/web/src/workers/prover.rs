@@ -531,7 +531,7 @@ impl ProverBridge {
     }
 
     pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self.call(ProverWorkerRequest::Ping, 5_000).await? {
+        match self.call(ProverWorkerRequest::Ping, 20_000).await? {
             ProverWorkerResponse::Pong => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
