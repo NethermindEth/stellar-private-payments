@@ -53,6 +53,8 @@ function setLoading(button, loading, label = 'Submitting…') {
     }
 }
 
+// SDK prover emits `stellar-private-payments:tx-progress` with { flow, stage, message };
+// surface `message` on the button loading label during pool ops.
 function bindTxProgress(button, flow) {
     const handler = (event) => {
         const detail = event.detail;
@@ -95,6 +97,7 @@ function updatePoolLabels() {
     });
 }
 
+// Show the balance of the currently selected token in Move Funds.
 function updateMoveFundsBalance() {
     const el = document.getElementById('move-funds-balance');
     if (!el) return;
@@ -165,6 +168,8 @@ function fillNextAdvancedInput(noteId) {
     target.dispatchEvent(new Event('input', { bubbles: true }));
 }
 
+// Show the amount of the note referenced by an input row (looked up from the
+// loaded notes), so the operator can see what each selected input is worth.
 function updateInputAmount(row) {
     const amountEl = row.querySelector('.note-input-amount');
     if (!amountEl) return;
@@ -191,6 +196,8 @@ function wireAdvancedOutputRow(row) {
         noteKey: row.querySelector('.output-note-key'),
         encKey: row.querySelector('.output-enc-key'),
     };
+    // Auto-search the registry once a full Stellar address (56 chars) is entered;
+    // reset the lookup state for any shorter/partial input.
     addressInput?.addEventListener('input', async () => {
         const value = addressInput.value.trim();
         if (value.length === 56) {
@@ -287,6 +294,8 @@ export const Transactions = {
             encKey: document.getElementById('transfer-enc-key'),
         };
         const transferAddress = document.getElementById('transfer-address');
+        // Auto-search the registry once a full Stellar address (56 chars) is entered;
+        // reset the lookup state for any shorter/partial input.
         transferAddress?.addEventListener('input', async () => {
             const value = transferAddress.value.trim();
             if (value.length === 56) {
@@ -387,6 +396,9 @@ export const Transactions = {
                     { allowNegative: false },
                 );
                 if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
+                // Public deposit is value entering the transaction (input, positive);
+                // public withdraw is value leaving it (output, negative). The contract
+                // takes a single signed ext amount.
                 const publicAmount = deposit.value - withdraw.value;
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
@@ -428,6 +440,7 @@ export const Transactions = {
         });
     },
 
+    // Returns true when a real submission happened, so callers can clear their form only on success.
     showExecuteResult(result, label = 'Transaction') {
         if (result?.status === 'aspNotReady') {
             Toast.show(

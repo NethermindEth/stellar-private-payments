@@ -207,6 +207,7 @@ async function connect() {
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
     await ensureDisclosureRuntime(net.sorobanRpcUrl || TESTNET_RPC);
+    // Load derived keys (cached keys load instantly).
     await initializeWalletSession(address, net.networkPassphrase);
 
     // Load notes and render generate section
@@ -707,6 +708,8 @@ async function generateReceipt(form) {
   window.addEventListener(TX_PROGRESS_EVENT, handler);
 
   try {
+    // Disclose against the pool the selected note actually belongs to (there can
+    // be multiple pools); falling back to the first enabled pool only if unknown.
     const config = client().contractConfig();
     const poolContractId =
       state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
@@ -720,6 +723,7 @@ async function generateReceipt(form) {
       contextNonce: form.nonce,
     });
 
+    // Receipt is a JS object (already deserialized by wasm_bindgen) or null.
     return receipt || null;
   } finally {
     window.removeEventListener(TX_PROGRESS_EVENT, handler);
