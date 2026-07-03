@@ -11,8 +11,8 @@ export interface ClientNewOptions {
   storageWorkerUrl?: string;
 }
 
-/** Options for {@link AccountClient.checkEventSync} and {@link AccountClient.startEventSync}. */
-export interface EventSyncOptions {
+/** Options for {@link AccountClient.checkSync} and {@link AccountClient.startSync}. */
+export interface SyncOptions {
   bootnodeUrl?: string;
 }
 

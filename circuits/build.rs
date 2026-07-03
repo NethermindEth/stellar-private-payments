@@ -45,7 +45,13 @@ const CURVE_ID: &str = "bn128";
 /// Circom stems whose Groth16 artifacts live under `testdata/`
 /// (`{stem}_proving_key.bin`, etc.). Append here when wiring a new entry-point
 /// through the same key-generation path.
-const GROTH16_KEY_CIRCUITS: &[&str] = &["policy_tx_2_2", "selectiveDisclosure_1"];
+const GROTH16_KEY_CIRCUITS: &[&str] = &[
+    "policy_tx_2_2",
+    "selectiveDisclosure_1",
+    "selectiveDisclosure_2",
+    "selectiveDisclosure_3",
+    "selectiveDisclosure_4",
+];
 
 /// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
 /// changed.
@@ -349,7 +355,7 @@ fn main() -> Result<()> {
         }
 
         // === GROTH16 Proving/Verifying key generation ===
-        // policy_tx_2_2 and selectiveDisclosure_1 (must match `*.circom` file stem).
+        // Stems listed in GROTH16_KEY_CIRCUITS (must match `*.circom` file stems).
         if circuit_needs_groth16_keys(circuit_name.as_str()) {
             if !wasm_success {
                 bail!(

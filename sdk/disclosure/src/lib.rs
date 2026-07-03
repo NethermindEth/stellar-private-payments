@@ -6,7 +6,10 @@ use sha2::{Digest, Sha256};
 use types::{
     DisclosureCircuitMetadata, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
     Field, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
-    SELECTIVE_DISCLOSURE_1_N_NOTES,
+    SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_2_LEVELS,
+    SELECTIVE_DISCLOSURE_2_N_NOTES, SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
+    SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT, SELECTIVE_DISCLOSURE_4_LEVELS,
+    SELECTIVE_DISCLOSURE_4_N_NOTES,
 };
 
 /// Domain prefix for `ext_context_hash` derivation.
@@ -264,6 +267,48 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     },
 };
 
+/// Circuit metadata for `selectiveDisclosure_2`.
+pub const SELECTIVE_DISCLOSURE_2: RegisteredCircuit = RegisteredCircuit {
+    name: SELECTIVE_DISCLOSURE_2_CIRCUIT,
+    levels: SELECTIVE_DISCLOSURE_2_LEVELS,
+    n_notes: SELECTIVE_DISCLOSURE_2_N_NOTES,
+    public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
+    artifacts: CircuitArtifacts {
+        wasm: "selectiveDisclosure_2.wasm",
+        r1cs: "selectiveDisclosure_2.r1cs",
+        proving_key: "selectiveDisclosure_2_proving_key.bin",
+        verifying_key_json: "selectiveDisclosure_2_vk.json",
+    },
+};
+
+/// Circuit metadata for `selectiveDisclosure_3`.
+pub const SELECTIVE_DISCLOSURE_3: RegisteredCircuit = RegisteredCircuit {
+    name: SELECTIVE_DISCLOSURE_3_CIRCUIT,
+    levels: SELECTIVE_DISCLOSURE_3_LEVELS,
+    n_notes: SELECTIVE_DISCLOSURE_3_N_NOTES,
+    public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
+    artifacts: CircuitArtifacts {
+        wasm: "selectiveDisclosure_3.wasm",
+        r1cs: "selectiveDisclosure_3.r1cs",
+        proving_key: "selectiveDisclosure_3_proving_key.bin",
+        verifying_key_json: "selectiveDisclosure_3_vk.json",
+    },
+};
+
+/// Circuit metadata for `selectiveDisclosure_4`.
+pub const SELECTIVE_DISCLOSURE_4: RegisteredCircuit = RegisteredCircuit {
+    name: SELECTIVE_DISCLOSURE_4_CIRCUIT,
+    levels: SELECTIVE_DISCLOSURE_4_LEVELS,
+    n_notes: SELECTIVE_DISCLOSURE_4_N_NOTES,
+    public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
+    artifacts: CircuitArtifacts {
+        wasm: "selectiveDisclosure_4.wasm",
+        r1cs: "selectiveDisclosure_4.r1cs",
+        proving_key: "selectiveDisclosure_4_proving_key.bin",
+        verifying_key_json: "selectiveDisclosure_4_vk.json",
+    },
+};
+
 /// Finds a registered disclosure circuit by entry-point name.
 ///
 /// # Arguments
@@ -274,6 +319,9 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
 pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
     match name {
         SELECTIVE_DISCLOSURE_1_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_1),
+        SELECTIVE_DISCLOSURE_2_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_2),
+        SELECTIVE_DISCLOSURE_3_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_3),
+        SELECTIVE_DISCLOSURE_4_CIRCUIT => Some(&SELECTIVE_DISCLOSURE_4),
         _ => None,
     }
 }
@@ -546,6 +594,79 @@ mod tests {
     #[test]
     fn registry_rejects_unknown_circuit() {
         assert!(find_circuit("unknown").is_none());
+    }
+
+    #[test]
+    fn registry_finds_all_selective_disclosure_variants() {
+        assert_eq!(
+            find_circuit(SELECTIVE_DISCLOSURE_1_CIRCUIT),
+            Some(&SELECTIVE_DISCLOSURE_1)
+        );
+        assert_eq!(
+            find_circuit(SELECTIVE_DISCLOSURE_2_CIRCUIT),
+            Some(&SELECTIVE_DISCLOSURE_2)
+        );
+        assert_eq!(
+            find_circuit(SELECTIVE_DISCLOSURE_3_CIRCUIT),
+            Some(&SELECTIVE_DISCLOSURE_3)
+        );
+        assert_eq!(
+            find_circuit(SELECTIVE_DISCLOSURE_4_CIRCUIT),
+            Some(&SELECTIVE_DISCLOSURE_4)
+        );
+    }
+
+    #[allow(clippy::arithmetic_side_effects)]
+    fn receipt_for_circuit(circuit: &'static RegisteredCircuit) -> DisclosureReceipt {
+        DisclosureReceipt {
+            version: DISCLOSURE_RECEIPT_VERSION,
+            circuit: circuit.receipt_metadata(VK_HASH),
+            context: DisclosureContext {
+                network: "testnet".to_string(),
+                pool_address: "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+                    .to_string(),
+                authority_label: "Authority XYZ".to_string(),
+                authority_identity_payload_hex: "0x617574686f72697479".to_string(),
+                purpose: "kyc-review".to_string(),
+                context_nonce: field(7),
+            },
+            public_inputs: DisclosurePublicInputs {
+                roots: (0..circuit.n_notes).map(|i| field(u64::from(i))).collect(),
+                note_commitments: (0..circuit.n_notes)
+                    .map(|i| field(u64::from(i) + 100))
+                    .collect(),
+                ext_context_hash: field(3),
+            },
+            proof_compressed_hex: format!("0x{}", "aa".repeat(128)),
+            issued_at: "2026-05-19T14:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn validates_multi_note_receipts() -> Result<()> {
+        for circuit in [
+            &SELECTIVE_DISCLOSURE_1,
+            &SELECTIVE_DISCLOSURE_2,
+            &SELECTIVE_DISCLOSURE_3,
+            &SELECTIVE_DISCLOSURE_4,
+        ] {
+            let receipt = receipt_for_circuit(circuit);
+            let registered = validate_registered_receipt(&receipt, VK_HASH)?;
+            assert_eq!(registered.name, circuit.name);
+
+            let bytes = registered.public_inputs_bytes(&receipt)?;
+            let expected_len = (circuit.n_notes as usize * 2 + 1) * 32;
+            assert_eq!(bytes.len(), expected_len);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_mismatched_public_input_count() {
+        let mut receipt = receipt_for_circuit(&SELECTIVE_DISCLOSURE_2);
+        receipt.public_inputs.roots.push(field(99));
+
+        assert!(validate_registered_receipt(&receipt, VK_HASH).is_err());
     }
 
     #[test]

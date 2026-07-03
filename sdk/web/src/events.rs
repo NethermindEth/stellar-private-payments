@@ -199,7 +199,7 @@ pub(crate) async fn start_indexer(
 ) -> Result<(), JsError> {
     ensure_log_init();
 
-    if INDEXER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+    if INDEXER_STARTED.load(std::sync::atomic::Ordering::SeqCst) {
         log::debug!("[EVENTS] indexer already running");
         return Ok(());
     }
@@ -207,6 +207,11 @@ pub(crate) async fn start_indexer(
     let bootnode = bootnode_check(&rpc_url, storage.clone(), config, bootnode_url.as_deref())
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
+
+    if INDEXER_STARTED.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        log::debug!("[EVENTS] indexer already running");
+        return Ok(());
+    }
 
     wasm_bindgen_futures::spawn_local(events_listener(rpc_url, bootnode, storage, config));
 

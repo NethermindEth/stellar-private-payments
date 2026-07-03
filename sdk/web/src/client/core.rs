@@ -8,7 +8,10 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use std::rc::Rc;
 use stellar_private_payments_sdk::{
-    chain::{StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx, submit_tx},
+    chain::{
+        StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx as chain_confirm_tx,
+        submit_tx as chain_submit_tx,
+    },
     tx::encryption::KEY_DERIVATION_MESSAGE,
     types::{
         ContractConfig, DisclosureReceipt, DisclosureVerificationReport, KeyDerivationSignature,
@@ -29,22 +32,12 @@ const DEFAULT_PROVER_WORKER_URL: &str = "./workers/prover-worker.js";
 
 /// Workers, RPC fetcher, and tx submission shared by [`super::Client`] and
 /// [`super::PrivatePool`].
+#[derive(Clone)]
 pub(crate) struct ClientCore {
     rpc_url: String,
     storage: StorageBridge,
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
-}
-
-impl Clone for ClientCore {
-    fn clone(&self) -> Self {
-        Self {
-            rpc_url: self.rpc_url.clone(),
-            storage: self.storage.clone(),
-            prover_bridge: self.prover_bridge.clone(),
-            fetcher: self.fetcher.clone(),
-        }
-    }
 }
 
 impl ClientCore {
@@ -66,13 +59,24 @@ impl ClientCore {
             }
         };
 
-        let core = Self::new_with_storage(
+        let prover_worker_url =
+            prover_worker_url.unwrap_or_else(|| DEFAULT_PROVER_WORKER_URL.to_string());
+
+        let fetcher = Rc::new(
+            StateFetcher::new(&rpc_url, (*contract_config).clone())
+                .map_err(|e| JsError::new(&e.to_string()))?,
+        );
+        let core = Self {
             rpc_url,
-            storage_bridge,
-            prover_worker_url.unwrap_or_else(|| DEFAULT_PROVER_WORKER_URL.to_string()),
-            contract_config,
-        )
-        .map_err(|e| JsError::new(&e.to_string()))?;
+            storage: storage_bridge,
+            prover_bridge: ProverBridge::new(
+                ProverWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&prover_worker_url),
+            ),
+            fetcher,
+        };
 
         core.ping_storage()
             .await
@@ -203,7 +207,9 @@ impl ClientCore {
             .await
             .map_err(|e| JsError::new(&e.to_string()))?;
         let signed_tx = wallet_signer.sign_prepared_transaction(&prepared).await?;
-        self.submit_and_confirm(&signed_tx).await
+        let hash = self.submit(&signed_tx).await?;
+        self.confirm(&hash).await?;
+        Ok(hash)
     }
 
     pub(crate) async fn recipient_keys(&self, address: &str) -> Result<(String, String), JsError> {
@@ -234,14 +240,21 @@ impl ClientCore {
         ))
     }
 
-    pub(super) async fn confirm_tx(&self, hash: &str) -> Result<(), JsError> {
+    pub(super) async fn submit(&self, signed: &TransactionEnvelope) -> Result<String, JsError> {
+        let rpc = self.fetcher.rpc();
+        chain_submit_tx(signed, rpc)
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    pub(super) async fn confirm(&self, hash: &str) -> Result<(), JsError> {
         let rpc = self.fetcher.rpc();
 
         for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
             if attempt > 1 {
                 TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
             }
-            match confirm_tx(hash, rpc)
+            match chain_confirm_tx(hash, rpc)
                 .await
                 .map_err(|e| JsError::new(&e.to_string()))?
             {
@@ -261,38 +274,6 @@ impl ClientCore {
         Err(JsError::new(&format!(
             "transaction confirmation failed (hash: {hash})"
         )))
-    }
-
-    pub(super) async fn submit_and_confirm(
-        &self,
-        signed: &TransactionEnvelope,
-    ) -> Result<String, JsError> {
-        let rpc = self.fetcher.rpc();
-        let hash = submit_tx(signed, rpc)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-
-        self.confirm_tx(&hash).await?;
-        Ok(hash)
-    }
-
-    fn new_with_storage(
-        rpc_url: String,
-        storage: StorageBridge,
-        prover_worker_url: String,
-        contract_config: &'static ContractConfig,
-    ) -> anyhow::Result<Self> {
-        Ok(Self {
-            rpc_url: rpc_url.clone(),
-            storage,
-            prover_bridge: ProverBridge::new(
-                ProverWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&prover_worker_url),
-            ),
-            fetcher: Rc::new(StateFetcher::new(&rpc_url, (*contract_config).clone())?),
-        })
     }
 
     async fn storage_request(

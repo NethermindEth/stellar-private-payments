@@ -1,16 +1,16 @@
 use serde::{Deserialize, Serialize};
 
 pub use stellar_private_payments_sdk::{
-    DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
-    TransactRequest,
+    DisclosureProveParams, PreparedProverTx, TransactRequest,
 };
 
 use stellar_private_payments_sdk::{
     tx::flows::TransactParams,
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
-        KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        PublicKeyEntry, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
+        KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey, OperationalFeedItem,
+        PortfolioBalance, PublicKeyEntry, RecipientLookup, SyncMetadata, UserNoteSummary,
+        UserOperation,
     },
 };
 
@@ -149,6 +149,36 @@ pub enum ProverWorkerResponse {
     TransactPrepared(PreparedProverTx),
     Disclosure(DisclosureReceipt),
     DisclosureProofVerified(bool),
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureInputsRequest {
+    pub user_address: Address,
+    pub pool_address: Address,
+    pub selected_commitments: Vec<Field>,
+    pub pool_root: Option<Field>,
+    pub pool_next_index: u32,
+    pub tree_depth: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureNoteInputs {
+    pub root: Field,
+    pub note_commitment: Field,
+    pub note_amount: NoteAmount,
+    pub note_private_key: NotePrivateKey,
+    pub note_blinding: Field,
+    pub merkle_path_indices: Field,
+    pub merkle_path_elements: Vec<Field>,
+}
+
+/// Inputs for a multi-note selective-disclosure proof.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DisclosureInputs {
+    pub notes: Vec<DisclosureNoteInputs>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

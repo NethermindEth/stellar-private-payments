@@ -35,6 +35,9 @@ jobs:
         with:
           cache-targets: "true"
 
+      - name: Build circuit artifacts
+        run: cargo build -p circuits --release
+
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 

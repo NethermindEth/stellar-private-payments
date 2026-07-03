@@ -80,7 +80,7 @@ async function ensureEventSync(rpcUrl) {
     const storage = client().storage();
     const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
     try {
-        await client().startEventSync({ bootnodeUrl: storedBootnodeUrl });
+        await client().startSync({ bootnodeUrl: storedBootnodeUrl });
         return { bootnodeRequired: false };
     } catch (error) {
         const message = error?.message || 'Failed to start event sync';
@@ -94,7 +94,7 @@ async function ensureEventSync(rpcUrl) {
         if (!modal.accepted || !modal.url) throw error;
 
         await storage.setBootnodeConfig(modal.url);
-        await client().startEventSync({ bootnodeUrl: modal.url });
+        await client().startSync({ bootnodeUrl: modal.url });
         return { bootnodeRequired: true };
     }
 }

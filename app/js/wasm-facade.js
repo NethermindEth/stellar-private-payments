@@ -1,7 +1,7 @@
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, and app persistence.
  *
- * Lifecycle: `initializeRuntime` → `client().startEventSync` → `client().initializeWallet` → pool ops.
+ * Lifecycle: `initializeRuntime` → `client().startSync` → `client().initializeWallet` → pool ops.
  */
 
 import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
@@ -14,7 +14,7 @@ let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let wasmReady = false;
-let eventSyncStarted = false;
+let syncStarted = false;
 let currentRpcUrl = null;
 let boundUserAddress = null;
 
@@ -41,15 +41,15 @@ function wrapSdkClient(sdk, sdkStorage) {
             }
             return appStorageInstance;
         },
-        async startEventSync({ bootnodeUrl } = {}) {
+        async startSync({ bootnodeUrl } = {}) {
             let resolvedBootnode = bootnodeUrl;
             if (resolvedBootnode === undefined) {
-                resolvedBootnode = await sdk.checkEventSync();
+                resolvedBootnode = await sdk.checkSync();
             }
-            await sdk.startEventSync({
+            await sdk.startSync({
                 bootnodeUrl: resolvedBootnode ?? undefined,
             });
-            eventSyncStarted = true;
+            syncStarted = true;
         },
         async initializeWallet(
             { networkPassphrase, userAddress },
@@ -173,7 +173,7 @@ export async function initializeRuntime(rpcUrl) {
         bindAppStorage(storageHandle);
         wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
         currentRpcUrl = rpcUrl;
-        eventSyncStarted = false;
+        syncStarted = false;
         boundUserAddress = null;
     }
 
@@ -182,19 +182,19 @@ export async function initializeRuntime(rpcUrl) {
 
 /**
  * Legacy entry for admin/disclosure pages: runtime + event sync, no wallet.
- * Prefer `initializeRuntime` + `client().startEventSync` in new code.
+ * Prefer `initializeRuntime` + `client().startSync` in new code.
  */
 export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
-    if (storageHandle && currentRpcUrl === rpcUrl && eventSyncStarted && bootnodeUrl == null) {
+    if (storageHandle && currentRpcUrl === rpcUrl && syncStarted && bootnodeUrl == null) {
         return client();
     }
 
     const activeClient = await initializeRuntime(rpcUrl);
 
     if (bootnodeUrl) {
-        await activeClient.startEventSync({ bootnodeUrl });
-    } else if (!eventSyncStarted) {
-        await activeClient.startEventSync();
+        await activeClient.startSync({ bootnodeUrl });
+    } else if (!syncStarted) {
+        await activeClient.startSync();
     }
 
     return client();

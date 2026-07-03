@@ -19,8 +19,8 @@ async function openStorage(options = {}) {
 
 function wrapClient(wasmClient) {
   return {
-    checkEventSync: (options) => wasmClient.checkEventSync(options),
-    startEventSync: (options) => wasmClient.startEventSync(options),
+    checkSync: (options) => wasmClient.checkSync(options),
+    startSync: (options) => wasmClient.startSync(options),
     initialize: async (options, signer) => {
       const userAddress =
         options.userAddress ??
@@ -52,7 +52,7 @@ function wrapClient(wasmClient) {
 }
 
 /**
- * Create a client shell. Call `startEventSync` then `initialize` before pool ops.
+ * Create a client shell. Call `startSync` then `initialize` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
  */
