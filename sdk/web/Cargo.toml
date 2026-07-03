@@ -1,0 +1,55 @@
+[package]
+name = "stellar-private-payments-sdk-web"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Web/WASM bindings for stellar-private-payments-sdk (stellar-private-payments-sdk-web on npm)"
+
+[lib]
+name = "stellar_private_payments_sdk_web"
+crate-type = ["cdylib", "rlib"]
+
+[[bin]]
+name = "storage-worker"
+path = "src/bin/storage_worker.rs"
+
+[[bin]]
+name = "prover-worker"
+path = "src/bin/prover_worker.rs"
+
+[dependencies]
+stellar-private-payments-sdk = { workspace = true }
+
+anyhow = { workspace = true }
+async-trait = { workspace = true }
+base64 = { workspace = true }
+console_error_panic_hook = { workspace = true }
+futures = { workspace = true }
+gloo-timers = { workspace = true, features = ["futures"] }
+gloo-worker = { workspace = true }
+js-sys = { workspace = true }
+log = { workspace = true }
+serde = { workspace = true }
+serde-wasm-bindgen = { workspace = true }
+serde_json = { workspace = true, features = ["alloc"] }
+sha2 = { workspace = true }
+wasm-bindgen = { workspace = true }
+wasm-bindgen-futures = { workspace = true }
+wasm-log = { workspace = true }
+web-sys = { workspace = true }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+sqlite-wasm-rs = { workspace = true }
+sqlite-wasm-vfs = { workspace = true }
+
+[build-dependencies]
+sha2 = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+wiremock = { workspace = true }
+
+[lints]
+workspace = true

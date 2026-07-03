@@ -38,6 +38,7 @@ mod tests {
     const EXT_CONTEXT_HASH: u64 = 0xC0FFEE_u64;
 
     /// Note material for a single selective-disclosure proof.
+    #[derive(Clone)]
     struct DisclosureNote {
         leaf_index: usize,
         priv_key: Scalar,
@@ -46,60 +47,77 @@ mod tests {
     }
 
     fn build_inputs(
-        note: &DisclosureNote,
-        leaves: &[Scalar],
+        notes: &[DisclosureNote],
+        leaves: &mut [Scalar],
         ext_context_hash: Scalar,
     ) -> Result<Inputs> {
-        let pub_key = derive_public_key(note.priv_key);
-        let note_commitment = commitment(note.amount, pub_key, note.blinding);
+        let mut roots = Vec::with_capacity(notes.len());
+        let mut note_commitments = Vec::with_capacity(notes.len());
+        let mut in_amount = Vec::with_capacity(notes.len());
+        let mut in_private_key = Vec::with_capacity(notes.len());
+        let mut in_blinding = Vec::with_capacity(notes.len());
+        let mut in_path_indices = Vec::with_capacity(notes.len());
+        let mut in_path_elements = Vec::new();
 
-        let mut frozen = leaves.to_vec();
-        frozen[note.leaf_index] = note_commitment;
+        for note in notes {
+            let pub_key = derive_public_key(note.priv_key);
+            let note_commitment = commitment(note.amount, pub_key, note.blinding);
 
-        let root = merkle_root(frozen.clone());
-        let (siblings, path_idx_u64, depth) = merkle_proof(&frozen, note.leaf_index);
-        assert_eq!(
-            depth, LEVELS,
-            "unexpected Merkle depth: expected {LEVELS}, got {depth}"
-        );
+            leaves[note.leaf_index] = note_commitment;
 
-        let path_elements: Vec<BigInt> = siblings.into_iter().map(scalar_to_bigint).collect();
+            let root = merkle_root(leaves.to_vec());
+            let (siblings, path_idx_u64, depth) = merkle_proof(leaves, note.leaf_index);
+            assert_eq!(
+                depth, LEVELS,
+                "unexpected Merkle depth: expected {LEVELS}, got {depth}"
+            );
+
+            roots.push(scalar_to_bigint(root));
+            note_commitments.push(scalar_to_bigint(note_commitment));
+            in_amount.push(note.amount);
+            in_private_key.push(note.priv_key);
+            in_blinding.push(note.blinding);
+            in_path_indices.push(Scalar::from(path_idx_u64));
+            in_path_elements.extend(siblings.into_iter().map(scalar_to_bigint));
+        }
 
         let mut inputs = Inputs::new();
-        inputs.set("roots", vec![scalar_to_bigint(root)]);
-        inputs.set("noteCommitments", vec![scalar_to_bigint(note_commitment)]);
+        inputs.set("roots", roots);
+        inputs.set("noteCommitments", note_commitments);
         inputs.set("extContextHash", ext_context_hash);
-        inputs.set("inAmount", vec![note.amount]);
-        inputs.set("inPrivateKey", vec![note.priv_key]);
-        inputs.set("inBlinding", vec![note.blinding]);
-        inputs.set("inPathIndices", vec![Scalar::from(path_idx_u64)]);
-        inputs.set("inPathElements", path_elements);
+        inputs.set("inAmount", in_amount);
+        inputs.set("inPrivateKey", in_private_key);
+        inputs.set("inBlinding", in_blinding);
+        inputs.set("inPathIndices", in_path_indices);
+        inputs.set("inPathElements", in_path_elements);
         Ok(inputs)
     }
 
-    fn sample_note(leaf_index: usize) -> DisclosureNote {
+    fn sample_note(leaf_index: usize, priv_key: u64, blinding: u64, amount: u64) -> DisclosureNote {
         DisclosureNote {
             leaf_index,
-            priv_key: Scalar::from(4242u64),
-            blinding: Scalar::from(5151u64),
-            amount: Scalar::from(17u64),
+            priv_key: Scalar::from(priv_key),
+            blinding: Scalar::from(blinding),
+            amount: Scalar::from(amount),
         }
     }
 
-    fn sample_leaves(note: &DisclosureNote) -> Vec<Scalar> {
-        prepopulated_leaves(LEVELS, 0xD15C_105E_u64, &[note.leaf_index], 24)
+    fn sample_leaves(notes: &[DisclosureNote]) -> Vec<Scalar> {
+        let indices: Vec<usize> = notes.iter().map(|n| n.leaf_index).collect();
+        prepopulated_leaves(LEVELS, 0xD15C_105E_u64, &indices, 24)
     }
 
-    #[test]
-    #[ignore]
-    fn test_selective_disclosure_valid_note() -> Result<()> {
-        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
-            .expect("Cannot find selectiveDisclosure_1 artifacts");
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_valid_note_test(n_notes: usize) -> Result<()> {
+        let circuit = format!("selectiveDisclosure_{n_notes}");
+        let (wasm, r1cs) = load_artifacts(&circuit).expect("Cannot find {circuit} artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(7);
-        let leaves = sample_leaves(&note);
-        let inputs = build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH))?;
+        let notes: Vec<DisclosureNote> = (0..n_notes)
+            .map(|i| sample_note(7 + i * 5, 4242 + i as u64, 5151 + i as u64, 17 + i as u64))
+            .collect();
+        let mut leaves = sample_leaves(&notes);
+        let inputs = build_inputs(&notes, &mut leaves, Scalar::from(EXT_CONTEXT_HASH))?;
         let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)
             .context("prove_and_verify failed")?;
         assert!(res.verified, "selective disclosure proof did not verify");
@@ -108,15 +126,43 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_private_key_fails() {
+    fn test_selective_disclosure_valid_1_note() -> Result<()> {
+        run_valid_note_test(1)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_valid_2_notes() -> Result<()> {
+        run_valid_note_test(2)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_valid_3_notes() -> Result<()> {
+        run_valid_note_test(3)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_valid_4_notes() -> Result<()> {
+        run_valid_note_test(4)
+    }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_1_wrong_private_key_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(14);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(14, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inPrivateKey", vec![Scalar::from(9999u64)]);
 
         assert!(
@@ -127,15 +173,19 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_amount_fails() {
+    fn test_selective_disclosure_1_wrong_amount_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(18);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(18, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inAmount", vec![Scalar::from(9999u64)]);
 
         assert!(
@@ -146,15 +196,19 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_blinding_fails() {
+    fn test_selective_disclosure_1_wrong_blinding_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(25);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(25, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("inBlinding", vec![Scalar::from(8888u64)]);
 
         assert!(
@@ -165,15 +219,19 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_path_fails() {
+    fn test_selective_disclosure_1_wrong_path_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(21);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(21, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         let zeros: Vec<BigInt> = (0..LEVELS).map(|_| BigInt::from(0u32)).collect();
         inputs.set("inPathElements", zeros);
 
@@ -185,15 +243,19 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_root_fails() {
+    fn test_selective_disclosure_1_wrong_root_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(28);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(28, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set("roots", vec![scalar_to_bigint(Scalar::from(12345u64))]);
 
         assert!(
@@ -204,15 +266,19 @@ mod tests {
 
     #[test]
     #[ignore]
-    fn test_selective_disclosure_wrong_note_commitment_fails() {
+    fn test_selective_disclosure_1_wrong_note_commitment_fails() {
         let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
             .expect("Cannot find selectiveDisclosure_1 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
-        let note = sample_note(35);
-        let leaves = sample_leaves(&note);
-        let mut inputs =
-            build_inputs(&note, &leaves, Scalar::from(EXT_CONTEXT_HASH)).expect("witness inputs");
+        let note = sample_note(35, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
         inputs.set(
             "noteCommitments",
             vec![scalar_to_bigint(Scalar::from(99999u64))],

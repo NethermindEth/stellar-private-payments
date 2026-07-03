@@ -14,6 +14,7 @@ Detailed API documentation generated from source code via `rustdoc`.
 - [prover](api/prover/index.html)
 - [witness](api/witness/index.html)
 - [web](api/web/index.html)
+- [stellar-private-payments-sdk-web](api/stellar_private_payments_sdk_web/index.html)
 
 ## Contracts
 
