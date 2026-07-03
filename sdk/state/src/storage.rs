@@ -416,7 +416,6 @@ impl Storage {
         Ok(id)
     }
 
-
     pub fn lookup_public_key_by_address(
         &self,
         address: &str,
@@ -1580,7 +1579,6 @@ mod tests {
             value: "dummy".to_string(),
         }
     }
-
 
     #[test]
     fn scan_commitments_and_reconcile_nullifiers() -> Result<()> {

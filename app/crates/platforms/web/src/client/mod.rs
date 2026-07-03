@@ -413,7 +413,6 @@ impl WebClient {
         }
     }
 
-
     #[wasm_bindgen(js_name = getUserNotes)]
     pub async fn get_user_notes(&self, address: String, limit: u32) -> Result<JsValue, JsError> {
         let req = StorageWorkerRequest::UserNotes(address, limit);

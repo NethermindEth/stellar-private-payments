@@ -7,8 +7,7 @@ use stellar_private_payments_sdk::{
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NoteAmount, NotePrivateKey, NotePublicKey, OperationalFeedItem,
-        PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
-        UserOperation,
+        PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
     },
 };
 
