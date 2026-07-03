@@ -32,6 +32,7 @@ const BN254_PRIME = 218882428718392752222464057452572750885483644004160343436982
 const state = {
   address: null,
   networkPassphrase: null,
+  sorobanRpcUrl: null,
   derivedKeys: null,
   notes: [],
   pools: [],
@@ -175,23 +176,37 @@ async function loadNotes() {
   }
 }
 
-const TESTNET_RPC = 'https://soroban-testnet.stellar.org';
-
-async function ensureDisclosureRuntime(rpcUrl = TESTNET_RPC) {
+async function ensureDisclosureRuntime(rpcUrl) {
+  if (!rpcUrl) {
+    throw new Error('Soroban RPC URL is required. Configure a testnet RPC in Freighter.');
+  }
   await initializeRuntime(rpcUrl);
   await client().startSync();
+}
+
+// Read the user's Soroban RPC preference from Freighter (not a hardcoded default).
+async function loadWalletRpcPreference() {
+  const net = await getWalletNetwork();
+  const rpcUrl = (net.sorobanRpcUrl || '').trim();
+  if (!rpcUrl.toLowerCase().includes('testnet')) {
+    throw new Error(
+      'This page supports Stellar testnet only. Configure a testnet Soroban RPC in Freighter.',
+    );
+  }
+  state.sorobanRpcUrl = rpcUrl;
+  return { rpcUrl, network: net.network, networkPassphrase: net.networkPassphrase };
 }
 
 async function connect() {
   try {
     const address = await connectWallet();
-    const net = await getWalletNetwork();
+    const { rpcUrl, network, networkPassphrase } = await loadWalletRpcPreference();
 
     // This page is testnet-only. Refuse connection from wallets on other networks.
     const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
-    if (net.networkPassphrase !== TESTNET_PASSPHRASE) {
+    if (networkPassphrase !== TESTNET_PASSPHRASE) {
       showToast(
-        `Network mismatch: expected Testnet, got ${net.network || 'unknown network'}. Please switch your wallet to Testnet.`,
+        `Network mismatch: expected Testnet, got ${network || 'unknown network'}. Please switch your wallet to Testnet.`,
         'error',
         8000
       );
@@ -199,16 +214,16 @@ async function connect() {
     }
 
     state.address = address;
-    state.networkPassphrase = net.networkPassphrase;
+    state.networkPassphrase = networkPassphrase;
 
     walletChip.textContent = shortAddress(address);
-    networkChip.textContent = net.network || 'Testnet';
+    networkChip.textContent = network || 'Testnet';
 
     showToast(`Connected: ${shortAddress(address)}`, 'success');
 
-    await ensureDisclosureRuntime(net.sorobanRpcUrl || TESTNET_RPC);
+    await ensureDisclosureRuntime(rpcUrl);
     // Load derived keys (cached keys load instantly).
-    await initializeWalletSession(address, net.networkPassphrase);
+    await initializeWalletSession(address, networkPassphrase);
 
     // Load notes and render generate section
     await loadNotes();
@@ -1101,19 +1116,19 @@ async function init() {
 
   connectBtn?.addEventListener('click', () => connect());
 
-  // Initialize wasm eagerly with a testnet RPC so the walletless verify
-  // section works immediately. Wallet connect is gated on Testnet (see
-  // connect()), so the default RPC is always correct for this page.
+  // Initialize wasm eagerly so the walletless verify section works immediately.
+  // RPC comes from the user's Freighter network settings (see connect()).
   try {
-    await ensureDisclosureRuntime(TESTNET_RPC);
-    networkChip.textContent = 'TESTNET';
+    const { rpcUrl, network } = await loadWalletRpcPreference();
+    await ensureDisclosureRuntime(rpcUrl);
+    networkChip.textContent = (network || 'Testnet').toUpperCase();
   } catch (e) {
     console.error('WASM init failed:', e);
     if (isDbLockedError(e?.message)) {
       showDbLockedModal(e.message);
       return;
     }
-    showToast('Failed to initialize cryptography', 'error', 8000);
+    showToast(e?.message || 'Failed to initialize cryptography', 'error', 8000);
   }
 
   const query = parseQueryParams();
