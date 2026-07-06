@@ -112,7 +112,7 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
         }
     }
 
-    // Pools were just synced, so the local registry index is current.
+    // Pools were just synced via balance() calls above.
     let storage = config.open_storage()?;
     let registered = storage
         .lookup_public_key_by_address(&account.address)?

@@ -4,7 +4,7 @@ use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use crate::{
-    PreparedTransaction, PreparedTransactionPlan,
+    PreparedTransaction, PreparedTransactionPlan, SyncMode,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
     prover::{LocalProver, NoopProver},
@@ -24,7 +24,7 @@ impl PrivatePool {
     pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
         let storage = LocalStorage::open(&config.storage_path)?;
         let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        let inner = AsyncPrivatePool::init(config, storage, signer, prover)?;
+        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Inline)?;
         Ok(Self { inner })
     }
 
@@ -38,7 +38,13 @@ impl PrivatePool {
         signer: Box<dyn Signer>,
     ) -> Result<Self, PoolError> {
         let storage = LocalStorage::open(&config.storage_path)?;
-        let inner = AsyncPrivatePool::init(config, storage, signer, Box::new(NoopProver))?;
+        let inner = AsyncPrivatePool::init(
+            config,
+            storage,
+            signer,
+            Box::new(NoopProver),
+            SyncMode::Inline,
+        )?;
         Ok(Self { inner })
     }
 

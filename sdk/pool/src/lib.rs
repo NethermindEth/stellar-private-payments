@@ -9,6 +9,7 @@
 //! ```no_run
 //! use stellar_private_payments_sdk::{
 //!     LocalProver, LocalSigner, LocalStorage, PrivatePool, PrivatePoolConfig, ProverArtifacts,
+//!     SyncMode,
 //!     types::{
 //!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient,
 //!     },
@@ -36,9 +37,9 @@
 //!         "G...",
 //!     )?),
 //!     Box::new(LocalProver::from_artifacts(&artifacts)?),
+//!     SyncMode::Inline,
 //! )?;
 //!
-//! pool.sync().await?;
 //! pool.deposit(10_000_000u128.into()).await?;
 //!
 //! let recipient = TransferRecipient {
@@ -119,7 +120,7 @@ pub use disclosure::{
 };
 pub use error::PoolError;
 pub use plan::PreparedTransactionPlan;
-pub use pool::PrivatePool;
+pub use pool::{PrivatePool, SyncMode};
 pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
