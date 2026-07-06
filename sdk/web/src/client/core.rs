@@ -106,6 +106,15 @@ impl ClientCore {
         Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
+    pub(crate) async fn asp_state(&self) -> Result<JsValue, JsError> {
+        let data = self
+            .fetcher
+            .asp_state()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&data)?)
+    }
+
     pub(crate) async fn lookup_registered_public_key(
         &self,
         address: String,

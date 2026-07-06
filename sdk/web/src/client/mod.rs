@@ -8,7 +8,7 @@ mod transact;
 use std::rc::Rc;
 
 use serde::Deserialize;
-use stellar_private_payments_sdk::{PoolError, types::DisclosureReceipt};
+use stellar_private_payments_sdk::{PoolError, chain::StateFetcher, types::DisclosureReceipt};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -195,6 +195,23 @@ impl Client {
     #[wasm_bindgen(js_name = allContractsData)]
     pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
         self.initialized()?.0.all_contracts_data().await
+    }
+
+    /// On-chain ASP membership and non-membership state.
+    #[wasm_bindgen(js_name = aspState)]
+    pub async fn asp_state(&self) -> Result<JsValue, JsError> {
+        if let Some(core) = &self.core {
+            return core.asp_state().await;
+        }
+
+        let config = deployment_config()?;
+        let fetcher = StateFetcher::new(&self.rpc_url, (*config).clone())
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let data = fetcher
+            .asp_state()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
     /// Register this account's public keys on the deployment-wide registry.

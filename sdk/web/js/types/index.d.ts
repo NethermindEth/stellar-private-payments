@@ -46,6 +46,7 @@ export interface AccountClient {
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;
   allContractsData(): Promise<unknown>;
+  aspState(): Promise<unknown>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,
