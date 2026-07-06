@@ -302,16 +302,15 @@ async function computeMembershipLeaf() {
       throw new Error('Blinding is required');
     }
 
-    const publicOverride = parseBigIntInput(publicKeyInput.value, 'Public key');
-    if (publicOverride === null) {
+    const notePublicKey = parseBigIntInput(publicKeyInput.value, 'Public key');
+    if (notePublicKey === null) {
       throw new Error('User note public key is required');
     }
 
-    const pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
-    const leafHex = await client().deriveAspUserLeaf(blindingValue, pubKey);
+    const leafHex = await client().deriveAspUserLeaf(blindingValue, notePublicKey);
     const leafDec = BigInt(leafHex).toString();
 
-    derivedPubKeyEl.textContent = pubKey;
+    derivedPubKeyEl.textContent = `0x${notePublicKey.toString(16).padStart(64, '0')}`;
     computedMembershipLeafHexEl.textContent = leafHex;
     computedMembershipLeafDecEl.textContent = leafDec;
 
@@ -444,7 +443,7 @@ async function computeNonMembershipLeaf() {
     if (valueValue === null) {
       throw new Error('Value is required');
     }
-    const leafBytes = await client().deriveAspUserLeaf(valueValue, keyValue.toString(16).padStart(64, '0'));
+    const leafBytes = await client().deriveAspUserLeaf(valueValue, keyValue);
     computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {
