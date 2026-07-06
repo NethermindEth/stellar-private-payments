@@ -42,6 +42,7 @@ function wrapClient(wasmClient) {
     registerPublicKeys: (options) => wasmClient.registerPublicKeys(options),
     lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
     allContractsData: () => wasmClient.allContractsData(),
+    aspState: () => wasmClient.aspState(),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash, options = {}) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
         proverWorkerUrl,

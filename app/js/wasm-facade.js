@@ -136,19 +136,11 @@ function wrapSdkClient(sdk, sdkStorage) {
             };
         },
         async aspState() {
-            try {
-                const data = await this.allContractsData();
-                return {
-                    aspMembership: data.aspMembership,
-                    aspNonMembership: data.aspNonMembership,
-                };
-            } catch (error) {
-                const message = error?.message || '';
-                if (!message.includes('initialize')) {
-                    throw error;
-                }
-                throw new Error('ASP state requires an initialized wallet session');
-            }
+            const data = await sdk.aspState();
+            return {
+                aspMembership: data.aspMembership,
+                aspNonMembership: data.aspNonMembership,
+            };
         },
     };
 }
