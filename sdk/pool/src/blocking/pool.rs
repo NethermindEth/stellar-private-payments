@@ -48,6 +48,20 @@ impl PrivatePool {
         Ok(Self { inner })
     }
 
+    /// Open against pre-populated local storage without inline RPC catch-up.
+    ///
+    /// Use for seeded databases and other callers that keep storage current
+    /// separately (same contract as [`SyncMode::Background`]).
+    pub fn open_local(
+        config: PrivatePoolConfig,
+        signer: Box<dyn Signer>,
+    ) -> Result<Self, PoolError> {
+        let storage = LocalStorage::open(&config.storage_path)?;
+        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
+        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Background)?;
+        Ok(Self { inner })
+    }
+
     pub fn into_inner(self) -> AsyncPrivatePool<LocalStorage> {
         self.inner
     }
