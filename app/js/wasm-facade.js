@@ -25,6 +25,11 @@ export async function ensureWasmInit() {
     }
 }
 
+function toScalarHex(value) {
+    const n = typeof value === 'bigint' ? value : BigInt(value);
+    return `0x${n.toString(16).padStart(64, '0')}`;
+}
+
 function bindAppStorage(sdkStorage) {
     appStorageInstance = new AppStorage(sdkStorage);
 }
@@ -112,11 +117,11 @@ function wrapSdkClient(sdk, sdkStorage) {
             const response = await storageCall(sdkStorage, { UserNotes: [address, limit] });
             return response.UserNotes ?? [];
         },
-        async deriveAspUserLeaf(membershipBlinding, pubkeyHex) {
+        async deriveAspUserLeaf(membershipBlinding, notePublicKey) {
             const response = await storageCall(sdkStorage, {
                 DeriveASPleaf: {
-                    membershipBlinding: membershipBlinding.toString(),
-                    pubkey: pubkeyHex,
+                    membershipBlinding: toScalarHex(membershipBlinding),
+                    pubkey: toScalarHex(notePublicKey),
                 },
             });
             const leaf = response.DeriveASPleaf;
