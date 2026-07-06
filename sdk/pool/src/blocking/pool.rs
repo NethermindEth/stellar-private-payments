@@ -88,7 +88,7 @@ impl PrivatePool {
 
     pub fn transfer(
         &self,
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
         block_on(self.inner.transfer(recipient, amount))
@@ -120,10 +120,10 @@ impl PrivatePool {
     pub fn prepare_transfer(
         &self,
         wallet: &[SpendableNote],
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.inner.prepare_transfer(wallet, recipient, amount)
+        block_on(self.inner.prepare_transfer(wallet, recipient, amount))
     }
 
     pub fn prepare_withdraw(

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use stellar_private_payments_sdk::{
     PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
     blocking::PrivatePool,
@@ -88,12 +88,6 @@ impl PoolSession {
     pub fn pool(&self) -> &PrivatePool {
         &self.pool
     }
-
-    pub fn sync(&self) -> Result<()> {
-        self.pool
-            .sync()
-            .map_err(|e| anyhow::anyhow!("sync pool: {e}"))
-    }
 }
 
 pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
@@ -148,46 +142,25 @@ pub fn parse_amount(raw: &str) -> Result<NoteAmount> {
     Ok(NoteAmount::from(amount))
 }
 
-/// Recipient of a private transfer: either an address (looked up in the local
-/// registry index) or explicit note + encryption keys.
-pub fn resolve_transfer_recipient(
-    config: &CliConfig,
+/// Parse `--to` address or explicit note + encryption keys into a
+/// [`TransferRecipient`].
+pub fn parse_transfer_recipient(
     to: Option<&str>,
     note_key: Option<&str>,
     encryption_key: Option<&str>,
 ) -> Result<TransferRecipient> {
     match (to, note_key, encryption_key) {
-        (Some(address), None, None) => recipient_from_address(config, address),
-        (None, Some(note_key), Some(encryption_key)) => {
-            recipient_from_keys(note_key, encryption_key)
-        }
+        (Some(address), None, None) => Ok(TransferRecipient::from(address)),
+        (None, Some(note_key), Some(encryption_key)) => Ok(TransferRecipient::keys(
+            NotePublicKey::parse(note_key)
+                .map_err(|e| anyhow::anyhow!("invalid recipient note key: {e}"))?,
+            EncryptionPublicKey::parse(encryption_key)
+                .map_err(|e| anyhow::anyhow!("invalid recipient encryption key: {e}"))?,
+        )),
         _ => anyhow::bail!(
             "specify the recipient with --to <G…>, or both --note-key <hex> and --encryption-key <hex>"
         ),
     }
-}
-
-fn recipient_from_address(config: &CliConfig, to: &str) -> Result<TransferRecipient> {
-    let storage = config.open_storage()?;
-    let entry = storage.lookup_public_key_by_address(to)?.with_context(|| {
-        format!(
-            "recipient {to} not found in the public key registry; \
-             they must register keys on-chain (`spp register`)"
-        )
-    })?;
-    Ok(TransferRecipient {
-        note_public_key: entry.note_key,
-        encryption_public_key: entry.encryption_key,
-    })
-}
-
-fn recipient_from_keys(note_key: &str, encryption_key: &str) -> Result<TransferRecipient> {
-    Ok(TransferRecipient {
-        note_public_key: NotePublicKey::parse(note_key)
-            .map_err(|e| anyhow::anyhow!("invalid recipient note key: {e}"))?,
-        encryption_public_key: EncryptionPublicKey::parse(encryption_key)
-            .map_err(|e| anyhow::anyhow!("invalid recipient encryption key: {e}"))?,
-    })
 }
 
 #[cfg(test)]

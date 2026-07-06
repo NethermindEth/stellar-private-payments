@@ -227,34 +227,6 @@ impl ClientCore {
         Ok(hash)
     }
 
-    pub(crate) async fn recipient_keys(&self, address: &str) -> Result<(String, String), JsError> {
-        use stellar_private_payments_sdk::types::RecipientLookup;
-
-        let lookup: RecipientLookup = {
-            let req = StorageWorkerRequest::RecipientLookup {
-                address: address.to_string(),
-                public_key_registry_contract_id: self.contract_config().public_key_registry.clone(),
-            };
-            match self.storage_request(req, 2_000).await? {
-                StorageWorkerResponse::RecipientLookup(lookup) => lookup,
-                other => {
-                    return Err(JsError::new(&format!("unexpected response: {other:?}")));
-                }
-            }
-        };
-
-        let entry = lookup
-            .entry
-            .ok_or_else(|| JsError::new(&format!("no public keys registered for {address}")))?;
-
-        use stellar_private_payments_sdk::types::encode_0x_hex;
-
-        Ok((
-            encode_0x_hex(&entry.note_key.0),
-            encode_0x_hex(&entry.encryption_key.0),
-        ))
-    }
-
     pub(super) async fn submit(&self, signed: &TransactionEnvelope) -> Result<String, JsError> {
         let rpc = self.fetcher.rpc();
         chain_submit_tx(signed, rpc)

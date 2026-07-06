@@ -80,9 +80,36 @@ pub struct TransactionResult {
 }
 
 #[derive(Debug, Clone)]
-pub struct TransferRecipient {
-    pub note_public_key: NotePublicKey,
-    pub encryption_public_key: EncryptionPublicKey,
+pub enum TransferRecipient {
+    Address(String),
+    Keys {
+        note_public_key: NotePublicKey,
+        encryption_public_key: EncryptionPublicKey,
+    },
+}
+
+impl TransferRecipient {
+    pub fn keys(
+        note_public_key: NotePublicKey,
+        encryption_public_key: EncryptionPublicKey,
+    ) -> Self {
+        Self::Keys {
+            note_public_key,
+            encryption_public_key,
+        }
+    }
+}
+
+impl From<String> for TransferRecipient {
+    fn from(address: String) -> Self {
+        Self::Address(address)
+    }
+}
+
+impl From<&str> for TransferRecipient {
+    fn from(address: &str) -> Self {
+        Self::Address(address.to_string())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

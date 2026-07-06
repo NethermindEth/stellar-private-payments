@@ -8,7 +8,7 @@ use crate::{
     config::{CliConfig, validate_pool},
     explorer::Explorer,
     onboard, output,
-    session::{PoolSession, parse_amount, resolve_transfer_recipient},
+    session::{PoolSession, parse_amount, parse_transfer_recipient},
 };
 
 fn open(config: &CliConfig, pool: &str) -> Result<PoolSession> {
@@ -43,28 +43,14 @@ pub fn transfer(
     encryption_key: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let (session, recipient) = prepare_transfer(config, pool, to, note_key, encryption_key)?;
+    let session = open(config, pool)?;
+    let recipient = parse_transfer_recipient(to, note_key, encryption_key)?;
     let amount = parse_amount(amount)?;
     let results = session
         .pool()
         .transfer(recipient, amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     print_tx_results(config, "Transfer submitted", &results, json)
-}
-
-fn prepare_transfer(
-    config: &CliConfig,
-    pool: &str,
-    to: Option<&str>,
-    note_key: Option<&str>,
-    encryption_key: Option<&str>,
-) -> Result<(PoolSession, stellar_private_payments_sdk::TransferRecipient)> {
-    let session = open(config, pool)?;
-    if matches!((to, note_key, encryption_key), (Some(_), None, None)) {
-        session.sync()?;
-    }
-    let recipient = resolve_transfer_recipient(config, to, note_key, encryption_key)?;
-    Ok((session, recipient))
 }
 
 pub fn withdraw(

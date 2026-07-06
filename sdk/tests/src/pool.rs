@@ -80,16 +80,14 @@ pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
 }
 
 pub fn test_recipient() -> TransferRecipient {
-    TransferRecipient {
-        note_public_key: NotePublicKey::parse(
-            "0x0000000000000000000000000000000000000000000000000000000000000001",
-        )
-        .expect("note public key"),
-        encryption_public_key: EncryptionPublicKey::parse(
+    TransferRecipient::keys(
+        NotePublicKey::parse("0x0000000000000000000000000000000000000000000000000000000000000001")
+            .expect("note public key"),
+        EncryptionPublicKey::parse(
             "0x0000000000000000000000000000000000000000000000000000000000000002",
         )
         .expect("encryption public key"),
-    }
+    )
 }
 
 fn test_signer() -> Result<Box<dyn Signer>> {
