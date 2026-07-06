@@ -15,11 +15,11 @@ pub struct PoolSession {
 }
 
 impl PoolSession {
-    /// Open and sync one pool with a full prover. `account` and `network` are
-    /// resolved once by the caller (so callers can reuse them across pools).
-    /// Loads circuit artifacts (proving key + circuit) — required for the
-    /// transacting commands (deposit/transfer/withdraw), which is the only
-    /// caller of this path.
+    /// Open one pool with a full prover. `account` and `network` are resolved
+    /// once by the caller (so callers can reuse them across pools). Loads
+    /// circuit artifacts (proving key + circuit) — required for transacting
+    /// commands (deposit/transfer/withdraw), which is the only caller of this
+    /// path.
     pub fn open(
         config: &CliConfig,
         account: &Account,
@@ -30,11 +30,10 @@ impl PoolSession {
         Self::open_with(config, account, network, pool_contract_id, artifacts, false)
     }
 
-    /// Open and sync one pool without a prover. Skips loading the circuit
-    /// artifacts entirely (no proving-key deserialization, no WASM compile), so
+    /// Open one pool without a prover. Skips loading the circuit artifacts
+    /// entirely (no proving-key deserialization, no WASM compile), so
     /// read-only commands (`overview`, `feed`) are cheap. The resulting pool
-    /// can read balances/notes and sync, but any transact/prove call
-    /// errors.
+    /// can read balances/notes and sync, but any transact/prove call errors.
     pub fn open_readonly(
         config: &CliConfig,
         account: &Account,
@@ -83,15 +82,17 @@ impl PoolSession {
         }
         .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
 
-        log::info!("Syncing pool {pool_contract_id}…");
-        pool.sync().map_err(|e| anyhow::anyhow!("sync pool: {e}"))?;
-        log::info!("Synced pool {pool_contract_id}");
-
         Ok(Self { pool })
     }
 
     pub fn pool(&self) -> &PrivatePool {
         &self.pool
+    }
+
+    pub fn sync(&self) -> Result<()> {
+        self.pool
+            .sync()
+            .map_err(|e| anyhow::anyhow!("sync pool: {e}"))
     }
 }
 

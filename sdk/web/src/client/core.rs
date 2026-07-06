@@ -197,8 +197,14 @@ impl ClientCore {
         let prover: Box<dyn stellar_private_payments_sdk::Prover> =
             Box::new(self.prover_bridge.clone());
 
-        stellar_private_payments_sdk::PrivatePool::init(pool_config, self.storage(), signer, prover)
-            .map_err(pool_err)
+        stellar_private_payments_sdk::PrivatePool::init(
+            pool_config,
+            self.storage(),
+            signer,
+            prover,
+            stellar_private_payments_sdk::SyncMode::Background,
+        )
+        .map_err(pool_err)
     }
 
     pub(crate) async fn register_public_keys(

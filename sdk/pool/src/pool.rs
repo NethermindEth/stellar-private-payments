@@ -42,6 +42,17 @@ pub struct PrivatePool<S> {
     storage: S,
     prover: Box<dyn Prover>,
     signer: Box<dyn Signer>,
+    sync_mode: SyncMode,
+}
+
+/// How the pool keeps local storage in sync with on-chain contract events
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// The pool runs [`PrivatePool::sync`] inline when needed.
+    /// No separate background sync task is required.
+    Inline,
+    /// Storage is kept in sync by a background task you start separately.
+    Background,
 }
 
 impl<S> PrivatePool<S> {
@@ -50,6 +61,7 @@ impl<S> PrivatePool<S> {
         storage: S,
         signer: Box<dyn Signer>,
         prover: Box<dyn Prover>,
+        sync_mode: SyncMode,
     ) -> Result<Self, PoolError> {
         let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())
             .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
@@ -62,6 +74,7 @@ impl<S> PrivatePool<S> {
             storage,
             prover,
             signer,
+            sync_mode,
         })
     }
 
@@ -85,11 +98,18 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
+        self.ensure_synced().await?;
         self.storage
             .notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
     }
 
+    /// Syncs the storage with the latest contract events
+    ///
+    /// Called automatically during operations when [`SyncMode::Inline`] is set.
+    /// With [`SyncMode::Background`], your background indexer should keep
+    /// storage current; you may still call this for an explicit foreground
+    /// catch-up.
     pub async fn sync(&self) -> Result<(), PoolError> {
         let indexer = Indexer::init(
             self.client.clone(),
@@ -215,6 +235,7 @@ impl<S: Storage> PrivatePool<S> {
                             gap,
                         )));
                     }
+                    self.ensure_synced().await?;
                     sleep(POLL_INTERVAL_MS).await;
                 }
                 Err(error) => return Err(error),
@@ -254,6 +275,7 @@ impl<S: Storage> PrivatePool<S> {
     // lower level methods
 
     pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
+        self.ensure_synced().await?;
         self.storage
             .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
@@ -355,6 +377,14 @@ impl<S: Storage> PrivatePool<S> {
 
     // helpers
 
+    async fn ensure_synced(&self) -> Result<(), PoolError> {
+        match self.sync_mode {
+            SyncMode::Inline => self.sync().await?,
+            SyncMode::Background => {}
+        }
+        Ok(())
+    }
+
     async fn next_prepared_transaction(
         &self,
         plan: &mut PreparedTransactionPlan,
@@ -362,6 +392,7 @@ impl<S: Storage> PrivatePool<S> {
         if plan.is_complete() {
             return Err(PoolError::Other("transaction plan is complete".into()));
         }
+        self.ensure_synced().await?;
 
         let chain = self.fetch_transact_chain_context().await?;
         let step = if let Some(amount) = plan.deposit_amount() {
@@ -418,6 +449,7 @@ impl<S: Storage> PrivatePool<S> {
                                     AspMembershipSync::SyncRequired(gap),
                                 ));
                             }
+                            self.ensure_synced().await?;
                             sleep(POLL_INTERVAL_MS).await;
                         }
                         Err(error) => return Err(error),

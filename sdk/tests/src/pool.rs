@@ -60,7 +60,7 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         &amounts,
     )?;
 
-    let pool = PrivatePool::open(
+    let pool = PrivatePool::open_local(
         PrivatePoolConfig {
             rpc_url: "https://soroban-testnet.stellar.org".into(),
             contract_config: serde_json::from_str(TEST_CONFIG_JSON)?,
