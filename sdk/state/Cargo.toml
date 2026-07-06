@@ -17,10 +17,17 @@ types = { workspace = true, features = ["rusqlite"] }
 anyhow = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
-rusqlite = { workspace = true }
 rusqlite_migration = { version = "2.5.0", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# external
+rusqlite = { workspace = true, features = ["bundled"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# external
+rusqlite = { workspace = true }
 
 [build-dependencies]
 # external

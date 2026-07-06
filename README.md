@@ -111,6 +111,25 @@ The main transaction circuit proves:
 - **ASP Membership**: Merkle tree of approved public keys
 - **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
 
+## Install the CLI
+
+The `spp` command-line tool can be installed with a single command:
+
+```bash
+curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh
+```
+
+This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64),
+verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
+`dist` data (circuits, proving key, license/notice texts). Then run `spp --help`.
+
+To install a specific release or the latest prerelease:
+
+```bash
+curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version v0.1.0
+curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --pre
+```
+
 ## Limitations
 
 As a work-in-progress, this implementation has several limitations:
@@ -118,7 +137,7 @@ As a work-in-progress, this implementation has several limitations:
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
-- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them. In future versions cloud sync maybe introduced. Also clearing the app site data permanently deletes the app database with app-derived keys and notes.
+- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them.
 
 
 ## AI tools disclosure

@@ -2,6 +2,7 @@
 members = [
     "circuit-keys",
     "circuits",
+    "cli",
     "contracts/*",
     "e2e-tests",
     "poseidon2",
@@ -61,6 +62,11 @@ ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
 async-trait = { version = "0.1.89", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 cfg-if = { version = "1", default-features = false }
+clap = { version = "4.6.1", default-features = false, features = ["std", "color",
+  "help",
+  "usage",
+  "error-context",
+  "suggestions", "derive", "env"] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false }
@@ -72,7 +78,7 @@ log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.6", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
-rusqlite = { version = "0.39.0", default-features = false, features = ["buildtime_bindgen"] }
+rusqlite = { version = "0.39.0", default-features = false }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false }

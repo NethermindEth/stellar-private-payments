@@ -7,7 +7,7 @@ use crate::{
     PreparedTransaction, PreparedTransactionPlan,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
-    prover::LocalProver,
+    prover::{LocalProver, NoopProver},
     signer::Signer,
     storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
@@ -25,6 +25,20 @@ impl PrivatePool {
         let storage = LocalStorage::open(&config.storage_path)?;
         let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
         let inner = AsyncPrivatePool::init(config, storage, signer, prover)?;
+        Ok(Self { inner })
+    }
+
+    /// Open a read-only pool session: no prover is constructed, so the proving
+    /// key / circuit artifacts in `config.prover_artifacts` are ignored and
+    /// never loaded. Suitable for balance/notes/sync; any transact/prove call
+    /// on the resulting pool errors. Callers that only read state should use
+    /// this to avoid the [`LocalProver`] init cost.
+    pub fn open_readonly(
+        config: PrivatePoolConfig,
+        signer: Box<dyn Signer>,
+    ) -> Result<Self, PoolError> {
+        let storage = LocalStorage::open(&config.storage_path)?;
+        let inner = AsyncPrivatePool::init(config, storage, signer, Box::new(NoopProver))?;
         Ok(Self { inner })
     }
 
