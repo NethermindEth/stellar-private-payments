@@ -1,4 +1,4 @@
-use anyhow::{Context, Result, bail};
+use anyhow::{Result, bail};
 use bootnode::{
     Bootnode, Postgres,
     config::{Config, OtelConfig, TlsConfig},
@@ -33,9 +33,7 @@ struct Cli {
     #[arg(long, env = "BOOTNODE_DEV", default_value_t = false)]
     dev: bool,
 
-    /// Serve plain HTTP (debug only).
-    ///
-    /// This is only allowed when binding to loopback (127.0.0.1 / ::1).
+    /// Serve plain HTTP.
     #[arg(long, env = "BOOTNODE_INSECURE_HTTP", default_value_t = false)]
     insecure_http: bool,
 
@@ -106,24 +104,23 @@ struct Cli {
 
 impl Cli {
     fn validate(&self) -> Result<()> {
-        if self.insecure_http {
-            if !self.dev {
-                bail!("--insecure-http requires --dev");
+        if self.insecure_http && !self.dev {
+            bail!("--insecure-http requires --dev");
+        } else if !self.insecure_http {
+            if self
+                .domain
+                .as_deref()
+                .is_none_or(|domain| domain.trim().is_empty())
+            {
+                bail!("--domain is required for HTTPS/ACME mode");
             }
-            let ip = self.bind.ip();
-            if !ip.is_loopback() {
-                bail!(
-                    "--insecure-http is only allowed on loopback binds (got {})",
-                    self.bind
-                );
+            if self
+                .acme_email
+                .as_deref()
+                .is_none_or(|email| email.trim().is_empty())
+            {
+                bail!("--acme-email is required for HTTPS/ACME mode");
             }
-        } else {
-            self.domain
-                .as_ref()
-                .context("--domain is required for HTTPS/ACME mode")?;
-            self.acme_email
-                .as_ref()
-                .context("--acme-email is required for HTTPS/ACME mode")?;
         }
 
         if self.otel_enabled && !(0.0..=1.0).contains(&self.otel_sample_ratio) {
