@@ -324,11 +324,7 @@ impl Client {
             user_address: user_address.to_string(),
         };
         let inner = Rc::new(core.create_pool_internal(&pool_cfg, signer).await?);
-        Ok(PrivatePool::from_parts(
-            inner,
-            core.clone(),
-            user_address.to_string(),
-        ))
+        Ok(PrivatePool::from_parts(inner, user_address.to_string()))
     }
 }
 

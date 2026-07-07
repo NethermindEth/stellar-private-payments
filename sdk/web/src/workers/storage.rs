@@ -722,4 +722,35 @@ impl Storage for StorageBridge {
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
         Ok(self.user_public_keys(user_address).await?.0)
     }
+
+    async fn registered_public_keys(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        match self
+            .call(
+                StorageWorkerRequest::RecipientLookup {
+                    address: address.to_string(),
+                    public_key_registry_contract_id: public_key_registry_contract_id.to_string(),
+                },
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::RecipientLookup(lookup)) => {
+                let entry = lookup.entry.ok_or_else(|| {
+                    PoolError::Other(format!(
+                        "recipient {address} not found in the public key registry; \
+                         they must register keys on-chain"
+                    ))
+                })?;
+                Ok((entry.note_key, entry.encryption_key))
+            }
+            Ok(other) => Err(PoolError::Other(format!(
+                "unexpected storage response looking up recipient: {other:?}"
+            ))),
+            Err(e) => Err(PoolError::Other(e.to_string())),
+        }
+    }
 }

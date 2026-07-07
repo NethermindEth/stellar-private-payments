@@ -42,14 +42,7 @@
 //!
 //! pool.deposit(10_000_000u128.into()).await?;
 //!
-//! let recipient = TransferRecipient {
-//!     note_public_key: NotePublicKey::parse(
-//!         "0x0000000000000000000000000000000000000000000000000000000000000001",
-//!     )?,
-//!     encryption_public_key: EncryptionPublicKey::parse(
-//!         "0x0000000000000000000000000000000000000000000000000000000000000002",
-//!     )?,
-//! };
+//! let recipient = "G...";
 //! pool.transfer(recipient, 5_000_000u128.into()).await?;
 //! pool.withdraw(3_000_000u128.into(), "G...").await?;
 //!

@@ -141,11 +141,11 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn transfer(
         &self,
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
         let wallet = self.spendable_notes().await?;
-        let mut plan = self.prepare_transfer(&wallet, recipient, amount)?;
+        let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
@@ -288,13 +288,16 @@ impl<S: Storage> PrivatePool<S> {
         self.core.prepare_deposit(amount)
     }
 
-    pub fn prepare_transfer(
+    pub async fn prepare_transfer(
         &self,
         wallet: &[SpendableNote],
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_transfer(wallet, recipient, amount)
+        let (note_public_key, encryption_public_key) =
+            self.resolve_transfer_recipient(recipient.into()).await?;
+        self.core
+            .prepare_transfer(wallet, note_public_key, encryption_public_key, amount)
     }
 
     pub fn prepare_withdraw(
@@ -383,6 +386,27 @@ impl<S: Storage> PrivatePool<S> {
             SyncMode::Background => {}
         }
         Ok(())
+    }
+
+    async fn resolve_transfer_recipient(
+        &self,
+        recipient: TransferRecipient,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        match recipient {
+            TransferRecipient::Keys {
+                note_public_key,
+                encryption_public_key,
+            } => Ok((note_public_key, encryption_public_key)),
+            TransferRecipient::Address(address) => {
+                self.ensure_synced().await?;
+                self.storage
+                    .registered_public_keys(
+                        &address,
+                        &self.config.contract_config.public_key_registry,
+                    )
+                    .await
+            }
+        }
     }
 
     async fn next_prepared_transaction(

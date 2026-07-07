@@ -124,6 +124,24 @@ impl Storage for LocalStorage {
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
 
+    async fn registered_public_keys(
+        &self,
+        address: &str,
+        _public_key_registry_contract_id: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        let entry = self
+            .storage()
+            .lookup_public_key_by_address(address)
+            .map_err(|e| PoolError::Other(format!("lookup recipient: {e:#}")))?
+            .ok_or_else(|| {
+                PoolError::Other(format!(
+                    "recipient {address} not found in the public key registry; \
+                     they must register keys on-chain"
+                ))
+            })?;
+        Ok((entry.note_key, entry.encryption_key))
+    }
+
     async fn process_pending_state(&self) -> Result<(), PoolError> {
         process_local_state(&mut self.storage_mut())
     }

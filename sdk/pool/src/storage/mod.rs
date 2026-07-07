@@ -110,6 +110,12 @@ pub trait Storage: stellar::ContractDataStorage {
         Ok(self.user_public_keys(user_address).await?.0)
     }
 
+    async fn registered_public_keys(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError>;
+
     /// Finalize local processing after RPC ingest
     async fn process_pending_state(&self) -> Result<(), PoolError>;
 }

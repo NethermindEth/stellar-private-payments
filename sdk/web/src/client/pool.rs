@@ -12,7 +12,7 @@ use stellar_private_payments_sdk::{
 use wasm_bindgen::prelude::*;
 
 use crate::{
-    client::{core::ClientCore, execute::emit, pool_err, transact::parse_transact_step},
+    client::{execute::emit, pool_err, transact::parse_transact_step},
     workers::storage::StorageBridge,
 };
 
@@ -26,34 +26,22 @@ pub(crate) struct PoolCreateConfig {
 #[wasm_bindgen]
 pub struct PrivatePool {
     inner: Rc<SdkPrivatePool<StorageBridge>>,
-    core: Rc<ClientCore>,
     user_address: String,
 }
 
 impl PrivatePool {
     pub(crate) fn from_parts(
         inner: Rc<SdkPrivatePool<StorageBridge>>,
-        core: Rc<ClientCore>,
         user_address: String,
     ) -> Self {
         Self {
             inner,
-            core,
             user_address,
         }
     }
 
     pub(crate) fn inner(&self) -> &SdkPrivatePool<StorageBridge> {
         &self.inner
-    }
-
-    async fn resolve_recipient(&self, recipient: &str) -> Result<(String, String), JsError> {
-        if recipient.starts_with('G') {
-            return self.core.recipient_keys(recipient).await;
-        }
-        Err(JsError::new(
-            "recipient must be a Stellar address (G...); lookup uses the on-chain public key registry",
-        ))
     }
 }
 
@@ -104,33 +92,27 @@ impl PrivatePool {
         encryption_public_key_hex: &str,
         amount: u128,
     ) -> Result<JsValue, JsError> {
-        let recipient = TransferRecipient {
-            note_public_key: NotePublicKey::parse(note_public_key_hex)
+        let recipient = TransferRecipient::keys(
+            NotePublicKey::parse(note_public_key_hex).map_err(|e| JsError::new(&e.to_string()))?,
+            EncryptionPublicKey::parse(encryption_public_key_hex)
                 .map_err(|e| JsError::new(&e.to_string()))?,
-            encryption_public_key: EncryptionPublicKey::parse(encryption_public_key_hex)
-                .map_err(|e| JsError::new(&e.to_string()))?,
-        };
+        );
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let mut plan = self
             .inner()
             .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+            .await
             .map_err(pool_err)?;
         self.execute_plan(&mut plan, "transfer").await
     }
 
     /// Transfer privately. `recipient` is a Stellar `G...` address.
     pub async fn transfer(&self, recipient: &str, amount: u128) -> Result<JsValue, JsError> {
-        let (note_key, enc_key) = self.resolve_recipient(recipient).await?;
-        let recipient = TransferRecipient {
-            note_public_key: NotePublicKey::parse(&note_key)
-                .map_err(|e| JsError::new(&e.to_string()))?,
-            encryption_public_key: EncryptionPublicKey::parse(&enc_key)
-                .map_err(|e| JsError::new(&e.to_string()))?,
-        };
         let wallet = self.inner().spendable_notes().await.map_err(pool_err)?;
         let mut plan = self
             .inner()
             .prepare_transfer(&wallet, recipient, NoteAmount::from(amount))
+            .await
             .map_err(pool_err)?;
         self.execute_plan(&mut plan, "transfer").await
     }
