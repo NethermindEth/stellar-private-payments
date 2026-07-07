@@ -84,10 +84,15 @@ pub fn verify_receipt_context(receipt: &DisclosureReceipt) -> Result<bool> {
 
 /// Public input order declared by the `selectiveDisclosure_N.circom` family.
 ///
-/// Matches the signal declaration order in the template: roots, noteCommitments,
-/// extContextHash, expectedNullifier, inAmount.
-pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] =
-    &["roots", "noteCommitments", "extContextHash", "expectedNullifier", "inAmount"];
+/// Matches the signal declaration order in the template: roots,
+/// noteCommitments, extContextHash, expectedNullifier, inAmount.
+pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] = &[
+    "roots",
+    "noteCommitments",
+    "extContextHash",
+    "expectedNullifier",
+    "inAmount",
+];
 
 /// Artifact file names for a registered disclosure circuit.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -602,7 +607,13 @@ mod tests {
         assert_eq!(circuit, &SELECTIVE_DISCLOSURE_1);
         assert_eq!(
             circuit.public_inputs_order,
-            ["roots", "noteCommitments", "extContextHash", "expectedNullifier", "inAmount"]
+            [
+                "roots",
+                "noteCommitments",
+                "extContextHash",
+                "expectedNullifier",
+                "inAmount"
+            ]
         );
     }
 
@@ -740,7 +751,8 @@ mod tests {
         let circuit = validate_registered_receipt(&receipt, VK_HASH)?;
         let bytes = circuit.public_inputs_bytes(&receipt)?;
 
-        // roots[0], noteCommitments[0], extContextHash, expectedNullifier[0], inAmount[0]
+        // roots[0], noteCommitments[0], extContextHash, expectedNullifier[0],
+        // inAmount[0]
         assert_eq!(bytes.len(), 160);
         assert_eq!(&bytes[0..32], &field(1).to_le_bytes());
         assert_eq!(&bytes[32..64], &field(2).to_le_bytes());

@@ -926,9 +926,9 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
         let merkle_path_indices_le = note.merkle_path_indices.to_le_bytes();
 
         let sender_pubkey = crypto::derive_public_key(&note.note_private_key.0)?;
-        let sender_pubkey_arr: [u8; 32] = sender_pubkey
-            .try_into()
-            .map_err(|v: Vec<u8>| anyhow!("derive_public_key: expected 32 bytes, got {}", v.len()))?;
+        let sender_pubkey_arr: [u8; 32] = sender_pubkey.try_into().map_err(|v: Vec<u8>| {
+            anyhow!("derive_public_key: expected 32 bytes, got {}", v.len())
+        })?;
 
         let commitment =
             crypto::compute_commitment(&amount_field_le, &sender_pubkey_arr, &note_blinding_le)?;
