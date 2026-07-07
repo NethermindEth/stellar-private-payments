@@ -4,8 +4,8 @@
 #   curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh
 #
 # Picks the release binary for this platform, installs it, and provisions the
-# data-dir `dist` (circuits, proving key, license/notice texts) that the CLI
-# reads at runtime.
+# data dir (circuits, proving key, license/notice texts) that the CLI reads at
+# runtime.
 #
 # Environment overrides:
 #   SPP_VERSION    release tag to install (default: latest non-prerelease)
@@ -119,14 +119,14 @@ install -m 0755 "$tmp/spp" "$BIN_DIR/spp" 2>/dev/null || {
   cp "$tmp/spp" "$BIN_DIR/spp"; chmod 0755 "$BIN_DIR/spp";
 }
 
-# --- install dist into the data dir ----------------------------------------
+# --- install runtime data into the data dir ---------------------------------
 fetch_verified "dist.tar.gz"
-mkdir -p "$DATA_DIR/dist"
-tar -xzf "$tmp/dist.tar.gz" -C "$DATA_DIR/dist"
+mkdir -p "$DATA_DIR"
+tar -xzf "$tmp/dist.tar.gz" -C "$DATA_DIR"
 
 echo "Installed:"
 echo "  binary: $BIN_DIR/spp"
-echo "  data:   $DATA_DIR/dist"
+echo "  data:   $DATA_DIR"
 case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) echo "note: $BIN_DIR is not on your PATH; add it, e.g. export PATH=\"$BIN_DIR:\$PATH\"" ;;

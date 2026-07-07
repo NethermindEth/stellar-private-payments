@@ -54,7 +54,7 @@ struct Cli {
 
     /// Directory with policy_tx_2_2.{wasm,r1cs} (default:
     /// target/circuits-artifacts/release in debug builds,
-    /// data_dir/dist/circuits otherwise)
+    /// data_dir/circuits otherwise)
     #[arg(long, global = true)]
     circuits_dir: Option<PathBuf>,
 
