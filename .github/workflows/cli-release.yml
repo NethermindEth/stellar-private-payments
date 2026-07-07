@@ -195,4 +195,11 @@ jobs:
         with:
           files: out/*
           prerelease: ${{ steps.pre.outputs.prerelease }}
+          generate_release_notes: true
+          body: |
+            ## Install CLI
+
+            ```bash
+            curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version ${{ github.ref_name }}
+            ```
           fail_on_unmatched_files: true
