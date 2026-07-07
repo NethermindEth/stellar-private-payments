@@ -2,16 +2,20 @@
 //!
 //! Account operations are delegated to the official Stellar CLI so the private
 //! payments CLI never handles a raw mnemonic or secret key: identities live in
-//! the Stellar CLI's alias store (`stellar keys …`). We shell out for three
-//! things:
+//! the Stellar CLI's alias store (`stellar keys …`). We shell out for:
 //!
 //! * resolve an alias to its address ([`public_key`]),
 //! * produce the SEP-53 key-derivation signature ([`sign_message`]), and
-//! * fetch the secret key just-in-time for transaction signing ([`secret`]).
+//! * sign transaction envelopes ([`sign_tx`]), including OS secure-store keys.
 
-use std::{path::Path, process::Command};
+use std::{
+    io::Write,
+    path::Path,
+    process::{Command, Stdio},
+};
 
 use anyhow::{Context, Result, bail};
+
 use stellar_private_payments_sdk::{chain::Signature, types::KeyDerivationSignature};
 
 /// Env var to override the `stellar` binary path (default: `stellar` on PATH).
@@ -84,11 +88,67 @@ pub fn sign_message(
     Ok(KeyDerivationSignature(signature.as_bytes().to_vec()))
 }
 
-/// Fetch an alias's secret key via `stellar keys secret` (transaction signing
-/// only). Not available for ledger identities.
-pub fn secret(alias: &str, config_dir: Option<&Path>) -> Result<String> {
-    let args = vec!["keys".to_string(), "secret".to_string(), alias.to_string()];
-    run(&args, config_dir)
+/// Sign an unsigned transaction envelope via `stellar tx sign`.
+///
+/// Works for identities stored in the config file or OS secure store. The
+/// unsigned envelope XDR is passed on stdin; signed envelope XDR is returned
+/// from stdout.
+pub fn sign_tx(
+    alias: &str,
+    tx_xdr: &str,
+    rpc_url: &str,
+    network_passphrase: &str,
+    config_dir: Option<&Path>,
+) -> Result<String> {
+    let bin = stellar_bin();
+    let mut cmd = Command::new(&bin);
+    cmd.args([
+        "tx",
+        "sign",
+        "--sign-with-key",
+        alias,
+        "--auto-sign",
+        "--rpc-url",
+        rpc_url,
+        "--network-passphrase",
+        network_passphrase,
+    ]);
+    if let Some(dir) = config_dir {
+        cmd.arg("--config-dir").arg(dir);
+    }
+    cmd.stdin(Stdio::piped());
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let mut child = cmd.spawn().with_context(|| {
+        format!(
+            "failed to run `{bin} tx sign`; install the Stellar CLI (https://stellar.org/cli) \
+             or set {STELLAR_BIN_ENV} to its path"
+        )
+    })?;
+
+    child
+        .stdin
+        .take()
+        .context("stellar tx sign stdin")?
+        .write_all(tx_xdr.as_bytes())
+        .context("write transaction XDR to stellar tx sign")?;
+
+    let output = child
+        .wait_with_output()
+        .context("wait for stellar tx sign")?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "`{bin} tx sign --sign-with-key {alias}` failed: {}",
+            stderr.trim()
+        );
+    }
+
+    let stdout =
+        String::from_utf8(output.stdout).context("stellar CLI produced non-UTF-8 output")?;
+    Ok(stdout.trim().to_string())
 }
 
 /// A network's connection parameters, resolved from the Stellar CLI.

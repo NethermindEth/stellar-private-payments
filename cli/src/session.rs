@@ -60,8 +60,8 @@ impl PoolSession {
     ) -> Result<Self> {
         let signer: Box<dyn Signer> = Box::new(AliasSigner {
             alias: account.alias.clone(),
+            rpc_url: network.rpc_url.clone(),
             network_passphrase: network.passphrase.clone(),
-            user_address: account.address.clone(),
             config_dir: config.stellar_config_dir.clone(),
         });
 

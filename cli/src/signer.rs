@@ -1,15 +1,15 @@
 //! Transaction signer backed by a `stellar keys` alias.
 //!
-//! The pool's `transact` call requires Soroban authorization-entry signatures,
-//! which the `stellar` binary cannot produce on its own. So we keep the SDK's
-//! in-process signing (`LocalSigner`) but source the secret from the alias via
-//! `stellar keys secret` **only when a transaction is actually signed** — read
-//! operations (balance, notes) never trigger this.
+//! Pool transacts delegate signing to `stellar tx sign --sign-with-key`, so
+//! keys in the OS secure store work without exporting secrets into this
+//! process.
 
 use std::path::PathBuf;
 
 use stellar_private_payments_sdk::{
-    LocalSigner, PoolError, PreparedTransaction, Signer, types::SignedTransaction,
+    PoolError, PreparedTransaction, Signer,
+    chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
+    types::SignedTransaction,
 };
 
 use crate::stellar_cli;
@@ -17,22 +17,41 @@ use crate::stellar_cli;
 /// Signs pool transactions using an alias resolved through the Stellar CLI.
 pub struct AliasSigner {
     pub alias: String,
+    pub rpc_url: String,
     pub network_passphrase: String,
-    pub user_address: String,
     pub config_dir: Option<PathBuf>,
+}
+
+impl AliasSigner {
+    pub fn sign_prepared_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<TransactionEnvelope, PoolError> {
+        let signed_xdr = stellar_cli::sign_tx(
+            &self.alias,
+            &prepared.tx_xdr,
+            &self.rpc_url,
+            &self.network_passphrase,
+            self.config_dir.as_deref(),
+        )
+        .map_err(|e| {
+            PoolError::Other(format!(
+                "sign transaction for alias `{}`: {e:#}",
+                self.alias
+            ))
+        })?;
+        TransactionEnvelope::from_xdr_base64(&signed_xdr, Limits::none())
+            .map_err(|e| PoolError::Other(format!("decode signed transaction xdr: {e}")))
+    }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Signer for AliasSigner {
     async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
-        let secret = stellar_cli::secret(&self.alias, self.config_dir.as_deref()).map_err(|e| {
-            PoolError::Other(format!("fetch secret for alias `{}`: {e:#}", self.alias))
-        })?;
-        let inner = LocalSigner::new(
-            &secret,
-            self.network_passphrase.clone(),
-            self.user_address.clone(),
-        )?;
-        inner.sign(prepared).await
+        let envelope = self.sign_prepared_transaction(&prepared.soroban_tx)?;
+        let signed_xdr = envelope
+            .to_xdr_base64(Limits::none())
+            .map_err(|e| PoolError::Other(format!("encode signed transaction xdr: {e}")))?;
+        Ok(SignedTransaction { signed_xdr })
     }
 }
