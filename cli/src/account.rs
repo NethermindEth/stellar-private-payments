@@ -1,9 +1,9 @@
 //! Account identity resolved from a `stellar keys` alias.
 //!
 //! The account is
-//! named by an alias and resolved to an address through the Stellar CLI. The
-//! secret is never read here — only at transaction-signing time (see
-//! [`crate::signer::AliasSigner`]).
+//! named by an alias and resolved to an address through the Stellar CLI.
+//! Transaction signing is delegated to `stellar tx sign` via
+//! [`crate::signer::AliasSigner`].
 
 use std::path::Path;
 

@@ -6,12 +6,13 @@ use anyhow::{Context, Result};
 use serde::Serialize;
 use stellar_private_payments_sdk::{
     blocking::{confirm_tx, prepare_register, submit_tx},
-    chain::{LocalSigner, StateFetcher},
+    chain::StateFetcher,
     state::SqliteStorage,
 };
 
 use crate::{
-    account::Account, config::CliConfig, onboard, output, stellar_cli, stellar_cli::StellarNetwork,
+    account::Account, config::CliConfig, onboard, output, signer::AliasSigner,
+    stellar_cli::StellarNetwork,
 };
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
@@ -61,10 +62,14 @@ pub fn register_account(
     log::info!("Preparing address registration for {}", account.address);
     let prepared = prepare_register(&fetcher, &account.address, note_key, encryption_key)?;
 
-    let secret = stellar_cli::secret(&account.alias, config.stellar_config_dir.as_deref())?;
-    let signer = LocalSigner::from_secret(&secret).context("build signer for registration")?;
+    let signer = AliasSigner {
+        alias: account.alias.clone(),
+        rpc_url: network.rpc_url.clone(),
+        network_passphrase: network.passphrase.clone(),
+        config_dir: config.stellar_config_dir.clone(),
+    };
     let envelope = signer
-        .sign_prepared_transaction(&prepared, &network.passphrase, &account.address)
+        .sign_prepared_transaction(&prepared)
         .context("sign registration transaction")?;
 
     log::info!("Submitting registration…");
