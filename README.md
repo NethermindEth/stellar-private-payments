@@ -88,7 +88,7 @@ curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh |
 
 This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64),
 verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
-`dist` data (circuits, proving key, license/notice texts). Then run `spp --help`.
+data dir (circuits, proving key, license/notice texts). Then run `spp --help`.
 
 To install a specific release
 

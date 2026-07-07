@@ -21,9 +21,9 @@ pub fn load_prover_artifacts(circuits_dir: Option<&Path>) -> Result<ProverArtifa
 
 /// Read the `policy_tx_2_2` proving key.
 ///
-/// Installed builds ship the key alongside the r1cs/wasm in the data-dir `dist`
+/// Installed builds ship the key alongside the r1cs/wasm in the data dir
 /// (`<circuits_dir>/policy_tx_2_2_proving_key.bin`). When it is absent — e.g.
-/// an in-repo `cargo run` before the dist is provisioned — fall back to the
+/// an in-repo `cargo run` before the installer has run — fall back to the
 /// canonical key committed under `deployments/testnet/circuit_keys/`.
 fn read_proving_key(circuits: &Path) -> Result<Vec<u8>> {
     let runtime = circuits.join("policy_tx_2_2_proving_key.bin");
@@ -36,7 +36,7 @@ fn read_proving_key(circuits: &Path) -> Result<Vec<u8>> {
         repo_root.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
     std::fs::read(&committed).with_context(|| {
         format!(
-            "read policy_tx_2_2 proving key from {} or {} (run the installer / build the dist)",
+            "read policy_tx_2_2 proving key from {} or {} (run the installer or build circuits)",
             runtime.display(),
             committed.display(),
         )
@@ -47,6 +47,6 @@ fn default_circuits_dir() -> PathBuf {
     if cfg!(debug_assertions) {
         PathBuf::from("target/circuits-artifacts/release")
     } else {
-        default_data_dir().join("dist/circuits")
+        default_data_dir().join("circuits")
     }
 }
