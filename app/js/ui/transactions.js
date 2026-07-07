@@ -261,14 +261,18 @@ export const Transactions = {
     bindMoveFunds() {
         document.getElementById('btn-deposit')?.addEventListener('click', async (event) => {
             const button = event.currentTarget;
+            console.log('[DEBUG] Deposit button clicked');
             try {
                 requireWallet();
                 const amount = parseAmount(document.getElementById('deposit-amount')?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
+                console.log('[DEBUG] Deposit amount:', amount.value.toString());
                 setLoading(button, true, 'Preparing deposit…');
                 const pool = selectedPool();
                 const session = await ensureAppPool();
+                console.log('[DEBUG] Calling session.deposit');
                 const result = await runPoolOp('deposit', button, () => session.deposit(amount.value));
+                console.log('[DEBUG] Deposit result:', result);
                 if (this.showExecuteResult(result, 'Deposit')) {
                     const hashes = result?.hashes ?? txResultsToHashes(result);
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {

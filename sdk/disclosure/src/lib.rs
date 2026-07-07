@@ -188,6 +188,8 @@ impl RegisteredCircuit {
     /// Returns an error if `public_inputs_order` contains an unknown name or if
     /// the output buffer capacity overflows.
     pub fn public_inputs_bytes(&self, receipt: &DisclosureReceipt) -> Result<Vec<u8>> {
+        receipt.public_inputs.validate(self.n_notes)?;
+
         let n_notes =
             usize::try_from(self.n_notes).map_err(|_| anyhow!("Circuit n_notes out of range"))?;
         let capacity = n_notes
@@ -558,6 +560,12 @@ where
         proof_verified,
         context_verified,
         known_root_status,
+        // The generic disclosure crate does not perform on-chain spent-nullifier
+        // checks. Callers that need spent-status validation (e.g. the pool
+        // verifier) should perform that check separately and overwrite these
+        // fields.
+        nullifiers_unspent: true,
+        spent_nullifier_indices: Vec::new(),
     })
 }
 
@@ -865,6 +873,8 @@ mod tests {
         assert!(report.proof_verified);
         assert!(report.context_verified);
         assert!(report.known_root_status);
+        assert!(report.nullifiers_unspent);
+        assert!(report.is_fully_verified());
         Ok(())
     }
 

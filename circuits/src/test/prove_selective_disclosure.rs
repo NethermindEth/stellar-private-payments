@@ -296,4 +296,30 @@ mod tests {
             "Wrong note commitment case unexpectedly verified; expected rejection"
         );
     }
+
+    #[test]
+    #[ignore]
+    fn test_selective_disclosure_1_wrong_nullifier_fails() {
+        let (wasm, r1cs) = load_artifacts("selectiveDisclosure_1")
+            .expect("Cannot find selectiveDisclosure_1 artifacts");
+        let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
+
+        let note = sample_note(42, 4242, 5151, 17);
+        let mut leaves = sample_leaves(std::slice::from_ref(&note));
+        let mut inputs = build_inputs(
+            std::slice::from_ref(&note),
+            &mut leaves,
+            Scalar::from(EXT_CONTEXT_HASH),
+        )
+        .expect("witness inputs");
+        inputs.set(
+            "expectedNullifier",
+            vec![scalar_to_bigint(Scalar::from(99999u64))],
+        );
+
+        assert!(
+            !proof_verifies(&wasm, &r1cs, &inputs, &keys),
+            "Wrong nullifier case unexpectedly verified; expected rejection"
+        );
+    }
 }

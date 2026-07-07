@@ -1,9 +1,9 @@
 use crate::{
     conversions::{
-        field_to_scval_u256, scval_to_address_string, scval_to_bool, scval_to_u32, scval_to_u64,
-        scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool, scval_to_u32,
+        scval_to_u64, scval_to_u256,
     },
-    rpc::{Client, ContractDataBulkRequest},
+    rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
     soroban_encode::BASE_FEE,
 };
 use anyhow::{Result, anyhow};
@@ -498,6 +498,60 @@ impl StateFetcher {
         )?;
         let retval = self.simulate_single_retval(&tx).await?;
         Ok(scval_to_bool(&retval)?)
+    }
+
+    /// Checks whether a note nullifier has been spent in the pool.
+    ///
+    /// Queries the pool's `NewNullifierEvent` contract events via the Soroban
+    /// RPC `getEvents` endpoint. A matching event with the supplied nullifier
+    /// means the note has been spent.
+    ///
+    /// # Arguments
+    /// * `pool_contract_id` - Contract id of the enabled pool to query.
+    /// * `nullifier` - Note nullifier to check.
+    ///
+    /// # Returns
+    /// Returns `true` when at least one `NewNullifierEvent` carrying this
+    /// nullifier exists.
+    ///
+    /// # Errors
+    /// Returns an error if the pool is not an enabled deployment, the RPC
+    /// `getEvents` call fails, or the requested ledger range is outside the
+    /// RPC's retained event window.
+    pub async fn is_nullifier_spent(
+        &self,
+        pool_contract_id: &str,
+        nullifier: Field,
+    ) -> Result<bool> {
+        let pool = self.enabled_pool_for(pool_contract_id)?;
+
+        let nullifier_scval = field_to_scval_u256(nullifier);
+        let nullifier_b64 = scval_to_base64(&nullifier_scval)?;
+
+        // The event name emitted by the pool contract is a Symbol. Soroban
+        // RPC topic filters expect exact segments as base64-encoded ScVals.
+        // Soroban convention uses snake_case, but accept both casings.
+        let topic_names = ["new_nullifier_event", "NewNullifierEvent"];
+        let mut topics: Vec<TopicFilter> = Vec::with_capacity(topic_names.len());
+        for name in topic_names {
+            let name_scval = xdr::ScVal::Symbol(
+                xdr::ScSymbol::try_from(name).map_err(|_| anyhow!("invalid event name symbol"))?,
+            );
+            topics.push(vec![scval_to_base64(&name_scval)?, nullifier_b64.clone()]);
+        }
+
+        let resp = self
+            .client
+            .get_events(
+                EventStart::Ledger(pool.deployment_ledger),
+                Some(EventType::Contract),
+                std::slice::from_ref(&pool.pool_contract_id),
+                &topics,
+                Some(1),
+            )
+            .await?;
+
+        Ok(!resp.events.is_empty())
     }
 
     async fn simulate_single_retval(&self, tx: &xdr::TransactionEnvelope) -> Result<xdr::ScVal> {

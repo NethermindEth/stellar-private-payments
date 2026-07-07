@@ -1,8 +1,9 @@
 use crate::rpc::Error;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
 use core::ops::Shl;
 use std::{collections::HashMap, convert::TryInto};
 use stellar_strkey::ed25519;
-use stellar_xdr::curr::{self as xdr, Int256Parts, ReadXdr};
+use stellar_xdr::curr::{self as xdr, Int256Parts, ReadXdr, WriteXdr};
 use types::{ContractEvent, Field, U256};
 
 impl From<crate::rpc::Event> for ContractEvent {
@@ -60,6 +61,23 @@ pub fn scval_to_bytes(val: &xdr::ScVal) -> Result<Vec<u8>, Error> {
             "Expected ScVal::Bytes, found: {val:?}"
         )))
     }
+}
+
+/// Encodes an `ScVal` as lowercase hex.
+pub fn scval_to_hex(scval: &xdr::ScVal) -> Result<String, Error> {
+    let bytes = scval
+        .to_xdr(xdr::Limits::none())
+        .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
+    Ok(bytes.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Encodes an `ScVal` as base64, the format expected by Soroban RPC topic
+/// filters.
+pub fn scval_to_base64(scval: &xdr::ScVal) -> Result<String, Error> {
+    let bytes = scval
+        .to_xdr(xdr::Limits::none())
+        .map_err(|e| Error::UnexpectedScVal(format!("failed to serialize ScVal to XDR: {e}")))?;
+    Ok(STANDARD.encode(&bytes))
 }
 
 /// Encodes a BN254 field element as Soroban `ScVal::U256`.
@@ -245,5 +263,24 @@ mod tests {
         let sc = field_to_scval_u256(field);
         let back = scval_to_u256(&sc).expect("decode u256");
         assert_eq!(back, field.0);
+    }
+
+    #[test]
+    fn nullifier_u256_topic_base64_roundtrip() {
+        // Sample nullifier (a BN254 field element).
+        let nullifier = Field(U256::from(0x0123_4567_89AB_CDEF_0123_4567_89AB_CDEF_u128));
+
+        // Encode as the U256 ScVal the pool contract emits in NewNullifierEvent.
+        let scval = field_to_scval_u256(nullifier);
+        let b64 = scval_to_base64(&scval).expect("encode nullifier to base64");
+
+        // Decode the base64 back to bytes and parse as ScVal.
+        let bytes = STANDARD.decode(b64).expect("valid base64");
+        let parsed =
+            xdr::ScVal::from_xdr(bytes, xdr::Limits::none()).expect("parse base64 as ScVal");
+
+        // Round-trip back to the original nullifier.
+        let roundtripped = scval_to_u256(&parsed).expect("decode parsed u256");
+        assert_eq!(roundtripped, nullifier.0);
     }
 }

@@ -6,7 +6,7 @@ extern crate alloc;
 
 use alloc::{format, string::String, vec, vec::Vec};
 
-use anyhow::{Result, anyhow};
+use anyhow::{Result, anyhow, bail};
 use serde::{Deserialize, Serialize};
 use types::{
     AspMembershipProof, AspNonMembershipProof, EncryptionPublicKey, ExtAmount, ExtData, Field,
@@ -932,6 +932,11 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
 
         let commitment =
             crypto::compute_commitment(&amount_field_le, &sender_pubkey_arr, &note_blinding_le)?;
+        let provided_commitment = note.note_commitment.to_le_bytes();
+        if commitment != provided_commitment {
+            bail!("computed commitment does not match provided note_commitment");
+        }
+
         let signature = crypto::compute_signature(
             &note.note_private_key.0,
             &commitment,
@@ -1213,12 +1218,18 @@ mod tests {
         let tree_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
 
+        let note_amount = NoteAmount::from(42);
+        let note_private_key = NotePrivateKey([3u8; 32]);
+        let note_blinding = Field::try_from_le_bytes([4u8; 32]).expect("field");
+        let note_commitment =
+            compute_test_note_commitment(note_amount, &note_private_key, note_blinding);
+
         let params = SelectiveDisclosure1Params {
             root: Field::try_from_le_bytes([1u8; 32]).expect("field"),
-            note_commitment: Field::try_from_le_bytes([2u8; 32]).expect("field"),
-            note_amount: NoteAmount::from(42),
-            note_private_key: NotePrivateKey([3u8; 32]),
-            note_blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            note_commitment,
+            note_amount,
+            note_private_key,
+            note_blinding,
             merkle_path_indices: Field::try_from_le_bytes([5u8; 32]).expect("field"),
             merkle_path_elements: vec![
                 Field::try_from_le_bytes([6u8; 32]).expect("field");
@@ -1335,18 +1346,42 @@ mod tests {
         assert_eq!(artifacts.ext_context_hash, params.ext_context_hash);
     }
 
+    fn compute_test_note_commitment(
+        note_amount: NoteAmount,
+        note_private_key: &NotePrivateKey,
+        note_blinding: Field,
+    ) -> Field {
+        let amount_field = note_amount_to_field(&note_amount);
+        let amount_field_le = amount_field.to_le_bytes();
+        let note_blinding_le = note_blinding.to_le_bytes();
+        let sender_pubkey =
+            crate::crypto::derive_public_key(&note_private_key.0).expect("derive public key");
+        let sender_pubkey_arr: [u8; 32] = sender_pubkey.try_into().expect("public key length");
+        let commitment = crate::crypto::compute_commitment(
+            &amount_field_le,
+            &sender_pubkey_arr,
+            &note_blinding_le,
+        )
+        .expect("compute commitment");
+        Field::try_from_le_bytes(commitment.try_into().expect("commitment length"))
+            .expect("commitment field")
+    }
+
     fn disclosure_note(
         root: Field,
-        note_commitment: Field,
         note_private_key: NotePrivateKey,
         tree_depth: u32,
     ) -> DisclosureNote {
+        let note_amount = NoteAmount::from(42);
+        let note_blinding = Field::try_from_le_bytes([4u8; 32]).expect("field");
+        let note_commitment =
+            compute_test_note_commitment(note_amount, &note_private_key, note_blinding);
         DisclosureNote {
             root,
             note_commitment,
-            note_amount: NoteAmount::from(42),
+            note_amount,
             note_private_key,
-            note_blinding: Field::try_from_le_bytes([4u8; 32]).expect("field"),
+            note_blinding,
             merkle_path_indices: Field::try_from_le_bytes([5u8; 32]).expect("field"),
             merkle_path_elements: vec![
                 Field::try_from_le_bytes([6u8; 32]).expect("field");
@@ -1359,15 +1394,12 @@ mod tests {
     fn selective_disclosure_multi_note_witness_shapes() {
         let tree_depth: u32 = 10;
         let root = Field::try_from_le_bytes([1u8; 32]).expect("field");
-        let note_commitment = Field::try_from_le_bytes([2u8; 32]).expect("field");
         let note_private_key = NotePrivateKey([3u8; 32]);
         let ext_context_hash = Field::try_from_le_bytes([7u8; 32]).expect("field");
 
         for n_notes in [2, 3, 4] {
             let notes: Vec<DisclosureNote> = (0..n_notes)
-                .map(|_| {
-                    disclosure_note(root, note_commitment, note_private_key.clone(), tree_depth)
-                })
+                .map(|_| disclosure_note(root, note_private_key.clone(), tree_depth))
                 .collect();
 
             let params = SelectiveDisclosureParams {

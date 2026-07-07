@@ -14,13 +14,13 @@ import { getActivePoolContractId } from './ui/pool.js';
 
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_1:
-    '0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af',
+    '0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e',
   selectiveDisclosure_2:
-    '0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1',
+    '0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d',
   selectiveDisclosure_3:
-    '0x0902ecd9e05270b8f68073d8b05b44c1a9bfd2ebd349699374ab3e6f614d7f73',
+    '0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62',
   selectiveDisclosure_4:
-    '0xfc1f2648fba94e325de3022ec380401b617ef0653f12acb91d2e5f9431d5134c',
+    '0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9',
 };
 
 // ---------------------------------------------------------------------------
@@ -73,10 +73,16 @@ function svgEl(tag, attrs = {}, children = []) {
   for (const c of children) node.appendChild(c);
   return node;
 }
-function el(tag, className, text) {
+function el(tag, className, textOrChildren) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text != null) node.textContent = text;
+  if (Array.isArray(textOrChildren)) {
+    for (const child of textOrChildren) {
+      if (child != null) node.appendChild(child);
+    }
+  } else if (textOrChildren != null) {
+    node.textContent = textOrChildren;
+  }
   return node;
 }
 function spinnerEl() {
@@ -93,6 +99,13 @@ function xCircleIcon(cls) {
     svgEl('circle', { cx: '12', cy: '12', r: '10' }),
     svgEl('line', { x1: '15', y1: '9', x2: '9', y2: '15' }),
     svgEl('line', { x1: '9', y1: '9', x2: '15', y2: '15' }),
+  ]);
+}
+function alertTriangleIcon(cls) {
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z' }),
+    svgEl('line', { x1: '12', y1: '9', x2: '12', y2: '13' }),
+    svgEl('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' }),
   ]);
 }
 function shieldIcon(cls) {
@@ -586,6 +599,58 @@ export function mountGenerate(container) {
     }
   };
 
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
+    const notesWrap = el('div', 'space-y-2');
+    notesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const symbol = selectedNotesForSymbol[i]?.symbol || 'Token';
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+
+      const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
+      card.appendChild(
+        el('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          el('span', 'font-medium text-brand-300', amountText),
+        ])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500', 'Commitment')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      notesWrap.appendChild(card);
+    }
+    return notesWrap;
+  };
+
   const showResult = (receipt) => {
     state.lastReceipt = receipt;
     resultArea.classList.remove('hidden');
@@ -596,8 +661,15 @@ export function mountGenerate(container) {
     const date = new Date().toISOString().slice(0, 10);
     const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
 
+    const selectedNotesForSymbol = state.selectedNotes.map((n) => ({
+      symbol: tokenLabelForPool(n.poolContractId),
+    }));
+
     const box = el('div', 'space-y-3');
     box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    if (receipt.publicInputs) {
+      box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
+    }
     box.appendChild(el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json));
     const actions = el('div', 'flex gap-2');
     const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
@@ -764,6 +836,7 @@ export function mountVerify(container) {
 
   let receipt = null;
   let receiptError = null;
+  let receiptPoolSymbol = 'Token';
 
   // -------------------------------------------------------------------------
   // Import area
@@ -879,6 +952,11 @@ export function mountVerify(container) {
   verifyBtn.textContent = 'Verify Receipt';
   summaryWrap.appendChild(verifyBtn);
 
+  // Disclosed notes section (populated after loading a receipt)
+  const disclosedNotesWrap = document.createElement('div');
+  disclosedNotesWrap.className = 'hidden space-y-2';
+  summaryWrap.appendChild(disclosedNotesWrap);
+
   container.appendChild(summaryWrap);
 
   // -------------------------------------------------------------------------
@@ -924,7 +1002,87 @@ export function mountVerify(container) {
     if (!r.context || typeof r.context !== 'object') return 'Missing receipt context';
     if (!r.publicInputs || typeof r.publicInputs !== 'object') return 'Missing public inputs';
 
+    if (typeof r.circuit.nNotes !== 'number' || r.circuit.nNotes < 1 || r.circuit.nNotes > 4)
+      return 'Missing or invalid circuit.nNotes (expected 1..4)';
+
+    const nNotes = r.circuit.nNotes;
+    const validateArray = (name) => {
+      const arr = r.publicInputs[name];
+      if (!Array.isArray(arr)) return `publicInputs.${name} must be an array`;
+      if (arr.length !== nNotes)
+        return `publicInputs.${name} length mismatch: expected ${nNotes}, got ${arr.length}`;
+      for (let i = 0; i < arr.length; i += 1) {
+        if (typeof arr[i] !== 'string') return `publicInputs.${name}[${i}] must be a string`;
+      }
+      return null;
+    };
+
+    for (const name of ['roots', 'noteCommitments', 'nullifiers', 'amounts']) {
+      const err = validateArray(name);
+      if (err) return err;
+    }
+
+    if (typeof r.publicInputs.extContextHash !== 'string')
+      return 'publicInputs.extContextHash must be a string';
+
     return null;
+  };
+
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotesVerify = (publicInputs, symbol = 'Token', spentIndices = []) => {
+    disclosedNotesWrap.replaceChildren();
+    disclosedNotesWrap.classList.remove('hidden');
+    disclosedNotesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const isSpent = spentIndices.includes(i);
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+
+      const card = el('div', `p-3 border rounded-lg space-y-1.5 ${
+        isSpent
+          ? 'bg-amber-500/5 border-amber-500/30'
+          : 'bg-dark-800 border-dark-700'
+      }`);
+      card.appendChild(
+        el('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          el('div', 'flex items-center gap-2', [
+            isSpent
+              ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
+              : null,
+            el('span', `font-medium ${isSpent ? 'text-amber-300 line-through' : 'text-brand-300'}`, amountText),
+          ]),
+        ])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500', 'Commitment'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      disclosedNotesWrap.appendChild(card);
+    }
   };
 
   const renderSummary = (r) => {
@@ -937,6 +1095,15 @@ export function mountVerify(container) {
       vkInput.value = defaultVkHash;
     }
 
+    const poolSymbol = tokenLabelForPool(r.context.poolAddress);
+    receiptPoolSymbol = poolSymbol;
+    const totalAmount = r.publicInputs?.amounts?.reduce((sum, value) => {
+      const v = parseReceiptAmount(value);
+      return v != null ? sum + v : sum;
+    }, 0n);
+    const amountSummary = totalAmount != null ? formatAmount(totalAmount, poolSymbol) : '—';
+    const nullifierCount = r.publicInputs?.nullifiers?.length ?? 0;
+
     const items = [
       { label: 'Network', value: r.context.network },
       { label: 'Pool address', value: r.context.poolAddress },
@@ -946,6 +1113,8 @@ export function mountVerify(container) {
       { label: 'Issued at', value: r.issuedAt },
       { label: 'Circuit', value: r.circuit.name },
       { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
+      { label: 'Disclosed amount', value: amountSummary },
+      { label: 'Nullifiers', value: `${nullifierCount} disclosed` },
     ];
     items.forEach((item) => {
       const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
@@ -955,6 +1124,10 @@ export function mountVerify(container) {
       );
       summaryGrid.appendChild(cell);
     });
+
+    if (r.publicInputs) {
+      renderDisclosedNotesVerify(r.publicInputs, poolSymbol, []);
+    }
   };
 
   const loadReceipt = (raw) => {
@@ -1035,7 +1208,11 @@ export function mountVerify(container) {
       const proofOk = !!report.proofVerified;
       const contextOk = !!report.contextVerified;
       const rootOk = !!report.knownRootStatus;
-      const fullyVerified = proofOk && contextOk && rootOk;
+      const unspentOk = !!report.nullifiersUnspent;
+      const spentIndices = Array.isArray(report.spentNullifierIndices)
+        ? report.spentNullifierIndices.map((i) => Number(i))
+        : [];
+      const fullyVerified = proofOk && contextOk && rootOk && unspentOk;
 
       resultsWrap.replaceChildren();
 
@@ -1044,14 +1221,23 @@ export function mountVerify(container) {
       list.setAttribute('role', 'list');
       list.setAttribute('aria-label', 'Verification results');
 
-      const makeCheck = (label, pass, failText, passText) => {
+      const makeCheck = (label, pass, failText, passText, failSeverity = 'error') => {
+        const isInfo = !pass && failSeverity === 'info';
         const li = el('li', `flex items-start gap-3 p-3 rounded-lg border ${
           pass
             ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-            : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+            : isInfo
+              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
         }`);
         const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
-        iconWrap.appendChild(pass ? checkCircleIcon('w-4 h-4') : xCircleIcon('w-4 h-4'));
+        if (pass) {
+          iconWrap.appendChild(checkCircleIcon('w-4 h-4'));
+        } else if (isInfo) {
+          iconWrap.appendChild(alertTriangleIcon('w-4 h-4'));
+        } else {
+          iconWrap.appendChild(xCircleIcon('w-4 h-4'));
+        }
         const textWrap = el('div');
         textWrap.append(
           el('div', 'text-sm font-medium', pass ? passText[0] : passText[1]),
@@ -1085,8 +1271,33 @@ export function mountVerify(container) {
           ['Root fresh', 'Root stale or unknown', 'Every root in the receipt is still in the pool\'s on-chain root history.']
         )
       );
+      const unspentFailText = (() => {
+        if (spentIndices.length === 0) {
+          return 'At least one disclosed nullifier has already been spent on-chain. The note(s) are no longer unspent.';
+        }
+        const spentAmounts = spentIndices.map((idx) => {
+          const v = parseReceiptAmount(receipt.publicInputs.amounts[idx]);
+          return v != null ? formatAmount(v, receiptPoolSymbol) : receipt.publicInputs.amounts[idx];
+        });
+        const noteLabels = spentIndices.map((idx) => `Note ${idx + 1}`);
+        return `Disclosed ${noteLabels.join(', ')} ${spentIndices.length === 1 ? 'has' : 'have'} already been spent on-chain (${spentAmounts.join(', ')}).`;
+      })();
+
+      list.appendChild(
+        makeCheck(
+          'unspent',
+          unspentOk,
+          unspentFailText,
+          ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers appear in the pool\'s spent-nullifier event history.'],
+          'info'
+        )
+      );
 
       resultsWrap.appendChild(list);
+
+      if (receipt.publicInputs) {
+        renderDisclosedNotesVerify(receipt.publicInputs, receiptPoolSymbol, spentIndices);
+      }
 
       if (fullyVerified) {
         const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2');

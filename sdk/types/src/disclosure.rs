@@ -1,6 +1,6 @@
-use crate::Field;
+use crate::{Field, U256};
 use anyhow::{Result, anyhow};
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, ser::SerializeSeq};
 
 /// Current selective-disclosure receipt version.
 pub const DISCLOSURE_RECEIPT_VERSION: u32 = 1;
@@ -186,8 +186,37 @@ pub struct DisclosurePublicInputs {
     pub ext_context_hash: Field,
     /// Nullifiers computed in-circuit for each disclosed note.
     pub nullifiers: Vec<Field>,
-    /// Disclosed amounts for each note.
+    /// Disclosed amounts for each note, serialized as decimal strings so the
+    /// receipt is human-readable while still representing BN254 field elements.
+    #[serde(
+        serialize_with = "serialize_amounts",
+        deserialize_with = "deserialize_amounts"
+    )]
     pub amounts: Vec<Field>,
+}
+
+fn serialize_amounts<S: Serializer>(
+    amounts: &[Field],
+    serializer: S,
+) -> core::result::Result<S::Ok, S::Error> {
+    let mut seq = serializer.serialize_seq(Some(amounts.len()))?;
+    for amount in amounts {
+        seq.serialize_element(&amount.0.to_string())?;
+    }
+    seq.end()
+}
+
+fn deserialize_amounts<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> core::result::Result<Vec<Field>, D::Error> {
+    let strings = Vec::<String>::deserialize(deserializer)?;
+    strings
+        .into_iter()
+        .map(|s| {
+            let v = U256::from_dec_str(&s).map_err(serde::de::Error::custom)?;
+            Field::try_from_u256(v).map_err(serde::de::Error::custom)
+        })
+        .collect()
 }
 
 impl DisclosurePublicInputs {
@@ -213,10 +242,11 @@ impl DisclosurePublicInputs {
 /// Verification status returned.
 ///
 /// # Security semantics
-/// A receipt is trustworthy **only when all three fields are `true`**:
-/// `proof_verified && context_verified && known_root_status`. The fields are
-/// kept separate so callers can diagnose *why* verification failed, but a
-/// consumer must check the conjunction, not any individual flag.
+/// A receipt is trustworthy **only when all four fields are `true`**:
+/// `proof_verified && context_verified && known_root_status &&
+/// nullifiers_unspent`. The fields are kept separate so callers can diagnose
+/// *why* verification failed, but a consumer must check the conjunction, not
+/// any individual flag.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisclosureVerificationReport {
@@ -226,12 +256,23 @@ pub struct DisclosureVerificationReport {
     pub context_verified: bool,
     /// Status of the known-root freshness check.
     pub known_root_status: bool,
+    /// Status of the spent-nullifier check. `true` means none of the disclosed
+    /// nullifiers have been spent on-chain.
+    pub nullifiers_unspent: bool,
+    /// Indices (0-based) of disclosed nullifiers that have already been spent
+    /// on-chain. Empty when `nullifiers_unspent` is `true` or the check could
+    /// not complete.
+    pub spent_nullifier_indices: Vec<u32>,
 }
 
 impl DisclosureVerificationReport {
-    /// Returns `true` only when proof, context, and root freshness all pass.
+    /// Returns `true` only when proof, context, root freshness, and unspent
+    /// status all pass.
     pub fn is_fully_verified(&self) -> bool {
-        self.proof_verified && self.context_verified && self.known_root_status
+        self.proof_verified
+            && self.context_verified
+            && self.known_root_status
+            && self.nullifiers_unspent
     }
 }
 /// Parses a strict `0x`-prefixed lowercase hex string.
@@ -332,6 +373,23 @@ mod tests {
 
         assert_eq!(parsed, receipt);
         parsed.validate()?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn receipt_amounts_serialize_as_decimal_strings() -> Result<()> {
+        let receipt = valid_receipt();
+        let json = serde_json::to_string(&receipt)?;
+
+        assert!(
+            json.contains(r#""amounts":["5"]"#),
+            "amounts should be serialized as decimal strings, got: {json}"
+        );
+
+        // Also verify deserializing decimal amounts works.
+        let parsed: DisclosureReceipt = serde_json::from_str(&json)?;
+        assert_eq!(parsed.public_inputs.amounts, receipt.public_inputs.amounts);
 
         Ok(())
     }
