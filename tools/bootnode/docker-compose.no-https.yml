@@ -1,0 +1,16 @@
+# Local dev: plain HTTP on port 8080 (no TLS / ACME).
+#
+#   docker compose -f docker-compose.yml -f docker-compose.no-https.yml up --build
+#
+# Bootnode URL for the app: http://127.0.0.1:8080
+
+services:
+  bootnode:
+    environment:
+      BOOTNODE_DEV: "true"
+      BOOTNODE_INSECURE_HTTP: "true"
+      BOOTNODE_BIND: 0.0.0.0:8080
+      BOOTNODE_DOMAIN: ""
+      BOOTNODE_ACME_EMAIL: ""
+    ports: !override
+      - "8080:8080"
