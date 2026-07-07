@@ -12,7 +12,7 @@
 [![LinkedIn](https://img.shields.io/badge/LinkedIn-0A66C2?style=flat&logo=linkedin&logoColor=white)](https://www.linkedin.com/groups/18809039/)
 
 > [!WARNING]
-> This project is a **Work in progress (WIP)**. It is intended to serve as **a reference implementation** of privacy pools for Stellar. The code has not yet been audited and should not be used in production environments with real assets as of now. The security hardening work is planned.
+> This project is a **Work in progress (WIP)**. It is intended to serve as **a reference implementation** of privacy pools for Stellar. The code has not yet been audited and should not be used in production environments with real assets as of now. The security hardening work is planned. Expect breaking changes and necessity to clear your local storage for the demo app/cli until the first stable release.
 
 A privacy-preserving payment system for the Stellar network using zero-knowledge proofs. This implementation enables users to deposit, transfer, and withdraw tokens while maintaining transaction privacy through Groth16 proofs.
 
