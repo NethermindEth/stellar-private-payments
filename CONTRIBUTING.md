@@ -238,7 +238,7 @@ git push origin v0.1.0-rc.1
 then you can install it from the Github with
 
 ```sh
-./deployments/scripts/install.sh --pre
+./scripts/install.sh --pre
 ```
 
 To make a production release of CLI

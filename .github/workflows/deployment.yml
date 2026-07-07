@@ -44,7 +44,7 @@ jobs:
           make release DIST_DIR=site PUBLIC_URL="${{ steps.pages.outputs.base_url }}/"
 
       - name: Publish install script
-        run: cp deployments/scripts/install.sh site/install.sh
+        run: cp scripts/install.sh site/install.sh
 
       - name: Resolve symlinks in docs
         run: |
