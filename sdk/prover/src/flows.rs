@@ -873,6 +873,10 @@ impl From<SelectiveDisclosure1Params> for SelectiveDisclosureParams {
 pub struct DisclosureArtifacts {
     pub circuit_inputs: CircuitInputs,
     pub ext_context_hash: Field,
+    /// Nullifiers computed in-circuit, one per disclosed note.
+    pub nullifiers: Vec<Field>,
+    /// Amounts of each disclosed note.
+    pub amounts: Vec<Field>,
 }
 
 /// Generates circuit inputs for a selective-disclosure proof.
@@ -905,7 +909,10 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
         &field_to_circuit_hex(&params.ext_context_hash)?,
     );
 
-    // Private inputs
+    // Compute per-note nullifiers for public disclosure and wire private inputs.
+    let mut output_nullifier_hex: Vec<String> = Vec::with_capacity(n_notes);
+    let mut nullifier_fields: Vec<Field> = Vec::with_capacity(n_notes);
+    let mut amount_fields: Vec<Field> = Vec::with_capacity(n_notes);
     let mut in_amount: Vec<String> = Vec::with_capacity(n_notes);
     let mut in_private_key: Vec<String> = Vec::with_capacity(n_notes);
     let mut in_blinding: Vec<String> = Vec::with_capacity(n_notes);
@@ -914,15 +921,42 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
 
     for note in &params.notes {
         let amount_field = note_amount_to_field(&note.note_amount);
+        let amount_field_le = amount_field.to_le_bytes();
+        let note_blinding_le = note.note_blinding.to_le_bytes();
+        let merkle_path_indices_le = note.merkle_path_indices.to_le_bytes();
+
+        let sender_pubkey = crypto::derive_public_key(&note.note_private_key.0)?;
+        let sender_pubkey_arr: [u8; 32] = sender_pubkey
+            .try_into()
+            .map_err(|v: Vec<u8>| anyhow!("derive_public_key: expected 32 bytes, got {}", v.len()))?;
+
+        let commitment =
+            crypto::compute_commitment(&amount_field_le, &sender_pubkey_arr, &note_blinding_le)?;
+        let signature = crypto::compute_signature(
+            &note.note_private_key.0,
+            &commitment,
+            &merkle_path_indices_le,
+        )?;
+        let nullifier =
+            crypto::compute_nullifier(&commitment, &merkle_path_indices_le, &signature)?;
+        let nullifier_arr: [u8; 32] = nullifier
+            .try_into()
+            .map_err(|v: Vec<u8>| anyhow!("nullifier: expected 32 bytes, got {}", v.len()))?;
+        let nullifier_field = Field::try_from_le_bytes(nullifier_arr)?;
+
+        output_nullifier_hex.push(field_to_circuit_hex(&nullifier_field)?);
+        nullifier_fields.push(nullifier_field);
+        amount_fields.push(amount_field);
         in_amount.push(field_to_circuit_hex(&amount_field)?);
         in_private_key.push(field_bytes_to_hex(&note.note_private_key.0)?);
-        in_blinding.push(field_bytes_to_hex(&note.note_blinding.to_le_bytes())?);
+        in_blinding.push(field_bytes_to_hex(&note_blinding_le)?);
         in_path_indices.push(field_to_circuit_hex(&note.merkle_path_indices)?);
         for pe in &note.merkle_path_elements {
             in_path_elements.push(field_to_circuit_hex(pe)?);
         }
     }
 
+    circuit.set_array("expectedNullifier", output_nullifier_hex);
     circuit.set_array("inAmount", in_amount);
     circuit.set_array("inPrivateKey", in_private_key);
     circuit.set_array("inBlinding", in_blinding);
@@ -932,6 +966,8 @@ pub fn selective_disclosure(params: SelectiveDisclosureParams) -> Result<Disclos
     Ok(DisclosureArtifacts {
         circuit_inputs: circuit,
         ext_context_hash: params.ext_context_hash,
+        nullifiers: nullifier_fields,
+        amounts: amount_fields,
     })
 }
 

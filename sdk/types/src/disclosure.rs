@@ -174,7 +174,7 @@ impl DisclosureContext {
     }
 }
 
-/// Public inputs exposed by `selectiveDisclosure_1`.
+/// Public inputs exposed by `selectiveDisclosure_N`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisclosurePublicInputs {
@@ -184,6 +184,10 @@ pub struct DisclosurePublicInputs {
     pub note_commitments: Vec<Field>,
     /// Hash of pool, authority, purpose, and nonce context.
     pub ext_context_hash: Field,
+    /// Nullifiers computed in-circuit for each disclosed note.
+    pub nullifiers: Vec<Field>,
+    /// Disclosed amounts for each note.
+    pub amounts: Vec<Field>,
 }
 
 impl DisclosurePublicInputs {
@@ -195,6 +199,12 @@ impl DisclosurePublicInputs {
         }
         if self.note_commitments.len() != n_notes {
             return Err(anyhow!("note_commitments length does not match n_notes"));
+        }
+        if self.nullifiers.len() != n_notes {
+            return Err(anyhow!("nullifiers length does not match n_notes"));
+        }
+        if self.amounts.len() != n_notes {
+            return Err(anyhow!("amounts length does not match n_notes"));
         }
         Ok(())
     }
@@ -306,6 +316,8 @@ mod tests {
                 roots: vec![field(1)],
                 note_commitments: vec![field(2)],
                 ext_context_hash: field(3),
+                nullifiers: vec![field(4)],
+                amounts: vec![field(5)],
             },
             proof_compressed_hex: format!("0x{}", "aa".repeat(COMPRESSED_GROTH16_PROOF_BYTES)),
             issued_at: "2026-05-19T14:00:00Z".to_string(),

@@ -3,9 +3,9 @@ mod tests {
     use crate::test::utils::{
         circom_tester::{CircuitKeys, Inputs, generate_keys, prove_and_verify_with_keys},
         general::{load_artifacts, scalar_to_bigint},
-        keypair::derive_public_key,
+        keypair::{derive_public_key, sign},
         merkle_tree::{merkle_proof, merkle_root},
-        transaction::{commitment, prepopulated_leaves},
+        transaction::{commitment, nullifier, prepopulated_leaves},
     };
     use anyhow::{Context, Result};
     use num_bigint::BigInt;
@@ -53,6 +53,7 @@ mod tests {
     ) -> Result<Inputs> {
         let mut roots = Vec::with_capacity(notes.len());
         let mut note_commitments = Vec::with_capacity(notes.len());
+        let mut output_nullifiers = Vec::with_capacity(notes.len());
         let mut in_amount = Vec::with_capacity(notes.len());
         let mut in_private_key = Vec::with_capacity(notes.len());
         let mut in_blinding = Vec::with_capacity(notes.len());
@@ -72,12 +73,17 @@ mod tests {
                 "unexpected Merkle depth: expected {LEVELS}, got {depth}"
             );
 
+            let path_indices = Scalar::from(path_idx_u64);
+            let sig = sign(note.priv_key, note_commitment, path_indices);
+            let note_nullifier = nullifier(note_commitment, path_indices, sig);
+
             roots.push(scalar_to_bigint(root));
             note_commitments.push(scalar_to_bigint(note_commitment));
+            output_nullifiers.push(scalar_to_bigint(note_nullifier));
             in_amount.push(note.amount);
             in_private_key.push(note.priv_key);
             in_blinding.push(note.blinding);
-            in_path_indices.push(Scalar::from(path_idx_u64));
+            in_path_indices.push(path_indices);
             in_path_elements.extend(siblings.into_iter().map(scalar_to_bigint));
         }
 
@@ -85,6 +91,7 @@ mod tests {
         inputs.set("roots", roots);
         inputs.set("noteCommitments", note_commitments);
         inputs.set("extContextHash", ext_context_hash);
+        inputs.set("expectedNullifier", output_nullifiers);
         inputs.set("inAmount", in_amount);
         inputs.set("inPrivateKey", in_private_key);
         inputs.set("inBlinding", in_blinding);

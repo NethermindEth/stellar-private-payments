@@ -10,44 +10,63 @@ include "./keypair.circom";
 // * nNotes: Number of notes to prove ownership of.
 // Right now we allow proving ownership of multiple notes on different roots BUT for the same external context:
 // - Purpose
-// - Authority 
+// - Authority
 // - Pool address
-// So that you can prove multiple notes 
+// So that you can prove multiple notes
 template SelectiveDisclosure(levels, nNotes) {
     /** PUBLIC INPUTS **/
     signal input roots[nNotes];
     signal input noteCommitments[nNotes];
     signal input extContextHash;
- 
-    
-    /** PRIVATE INPUTS **/
+    // Nullifier, re-computed in-circuit
+    signal input expectedNullifier[nNotes];
+    // Disclosed note amounts
     signal input inAmount[nNotes];
+
+    /** PRIVATE INPUTS **/
     signal input inPrivateKey[nNotes];
     signal input inBlinding[nNotes];
     signal input inPathIndices[nNotes];
     signal input inPathElements[nNotes][levels];
-    
+
     // Components
     component inKeypair[nNotes];
     component inCommitmentHasher[nNotes];
+    component inSignature[nNotes];
+    component inNullifierHasher[nNotes];
     component inTree[nNotes];
-    
+
     for (var ni = 0; ni < nNotes; ni++) {
         // Verify that the sender actually owns the inputs
         // He knows the secret keys and the blinding factors.
         inKeypair[ni] = Keypair();
         inKeypair[ni].privateKey <== inPrivateKey[ni];
-        
+
         // Computes the leaf commitment as hash(amount, publicKey, blinding)
         inCommitmentHasher[ni] = Poseidon2(3);
         inCommitmentHasher[ni].inputs[0] <== inAmount[ni];
         inCommitmentHasher[ni].inputs[1] <== inKeypair[ni].publicKey;
         inCommitmentHasher[ni].inputs[2] <== inBlinding[ni];
         inCommitmentHasher[ni].domainSeparation <== 0x01; // Leaf commitment
-        
+
         // Ensures it matches the claimed note
         noteCommitments[ni] === inCommitmentHasher[ni].out;
-        
+
+        // Computes the signature as hash(privateKey, commitment, merklePath)
+        inSignature[ni] = Signature();
+        inSignature[ni].privateKey <== inPrivateKey[ni];
+        inSignature[ni].commitment <== inCommitmentHasher[ni].out;
+        inSignature[ni].merklePath <== inPathIndices[ni];
+
+        // Computes and constrains the nullifier as hash(commitment, merklePath, signature)
+        inNullifierHasher[ni] = Poseidon2(3);
+        inNullifierHasher[ni].inputs[0] <== inCommitmentHasher[ni].out;
+        inNullifierHasher[ni].inputs[1] <== inPathIndices[ni];
+        inNullifierHasher[ni].inputs[2] <== inSignature[ni].out;
+        inNullifierHasher[ni].domainSeparation <== 0x02;
+        // Ensure it matches the provided nullifier
+        expectedNullifier[ni] === inNullifierHasher[ni].out;
+
         // Verifies the merkle proofs
         inTree[ni] = MerkleProof(levels);
         inTree[ni].leaf <== inCommitmentHasher[ni].out;
@@ -58,6 +77,6 @@ template SelectiveDisclosure(levels, nNotes) {
         // Ensure root matches the expected value
         roots[ni] === inTree[ni].root;
     }
-    // Safety constraint to bind external context 
-    signal extContextSquare <== extContextHash * extContextHash;   
+    // Safety constraint to bind external context
+    signal extContextSquare <== extContextHash * extContextHash;
 }
