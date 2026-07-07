@@ -27,47 +27,14 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 - **Stellar Integration**: Built on Soroban smart contracts
 
 ## Demo Application
-The demo application consists on three main parts:
+[The demo application](https://nethermindeth.github.io/stellar-private-payments/) consists on three main parts:
 - **Frontend**: Provides a nice user interface for interacting with the system. 
 - **Circuits**: Where the real zk-magic happens and constraints are defined.
 - **Smart Contracts**: They define the state of the system, and how transactions are processed.
-The Frontend includes the [user-facing part](#transaction-flow) and an example of an [ASP admin page](#asp-admin-page) which will be separated according to roles in the main application
 
-If you want to try it out:
+The Frontend includes the [user-facing part](#transaction-flow) and an example of an [ASP admin page](#asp-admin-page) which will be separated according to roles in the main application.
 
-1. Deploy the contracts to a Stellar network:
-    ```bash
-    ./deployments/scripts/deploy.sh <network> \                                          # e.g. testnet
-      --deployer <identity> \                                                            # Must be added in stellar-cli keys
-      --asp-levels 10 \                                                                  # Number of levels in the ASP trees
-      --pool-levels 10 \                                                                 # Number of levels in the pool Merkle tree
-      --max-deposit 1000000000 \                                                         # Maximum deposit amount (in Stroops)
-      --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json                   # Verification key file
-      --pool native:$(stellar contract id asset --asset native --network testnet) \      # XLM pool
-      --pool classic:CODE:ISSUE:ASSET_CONTRACT                                           # Stellar Asset Pool
-    ```
-   If you already have deployed contracts, make sure their addresses are updated in `deployments/testnet/deployments.json`.
-
-2. Serve frontend
-    ```bash
-      make serve
-    ```
-    Open `http://localhost:8000` in your browser. You might want to open the console (_Shift + Ctrl + I_) to see the logs.
-    You might need to delete the browser cache from previous runs. Go to `Application` -> `Clear storage`.
-
-
-3. The pool is ready to use. But you will need to populate the ASP membership smart contracts with some public keys. You can do it directly from the stellar-cli:
-    ```bash
-    stellar contract invoke --id <CONTRACT_ADDRESS> --source-account <ASP_ADMIN_ACCOUNT> -- insert_leaf --leaf <LEAF_VALUE> # See circuit for leaf format
-    ```
-    Or, directly access `http://localhost:8000/admin.html` and use the UI to add public keys.
-    Please note that the admin UI allows deriving keys for ANY account.
-    But insertion MUST be signed by the ASP admin account.
-    You can add your Freighter account to your Stellar-cli keys with `stellar keys add <NAME_FOR_ACCOUNT> --seed-phrase`.
-    This will prompt you to type your seed phrase and will enable you to deploy contracts with the same account you have on your browser wallet.
-
-
-4. Go back to `http://localhost:8000` and try it out!
+The demo app demonstrates integration of the Stellar Private Payments [JS/TS SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/web).
 
 ### Architecture Overview
 
@@ -80,19 +47,17 @@ If you want to try it out:
 
 #### ASP Admin Page
 
-This is the administrative control panel for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
+This is [the administrative control panel](https://nethermindeth.github.io/stellar-private-payments/admin.html) for managing the **Association Set Provider (ASP)** membership trees. It allows you to:
 
 1. **Add/insert public keys** to the ASP membership tree - Controls which public keys are approved
 2. **Manage the exclusion list** - Block specific public keys via the non-membership Merkle tree
-3. **Derive keys** for accounts - Generate derived keys for any account (though insertion must be signed by the ASP admin account)
 
-This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy. To access the ASP Admin Page, go to `http://localhost:8000/admin.html`
+This provides **illicit activity safeguards** while maintaining user privacy. The ASP membership trees work with the zero-knowledge proofs to prove that deposits either belong to approved accounts or don't belong to blocked accounts—without compromising privacy.
 
 The admin has the option of toggling the "Admin-Only Leaf Insert", It's enabled by default which restricts only the admin to insert membership leaves but when disabled by the admin, anyone can insert membership leaves.
 
 > [!WARNING]
 > Disabling "Admin-Only Leaf Insert" removes the access-control safeguard on the ASP membership tree. Any party will be able to add themselves (or others) to the approved set without admin approval, bypassing the intended illicit-activity safeguards. Only disable this in a controlled demo or testing environment—never in production.
-
 
 #### Zero-Knowledge Circuits
 
@@ -110,6 +75,8 @@ The main transaction circuit proves:
 - **Circom Groth16 Verifier**: On-chain verification of ZK proofs
 - **ASP Membership**: Merkle tree of approved public keys
 - **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
+- **Public key registry**: A public address book mapping Stellar addresses to user's SPP public keys. \
+  (allows transfers by using just a standard Stellar address)
 
 ## Install the CLI
 
@@ -123,21 +90,28 @@ This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64
 verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
 `dist` data (circuits, proving key, license/notice texts). Then run `spp --help`.
 
-To install a specific release or the latest prerelease:
+To install a specific release
 
 ```bash
 curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --version v0.1.0
+```
+
+or the latest prerelease
+
+```bash
 curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh -s -- --pre
 ```
 
+CLI demonstrates integration of the Stellar Private Payments [Rust SDK](https://github.com/NethermindEth/stellar-private-payments/tree/main/sdk/pool).
+
 ## Limitations
 
-As a work-in-progress, this implementation has several limitations:
+As a work-in-progress, this implementation has several limitations to be resolved in the nearest future:
 
 - **Stellar Events retention**: The app relies heavily on Stellar events. But RPC nodes only store events for a small retention window (7 days). This means that the demo will not work for users onboarded after 7 days of contract deployment because they couldn't re-play events history. But a user who onboarded within 7 days from the contracts deployment and keeps their app tab open in a browser, can use the app without a reset as the events digestion happens in the background.
 - **Not Audited**: The code has not undergone security audits.
 - **Error Handling**: Error handling may not cover all edge cases.
-- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them.
+- **Browser storage** for the storage the app uses SQLite relying on [OPFS](https://developer.mozilla.org/en-US/docs/Web/API/File_System_API/Origin_private_file_system). Basically, the data is stored on the file system as some files with opaque names. Some antiviruses and other software may accidentally delete them. Nevertheless, losing the local state is not critical - all keys are deterministically derived from the wallet-signed message. Only the local app settings and the history of operations (executed by a user) are lost in this case but it doesn't prevent from the new onboarding of the same user and restoring thus an access to pooled tokens.
 
 
 ## AI tools disclosure
