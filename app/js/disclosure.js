@@ -73,15 +73,22 @@ function svgEl(tag, attrs = {}, children = []) {
   for (const c of children) node.appendChild(c);
   return node;
 }
-function el(tag, className, textOrChildren) {
+// Create an element with optional class and text. Text always goes through
+// textContent, so it is never interpreted as HTML.
+function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (Array.isArray(textOrChildren)) {
-    for (const child of textOrChildren) {
-      if (child != null) node.appendChild(child);
-    }
-  } else if (textOrChildren != null) {
-    node.textContent = textOrChildren;
+  if (text != null) node.textContent = String(text);
+  return node;
+}
+// Create an element and append DOM-node children. `children` only ever
+// contains Nodes (or null) built via el()/svgEl() — never raw strings — so
+// nothing untrusted reaches appendChild as markup.
+function elc(tag, className, children) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  for (const child of children) {
+    if (child instanceof Node) node.appendChild(child);
   }
   return node;
 }
@@ -629,7 +636,7 @@ export function mountGenerate(container) {
 
       const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
       card.appendChild(
-        el('div', 'flex justify-between text-xs', [
+        elc('div', 'flex justify-between text-xs', [
           el('span', 'text-dark-500', `Note ${i + 1}`),
           el('span', 'font-medium text-brand-300', amountText),
         ])
@@ -1063,9 +1070,9 @@ export function mountVerify(container) {
           : 'bg-dark-800 border-dark-700'
       }`);
       card.appendChild(
-        el('div', 'flex justify-between text-xs', [
+        elc('div', 'flex justify-between text-xs', [
           el('span', 'text-dark-500', `Note ${i + 1}`),
-          el('div', 'flex items-center gap-2', [
+          elc('div', 'flex items-center gap-2', [
             isSpent
               ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
               : null,
