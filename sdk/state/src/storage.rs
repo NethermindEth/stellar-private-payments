@@ -438,13 +438,23 @@ impl Storage {
     }
 
     /// List notes derived for `address` (newest first), with pagination.
+    ///
+    /// `spent` filters to spent-only (`Some(true)`), unspent-only
+    /// (`Some(false)`), or all notes (`None`) — applied in SQL so `offset`/
+    /// `limit` page over the filtered set, matching [`Self::count_user_notes`].
     pub fn list_user_notes(
         &self,
         address: &str,
         offset: u32,
         limit: u32,
+        spent: Option<bool>,
     ) -> Result<Vec<UserNoteSummary>> {
-        let mut stmt = self.conn.prepare(
+        let spent_clause = match spent {
+            Some(true) => "AND n.nullifier_id IS NOT NULL",
+            Some(false) => "AND n.nullifier_id IS NULL",
+            None => "",
+        };
+        let mut stmt = self.conn.prepare(&format!(
             "SELECT
                 n.id,
                 pool.address,
@@ -457,10 +467,10 @@ impl Storage {
              JOIN pool_commitments c ON c.id = n.commitment_id
              JOIN raw_contract_events r ON r.id = c.event_id
              JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1
+             WHERE a.address = ?1 {spent_clause}
              ORDER BY r.ledger DESC
-             LIMIT ?2 OFFSET ?3",
-        )?;
+             LIMIT ?2 OFFSET ?3"
+        ))?;
 
         let rows = stmt.query_map(params![address, limit, offset], |row| {
             let id: Field = row.get(0)?;
@@ -489,19 +499,28 @@ impl Storage {
         Ok(out)
     }
 
-    /// Total number of notes derived for `address`.
-    pub fn count_user_notes(&self, address: &str) -> Result<u32> {
-        self.conn
+    /// Total number of notes derived for `address`, under the same `spent`
+    /// filter as [`Self::list_user_notes`].
+    pub fn count_user_notes(&self, address: &str, spent: Option<bool>) -> Result<u32> {
+        let spent_clause = match spent {
+            Some(true) => "AND n.nullifier_id IS NOT NULL",
+            Some(false) => "AND n.nullifier_id IS NULL",
+            None => "",
+        };
+        let count: i64 = self
+            .conn
             .query_row(
-                "SELECT COUNT(*)
-                 FROM user_notes n
-                 JOIN accounts a ON a.id = n.account_id
-                 WHERE a.address = ?1",
+                &format!(
+                    "SELECT COUNT(*)
+                     FROM user_notes n
+                     JOIN accounts a ON a.id = n.account_id
+                     WHERE a.address = ?1 {spent_clause}"
+                ),
                 params![address],
-                |row| row.get::<_, i64>(0),
+                |row| row.get(0),
             )
-            .map(|n| n as u32)
-            .context("count_user_notes")
+            .context("count_user_notes")?;
+        u32::try_from(count).context("count_user_notes: count exceeds u32")
     }
 
     /// All notes for `address` in `pool_contract_id` (newest first), spent and

@@ -70,8 +70,16 @@ pub enum StorageWorkerRequest {
     },
     UserKeys(Address),
     AspSecret(Address),
-    UserNotes { address: Address, offset: u32, limit: u32 },
-    CountUserNotes(Address),
+    UserNotes {
+        address: Address,
+        offset: u32,
+        limit: u32,
+        spent: Option<bool>,
+    },
+    CountUserNotes {
+        address: Address,
+        spent: Option<bool>,
+    },
     PortfolioBalances(Address),
     RecordOperation {
         address: Address,

@@ -113,12 +113,12 @@ function wrapSdkClient(sdk, sdkStorage) {
             });
             return response.OperationalFeed ?? [];
         },
-        async getUserNotes(address, offset, limit) {
-            const response = await storageCall(sdkStorage, { UserNotes: { address, offset, limit } });
+        async getUserNotes(address, offset, limit, spent = null) {
+            const response = await storageCall(sdkStorage, { UserNotes: { address, offset, limit, spent } });
             return response.UserNotes ?? [];
         },
-        async getUserNotesCount(address) {
-            const response = await storageCall(sdkStorage, { CountUserNotes: address });
+        async getUserNotesCount(address, spent = null) {
+            const response = await storageCall(sdkStorage, { CountUserNotes: { address, spent } });
             return response.UserNotesCount ?? 0;
         },
         async deriveAspUserLeaf(membershipBlinding, notePublicKey) {

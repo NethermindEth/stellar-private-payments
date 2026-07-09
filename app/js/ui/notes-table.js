@@ -73,15 +73,20 @@ export const NotesTable = {
         }
     },
 
+    spentFilter() {
+        return this.filter === 'unspent' ? false : this.filter === 'spent' ? true : null;
+    },
+
     async refreshOnce() {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
         try {
             const address = App.state.wallet.address;
             const offset = this.page * PAGE_SIZE;
+            const spent = this.spentFilter();
             const [list, count] = await Promise.all([
-                client().getUserNotes(address, offset, PAGE_SIZE),
-                client().getUserNotesCount(address),
+                client().getUserNotes(address, offset, PAGE_SIZE, spent),
+                client().getUserNotesCount(address, spent),
             ]);
             this.totalCount = count ?? 0;
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
@@ -112,7 +117,6 @@ export const NotesTable = {
 
         tbody.replaceChildren();
         const filtered = App.state.notes
-            .filter(note => this.filter === 'all' ? true : this.filter === 'unspent' ? !note.spent : note.spent)
             .filter(note => !App.state.selectedPoolId || note.poolContractId === App.state.selectedPoolId)
             .map(noteWithLabels);
 
