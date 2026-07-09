@@ -874,7 +874,7 @@ mod tests {
         assert!(report.context_verified);
         assert!(report.known_root_status);
         assert!(report.nullifiers_unspent);
-        assert!(report.is_fully_verified());
+        assert!(report.is_valid_and_unspent());
         Ok(())
     }
 

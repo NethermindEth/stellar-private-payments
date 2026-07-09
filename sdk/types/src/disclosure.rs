@@ -242,11 +242,12 @@ impl DisclosurePublicInputs {
 /// Verification status returned.
 ///
 /// # Security semantics
-/// A receipt is trustworthy **only when all four fields are `true`**:
-/// `proof_verified && context_verified && known_root_status &&
-/// nullifiers_unspent`. The fields are kept separate so callers can diagnose
-/// *why* verification failed, but a consumer must check the conjunction, not
-/// any individual flag.
+/// A receipt's cryptographic and contextual validity is confirmed when
+/// `proof_verified && context_verified && known_root_status` are all `true`.
+/// The `nullifiers_unspent` flag is separate: a valid receipt may disclose
+/// previously spent notes (e.g., to prove a past payment). The fields are
+/// kept separate so callers can enforce their specific business logic (e.g.,
+/// requiring unspent notes) while diagnosing exactly why validation failed.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct DisclosureVerificationReport {
@@ -266,13 +267,16 @@ pub struct DisclosureVerificationReport {
 }
 
 impl DisclosureVerificationReport {
-    /// Returns `true` only when proof, context, root freshness, and unspent
-    /// status all pass.
-    pub fn is_fully_verified(&self) -> bool {
-        self.proof_verified
-            && self.context_verified
-            && self.known_root_status
-            && self.nullifiers_unspent
+    /// Returns `true` when the proof, context, and root freshness checks all
+    /// pass. This confirms the mathematical validity of the disclosure.
+    pub fn is_cryptographically_valid(&self) -> bool {
+        self.proof_verified && self.context_verified && self.known_root_status
+    }
+
+    /// Returns `true` only when the disclosure is cryptographically valid
+    /// *and* all disclosed notes are currently unspent.
+    pub fn is_valid_and_unspent(&self) -> bool {
+        self.is_cryptographically_valid() && self.nullifiers_unspent
     }
 }
 /// Parses a strict `0x`-prefixed lowercase hex string.

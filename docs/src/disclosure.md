@@ -19,7 +19,7 @@ A receipt is a JSON object with the following schema:
     "name": "selectiveDisclosure_2",
     "levels": 10,
     "nNotes": 2,
-    "vkHash": "0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1"
+    "vkHash": "0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d"
   },
   "context": {
     "network": "testnet",
@@ -100,10 +100,8 @@ Anyone with the receipt JSON can verify it at `/disclosure.html`, **no wallet re
 4. Confirm the **Expected VK hash** field. It defaults to the canonical hash published in this documentation and in `deployments/testnet/circuit_keys/README.md`. Authorities who pin a different key can click **Override** and paste their own hash.
 5. Click **Verify Receipt**.
 
-### Where the canonical `vk_hash` is published
+### Canonical `vk_hash` values
 
-| Location | Contents |
-|---|---|
 | Circuit | Canonical `vk_hash` |
 |---|---|
 | `selectiveDisclosure_1` | `0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e` |
