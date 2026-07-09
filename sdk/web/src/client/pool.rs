@@ -182,6 +182,5 @@ pub(crate) fn build_pool_config(
         pool_contract_id,
         user_address,
         storage_path: String::new(),
-        prover_artifacts: stellar_private_payments_sdk::ProverArtifacts::empty(),
     }
 }

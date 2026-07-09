@@ -11,13 +11,14 @@
 //!     LocalProver, LocalSigner, LocalStorage, PrivatePool, PrivatePoolConfig, ProverArtifacts,
 //!     SyncMode,
 //!     types::{
-//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient,
+//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, PolicyMode,
+//!         TransferRecipient,
 //!     },
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage_path = "wallet.sqlite";
-//! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
+//! let artifacts = load_transact_artifacts(); // proving key + wasm + r1cs per mode
 //!
 //! let config = PrivatePoolConfig {
 //!     rpc_url: "https://soroban-testnet.stellar.org".into(),
@@ -25,7 +26,6 @@
 //!     pool_contract_id: "CA2TZ...".into(),
 //!     user_address: "G...".into(),
 //!     storage_path: storage_path.into(),
-//!     prover_artifacts: artifacts.clone(),
 //! };
 //!
 //! let pool = PrivatePool::init(
@@ -36,7 +36,7 @@
 //!         "Test SDF Network ; September 2015",
 //!         "G...",
 //!     )?),
-//!     Box::new(LocalProver::from_artifacts(&artifacts)?),
+//!     Box::new(LocalProver::from_artifacts(&[(PolicyMode::Permissioned, artifacts.clone())])?),
 //!     SyncMode::Inline,
 //! )?;
 //!

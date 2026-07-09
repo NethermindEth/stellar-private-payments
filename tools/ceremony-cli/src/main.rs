@@ -39,7 +39,7 @@ enum Commands {
 #[derive(Debug, clap::Args)]
 struct CeremonyArgs {
     /// Path to the `.r1cs` file. If omitted, auto-discovers
-    /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
+    /// `policy_tx_2_2_permissioned.r1cs` from the Cargo build output directory.
     #[arg(short = 'c', long = "circuit")]
     circuits: Option<PathBuf>,
     /// Input Powers of Tau file.
@@ -60,7 +60,7 @@ struct ContributeArgs {
     #[arg(short = 'z', long = "zkey")]
     zkey: PathBuf,
     /// Path to the `.r1cs` file. If omitted, auto-discovers the compiled
-    /// `policy_tx_2_2.r1cs` from the Cargo build output directory.
+    /// `policy_tx_2_2_permissioned.r1cs` from the Cargo build output directory.
     #[arg(short = 'c', long = "circuit")]
     circuits: Option<PathBuf>,
     /// Input Powers of Tau file.
@@ -110,7 +110,7 @@ struct ExportDeploymentArgs {
     #[arg(short = 'o', long = "out-dir")]
     out_dir: PathBuf,
     /// Basename used for output files.
-    #[arg(long = "basename", default_value = "policy_tx_2_2")]
+    #[arg(long = "basename", default_value = "policy_tx_2_2_permissioned")]
     basename: String,
     /// Overwrite existing outputs.
     #[arg(long = "force", action = ArgAction::SetTrue)]
@@ -416,7 +416,7 @@ fn resolve_snarkjs_circuit_path(path: &Path) -> Result<PathBuf> {
 
 /// Default name of the compiled circuit as produced and verified by `cargo
 /// build -p circuits --release`.
-const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2.r1cs";
+const DEFAULT_R1CS_NAME: &str = "policy_tx_2_2_permissioned.r1cs";
 
 /// Resolves the `--circuit` argument. If the user supplied an explicit path it
 /// is validated and returned. Otherwise we auto-discover the compiled `.r1cs`

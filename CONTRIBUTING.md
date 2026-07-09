@@ -53,7 +53,7 @@ stellar-private-payments/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
 │   │   ├── smt/                # Sparse Merkle tree circuits
 │   │   ├── test/               # Circuit test utilities
-│   │   ├── policyTransaction.circom  # Main transaction circuit
+│   │   ├── policyTransactionPermissioned.circom  # Permissioned transaction circuit
 │   │   └── *.circom            # Supporting circuits
 │   └── build.rs                # Circuit compilation build script
 ├── circuit-keys/               # Helpers to convert snarkjs keys to Arkworks
@@ -154,8 +154,18 @@ You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a 
 
 See `./deployments/scripts/deploy.sh --help` for all options.
 
-For testnet purposes
-(https://www.circle.com/eurc#how-to-start-using-eurc, you can use https://faucet.circle.com/ to fund your account (but first add an asset and a trustline in your wallet))
+Each pool has a **policy mode** (`open` or `permissioned`) fixed at deploy time. The mode selects which transact circuit/VK the pool's verifier embeds. A single deployment can include **multiple pools with different policies**; the script deploys one verifier contract per mode used and wires the matching verifier into each pool constructor.
+
+Pool specs accept an optional per-pool prefix:
+
+- `open:native:<TOKEN_CONTRACT_ID>`
+- `permissioned:contract:<TOKEN_CONTRACT_ID>`
+
+Or pass `--policy-mode` as the default when specs omit the prefix.
+
+For testnet open-only pools, pass `--policy-mode open` (or prefix each `--pool` with `open:`) and omit `--vk-file` to use the committed key at `deployments/testnet/circuit_keys/policy_tx_2_2_open_vk.json`.
+
+Mixed-policy example:
 
 ```sh
 ./deployments/scripts/deploy.sh testnet \
@@ -163,9 +173,34 @@ For testnet purposes
   --asp-levels 10 \
   --pool-levels 10 \
   --max-deposit 1000000000 \
-  --vk-file deployments/testnet/circuit_keys/policy_tx_2_2_vk.json \
+  --pool open:native:$(stellar contract id asset --asset native --network testnet) \
+  --pool permissioned:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+```
+
+For testnet purposes
+(https://www.circle.com/eurc#how-to-start-using-eurc, you can use https://faucet.circle.com/ to fund your account (but first add an asset and a trustline in your wallet))
+
+```sh
+./deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-mode open \
+  --asp-levels 10 \
+  --pool-levels 10 \
+  --max-deposit 1000000000 \
   --pool native:$(stellar contract id asset --asset native --network testnet) \
   --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+```
+
+Permissioned pool (allowlist + blocklist):
+
+```sh
+./deployments/scripts/deploy.sh testnet \
+  --deployer <identity> \
+  --policy-mode permissioned \
+  --asp-levels 10 \
+  --pool-levels 10 \
+  --max-deposit 1000000000 \
+  --pool native:$(stellar contract id asset --asset native --network testnet)
 ```
 
 ### End-to-End Tests

@@ -1,4 +1,4 @@
-use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey};
+use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyMode};
 use serde::{Deserialize, Serialize};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
@@ -54,6 +54,7 @@ pub struct PoolInfo {
     pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
+    pub policy_mode: PolicyMode,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -86,7 +87,7 @@ pub struct AspNonMembership {
     pub admin: String,
 }
 
-/// ASP non-membership (sanctions) proof data needed by the circuit.
+/// ASP non-membership (blocklist) proof data needed by the circuit.
 ///
 /// The prover crate does not fetch or build these proofs. Treat them as
 /// external inputs provided by a higher-level "state/chain" component.
@@ -120,6 +121,7 @@ pub struct TransactChainContext {
     pub asp_membership_contract_id: String,
     pub asp_membership_ledger: u32,
     pub non_membership_proof: AspNonMembershipProof,
+    pub policy_mode: PolicyMode,
 }
 
 pub fn transact_chain_context_from_state(
@@ -148,6 +150,7 @@ pub fn transact_chain_context_from_state(
         asp_membership_contract_id: data.asp_membership.contract_id,
         asp_membership_ledger: data.asp_membership.ledger,
         non_membership_proof,
+        policy_mode: pool.policy_mode,
     })
 }
 

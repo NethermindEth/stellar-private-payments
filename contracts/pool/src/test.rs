@@ -5,6 +5,7 @@ use crate::{
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
+use contract_types::PolicyMode;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -129,6 +130,7 @@ fn register_pool(
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount,
             levels,
+            PolicyMode::Permissioned,
         ),
     )
 }
@@ -503,6 +505,7 @@ fn transact_rejects_non_canonical_nullifier() {
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount.clone(),
             levels,
+            PolicyMode::Permissioned,
         ),
     );
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -556,6 +559,7 @@ fn transact_rejects_non_canonical_output_commitment() {
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount.clone(),
             levels,
+            PolicyMode::Permissioned,
         ),
     );
     let pool = PoolContractClient::new(&env, &pool_id);
@@ -608,6 +612,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount.clone(),
             levels,
+            PolicyMode::Permissioned,
         ),
     );
     let pool = PoolContractClient::new(&env, &pool_id);

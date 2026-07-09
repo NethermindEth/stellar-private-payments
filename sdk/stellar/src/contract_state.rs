@@ -1,7 +1,7 @@
 use crate::{
     conversions::{
-        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool, scval_to_u32,
-        scval_to_u64, scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool,
+        scval_to_policy_mode, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
     soroban_encode::BASE_FEE,
@@ -148,6 +148,7 @@ impl StateFetcher {
                     "CurrentRootIndex",
                     "NextIndex",
                     "MaximumDepositAmount",
+                    "PolicyMode",
                 ],
                 valued_keys: vec![],
             });
@@ -312,6 +313,19 @@ impl StateFetcher {
                     merkle_root,
                     merkle_capacity,
                     total_commitments: merkle_next_index.to_string(),
+                    policy_mode: match pool_state.get("PolicyMode") {
+                        Some(val) => scval_to_policy_mode(val)?,
+                        None => match pool_state.get("MembershipRequired") {
+                            Some(val) => {
+                                if scval_to_bool(val)? {
+                                    types::PolicyMode::Permissioned
+                                } else {
+                                    types::PolicyMode::Open
+                                }
+                            }
+                            None => types::PolicyMode::Permissioned,
+                        },
+                    },
                 };
 
                 out.push(pool_info);
@@ -445,7 +459,7 @@ impl StateFetcher {
 
         if parsed.found {
             return Err(anyhow!(
-                "Key exists in non-membership tree (user is sanctioned)"
+                "Key exists in non-membership tree (user is blocklisted)"
             ));
         }
 

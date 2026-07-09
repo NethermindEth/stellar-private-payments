@@ -1,7 +1,7 @@
 //! `config` — inspect resolved config, write a template, and update the
 //! explorer / bootnode settings stored in the local database.
 
-use std::path::Path;
+use std::{collections::BTreeMap, path::Path};
 
 use anyhow::Result;
 use serde::Serialize;
@@ -40,7 +40,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         bootnode_url: &'a str,
         asp_membership: &'a str,
         asp_non_membership: &'a str,
-        verifier: &'a str,
+        verifiers: &'a BTreeMap<String, String>,
         public_key_registry: &'a str,
         enabled_pools: usize,
     }
@@ -58,7 +58,7 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
         bootnode_url: &bootnode.url,
         asp_membership: &config.deployment.asp_membership,
         asp_non_membership: &config.deployment.asp_non_membership,
-        verifier: &config.deployment.verifier,
+        verifiers: &config.deployment.verifiers,
         public_key_registry: &config.deployment.public_key_registry,
         enabled_pools: config.deployment.pools.iter().filter(|p| p.enabled).count(),
     };
@@ -94,7 +94,9 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     );
     output::print_kv("asp_membership", payload.asp_membership);
     output::print_kv("asp_non_membership", payload.asp_non_membership);
-    output::print_kv("verifier", payload.verifier);
+    for (mode, id) in payload.verifiers {
+        output::print_kv(&format!("verifier.{mode}"), id);
+    }
     output::print_kv("public_key_registry", payload.public_key_registry);
     output::print_kv("enabled_pools", payload.enabled_pools);
     Ok(())

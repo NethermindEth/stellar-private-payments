@@ -1917,6 +1917,7 @@ dependencies = [
  "asp-non-membership",
  "circom-groth16-verifier",
  "circuits",
+ "contract-types",
  "num-bigint",
  "pool",
  "soroban-sdk",

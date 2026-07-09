@@ -55,6 +55,24 @@ impl Groth16Proof {
     }
 }
 
+/// ASP policy enforced in pool transact proofs.
+#[contracttype]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum PolicyMode {
+    Permissioned,
+    Open,
+}
+
+impl PolicyMode {
+    pub fn requires_membership_proofs(self) -> bool {
+        matches!(self, PolicyMode::Permissioned)
+    }
+
+    pub fn requires_non_membership_proofs(self) -> bool {
+        true
+    }
+}
+
 /// Size of a single BN254 field element in bytes.
 pub const FIELD_ELEMENT_SIZE: u32 = 32;
 

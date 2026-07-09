@@ -7,7 +7,7 @@ use crate::{
     PreparedTransaction, PreparedTransactionPlan, SyncMode,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
-    prover::{LocalProver, NoopProver},
+    prover::{NoopProver, Prover},
     signer::Signer,
     storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
@@ -21,18 +21,18 @@ pub struct PrivatePool {
 }
 
 impl PrivatePool {
-    pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
+    pub fn open(
+        config: PrivatePoolConfig,
+        signer: Box<dyn Signer>,
+        prover: Box<dyn Prover>,
+    ) -> Result<Self, PoolError> {
         let storage = LocalStorage::open(&config.storage_path)?;
-        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
         let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Inline)?;
         Ok(Self { inner })
     }
 
-    /// Open a read-only pool session: no prover is constructed, so the proving
-    /// key / circuit artifacts in `config.prover_artifacts` are ignored and
-    /// never loaded. Suitable for balance/notes/sync; any transact/prove call
-    /// on the resulting pool errors. Callers that only read state should use
-    /// this to avoid the [`LocalProver`] init cost.
+    /// Open a read-only pool session with a no-op prover. Suitable for
+    /// balance/notes/sync; any transact/prove call errors.
     pub fn open_readonly(
         config: PrivatePoolConfig,
         signer: Box<dyn Signer>,
@@ -55,9 +55,9 @@ impl PrivatePool {
     pub fn open_local(
         config: PrivatePoolConfig,
         signer: Box<dyn Signer>,
+        prover: Box<dyn Prover>,
     ) -> Result<Self, PoolError> {
         let storage = LocalStorage::open(&config.storage_path)?;
-        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
         let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Background)?;
         Ok(Self { inner })
     }

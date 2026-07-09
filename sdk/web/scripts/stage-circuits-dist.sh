@@ -9,8 +9,10 @@ CIRCUITS_OUT="$ROOT/target/circuits-artifacts/$PROFILE"
 DIST="$WEB/dist"
 
 ARTIFACTS=(
-  policy_tx_2_2.wasm
-  policy_tx_2_2.r1cs
+  policy_tx_2_2_permissioned.wasm
+  policy_tx_2_2_permissioned.r1cs
+  policy_tx_2_2_open.wasm
+  policy_tx_2_2_open.r1cs
   selectiveDisclosure_1.wasm
   selectiveDisclosure_1.r1cs
   selectiveDisclosure_2.wasm

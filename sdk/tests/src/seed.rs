@@ -11,7 +11,8 @@ use stellar_private_payments_sdk::{
 };
 use types::{
     AspNonMembershipProof, ContractEvent, ContractsEventData, Field, KeyDerivationSignature,
-    LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, SMT_DEPTH, SyncMetadata,
+    LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyMode, SMT_DEPTH,
+    SyncMetadata,
 };
 
 pub const POOL_MERKLE_LEVELS: u32 = 10;
@@ -313,6 +314,7 @@ fn chain_snapshot_from_storage(
             siblings: vec![Field::ZERO; SMT_DEPTH as usize],
             root: Field::ZERO,
         },
+        policy_mode: PolicyMode::Permissioned,
     })
 }
 

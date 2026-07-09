@@ -4,7 +4,10 @@
   "admin": "GDF4BXPQY5N4BEO24UIHM4NVB62MW7HDWH7SVHKLVZAMLP5IIHCFQORC",
   "asp_membership": "CDSJXWV5JITIQLXNM4AEI53RY2UQLOQBCG6WKYCFPWS5AHBAD3FWAVNH",
   "asp_non_membership": "CBG3BT6KHJM3UQGSUP2GHPQE5FLPEYBFVF47DCDHH6UOYQ6KDT5URJTI",
-  "verifier": "CCKNCZXDGM7Z7EHL7PVQEYRDK636TZJIDODO5TSAS5BME2JYGMFR3MU3",
+  "verifiers": {
+    "open": "CC3V62JEX2IOU2S6QRTSG7HWAYLV4E2LDPX3VOV5V6NN4POMS5IYDOA5",
+    "permissioned": "CCKNCZXDGM7Z7EHL7PVQEYRDK636TZJIDODO5TSAS5BME2JYGMFR3MU3"
+  },
   "public_key_registry": "CB3IAFWZPU5H5MQ4NEMQCWLZJ6PAYZWLAA4DZIRZZCWXSI2WV6C7L556",
   "pools": [
     {
@@ -12,6 +15,7 @@
       "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
       "deploymentLedger": 3479862,
       "enabled": true,
+      "policyMode": "open",
       "asset": {
         "kind": "native"
       }
@@ -21,6 +25,7 @@
       "tokenContractId": "CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ",
       "deploymentLedger": 3479864,
       "enabled": true,
+      "policyMode": "permissioned",
       "asset": {
         "kind": "classic",
         "code": "EURC",

@@ -3,7 +3,7 @@
 # explicitly before building (the `force` flag is intentionally absent so the
 # env-var takes precedence when set).
 [env]
-VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_vk.json", relative = true }
+VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_permissioned_vk.json", relative = true }
 
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"

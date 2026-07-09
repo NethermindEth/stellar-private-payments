@@ -10,19 +10,20 @@ use gloo_worker::{
     oneshot::{OneshotBridge, oneshot},
 };
 use sha2::{Digest as _, Sha256};
-use std::{cell::RefCell, fmt::Write as _};
+use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments_sdk::{
     PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
     tx::flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
-        DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
+        DisclosureReceipt, POLICY_TX_2_2_OPEN, POLICY_TX_2_2_PERMISSIONED,
+        SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
         SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_LEVELS, SELECTIVE_DISCLOSURE_2_N_NOTES,
         SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
         SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT,
-        SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
+        SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES, policy_tx_stem,
     },
 };
 use wasm_bindgen::JsError;
@@ -37,8 +38,17 @@ enum InitState {
     Failed(String),
 }
 
-const PROVING_KEY: &[u8] =
-    include_bytes!("../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
+const PERMISSIONED_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_permissioned_proving_key.bin"
+);
+const OPEN_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_open_proving_key.bin"
+);
+
+const POLICY_TRANSACT_CIRCUITS: [(&str, &[u8]); 2] = [
+    (POLICY_TX_2_2_PERMISSIONED, PERMISSIONED_PROVING_KEY),
+    (POLICY_TX_2_2_OPEN, OPEN_PROVING_KEY),
+];
 
 const DISCLOSURE_PROVING_KEYS: [&[u8]; 4] = [
     include_bytes!(
@@ -101,12 +111,91 @@ fn ensure_sha256_matches(
 // wasm threads?
 
 thread_local! {
-    static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
+    static TRANSACT_PROVERS: RefCell<HashMap<&'static str, ProverEngine>> =
+        RefCell::new(HashMap::new());
     static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> =
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+}
+
+struct TransactArtifactHashes {
+    proving_key_len: usize,
+    proving_key_sha256: [u8; 32],
+    wasm_len: usize,
+    wasm_sha256: [u8; 32],
+    r1cs_len: usize,
+    r1cs_sha256: [u8; 32],
+}
+
+fn transact_hashes(stem: &str) -> TransactArtifactHashes {
+    match stem {
+        POLICY_TX_2_2_PERMISSIONED => TransactArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_R1CS_SHA256,
+        },
+        POLICY_TX_2_2_OPEN => TransactArtifactHashes {
+            proving_key_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_R1CS_SHA256,
+        },
+        _ => panic!("unsupported transact circuit stem: {stem}"),
+    }
+}
+
+async fn load_transact_prover(stem: &str, proving_key: &[u8]) -> Result<ProverEngine, JsError> {
+    let hashes = transact_hashes(stem);
+    let (wasm_bytes, r1cs_bytes) = try_join!(
+        async {
+            let wasm_bytes: Vec<u8> = fetch_circuit_file(&format!("{stem}.wasm")).await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched {stem}.wasm: {} bytes",
+                wasm_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(wasm_bytes)
+        },
+        async {
+            let r1cs_bytes: Vec<u8> = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
+            log::debug!(
+                "[{WORKER_NAME}] fetched {stem}.r1cs: {} bytes",
+                r1cs_bytes.len()
+            );
+            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+        }
+    )?;
+
+    ensure_sha256_matches(
+        &format!("{stem}_proving_key.bin"),
+        proving_key,
+        hashes.proving_key_len,
+        hashes.proving_key_sha256,
+    )?;
+    ensure_sha256_matches(
+        &format!("{stem}.wasm"),
+        &wasm_bytes,
+        hashes.wasm_len,
+        hashes.wasm_sha256,
+    )?;
+    ensure_sha256_matches(
+        &format!("{stem}.r1cs"),
+        &r1cs_bytes,
+        hashes.r1cs_len,
+        hashes.r1cs_sha256,
+    )?;
+
+    ProverEngine::new(proving_key, &wasm_bytes, &r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init {stem} transact prover: {e:#}")))
 }
 
 struct DisclosureArtifactHashes {
@@ -174,56 +263,27 @@ fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
-    let all_ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
+    let transact_ready = TRANSACT_PROVERS.with(|s| {
+        POLICY_TRANSACT_CIRCUITS
+            .iter()
+            .all(|(stem, _)| s.borrow().contains_key(stem))
+    });
+    let all_ready = transact_ready
         && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow().iter().all(|c| c.is_some()))
         && DISCLOSURE_PROVERS.with(|s| s.borrow().iter().all(|p| p.is_some()));
     if all_ready {
         return Ok(());
     }
 
-    let (wasm_bytes, r1cs_bytes) = try_join!(
-        async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.wasm").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
-        },
-        async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.r1cs").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
-                r1cs_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+    for (stem, proving_key) in POLICY_TRANSACT_CIRCUITS {
+        if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
+            continue;
         }
-    )?;
-
-    ensure_sha256_matches(
-        "policy_tx_2_2_proving_key.bin",
-        PROVING_KEY,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "policy_tx_2_2.wasm",
-        &wasm_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "policy_tx_2_2.r1cs",
-        &r1cs_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
-    )?;
-
-    let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
-    TRANSACT_PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(transact_prover);
-    });
+        let transact_prover = load_transact_prover(stem, proving_key).await?;
+        TRANSACT_PROVERS.with(|cell| {
+            cell.borrow_mut().insert(stem, transact_prover);
+        });
+    }
 
     let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
         futures::future::try_join_all((1..=4).map(|n_notes| async move {
@@ -343,11 +403,12 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
-            let prepared = TRANSACT_PROVER.with(|cell| {
+            let stem = policy_tx_stem(params.policy_mode);
+            let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
-                let engine = borrow
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("transact prover is not initialized"))?;
+                let engine = borrow.get_mut(stem).ok_or_else(|| {
+                    anyhow::anyhow!("transact prover for {stem} is not initialized")
+                })?;
                 engine.prove_transact(params)
             })?;
             ProverWorkerResponse::TransactPrepared(prepared)

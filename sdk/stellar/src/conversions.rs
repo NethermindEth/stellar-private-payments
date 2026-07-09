@@ -173,6 +173,32 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     }
 }
 
+/// Decode a pool `PolicyMode` from contract storage (enum or legacy bool).
+pub fn scval_to_policy_mode(val: &xdr::ScVal) -> Result<types::PolicyMode, Error> {
+    if let xdr::ScVal::Vec(Some(items)) = val {
+        let first = items
+            .first()
+            .ok_or_else(|| Error::UnexpectedScVal("empty policy mode vec".into()))?;
+        if let xdr::ScVal::Symbol(sym) = first {
+            return match sym.to_utf8_string()?.as_str() {
+                "Permissioned" => Ok(types::PolicyMode::Permissioned),
+                "Open" | "Relaxed" | "OpenPermissioned" => Ok(types::PolicyMode::Open),
+                other => Err(Error::UnexpectedScVal(format!(
+                    "unknown PolicyMode variant: {other}"
+                ))),
+            };
+        }
+    }
+    if let Ok(legacy) = scval_to_bool(val) {
+        return Ok(if legacy {
+            types::PolicyMode::Permissioned
+        } else {
+            types::PolicyMode::Open
+        });
+    }
+    Err(Error::UnexpectedScVal(format!("{val:?}")))
+}
+
 #[derive(Debug)]
 pub struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
