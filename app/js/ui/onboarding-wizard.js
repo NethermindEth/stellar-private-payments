@@ -1,5 +1,5 @@
-import { getHandle } from '../wasm-facade.js';
-import { deriveKeysFromWallet } from '../wallet.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { client } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
@@ -159,10 +159,7 @@ function setStepState(stepId, state) {
     }
 }
 
-function maskSecret(secret) {
-    if (!secret) return 'Not available';
-    return `${'*'.repeat(12)}${secret.slice(-6)}`;
-}
+const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
 
 function renderDisclaimerMarkdown(md, container) {
     container.textContent = '';
@@ -256,27 +253,30 @@ async function persistStorageIfWanted() {
     }
 }
 
-async function registerNow({ client, address, notePublicKey, encryptionPublicKey, networkPassphrase }) {
+async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
-    return client.registerPublicKeys(
-        address,
-        notePublicKey,
-        encryptionPublicKey,
-        networkPassphrase,
-        null,
-    );
+    await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
+    return client().registerPublicKeys({
+        notePublicKeyHex: notePublicKey,
+        encryptionPublicKeyHex: encryptionPublicKey,
+    });
 }
 
-export async function runOnboardingWizard({ address, networkPassphrase, bootnodeRequired = false } = {}) {
-    const client = getHandle().webClient;
+export async function runOnboardingWizard({
+    address,
+    networkPassphrase,
+    bootnodeRequired = false,
+    signer = new FreighterSigner(),
+} = {}) {
     if (!address) throw new Error('Wallet address required for onboarding');
 
-    const disclaimerState = await client.getDisclaimerState(address);
-    const existingKeys = await client.getUserKeys(address);
-    const existingAspSecret = await client.getASPSecret(address);
-    const explorerSetting = await client.getExplorerSetting();
-    const bootnodeSetting = await client.getBootnodeConfig();
-    const registryLookup = await client.lookupRegisteredPublicKey(address).catch(() => null);
+    const storage = client().storage();
+    const session = client();
+    const disclaimerState = await storage.getDisclaimerState(address);
+    const existingKeys = await session.getUserKeys(address);
+    const explorerSetting = await storage.getExplorerSetting();
+    const bootnodeSetting = await storage.getBootnodeConfig();
+    const registryLookup = await client().lookupRegisteredPublicKey(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
@@ -287,7 +287,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...((!existingKeys || !existingAspSecret?.membershipBlinding) ? ['keys'] : []),
+        ...(!existingKeys?.noteKeypair?.public ? ['keys'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
@@ -305,7 +305,6 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
         return {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-            aspSecret: existingAspSecret.membershipBlinding,
         };
     }
 
@@ -325,7 +324,6 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
         keys: existingKeys ? {
             pubKey: existingKeys.noteKeypair.public,
             encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-            aspSecret: existingAspSecret?.membershipBlinding || '',
         } : null,
         explorerBaseUrl: explorerSetting?.baseUrl || DEFAULT_EXPLORER_BASE_URL,
         bootnode: bootnodeSetting || { enabled: false, url: '' },
@@ -381,7 +379,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                     onClick: async () => {
                         try {
                             accept.disabled = true;
-                            await client.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
+                            await storage.acceptDisclaimer(address, disclaimerState?.disclaimerHashHex || '');
                             resolve();
                         } catch (error) {
                             accept.disabled = false;
@@ -449,12 +447,18 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
             const noteField = secretWrap.querySelector('[data-field="note"]');
             const aspField = secretWrap.querySelector('[data-field="asp"]');
             noteField.textContent = state.keys?.pubKey || 'Not available';
-            aspField.textContent = maskSecret(state.keys?.aspSecret || '');
+            aspField.textContent = state.keys?.pubKey ? HIDDEN_SECRET_PLACEHOLDER : 'Not available';
             secretWrap.querySelector('[data-copy="note"]').addEventListener('click', () => {
                 if (state.keys?.pubKey) Utils.copyToClipboard(state.keys.pubKey);
             });
-            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', () => {
-                if (state.keys?.aspSecret) Utils.copyToClipboard(state.keys.aspSecret);
+            secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', async () => {
+                try {
+                    const asp = await session.getAspSecret(address);
+                    const secret = asp?.membershipBlinding;
+                    if (secret != null) Utils.copyToClipboard(String(secret));
+                } catch (error) {
+                    setError(error?.message || 'Failed to load ASP secret');
+                }
             });
             const panel = makePanel({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
@@ -472,13 +476,14 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                     onClick: async () => {
                         try {
                             derive.disabled = true;
-                            const result = await deriveKeysFromWallet(address, {
-                                onStatus: () => {},
-                                skipCacheCheck: false,
-                            });
+                            await client().initializeWallet(
+                                { networkPassphrase, userAddress: address },
+                                signer,
+                            );
+                            const result = await session.loadPublicKeys(address);
                             state.keys = result;
                             noteField.textContent = result.pubKey;
-                            aspField.textContent = maskSecret(result.aspSecret);
+                            aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {
                             derive.disabled = false;
@@ -571,7 +576,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
                             }
-                            await client.setSetting('bootnode_config', { enabled, url });
+                            await storage.setSetting('bootnode_config', { enabled, url });
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
                                 setNotificationsPrompted();
@@ -601,7 +606,7 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
             const persistExplorer = async (button, baseUrl) => {
                 try {
                     button.disabled = true;
-                    await client.setSetting('explorer', { baseUrl });
+                    await storage.setSetting('explorer', { baseUrl });
                     state.explorerBaseUrl = baseUrl;
                     resolveStep();
                 } catch (error) {
@@ -652,11 +657,11 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
                             }
                             register.disabled = true;
                             await registerNow({
-                                client,
                                 address,
                                 notePublicKey: state.keys.pubKey,
                                 encryptionPublicKey: state.keys.encryptionKeypair.publicKey,
                                 networkPassphrase,
+                                signer,
                             });
                             state.registered = true;
                             resolve();
@@ -673,7 +678,4 @@ export async function runOnboardingWizard({ address, networkPassphrase, bootnode
     }
 
     hideModal();
-
-    const finalKeys = state.keys || await deriveKeysFromWallet(address, { onStatus: () => {}, skipCacheCheck: false });
-    return finalKeys;
 }

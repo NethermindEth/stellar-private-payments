@@ -1,0 +1,51 @@
+{
+  "name": "stellar-private-payments-sdk-web",
+  "version": "0.1.0",
+  "description": "Stellar Private Payments browser SDK",
+  "license": "Apache-2.0",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NethermindEth/stellar-private-transactions",
+    "directory": "sdk/web"
+  },
+  "main": "./js/index.js",
+  "types": "./js/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./js/types/index.d.ts",
+      "import": "./js/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/stellar_private_payments_sdk_web.d.ts",
+      "import": "./dist/stellar_private_payments_sdk_web.js"
+    },
+    "./freighter": {
+      "types": "./js/types/freighter.d.ts",
+      "import": "./js/freighter.js"
+    },
+    "./circuits/*": "./dist/circuits/*",
+    "./workers/*": "./dist/workers/*"
+  },
+  "files": [
+    "dist/",
+    "js/"
+  ],
+  "scripts": {
+    "build": "bash scripts/build.sh",
+    "check:artifacts": "node scripts/check-wasm-types.js",
+    "check:types": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build && npm run check:artifacts"
+  },
+  "peerDependencies": {
+    "@stellar/freighter-api": "^6.0.1"
+  },
+  "peerDependenciesMeta": {
+    "@stellar/freighter-api": {
+      "optional": true
+    }
+  },
+  "devDependencies": {
+    "typescript": "^5.5.4"
+  }
+}

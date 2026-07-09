@@ -1,6 +1,6 @@
 import { contract } from '@stellar/stellar-sdk';
-import { initializeWasm, getHandle } from './wasm-facade.js';
-import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction, signWalletMessage } from './wallet.js';
+import { client, initializeWasm } from './wasm-facade.js';
+import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
 // DOM element references
@@ -265,9 +265,7 @@ async function connect() {
 async function refreshState() {
   try {
     setStatus('Loading contract state...', 'info');
-    const client = getHandle().webClient;
-
-    const state = await client.aspState();
+    const state = await client().aspState();
     const membershipState = state.aspMembership;
     const nonMembershipState = state.aspNonMembership;
 
@@ -304,17 +302,15 @@ async function computeMembershipLeaf() {
       throw new Error('Blinding is required');
     }
 
-    const publicOverride = parseBigIntInput(publicKeyInput.value, 'Public key');
-    if (publicOverride === null) {
+    const notePublicKey = parseBigIntInput(publicKeyInput.value, 'Public key');
+    if (notePublicKey === null) {
       throw new Error('User note public key is required');
     }
 
-    const pubKey = '0x' + publicOverride.toString(16).padStart(64, '0');
-    const client = getHandle().webClient;
-    const leafHex = await client.deriveAspUserLeaf(blindingValue, pubKey);
+    const leafHex = await client().deriveAspUserLeaf(blindingValue, notePublicKey);
     const leafDec = BigInt(leafHex).toString();
 
-    derivedPubKeyEl.textContent = pubKey;
+    derivedPubKeyEl.textContent = `0x${notePublicKey.toString(16).padStart(64, '0')}`;
     computedMembershipLeafHexEl.textContent = leafHex;
     computedMembershipLeafDecEl.textContent = leafDec;
 
@@ -447,9 +443,7 @@ async function computeNonMembershipLeaf() {
     if (valueValue === null) {
       throw new Error('Value is required');
     }
-    const client = getHandle().webClient;
-
-    const leafBytes = await client.deriveAspUserLeaf(valueValue, keyValue.toString(16).padStart(64, '0'));
+    const leafBytes = await client().deriveAspUserLeaf(valueValue, keyValue);
     computedNonMembershipLeafHexEl.textContent = leafBytes;
     log('Computed non-membership leaf hash');
   } catch (err) {

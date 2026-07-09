@@ -42,6 +42,17 @@ pub struct PrivatePool<S> {
     storage: S,
     prover: Box<dyn Prover>,
     signer: Box<dyn Signer>,
+    sync_mode: SyncMode,
+}
+
+/// How the pool keeps local storage in sync with on-chain contract events
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// The pool runs [`PrivatePool::sync`] inline when needed.
+    /// No separate background sync task is required.
+    Inline,
+    /// Storage is kept in sync by a background task you start separately.
+    Background,
 }
 
 impl<S> PrivatePool<S> {
@@ -50,6 +61,7 @@ impl<S> PrivatePool<S> {
         storage: S,
         signer: Box<dyn Signer>,
         prover: Box<dyn Prover>,
+        sync_mode: SyncMode,
     ) -> Result<Self, PoolError> {
         let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())
             .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
@@ -62,6 +74,7 @@ impl<S> PrivatePool<S> {
             storage,
             prover,
             signer,
+            sync_mode,
         })
     }
 
@@ -85,11 +98,18 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn notes(&self) -> Result<Vec<UserNoteSummary>, PoolError> {
+        self.ensure_synced().await?;
         self.storage
             .notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
     }
 
+    /// Syncs the storage with the latest contract events
+    ///
+    /// Called automatically during operations when [`SyncMode::Inline`] is set.
+    /// With [`SyncMode::Background`], your background indexer should keep
+    /// storage current; you may still call this for an explicit foreground
+    /// catch-up.
     pub async fn sync(&self) -> Result<(), PoolError> {
         let indexer = Indexer::init(
             self.client.clone(),
@@ -121,11 +141,11 @@ impl<S: Storage> PrivatePool<S> {
 
     pub async fn transfer(
         &self,
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
         let wallet = self.spendable_notes().await?;
-        let mut plan = self.prepare_transfer(&wallet, recipient, amount)?;
+        let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
@@ -151,6 +171,13 @@ impl<S: Storage> PrivatePool<S> {
         &self,
         req: DisclosureRequest,
     ) -> Result<Option<DisclosureReceipt>, PoolError> {
+        if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
+            return Err(PoolError::Other(
+                "selective disclosure requires 1..=4 selected commitments".into(),
+            ));
+        }
+
+        let selected_commitments = req.selected_commitments;
         let mut sync_waits = 0u32;
         loop {
             let data = self
@@ -176,14 +203,14 @@ impl<S: Storage> PrivatePool<S> {
             let inputs_req = DisclosureInputsRequest {
                 user_address: self.config.user_address.clone(),
                 pool_address: self.config.pool_contract_id.clone(),
-                selected_commitment: req.selected_commitment,
+                selected_commitments: selected_commitments.clone(),
                 pool_root: Some(pool_root),
                 pool_next_index,
                 tree_depth: pool.merkle_levels,
             };
 
             match self.storage.build_disclosure_inputs(&inputs_req).await {
-                Ok(inputs) => {
+                Ok(notes) => {
                     let context = DisclosureContext {
                         network: self.fetcher.contract_config().network.clone(),
                         pool_address: pool.contract_id,
@@ -194,7 +221,7 @@ impl<S: Storage> PrivatePool<S> {
                     };
                     let receipt = self
                         .prover
-                        .prove_disclosure(DisclosureProveParams { inputs, context })
+                        .prove_disclosure(DisclosureProveParams { notes, context })
                         .await?;
                     return Ok(Some(receipt));
                 }
@@ -208,6 +235,7 @@ impl<S: Storage> PrivatePool<S> {
                             gap,
                         )));
                     }
+                    self.ensure_synced().await?;
                     sleep(POLL_INTERVAL_MS).await;
                 }
                 Err(error) => return Err(error),
@@ -247,6 +275,7 @@ impl<S: Storage> PrivatePool<S> {
     // lower level methods
 
     pub async fn spendable_notes(&self) -> Result<Vec<SpendableNote>, PoolError> {
+        self.ensure_synced().await?;
         self.storage
             .spendable_notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
@@ -259,13 +288,16 @@ impl<S: Storage> PrivatePool<S> {
         self.core.prepare_deposit(amount)
     }
 
-    pub fn prepare_transfer(
+    pub async fn prepare_transfer(
         &self,
         wallet: &[SpendableNote],
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.core.prepare_transfer(wallet, recipient, amount)
+        let (note_public_key, encryption_public_key) =
+            self.resolve_transfer_recipient(recipient.into()).await?;
+        self.core
+            .prepare_transfer(wallet, note_public_key, encryption_public_key, amount)
     }
 
     pub fn prepare_withdraw(
@@ -348,6 +380,35 @@ impl<S: Storage> PrivatePool<S> {
 
     // helpers
 
+    async fn ensure_synced(&self) -> Result<(), PoolError> {
+        match self.sync_mode {
+            SyncMode::Inline => self.sync().await?,
+            SyncMode::Background => {}
+        }
+        Ok(())
+    }
+
+    async fn resolve_transfer_recipient(
+        &self,
+        recipient: TransferRecipient,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+        match recipient {
+            TransferRecipient::Keys {
+                note_public_key,
+                encryption_public_key,
+            } => Ok((note_public_key, encryption_public_key)),
+            TransferRecipient::Address(address) => {
+                self.ensure_synced().await?;
+                self.storage
+                    .registered_public_keys(
+                        &address,
+                        &self.config.contract_config.public_key_registry,
+                    )
+                    .await
+            }
+        }
+    }
+
     async fn next_prepared_transaction(
         &self,
         plan: &mut PreparedTransactionPlan,
@@ -355,6 +416,7 @@ impl<S: Storage> PrivatePool<S> {
         if plan.is_complete() {
             return Err(PoolError::Other("transaction plan is complete".into()));
         }
+        self.ensure_synced().await?;
 
         let chain = self.fetch_transact_chain_context().await?;
         let step = if let Some(amount) = plan.deposit_amount() {
@@ -411,6 +473,7 @@ impl<S: Storage> PrivatePool<S> {
                                     AspMembershipSync::SyncRequired(gap),
                                 ));
                             }
+                            self.ensure_synced().await?;
                             sleep(POLL_INTERVAL_MS).await;
                         }
                         Err(error) => return Err(error),

@@ -13,7 +13,7 @@ types = { workspace = true }
 # external
 anyhow = { workspace = true }
 async-trait = { workspace = true }
-base64 = "0.22"
+base64 = { workspace = true }
 ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
 futures = { workspace = true, features = ["executor"] }
 http = "1.4.0"

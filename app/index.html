@@ -20,13 +20,18 @@
 
     <link data-trunk data-target-path="css" rel="tailwind-css" href="css/app.css" />
 
+    <script type="importmap">
+    {
+        "imports": {
+            "stellar-private-payments-sdk-web": "./js/stellar-private-payments-sdk-web/js/index.js"
+        }
+    }
+    </script>
+
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
-    <link data-trunk rel="rust" href="crates/platforms/web" data-target-name="web" data-target-path="js" data-wasm-opt="0"/>
-    <link data-trunk rel="rust" href="crates/platforms/web/Cargo.toml" data-bin="storage-worker" data-type="worker" data-target-path="js" data-wasm-opt="0" data-bindgen-target="web"/>
-    <link data-trunk rel="rust" href="crates/platforms/web/Cargo.toml" data-bin="prover-worker" data-type="worker" data-target-path="js" data-wasm-opt="0" data-bindgen-target="web"/>
     <link data-trunk rel="copy-dir" href="assets/" />
 </head>
 <body class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
@@ -373,7 +378,7 @@
                     </div>
                     <button id="settings-register-btn" type="button" class="rounded-full bg-cyan-400/15 px-4 py-2 text-sm font-medium text-cyan-100 transition hover:bg-cyan-400/20">Register now</button>
                 </div>
-                <p class="mt-3 text-sm text-slate-400">Register your public keys so other operators can transfer using only your Stellar address.</p>
+                <p class="mt-3 text-sm text-slate-400">Register your public keys so other users can transfer using only your Stellar address.</p>
             </section>
 
             <section class="rounded-[24px] border border-white/8 bg-white/[0.03] p-5">

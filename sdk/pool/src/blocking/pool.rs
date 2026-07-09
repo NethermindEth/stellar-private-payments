@@ -4,10 +4,10 @@ use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use crate::{
-    PreparedTransaction, PreparedTransactionPlan,
+    PreparedTransaction, PreparedTransactionPlan, SyncMode,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
-    prover::LocalProver,
+    prover::{LocalProver, NoopProver},
     signer::Signer,
     storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
@@ -24,7 +24,41 @@ impl PrivatePool {
     pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
         let storage = LocalStorage::open(&config.storage_path)?;
         let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        let inner = AsyncPrivatePool::init(config, storage, signer, prover)?;
+        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Inline)?;
+        Ok(Self { inner })
+    }
+
+    /// Open a read-only pool session: no prover is constructed, so the proving
+    /// key / circuit artifacts in `config.prover_artifacts` are ignored and
+    /// never loaded. Suitable for balance/notes/sync; any transact/prove call
+    /// on the resulting pool errors. Callers that only read state should use
+    /// this to avoid the [`LocalProver`] init cost.
+    pub fn open_readonly(
+        config: PrivatePoolConfig,
+        signer: Box<dyn Signer>,
+    ) -> Result<Self, PoolError> {
+        let storage = LocalStorage::open(&config.storage_path)?;
+        let inner = AsyncPrivatePool::init(
+            config,
+            storage,
+            signer,
+            Box::new(NoopProver),
+            SyncMode::Inline,
+        )?;
+        Ok(Self { inner })
+    }
+
+    /// Open against pre-populated local storage without inline RPC catch-up.
+    ///
+    /// Use for seeded databases and other callers that keep storage current
+    /// separately (same contract as [`SyncMode::Background`]).
+    pub fn open_local(
+        config: PrivatePoolConfig,
+        signer: Box<dyn Signer>,
+    ) -> Result<Self, PoolError> {
+        let storage = LocalStorage::open(&config.storage_path)?;
+        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
+        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Background)?;
         Ok(Self { inner })
     }
 
@@ -54,7 +88,7 @@ impl PrivatePool {
 
     pub fn transfer(
         &self,
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, PoolError> {
         block_on(self.inner.transfer(recipient, amount))
@@ -86,10 +120,10 @@ impl PrivatePool {
     pub fn prepare_transfer(
         &self,
         wallet: &[SpendableNote],
-        recipient: TransferRecipient,
+        recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
-        self.inner.prepare_transfer(wallet, recipient, amount)
+        block_on(self.inner.prepare_transfer(wallet, recipient, amount))
     }
 
     pub fn prepare_withdraw(

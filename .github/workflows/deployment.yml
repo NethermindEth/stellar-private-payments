@@ -33,13 +33,18 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --no-default-features
 
+      - name: Install wasm build prerequisites
+        run: |
+          rustup target add wasm32-unknown-unknown
+          cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
       - name: Build app (Trunk)
         run: |
           rm -rf site
           make release DIST_DIR=site PUBLIC_URL="${{ steps.pages.outputs.base_url }}/"
 
-      - name: Package circuits source bundle
-        run: sh deployments/scripts/package-circuits-source-bundle.sh site/circuits/source-bundle.tar.gz
+      - name: Publish install script
+        run: cp scripts/install.sh site/install.sh
 
       - name: Resolve symlinks in docs
         run: |

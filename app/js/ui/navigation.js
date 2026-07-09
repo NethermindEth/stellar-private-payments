@@ -1,9 +1,25 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
-import { getHandle, initializeWasm } from '../wasm-facade.js';
+import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { client, initializeRuntime, resetWalletSession } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
 import { isDbLockedError, showDbLockedModal } from '../db-locked.js';
+
+const HIDDEN_SECRET_PLACEHOLDER = '••••••••••••';
+let revealedAspSecret = null;
+
+function clearRevealedAspSecret() {
+    revealedAspSecret = null;
+    const revealBtn = document.getElementById('settings-reveal-secret');
+    if (revealBtn) revealBtn.dataset.revealed = 'false';
+}
+
+async function fetchAspSecretForUser(address) {
+    const asp = await client().getAspSecret(address);
+    const secret = asp?.membershipBlinding;
+    return secret != null ? String(secret) : null;
+}
 
 function isRpcSyncGapError(message) {
     return typeof message === 'string' && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
@@ -75,8 +91,31 @@ function setMoveFlow(flow) {
     });
 }
 
+async function ensureEventSync(rpcUrl) {
+    const storage = client().storage();
+    const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
+    try {
+        await client().startSync({ bootnodeUrl: storedBootnodeUrl });
+        return { bootnodeRequired: false };
+    } catch (error) {
+        const message = error?.message || 'Failed to start event sync';
+        if (!isRpcSyncGapError(message)) throw error;
+
+        const modal = await showBootnodeConsentModal({
+            defaultUrl: storedBootnodeUrl || '',
+            rpcUrl,
+            errorMessage: message,
+        });
+        if (!modal.accepted || !modal.url) throw error;
+
+        await storage.setBootnodeConfig(modal.url);
+        await client().startSync({ bootnodeUrl: modal.url });
+        return { bootnodeRequired: true };
+    }
+}
+
 async function loadRuntimeState() {
-    const config = await getHandle().webClient.contractConfig();
+    const config = client().contractConfig();
     App.state.pools = (config?.pools || []).filter(pool => pool.enabled);
     App.state.selectedPoolId = App.state.selectedPoolId || App.state.pools[0]?.poolContractId || null;
     const poolSelects = document.querySelectorAll('[data-pool-select]');
@@ -91,10 +130,11 @@ async function loadRuntimeState() {
         select.value = App.state.selectedPoolId || '';
     });
 
-    const explorerSetting = await getHandle().webClient.getExplorerSetting();
+    const storage = client().storage();
+    const explorerSetting = await storage.getExplorerSetting();
     App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
 
-    const bootnodeSetting = await getHandle().webClient.getBootnodeConfig();
+    const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
     App.events.dispatchEvent(new CustomEvent('pool:config'));
@@ -135,11 +175,13 @@ function renderSyncStatus() {
 function renderSettingsDrawer() {
     document.getElementById('settings-note-key').textContent = App.state.keys.notePublicKey || '—';
     document.getElementById('settings-enc-key').textContent = App.state.keys.encryptionPublicKey || '—';
-    const aspMasked = App.state.keys.aspSecret ? `${'*'.repeat(12)}${App.state.keys.aspSecret.slice(-6)}` : '—';
+    const hasKeys = !!App.state.keys.notePublicKey;
+    const aspMasked = hasKeys ? HIDDEN_SECRET_PLACEHOLDER : '—';
     const aspValue = document.getElementById('settings-asp-secret');
     const revealBtn = document.getElementById('settings-reveal-secret');
     const revealed = revealBtn?.dataset.revealed === 'true';
-    aspValue.textContent = revealed ? (App.state.keys.aspSecret || '—') : aspMasked;
+    aspValue.textContent = revealed ? (revealedAspSecret || '—') : aspMasked;
+    revealBtn?.classList.toggle('hidden', !hasKeys);
     revealBtn?.querySelector('.settings-eye')?.classList.toggle('hidden', revealed);
     revealBtn?.querySelector('.settings-eye-off')?.classList.toggle('hidden', !revealed);
     if (revealBtn) revealBtn.title = revealed ? 'Hide ASP secret' : 'Reveal ASP secret';
@@ -173,8 +215,26 @@ export const Shell = {
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
         document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
-        document.getElementById('settings-reveal-secret')?.addEventListener('click', (e) => {
-            e.currentTarget.dataset.revealed = e.currentTarget.dataset.revealed === 'true' ? 'false' : 'true';
+        document.getElementById('settings-reveal-secret')?.addEventListener('click', async (e) => {
+            const btn = e.currentTarget;
+            const revealing = btn.dataset.revealed !== 'true';
+            if (revealing) {
+                const address = App.state.wallet.address;
+                if (!address) return;
+                try {
+                    revealedAspSecret = await fetchAspSecretForUser(address);
+                    if (!revealedAspSecret) {
+                        Toast.show('ASP secret not found', 'error');
+                        return;
+                    }
+                    btn.dataset.revealed = 'true';
+                } catch (error) {
+                    Toast.show(error?.message || 'Failed to load ASP secret', 'error');
+                    return;
+                }
+            } else {
+                clearRevealedAspSecret();
+            }
             renderSettingsDrawer();
         });
         // Click any identity value to copy it (copies the real value, even when masked).
@@ -182,11 +242,16 @@ export const Shell = {
             'settings-wallet-address': () => App.state.wallet.address,
             'settings-note-key': () => App.state.keys.notePublicKey,
             'settings-enc-key': () => App.state.keys.encryptionPublicKey,
-            'settings-asp-secret': () => App.state.keys.aspSecret,
+            'settings-asp-secret': async () => {
+                if (revealedAspSecret) return revealedAspSecret;
+                const address = App.state.wallet.address;
+                if (!address) return null;
+                return fetchAspSecretForUser(address);
+            },
         };
         Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
-            document.getElementById(id)?.addEventListener('click', () => {
-                const value = getValue();
+            document.getElementById(id)?.addEventListener('click', async () => {
+                const value = await getValue();
                 if (value) Utils.copyToClipboard(value);
             });
         });
@@ -243,6 +308,8 @@ export const Wallet = {
         if (this._connectPromise) return this._connectPromise;
 
         this._connectPromise = (async () => {
+            const signer = new FreighterSigner();
+
             try {
                 const address = await connectWallet();
                 const { network, networkPassphrase, sorobanRpcUrl } = await getWalletNetwork();
@@ -258,27 +325,20 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
-                let bootnodeRequired = false;
-                try {
-                    await initializeWasm(rpcUrl);
-                } catch (error) {
-                    const message = error?.message || 'Failed to initialize app runtime';
-                    if (!isRpcSyncGapError(message)) throw error;
-                    const modal = await showBootnodeConsentModal({ defaultUrl: '', rpcUrl, errorMessage: message });
-                    if (!modal.accepted || !modal.url) throw error;
-                    await initializeWasm(rpcUrl, modal.url);
-                    await getHandle().webClient.setBootnodeConfig(modal.url);
-                    bootnodeRequired = true;
-                }
+                await initializeRuntime(rpcUrl);
+                const { bootnodeRequired } = await ensureEventSync(rpcUrl);
 
-                const keys = await runOnboardingWizard({
+                await runOnboardingWizard({
                     address,
                     networkPassphrase,
                     bootnodeRequired,
+                    signer,
                 });
-                App.state.keys.notePublicKey = keys?.pubKey || null;
-                App.state.keys.encryptionPublicKey = keys?.encryptionKeypair?.publicKey || null;
-                App.state.keys.aspSecret = keys?.aspSecret || null;
+
+                await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
+                const keys = await client().loadPublicKeys(address);
+                App.state.keys.notePublicKey = keys.pubKey;
+                App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
@@ -288,8 +348,8 @@ export const Wallet = {
                 this.startWatcher();
                 if (!auto) Toast.show('Wallet connected', 'success');
             } catch (error) {
-                this.disconnect();
                 const message = error?.message || '';
+                this.disconnect();
                 if (isDbLockedError(message)) {
                     // Blocking condition: another tab/window holds the local DB lock.
                     // Surface it even on auto-connect (the common multi-tab trigger).
@@ -323,7 +383,9 @@ export const Wallet = {
     disconnect() {
         this._stopWatcher?.();
         this._stopWatcher = null;
+        resetWalletSession();
         closeAppPool();
+        clearRevealedAspSecret();
         App.state.wallet = {
             connected: false,
             address: null,
@@ -331,7 +393,7 @@ export const Wallet = {
             network: null,
             networkPassphrase: null,
         };
-        App.state.keys = { notePublicKey: null, encryptionPublicKey: null, aspSecret: null };
+        App.state.keys = { notePublicKey: null, encryptionPublicKey: null };
         renderWallet();
         this.closeSettings();
         App.events.dispatchEvent(new CustomEvent('wallet:disconnected'));
@@ -348,6 +410,7 @@ export const Wallet = {
         App.state.ui.settingsOpen = false;
         document.getElementById('settings-drawer')?.classList.add('hidden', 'translate-x-full');
         document.getElementById('settings-overlay')?.classList.add('hidden');
+        clearRevealedAspSecret();
     },
 
     async saveSettings() {
@@ -356,8 +419,9 @@ export const Wallet = {
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
 
-            await getHandle().webClient.setSetting('explorer', { baseUrl: explorerBaseUrl });
-            await getHandle().webClient.setSetting('bootnode_config', {
+            const storage = client().storage();
+            await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
+            await storage.setSetting('bootnode_config', {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
@@ -383,13 +447,10 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true; // prevent duplicate registrations
-            const hash = await getHandle().webClient.registerPublicKeys(
-                App.state.wallet.address,
-                App.state.keys.notePublicKey,
-                App.state.keys.encryptionPublicKey,
-                App.state.wallet.networkPassphrase,
-                null,
-            );
+            const hash = await client().registerPublicKeys({
+                notePublicKeyHex: App.state.keys.notePublicKey,
+                encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
+            });
             App.state.profile.registered = true;
             renderSettingsDrawer();
             Toast.show(`Public keys registered: ${Utils.truncateHex(hash, 10, 8)}`, 'success', 7000, {

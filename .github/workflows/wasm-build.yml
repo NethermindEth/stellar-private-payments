@@ -36,10 +36,37 @@ jobs:
           cache-targets: "true"
 
       - name: Build circuit artifacts
-        run: cargo build -p circuits
+        run: cargo build -p circuits --release
 
-      - name: Check the wasm build
-        run: cargo build -p web --target wasm32-unknown-unknown
+      - name: Install wasm-bindgen-cli
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+
+      - name: Install SDK npm dependencies
+        run: npm ci --prefix sdk/web
+
+      - name: Build npm package
+        run: npm run build --prefix sdk/web
+
+      - name: Check SDK artifacts and types
+        run: |
+          npm run check:artifacts --prefix sdk/web
+          npm run check:types --prefix sdk/web
+
+      - name: Install app npm dependencies
+        run: npm ci --prefix app
+
+      - name: Install Trunk
+        run: cargo install trunk --locked
+
+      - name: Smoke-test Trunk app build
+        run: trunk build --release --dist /tmp/app-dist
 
   wasm-test:
     timeout-minutes: 30
@@ -62,7 +89,7 @@ jobs:
           cache-targets: "true"
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.120 --locked
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar

@@ -1,12 +1,12 @@
 //! Shared pool config, planning, and helpers (all targets).
 
 use tx_planner::{SpendSession, SpendTarget, SpendableNote, Transact};
-use types::{ExtAmount, NoteAmount};
+use types::{EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey};
 
 use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
-    types::{Estimate, PoolChainConfig, TransferRecipient},
+    types::{Estimate, PoolChainConfig},
 };
 
 mod plan;
@@ -44,7 +44,8 @@ impl PoolCore {
     pub fn prepare_transfer(
         &self,
         wallet: &[SpendableNote],
-        recipient: TransferRecipient,
+        note_public_key: NotePublicKey,
+        encryption_public_key: EncryptionPublicKey,
         amount: NoteAmount,
     ) -> Result<PreparedTransactionPlan, PoolError> {
         if amount.is_zero() {
@@ -54,7 +55,7 @@ impl PoolCore {
             wallet.to_vec(),
             amount,
             self.config.pool_contract_id.clone(),
-            SpendTarget::transfer(recipient.note_public_key, recipient.encryption_public_key),
+            SpendTarget::transfer(note_public_key, encryption_public_key),
         )?;
         PreparedTransactionPlan::from_session(session).map_err(PoolError::from)
     }

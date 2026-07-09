@@ -1,4 +1,12 @@
-import { getHandle } from '../wasm-facade.js';
+/**
+ * Transactions UI — deposit, transfer, withdraw, and advanced transact.
+ *
+ * DOM matches `app/index.html`. Pool ops run on the SDK `PrivatePool` handle.
+ *
+ * @module ui/transactions
+ */
+
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
@@ -6,6 +14,7 @@ import { OpHistory } from './op-history.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
+const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
 
 function selectedPool() {
     return Utils.selectedPool();
@@ -21,7 +30,9 @@ function parseAmount(value, { allowNegative = false } = {}) {
     const frac = (match[3] || '').padEnd(DECIMALS, '0');
     if ((match[3] || '').length > DECIMALS) return { ok: false, error: 'Too many decimal places' };
     const valueInt = (BigInt(intPart) * (10n ** BigInt(DECIMALS))) + BigInt(frac || '0');
-    if (sign === '-' && !allowNegative && valueInt !== 0n) return { ok: false, error: 'Amount must be non-negative' };
+    if (sign === '-' && !allowNegative && valueInt !== 0n) {
+        return { ok: false, error: 'Amount must be non-negative' };
+    }
     return { ok: true, value: sign === '-' ? -valueInt : valueInt };
 }
 
@@ -42,15 +53,40 @@ function setLoading(button, loading, label = 'Submitting…') {
     }
 }
 
-// Builds a progress callback for the Rust backend. The backend invokes it with
-// a { flow, stage, message } object at each stage; we surface `message` on the
-// button's loading label so the user sees live progress.
-function statusUpdater(button) {
-    return (progress) => {
-        if (!button || !progress?.message) return;
+// SDK prover emits `stellar-private-payments:tx-progress` with { flow, stage, message };
+// surface `message` on the button loading label during pool ops.
+function bindTxProgress(button, flow) {
+    const handler = (event) => {
+        const detail = event.detail;
+        if (!button || detail?.flow !== flow || !detail?.message) return;
         const loadingEl = button.querySelector('.btn-loading');
-        if (loadingEl) loadingEl.textContent = progress.message;
+        if (!loadingEl) return;
+        loadingEl.classList.remove('hidden');
+        loadingEl.textContent = detail.message;
     };
+    window.addEventListener(TX_PROGRESS_EVENT, handler);
+    return () => window.removeEventListener(TX_PROGRESS_EVENT, handler);
+}
+
+async function runPoolOp(flow, button, fn) {
+    const unbind = button ? bindTxProgress(button, flow) : () => {};
+    try {
+        return await fn();
+    } finally {
+        unbind();
+    }
+}
+
+function txResultsToHashes(results) {
+    if (results == null) return null;
+    const list = Array.isArray(results) ? results : [results];
+    return list.map((r) => (typeof r === 'string' ? r : r?.txHash)).filter(Boolean);
+}
+
+function normalizeHexKey(value) {
+    if (value == null) return '';
+    if (typeof value === 'string') return value.trim();
+    return String(value).trim();
 }
 
 function updatePoolLabels() {
@@ -79,10 +115,10 @@ async function lookupRecipient(address, refs) {
         return null;
     }
 
-    const lookup = await getHandle().webClient.lookupRegisteredPublicKey(address);
+    const lookup = await client().lookupRegisteredPublicKey(address);
     if (lookup?.entry) {
-        refs.noteKey.value = lookup.entry.noteKey;
-        refs.encKey.value = lookup.entry.encryptionKey;
+        refs.noteKey.value = normalizeHexKey(lookup.entry.noteKey);
+        refs.encKey.value = normalizeHexKey(lookup.entry.encryptionKey);
         refs.status.textContent = 'Found local registration';
         return lookup;
     }
@@ -90,7 +126,8 @@ async function lookupRecipient(address, refs) {
     refs.manual.classList.remove('hidden');
     refs.status.textContent = 'No local registration found';
     if (!lookup?.registryFullySynced) {
-        refs.warning.textContent = 'Local registry is still syncing. This address may be registered on-chain but not yet available locally.';
+        refs.warning.textContent =
+            'Local registry is still syncing. This address may be registered on-chain but not yet available locally.';
     }
     return lookup;
 }
@@ -116,7 +153,11 @@ function collectAdvancedOutputs() {
     while (amounts.length < N_OUTPUTS) amounts.push(0n);
     while (noteKeys.length < N_OUTPUTS) noteKeys.push(null);
     while (encKeys.length < N_OUTPUTS) encKeys.push(null);
-    return { amounts: amounts.slice(0, N_OUTPUTS), noteKeys: noteKeys.slice(0, N_OUTPUTS), encKeys: encKeys.slice(0, N_OUTPUTS) };
+    return {
+        amounts: amounts.slice(0, N_OUTPUTS),
+        noteKeys: noteKeys.slice(0, N_OUTPUTS),
+        encKeys: encKeys.slice(0, N_OUTPUTS),
+    };
 }
 
 function fillNextAdvancedInput(noteId) {
@@ -179,6 +220,15 @@ export const Transactions = {
         this.bindAdvancedTransact();
         updatePoolLabels();
         updateMoveFundsBalance();
+
+        App.events.addEventListener('wallet:ready', (event) => {
+            const address = event?.detail?.address || App.state.wallet.address;
+            if (!address) return;
+            const withdrawRecipient = document.getElementById('withdraw-recipient');
+            const advancedRecipient = document.getElementById('advanced-public-recipient');
+            if (withdrawRecipient) withdrawRecipient.value = address;
+            if (advancedRecipient) advancedRecipient.value = address;
+        });
     },
 
     buildAdvancedComposer() {
@@ -218,14 +268,14 @@ export const Transactions = {
                 setLoading(button, true, 'Preparing deposit…');
                 const pool = selectedPool();
                 const session = await ensureAppPool();
-                const result = await session.deposit(
-                    amount.value,
-                    [amount.value, 0n],
-                    statusUpdater(button),
-                );
+                const result = await runPoolOp('deposit', button, () => session.deposit(amount.value));
                 if (this.showExecuteResult(result, 'Deposit')) {
+                    const hashes = result?.hashes ?? txResultsToHashes(result);
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Deposit', amount: amount.value, direction: 'in', hashes: result.hashes,
+                        type: 'Deposit',
+                        amount: amount.value,
+                        direction: 'in',
+                        hashes,
                     });
                     document.getElementById('deposit-amount').value = '';
                 }
@@ -271,16 +321,17 @@ export const Transactions = {
                 setLoading(button, true, 'Preparing transfer…');
                 const pool = selectedPool();
                 const session = await ensureAppPool();
-                const result = await session.transfer(
-                    amount.value,
-                    noteKey,
-                    encKey,
-                    statusUpdater(button),
+                const result = await runPoolOp('transfer', button, () =>
+                    session.transferToKeys(noteKey, encKey, amount.value),
                 );
                 if (this.showExecuteResult(result, 'Transfer')) {
+                    const hashes = result?.hashes ?? txResultsToHashes(result);
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Sent', amount: amount.value, direction: 'out',
-                        counterparty: transferAddress.value.trim() || noteKey, hashes: result.hashes,
+                        type: 'Sent',
+                        amount: amount.value,
+                        direction: 'out',
+                        counterparty: transferAddress.value.trim() || noteKey,
+                        hashes,
                     });
                     document.getElementById('transfer-amount').value = '';
                     transferAddress.value = '';
@@ -307,15 +358,17 @@ export const Transactions = {
                 setLoading(button, true, 'Preparing withdrawal…');
                 const pool = selectedPool();
                 const session = await ensureAppPool();
-                const result = await session.withdraw(
-                    recipient,
-                    amount.value,
-                    statusUpdater(button),
+                const result = await runPoolOp('withdraw', button, () =>
+                    session.withdraw(amount.value, recipient),
                 );
                 if (this.showExecuteResult(result, 'Withdrawal')) {
+                    const hashes = result?.hashes ?? txResultsToHashes(result);
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Withdraw', amount: amount.value, direction: 'out',
-                        counterparty: recipient, hashes: result.hashes,
+                        type: 'Withdraw',
+                        amount: amount.value,
+                        direction: 'out',
+                        counterparty: recipient,
+                        hashes,
                     });
                     document.getElementById('withdraw-amount').value = '';
                     document.getElementById('withdraw-recipient').value = '';
@@ -333,9 +386,15 @@ export const Transactions = {
             const button = event.currentTarget;
             try {
                 requireWallet();
-                const deposit = parseAmount(document.getElementById('advanced-public-deposit')?.value, { allowNegative: false });
+                const deposit = parseAmount(
+                    document.getElementById('advanced-public-deposit')?.value,
+                    { allowNegative: false },
+                );
                 if (!deposit.ok) throw new Error(`Public deposit: ${deposit.error}`);
-                const withdraw = parseAmount(document.getElementById('advanced-public-withdraw')?.value, { allowNegative: false });
+                const withdraw = parseAmount(
+                    document.getElementById('advanced-public-withdraw')?.value,
+                    { allowNegative: false },
+                );
                 if (!withdraw.ok) throw new Error(`Public withdraw: ${withdraw.error}`);
                 // Public deposit is value entering the transaction (input, positive);
                 // public withdraw is value leaving it (output, negative). The contract
@@ -344,25 +403,29 @@ export const Transactions = {
                 const inputNoteIds = collectInputNotes('advanced-inputs');
                 const { amounts, noteKeys, encKeys } = collectAdvancedOutputs();
                 const pool = selectedPool();
-                const recipient = document.getElementById('advanced-public-recipient')?.value?.trim() || App.state.wallet.address;
+                const recipient = document.getElementById('advanced-public-recipient')?.value?.trim()
+                    || App.state.wallet.address;
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();
-                const result = await session.transact(
-                    recipient,
-                    publicAmount,
+                const result = await runPoolOp('transact', button, () => session.transact({
+                    extRecipient: recipient,
+                    extAmount: publicAmount,
                     inputNoteIds,
-                    amounts,
-                    noteKeys,
-                    encKeys,
-                    statusUpdater(button),
-                );
+                    outputAmounts: amounts,
+                    outRecipientNoteKeysHex: noteKeys,
+                    outRecipientEncKeysHex: encKeys,
+                }));
                 if (this.showExecuteResult(result, 'Advanced transaction')) {
+                    const hashes = result?.hashes ?? txResultsToHashes(result);
                     const absAmount = publicAmount < 0n ? -publicAmount : publicAmount;
                     const direction = publicAmount > 0n ? 'in' : publicAmount < 0n ? 'out' : 'none';
                     OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Advanced', amount: absAmount, direction,
-                        counterparty: direction === 'out' ? recipient : null, hashes: result.hashes,
+                        type: 'Advanced',
+                        amount: absAmount,
+                        direction,
+                        counterparty: direction === 'out' ? recipient : null,
+                        hashes,
                     });
                     this.buildAdvancedComposer();
                     document.getElementById('advanced-public-deposit').value = '';
@@ -397,6 +460,10 @@ export const Transactions = {
         if (result?.status === 'ok') {
             return this.showSubmittedToasts(result.hashes, label);
         }
+        const hashes = txResultsToHashes(result);
+        if (hashes?.length) {
+            return this.showSubmittedToasts(hashes, label);
+        }
         Toast.show(`${label} failed`, 'error');
         return false;
     },
@@ -411,7 +478,9 @@ export const Transactions = {
             linkUrl: Utils.explorerTxUrl(lastHash),
             linkAriaLabel: 'Open transaction in explorer',
         });
-        App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { hashes } }));
+        for (const txHash of hashes) {
+            App.events.dispatchEvent(new CustomEvent('tx:submitted', { detail: { txHash } }));
+        }
         return true;
     },
 };

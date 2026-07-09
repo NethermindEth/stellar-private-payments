@@ -23,17 +23,15 @@ Unified project documentation is available at https://nethermindeth.github.io/st
 ```
 stellar-private-payments/
 ├── app/                        # Web application (see app/README.md, app/ARCHITECTURE.md)
-│   ├── crates/
-│   │   └── platforms/
-│   │       └── web/            # WASM entrypoint + WebClient (sign/submit in sign.rs, prover/storage workers)
 │   ├── js/                     # JavaScript frontend code (web interface)
 │   │   ├── ui/                 # UI components
 │   │   ├── admin.js            # Admin UI entry
 │   │   ├── ui.js               # Main UI entry
 │   │   ├── disclosure.js       # Selective disclosure UI entry
+│   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
-│   │   ├── wallet.js           # Freighter integration + WASM signing bridge
-│   │   ├── wasm-facade.js      # Thin wrapper over WASM exports
+│   │   ├── wallet.js           # Freighter connect/watch/sign UX
+│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments-sdk-web
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
 │   ├── assets/                 # Static assets (logo, favicon)
@@ -41,6 +39,7 @@ stellar-private-payments/
 │   ├── admin.html              # Admin entry
 │   └── disclosure.html         # Selective disclosure entry
 ├── sdk/                        # Platform-agnostic Rust SDK crates
+│   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
 │   ├── disclosure/             # Selective disclosure
 │   ├── prover/                 # Proving flows
 │   ├── state/                  # Storage and indexer
@@ -112,8 +111,8 @@ The workspace is configured to use `wasm-bindgen-test-runner` as the wasm test r
 so you need it available on your `PATH` (typically by installing `wasm-bindgen-cli`).
 
 ```bash
-# Install a compatible wasm-bindgen toolchain (adjust the version if `Cargo.lock` changes)
-cargo install wasm-bindgen-cli --version 0.2.120
+# Install wasm-bindgen-cli (version must match `wasm-bindgen` in Cargo.lock)
+cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
 # Example: run wasm tests for the Stellar core crate
 cargo test --target wasm32-unknown-unknown -p stellar
@@ -191,15 +190,60 @@ git config core.hooksPath .githooks
 * Node.js
 * npm
 
-The whole app:
+The web application:
 
 ```sh
-$ make install
-$ make serve
+make install
+make serve
 ```
 
-Prepare a production build (TODO: enable optimizations and minification)
+Production build:
 
 ```sh
-$ make dist
+make release
+```
+
+### Browser SDK (`sdk/web`)
+
+Standalone npm package (`stellar-private-payments-sdk-web`). See [`sdk/web/README.md`](sdk/web/README.md).
+
+Requires [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (version must match `Cargo.lock`).
+
+```sh
+make install
+make sdk-web-build
+npm run check:artifacts --prefix sdk/web
+npm run check:types --prefix sdk/web
+```
+
+CI runs these checks in `.github/workflows/wasm-build.yml`.
+
+## CLI development
+
+Build it in a debug mode
+
+```sh
+cargo build -p stellar-private-payments-cli
+```
+
+If you build it in a release mode, then ensure that proper data directory is configured.
+
+A CLI *prerelease* can be done with 
+
+```sh
+git tag v0.1.0-rc.1 # with a proper new version
+git push origin v0.1.0-rc.1
+```
+
+then you can install it from the Github with
+
+```sh
+./scripts/install.sh --pre
+```
+
+To make a production release of CLI
+
+```sh
+git tag v0.1.0 # with a proper new version
+git push origin v0.1.0
 ```

@@ -97,7 +97,7 @@ pub trait Storage: stellar::ContractDataStorage {
     async fn build_disclosure_inputs(
         &self,
         req: &DisclosureInputsRequest,
-    ) -> Result<DisclosureInputs, PoolError>;
+    ) -> Result<Vec<DisclosureInputs>, PoolError>;
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError>;
 
@@ -109,6 +109,12 @@ pub trait Storage: stellar::ContractDataStorage {
     async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
         Ok(self.user_public_keys(user_address).await?.0)
     }
+
+    async fn registered_public_keys(
+        &self,
+        address: &str,
+        public_key_registry_contract_id: &str,
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError>;
 
     /// Finalize local processing after RPC ingest
     async fn process_pending_state(&self) -> Result<(), PoolError>;

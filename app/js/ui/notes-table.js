@@ -1,4 +1,4 @@
-import { getHandle } from '../wasm-facade.js';
+import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
 
@@ -80,8 +80,8 @@ export const NotesTable = {
             const address = App.state.wallet.address;
             const offset = this.page * PAGE_SIZE;
             const [list, count] = await Promise.all([
-                getHandle().webClient.getUserNotes(address, offset, PAGE_SIZE),
-                getHandle().webClient.getUserNotesCount(address),
+                client().getUserNotes(address, offset, PAGE_SIZE),
+                client().getUserNotesCount(address),
             ]);
             this.totalCount = count ?? 0;
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({

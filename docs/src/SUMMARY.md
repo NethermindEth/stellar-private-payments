@@ -1,6 +1,7 @@
 # Summary
 
 - [Introduction](./introduction.md)
+  - [Install the CLI](./introduction.md#install-the-cli)
 - [Contributing](./contributing.md)
 - [Security](./security.md)
 - [Selective Disclosure](./disclosure.md)
