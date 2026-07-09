@@ -5,4 +5,4 @@ include "./selectiveDisclosure.circom";
 // SelectiveDisclosure(
 //   levels, nNotes
 // )
-component main {public [roots, noteCommitments, extContextHash]} = SelectiveDisclosure(10, 1);
+component main {public [roots, noteCommitments, extContextHash, expectedNullifier, inAmount]} = SelectiveDisclosure(10, 1);

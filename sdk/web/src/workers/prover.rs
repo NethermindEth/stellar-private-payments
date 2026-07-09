@@ -388,6 +388,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             };
 
             let artifacts = selective_disclosure(params)?;
+            let nullifiers = artifacts.nullifiers.clone();
+            let amounts = artifacts.amounts.clone();
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
             let witness_bytes = DISCLOSURE_WITNESS_CALCS.with(|cell| {
@@ -451,6 +453,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     roots,
                     note_commitments,
                     ext_context_hash,
+                    nullifiers,
+                    amounts,
                 },
                 proof_compressed_hex,
                 issued_at: js_sys::Date::new_0()

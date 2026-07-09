@@ -82,9 +82,17 @@ pub fn verify_receipt_context(receipt: &DisclosureReceipt) -> Result<bool> {
     Ok(expected == receipt.public_inputs.ext_context_hash)
 }
 
-/// Public input order declared by `selectiveDisclosure_1.circom`.
-pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] =
-    &["roots", "noteCommitments", "extContextHash"];
+/// Public input order declared by the `selectiveDisclosure_N.circom` family.
+///
+/// Matches the signal declaration order in the template: roots,
+/// noteCommitments, extContextHash, expectedNullifier, inAmount.
+pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] = &[
+    "roots",
+    "noteCommitments",
+    "extContextHash",
+    "expectedNullifier",
+    "inAmount",
+];
 
 /// Artifact file names for a registered disclosure circuit.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
@@ -180,10 +188,12 @@ impl RegisteredCircuit {
     /// Returns an error if `public_inputs_order` contains an unknown name or if
     /// the output buffer capacity overflows.
     pub fn public_inputs_bytes(&self, receipt: &DisclosureReceipt) -> Result<Vec<u8>> {
+        receipt.public_inputs.validate(self.n_notes)?;
+
         let n_notes =
             usize::try_from(self.n_notes).map_err(|_| anyhow!("Circuit n_notes out of range"))?;
         let capacity = n_notes
-            .checked_mul(2)
+            .checked_mul(4)
             .and_then(|n| n.checked_add(1))
             .and_then(|n| n.checked_mul(32))
             .ok_or_else(|| anyhow!("Public input byte capacity overflow"))?;
@@ -203,6 +213,16 @@ impl RegisteredCircuit {
                 }
                 "extContextHash" => {
                     out.extend_from_slice(&receipt.public_inputs.ext_context_hash.to_le_bytes());
+                }
+                "expectedNullifier" => {
+                    for nullifier in &receipt.public_inputs.nullifiers {
+                        out.extend_from_slice(&nullifier.to_le_bytes());
+                    }
+                }
+                "inAmount" => {
+                    for amount in &receipt.public_inputs.amounts {
+                        out.extend_from_slice(&amount.to_le_bytes());
+                    }
                 }
                 other => {
                     return Err(anyhow!(
@@ -540,6 +560,12 @@ where
         proof_verified,
         context_verified,
         known_root_status,
+        // The generic disclosure crate does not perform on-chain spent-nullifier
+        // checks. Callers that need spent-status validation (e.g. the pool
+        // verifier) should perform that check separately and overwrite these
+        // fields.
+        nullifiers_unspent: true,
+        spent_nullifier_indices: Vec::new(),
     })
 }
 
@@ -573,6 +599,8 @@ mod tests {
                 roots: vec![field(1)],
                 note_commitments: vec![field(2)],
                 ext_context_hash: field(3),
+                nullifiers: vec![field(4)],
+                amounts: vec![field(5)],
             },
             proof_compressed_hex: format!("0x{}", "aa".repeat(128)),
             issued_at: "2026-05-19T14:00:00Z".to_string(),
@@ -587,7 +615,13 @@ mod tests {
         assert_eq!(circuit, &SELECTIVE_DISCLOSURE_1);
         assert_eq!(
             circuit.public_inputs_order,
-            ["roots", "noteCommitments", "extContextHash"]
+            [
+                "roots",
+                "noteCommitments",
+                "extContextHash",
+                "expectedNullifier",
+                "inAmount"
+            ]
         );
     }
 
@@ -636,6 +670,12 @@ mod tests {
                     .map(|i| field(u64::from(i) + 100))
                     .collect(),
                 ext_context_hash: field(3),
+                nullifiers: (0..circuit.n_notes)
+                    .map(|i| field(u64::from(i) + 200))
+                    .collect(),
+                amounts: (0..circuit.n_notes)
+                    .map(|i| field(u64::from(i) + 300))
+                    .collect(),
             },
             proof_compressed_hex: format!("0x{}", "aa".repeat(128)),
             issued_at: "2026-05-19T14:00:00Z".to_string(),
@@ -655,7 +695,7 @@ mod tests {
             assert_eq!(registered.name, circuit.name);
 
             let bytes = registered.public_inputs_bytes(&receipt)?;
-            let expected_len = (circuit.n_notes as usize * 2 + 1) * 32;
+            let expected_len = (circuit.n_notes as usize * 4 + 1) * 32;
             assert_eq!(bytes.len(), expected_len);
         }
         Ok(())
@@ -719,10 +759,14 @@ mod tests {
         let circuit = validate_registered_receipt(&receipt, VK_HASH)?;
         let bytes = circuit.public_inputs_bytes(&receipt)?;
 
-        assert_eq!(bytes.len(), 96);
-        assert_eq!(&bytes[..32], &field(1).to_le_bytes());
+        // roots[0], noteCommitments[0], extContextHash, expectedNullifier[0],
+        // inAmount[0]
+        assert_eq!(bytes.len(), 160);
+        assert_eq!(&bytes[0..32], &field(1).to_le_bytes());
         assert_eq!(&bytes[32..64], &field(2).to_le_bytes());
-        assert_eq!(&bytes[64..], &field(3).to_le_bytes());
+        assert_eq!(&bytes[64..96], &field(3).to_le_bytes());
+        assert_eq!(&bytes[96..128], &field(4).to_le_bytes());
+        assert_eq!(&bytes[128..160], &field(5).to_le_bytes());
         Ok(())
     }
 
@@ -829,6 +873,8 @@ mod tests {
         assert!(report.proof_verified);
         assert!(report.context_verified);
         assert!(report.known_root_status);
+        assert!(report.nullifiers_unspent);
+        assert!(report.is_valid_and_unspent());
         Ok(())
     }
 

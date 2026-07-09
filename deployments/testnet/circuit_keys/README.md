@@ -28,10 +28,10 @@ Files (one set per supported note count):
 
 | Circuit | `vk_hash` |
 |---|---|
-| `selectiveDisclosure_1` | `0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af` |
-| `selectiveDisclosure_2` | `0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1` |
-| `selectiveDisclosure_3` | `0x0902ecd9e05270b8f68073d8b05b44c1a9bfd2ebd349699374ab3e6f614d7f73` |
-| `selectiveDisclosure_4` | `0xfc1f2648fba94e325de3022ec380401b617ef0653f12acb91d2e5f9431d5134c` |
+| `selectiveDisclosure_1` | `0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e` |
+| `selectiveDisclosure_2` | `0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d` |
+| `selectiveDisclosure_3` | `0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62` |
+| `selectiveDisclosure_4` | `0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9` |
 
 Each hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`) for that circuit, not the SHA-256 of the JSON file. The same values are pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`.
 
