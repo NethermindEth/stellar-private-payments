@@ -36,7 +36,7 @@
 //!         "Test SDF Network ; September 2015",
 //!         "G...",
 //!     )?),
-//!     Box::new(LocalProver::from_artifacts(&[(PolicyMode::Permissioned, artifacts.clone())])?),
+//!     Box::new(LocalProver::from_artifacts(&[(PolicyMode::Both, artifacts.clone())])?),
 //!     SyncMode::Inline,
 //! )?;
 //!

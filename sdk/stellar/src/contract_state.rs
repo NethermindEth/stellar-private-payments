@@ -313,19 +313,11 @@ impl StateFetcher {
                     merkle_root,
                     merkle_capacity,
                     total_commitments: merkle_next_index.to_string(),
-                    policy_mode: match pool_state.get("PolicyMode") {
-                        Some(val) => scval_to_policy_mode(val)?,
-                        None => match pool_state.get("MembershipRequired") {
-                            Some(val) => {
-                                if scval_to_bool(val)? {
-                                    types::PolicyMode::Permissioned
-                                } else {
-                                    types::PolicyMode::Open
-                                }
-                            }
-                            None => types::PolicyMode::Permissioned,
-                        },
-                    },
+                    policy_mode: scval_to_policy_mode(get_state!(
+                        pool_state,
+                        "PolicyMode",
+                        pool.pool_contract_id
+                    )?)?,
                 };
 
                 out.push(pool_info);

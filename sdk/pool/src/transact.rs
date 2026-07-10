@@ -178,7 +178,11 @@ pub fn build_transact_params(
         inputs,
         outputs,
         membership_proof,
-        non_membership_proof: req.non_membership_proof.clone(),
+        non_membership_proof: if req.policy_mode.requires_non_membership_proofs() {
+            Some(req.non_membership_proof.clone())
+        } else {
+            None
+        },
         tree_depth: req.tree_depth,
         smt_depth: req.smt_depth,
         policy_mode: req.policy_mode,

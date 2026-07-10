@@ -32,7 +32,7 @@ Options:
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
   --token ADDRESS       Legacy single-pool token contract address (cannot be mixed with --pool)
   --pool SPEC           Pool spec (repeatable). Optional policy prefix per pool:
-                        open:<SPEC> | permissioned:<SPEC>
+                        open:<SPEC> | allowlist:<SPEC> | blocklist:<SPEC> | both:<SPEC>
                         where <SPEC> is one of:
                         contract:<TOKEN_CONTRACT_ID>
                         native:<TOKEN_CONTRACT_ID>
@@ -41,11 +41,11 @@ Options:
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
   --policy-mode MODE    Default pool ASP policy when a --pool spec omits the prefix:
-                        open or permissioned (required when running constructors
-                        unless every --pool spec includes open: or permissioned:)
+                        open, allowlist, blocklist, or both (required when running constructors
+                        unless every --pool spec includes a policy prefix)
   --vk-json JSON        Verification key as a JSON string (snarkjs or repo format).
-                        Applies to permissioned verifier builds only.
-  --vk-file PATH        Path to a verification key JSON file (permissioned only)
+                        Applies to both-policy verifier builds only.
+  --vk-file PATH        Path to a verification key JSON file (both policy only)
   --skip-init           Deploy only, do not call constructors
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
@@ -54,8 +54,8 @@ Examples:
   # Mixed policies in one deployment (two verifiers, shared ASP contracts)
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
-    --pool open:native:CB... \
-    --pool permissioned:contract:CC... \
+    --pool blocklist:native:CB... \
+    --pool both:contract:CC... \
     --asp-levels 8 \
     --pool-levels 8 \
     --max-deposit 1000000000
@@ -63,7 +63,7 @@ Examples:
   # Same policy on every pool via default
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
-    --policy-mode open \
+    --policy-mode blocklist \
     --pool native:CB... \
     --pool classic:USDC:G...:CD... \
     --asp-levels 8 \
@@ -73,7 +73,7 @@ Examples:
 Notes:
   - Each policy mode needs its own verifier contract (VK is baked into the WASM).
   - Per-pool policyMode is written to deployments/<network>/deployments.json.
-  - Provide --vk-file/--vk-json only for ceremony permissioned keys; open VK
+  - Provide --vk-file/--vk-json only for ceremony both-policy keys; blocklist VK
     is taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
@@ -103,15 +103,19 @@ YES=false
 normalize_policy_mode() {
   case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
     open) printf '%s' "open" ;;
-    permissioned) printf '%s' "permissioned" ;;
-    *) die "invalid policy mode '$1' (expected open or permissioned)" ;;
+    allowlist) printf '%s' "allowlist" ;;
+    blocklist) printf '%s' "blocklist" ;;
+    both) printf '%s' "both" ;;
+    *) die "invalid policy mode '$1' (expected open, allowlist, blocklist, or both)" ;;
   esac
 }
 
 policy_mode_constructor_arg() {
   case "$1" in
     open) printf '%s' "Open" ;;
-    permissioned) printf '%s' "Permissioned" ;;
+    allowlist) printf '%s' "Allowlist" ;;
+    blocklist) printf '%s' "Blocklist" ;;
+    both) printf '%s' "Both" ;;
     *) die "internal error: unknown policy mode '$1'" ;;
   esac
 }
@@ -142,7 +146,7 @@ resolve_pool_spec_policy() {
   POOL_SPEC_MODE=""
   POOL_SPEC_BODY=""
   case "$first" in
-    open|permissioned)
+    open|allowlist|blocklist|both)
       POOL_SPEC_MODE="$(normalize_policy_mode "$first")"
       POOL_SPEC_BODY="${spec#*:}"
       ;;
@@ -247,7 +251,7 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
     mode="$POLICY_MODE"
   fi
   if [[ "$SKIP_INIT" != "true" && -z "$mode" ]]; then
-    die "pool spec '$spec' has no policy mode; prefix with open: or permissioned:, or pass --policy-mode"
+    die "pool spec '$spec' has no policy mode; prefix with blocklist: or both:, or pass --policy-mode"
   fi
   POOL_BODY_SPECS+=("$body")
   POOL_POLICY_MODES+=("$mode")
@@ -305,16 +309,16 @@ build_verifier_wasm_for_mode() {
   local wasm_name vk_path tmp_vk=""
   wasm_name="$(verifier_wasm_name_for_mode "$mode")"
 
-  if [[ "$mode" == "permissioned" && -n "$VK_FILE" ]]; then
+  if [[ "$mode" == "both" && -n "$VK_FILE" ]]; then
     [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
     vk_path="$VK_FILE"
-  elif [[ "$mode" == "permissioned" && -n "$VK_JSON" ]]; then
+  elif [[ "$mode" == "both" && -n "$VK_JSON" ]]; then
     tmp_vk="$(mktemp "${TMPDIR:-/tmp}/deploy-vk.XXXXXX.json")"
     printf '%s' "$VK_JSON" > "$tmp_vk"
     vk_path="$tmp_vk"
   else
     vk_path="$(default_vk_file "$NETWORK" "$mode")"
-    [[ -f "$vk_path" ]] || die "VK not found for policy mode $mode: $vk_path (pass --vk-file for permissioned)"
+    [[ -f "$vk_path" ]] || die "VK not found for policy mode $mode: $vk_path (pass --vk-file for both)"
   fi
 
   step "building verifier WASM for $mode from $vk_path"

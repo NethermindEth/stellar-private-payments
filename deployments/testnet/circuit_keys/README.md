@@ -2,28 +2,20 @@
 
 This directory contains the Groth16 key material used by the testnet deployment.
 
-- `policy_tx_2_2_permissioned_*` — permissioned pools (`PolicyMode::Permissioned`, allowlist + blocklist).
-- `policy_tx_2_2_open_*` — open pools (`PolicyMode::Open`, blocklist only).
-- `selectiveDisclosure_{1,2,3,4}_*` — keys for the off-chain selective-disclosure receipt circuits (one per supported note count).
+- `policy_tx_2_2_open_*` — unrestricted pools (`PolicyMode::Open`).
+- `policy_tx_2_2_allowlist_*` — allowlist-only pools (`PolicyMode::Allowlist`).
+- `policy_tx_2_2_blocklist_*` — blocklist-only pools (`PolicyMode::Blocklist`).
+- `policy_tx_2_2_both_*` — allowlist + blocklist pools (`PolicyMode::Both`).
+- `selectiveDisclosure_{1,2,3,4}_*` — off-chain selective-disclosure receipt circuits.
+
+The base transact circuit is `policyTransaction.circom`; policy entry points compose on top of it.
 
 Notes:
-- `testdata/` remains a local/generated workspace directory (and is
-  ignored by git). Tests may still read keys from there.
-- Changing the `policy_tx_2_2_permissioned` keys requires redeploying the on-chain verifier
-  and any dependent contracts.
-- Changing the `policy_tx_2_2_open` keys requires redeploying the on-chain verifier
-  and any dependent contracts.
-- Changing any `selectiveDisclosure_N` keys requires a web app rebuild and an
-  updated pinned `vk_hash`; it does not require a contract redeploy.
-
-## Policy transaction open (`policy_tx_2_2_open`)
-
-Files:
-- `policy_tx_2_2_open_proving_key.bin` — compressed arkworks Groth16 proving key.
-- `policy_tx_2_2_open_vk.json` — snarkjs-compatible verifying key.
-- `policy_tx_2_2_open_vk_soroban.bin` — VK serialized for the on-chain verifier.
-
-**Provenance caveat:** Unlike `policy_tx_2_2_permissioned`, the `policy_tx_2_2_open` key pair was **locally generated** (not produced by a trusted ceremony). Regenerate with `REGEN_KEYS=1 cargo build -p circuits --release`. Suitable for testnet only.
+- `testdata/` remains a local/generated workspace directory (and is ignored by git). Tests may still read keys from there.
+- Changing any `policy_tx_2_2_*` keys requires redeploying the matching on-chain verifier.
+- Changing any `selectiveDisclosure_N` keys requires a web app rebuild and an updated pinned `vk_hash`; it does **not** require a pool contract redeploy.
+- `policy_tx_2_2_both` is the only policy circuit produced by a trusted ceremony (see below).
+- Open, allowlist, and blocklist keys are locally generated (`REGEN_KEYS=1 cargo build -p circuits`).
 
 ## Selective disclosure circuits (`selectiveDisclosure_1` through `selectiveDisclosure_4`)
 
@@ -34,7 +26,7 @@ Files (one set per supported note count):
 - `selectiveDisclosure_3_proving_key.bin` — proving key for three-note receipts.
 - `selectiveDisclosure_4_proving_key.bin` — proving key for four-note receipts.
 
-**Provenance caveat:** Unlike `policy_tx_2_2_permissioned`, the `selectiveDisclosure_*` key pairs were **locally generated** (not produced by a trusted ceremony). They are suitable for testnet/off-chain disclosure receipts only.
+**Provenance caveat:** Unlike `policy_tx_2_2_both`, the `selectiveDisclosure_*` key pairs were **locally generated** (not produced by a trusted ceremony). They are suitable for testnet/off-chain disclosure receipts only.
 
 **Canonical `vk_hash` values (one per supported note count):**
 
@@ -51,4 +43,4 @@ Each hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-
 
 ## Trusted ceremonies (chronological order)
 
-- `policy_tx_2_2_permissioned`: https://github.com/NethermindEth/stellar-private-payments/issues/177
+- `policy_tx_2_2_both`: https://github.com/NethermindEth/stellar-private-payments/issues/177

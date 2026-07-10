@@ -1,5 +1,5 @@
 pragma circom 2.2.2;
-// Open policy transaction: blocklist only, no allowlist.
+// Entry point: policy_tx_2_2_open — unrestricted pool transact (no ASP proofs).
 include "./policyTransactionOpen.circom";
 
-component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, nonMembershipRoots]} = PolicyTransactionOpen(2, 2, 1, 10, 10);
+component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment]} = PolicyTransactionOpen(2, 2, 10);

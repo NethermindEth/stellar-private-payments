@@ -46,8 +46,10 @@ const CURVE_ID: &str = "bn128";
 /// (`{stem}_proving_key.bin`, etc.). Append here when wiring a new entry-point
 /// through the same key-generation path.
 const GROTH16_KEY_CIRCUITS: &[&str] = &[
-    "policy_tx_2_2_permissioned",
     "policy_tx_2_2_open",
+    "policy_tx_2_2_allowlist",
+    "policy_tx_2_2_blocklist",
+    "policy_tx_2_2_both",
     "selectiveDisclosure_1",
     "selectiveDisclosure_2",
     "selectiveDisclosure_3",
@@ -1069,7 +1071,7 @@ fn check_keys_need_generation(
 ///
 /// * `crate_dir` - The circuits crate directory
 /// * `out_dir` - The output directory containing WASM files
-/// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_permissioned`,
+/// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_both`,
 ///   `selectiveDisclosure_1`)
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
 ///

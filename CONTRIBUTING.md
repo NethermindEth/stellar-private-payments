@@ -53,7 +53,8 @@ stellar-private-payments/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
 │   │   ├── smt/                # Sparse Merkle tree circuits
 │   │   ├── test/               # Circuit test utilities
-│   │   ├── policyTransactionPermissioned.circom  # Permissioned transaction circuit
+│   │   ├── policyTransactionBoth.circom  # Both-policy transaction circuit
+│   │   ├── policyTransactionBlocklist.circom  # Blocklist-only transaction circuit
 │   │   └── *.circom            # Supporting circuits
 │   └── build.rs                # Circuit compilation build script
 ├── circuit-keys/               # Helpers to convert snarkjs keys to Arkworks
@@ -154,16 +155,18 @@ You can use the script `deployments/scripts/deploy.sh` to deploy contracts to a 
 
 See `./deployments/scripts/deploy.sh --help` for all options.
 
-Each pool has a **policy mode** (`open` or `permissioned`) fixed at deploy time. The mode selects which transact circuit/VK the pool's verifier embeds. A single deployment can include **multiple pools with different policies**; the script deploys one verifier contract per mode used and wires the matching verifier into each pool constructor.
+Each pool has a **policy mode** (`open`, `allowlist`, `blocklist`, or `both`) fixed at deploy time. The mode selects which transact circuit/VK the pool's verifier embeds. A single deployment can include **multiple pools with different policies**; the script deploys one verifier contract per mode used and wires the matching verifier into each pool constructor.
 
 Pool specs accept an optional per-pool prefix:
 
 - `open:native:<TOKEN_CONTRACT_ID>`
-- `permissioned:contract:<TOKEN_CONTRACT_ID>`
+- `allowlist:contract:<TOKEN_CONTRACT_ID>`
+- `blocklist:native:<TOKEN_CONTRACT_ID>`
+- `both:contract:<TOKEN_CONTRACT_ID>`
 
 Or pass `--policy-mode` as the default when specs omit the prefix.
 
-For testnet open-only pools, pass `--policy-mode open` (or prefix each `--pool` with `open:`) and omit `--vk-file` to use the committed key at `deployments/testnet/circuit_keys/policy_tx_2_2_open_vk.json`.
+For testnet blocklist-only pools, pass `--policy-mode blocklist` (or prefix each `--pool` with `blocklist:`) and omit `--vk-file` to use the committed key at `deployments/testnet/circuit_keys/policy_tx_2_2_blocklist_vk.json`.
 
 Mixed-policy example:
 
@@ -173,8 +176,8 @@ Mixed-policy example:
   --asp-levels 10 \
   --pool-levels 10 \
   --max-deposit 1000000000 \
-  --pool open:native:$(stellar contract id asset --asset native --network testnet) \
-  --pool permissioned:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
+  --pool blocklist:native:$(stellar contract id asset --asset native --network testnet) \
+  --pool both:classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
 ```
 
 For testnet purposes
@@ -183,7 +186,7 @@ For testnet purposes
 ```sh
 ./deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
-  --policy-mode open \
+  --policy-mode blocklist \
   --asp-levels 10 \
   --pool-levels 10 \
   --max-deposit 1000000000 \
@@ -191,12 +194,12 @@ For testnet purposes
   --pool classic:EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO:$(stellar contract id asset --asset EURC:GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO --network testnet)
 ```
 
-Permissioned pool (allowlist + blocklist):
+Both-policy pool (allowlist + blocklist):
 
 ```sh
 ./deployments/scripts/deploy.sh testnet \
   --deployer <identity> \
-  --policy-mode permissioned \
+  --policy-mode both \
   --asp-levels 10 \
   --pool-levels 10 \
   --max-deposit 1000000000 \

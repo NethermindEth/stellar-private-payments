@@ -11,10 +11,15 @@ use crate::config::default_data_dir;
 pub fn load_policy_transact_artifacts(
     circuits_dir: Option<&Path>,
 ) -> Result<Vec<(PolicyMode, ProverArtifacts)>> {
-    [PolicyMode::Permissioned, PolicyMode::Open]
-        .into_iter()
-        .map(|mode| load_prover_artifacts(circuits_dir, mode).map(|artifacts| (mode, artifacts)))
-        .collect()
+    [
+        PolicyMode::Open,
+        PolicyMode::Allowlist,
+        PolicyMode::Blocklist,
+        PolicyMode::Both,
+    ]
+    .into_iter()
+    .map(|mode| load_prover_artifacts(circuits_dir, mode).map(|artifacts| (mode, artifacts)))
+    .collect()
 }
 
 pub fn load_prover_artifacts(

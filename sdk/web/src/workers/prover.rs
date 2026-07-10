@@ -17,8 +17,8 @@ use stellar_private_payments_sdk::{
     tx::flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
-        DisclosureReceipt, POLICY_TX_2_2_OPEN, POLICY_TX_2_2_PERMISSIONED,
-        SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
+        DisclosureReceipt, POLICY_TX_2_2_ALLOWLIST, POLICY_TX_2_2_BLOCKLIST, POLICY_TX_2_2_BOTH,
+        POLICY_TX_2_2_OPEN, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
         SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT,
         SELECTIVE_DISCLOSURE_2_LEVELS, SELECTIVE_DISCLOSURE_2_N_NOTES,
         SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
@@ -38,16 +38,24 @@ enum InitState {
     Failed(String),
 }
 
-const PERMISSIONED_PROVING_KEY: &[u8] = include_bytes!(
-    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_permissioned_proving_key.bin"
-);
 const OPEN_PROVING_KEY: &[u8] = include_bytes!(
     "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_open_proving_key.bin"
 );
+const ALLOWLIST_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_allowlist_proving_key.bin"
+);
+const BOTH_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_both_proving_key.bin"
+);
+const BLOCKLIST_PROVING_KEY: &[u8] = include_bytes!(
+    "../../../../deployments/testnet/circuit_keys/policy_tx_2_2_blocklist_proving_key.bin"
+);
 
-const POLICY_TRANSACT_CIRCUITS: [(&str, &[u8]); 2] = [
-    (POLICY_TX_2_2_PERMISSIONED, PERMISSIONED_PROVING_KEY),
+const POLICY_TRANSACT_CIRCUITS: [(&str, &[u8]); 4] = [
     (POLICY_TX_2_2_OPEN, OPEN_PROVING_KEY),
+    (POLICY_TX_2_2_ALLOWLIST, ALLOWLIST_PROVING_KEY),
+    (POLICY_TX_2_2_BLOCKLIST, BLOCKLIST_PROVING_KEY),
+    (POLICY_TX_2_2_BOTH, BOTH_PROVING_KEY),
 ];
 
 const DISCLOSURE_PROVING_KEYS: [&[u8]; 4] = [
@@ -131,16 +139,6 @@ struct TransactArtifactHashes {
 
 fn transact_hashes(stem: &str) -> TransactArtifactHashes {
     match stem {
-        POLICY_TX_2_2_PERMISSIONED => TransactArtifactHashes {
-            proving_key_len:
-                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_PROVING_KEY_LEN,
-            proving_key_sha256:
-                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_PROVING_KEY_SHA256,
-            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_WASM_LEN,
-            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_WASM_SHA256,
-            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_R1CS_LEN,
-            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PERMISSIONED_R1CS_SHA256,
-        },
         POLICY_TX_2_2_OPEN => TransactArtifactHashes {
             proving_key_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_PROVING_KEY_LEN,
             proving_key_sha256:
@@ -149,6 +147,35 @@ fn transact_hashes(stem: &str) -> TransactArtifactHashes {
             wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_WASM_SHA256,
             r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_R1CS_LEN,
             r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_OPEN_R1CS_SHA256,
+        },
+        POLICY_TX_2_2_ALLOWLIST => TransactArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_ALLOWLIST_R1CS_SHA256,
+        },
+        POLICY_TX_2_2_BOTH => TransactArtifactHashes {
+            proving_key_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BOTH_R1CS_SHA256,
+        },
+        POLICY_TX_2_2_BLOCKLIST => TransactArtifactHashes {
+            proving_key_len:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_PROVING_KEY_LEN,
+            proving_key_sha256:
+                crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_PROVING_KEY_SHA256,
+            wasm_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_WASM_LEN,
+            wasm_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_WASM_SHA256,
+            r1cs_len: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_R1CS_LEN,
+            r1cs_sha256: crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_BLOCKLIST_R1CS_SHA256,
         },
         _ => panic!("unsupported transact circuit stem: {stem}"),
     }

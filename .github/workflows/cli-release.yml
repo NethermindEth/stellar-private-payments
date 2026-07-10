@@ -64,11 +64,15 @@ jobs:
 
           # Compiled circuit artifacts + proving keys the CLI loads at runtime.
           CIRCUITS="target/circuits-artifacts/release"
-          cp "$CIRCUITS/policy_tx_2_2_permissioned.r1cs" "$CIRCUITS/policy_tx_2_2_permissioned.wasm" "$STAGING/circuits/"
           cp "$CIRCUITS/policy_tx_2_2_open.r1cs" "$CIRCUITS/policy_tx_2_2_open.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_allowlist.r1cs" "$CIRCUITS/policy_tx_2_2_allowlist.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_both.r1cs" "$CIRCUITS/policy_tx_2_2_both.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_blocklist.r1cs" "$CIRCUITS/policy_tx_2_2_blocklist.wasm" "$STAGING/circuits/"
           cp "$CIRCUITS/selectiveDisclosure_1.r1cs" "$CIRCUITS/selectiveDisclosure_1.wasm" "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/policy_tx_2_2_permissioned_proving_key.bin "$STAGING/circuits/"
           cp deployments/testnet/circuit_keys/policy_tx_2_2_open_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_allowlist_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_both_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_blocklist_proving_key.bin "$STAGING/circuits/"
           cp deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin "$STAGING/circuits/"
 
           # Corresponding Source bundle (LGPL-3.0).

@@ -59,17 +59,19 @@ impl Groth16Proof {
 #[contracttype]
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PolicyMode {
-    Permissioned,
     Open,
+    Allowlist,
+    Blocklist,
+    Both,
 }
 
 impl PolicyMode {
     pub fn requires_membership_proofs(self) -> bool {
-        matches!(self, PolicyMode::Permissioned)
+        matches!(self, PolicyMode::Allowlist | PolicyMode::Both)
     }
 
     pub fn requires_non_membership_proofs(self) -> bool {
-        true
+        matches!(self, PolicyMode::Blocklist | PolicyMode::Both)
     }
 }
 

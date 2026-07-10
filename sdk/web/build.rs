@@ -53,7 +53,12 @@ fn main() {
     let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
     let repo_root = repo_root_from_manifest_dir(&manifest_dir);
 
-    const POLICY_CIRCUITS: &[&str] = &["policy_tx_2_2_permissioned", "policy_tx_2_2_open"];
+    const POLICY_CIRCUITS: &[&str] = &[
+        "policy_tx_2_2_open",
+        "policy_tx_2_2_allowlist",
+        "policy_tx_2_2_blocklist",
+        "policy_tx_2_2_both",
+    ];
 
     let profile = env::var("PROFILE").expect("PROFILE env var is set by Cargo");
     let circuits_out = repo_root.join("target/circuits-artifacts").join(&profile);

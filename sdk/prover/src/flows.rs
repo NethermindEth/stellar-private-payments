@@ -139,11 +139,10 @@ pub struct TransactParams {
     /// dummy output notes.
     pub outputs: Vec<TransactOutput>,
 
-    /// ASP membership proof when `policy_mode` is `Permissioned`; must be
-    /// `None` for `Open`.
+    /// ASP membership proof when `policy_mode` requires allowlist proofs.
     pub membership_proof: Option<AspMembershipProof>,
-    /// ASP non-membership proof (provided by caller).
-    pub non_membership_proof: AspNonMembershipProof,
+    /// ASP non-membership proof when `policy_mode` requires blocklist proofs.
+    pub non_membership_proof: Option<AspNonMembershipProof>,
 
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
@@ -175,12 +174,10 @@ pub struct DepositParams {
     /// Output distribution (<= 2 outputs). `transact()` pads to 2.
     pub outputs: Vec<TransactOutput>,
 
-    /// ASP membership proof when `policy_mode` is `Permissioned`; must be
-    /// `None` for `Open`.
+    /// ASP membership proof when `policy_mode` requires allowlist proofs.
     pub membership_proof: Option<AspMembershipProof>,
-    /// ASP non-membership proof data required by the circuit (provided by
-    /// caller).
-    pub non_membership_proof: AspNonMembershipProof,
+    /// ASP non-membership proof when `policy_mode` requires blocklist proofs.
+    pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
@@ -218,12 +215,10 @@ pub struct WithdrawParams {
     /// Optional outputs override (must satisfy equation if provided).
     pub outputs: Option<Vec<TransactOutput>>,
 
-    /// ASP membership proof when `policy_mode` is `Permissioned`; must be
-    /// `None` for `Open`.
+    /// ASP membership proof when `policy_mode` requires allowlist proofs.
     pub membership_proof: Option<AspMembershipProof>,
-    /// ASP non-membership proof data required by the circuit (provided by
-    /// caller).
-    pub non_membership_proof: AspNonMembershipProof,
+    /// ASP non-membership proof when `policy_mode` requires blocklist proofs.
+    pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
@@ -257,12 +252,10 @@ pub struct TransferParams {
     /// transfer privately.
     pub outputs: Vec<TransactOutput>,
 
-    /// ASP membership proof when `policy_mode` is `Permissioned`; must be
-    /// `None` for `Open`.
+    /// ASP membership proof when `policy_mode` requires allowlist proofs.
     pub membership_proof: Option<AspMembershipProof>,
-    /// ASP non-membership proof data required by the circuit (provided by
-    /// caller).
-    pub non_membership_proof: AspNonMembershipProof,
+    /// ASP non-membership proof when `policy_mode` requires blocklist proofs.
+    pub non_membership_proof: Option<AspNonMembershipProof>,
     /// Pool Merkle tree depth.
     pub tree_depth: u32,
     /// ASP sparse Merkle tree depth.
@@ -485,13 +478,32 @@ where
         }
         (false, None) => None,
     };
-    if non_membership_proof.siblings.len() != smt_depth_usize {
-        return Err(anyhow!(
-            "non_membership_proof.siblings length mismatch: expected {}, got {}",
-            smt_depth,
-            non_membership_proof.siblings.len()
-        ));
-    }
+    let non_membership_proof = match (
+        policy_mode.requires_non_membership_proofs(),
+        non_membership_proof,
+    ) {
+        (true, None) => {
+            return Err(anyhow!(
+                "non_membership_proof is required for policy mode {policy_mode:?}"
+            ));
+        }
+        (false, Some(_)) => {
+            return Err(anyhow!(
+                "non_membership_proof must be omitted for policy mode {policy_mode:?}"
+            ));
+        }
+        (true, Some(proof)) => {
+            if proof.siblings.len() != smt_depth_usize {
+                return Err(anyhow!(
+                    "non_membership_proof.siblings length mismatch: expected {}, got {}",
+                    smt_depth,
+                    proof.siblings.len()
+                ));
+            }
+            Some(proof)
+        }
+        (false, None) => None,
+    };
 
     if outputs.len() > N_OUTPUTS {
         return Err(anyhow!(
@@ -707,6 +719,7 @@ where
         );
     }
     if policy_mode.requires_non_membership_proofs() {
+        let non_membership_proof = non_membership_proof.as_ref().expect("validated above");
         let non_membership_root_hex = field_to_circuit_hex(&non_membership_proof.root)?;
         circuit.set_array(
             "nonMembershipRoots",
@@ -749,6 +762,7 @@ where
         }
 
         if policy_mode.requires_non_membership_proofs() {
+            let non_membership_proof = non_membership_proof.as_ref().expect("validated above");
             let prefix_n = format!("nonMembershipProofs[{slot}][0].");
             circuit.set_single(
                 &format!("{prefix_n}key"),
@@ -809,11 +823,10 @@ where
                 .as_ref()
                 .map(|proof| proof.root)
                 .unwrap_or(Field::ZERO),
-            asp_non_membership_root: if policy_mode.requires_non_membership_proofs() {
-                non_membership_proof.root
-            } else {
-                Field::ZERO
-            },
+            asp_non_membership_root: non_membership_proof
+                .as_ref()
+                .map(|proof| proof.root)
+                .unwrap_or(Field::ZERO),
         },
     })
 }
@@ -1101,10 +1114,10 @@ mod tests {
                     recipient_encryption_pubkey: None,
                 }],
                 membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Permissioned,
+                policy_mode: PolicyMode::Both,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1137,7 +1150,7 @@ mod tests {
     }
 
     #[test]
-    fn open_transact_omits_membership_witness() {
+    fn blocklist_transact_omits_membership_witness() {
         let tree_depth: u32 = 10;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
@@ -1157,10 +1170,10 @@ mod tests {
                     recipient_encryption_pubkey: None,
                 }],
                 membership_proof: None,
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Open,
+                policy_mode: PolicyMode::Blocklist,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1182,7 +1195,97 @@ mod tests {
     }
 
     #[test]
-    fn open_transact_rejects_membership_proof() {
+    fn open_transact_omits_asp_witness() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+
+        let artifacts = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: None,
+                non_membership_proof: None,
+                tree_depth,
+                smt_depth,
+                policy_mode: PolicyMode::Open,
+            },
+            |_| Ok([0u8; 32]),
+        )
+        .expect("open transact builds");
+
+        assert!(
+            !artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("membershipRoots")
+        );
+        assert!(
+            !artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("nonMembershipRoots")
+        );
+        assert!(artifacts.prepared.asp_membership_root.is_zero());
+        assert!(artifacts.prepared.asp_non_membership_root.is_zero());
+    }
+
+    #[test]
+    fn allowlist_transact_omits_blocklist_witness() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+
+        let artifacts = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(tree_depth_usize)),
+                non_membership_proof: None,
+                tree_depth,
+                smt_depth,
+                policy_mode: PolicyMode::Allowlist,
+            },
+            |_| Ok([0u8; 32]),
+        )
+        .expect("allowlist transact builds");
+
+        assert!(
+            artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("membershipRoots")
+        );
+        assert!(
+            !artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("nonMembershipRoots")
+        );
+        assert!(artifacts.prepared.asp_non_membership_root.is_zero());
+    }
+
+    #[test]
+    fn blocklist_transact_rejects_membership_proof() {
         let tree_depth: u32 = 10;
         let smt_depth: u32 = 10;
         let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
@@ -1203,10 +1306,10 @@ mod tests {
                     recipient_encryption_pubkey: None,
                 }],
                 membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Open,
+                policy_mode: PolicyMode::Blocklist,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1215,7 +1318,7 @@ mod tests {
     }
 
     #[test]
-    fn permissioned_transact_requires_membership_proof() {
+    fn both_transact_requires_membership_proof() {
         let tree_depth: u32 = 10;
         let smt_depth: u32 = 10;
         let smt_depth_usize = usize::try_from(smt_depth).expect("smt_depth");
@@ -1235,10 +1338,10 @@ mod tests {
                     recipient_encryption_pubkey: None,
                 }],
                 membership_proof: None,
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Permissioned,
+                policy_mode: PolicyMode::Both,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1273,10 +1376,10 @@ mod tests {
                 inputs: vec![input],
                 outputs: None,
                 membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Permissioned,
+                policy_mode: PolicyMode::Both,
             },
             |_| Ok([0u8; 32]),
         )
@@ -1326,10 +1429,10 @@ mod tests {
                 inputs: vec![input],
                 outputs: vec![out],
                 membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Permissioned,
+                policy_mode: PolicyMode::Both,
             },
             |_| Ok([0u8; 32]),
         );
@@ -1365,10 +1468,10 @@ mod tests {
                 inputs: vec![input0],
                 outputs: None,
                 membership_proof: Some(zero_membership(tree_depth_usize)),
-                non_membership_proof: zero_non_membership(smt_depth_usize),
+                non_membership_proof: Some(zero_non_membership(smt_depth_usize)),
                 tree_depth,
                 smt_depth,
-                policy_mode: PolicyMode::Permissioned,
+                policy_mode: PolicyMode::Both,
             },
             |_| Ok([0u8; 32]),
         );

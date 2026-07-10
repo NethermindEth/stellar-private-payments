@@ -175,7 +175,7 @@ pub(crate) enum DataKey {
     ASPMembership,
     /// Address of the ASP Non-Membership contract
     ASPNonMembership,
-    /// Pool policy mode (`Permissioned` or `Open`).
+    /// Pool policy mode (`Open`, `Allowlist`, `Blocklist`, or `Both`).
     PolicyMode,
 }
 
@@ -718,7 +718,7 @@ impl PoolContract {
             .storage()
             .persistent()
             .get(&DataKey::PolicyMode)
-            .unwrap_or(PolicyMode::Permissioned))
+            .unwrap_or(PolicyMode::Both))
     }
 
     /// Get the latest root of the Merkle tree that defines the pool

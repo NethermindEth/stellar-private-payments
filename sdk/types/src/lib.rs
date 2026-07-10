@@ -25,8 +25,7 @@ pub struct ContractConfig {
     pub asp_membership: String,
     /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
-    /// Groth16 verifier contracts keyed by policy mode (`permissioned`,
-    /// `open`).
+    /// Groth16 verifier contracts keyed by policy mode (`both`, `blocklist`).
     pub verifiers: BTreeMap<String, String>,
     /// Address of public key registry deployed contract
     pub public_key_registry: String,
@@ -46,7 +45,7 @@ pub struct PoolConfigEntry {
     pub deployment_ledger: u32,
     pub enabled: bool,
     pub asset: AssetDescriptor,
-    /// ASP policy mode for transact proofs (`permissioned` by default).
+    /// ASP policy mode for transact proofs.
     pub policy_mode: PolicyMode,
 }
 
@@ -275,13 +274,13 @@ impl ContractConfig {
             .ok_or_else(|| anyhow!("at least one pool should be enabled"))
     }
 
-    /// Policy mode for a pool (`Permissioned` when the pool is unknown).
+    /// Policy mode for a pool (`Both` when the pool is unknown).
     pub fn pool_policy_mode(&self, pool_contract_id: &str) -> PolicyMode {
         self.pools
             .iter()
             .find(|p| p.pool_contract_id == pool_contract_id)
             .map(|p| p.policy_mode)
-            .unwrap_or(PolicyMode::Permissioned)
+            .unwrap_or(PolicyMode::Both)
     }
 
     /// Verifier contract for a policy mode.

@@ -314,7 +314,7 @@ fn chain_snapshot_from_storage(
             siblings: vec![Field::ZERO; SMT_DEPTH as usize],
             root: Field::ZERO,
         },
-        policy_mode: PolicyMode::Permissioned,
+        policy_mode: PolicyMode::Both,
     })
 }
 
