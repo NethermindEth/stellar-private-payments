@@ -4,7 +4,7 @@
 #   curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh
 #
 # Picks the release binary for this platform, installs it, and provisions the
-# data dir (circuits, proving key, license/notice texts) that the CLI reads at
+# data dir (circuits, policy proving keys, license/notice texts) that the CLI reads at
 # runtime.
 #
 # Environment overrides:

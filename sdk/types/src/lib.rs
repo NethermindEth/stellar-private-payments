@@ -25,7 +25,8 @@ pub struct ContractConfig {
     pub asp_membership: String,
     /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
-    /// Groth16 verifier contracts keyed by policy mode (`both`, `blocklist`).
+    /// Groth16 verifier contracts keyed by policy mode (`open`, `allowlist`,
+    /// `blocklist`, `both`).
     pub verifiers: BTreeMap<String, String>,
     /// Address of public key registry deployed contract
     pub public_key_registry: String,

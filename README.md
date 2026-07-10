@@ -67,7 +67,8 @@ The main transaction circuit proves:
 - Valid Merkle proofs for input commitments
 - Correct output commitment computation
 - Balance conservation (inputs = outputs + public amount)
-- ASP membership/non-membership proofs
+- ASP membership and/or non-membership proofs, depending on pool policy mode
+  (`Open` = neither; `Allowlist`, `Blocklist`, or `Both`)
 
 #### Smart Contracts
 
@@ -88,7 +89,7 @@ curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh |
 
 This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64),
 verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
-data dir (circuits, proving key, license/notice texts). Then run `spp --help`.
+data dir (circuits, policy proving keys, license/notice texts). Then run `spp --help`.
 
 To install a specific release
 

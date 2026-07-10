@@ -53,8 +53,14 @@ stellar-private-payments/
 │   │   ├── poseidon2/          # Poseidon2 hash circuits
 │   │   ├── smt/                # Sparse Merkle tree circuits
 │   │   ├── test/               # Circuit test utilities
-│   │   ├── policyTransactionBoth.circom  # Both-policy transaction circuit
+│   │   ├── policyTransaction.circom      # Base transact circuit
+│   │   ├── aspMembership.circom          # ASP allowlist proof subcircuit
+│   │   ├── aspNonMembership.circom       # ASP blocklist proof subcircuit
+│   │   ├── policyTransactionOpen.circom  # Open-policy transaction circuit
+│   │   ├── policyTransactionAllowlist.circom  # Allowlist-only transaction circuit
 │   │   ├── policyTransactionBlocklist.circom  # Blocklist-only transaction circuit
+│   │   ├── policyTransactionBoth.circom  # Both-policy transaction circuit
+│   │   ├── policy_tx_2_2_{open,allowlist,blocklist,both}.circom  # Entry points
 │   │   └── *.circom            # Supporting circuits
 │   └── build.rs                # Circuit compilation build script
 ├── circuit-keys/               # Helpers to convert snarkjs keys to Arkworks

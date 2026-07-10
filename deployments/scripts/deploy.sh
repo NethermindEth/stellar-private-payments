@@ -253,7 +253,7 @@ while [[ "$_ps_i" -lt "$_ps_len" ]]; do
     mode="$POLICY_MODE"
   fi
   if [[ "$SKIP_INIT" != "true" && -z "$mode" ]]; then
-    die "pool spec '$spec' has no policy mode; prefix with blocklist: or both:, or pass --policy-mode"
+    die "pool spec '$spec' has no policy mode; prefix with open:, allowlist:, blocklist:, or both:, or pass --policy-mode"
   fi
   POOL_BODY_SPECS+=("$body")
   POOL_POLICY_MODES+=("$mode")

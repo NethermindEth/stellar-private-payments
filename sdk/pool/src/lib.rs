@@ -18,7 +18,7 @@
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage_path = "wallet.sqlite";
-//! let artifacts = load_transact_artifacts(); // proving key + wasm + r1cs per mode
+//! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
 //!
 //! let config = PrivatePoolConfig {
 //!     rpc_url: "https://soroban-testnet.stellar.org".into(),
