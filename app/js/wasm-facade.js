@@ -117,6 +117,38 @@ function wrapSdkClient(sdk, sdkStorage) {
             const response = await storageCall(sdkStorage, { UserNotes: [address, limit] });
             return response.UserNotes ?? [];
         },
+        // Encrypted, opt-in local storage of generated disclosure receipts.
+        // The worker encrypts/decrypts under the account's own encryption keypair;
+        // returned receipts carry camelCase fields { id, createdAt, receiptJson }.
+        async saveDisclosureReceipt(address, receiptJson, createdAt) {
+            const response = await storageCall(sdkStorage, {
+                SaveDisclosureReceipt: {
+                    address,
+                    receipt_json: receiptJson,
+                    created_at: createdAt,
+                },
+            });
+            return response.DisclosureReceiptSaved ?? null;
+        },
+        async listDisclosureReceipts(address) {
+            const response = await storageCall(sdkStorage, { ListDisclosureReceipts: address });
+            return response.DisclosureReceipts ?? [];
+        },
+        async deleteDisclosureReceipt(address, id) {
+            await storageCall(sdkStorage, { DeleteDisclosureReceipt: { address, id } });
+        },
+        async clearDisclosureReceipts(address) {
+            await storageCall(sdkStorage, { ClearDisclosureReceipts: address });
+        },
+        async getStoreReceiptsSetting() {
+            // Unit request variant -> externally-tagged bare string.
+            const response = await storageCall(sdkStorage, 'GetStoreReceiptsSetting');
+            return response.StoreReceiptsSetting ?? false;
+        },
+        async setStoreReceiptsSetting(enabled) {
+            const response = await storageCall(sdkStorage, { SetStoreReceiptsSetting: enabled });
+            return response.StoreReceiptsSetting ?? enabled;
+        },
         async deriveAspUserLeaf(membershipBlinding, notePublicKey) {
             const response = await storageCall(sdkStorage, {
                 DeriveASPleaf: {

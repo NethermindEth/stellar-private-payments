@@ -49,6 +49,16 @@ pub struct DisclaimerStatePayload {
     pub accepted: bool,
 }
 
+/// A stored disclosure receipt returned to the UI: opaque `id`, `created_at`,
+/// and the decrypted receipt JSON (decrypted inside the worker).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredDisclosureReceipt {
+    pub id: String,
+    pub created_at: String,
+    pub receipt_json: String,
+}
+
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug, Serialize, Deserialize)]
 pub enum StorageWorkerRequest {
@@ -106,6 +116,19 @@ pub enum StorageWorkerRequest {
     DisclosureInputs(DisclosureInputsRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
+    SaveDisclosureReceipt {
+        address: Address,
+        receipt_json: String,
+        created_at: String,
+    },
+    ListDisclosureReceipts(Address),
+    DeleteDisclosureReceipt {
+        address: Address,
+        id: String,
+    },
+    ClearDisclosureReceipts(Address),
+    GetStoreReceiptsSetting,
+    SetStoreReceiptsSetting(bool),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -128,6 +151,9 @@ pub enum StorageWorkerResponse {
     DisclosureNotes(Vec<DisclosureInputs>),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
+    DisclosureReceiptSaved(String),
+    DisclosureReceipts(Vec<StoredDisclosureReceipt>),
+    StoreReceiptsSetting(bool),
 }
 
 #[allow(clippy::large_enum_variant)]

@@ -295,14 +295,39 @@ pub fn decrypt_output_note(
 ///
 /// # Returns
 /// Encrypted data (120 bytes)
+/// Encrypt arbitrary-length `plaintext` to `recipient_pubkey` using the same
+/// scheme as note encryption (ephemeral X25519 + XSalsa20Poly1305). Intended
+/// for self-encryption of local artifacts (e.g. disclosure receipts) under the
+/// account's own encryption public key.
+pub fn encrypt_blob(recipient_pubkey: &EncryptionPublicKey, plaintext: &[u8]) -> Result<Vec<u8>> {
+    encrypt_ecies(&recipient_pubkey.0, plaintext)
+}
+
+/// Decrypt bytes produced by [`encrypt_blob`]. Unlike [`decrypt_note_data`]
+/// (which returns an empty vec when a scanned note is not ours), this errors on
+/// failure because the caller expects the blob to be its own.
+pub fn decrypt_blob(
+    recipient_privkey: &EncryptionPrivateKey,
+    ciphertext: &[u8],
+) -> Result<Vec<u8>> {
+    ecies_open(&recipient_privkey.0, ciphertext)
+}
+
 fn encrypt_note_data(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
-    if recipient_pubkey_bytes.len() != 32 {
-        return Err(anyhow!("Recipient public key must be 32 bytes"));
-    }
     if plaintext.len() != 48 {
         return Err(anyhow!(
             "Plaintext must be 48 bytes (16 amount + 32 blinding)"
         ));
+    }
+    encrypt_ecies(recipient_pubkey_bytes, plaintext)
+}
+
+/// Core ECIES seal over arbitrary-length plaintext:
+/// ephemeral X25519 + ECDH + XSalsa20Poly1305, packed as
+/// `[ephemeral_pubkey(32)][nonce(24)][ciphertext+tag]`.
+fn encrypt_ecies(recipient_pubkey_bytes: &[u8], plaintext: &[u8]) -> Result<Vec<u8>> {
+    if recipient_pubkey_bytes.len() != 32 {
+        return Err(anyhow!("Recipient public key must be 32 bytes"));
     }
 
     // Generate ephemeral secret key using getrandom directly
@@ -406,6 +431,40 @@ fn decrypt_note_data(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<
     }
 }
 
+/// Core ECIES open matching [`encrypt_ecies`], returning the plaintext or an
+/// error. Mirrors [`decrypt_note_data`] but treats decryption failure as an
+/// error (the caller owns the ciphertext), and imposes no fixed plaintext size.
+fn ecies_open(private_key_bytes: &[u8], encrypted_data: &[u8]) -> Result<Vec<u8>> {
+    if private_key_bytes.len() != 32 {
+        return Err(anyhow!("Private key must be 32 bytes"));
+    }
+    if encrypted_data.len() < 56 {
+        return Err(anyhow!("Encrypted data too short"));
+    }
+
+    let ephemeral_pubkey = &encrypted_data[0..32];
+    let nonce_bytes = &encrypted_data[32..56];
+    let ciphertext_with_tag = &encrypted_data[56..];
+
+    let our_secret = StaticSecret::from(
+        *<&[u8; 32]>::try_from(private_key_bytes).map_err(|_| anyhow!("Invalid private key"))?,
+    );
+    let ephemeral_public = PublicKey::from(
+        *<&[u8; 32]>::try_from(ephemeral_pubkey)
+            .map_err(|_| anyhow!("Invalid ephemeral public key"))?,
+    );
+    let shared_secret = our_secret.diffie_hellman(&ephemeral_public);
+    let cipher = XSalsa20Poly1305::new(shared_secret.as_bytes().into());
+
+    let mut nonce_array = [0u8; 24];
+    nonce_array.copy_from_slice(nonce_bytes);
+    let nonce = Nonce::from(nonce_array);
+
+    cipher
+        .decrypt(&nonce, ciphertext_with_tag)
+        .map_err(|_| anyhow!("blob decryption failed"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -475,6 +534,41 @@ mod tests {
 
         let decrypted = decrypt_note_data(priv_key, &encrypted).expect("Decryption failed");
         assert_eq!(decrypted, plaintext);
+    }
+
+    #[test]
+    fn test_encrypt_blob_roundtrip_arbitrary_length() {
+        let (_note, enc) =
+            derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![9u8; 64]))
+                .expect("derivation failed");
+
+        // Arbitrary-length payload (not the 48-byte note framing).
+        let plaintext = br#"{"version":1,"purpose":"KYC for Exchange X","amounts":["550000000"]}"#;
+
+        let ciphertext = encrypt_blob(&enc.public, plaintext).expect("encrypt_blob failed");
+        assert_ne!(
+            &ciphertext[..],
+            &plaintext[..],
+            "ciphertext must differ from plaintext"
+        );
+
+        let recovered = decrypt_blob(&enc.private, &ciphertext).expect("decrypt_blob failed");
+        assert_eq!(recovered, plaintext);
+    }
+
+    #[test]
+    fn test_decrypt_blob_wrong_key_errors() {
+        let (_a_note, alice) =
+            derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![3u8; 64]))
+                .expect("derivation failed");
+        let (_b_note, bob) =
+            derive_encryption_and_note_keypairs(KeyDerivationSignature(vec![4u8; 64]))
+                .expect("derivation failed");
+
+        let ciphertext =
+            encrypt_blob(&alice.public, b"secret receipt bytes").expect("encrypt_blob failed");
+        // Unlike note scanning, a blob addressed to us must ERROR on the wrong key.
+        assert!(decrypt_blob(&bob.private, &ciphertext).is_err());
     }
 
     #[test]
