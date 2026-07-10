@@ -46,7 +46,9 @@ Options:
   --vk-json JSON        Verification key as a JSON string (snarkjs or repo format).
                         Applies to both-policy verifier builds only.
   --vk-file PATH        Path to a verification key JSON file (both policy only)
-  --skip-init           Deploy only, do not call constructors
+  --skip-init           Deploy WASM only (no constructors). Writes verifiers under the
+                        policy mode key (open/allowlist/blocklist/both); use --policy-mode
+                        or a per-pool prefix when the mode is not otherwise known.
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
@@ -60,7 +62,7 @@ Examples:
     --pool-levels 8 \
     --max-deposit 1000000000
 
-  # Same policy on every pool via default
+  # Same policy on every pool via --policy-mode
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
     --policy-mode blocklist \
@@ -429,18 +431,28 @@ else
 fi
 
 if [[ "$SKIP_INIT" == "true" ]]; then
+  if [[ ${#UNIQUE_POLICY_MODES[@]} -gt 1 ]]; then
+    die "--skip-init supports at most one policy mode; deploy without --skip-init for mixed policies"
+  fi
+
+  skip_init_verifier_mode=""
+  if [[ ${#UNIQUE_POLICY_MODES[@]} -eq 1 ]]; then
+    skip_init_verifier_mode="${UNIQUE_POLICY_MODES[0]}"
+  elif [[ -n "$POLICY_MODE" ]]; then
+    skip_init_verifier_mode="$POLICY_MODE"
+  fi
+  [[ -n "$skip_init_verifier_mode" ]] \
+    || die "--skip-init requires a policy mode (--policy-mode or pool prefix open:|allowlist:|blocklist:|both:)"
+
   if [[ -f "$WASM_DIR/circom_groth16_verifier.wasm" ]]; then
     verifier_wasm="$WASM_DIR/circom_groth16_verifier.wasm"
-  elif [[ ${#UNIQUE_POLICY_MODES[@]} -eq 1 ]]; then
-    mode="${UNIQUE_POLICY_MODES[0]}"
-    verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$mode")"
-    [[ -f "$verifier_wasm" ]] \
-      || die "missing verifier wasm for $mode (run build-verifier-with-vk.sh or deploy without --skip-init)"
   else
-    die "missing verifier wasm in $WASM_DIR (build with scripts/build-verifier-with-vk.sh first)"
+    verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$skip_init_verifier_mode")"
+    [[ -f "$verifier_wasm" ]] \
+      || die "missing verifier wasm for $skip_init_verifier_mode (run build-verifier-with-vk.sh or deploy without --skip-init)"
   fi
-  step "deploy circom-groth16-verifier"
-  set_verifier_id default "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
+  step "deploy circom-groth16-verifier ($skip_init_verifier_mode)"
+  set_verifier_id "$skip_init_verifier_mode" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
 else
   for mode in $(array_values UNIQUE_POLICY_MODES); do
     verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$mode")"

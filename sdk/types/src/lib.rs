@@ -274,13 +274,13 @@ impl ContractConfig {
             .ok_or_else(|| anyhow!("at least one pool should be enabled"))
     }
 
-    /// Policy mode for a pool (`Both` when the pool is unknown).
-    pub fn pool_policy_mode(&self, pool_contract_id: &str) -> PolicyMode {
+    /// Policy mode for a pool from `deployments.json`.
+    pub fn pool_policy_mode(&self, pool_contract_id: &str) -> Result<PolicyMode> {
         self.pools
             .iter()
             .find(|p| p.pool_contract_id == pool_contract_id)
             .map(|p| p.policy_mode)
-            .unwrap_or(PolicyMode::Both)
+            .ok_or_else(|| anyhow!("pool {pool_contract_id} not found in deployment config"))
     }
 
     /// Verifier contract for a policy mode.

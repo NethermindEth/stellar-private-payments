@@ -35,7 +35,7 @@ pub struct TransactRequest {
     pub out_recipient_encryption_pubkeys: [Option<EncryptionPublicKey>; N_OUTPUTS],
     pub smt_depth: u32,
     pub tree_depth: u32,
-    pub non_membership_proof: AspNonMembershipProof,
+    pub non_membership_proof: Option<AspNonMembershipProof>,
     pub policy_mode: PolicyMode,
 }
 
@@ -178,11 +178,7 @@ pub fn build_transact_params(
         inputs,
         outputs,
         membership_proof,
-        non_membership_proof: if req.policy_mode.requires_non_membership_proofs() {
-            Some(req.non_membership_proof.clone())
-        } else {
-            None
-        },
+        non_membership_proof: req.non_membership_proof.clone(),
         tree_depth: req.tree_depth,
         smt_depth: req.smt_depth,
         policy_mode: req.policy_mode,

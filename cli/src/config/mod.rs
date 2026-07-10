@@ -166,6 +166,7 @@ fn load_deployment(path: Option<&Path>) -> Result<(String, ContractConfig)> {
 }
 
 pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {
+    deployment.pool_policy_mode(pool)?;
     if deployment
         .pools
         .iter()

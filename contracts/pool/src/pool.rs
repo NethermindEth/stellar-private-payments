@@ -714,11 +714,10 @@ impl PoolContract {
     }
 
     fn policy_mode(env: &Env) -> Result<PolicyMode, Error> {
-        Ok(env
-            .storage()
+        env.storage()
             .persistent()
             .get(&DataKey::PolicyMode)
-            .unwrap_or(PolicyMode::Both))
+            .ok_or(Error::NotInitialized)
     }
 
     /// Get the latest root of the Merkle tree that defines the pool

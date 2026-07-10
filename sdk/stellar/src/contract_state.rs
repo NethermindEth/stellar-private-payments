@@ -485,14 +485,24 @@ impl StateFetcher {
         user_address: &str,
     ) -> Result<TransactChainContext> {
         let data = self.contracts_data_for_pool(pool_contract_id).await?;
-        let non_membership_proof = self
-            .get_nonmembership_proof(
-                note_pubkey,
-                data.asp_non_membership.root,
-                SMT_DEPTH as usize,
-                user_address,
+        let policy_mode = data
+            .pools
+            .first()
+            .map(|pool| pool.policy_mode)
+            .ok_or_else(|| anyhow!("pool data not fetched for {pool_contract_id}"))?;
+        let non_membership_proof = if policy_mode.requires_non_membership_proofs() {
+            Some(
+                self.get_nonmembership_proof(
+                    note_pubkey,
+                    data.asp_non_membership.root,
+                    SMT_DEPTH as usize,
+                    user_address,
+                )
+                .await?,
             )
-            .await?;
+        } else {
+            None
+        };
         transact_chain_context_from_state(data, pool_contract_id, non_membership_proof)
     }
 

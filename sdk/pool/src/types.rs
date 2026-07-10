@@ -31,6 +31,9 @@ impl PoolChainConfig {
                 "user_address must not be empty".into(),
             ));
         }
+        self.contract_config
+            .pool_policy_mode(&self.pool_contract_id)
+            .map_err(|e| crate::error::PoolError::InvalidConfig(e.to_string()))?;
         Ok(())
     }
 }

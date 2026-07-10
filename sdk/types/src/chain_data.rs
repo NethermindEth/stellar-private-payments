@@ -120,14 +120,14 @@ pub struct TransactChainContext {
     pub asp_membership_root: Field,
     pub asp_membership_contract_id: String,
     pub asp_membership_ledger: u32,
-    pub non_membership_proof: AspNonMembershipProof,
+    pub non_membership_proof: Option<AspNonMembershipProof>,
     pub policy_mode: PolicyMode,
 }
 
 pub fn transact_chain_context_from_state(
     data: ContractsStateData,
     pool_contract_id: &str,
-    non_membership_proof: AspNonMembershipProof,
+    non_membership_proof: Option<AspNonMembershipProof>,
 ) -> anyhow::Result<TransactChainContext> {
     let pool = data
         .pools

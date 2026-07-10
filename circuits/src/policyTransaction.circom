@@ -8,21 +8,30 @@ include "./keypair.circom";
 include "./circomlib/circuits/comparators.circom";
 include "./circomlib/circuits/gates.circom";
 
+// * nIns: Number of inputs
+// * nOuts: Number of outputs
+// * levels: Number of levels in the Merkle tree
 template PolicyTransaction(nIns, nOuts, levels) {
+    /** PUBLIC INPUTS **/
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
     signal input inputNullifier[nIns];
     signal input outputCommitment[nOuts];
+
+    /** PRIVATE INPUTS **/
+    // Transaction input data
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
     signal input inBlinding[nIns];
     signal input inPathIndices[nIns];
     signal input inPathElements[nIns][levels];
+    // Transaction output data
     signal input outAmount[nOuts];
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
 
+    // Exposed to parent wrappers for ASP policy modules; not a main-component output.
     signal output inPublicKey[nIns];
 
     component inKeypair[nIns];
@@ -34,30 +43,38 @@ template PolicyTransaction(nIns, nOuts, levels) {
 
     var sumIns = 0;
 
+    // verify correctness of transaction inputs
     for (var tx = 0; tx < nIns; tx++) {
+        // Verify that the sender actually owns the inputs
+        // He knows the secret keys and the blinding factors.
         inKeypair[tx] = Keypair();
         inKeypair[tx].privateKey <== inPrivateKey[tx];
         inPublicKey[tx] <== inKeypair[tx].publicKey;
 
+        // Computes the leaf commitment as hash(amount, publicKey, blinding)
         inCommitmentHasher[tx] = Poseidon2(3);
         inCommitmentHasher[tx].inputs[0] <== inAmount[tx];
         inCommitmentHasher[tx].inputs[1] <== inPublicKey[tx];
         inCommitmentHasher[tx].inputs[2] <== inBlinding[tx];
-        inCommitmentHasher[tx].domainSeparation <== 0x01;
+        inCommitmentHasher[tx].domainSeparation <== 0x01; // Leaf commitment
 
+        // Computes the signature as hash(privateKey, commitment, merklePath)
         inSignature[tx] = Signature();
         inSignature[tx].privateKey <== inPrivateKey[tx];
         inSignature[tx].commitment <== inCommitmentHasher[tx].out;
         inSignature[tx].merklePath <== inPathIndices[tx];
 
+        // Computes the Nullifier as h(commitment, merklePath, signature)
+        // Checks it matches the input nullifier
         inNullifierHasher[tx] = Poseidon2(3);
         inNullifierHasher[tx].inputs[0] <== inCommitmentHasher[tx].out;
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];
         inNullifierHasher[tx].inputs[2] <== inSignature[tx].out;
-        inNullifierHasher[tx].domainSeparation <== 0x02;
+        inNullifierHasher[tx].domainSeparation <== 0x02; // Input Nullifier
 
         inNullifierHasher[tx].out === inputNullifier[tx];
 
+        // Verifies the merkle proofs
         inTree[tx] = MerkleProof(levels);
         inTree[tx].leaf <== inCommitmentHasher[tx].out;
         inTree[tx].pathIndices <== inPathIndices[tx];
@@ -65,10 +82,15 @@ template PolicyTransaction(nIns, nOuts, levels) {
             inTree[tx].pathElements[i] <== inPathElements[tx][i];
         }
 
+        // Check merkle proof only if amount is non-zero
         inCheckRoot[tx] = ForceEqualIfEnabled();
         inCheckRoot[tx].in[0] <== root;
         inCheckRoot[tx].in[1] <== inTree[tx].root;
         inCheckRoot[tx].enabled <== inAmount[tx];
+
+        // We don't need to range check input amounts, since all inputs are valid UTXOs that
+        // were already checked as outputs in the previous transaction (or zero amount UTXOs that don't
+        // need to be checked either).
 
         sumIns += inAmount[tx];
     }
@@ -77,20 +99,23 @@ template PolicyTransaction(nIns, nOuts, levels) {
     component outAmountCheck[nOuts];
     var sumOuts = 0;
 
+    // Verify correctness of transaction outputs
     for (var tx = 0; tx < nOuts; tx++) {
         outCommitmentHasher[tx] = Poseidon2(3);
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];
-        outCommitmentHasher[tx].domainSeparation <== 0x01;
+        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment
         outCommitmentHasher[tx].out === outputCommitment[tx];
 
+        // Check that amount fits into 248 bits to prevent overflow
         outAmountCheck[tx] = Num2Bits(248);
         outAmountCheck[tx].in <== outAmount[tx];
 
         sumOuts += outAmount[tx];
     }
 
+    // check that there are no same nullifiers among all inputs
     component sameNullifiers[nIns * (nIns - 1) / 2];
     var index = 0;
     for (var i = 0; i < nIns - 1; i++) {
@@ -103,6 +128,9 @@ template PolicyTransaction(nIns, nOuts, levels) {
         }
     }
 
+    // Verify amount invariant
     sumIns + publicAmount === sumOuts;
+
+    // Optional safety constraint to make sure extDataHash cannot be changed
     signal extDataSquare <== extDataHash * extDataHash;
 }
