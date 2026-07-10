@@ -95,6 +95,7 @@ done
 
 [[ -n "$NETWORK" ]] || usage
 need stellar
+need jq
 
 [[ -n "$DEPLOYER" ]] || die "--deployer is required"
 [[ -n "$ASP_LEVELS" ]] || die "--asp-levels is required"
@@ -331,5 +332,6 @@ DEPLOY_JSON="{\"network\":\"$NETWORK\",\"deployer\":\"$DEPLOYER_ADDR\",\"admin\"
 
 DEPLOYMENTS_DIR="$ROOT_DIR/deployments/$NETWORK"
 mkdir -p "$DEPLOYMENTS_DIR"
-printf '%s\n' "$DEPLOY_JSON" > "$DEPLOYMENTS_DIR/deployments.json"
-printf '%s\n' "$DEPLOY_JSON"
+DEPLOY_JSON_PRETTY="$(printf '%s\n' "$DEPLOY_JSON" | jq .)"
+printf '%s\n' "$DEPLOY_JSON_PRETTY" > "$DEPLOYMENTS_DIR/deployments.json"
+printf '%s\n' "$DEPLOY_JSON_PRETTY"
