@@ -4,11 +4,9 @@ use tx_planner::SpendableNote;
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
 use crate::{
-    PreparedTransaction, PreparedTransactionPlan, SyncMode,
+    PreparedTransaction, PreparedTransactionPlan,
     error::PoolError,
     pool::PrivatePool as AsyncPrivatePool,
-    prover::{LocalProver, NoopProver},
-    signer::Signer,
     storage::LocalStorage,
     types::{Estimate, PrivatePoolConfig, SignedTransaction, TransactionResult, TransferRecipient},
 };
@@ -16,50 +14,15 @@ use crate::{
 use super::runtime::block_on;
 
 /// Native sync wallet — [`crate::PrivatePool`] with blocking method names.
+///
+/// Construct via [`super::Client::account`] → [`super::Account::pool`].
 pub struct PrivatePool {
     inner: AsyncPrivatePool<LocalStorage>,
 }
 
 impl PrivatePool {
-    pub fn open(config: PrivatePoolConfig, signer: Box<dyn Signer>) -> Result<Self, PoolError> {
-        let storage = LocalStorage::open(&config.storage_path)?;
-        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Inline)?;
-        Ok(Self { inner })
-    }
-
-    /// Open a read-only pool session: no prover is constructed, so the proving
-    /// key / circuit artifacts in `config.prover_artifacts` are ignored and
-    /// never loaded. Suitable for balance/notes/sync; any transact/prove call
-    /// on the resulting pool errors. Callers that only read state should use
-    /// this to avoid the [`LocalProver`] init cost.
-    pub fn open_readonly(
-        config: PrivatePoolConfig,
-        signer: Box<dyn Signer>,
-    ) -> Result<Self, PoolError> {
-        let storage = LocalStorage::open(&config.storage_path)?;
-        let inner = AsyncPrivatePool::init(
-            config,
-            storage,
-            signer,
-            Box::new(NoopProver),
-            SyncMode::Inline,
-        )?;
-        Ok(Self { inner })
-    }
-
-    /// Open against pre-populated local storage without inline RPC catch-up.
-    ///
-    /// Use for seeded databases and other callers that keep storage current
-    /// separately (same contract as [`SyncMode::Background`]).
-    pub fn open_local(
-        config: PrivatePoolConfig,
-        signer: Box<dyn Signer>,
-    ) -> Result<Self, PoolError> {
-        let storage = LocalStorage::open(&config.storage_path)?;
-        let prover = Box::new(LocalProver::from_artifacts(&config.prover_artifacts)?);
-        let inner = AsyncPrivatePool::init(config, storage, signer, prover, SyncMode::Background)?;
-        Ok(Self { inner })
+    pub(crate) fn from_inner(inner: AsyncPrivatePool<LocalStorage>) -> Self {
+        Self { inner }
     }
 
     pub fn into_inner(self) -> AsyncPrivatePool<LocalStorage> {

@@ -7,7 +7,7 @@ members = [
     "e2e-tests",
     "poseidon2",
     "sdk/disclosure",
-    "sdk/pool",
+    "sdk/client",
     "sdk/prover",
     "sdk/state",
     "sdk/stellar",
@@ -43,7 +43,7 @@ public-key-registry = { path = "contracts/public-key-registry" }
 soroban-utils = { path = "contracts/soroban-utils" }
 state = { path = "sdk/state" }
 stellar = { path = "sdk/stellar" }
-stellar-private-payments-sdk = { path = "sdk/pool" }
+stellar-private-payments-sdk = { path = "sdk/client" }
 tx-planner = { path = "sdk/tx-planner" }
 types = { path = "sdk/types" }
 witness = { path = "sdk/witness" }

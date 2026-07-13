@@ -48,7 +48,10 @@ export async function createAppPool() {
     const config = await getContractConfig();
     const poolContract = getActivePoolContractId(config);
     if (!poolContract) throw new Error('Pool contract ID not available');
-    const pool = await client().pool({ poolContract });
+    await client().openAccount(
+        { networkPassphrase: App.state.wallet.networkPassphrase, userAddress: App.state.wallet.address },
+    );
+    const pool = await client().account().pool({ poolContract });
     activeSession = pool;
     activeSessionContractId = poolContract;
     return pool;

@@ -2,7 +2,7 @@
 
 Browser SDK for Stellar Private Payments.
 
-**`Storage.open`** → **`Client.new`** → **`checkSync`** → **`startSync`** → **`initialize`** → **`client.pool()`** → **`PrivatePool`** (Rust SDK parity).
+**`Storage.open`** → **`Client.new`** → **`checkSync`** → **`startSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
 ## Usage
 
@@ -22,10 +22,10 @@ const client = await Client.new({
 
 const bootnodeUrl = await client.checkSync();
 await client.startSync({ bootnodeUrl: bootnodeUrl ?? undefined });
-await client.initialize({ networkPassphrase }, signer);
-await client.registerPublicKeys();
+const account = await client.account({ networkPassphrase }, signer);
+await account.registerPublicKeys();
 
-const pool = await client.pool({ poolContract: 'CA2TZ...' });
+const pool = await account.pool({ poolContract: 'CA2TZ...' });
 await pool.sync(); // optional foreground catch-up; prefer startSync for background indexing
 await pool.deposit(10_000_000n); // stroops (1 XLM)
 console.log(await pool.getBalance()); // bigint stroops
@@ -33,7 +33,7 @@ await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n);
 
 const cfg = Client.contractConfig();
-const chain = await client.allContractsData();
+const chain = await account.allContractsData();
 ```
 
 ### `Storage`
@@ -48,15 +48,22 @@ const chain = await client.allContractsData();
 
 | Method | Description |
 |--------|-------------|
-| `new({ storage, rpcUrl })` | Client shell (no wallet yet) |
+| `new({ storage, rpcUrl })` | Deployment client shell (no wallet yet) |
 | `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
 | `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
-| `initialize({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, derive keys if missing |
 | `contractConfig()` | Static deployment config |
-| `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
+| `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, return `Account` |
 | `lookupRegisteredPublicKey(address)` | Recipient key lookup |
-| `allContractsData()` | On-chain pool + ASP state |
+| `aspState()` | On-chain ASP membership state |
 | `verifySelectiveDisclosure(receiptJson, expectedVkHash, options?)` | Walletless disclosure receipt verification |
+
+### `Account`
+
+| Method | Description |
+|--------|-------------|
+| `userAddress` | Connected Stellar address |
+| `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
+| `allContractsData()` | On-chain pool + ASP state |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`
@@ -67,7 +74,7 @@ Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `note
 
 ### Signer
 
-Bound at `client.initialize`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
+Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
 
 ## TypeScript
 
@@ -119,4 +126,4 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.initialize()`. Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.account()`. Circuit artifacts default to `dist/circuits/` via the prover worker loader.

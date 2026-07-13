@@ -1,6 +1,6 @@
 //! Browser SDK — wasm-bindgen bindings over [`stellar_private_payments_sdk`].
 //!
-//! Connect with [`Client`], then open per-pool sessions via [`Client::pool`].
+//! Connect with [`Client`], then [`Client::account`], then [`Account::pool`].
 
 mod circuits;
 mod client;
@@ -17,7 +17,7 @@ pub(crate) mod artifact_hashes {
 
 pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
 
-pub use client::{Client, PrivatePool};
+pub use client::{Account, Client, PrivatePool};
 pub use storage::Storage;
 
 pub(crate) fn wasm_start() {

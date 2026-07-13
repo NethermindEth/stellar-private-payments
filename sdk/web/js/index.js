@@ -17,11 +17,22 @@ async function openStorage(options = {}) {
   });
 }
 
+function wrapAccount(wasmAccount) {
+  return {
+    get userAddress() {
+      return wasmAccount.userAddress;
+    },
+    registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
+    allContractsData: () => wasmAccount.allContractsData(),
+    pool: (options) => wasmAccount.pool(options),
+  };
+}
+
 function wrapClient(wasmClient) {
   return {
     checkSync: (options) => wasmClient.checkSync(options),
     startSync: (options) => wasmClient.startSync(options),
-    initialize: async (options, signer) => {
+    account: async (options, signer) => {
       const userAddress =
         options.userAddress ??
         (typeof signer?.getPublicKey === 'function' ? await signer.getPublicKey() : undefined);
@@ -30,7 +41,7 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
-      return wasmClient.initialize(
+      const wasmAccount = await wasmClient.account(
         {
           proverWorkerUrl,
           ...options,
@@ -38,22 +49,20 @@ function wrapClient(wasmClient) {
         },
         signer,
       );
+      return wrapAccount(wasmAccount);
     },
-    registerPublicKeys: (options) => wasmClient.registerPublicKeys(options),
     lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
-    allContractsData: () => wasmClient.allContractsData(),
     aspState: () => wasmClient.aspState(),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash, options = {}) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
         proverWorkerUrl,
         ...options,
       }),
-    pool: (options) => wasmClient.pool(options),
   };
 }
 
 /**
- * Create a client shell. Call `startSync` then `initialize` before pool ops.
+ * Create a deployment client shell. Call `startSync` then `account` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
  */

@@ -3,11 +3,8 @@
 use std::rc::Rc;
 
 use stellar_private_payments_sdk::{
-    DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig,
-    types::{
-        ContractConfig, DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey,
-        TransferRecipient,
-    },
+    DisclosureRequest, PrivatePool as SdkPrivatePool,
+    types::{DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };
 use wasm_bindgen::prelude::*;
 
@@ -167,21 +164,5 @@ impl PrivatePool {
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
-    }
-}
-
-pub(crate) fn build_pool_config(
-    rpc_url: String,
-    contract_config: ContractConfig,
-    pool_contract_id: String,
-    user_address: String,
-) -> PrivatePoolConfig {
-    PrivatePoolConfig {
-        rpc_url,
-        contract_config,
-        pool_contract_id,
-        user_address,
-        storage_path: String::new(),
-        prover_artifacts: stellar_private_payments_sdk::ProverArtifacts::empty(),
     }
 }

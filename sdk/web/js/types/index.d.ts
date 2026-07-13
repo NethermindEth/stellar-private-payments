@@ -3,8 +3,8 @@
 import type { PrivatePool } from '../../dist/stellar_private_payments_sdk_web.js';
 
 import type {
+  AccountOptions,
   ClientNewOptions,
-  InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
@@ -15,12 +15,12 @@ import type { Storage, StorageOpenOptions } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
 export { default } from '../../dist/stellar_private_payments_sdk_web.js';
-export { PrivatePool, Storage } from '../../dist/stellar_private_payments_sdk_web.js';
+export { Account, PrivatePool, Storage } from '../../dist/stellar_private_payments_sdk_web.js';
 export type { Client as WasmClient } from '../../dist/stellar_private_payments_sdk_web.js';
 
 export type {
+  AccountOptions,
   ClientNewOptions,
-  InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
@@ -38,25 +38,30 @@ export type {
 
 export { FreighterSigner } from './freighter.js';
 
-/** Account session returned by {@link Client.new}. */
+/** Wallet session returned by {@link DeploymentClient.account}. */
 export interface AccountClient {
+  readonly userAddress: string;
+  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
+  allContractsData(): Promise<unknown>;
+  pool(options: PoolOptions): Promise<PrivatePool>;
+}
+
+/** Deployment runtime returned by {@link Client.new}. */
+export interface DeploymentClient {
   checkSync(options?: SyncOptions | null): Promise<string | null>;
   startSync(options?: SyncOptions | null): Promise<void>;
-  initialize(options: InitializeOptions, signer: WalletSigner): Promise<void>;
-  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
+  account(options: AccountOptions, signer: WalletSigner): Promise<AccountClient>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;
-  allContractsData(): Promise<unknown>;
   aspState(): Promise<unknown>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,
     options?: VerifyDisclosureOptions | null,
   ): Promise<DisclosureVerificationReport>;
-  pool(options: PoolOptions): Promise<PrivatePool>;
 }
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
 export declare const Client: {
-  new(options: ClientNewOptions): Promise<AccountClient>;
+  new(options: ClientNewOptions): Promise<DeploymentClient>;
   contractConfig(): unknown;
 };

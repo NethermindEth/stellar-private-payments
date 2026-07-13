@@ -9,13 +9,14 @@ use stellar::{
 };
 
 use crate::{
-    PoolCore, PreparedTransaction,
+    PoolCore, PreparedTransaction, SyncMode,
     core::{pool_transact_input, transact_step_for_plan},
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
         verify_disclosure_receipt,
     },
     error::PoolError,
+    handle::Handle,
     plan::PreparedTransactionPlan,
     prover::Prover,
     signer::Signer,
@@ -33,34 +34,26 @@ const POLL_INTERVAL_MS: u32 = 1_000;
 const SYNC_MAX_RETRIES: u32 = 30;
 const DISCLOSE_MAX_RETRIES: u32 = 30;
 
-/// Main entry point for a single privacy pool
+/// Main entry point for a single privacy pool.
+///
+/// Construct via [`crate::Account::pool`].
 pub struct PrivatePool<S> {
     config: PrivatePoolConfig,
     core: PoolCore,
     client: Client,
     fetcher: StateFetcher,
     storage: S,
-    prover: Box<dyn Prover>,
-    signer: Box<dyn Signer>,
+    prover: Handle<dyn Prover>,
+    signer: Handle<dyn Signer>,
     sync_mode: SyncMode,
 }
 
-/// How the pool keeps local storage in sync with on-chain contract events
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncMode {
-    /// The pool runs [`PrivatePool::sync`] inline when needed.
-    /// No separate background sync task is required.
-    Inline,
-    /// Storage is kept in sync by a background task you start separately.
-    Background,
-}
-
 impl<S> PrivatePool<S> {
-    pub fn init(
+    pub(crate) fn init(
         config: PrivatePoolConfig,
         storage: S,
-        signer: Box<dyn Signer>,
-        prover: Box<dyn Prover>,
+        signer: Handle<dyn Signer>,
+        prover: Handle<dyn Prover>,
         sync_mode: SyncMode,
     ) -> Result<Self, PoolError> {
         let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())

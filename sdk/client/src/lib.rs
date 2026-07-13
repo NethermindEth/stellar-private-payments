@@ -1,51 +1,37 @@
 //! Stellar Private Payments SDK
 //!
-//! The main entry point is [`PrivatePool`], one
-//! session per pool contract and Stellar account (deposit, transfer, withdraw,
-//! transact, disclose).
+//! Entry point: [`Client`] → [`Account`] → [`PrivatePool`].
 //!
 //! # Example
 //!
 //! ```no_run
 //! use stellar_private_payments_sdk::{
-//!     LocalProver, LocalSigner, LocalStorage, PrivatePool, PrivatePoolConfig, ProverArtifacts,
-//!     SyncMode,
-//!     types::{
-//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient,
-//!     },
+//!     Client, Handle, LocalProver, LocalSigner, LocalStorage, ProverArtifacts, SyncMode,
+//!     types::{ContractConfig, NoteAmount, TransferRecipient},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
-//! let storage_path = "wallet.sqlite";
+//! let storage = LocalStorage::open("wallet.sqlite")?;
 //! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
+//! let prover = Handle::from_box(
+//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn stellar_private_payments_sdk::Prover>,
+//! );
+//! let signer = Handle::from_box(
+//!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
+//!         as Box<dyn stellar_private_payments_sdk::Signer>,
+//! );
 //!
-//! let config = PrivatePoolConfig {
-//!     rpc_url: "https://soroban-testnet.stellar.org".into(),
-//!     contract_config: deployment,
-//!     pool_contract_id: "CA2TZ...".into(),
-//!     user_address: "G...".into(),
-//!     storage_path: storage_path.into(),
-//!     prover_artifacts: artifacts.clone(),
-//! };
-//!
-//! let pool = PrivatePool::init(
-//!     config,
-//!     LocalStorage::open(storage_path)?,
-//!     Box::new(LocalSigner::new(
-//!         "S...",
-//!         "Test SDF Network ; September 2015",
-//!         "G...",
-//!     )?),
-//!     Box::new(LocalProver::from_artifacts(&artifacts)?),
-//!     SyncMode::Inline,
+//! let client = Client::new(storage, prover, SyncMode::Inline);
+//! let account = client.account("G...", signer)?;
+//! let pool = account.pool(
+//!     "https://soroban-testnet.stellar.org",
+//!     deployment,
+//!     "CA2TZ...",
 //! )?;
 //!
 //! pool.deposit(10_000_000u128.into()).await?;
-//!
-//! let recipient = "G...";
-//! pool.transfer(recipient, 5_000_000u128.into()).await?;
+//! pool.transfer("G...", 5_000_000u128.into()).await?;
 //! pool.withdraw(3_000_000u128.into(), "G...").await?;
-//!
 //! let balance = pool.balance().await?;
 //! # Ok(())
 //! # }
@@ -94,29 +80,37 @@ pub mod state {
     };
 }
 
+mod account;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod blocking;
+mod client;
 mod core;
 mod error;
+mod handle;
 mod plan;
 mod pool;
 mod prover;
 mod signer;
 mod sleep;
 mod storage;
+mod sync;
 mod transact;
 
+pub use account::Account;
+pub use client::Client;
 pub use core::PoolCore;
 pub use disclosure::{
     BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
     DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
 };
 pub use error::PoolError;
+pub use handle::Handle;
 pub use plan::PreparedTransactionPlan;
-pub use pool::{PrivatePool, SyncMode};
+pub use pool::PrivatePool;
 pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
+pub use sync::SyncMode;
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,

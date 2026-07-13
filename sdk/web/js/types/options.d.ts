@@ -11,18 +11,21 @@ export interface ClientNewOptions {
   storageWorkerUrl?: string;
 }
 
-/** Options for {@link AccountClient.checkSync} and {@link AccountClient.startSync}. */
+/** Options for {@link DeploymentClient.checkSync} and {@link DeploymentClient.startSync}. */
 export interface SyncOptions {
   bootnodeUrl?: string;
 }
 
-/** Options for {@link AccountClient.initialize}. */
-export interface InitializeOptions {
+/** Options for {@link DeploymentClient.account}. */
+export interface AccountOptions {
   networkPassphrase: string;
   /** Optional when `signer.getPublicKey()` is implemented. */
   userAddress?: string;
   proverWorkerUrl?: string;
 }
+
+/** @deprecated Use {@link AccountOptions}. */
+export type InitializeOptions = AccountOptions;
 
 /** Options for {@link AccountClient.pool}. */
 export interface PoolOptions {
@@ -35,7 +38,7 @@ export interface RegisterPublicKeysOptions {
   encryptionPublicKeyHex?: string;
 }
 
-/** Options for {@link AccountClient.verifySelectiveDisclosure}. */
+/** Options for {@link DeploymentClient.verifySelectiveDisclosure}. */
 export interface VerifyDisclosureOptions {
   proverWorkerUrl?: string;
 }

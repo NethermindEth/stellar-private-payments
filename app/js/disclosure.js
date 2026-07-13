@@ -257,7 +257,7 @@ async function connect() {
 }
 
 async function initializeWalletSession(address, networkPassphrase) {
-  await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
+  await client().openAccount({ networkPassphrase, userAddress: address }, new FreighterSigner());
   const keys = await client().getUserKeys(address);
   if (!keys?.noteKeypair?.public) {
     throw new Error('Privacy keys not found in local storage');
@@ -811,7 +811,7 @@ async function generateReceipt(form) {
     const config = client().contractConfig();
     const poolContractId =
       state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
-    const pool = await client().pool({ poolContract: poolContractId });
+    const pool = await client().account().pool({ poolContract: poolContractId });
 
     const receipt = await pool.disclose({
       selectedCommitments: state.selectedNotes.map((n) => n.id),

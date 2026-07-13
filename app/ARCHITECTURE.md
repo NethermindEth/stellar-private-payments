@@ -8,7 +8,7 @@ This document describes how the application manages local state, including persi
 
 | Layer | Location | Role |
 |-------|----------|------|
-| **Pool SDK** | `sdk/pool` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
+| **Rust SDK** | `sdk/client` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
 | **Web SDK** | `sdk/web` | npm package `stellar-private-payments-sdk-web` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
 | **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
@@ -25,10 +25,10 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.open() → Client.new() → checkSync() → startSync() → initialize(signer) → client.pool() → PrivatePool ops
+init() → Storage.open() → Client.new() → checkSync() → startSync() → client.account(signer) → account.pool() → PrivatePool ops
 ```
 
-The app wraps this in `wasm-facade.js` and `ui/pool.js`: `initializeRuntime` → `client().startSync` → `client().initializeWallet` → `createAppPool()` / `ensureAppPool()`.
+The app wraps this in `wasm-facade.js` and `ui/pool.js`: `initializeRuntime` → `client().startSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.
 
 ### Components
 
@@ -37,10 +37,11 @@ The WASM layer exposes three JS handles with different scope:
 | Handle | Scope | Examples |
 |--------|-------|----------|
 | **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (raw worker RPC) |
-| **`Client`** | Account + deployment (all pools) | `contractConfig`, `allContractsData`, `registerPublicKeys`, `pool()` |
+| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `lookupRegisteredPublicKey`, `account()` |
+| **`Account`** | Wallet session (address + signer) | `registerPublicKeys`, `allContractsData`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `sync`, `getBalance` |
 
-`Client` is the long-lived session shell; `PrivatePool` is created per active pool when the user transacts.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
 
 **JS UI (main thread)**
 
@@ -49,7 +50,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 **Main thread (WASM)**
 
 - Entry: `init()` from `stellar-private-payments-sdk-web` (wasm-bindgen module init).
-- `Client::new` forks a `Storage` handle and holds RPC URL; wallet binding happens at `initialize`.
+- `Client::new` forks a `Storage` handle and holds RPC URL; wallet binding happens at `account`.
 - `events::start_indexer` spawns the background contract-event loop (`events_listener`).
 
 **Indexer (pool SDK + web SDK)**
@@ -67,12 +68,19 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Client` (WASM, wasm-bindgen API)**
 
-- Constructed by `Client.new({ storage, rpcUrl })` — shell only, no wallet yet.
-- Spawns the prover worker at `initialize`; routes storage requests through `StorageBridge`.
-- **Account- and deployment-wide operations:**
-  - Wallet bind + key derivation at `initialize` (Freighter `signMessage` when keys missing in local DB).
-  - Chain reads: `contractConfig`, `allContractsData`, `lookupRegisteredPublicKey`, `registerPublicKeys`.
-  - Selective-disclosure verification without a wallet session (`verifySelectiveDisclosure`).
+- Constructed by `Client.new({ storage, rpcUrl })` — deployment shell only, no wallet yet.
+- Spawns the prover worker at `account()`; routes storage requests through `StorageBridge`.
+- **Deployment-wide operations:**
+  - Background sync via `startSync`.
+  - Chain reads without a wallet: `contractConfig`, `lookupRegisteredPublicKey`, `aspState`, `verifySelectiveDisclosure`.
+  - Account factory via `account({ networkPassphrase, userAddress? }, signer)`.
+
+**`Account` (WASM, wasm-bindgen API)**
+
+- Wallet session: signer + user address + shared `ClientCore`.
+- **Account-wide operations:**
+  - Key derivation on first `account()` (Freighter `signMessage` when keys missing in local DB).
+  - `registerPublicKeys`, `allContractsData`.
   - Per-pool sessions via `pool({ poolContract })`.
 
 **`PrivatePool` (WASM, wasm-bindgen API)**
@@ -115,6 +123,7 @@ flowchart LR
   subgraph PKG["stellar-private-payments-sdk-web"]
     ST["Storage"]
     CL["Client"]
+    AC["Account"]
     PP["PrivatePool"]
     SB["StorageBridge"]
     EL["events_listener"]
@@ -135,11 +144,13 @@ flowchart LR
 
   UI --> ST
   UI --> CL
+  UI --> AC
   UI --> PP
   AS -->|"Storage.call"| ST
   CL --> ST
   CL --> SB
-  CL -->|"pool()"| PP
+  CL -->|"account()"| AC
+  AC -->|"pool()"| PP
   PP --> SB
   PP --> PW
   EL --> IDX
@@ -159,8 +170,8 @@ Single entry for the main app pages. Owns singleton lifecycle:
 
 1. `initializeRuntime(rpcUrl)` — `init()`, `Storage.open`, `Client.new`
 2. `client().startSync({ bootnodeUrl? })` — `checkSync` when bootnode omitted, then background indexer
-3. `client().initializeWallet({ networkPassphrase, userAddress }, signer)` — `Client.initialize`
-4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `client().pool({ poolContract })`
+3. `client().openAccount({ networkPassphrase, userAddress }, signer)` — `Client.account`
+4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `account().pool({ poolContract })`
 
 Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadPublicKeys`, `aspState`, etc.) via `Storage.call`.
 
@@ -170,7 +181,7 @@ App-only persistence on top of `Storage.call`: explorer settings, bootnode confi
 
 **`app/js/wallet.js`**
 
-Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.initialize`.
+Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`.
 
 **Build (Trunk)**
 

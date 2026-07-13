@@ -8,6 +8,7 @@ use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use std::rc::Rc;
 use stellar_private_payments_sdk::{
+    Client, Handle, SyncMode,
     chain::{
         StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx as chain_confirm_tx,
         submit_tx as chain_submit_tx,
@@ -23,7 +24,7 @@ use wasm_bindgen::prelude::*;
 
 use crate::workers::storage::StorageBridge;
 
-use super::{PoolCreateConfig, build_pool_config, pool_err};
+use super::{PoolCreateConfig, pool_err};
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
@@ -171,7 +172,7 @@ impl ClientCore {
                 ))
             }
             StorageWorkerResponse::UserKeys(None) => Err(JsError::new(
-                "user keys not found in local storage; call initialize() first",
+                "user keys not found in local storage; call account() first",
             )),
             other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
         }
@@ -187,24 +188,25 @@ impl ClientCore {
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
         let contract_config = self.fetcher.contract_config().clone();
-        let pool_config = build_pool_config(
-            self.rpc_url.clone(),
-            contract_config,
-            cfg.pool_contract.clone(),
-            cfg.user_address.clone(),
-        );
-        let signer: Box<dyn stellar_private_payments_sdk::Signer> = Box::new(wallet_signer.clone());
-        let prover: Box<dyn stellar_private_payments_sdk::Prover> =
-            Box::new(self.prover_bridge.clone());
-
-        stellar_private_payments_sdk::PrivatePool::init(
-            pool_config,
-            self.storage(),
-            signer,
-            prover,
-            stellar_private_payments_sdk::SyncMode::Background,
+        let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
+            wallet_signer.clone(),
         )
-        .map_err(pool_err)
+            as Box<dyn stellar_private_payments_sdk::Signer>);
+        let prover: Handle<dyn stellar_private_payments_sdk::Prover> =
+            Handle::from_box(Box::new(self.prover_bridge.clone())
+                as Box<dyn stellar_private_payments_sdk::Prover>);
+
+        let client = Client::new(self.storage(), prover, SyncMode::Background);
+        let account = client
+            .account(cfg.user_address.clone(), signer)
+            .map_err(pool_err)?;
+        account
+            .pool(
+                self.rpc_url.clone(),
+                contract_config,
+                cfg.pool_contract.clone(),
+            )
+            .map_err(pool_err)
     }
 
     pub(crate) async fn register_public_keys(

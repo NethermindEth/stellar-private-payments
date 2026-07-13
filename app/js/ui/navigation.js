@@ -335,7 +335,7 @@ export const Wallet = {
                     signer,
                 });
 
-                await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
+                await client().openAccount({ networkPassphrase, userAddress: address }, signer);
                 const keys = await client().loadPublicKeys(address);
                 App.state.keys.notePublicKey = keys.pubKey;
                 App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;

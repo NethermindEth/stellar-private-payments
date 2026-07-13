@@ -1,7 +1,8 @@
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
-    blocking::PrivatePool,
+    Handle, LocalProver, LocalStorage, NoopProver, Prover, ProverArtifacts, Signer, SyncMode,
+    TransferRecipient,
+    blocking::{Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
@@ -58,29 +59,31 @@ impl PoolSession {
         prover_artifacts: ProverArtifacts,
         readonly: bool,
     ) -> Result<Self> {
-        let signer: Box<dyn Signer> = Box::new(AliasSigner {
-            alias: account.alias.clone(),
-            rpc_url: network.rpc_url.clone(),
-            network_passphrase: network.passphrase.clone(),
-            config_dir: config.stellar_config_dir.clone(),
-        });
+        let storage_path = config.db_path().to_string_lossy().into_owned();
+        let storage =
+            LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
 
-        let pool_config = PrivatePoolConfig {
-            rpc_url: network.rpc_url.clone(),
-            contract_config: config.deployment.clone(),
-            pool_contract_id: pool_contract_id.to_string(),
-            user_address: account.address.clone(),
-            storage_path: config.db_path().to_string_lossy().into_owned(),
-            prover_artifacts,
+        let prover: Handle<dyn Prover> = if readonly {
+            Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>)
+        } else {
+            Handle::from_box(
+                Box::new(LocalProver::from_artifacts(&prover_artifacts)?) as Box<dyn Prover>
+            )
         };
 
+        let client = Client::new(storage, prover, SyncMode::Inline);
+        let sdk_account = client
+            .account(&account.address, alias_signer(config, account, network))
+            .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
+
         log::info!("Opening pool {pool_contract_id}");
-        let pool = if readonly {
-            PrivatePool::open_readonly(pool_config, signer)
-        } else {
-            PrivatePool::open(pool_config, signer)
-        }
-        .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
+        let pool = sdk_account
+            .pool(
+                network.rpc_url.clone(),
+                config.deployment.clone(),
+                pool_contract_id,
+            )
+            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
 
         Ok(Self { pool })
     }
@@ -88,6 +91,19 @@ impl PoolSession {
     pub fn pool(&self) -> &PrivatePool {
         &self.pool
     }
+}
+
+fn alias_signer(
+    config: &CliConfig,
+    account: &Account,
+    network: &StellarNetwork,
+) -> Handle<dyn Signer> {
+    Handle::from_box(Box::new(AliasSigner {
+        alias: account.alias.clone(),
+        rpc_url: network.rpc_url.clone(),
+        network_passphrase: network.passphrase.clone(),
+        config_dir: config.stellar_config_dir.clone(),
+    }) as Box<dyn Signer>)
 }
 
 pub fn parse_amount(raw: &str) -> Result<NoteAmount> {

@@ -1,4 +1,4 @@
-/** Result of {@link AccountClient.verifySelectiveDisclosure}. */
+/** Result of {@link DeploymentClient.verifySelectiveDisclosure}. */
 export interface DisclosureVerificationReport {
   /** Groth16 proof verified against receipt public inputs. */
   proofVerified: boolean;

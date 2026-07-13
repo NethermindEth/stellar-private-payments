@@ -1,7 +1,7 @@
 /**
- * Browser runtime facade — single entry for SDK `Storage`, `Client`, and app persistence.
+ * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
- * Lifecycle: `initializeRuntime` → `client().startSync` → `client().initializeWallet` → pool ops.
+ * Lifecycle: `initializeRuntime` → `client().startSync` → `client().openAccount` → `account().pool`.
  */
 
 import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
@@ -13,6 +13,7 @@ const KEY_DERIVATION_MESSAGE = 'Privacy Pool Key Derivation [v1]';
 let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
+let boundAccount = null;
 let wasmReady = false;
 let syncStarted = false;
 let currentRpcUrl = null;
@@ -56,17 +57,20 @@ function wrapSdkClient(sdk, sdkStorage) {
             });
             syncStarted = true;
         },
-        async initializeWallet(
+        async openAccount(
             { networkPassphrase, userAddress },
             signer = new FreighterSigner(),
         ) {
-            if (boundUserAddress === userAddress) return;
+            if (boundUserAddress === userAddress && boundAccount) {
+                return boundAccount;
+            }
 
             if (boundUserAddress != null) {
                 wrappedClient = await openWrappedClient(storageHandle, currentRpcUrl);
+                boundAccount = null;
             }
 
-            await client().initialize(
+            boundAccount = await sdk.account(
                 {
                     networkPassphrase,
                     userAddress,
@@ -74,6 +78,13 @@ function wrapSdkClient(sdk, sdkStorage) {
                 signer,
             );
             boundUserAddress = userAddress;
+            return boundAccount;
+        },
+        account() {
+            if (!boundAccount) {
+                throw new Error('Account session not open. Call openAccount() first.');
+            }
+            return boundAccount;
         },
         verifySelectiveDisclosure(receiptJson, expectedVkHash) {
             return sdk.verifySelectiveDisclosure(receiptJson, expectedVkHash);
@@ -155,9 +166,10 @@ async function openWrappedClient(sdkStorage, rpcUrl) {
     return wrapSdkClient(sdk, sdkStorage);
 }
 
-/** Drop the in-memory SDK client shell (e.g. on wallet disconnect). Storage worker stays open. */
+/** Drop the in-memory SDK client and account session (e.g. on wallet disconnect). */
 export function resetWalletSession() {
     boundUserAddress = null;
+    boundAccount = null;
     wrappedClient = null;
     syncStarted = false;
 }
@@ -170,6 +182,7 @@ export async function initializeRuntime(rpcUrl) {
         storageHandle = await Storage.open();
         bindAppStorage(storageHandle);
         wrappedClient = null;
+        boundAccount = null;
         currentRpcUrl = rpcUrl;
         syncStarted = false;
         boundUserAddress = null;
@@ -202,10 +215,20 @@ export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
     return client();
 }
 
-/** SDK session + storage-backed reads (keys, notes, feeds, ASP helpers). */
+/** SDK deployment client + cached account session + storage-backed reads. */
 export function client() {
     if (!wrappedClient) {
         throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
     }
     return wrappedClient;
+}
+
+/** @deprecated Use {@link client}().openAccount */
+export async function openAccount(options, signer) {
+    return client().openAccount(options, signer);
+}
+
+/** @deprecated Use {@link client}().openAccount */
+export async function initializeWallet(options, signer) {
+    return client().openAccount(options, signer);
 }
