@@ -176,6 +176,80 @@ fn wrong_asp_root(env: &Env) -> U256 {
     U256::from_u32(env, 0xBAD0_BEEF)
 }
 
+#[derive(Clone, Copy, Debug)]
+enum PolicyAspRootField {
+    Membership,
+    NonMembership,
+}
+
+fn assert_policy_transact_rejects_wrong_asp_root(
+    mode: PolicyMode,
+    wrong_field: PolicyAspRootField,
+    nullifier: u32,
+) {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let wrong = wrong_asp_root(&env);
+    let (asp_membership_root, asp_non_membership_root) = match wrong_field {
+        PolicyAspRootField::Membership => (wrong, non_member_root),
+        PolicyAspRootField::NonMembership => (member_root, wrong),
+    };
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        asp_membership_root,
+        asp_non_membership_root,
+        nullifier,
+    );
+
+    assert!(
+        matches!(
+            pool.try_transact(&proof, &ext, &sender),
+            Err(Ok(Error::InvalidProof))
+        ),
+        "expected InvalidProof for {mode:?} with wrong {wrong_field:?} root"
+    );
+}
+
+fn assert_policy_transact_skips_ignored_asp_root_validation(mode: PolicyMode, nullifier: u32) {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+    let pool = PoolContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let non_canonical = bn256_modulus(&env);
+    let (asp_membership_root, asp_non_membership_root) = match mode {
+        PolicyMode::Open => (non_canonical.clone(), non_canonical),
+        PolicyMode::Allowlist => (member_root, non_canonical),
+        PolicyMode::Blocklist => (non_canonical, non_member_root),
+        PolicyMode::Both => panic!("both mode validates both ASP roots"),
+    };
+    let (proof, ext) = mk_transact_proof(
+        &env,
+        &pool,
+        asp_membership_root,
+        asp_non_membership_root,
+        nullifier,
+    );
+
+    assert!(
+        !matches!(
+            pool.try_transact(&proof, &ext, &sender),
+            Err(Ok(Error::NonCanonicalPublicInput))
+        ),
+        "expected ASP root field to be skipped for {mode:?}"
+    );
+}
+
 /// Create a test environment that disables snapshot writing under Miri.
 /// Miri's isolation mode blocks filesystem operations, which the Soroban SDK
 /// uses for test snapshots.
@@ -603,177 +677,35 @@ fn transact_rejects_non_canonical_nullifier() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn transact_rejects_wrong_membership_root_in_allowlist_mode() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Allowlist,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
+fn transact_rejects_wrong_asp_root_when_mode_requires() {
+    let cases = [
+        (PolicyMode::Allowlist, PolicyAspRootField::Membership, 0xB1),
+        (PolicyMode::Both, PolicyAspRootField::Membership, 0xB2),
+        (
+            PolicyMode::Blocklist,
+            PolicyAspRootField::NonMembership,
+            0xB3,
+        ),
+        (PolicyMode::Both, PolicyAspRootField::NonMembership, 0xB4),
+    ];
 
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (_, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, wrong_asp_root(&env), non_member_root, 0xB1);
-
-    assert!(matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::InvalidProof))
-    ));
+    for (mode, wrong_field, nullifier) in cases {
+        assert_policy_transact_rejects_wrong_asp_root(mode, wrong_field, nullifier);
+    }
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn transact_rejects_wrong_membership_root_in_both_mode() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Both,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
+fn transact_skips_asp_root_canonical_validation_when_mode_ignores_field() {
+    let cases = [
+        (PolicyMode::Open, 0xB5),
+        (PolicyMode::Allowlist, 0xB6),
+        (PolicyMode::Blocklist, 0xB7),
+    ];
 
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (_, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, wrong_asp_root(&env), non_member_root, 0xB2);
-
-    assert!(matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::InvalidProof))
-    ));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_rejects_wrong_non_membership_root_in_blocklist_mode() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Blocklist,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (member_root, _) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, wrong_asp_root(&env), 0xB3);
-
-    assert!(matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::InvalidProof))
-    ));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_rejects_wrong_non_membership_root_in_both_mode() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Both,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (member_root, _) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, wrong_asp_root(&env), 0xB4);
-
-    assert!(matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::InvalidProof))
-    ));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_open_mode_skips_asp_root_field_validation() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Open,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let non_canonical = bn256_modulus(&env);
-    let (proof, ext) = mk_transact_proof(&env, &pool, non_canonical.clone(), non_canonical, 0xB5);
-
-    assert!(!matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
-    ));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_allowlist_mode_skips_non_membership_root_field_validation() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Allowlist,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (member_root, _) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, bn256_modulus(&env), 0xB6);
-
-    assert!(!matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
-    ));
-}
-
-#[test]
-#[cfg_attr(miri, ignore)]
-fn transact_blocklist_mode_skips_membership_root_field_validation() {
-    let env = test_env();
-    let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Blocklist,
-    );
-    let pool = PoolContractClient::new(&env, &pool_id);
-
-    env.mock_all_auths();
-    let sender = Address::generate(&env);
-    let (_, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(&env, &pool, bn256_modulus(&env), non_member_root, 0xB7);
-
-    assert!(!matches!(
-        pool.try_transact(&proof, &ext, &sender),
-        Err(Ok(Error::NonCanonicalPublicInput))
-    ));
+    for (mode, nullifier) in cases {
+        assert_policy_transact_skips_ignored_asp_root_validation(mode, nullifier);
+    }
 }
 
 #[test]

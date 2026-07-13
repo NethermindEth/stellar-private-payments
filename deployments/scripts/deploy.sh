@@ -435,22 +435,13 @@ if [[ "$SKIP_INIT" == "true" ]]; then
     die "--skip-init supports at most one policy mode; deploy without --skip-init for mixed policies"
   fi
 
-  skip_init_verifier_mode=""
-  if [[ ${#UNIQUE_POLICY_MODES[@]} -eq 1 ]]; then
-    skip_init_verifier_mode="${UNIQUE_POLICY_MODES[0]}"
-  elif [[ -n "$POLICY_MODE" ]]; then
-    skip_init_verifier_mode="$POLICY_MODE"
-  fi
+  skip_init_verifier_mode="${UNIQUE_POLICY_MODES[0]:-$POLICY_MODE}"
   [[ -n "$skip_init_verifier_mode" ]] \
     || die "--skip-init requires a policy mode (--policy-mode or pool prefix open:|allowlist:|blocklist:|both:)"
 
-  if [[ -f "$WASM_DIR/circom_groth16_verifier.wasm" ]]; then
-    verifier_wasm="$WASM_DIR/circom_groth16_verifier.wasm"
-  else
-    verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$skip_init_verifier_mode")"
-    [[ -f "$verifier_wasm" ]] \
-      || die "missing verifier wasm for $skip_init_verifier_mode (run build-verifier-with-vk.sh or deploy without --skip-init)"
-  fi
+  verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$skip_init_verifier_mode")"
+  [[ -f "$verifier_wasm" ]] \
+    || die "missing verifier wasm for $skip_init_verifier_mode (run build-verifier-with-vk.sh or deploy without --skip-init)"
   step "deploy circom-groth16-verifier ($skip_init_verifier_mode)"
   set_verifier_id "$skip_init_verifier_mode" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
 else
@@ -549,11 +540,8 @@ _pi=0
 _plen="$(array_len POOL_IDS)"
 while [[ "$_pi" -lt "$_plen" ]]; do
   mode="${POOL_POLICY_MODES[$_pi]}"
-  if [[ -n "$mode" ]]; then
-    entry="{\"poolContractId\":\"${POOL_IDS[$_pi]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$_pi]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$_pi]},\"enabled\":true,\"policyMode\":\"$mode\",\"asset\":${POOL_ASSET_JSONS[$_pi]}}"
-  else
-    entry="{\"poolContractId\":\"${POOL_IDS[$_pi]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$_pi]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$_pi]},\"enabled\":true,\"asset\":${POOL_ASSET_JSONS[$_pi]}}"
-  fi
+  [[ -n "$mode" ]] || die "internal error: pool entry missing policy mode"
+  entry="{\"poolContractId\":\"${POOL_IDS[$_pi]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$_pi]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$_pi]},\"enabled\":true,\"policyMode\":\"$mode\",\"asset\":${POOL_ASSET_JSONS[$_pi]}}"
   [[ "$_pi" -gt 0 ]] && pools_json+=","
   pools_json+="$entry"
   _pi=$((_pi + 1))

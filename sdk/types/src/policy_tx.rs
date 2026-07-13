@@ -53,11 +53,3 @@ pub fn policy_tx_stem(mode: PolicyMode) -> &'static str {
         PolicyMode::Both => POLICY_TX_2_2_BOTH,
     }
 }
-
-/// All policy transact circuit stems.
-pub const ALL_POLICY_TX_STEMS: &[&str] = &[
-    POLICY_TX_2_2_OPEN,
-    POLICY_TX_2_2_ALLOWLIST,
-    POLICY_TX_2_2_BLOCKLIST,
-    POLICY_TX_2_2_BOTH,
-];

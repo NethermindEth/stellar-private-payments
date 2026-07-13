@@ -8,7 +8,7 @@ use stellar_private_payments_sdk::{
 
 use crate::config::default_data_dir;
 
-pub fn load_policy_transact_artifacts(
+pub fn load_transact_artifacts(
     circuits_dir: Option<&Path>,
 ) -> Result<Vec<(PolicyMode, ProverArtifacts)>> {
     [
@@ -18,11 +18,13 @@ pub fn load_policy_transact_artifacts(
         PolicyMode::Both,
     ]
     .into_iter()
-    .map(|mode| load_prover_artifacts(circuits_dir, mode).map(|artifacts| (mode, artifacts)))
+    .map(|mode| {
+        load_transact_artifacts_for_policy(circuits_dir, mode).map(|artifacts| (mode, artifacts))
+    })
     .collect()
 }
 
-pub fn load_prover_artifacts(
+pub fn load_transact_artifacts_for_policy(
     circuits_dir: Option<&Path>,
     policy_mode: PolicyMode,
 ) -> Result<ProverArtifacts> {

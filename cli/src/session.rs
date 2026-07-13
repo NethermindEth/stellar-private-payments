@@ -1,6 +1,6 @@
 use crate::{
-    account::Account, artifacts::load_policy_transact_artifacts, config::CliConfig,
-    signer::AliasSigner, stellar_cli::StellarNetwork,
+    account::Account, artifacts::load_transact_artifacts, config::CliConfig, signer::AliasSigner,
+    stellar_cli::StellarNetwork,
 };
 use anyhow::Result;
 use stellar_private_payments_sdk::{
@@ -25,7 +25,7 @@ impl PoolSession {
         network: &StellarNetwork,
         pool_contract_id: &str,
     ) -> Result<Self> {
-        let artifacts = load_policy_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
+        let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
         let prover = Box::new(
             LocalProver::from_artifacts(&artifacts)
                 .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,

@@ -1318,6 +1318,38 @@ mod tests {
     }
 
     #[test]
+    fn both_transact_requires_non_membership_proof() {
+        let tree_depth: u32 = 10;
+        let smt_depth: u32 = 10;
+        let tree_depth_usize = usize::try_from(tree_depth).expect("tree_depth");
+
+        let res = transact(
+            TransactParams {
+                priv_key: NotePrivateKey([1u8; 32]),
+                encryption_pubkey: EncryptionPublicKey([2u8; 32]),
+                pool_root: Field::try_from_le_bytes([9u8; 32]).expect("field"),
+                ext_recipient: "POOL".into(),
+                ext_amount: ExtAmount::from(10),
+                inputs: Vec::new(),
+                outputs: vec![TransactOutput {
+                    amount: NoteAmount::from(10),
+                    blinding: Field::try_from_le_bytes([3u8; 32]).expect("field"),
+                    recipient_note_pubkey: None,
+                    recipient_encryption_pubkey: None,
+                }],
+                membership_proof: Some(zero_membership(tree_depth_usize)),
+                non_membership_proof: None,
+                tree_depth,
+                smt_depth,
+                policy_mode: PolicyMode::Both,
+            },
+            |_| Ok([0u8; 32]),
+        );
+
+        assert!(res.is_err());
+    }
+
+    #[test]
     fn both_transact_requires_membership_proof() {
         let tree_depth: u32 = 10;
         let smt_depth: u32 = 10;
