@@ -119,6 +119,7 @@ fn register_pool(
     setup: &TestSetup,
     maximum_deposit_amount: U256,
     levels: u32,
+    policy_mode: PolicyMode,
 ) -> Address {
     env.register(
         PoolContract,
@@ -130,9 +131,49 @@ fn register_pool(
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount,
             levels,
-            PolicyMode::Both,
+            policy_mode,
         ),
     )
+}
+
+fn asp_roots(setup: &TestSetup) -> (U256, U256) {
+    (
+        setup.asp_membership_client.get_root(),
+        setup.asp_non_membership_client.get_root(),
+    )
+}
+
+/// Baseline transact proof with valid pool root, ext hash, and public amount.
+fn mk_transact_proof(
+    env: &Env,
+    pool: &PoolContractClient,
+    asp_membership_root: U256,
+    asp_non_membership_root: U256,
+    nullifier: u32,
+) -> (Proof, ExtData) {
+    let root = pool.get_root();
+    let ext = mk_ext_data(env, Address::generate(env), 0);
+    let ext_hash = compute_ext_hash(env, &ext);
+    let proof = Proof {
+        proof: mk_mock_groth16_proof(env),
+        root,
+        input_nullifiers: {
+            let mut v: Vec<U256> = Vec::new(env);
+            v.push_back(U256::from_u32(env, nullifier));
+            v
+        },
+        output_commitment0: U256::from_u32(env, 0x01),
+        output_commitment1: U256::from_u32(env, 0x02),
+        public_amount: U256::from_u32(env, 0),
+        ext_data_hash: ext_hash,
+        asp_membership_root,
+        asp_non_membership_root,
+    };
+    (proof, ext)
+}
+
+fn wrong_asp_root(env: &Env) -> U256 {
+    U256::from_u32(env, 0xBAD0_BEEF)
 }
 
 /// Create a test environment that disables snapshot writing under Miri.
@@ -158,7 +199,7 @@ fn pool_constructor_sets_state() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max.clone(), levels);
+    let pool_id = register_pool(&env, &setup, max.clone(), levels, PolicyMode::Both);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
@@ -196,7 +237,7 @@ fn merkle_init_only_once() {
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
     // First init should succeed
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
 
     env.as_contract(&pool_id, || {
         // Second init should return AlreadyInitialized error
@@ -211,7 +252,7 @@ fn merkle_insert_updates_root_and_index() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x01);
@@ -244,7 +285,13 @@ fn merkle_insert_updates_root_and_index() {
 fn pool_is_known_root_returns_true_for_latest_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        PolicyMode::Both,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let latest_root = pool.get_root();
@@ -256,7 +303,13 @@ fn pool_is_known_root_returns_true_for_latest_root() {
 fn pool_is_known_root_returns_true_for_recent_historical_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        PolicyMode::Both,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
@@ -284,7 +337,13 @@ fn pool_is_known_root_returns_true_for_recent_historical_root() {
 fn pool_is_known_root_returns_false_for_zero_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        PolicyMode::Both,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
     let zero_root = U256::from_u32(&env, 0);
 
@@ -299,7 +358,13 @@ fn pool_is_known_root_returns_false_for_zero_root() {
 fn pool_is_known_root_returns_false_for_evicted_root() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 8);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        8,
+        PolicyMode::Both,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
@@ -341,7 +406,7 @@ fn merkle_insert_fails_when_full() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 1u32;
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x0A);
@@ -364,7 +429,7 @@ fn merkle_init_rejects_zero_levels() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
     let levels = 0u32;
 
     env.as_contract(&pool_id, || {
@@ -381,7 +446,7 @@ fn transact_rejects_unknown_root() {
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -418,7 +483,7 @@ fn transact_rejects_bad_ext_hash() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -456,7 +521,7 @@ fn transact_rejects_bad_public_amount() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = register_pool(&env, &setup, max, levels);
+    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -495,18 +560,12 @@ fn transact_rejects_non_canonical_nullifier() {
     let setup = setup_test_contracts(&env);
     let maximum_deposit_amount = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            maximum_deposit_amount.clone(),
-            levels,
-            PolicyMode::Both,
-        ),
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        maximum_deposit_amount.clone(),
+        levels,
+        PolicyMode::Both,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -544,23 +603,266 @@ fn transact_rejects_non_canonical_nullifier() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
+fn transact_rejects_wrong_membership_root_in_allowlist_mode() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Allowlist,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (_, non_member_root) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, wrong_asp_root(&env), non_member_root, 0xB1);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::InvalidProof))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_wrong_membership_root_in_both_mode() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Both,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (_, non_member_root) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, wrong_asp_root(&env), non_member_root, 0xB2);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::InvalidProof))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_wrong_non_membership_root_in_blocklist_mode() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Blocklist,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (member_root, _) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, wrong_asp_root(&env), 0xB3);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::InvalidProof))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_wrong_non_membership_root_in_both_mode() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Both,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (member_root, _) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, wrong_asp_root(&env), 0xB4);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::InvalidProof))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_open_mode_skips_asp_root_field_validation() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Open,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let non_canonical = bn256_modulus(&env);
+    let (proof, ext) = mk_transact_proof(&env, &pool, non_canonical.clone(), non_canonical, 0xB5);
+
+    assert!(!matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_allowlist_mode_skips_non_membership_root_field_validation() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Allowlist,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (member_root, _) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, bn256_modulus(&env), 0xB6);
+
+    assert!(!matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_blocklist_mode_skips_membership_root_field_validation() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Blocklist,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (_, non_member_root) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, bn256_modulus(&env), non_member_root, 0xB7);
+
+    assert!(!matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NonCanonicalPublicInput))
+    ));
+}
+
+#[test]
+fn get_policy_mode_returns_registered_value() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let modes = [
+        PolicyMode::Open,
+        PolicyMode::Allowlist,
+        PolicyMode::Blocklist,
+        PolicyMode::Both,
+    ];
+
+    for mode in modes {
+        let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+        let pool = PoolContractClient::new(&env, &pool_id);
+        assert_eq!(pool.get_policy_mode(), mode);
+    }
+}
+
+#[test]
+fn get_policy_mode_errors_when_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Open,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .remove(&crate::pool::DataKey::PolicyMode);
+    });
+
+    assert!(matches!(
+        pool.try_get_policy_mode(),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_errors_when_policy_mode_unset() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        PolicyMode::Both,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .remove(&crate::pool::DataKey::PolicyMode);
+    });
+
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+    let (member_root, non_member_root) = asp_roots(&setup);
+    let (proof, ext) = mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB8);
+
+    assert!(matches!(
+        pool.try_transact(&proof, &ext, &sender),
+        Err(Ok(Error::NotInitialized))
+    ));
+}
+
+#[test]
+#[cfg_attr(miri, ignore)]
 fn transact_rejects_non_canonical_output_commitment() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let maximum_deposit_amount = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            maximum_deposit_amount.clone(),
-            levels,
-            PolicyMode::Both,
-        ),
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        maximum_deposit_amount.clone(),
+        levels,
+        PolicyMode::Both,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -602,18 +904,12 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
     let setup = setup_test_contracts(&env);
     let maximum_deposit_amount = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = env.register(
-        PoolContract,
-        (
-            setup.admin.clone(),
-            setup.token.clone(),
-            setup.verifier.clone(),
-            setup.asp_membership_address.clone(),
-            setup.asp_non_membership_address.clone(),
-            maximum_deposit_amount.clone(),
-            levels,
-            PolicyMode::Both,
-        ),
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        maximum_deposit_amount.clone(),
+        levels,
+        PolicyMode::Both,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
