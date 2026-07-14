@@ -3,7 +3,7 @@ use crate::{
     protocol::{ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
-use futures::{FutureExt, try_join};
+use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
     Registrable,
@@ -181,26 +181,13 @@ fn transact_hashes(stem: &str) -> TransactArtifactHashes {
     }
 }
 
-async fn load_transact_prover(stem: &str, proving_key: &[u8]) -> Result<ProverEngine, JsError> {
+fn init_transact_prover(
+    stem: &str,
+    proving_key: &[u8],
+    wasm_bytes: &[u8],
+    r1cs_bytes: &[u8],
+) -> Result<ProverEngine, JsError> {
     let hashes = transact_hashes(stem);
-    let (wasm_bytes, r1cs_bytes) = try_join!(
-        async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file(&format!("{stem}.wasm")).await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched {stem}.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
-        },
-        async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched {stem}.r1cs: {} bytes",
-                r1cs_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(r1cs_bytes)
-        }
-    )?;
 
     ensure_sha256_matches(
         &format!("{stem}_proving_key.bin"),
@@ -210,18 +197,18 @@ async fn load_transact_prover(stem: &str, proving_key: &[u8]) -> Result<ProverEn
     )?;
     ensure_sha256_matches(
         &format!("{stem}.wasm"),
-        &wasm_bytes,
+        wasm_bytes,
         hashes.wasm_len,
         hashes.wasm_sha256,
     )?;
     ensure_sha256_matches(
         &format!("{stem}.r1cs"),
-        &r1cs_bytes,
+        r1cs_bytes,
         hashes.r1cs_len,
         hashes.r1cs_sha256,
     )?;
 
-    ProverEngine::new(proving_key, &wasm_bytes, &r1cs_bytes)
+    ProverEngine::new(proving_key, wasm_bytes, r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init {stem} transact prover: {e:#}")))
 }
 
@@ -302,13 +289,34 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         return Ok(());
     }
 
-    for (stem, proving_key) in POLICY_TRANSACT_CIRCUITS {
-        if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
-            continue;
+    let to_load: Vec<(&str, &[u8])> = POLICY_TRANSACT_CIRCUITS
+        .iter()
+        .copied()
+        .filter(|(stem, _)| !TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)))
+        .collect();
+
+    if !to_load.is_empty() {
+        let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
+            futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
+                let wasm = fetch_circuit_file(&format!("{stem}.wasm")).await?;
+                let r1cs = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
+                Ok::<_, JsError>((wasm, r1cs))
+            }))
+            .await?;
+
+        let mut loaded = Vec::with_capacity(to_load.len());
+        for (&(stem, proving_key), (wasm_bytes, r1cs_bytes)) in
+            to_load.iter().zip(transact_artifacts.iter())
+        {
+            let prover = init_transact_prover(stem, proving_key, wasm_bytes, r1cs_bytes)?;
+            loaded.push((stem, prover));
         }
-        let transact_prover = load_transact_prover(stem, proving_key).await?;
+
         TRANSACT_PROVERS.with(|cell| {
-            cell.borrow_mut().insert(stem, transact_prover);
+            let mut borrow = cell.borrow_mut();
+            for (stem, prover) in loaded {
+                borrow.insert(stem, prover);
+            }
         });
     }
 
