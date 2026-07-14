@@ -13,7 +13,7 @@ use types::{
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
-const DB_NAME: &str = "poolstellar.sqlite";
+const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
 
