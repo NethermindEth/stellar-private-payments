@@ -16,7 +16,7 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 **Storage**
 
-Local storage is SQLite (`sdk/state/src/storage.rs`, schema in `sdk/state/src/schema.sql`), shared across platforms. In the browser the database file (`poolstellar.sqlite`) lives on OPFS behind the storage worker.
+Local storage is SQLite (`sdk/state/src/storage.rs`, schema in `sdk/state/src/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
 
 ## Browser SDK (`sdk/web`)
 
