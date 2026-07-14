@@ -586,7 +586,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
     Ok(resp)
 }
 
-const PROVE_TIMEOUT_MS: u32 = 20_000;
+const PROVE_TIMEOUT_MS: u32 = 30_000;
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
 pub(crate) struct ProverBridge {
@@ -631,7 +631,10 @@ impl ProverBridge {
     }
 
     pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self.call(ProverWorkerRequest::Ping, 20_000).await? {
+        match self
+            .call(ProverWorkerRequest::Ping, PROVE_TIMEOUT_MS)
+            .await?
+        {
             ProverWorkerResponse::Pong => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
