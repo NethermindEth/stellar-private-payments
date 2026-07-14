@@ -37,8 +37,8 @@ The WASM layer exposes three JS handles with different scope:
 | Handle | Scope | Examples |
 |--------|-------|----------|
 | **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (raw worker RPC) |
-| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `lookupRegisteredPublicKey`, `account()` |
-| **`Account`** | Wallet session (address + signer) | `registerPublicKeys`, `allContractsData`, `pool()` |
+| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `allContractsData`, `lookupRegisteredPublicKey`, `account()` |
+| **`Account`** | Wallet session (address + signer) | `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `sync`, `getBalance` |
 
 `Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
@@ -72,7 +72,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Spawns the prover worker at `account()`; routes storage requests through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `startSync`.
-  - Chain reads without a wallet: `contractConfig`, `lookupRegisteredPublicKey`, `aspState`, `verifySelectiveDisclosure`.
+  - Chain reads without a wallet: `contractConfig`, `allContractsData`, `lookupRegisteredPublicKey`, `aspState`, `verifySelectiveDisclosure`.
   - Account factory via `account({ networkPassphrase, userAddress? }, signer)`.
 
 **`Account` (WASM, wasm-bindgen API)**
@@ -80,7 +80,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Wallet session: signer + user address + shared `ClientCore`.
 - **Account-wide operations:**
   - Key derivation on first `account()` (Freighter `signMessage` when keys missing in local DB).
-  - `registerPublicKeys`, `allContractsData`.
+  - `registerPublicKeys`.
   - Per-pool sessions via `pool({ poolContract })`.
 
 **`PrivatePool` (WASM, wasm-bindgen API)**

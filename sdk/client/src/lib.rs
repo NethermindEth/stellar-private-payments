@@ -21,13 +21,15 @@
 //!         as Box<dyn stellar_private_payments_sdk::Signer>,
 //! );
 //!
-//! let client = Client::new(storage, prover, SyncMode::Inline);
-//! let account = client.account("G...", signer)?;
-//! let pool = account.pool(
-//!     "https://soroban-testnet.stellar.org",
+//! let client = Client::new(
+//!     storage,
+//!     prover,
+//!     SyncMode::Inline,
 //!     deployment,
-//!     "CA2TZ...",
-//! )?;
+//!     "https://soroban-testnet.stellar.org",
+//! );
+//! let account = client.account("G...", signer)?;
+//! let pool = account.pool("CA2TZ...")?;
 //!
 //! pool.deposit(10_000_000u128.into()).await?;
 //! pool.transfer("G...", 5_000_000u128.into()).await?;
@@ -118,8 +120,8 @@ pub use transact::{
 };
 pub use tx_planner::{SpendTarget, SpendableNote, Transact};
 pub use types::{
-    Estimate, PoolChainConfig, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
-    TransactChainContext, TransactionResult, TransferRecipient,
+    Estimate, PrivatePoolConfig, ProverArtifacts, SignedTransaction, TransactChainContext,
+    TransactionResult, TransferRecipient,
 };
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).

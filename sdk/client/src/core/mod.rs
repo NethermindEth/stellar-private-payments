@@ -6,7 +6,7 @@ use types::{EncryptionPublicKey, ExtAmount, NoteAmount, NotePublicKey};
 use crate::{
     error::PoolError,
     plan::PreparedTransactionPlan,
-    types::{Estimate, PoolChainConfig},
+    types::{Estimate, PrivatePoolConfig},
 };
 
 mod plan;
@@ -18,16 +18,16 @@ pub use state::process_local_state_batch;
 
 /// Config and planning for one privacy pool.
 pub struct PoolCore {
-    config: PoolChainConfig,
+    config: PrivatePoolConfig,
 }
 
 impl PoolCore {
-    pub fn new(config: PoolChainConfig) -> Result<Self, PoolError> {
+    pub fn new(config: PrivatePoolConfig) -> Result<Self, PoolError> {
         config.validate()?;
         Ok(Self { config })
     }
 
-    pub fn config(&self) -> &PoolChainConfig {
+    pub fn config(&self) -> &PrivatePoolConfig {
         &self.config
     }
 

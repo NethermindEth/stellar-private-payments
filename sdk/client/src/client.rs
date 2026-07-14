@@ -5,20 +5,32 @@ use crate::{
     chain::{Indexer, StateFetcher},
 };
 
-/// Deployment-scoped SDK runtime: storage + prover, plus helpers to sync and
-/// create account sessions.
+/// Top-level SDK client for a privacy pools deployment.
+///
+/// Configure with local storage, a prover, and RPC; then sync and open
+/// [`Account`] sessions.
 pub struct Client<S: Storage> {
     storage: S,
     prover: Handle<dyn Prover>,
     sync_mode: SyncMode,
+    contract_config: ContractConfig,
+    rpc_url: String,
 }
 
 impl<S: Storage> Client<S> {
-    pub fn new(storage: S, prover: Handle<dyn Prover>, sync_mode: SyncMode) -> Self {
+    pub fn new(
+        storage: S,
+        prover: Handle<dyn Prover>,
+        sync_mode: SyncMode,
+        contract_config: ContractConfig,
+        rpc_url: impl Into<String>,
+    ) -> Self {
         Self {
             storage,
             prover,
             sync_mode,
+            contract_config,
+            rpc_url: rpc_url.into(),
         }
     }
 
@@ -30,15 +42,19 @@ impl<S: Storage> Client<S> {
         &self.prover
     }
 
-    /// Catch local storage up to the current chain tip for the deployment
-    pub async fn sync(
-        &self,
-        rpc_url: &str,
-        contract_config: &ContractConfig,
-    ) -> Result<(), PoolError> {
-        let rpc = stellar::Client::new(rpc_url)
+    pub fn contract_config(&self) -> &ContractConfig {
+        &self.contract_config
+    }
+
+    pub fn rpc_url(&self) -> &str {
+        &self.rpc_url
+    }
+
+    /// Catch local storage up to the current chain tip for the deployment.
+    pub async fn sync(&self) -> Result<(), PoolError> {
+        let rpc = stellar::Client::new(&self.rpc_url)
             .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
-        let indexer = Indexer::init(rpc, self.storage.fork()?, contract_config)
+        let indexer = Indexer::init(rpc, self.storage.fork()?, &self.contract_config)
             .await
             .map_err(|e| PoolError::Other(format!("indexer: {e:#}")))?;
         indexer
@@ -49,7 +65,7 @@ impl<S: Storage> Client<S> {
         Ok(())
     }
 
-    /// Create an [`Account`] session
+    /// Create an [`Account`] session.
     pub fn account(
         &self,
         user_address: impl Into<String>,
@@ -61,16 +77,14 @@ impl<S: Storage> Client<S> {
             user_address.into(),
             signer,
             self.sync_mode,
+            self.contract_config.clone(),
+            self.rpc_url.clone(),
         ))
     }
 
-    /// Chain-state accessor
-    pub fn state_fetcher(
-        &self,
-        rpc_url: &str,
-        contract_config: ContractConfig,
-    ) -> Result<StateFetcher, PoolError> {
-        StateFetcher::new(rpc_url, contract_config)
+    /// Chain-state accessor for this deployment.
+    pub fn state_fetcher(&self) -> Result<StateFetcher, PoolError> {
+        StateFetcher::new(&self.rpc_url, self.contract_config.clone())
             .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))
     }
 }

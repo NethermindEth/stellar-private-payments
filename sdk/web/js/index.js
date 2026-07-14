@@ -23,7 +23,6 @@ function wrapAccount(wasmAccount) {
       return wasmAccount.userAddress;
     },
     registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
-    allContractsData: () => wasmAccount.allContractsData(),
     pool: (options) => wasmAccount.pool(options),
   };
 }
@@ -53,6 +52,7 @@ function wrapClient(wasmClient) {
     },
     lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
     aspState: () => wasmClient.aspState(),
+    allContractsData: () => wasmClient.allContractsData(),
     verifySelectiveDisclosure: (receiptJson, expectedVkHash, options = {}) =>
       wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
         proverWorkerUrl,

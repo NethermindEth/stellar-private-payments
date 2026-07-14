@@ -1,9 +1,6 @@
 use types::ContractConfig;
 
-use crate::{
-    Handle, PoolError, PrivatePool, PrivatePoolConfig, Prover, ProverArtifacts, Signer, Storage,
-    SyncMode,
-};
+use crate::{Handle, PoolError, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode};
 
 /// Stellar account session (address + signer).
 ///
@@ -14,6 +11,8 @@ pub struct Account<S: Storage> {
     user_address: String,
     signer: Handle<dyn Signer>,
     sync_mode: SyncMode,
+    contract_config: ContractConfig,
+    rpc_url: String,
 }
 
 impl<S: Storage> Account<S> {
@@ -23,6 +22,8 @@ impl<S: Storage> Account<S> {
         user_address: String,
         signer: Handle<dyn Signer>,
         sync_mode: SyncMode,
+        contract_config: ContractConfig,
+        rpc_url: String,
     ) -> Self {
         Self {
             storage,
@@ -30,6 +31,8 @@ impl<S: Storage> Account<S> {
             user_address,
             signer,
             sync_mode,
+            contract_config,
+            rpc_url,
         }
     }
 
@@ -45,22 +48,13 @@ impl<S: Storage> Account<S> {
         &self.storage
     }
 
-    /// Create an owned pool
-    pub fn pool(
-        &self,
-        rpc_url: impl Into<String>,
-        contract_config: ContractConfig,
-        pool_contract_id: impl Into<String>,
-    ) -> Result<PrivatePool<S>, PoolError> {
+    /// Create an owned pool session for `pool_contract_id`.
+    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, PoolError> {
         let cfg = PrivatePoolConfig {
-            rpc_url: rpc_url.into(),
-            contract_config,
+            rpc_url: self.rpc_url.clone(),
+            contract_config: self.contract_config.clone(),
             pool_contract_id: pool_contract_id.into(),
             user_address: self.user_address.clone(),
-            // not used by the pool runtime when storage+prover are injected,
-            // but still part of the existing config type.
-            storage_path: String::new(),
-            prover_artifacts: ProverArtifacts::empty(),
         };
 
         PrivatePool::init(

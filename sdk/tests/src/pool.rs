@@ -66,14 +66,15 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
             as Box<dyn stellar_private_payments_sdk::Prover>,
     );
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
-
-    let client = Client::new(storage, prover, SyncMode::Background);
-    let account = client.account(USER_ADDRESS, test_signer()?)?;
-    let pool = account.pool(
-        "https://soroban-testnet.stellar.org",
+    let client = Client::new(
+        storage,
+        prover,
+        SyncMode::Background,
         contract_config,
-        POOL_CONTRACT_ID,
-    )?;
+        "https://soroban-testnet.stellar.org",
+    );
+    let account = client.account(USER_ADDRESS, test_signer()?)?;
+    let pool = account.pool(POOL_CONTRACT_ID)?;
 
     Ok(pool)
 }

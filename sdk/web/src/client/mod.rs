@@ -199,6 +199,23 @@ impl Client {
         Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
+    /// On-chain state for all enabled pools plus shared ASP contracts.
+    #[wasm_bindgen(js_name = allContractsData)]
+    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
+        if let Some(core) = &self.core {
+            return core.all_contracts_data().await;
+        }
+
+        let config = deployment_config()?;
+        let fetcher = StateFetcher::new(&self.rpc_url, (*config).clone())
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let data = fetcher
+            .all_contracts_data()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&data)?)
+    }
+
     /// Verify a selective-disclosure receipt without a wallet session.
     #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
     pub async fn verify_selective_disclosure(

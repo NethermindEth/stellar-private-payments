@@ -256,7 +256,7 @@ async function persistStorageIfWanted() {
 async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
     await client().openAccount({ networkPassphrase, userAddress: address }, signer);
-    return client().registerPublicKeys({
+    return client().account().registerPublicKeys({
         notePublicKeyHex: notePublicKey,
         encryptionPublicKeyHex: encryptionPublicKey,
     });

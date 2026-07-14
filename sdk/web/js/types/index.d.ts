@@ -42,7 +42,6 @@ export { FreighterSigner } from './freighter.js';
 export interface AccountClient {
   readonly userAddress: string;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
-  allContractsData(): Promise<unknown>;
   pool(options: PoolOptions): Promise<PrivatePool>;
 }
 
@@ -53,6 +52,7 @@ export interface DeploymentClient {
   account(options: AccountOptions, signer: WalletSigner): Promise<AccountClient>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;
   aspState(): Promise<unknown>;
+  allContractsData(): Promise<unknown>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,

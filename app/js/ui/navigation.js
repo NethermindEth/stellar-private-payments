@@ -447,7 +447,7 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true; // prevent duplicate registrations
-            const hash = await client().registerPublicKeys({
+            const hash = await client().account().registerPublicKeys({
                 notePublicKeyHex: App.state.keys.notePublicKey,
                 encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
             });

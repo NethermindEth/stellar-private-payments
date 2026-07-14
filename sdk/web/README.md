@@ -33,7 +33,7 @@ await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n);
 
 const cfg = Client.contractConfig();
-const chain = await account.allContractsData();
+const chain = await client.allContractsData();
 ```
 
 ### `Storage`
@@ -55,6 +55,7 @@ const chain = await account.allContractsData();
 | `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, return `Account` |
 | `lookupRegisteredPublicKey(address)` | Recipient key lookup |
 | `aspState()` | On-chain ASP membership state |
+| `allContractsData()` | On-chain pool + ASP state |
 | `verifySelectiveDisclosure(receiptJson, expectedVkHash, options?)` | Walletless disclosure receipt verification |
 
 ### `Account`
@@ -63,7 +64,6 @@ const chain = await account.allContractsData();
 |--------|-------------|
 | `userAddress` | Connected Stellar address |
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
-| `allContractsData()` | On-chain pool + ASP state |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`

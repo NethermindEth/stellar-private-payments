@@ -187,7 +187,6 @@ impl ClientCore {
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-        let contract_config = self.fetcher.contract_config().clone();
         let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
             wallet_signer.clone(),
         )
@@ -196,17 +195,17 @@ impl ClientCore {
             Handle::from_box(Box::new(self.prover_bridge.clone())
                 as Box<dyn stellar_private_payments_sdk::Prover>);
 
-        let client = Client::new(self.storage(), prover, SyncMode::Background);
+        let client = Client::new(
+            self.storage(),
+            prover,
+            SyncMode::Background,
+            self.fetcher.contract_config().clone(),
+            self.rpc_url.clone(),
+        );
         let account = client
             .account(cfg.user_address.clone(), signer)
             .map_err(pool_err)?;
-        account
-            .pool(
-                self.rpc_url.clone(),
-                contract_config,
-                cfg.pool_contract.clone(),
-            )
-            .map_err(pool_err)
+        account.pool(cfg.pool_contract.clone()).map_err(pool_err)
     }
 
     pub(crate) async fn register_public_keys(

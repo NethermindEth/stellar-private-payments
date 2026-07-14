@@ -9,16 +9,21 @@ use crate::{
 
 use super::{account::Account, runtime::block_on};
 
-/// Deployment-scoped sync SDK runtime: storage + prover, plus helpers to sync
-/// and create account sessions.
+/// Blocking wrapper around [`crate::Client`].
 pub struct Client {
     inner: AsyncClient<LocalStorage>,
 }
 
 impl Client {
-    pub fn new(storage: LocalStorage, prover: Handle<dyn Prover>, sync_mode: SyncMode) -> Self {
+    pub fn new(
+        storage: LocalStorage,
+        prover: Handle<dyn Prover>,
+        sync_mode: SyncMode,
+        contract_config: ContractConfig,
+        rpc_url: impl Into<String>,
+    ) -> Self {
         Self {
-            inner: AsyncClient::new(storage, prover, sync_mode),
+            inner: AsyncClient::new(storage, prover, sync_mode, contract_config, rpc_url),
         }
     }
 
@@ -30,8 +35,16 @@ impl Client {
         self.inner.prover()
     }
 
-    pub fn sync(&self, rpc_url: &str, contract_config: &ContractConfig) -> Result<(), PoolError> {
-        block_on(self.inner.sync(rpc_url, contract_config))
+    pub fn contract_config(&self) -> &ContractConfig {
+        self.inner.contract_config()
+    }
+
+    pub fn rpc_url(&self) -> &str {
+        self.inner.rpc_url()
+    }
+
+    pub fn sync(&self) -> Result<(), PoolError> {
+        block_on(self.inner.sync())
     }
 
     pub fn account(
@@ -44,11 +57,7 @@ impl Client {
         ))
     }
 
-    pub fn state_fetcher(
-        &self,
-        rpc_url: &str,
-        contract_config: ContractConfig,
-    ) -> Result<StateFetcher, PoolError> {
-        self.inner.state_fetcher(rpc_url, contract_config)
+    pub fn state_fetcher(&self) -> Result<StateFetcher, PoolError> {
+        self.inner.state_fetcher()
     }
 }

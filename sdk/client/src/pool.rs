@@ -56,11 +56,12 @@ impl<S> PrivatePool<S> {
         prover: Handle<dyn Prover>,
         sync_mode: SyncMode,
     ) -> Result<Self, PoolError> {
+        config.validate()?;
         let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())
             .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))?;
         let client = fetcher.rpc().clone();
         Ok(Self {
-            core: PoolCore::new(config.chain_config())?,
+            core: PoolCore::new(config.clone())?,
             config,
             client,
             fetcher,

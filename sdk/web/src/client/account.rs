@@ -51,12 +51,6 @@ impl Account {
         self.user_address.clone()
     }
 
-    /// On-chain state for all enabled pools plus shared ASP contracts.
-    #[wasm_bindgen(js_name = allContractsData)]
-    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        self.core.all_contracts_data().await
-    }
-
     /// Register this account's public keys on the deployment-wide registry.
     #[wasm_bindgen(js_name = registerPublicKeys)]
     pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {

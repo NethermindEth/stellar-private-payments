@@ -71,18 +71,20 @@ impl PoolSession {
             )
         };
 
-        let client = Client::new(storage, prover, SyncMode::Inline);
+        let client = Client::new(
+            storage,
+            prover,
+            SyncMode::Inline,
+            config.deployment.clone(),
+            network.rpc_url.clone(),
+        );
         let sdk_account = client
             .account(&account.address, alias_signer(config, account, network))
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
         log::info!("Opening pool {pool_contract_id}");
         let pool = sdk_account
-            .pool(
-                network.rpc_url.clone(),
-                config.deployment.clone(),
-                pool_contract_id,
-            )
+            .pool(pool_contract_id)
             .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
 
         Ok(Self { pool })
