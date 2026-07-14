@@ -86,7 +86,7 @@ impl Storage {
         .await
     }
 
-    /// New handle to the same storage worker (shared `poolstellar.sqlite`).
+    /// New handle to the same storage worker (shared `spp.db`).
     pub fn fork(&self) -> Storage {
         Storage {
             bridge: self.bridge.clone(),
