@@ -65,8 +65,14 @@ jobs:
           # Compiled circuit artifacts + proving keys the CLI loads at runtime.
           CIRCUITS="target/circuits-artifacts/release"
           cp "$CIRCUITS/policy_tx_2_2.r1cs" "$CIRCUITS/policy_tx_2_2.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_A.r1cs" "$CIRCUITS/policy_tx_2_2_A.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_B.r1cs" "$CIRCUITS/policy_tx_2_2_B.wasm" "$STAGING/circuits/"
+          cp "$CIRCUITS/policy_tx_2_2_AB.r1cs" "$CIRCUITS/policy_tx_2_2_AB.wasm" "$STAGING/circuits/"
           cp "$CIRCUITS/selectiveDisclosure_1.r1cs" "$CIRCUITS/selectiveDisclosure_1.wasm" "$STAGING/circuits/"
           cp deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_A_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_B_proving_key.bin "$STAGING/circuits/"
+          cp deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin "$STAGING/circuits/"
           cp deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin "$STAGING/circuits/"
 
           # Corresponding Source bundle (LGPL-3.0).

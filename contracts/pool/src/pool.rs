@@ -13,7 +13,10 @@
 //! - Token integration for deposits and withdrawals
 
 #![allow(clippy::too_many_arguments)]
-use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
+use crate::{
+    merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
+    policy,
+};
 use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractclient, contracterror,
@@ -53,6 +56,8 @@ pub enum Error {
     Overflow = 12,
     /// Public input is not canonical in the BN254 scalar field
     NonCanonicalPublicInput = 13,
+    /// Unsupported policy flag bits.
+    InvalidPolicyFlags = 14,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -175,6 +180,8 @@ pub(crate) enum DataKey {
     ASPMembership,
     /// Address of the ASP Non-Membership contract
     ASPNonMembership,
+    /// Pool ASP policy flags (bitset; see `crate::policy`).
+    PolicyFlags,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -229,6 +236,8 @@ impl PoolContract {
     /// * `asp_non_membership` - Address of the ASP Non-Membership contract
     /// * `maximum_deposit_amount` - Maximum allowed deposit per transaction
     /// * `levels` - Number of levels in the commitment Merkle tree (1-32)
+    /// * `policy_flags` - ASP policy flag bitset enforced by the transact
+    ///   circuit
     ///
     /// # Returns
     ///
@@ -243,7 +252,11 @@ impl PoolContract {
         asp_non_membership: Address,
         maximum_deposit_amount: U256,
         levels: u32,
+        policy_flags: u32,
     ) -> Result<(), Error> {
+        if !policy::is_valid(policy_flags) {
+            return Err(Error::InvalidPolicyFlags);
+        }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()
@@ -261,6 +274,9 @@ impl PoolContract {
         env.storage()
             .persistent()
             .set(&DataKey::Nullifiers, &Map::<U256, bool>::new(&env));
+        env.storage()
+            .persistent()
+            .set(&DataKey::PolicyFlags, &policy_flags);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -376,7 +392,12 @@ impl PoolContract {
     /// input vector. The transaction path checks `ext_data_hash` against
     /// `hash_ext_data` before proof verification, so this covers the remaining
     /// public-input values.
-    fn validate_bn256_public_inputs(proof: &Proof, modulus: &U256) -> Result<(), Error> {
+    fn validate_bn256_public_inputs(
+        _env: &Env,
+        proof: &Proof,
+        policy_flags: u32,
+        modulus: &U256,
+    ) -> Result<(), Error> {
         Self::validate_bn256_public_input(&proof.root, modulus)?;
         Self::validate_bn256_public_input(&proof.public_amount, modulus)?;
         for nullifier in proof.input_nullifiers.iter() {
@@ -384,8 +405,12 @@ impl PoolContract {
         }
         Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
         Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
-        Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
-        Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
+        if policy::requires_membership_proofs(policy_flags) {
+            Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
+        }
+        if policy::requires_non_membership_proofs(policy_flags) {
+            Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
+        }
 
         Ok(())
     }
@@ -405,13 +430,14 @@ impl PoolContract {
         if proof.proof.is_empty() {
             return Err(Error::InvalidProof);
         }
+        let policy_flags = Self::load_policy_flags(env)?;
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
-        Self::validate_bn256_public_inputs(proof, &bn256_modulus(env))?;
+        Self::validate_bn256_public_inputs(env, proof, policy_flags, &bn256_modulus(env))?;
 
-        // Public inputs must match the order declared by the policy circuit:
+        // Public inputs must match the policy circuit:
         // [root, public_amount, ext_data_hash, input_nullifiers,
-        // output_commitments, membership_roots, non_membership_roots]
+        // output_commitments, membership_roots?, non_membership_roots]
         let mut public_inputs: Vec<Bn254Fr> = Vec::new(env);
         public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(env, &proof.root)));
         public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
@@ -430,17 +456,21 @@ impl PoolContract {
             env,
             &proof.output_commitment1,
         )));
-        for _ in 0..proof.input_nullifiers.len() {
-            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
-                env,
-                &proof.asp_membership_root,
-            )));
+        if policy::requires_membership_proofs(policy_flags) {
+            for _ in 0..proof.input_nullifiers.len() {
+                public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+                    env,
+                    &proof.asp_membership_root,
+                )));
+            }
         }
-        for _ in 0..proof.input_nullifiers.len() {
-            public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
-                env,
-                &proof.asp_non_membership_root,
-            )));
+        if policy::requires_non_membership_proofs(policy_flags) {
+            for _ in 0..proof.input_nullifiers.len() {
+                public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
+                    env,
+                    &proof.asp_non_membership_root,
+                )));
+            }
         }
 
         let is_valid = client.verify(&proof.proof, &public_inputs);
@@ -571,12 +601,18 @@ impl PoolContract {
         }
 
         // ASP root validation
-        let member_root = Self::get_asp_membership_root(env)?;
-        let non_member_root = Self::get_asp_non_membership_root(env)?;
-        if member_root != proof.asp_membership_root
-            || non_member_root != proof.asp_non_membership_root
-        {
-            return Err(Error::InvalidProof);
+        let policy_flags = Self::load_policy_flags(env)?;
+        if policy::requires_non_membership_proofs(policy_flags) {
+            let non_member_root = Self::get_asp_non_membership_root(env)?;
+            if non_member_root != proof.asp_non_membership_root {
+                return Err(Error::InvalidProof);
+            }
+        }
+        if policy::requires_membership_proofs(policy_flags) {
+            let member_root = Self::get_asp_membership_root(env)?;
+            if member_root != proof.asp_membership_root {
+                return Err(Error::InvalidProof);
+            }
         }
 
         // 5. ZK proof verification
@@ -678,6 +714,18 @@ impl PoolContract {
         env.storage()
             .persistent()
             .get(&DataKey::Admin)
+            .ok_or(Error::NotInitialized)
+    }
+
+    /// Get the pool's ASP policy flags.
+    pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
+        Self::load_policy_flags(env)
+    }
+
+    fn load_policy_flags(env: &Env) -> Result<u32, Error> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::PolicyFlags)
             .ok_or(Error::NotInitialized)
     }
 

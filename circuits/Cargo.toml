@@ -50,6 +50,7 @@ ark-circom = { workspace = true, optional = true }
 [build-dependencies]
 # workspace
 circuit-keys = { workspace = true }
+types = { workspace = true }
 
 # external
 anyhow = { workspace = true }

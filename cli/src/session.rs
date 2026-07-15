@@ -1,13 +1,12 @@
+use crate::{
+    account::Account, artifacts::load_transact_artifacts, config::CliConfig, signer::AliasSigner,
+    stellar_cli::StellarNetwork,
+};
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
+    LocalProver, PrivatePoolConfig, Signer, TransferRecipient,
     blocking::PrivatePool,
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
-};
-
-use crate::{
-    account::Account, artifacts::load_prover_artifacts, config::CliConfig, signer::AliasSigner,
-    stellar_cli::StellarNetwork,
 };
 
 pub struct PoolSession {
@@ -26,8 +25,12 @@ impl PoolSession {
         network: &StellarNetwork,
         pool_contract_id: &str,
     ) -> Result<Self> {
-        let artifacts = load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?;
-        Self::open_with(config, account, network, pool_contract_id, artifacts, false)
+        let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
+        let prover = Box::new(
+            LocalProver::from_artifacts(&artifacts)
+                .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
+        );
+        Self::open_pool(config, account, network, pool_contract_id, prover)
     }
 
     /// Open one pool without a prover. Skips loading the circuit artifacts
@@ -40,23 +43,21 @@ impl PoolSession {
         network: &StellarNetwork,
         pool_contract_id: &str,
     ) -> Result<Self> {
-        Self::open_with(
+        Self::open_pool(
             config,
             account,
             network,
             pool_contract_id,
-            ProverArtifacts::empty(),
-            true,
+            Box::new(stellar_private_payments_sdk::NoopProver),
         )
     }
 
-    fn open_with(
+    fn open_pool(
         config: &CliConfig,
         account: &Account,
         network: &StellarNetwork,
         pool_contract_id: &str,
-        prover_artifacts: ProverArtifacts,
-        readonly: bool,
+        prover: Box<dyn stellar_private_payments_sdk::Prover>,
     ) -> Result<Self> {
         let signer: Box<dyn Signer> = Box::new(AliasSigner {
             alias: account.alias.clone(),
@@ -71,16 +72,11 @@ impl PoolSession {
             pool_contract_id: pool_contract_id.to_string(),
             user_address: account.address.clone(),
             storage_path: config.db_path().to_string_lossy().into_owned(),
-            prover_artifacts,
         };
 
         log::info!("Opening pool {pool_contract_id}");
-        let pool = if readonly {
-            PrivatePool::open_readonly(pool_config, signer)
-        } else {
-            PrivatePool::open(pool_config, signer)
-        }
-        .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
+        let pool = PrivatePool::open(pool_config, signer, prover)
+            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
 
         Ok(Self { pool })
     }

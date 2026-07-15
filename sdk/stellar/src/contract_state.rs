@@ -1,7 +1,7 @@
 use crate::{
     conversions::{
-        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool, scval_to_u32,
-        scval_to_u64, scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool,
+        scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
     soroban_encode::BASE_FEE,
@@ -148,6 +148,7 @@ impl StateFetcher {
                     "CurrentRootIndex",
                     "NextIndex",
                     "MaximumDepositAmount",
+                    "PolicyFlags",
                 ],
                 valued_keys: vec![],
             });
@@ -312,6 +313,11 @@ impl StateFetcher {
                     merkle_root,
                     merkle_capacity,
                     total_commitments: merkle_next_index.to_string(),
+                    policy_flags: scval_to_policy_flags(get_state!(
+                        pool_state,
+                        "PolicyFlags",
+                        pool.pool_contract_id
+                    )?)?,
                 };
 
                 out.push(pool_info);
@@ -479,14 +485,24 @@ impl StateFetcher {
         user_address: &str,
     ) -> Result<TransactChainContext> {
         let data = self.contracts_data_for_pool(pool_contract_id).await?;
-        let non_membership_proof = self
-            .get_nonmembership_proof(
-                note_pubkey,
-                data.asp_non_membership.root,
-                SMT_DEPTH as usize,
-                user_address,
+        let policy_flags = data
+            .pools
+            .first()
+            .map(|pool| pool.policy_flags)
+            .ok_or_else(|| anyhow!("pool data not fetched for {pool_contract_id}"))?;
+        let non_membership_proof = if policy_flags.requires_non_membership_proofs() {
+            Some(
+                self.get_nonmembership_proof(
+                    note_pubkey,
+                    data.asp_non_membership.root,
+                    SMT_DEPTH as usize,
+                    user_address,
+                )
+                .await?,
             )
-            .await?;
+        } else {
+            None
+        };
         transact_chain_context_from_state(data, pool_contract_id, non_membership_proof)
     }
 

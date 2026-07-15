@@ -1,10 +1,5 @@
 pragma circom 2.2.2;
-// Entry Point PolicyTransaction with 2 inputs, 2 outputs.
-include "./policyTransaction.circom";
+// Entry point: policy_tx_2_2 — unrestricted pool transact (no ASP proofs).
+include "./policyTransactionOpen.circom";
 
-// PolicyTransaction(
-//   nIns, nOuts,
-//   nMembershipProofs, nNonMembershipProofs,
-//   levels, smtLevels
-// )
-component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment, membershipRoots, nonMembershipRoots]} = PolicyTransaction(2, 2, 1, 1, 10, 10);
+component main {public [root, publicAmount, extDataHash, inputNullifier, outputCommitment]} = PolicyTransactionOpen(2, 2, 10);

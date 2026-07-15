@@ -19,6 +19,7 @@ use soroban_sdk::{
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
+use types::PolicyFlags;
 
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
 
@@ -59,15 +60,16 @@ pub fn test_env() -> Env {
     }
 }
 
-/// Returns the path to the pre-generated proving key for the policy_tx_2_2
-/// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
+/// Returns the path to the pre-generated proving key for the
+/// policy_tx_2_2_AB circuit. Uses CARGO_MANIFEST_DIR to find the
+/// workspace root.
 fn proving_key_path() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
     manifest_dir
         .parent()
         .expect("Failed to get workspace root")
-        .join("testdata/policy_tx_2_2_proving_key.bin")
+        .join("testdata/policy_tx_2_2_AB_proving_key.bin")
 }
 
 /// Addresses of deployed contracts for E2E tests
@@ -115,6 +117,7 @@ pub fn deploy_contracts(env: &Env) -> DeployedContracts {
             asp_non_membership.clone(),
             max_deposit,
             u32::try_from(LEVELS).expect("Failed to convert LEVELS to u32"),
+            (PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST).bits(),
         ),
     );
 
@@ -297,7 +300,7 @@ pub fn generate_proof(
     non_membership: &[NonMembership],
     ext_data_hash: Option<BigInt>,
 ) -> Result<CircomResult> {
-    let (wasm, r1cs) = load_artifacts("policy_tx_2_2")?;
+    let (wasm, r1cs) = load_artifacts("policy_tx_2_2_AB")?;
 
     let n_inputs = case.inputs.len();
     let witness = prepare_transaction_witness(case, leaves, LEVELS)?;

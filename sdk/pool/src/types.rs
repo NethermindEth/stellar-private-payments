@@ -2,8 +2,7 @@ pub use ::types::*;
 
 use serde::{Deserialize, Serialize};
 
-/// Circuit bytes for lazy prover init (load via platform I/O before pool
-/// config).
+/// Circuit bytes for in-process transact proving.
 #[derive(Debug, Clone)]
 pub struct ProverArtifacts {
     pub proving_key: Vec<u8>,
@@ -32,6 +31,9 @@ impl PoolChainConfig {
                 "user_address must not be empty".into(),
             ));
         }
+        self.contract_config
+            .pool(&self.pool_contract_id)
+            .map_err(|e| crate::error::PoolError::InvalidConfig(e.to_string()))?;
         Ok(())
     }
 }
@@ -54,17 +56,6 @@ pub struct PrivatePoolConfig {
     pub pool_contract_id: String,
     pub user_address: String,
     pub storage_path: String,
-    pub prover_artifacts: ProverArtifacts,
-}
-
-impl ProverArtifacts {
-    pub fn empty() -> Self {
-        Self {
-            proving_key: Vec::new(),
-            circuit_wasm: Vec::new(),
-            circuit_r1cs: Vec::new(),
-        }
-    }
 }
 
 impl PrivatePoolConfig {
