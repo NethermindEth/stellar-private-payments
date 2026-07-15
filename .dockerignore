@@ -1,9 +1,33 @@
+# Deny everything by default: the only Dockerfile in this repo (tools/bootnode)
+# only needs its own crate + sdk/types (its one path dependency, per
+# tools/bootnode/Cargo.toml) + the compiled-in testnet deployment config.
+# Everything else at the repo root (circuits, contracts, app, cli, e2e-tests,
+# ceremony keys, docs, vendor, root Cargo workspace, ...) is unrelated to its
+# build (tools/bootnode is excluded from the root Cargo workspace).
+*
+
+!Cargo.toml
+!Cargo.lock
+
+!tools
+tools/*
+!tools/bootnode
+
+!sdk
+sdk/*
+!sdk/types
+
+!deployments
+deployments/*
+!deployments/testnet
+deployments/testnet/*
+!deployments/testnet/deployments.json
+
+# Re-exclude local junk/build artifacts that may exist inside the allowed trees
 .git
 .github
 **/.env
-.env
-.env.*
-
+**/.env.*
 **/target
 **/node_modules
 **/dist

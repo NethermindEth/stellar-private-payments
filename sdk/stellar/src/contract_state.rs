@@ -451,7 +451,7 @@ impl StateFetcher {
 
         if parsed.found {
             return Err(anyhow!(
-                "Key exists in non-membership tree (user is blocklisted)"
+                "User note key exists in non-membership tree (user is blocklisted)"
             ));
         }
 

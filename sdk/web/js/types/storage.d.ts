@@ -4,7 +4,7 @@ export interface StorageOpenOptions {
 }
 
 /**
- * Worker-backed local persistence (`poolstellar.sqlite` on OPFS).
+ * Worker-backed local persistence (`spp.db` on OPFS).
  *
  * Open once per page. {@link Storage.fork} for additional handles (e.g. app
  * code alongside {@link Client.new}).
