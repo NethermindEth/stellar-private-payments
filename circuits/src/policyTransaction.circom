@@ -1,54 +1,30 @@
 pragma circom 2.2.2;
 
-// Policy Transaction Circuit
-// Extends the base transaction with membership and non-membership proof verification for association sets support
+// Base pool transact circuit (no ASP policy proofs).
+//
+// WARNING: Do not instantiate `PolicyTransaction` as `component main`. Its
+// `inPublicKey` outputs would become public inputs and leak input note
+// public keys. Use a wrapper entry point (`policyTransactionOpen.circom`,
+// `policyTransactionAllowlist.circom`, etc.) so the base stays a subcomponent.
 
-include "./smt/smtverifier.circom";
 include "./merkleProof.circom";
 include "./poseidon2/poseidon2_hash.circom";
 include "./keypair.circom";
+include "./circomlib/circuits/comparators.circom";
+include "./circomlib/circuits/gates.circom";
 
-// Bus definitions
-
-// Membership Proof
-bus MembershipProof(levels) {
-    signal leaf;                    // Leaf commitment
-    signal blinding;                // Blinding factor used in the leaf hash
-    signal pathElements[levels];    // Merkle path sibling elements required to go from leaf to root
-    signal pathIndices;             // Indices off the path that signal if the node is a left or right child
-}
-
-// Non-Membership Proof
-bus NonMembershipProof(levels) {
-    signal key;                     // Key to be checked in the Sparse merkle Tree
-    signal siblings[levels];        // List of sibling nodes
-    signal oldKey;                  // Old key to be checked in the Sparse merkle Tree (might be 0)
-    signal oldValue;                // Old value to be checked in the Sparse merkle Tree (might be 0)
-    signal isOld0;                  // Boolean indicator to signal if the oldKey should be used or not (0 for not using it)
-}
-
-// Policy Transaction Circuit
 // * nIns: Number of inputs
 // * nOuts: Number of outputs
-// * nMembershipProofs: Number of membership proofs for each input
-// * nNonMembershipProofs: Number of non-membership proofs for each input
 // * levels: Number of levels in the Merkle tree
-// * smtLevels: Number of levels in the Sparse Merkle Tree
-template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs, levels, smtLevels) {
+template PolicyTransaction(nIns, nOuts, levels) {
     /** PUBLIC INPUTS **/
     signal input root;
     signal input publicAmount;
     signal input extDataHash;
     signal input inputNullifier[nIns];
     signal input outputCommitment[nOuts];
-    // Policy roots
-    signal input membershipRoots[nIns][nMembershipProofs];
-    signal input nonMembershipRoots[nIns][nNonMembershipProofs];
 
     /** PRIVATE INPUTS **/
-    // Policy witness data
-    input MembershipProof(levels) membershipProofs[nIns][nMembershipProofs];
-    input NonMembershipProof(smtLevels) nonMembershipProofs[nIns][nNonMembershipProofs];
     // Transaction input data
     signal input inAmount[nIns];
     signal input inPrivateKey[nIns];
@@ -59,32 +35,31 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
     signal input outAmount[nOuts];
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
-    
-    // Components and variables definition
+
+    // Wired to parent wrappers only. As a subcomponent this stays private.
+    signal output inPublicKey[nIns];
+
     component inKeypair[nIns];
     component inSignature[nIns];
     component inCommitmentHasher[nIns];
     component inNullifierHasher[nIns];
     component inTree[nIns];
     component inCheckRoot[nIns];
-    component policyMembershipHasher[nIns][nMembershipProofs];
-    component membershipVerifiers[nIns][nMembershipProofs];
-    component nonMembershipVerifiers[nIns][nNonMembershipProofs];
-    component n2bs[nIns][nNonMembershipProofs];
-    
+
     var sumIns = 0;
-    
+
     // verify correctness of transaction inputs
     for (var tx = 0; tx < nIns; tx++) {
         // Verify that the sender actually owns the inputs
         // He knows the secret keys and the blinding factors.
         inKeypair[tx] = Keypair();
         inKeypair[tx].privateKey <== inPrivateKey[tx];
+        inPublicKey[tx] <== inKeypair[tx].publicKey;
 
         // Computes the leaf commitment as hash(amount, publicKey, blinding)
         inCommitmentHasher[tx] = Poseidon2(3);
         inCommitmentHasher[tx].inputs[0] <== inAmount[tx];
-        inCommitmentHasher[tx].inputs[1] <== inKeypair[tx].publicKey;
+        inCommitmentHasher[tx].inputs[1] <== inPublicKey[tx];
         inCommitmentHasher[tx].inputs[2] <== inBlinding[tx];
         inCommitmentHasher[tx].domainSeparation <== 0x01; // Leaf commitment
 
@@ -101,7 +76,7 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
         inNullifierHasher[tx].inputs[1] <== inPathIndices[tx];
         inNullifierHasher[tx].inputs[2] <== inSignature[tx].out;
         inNullifierHasher[tx].domainSeparation <== 0x02; // Input Nullifier
-        
+
         inNullifierHasher[tx].out === inputNullifier[tx];
 
         // Verifies the merkle proofs
@@ -117,59 +92,11 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
         inCheckRoot[tx].in[0] <== root;
         inCheckRoot[tx].in[1] <== inTree[tx].root;
         inCheckRoot[tx].enabled <== inAmount[tx];
-        
+
         // We don't need to range check input amounts, since all inputs are valid UTXOs that
         // were already checked as outputs in the previous transaction (or zero amount UTXOs that don't
         // need to be checked either).
-        
-        // Policy checks
-        // 1. Verify membership proofs
-        for (var i = 0; i < nMembershipProofs; i++) {
-            membershipVerifiers[tx][i] = MerkleProof(levels);
-            // Check leaf structure and that the leaf is under the same public key as the valid transaction tree
-            policyMembershipHasher[tx][i] = Poseidon2(2);
-            policyMembershipHasher[tx][i].inputs[0] <== inKeypair[tx].publicKey;
-            policyMembershipHasher[tx][i].inputs[1] <== membershipProofs[tx][i].blinding;
-            policyMembershipHasher[tx][i].domainSeparation <== 0x01; // Leaf commitment for membership proof
-            membershipProofs[tx][i].leaf === policyMembershipHasher[tx][i].out;
-            
-            // Verify Membership
-            membershipVerifiers[tx][i].leaf <== membershipProofs[tx][i].leaf;
-            membershipVerifiers[tx][i].pathIndices <== membershipProofs[tx][i].pathIndices;       
-            for (var j = 0; j < levels ; j++) { 
-                membershipVerifiers[tx][i].pathElements[j] <== membershipProofs[tx][i].pathElements[j];
-            }
-            
-            // Verify that the computed root matches the provided root
-            membershipVerifiers[tx][i].root === membershipRoots[tx][i];
-        }
-    
-        // 2. Verify non-membership proofs using SMT
-        for (var i = 0; i < nNonMembershipProofs; i++) {
-            nonMembershipVerifiers[tx][i] = SMTVerifier(smtLevels);
-            nonMembershipVerifiers[tx][i].enabled <== 1; // Always enabled
-            nonMembershipVerifiers[tx][i].root <== nonMembershipRoots[tx][i];
-            
-            // Check that the leaf is under the same public key as the valid transaction tree
-            nonMembershipProofs[tx][i].key === inKeypair[tx].publicKey;
-            
-            for (var j = 0; j < smtLevels; j++) {
-                nonMembershipVerifiers[tx][i].siblings[j] <== nonMembershipProofs[tx][i].siblings[j];
-            }
-            
-            nonMembershipVerifiers[tx][i].oldKey <== nonMembershipProofs[tx][i].oldKey; 
-            nonMembershipVerifiers[tx][i].oldValue <== nonMembershipProofs[tx][i].oldValue;
-            
-            n2bs[tx][i] = Num2Bits(1);
-            n2bs[tx][i].in <== nonMembershipProofs[tx][i].isOld0;
-            
-            nonMembershipVerifiers[tx][i].isOld0 <== n2bs[tx][i].out[0];
-            nonMembershipVerifiers[tx][i].key <== nonMembershipProofs[tx][i].key; 
-            nonMembershipVerifiers[tx][i].value <== nonMembershipProofs[tx][i].key; // We do not actually use value. We only need to check that the key is not present in the tree.
-            nonMembershipVerifiers[tx][i].fnc <== 1; // Always 1 to verify NON-inclusion exclusively 
-        }
-   
-            
+
         sumIns += inAmount[tx];
     }
 
@@ -183,7 +110,7 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
         outCommitmentHasher[tx].inputs[0] <== outAmount[tx];
         outCommitmentHasher[tx].inputs[1] <== outPubkey[tx];
         outCommitmentHasher[tx].inputs[2] <== outBlinding[tx];
-        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment;
+        outCommitmentHasher[tx].domainSeparation <== 0x01; // Output Commitment
         outCommitmentHasher[tx].out === outputCommitment[tx];
 
         // Check that amount fits into 248 bits to prevent overflow
@@ -197,13 +124,13 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
     component sameNullifiers[nIns * (nIns - 1) / 2];
     var index = 0;
     for (var i = 0; i < nIns - 1; i++) {
-      for (var j = i + 1; j < nIns; j++) {
-          sameNullifiers[index] = IsEqual();
-          sameNullifiers[index].in[0] <== inputNullifier[i];
-          sameNullifiers[index].in[1] <== inputNullifier[j];
-          sameNullifiers[index].out === 0;
-          index++;
-      }
+        for (var j = i + 1; j < nIns; j++) {
+            sameNullifiers[index] = IsEqual();
+            sameNullifiers[index].in[0] <== inputNullifier[i];
+            sameNullifiers[index].in[1] <== inputNullifier[j];
+            sameNullifiers[index].out === 0;
+            index++;
+        }
     }
 
     // Verify amount invariant
@@ -211,5 +138,4 @@ template PolicyTransaction(nIns, nOuts, nMembershipProofs, nNonMembershipProofs,
 
     // Optional safety constraint to make sure extDataHash cannot be changed
     signal extDataSquare <== extDataHash * extDataHash;
-       
 }

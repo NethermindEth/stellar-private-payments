@@ -159,3 +159,4 @@ impl PrivatePool {
         Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 }
+

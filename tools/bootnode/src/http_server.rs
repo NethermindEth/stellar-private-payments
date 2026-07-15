@@ -60,7 +60,12 @@ impl HttpServer {
         let router = Router::new()
             .route("/healthz", get(healthz))
             .route("/metrics", get(metrics))
-            .route("/", post(handle_rpc))
+            .route(
+                "/",
+                post(handle_rpc).layer(GovernorLayer {
+                    config: Arc::new(governor_conf),
+                }),
+            )
             .with_state(RpcState {
                 app: state.clone(),
                 rpc: rpc_svc,
@@ -68,9 +73,6 @@ impl HttpServer {
             .layer(axum::extract::DefaultBodyLimit::max(1024 * 1024))
             .layer(cors)
             .layer(TraceLayer::new_for_http())
-            .layer(GovernorLayer {
-                config: Arc::new(governor_conf),
-            })
             .layer(SetResponseHeaderLayer::overriding(
                 header::X_CONTENT_TYPE_OPTIONS,
                 HeaderValue::from_static("nosniff"),

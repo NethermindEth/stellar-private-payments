@@ -1,7 +1,7 @@
-use std::cell::RefCell;
+use std::{cell::RefCell, collections::HashMap};
 
 use prover::flows::TransactParams;
-use types::DisclosureReceipt;
+use types::{DisclosureReceipt, PolicyFlags};
 
 use crate::{
     disclosure::DisclosureProveParams,
@@ -11,23 +11,42 @@ use crate::{
     types::ProverArtifacts,
 };
 
-/// [`Prover`] backed by in-process [`ProverEngine`].
-pub struct LocalProver(RefCell<ProverEngine>);
+/// In-process Groth16 prover for pool transact circuits.
+///
+/// Holds one [`ProverEngine`] per [`PolicyFlags`]. Witness/proof generation
+/// follows `params.policy_flags` (on-chain pool policy).
+pub struct LocalProver(RefCell<HashMap<PolicyFlags, ProverEngine>>);
 
 impl LocalProver {
-    pub fn from_artifacts(artifacts: &ProverArtifacts) -> Result<Self, Error> {
-        ProverEngine::new(
-            &artifacts.proving_key,
-            &artifacts.circuit_wasm,
-            &artifacts.circuit_r1cs,
-        )
-        .map(|engine| Self(RefCell::new(engine)))
-        .map_err(|e| Error::Other(format!("init prover: {e:#}")))
+    pub fn from_artifacts(artifacts: &[(PolicyFlags, ProverArtifacts)]) -> Result<Self, Error> {
+        let mut engines = HashMap::with_capacity(artifacts.len());
+        for (flags, bundle) in artifacts {
+            let engine = ProverEngine::new(
+                &bundle.proving_key,
+                &bundle.circuit_wasm,
+                &bundle.circuit_r1cs,
+            )
+            .map_err(|e| Error::Other(format!("init prover for {flags:?}: {e:#}")))?;
+            engines.insert(*flags, engine);
+        }
+        if engines.is_empty() {
+            return Err(Error::Other(
+                "at least one transact circuit is required".into(),
+            ));
+        }
+        Ok(Self(RefCell::new(engines)))
     }
 
     pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
+        let flags = params.policy_flags;
         self.0
             .borrow_mut()
+            .get_mut(&flags)
+            .ok_or_else(|| {
+                Error::Other(format!(
+                    "no transact prover configured for policy flags {flags:?}"
+                ))
+            })?
             .prove_transact(params)
             .map_err(|e| Error::Other(format!("prove: {e:#}")))
     }

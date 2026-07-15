@@ -42,6 +42,9 @@ impl PrivatePoolConfig {
                 "user_address must not be empty".into(),
             ));
         }
+        self.contract_config
+            .pool(&self.pool_contract_id)
+            .map_err(|e| crate::error::Error::InvalidConfig(e.to_string()))?;
         Ok(())
     }
 }

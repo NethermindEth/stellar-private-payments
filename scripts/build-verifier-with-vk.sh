@@ -14,8 +14,9 @@
 #   verification_key.json   Path to a snarkjs Groth16 verification key JSON.
 #
 # Options:
-#   --out-dir DIR   Directory to copy the built WASM into (default: target/stellar)
-#   -h, --help      Show this help
+#   --out-dir DIR     Directory to copy the built WASM into (default: target/stellar)
+#   --wasm-name NAME  Output WASM filename (default: circom_groth16_verifier.wasm)
+#   -h, --help        Show this help
 #
 # Example (after running the ceremony):
 #   scripts/build-verifier-with-vk.sh ceremony/circuit_verification_key.json
@@ -36,12 +37,14 @@ usage() {
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 OUT_DIR="$ROOT_DIR/target/stellar"
+WASM_NAME="circom_groth16_verifier.wasm"
 
 VK_FILE=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --out-dir) OUT_DIR="$2"; shift 2 ;;
+    --wasm-name) WASM_NAME="$2"; shift 2 ;;
     -h|--help) usage ;;
     -*)        die "unknown option: $1" ;;
     *)
@@ -69,8 +72,13 @@ VERIFIER_VK_JSON="$VK_FILE" \
     --optimize \
     --package circom-groth16-verifier
 
-WASM="$OUT_DIR/circom_groth16_verifier.wasm"
-[[ -f "$WASM" ]] || die "expected WASM not found: $WASM"
+BUILT_WASM="$OUT_DIR/circom_groth16_verifier.wasm"
+[[ -f "$BUILT_WASM" ]] || die "expected WASM not found: $BUILT_WASM"
+
+WASM="$OUT_DIR/$WASM_NAME"
+if [[ "$WASM" != "$BUILT_WASM" ]]; then
+  cp "$BUILT_WASM" "$WASM"
+fi
 
 SIZE="$(wc -c < "$WASM")"
 step "done: $WASM ($SIZE bytes)"

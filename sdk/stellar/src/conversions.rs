@@ -173,6 +173,15 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     }
 }
 
+/// Decode pool ASP policy flags from contract storage.
+pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<types::PolicyFlags, Error> {
+    if let xdr::ScVal::U32(bits) = val {
+        return types::PolicyFlags::from_bits(*bits)
+            .map_err(|e| Error::UnexpectedScVal(e.to_string()));
+    }
+    Err(Error::UnexpectedScVal(format!("{val:?}")))
+}
+
 #[derive(Debug)]
 pub struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.

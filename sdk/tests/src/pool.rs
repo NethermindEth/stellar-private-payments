@@ -6,7 +6,7 @@ use anyhow::Result;
 use stellar_private_payments_sdk::{
     Handle, LocalProver, LocalSigner, LocalStorage, Signer, SyncMode, TransferRecipient,
     blocking::{Account, Client, PrivatePool},
-    types::{ContractConfig, NoteAmount, NotePublicKey},
+    types::{ContractConfig, NoteAmount, NotePublicKey, PolicyFlags},
 };
 use types::{EncryptionPublicKey, Field};
 
@@ -20,13 +20,16 @@ const TEST_CONFIG_JSON: &str = r#"{
     "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-    "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+    "verifiers": {
+        "AB": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
+    },
     "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "pools": [{
         "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "deploymentLedger": 1,
         "enabled": true,
+            "policyFlags": ["allowlist", "blocklist"],
         "asset": {"kind": "native"}
     }]
 }"#;
@@ -69,9 +72,12 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
 
     let storage_path = db_path.to_string_lossy().into_owned();
     let storage = LocalStorage::open(&storage_path)?;
+    let artifacts = test_prover_artifacts()?;
     let prover = Handle::from_box(
-        Box::new(LocalProver::from_artifacts(&test_prover_artifacts()?)?)
-            as Box<dyn stellar_private_payments_sdk::Prover>,
+        Box::new(LocalProver::from_artifacts(&[(
+            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+            artifacts,
+        )])?) as Box<dyn stellar_private_payments_sdk::Prover>,
     );
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
     let client = Client::new(
@@ -111,10 +117,10 @@ fn test_prover_artifacts() -> Result<stellar_private_payments_sdk::ProverArtifac
     let circuits = repo.join("target/circuits-artifacts").join(profile);
     Ok(stellar_private_payments_sdk::ProverArtifacts {
         proving_key: std::fs::read(
-            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"),
+            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),
         )?,
-        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2.wasm"))?,
-        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2.r1cs"))?,
+        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2_AB.wasm"))?,
+        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,
     })
 }
 

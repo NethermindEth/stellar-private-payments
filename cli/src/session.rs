@@ -1,13 +1,12 @@
+use crate::{
+    account::Account, artifacts::load_transact_artifacts, config::CliConfig, signer::AliasSigner,
+    stellar_cli::StellarNetwork,
+};
 use anyhow::Result;
 use stellar_private_payments_sdk::{
     Handle, LocalProver, LocalStorage, NoopProver, Prover, Signer, SyncMode, TransferRecipient,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
-};
-
-use crate::{
-    account::Account, artifacts::load_prover_artifacts, config::CliConfig, signer::AliasSigner,
-    stellar_cli::StellarNetwork,
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
@@ -31,8 +30,13 @@ impl ClientSession {
         let prover: Handle<dyn Prover> = if readonly {
             Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>)
         } else {
-            let artifacts = load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?;
-            Handle::from_box(Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>)
+            let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
+            Handle::from_box(
+                Box::new(
+                    LocalProver::from_artifacts(&artifacts)
+                        .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
+                ) as Box<dyn Prover>,
+            )
         };
 
         let client = Client::new(

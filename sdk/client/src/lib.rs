@@ -7,14 +7,15 @@
 //! ```no_run
 //! use stellar_private_payments_sdk::{
 //!     Client, Handle, LocalProver, LocalSigner, LocalStorage, ProverArtifacts, SyncMode,
-//!     types::{ContractConfig, NoteAmount, TransferRecipient},
+//!     types::{ContractConfig, NoteAmount, PolicyFlags, TransferRecipient},
 //! };
 //!
 //! # async fn example(deployment: ContractConfig) -> Result<(), Box<dyn std::error::Error>> {
 //! let storage = LocalStorage::open("wallet.sqlite")?;
 //! let artifacts = ProverArtifacts::empty(); // load real circuit bytes before deposit
 //! let prover = Handle::from_box(
-//!     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn stellar_private_payments_sdk::Prover>,
+//!     Box::new(LocalProver::from_artifacts(&[(PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST, artifacts)])?)
+//!         as Box<dyn stellar_private_payments_sdk::Prover>,
 //! );
 //! let signer = Handle::from_box(
 //!     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
