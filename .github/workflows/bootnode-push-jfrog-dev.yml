@@ -1,0 +1,40 @@
+name: Bootnode push to JFrog (dev)
+
+on:
+  push:
+    branches: ["main"]
+    paths:
+      - "tools/bootnode/**"
+      - "sdk/types/**"
+      - "deployments/testnet/deployments.json"
+      - ".github/workflows/bootnode-push-jfrog-dev.yml"
+  pull_request:
+    branches: ["main"]
+    paths:
+      - "tools/bootnode/**"
+      - "sdk/types/**"
+      - "deployments/testnet/deployments.json"
+      - ".github/workflows/bootnode-push-jfrog-dev.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  attestations: write
+  artifact-metadata: write
+  contents: read
+
+jobs:
+  push-bootnode:
+    uses: NethermindEth/github-workflows/.github/workflows/docker-build-push-jfrog.yaml@77a6b36410ca0a5e9ae2cb5d387e5b34d6f639ef
+    with:
+      repo_name: research-oci-local-dev
+      image_name: bootnode
+      runner: ubuntu-24.04-arm
+      platforms: "linux/arm64"
+      context: .
+      dockerfile_path: ./tools/bootnode/Dockerfile
+      push: ${{ github.event_name != 'pull_request' }}
