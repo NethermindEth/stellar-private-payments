@@ -73,12 +73,10 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     let storage_path = db_path.to_string_lossy().into_owned();
     let storage = LocalStorage::open(&storage_path)?;
     let artifacts = test_prover_artifacts()?;
-    let prover = Handle::from_box(
-        Box::new(LocalProver::from_artifacts(&[(
-            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-            artifacts,
-        )])?) as Box<dyn stellar_private_payments_sdk::Prover>,
-    );
+    let prover = Handle::from_box(Box::new(LocalProver::from_artifacts(&[(
+        PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+        artifacts,
+    )])?) as Box<dyn stellar_private_payments_sdk::Prover>);
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
     let client = Client::new(
         storage,

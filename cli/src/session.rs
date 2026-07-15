@@ -31,12 +31,10 @@ impl ClientSession {
             Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>)
         } else {
             let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
-            Handle::from_box(
-                Box::new(
-                    LocalProver::from_artifacts(&artifacts)
-                        .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
-                ) as Box<dyn Prover>,
-            )
+            Handle::from_box(Box::new(
+                LocalProver::from_artifacts(&artifacts)
+                    .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
+            ) as Box<dyn Prover>)
         };
 
         let client = Client::new(
