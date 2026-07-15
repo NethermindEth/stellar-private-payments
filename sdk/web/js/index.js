@@ -22,6 +22,7 @@ function wrapAccount(wasmAccount) {
     get userAddress() {
       return wasmAccount.userAddress;
     },
+    portfolio: () => wasmAccount.portfolio(),
     registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
     pool: (options) => wasmAccount.pool(options),
   };
@@ -31,6 +32,7 @@ function wrapClient(wasmClient) {
   return {
     checkSync: (options) => wasmClient.checkSync(options),
     startSync: (options) => wasmClient.startSync(options),
+    sync: (options) => wasmClient.sync(options ?? {}),
     account: async (options, signer) => {
       const userAddress =
         options.userAddress ??

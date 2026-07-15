@@ -3,10 +3,7 @@
 use tx_planner::{SpendableNote, Transact};
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
-use stellar::{
-    Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, TxConfirmStatus,
-    confirm_tx, submit_tx,
-};
+use stellar::{Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     PoolCore, PreparedTransaction, SyncMode,
@@ -22,6 +19,7 @@ use crate::{
     signer::Signer,
     sleep::sleep,
     storage::Storage,
+    sync::confirm_tx,
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
@@ -319,38 +317,7 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn confirm(&self, hash: &str) -> Result<TransactionResult, Error> {
-        const CONFIRM_POLL_ATTEMPTS: u32 = 30;
-
-        let rpc = &self.client;
-
-        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
-            if attempt > 1 {
-                sleep(POLL_INTERVAL_MS).await;
-            }
-            match confirm_tx(hash, rpc)
-                .await
-                .map_err(|e| Error::Other(format!("confirm transaction: {e:#}")))?
-            {
-                TxConfirmStatus::Success => {
-                    return Ok(TransactionResult {
-                        tx_hash: hash.to_string(),
-                    });
-                }
-                TxConfirmStatus::Failed { detail } => {
-                    return Err(Error::Other(format!("transaction failed{detail}")));
-                }
-                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
-                    return Err(Error::Other(format!(
-                        "transaction confirmation timed out after 30s (hash: {hash})"
-                    )));
-                }
-                TxConfirmStatus::Pending => {}
-            }
-        }
-
-        Err(Error::Other(format!(
-            "transaction confirmation failed (hash: {hash})"
-        )))
+        confirm_tx(hash, &self.client).await
     }
 
     pub async fn user_public_keys(
@@ -361,7 +328,7 @@ impl<S: Storage> PrivatePool<S> {
     }
 
     pub async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
-        self.signer.sign(prepared).await
+        self.signer.sign_transaction(prepared).await
     }
 
     // helpers

@@ -57,6 +57,9 @@ function wrapSdkClient(sdk, sdkStorage) {
             });
             syncStarted = true;
         },
+        sync() {
+            return sdk.sync({});
+        },
         async openAccount(
             { networkPassphrase, userAddress },
             signer = new FreighterSigner(),
@@ -108,10 +111,6 @@ function wrapSdkClient(sdk, sdkStorage) {
         },
         keyDerivationMessage() {
             return KEY_DERIVATION_MESSAGE;
-        },
-        async getPortfolioBalances(address) {
-            const response = await storageCall(sdkStorage, { PortfolioBalances: address });
-            return response.PortfolioBalances ?? [];
         },
         async getOperationalFeed(limit) {
             const config = Client.contractConfig();

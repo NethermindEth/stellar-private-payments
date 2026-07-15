@@ -1,4 +1,4 @@
-use stellar::{Limits, LocalSigner as StellarSigner, WriteXdr};
+use stellar::{Limits, LocalSigner as StellarSigner, PreparedSorobanTx, WriteXdr};
 
 use super::Signer;
 use crate::{PreparedTransaction, error::Error, types::SignedTransaction};
@@ -39,14 +39,20 @@ impl LocalSigner {
 
 #[async_trait::async_trait(?Send)]
 impl Signer for LocalSigner {
-    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
         let envelope = self
             .stellar
-            .sign_prepared_transaction(
-                &prepared.soroban_tx,
-                &self.network_passphrase,
-                &self.user_address,
-            )
+            .sign_prepared_transaction(prepared, &self.network_passphrase, &self.user_address)
             .map_err(|e| Error::Other(format!("sign transaction: {e:#}")))?;
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())

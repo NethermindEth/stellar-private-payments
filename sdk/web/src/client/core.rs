@@ -4,41 +4,27 @@ use crate::{
     storage::Storage,
     workers::prover::{ProverBridge, ProverWorker},
 };
-use gloo_timers::future::TimeoutFuture;
 use gloo_worker::Spawnable;
 use std::rc::Rc;
 use stellar_private_payments_sdk::{
-    Client, Handle, SyncMode,
-    chain::{
-        StateFetcher, TransactionEnvelope, TxConfirmStatus, confirm_tx as chain_confirm_tx,
-        submit_tx as chain_submit_tx,
-    },
-    tx::encryption::KEY_DERIVATION_MESSAGE,
-    types::{
-        ContractConfig, DisclosureReceipt, DisclosureVerificationReport, KeyDerivationSignature,
-        parse_0x_hex_32,
-    },
+    Account as NativeAccount, Client, Handle, SyncMode,
+    types::{DisclosureReceipt, DisclosureVerificationReport, KeyDerivationSignature},
     verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
 
 use crate::workers::storage::StorageBridge;
 
-use super::{PoolCreateConfig, pool_err};
-
-const CONFIRM_POLL_ATTEMPTS: u32 = 30;
-const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
+use super::pool_err;
 
 const DEFAULT_PROVER_WORKER_URL: &str = "./workers/prover-worker.js";
 
-/// Workers, RPC fetcher, and tx submission shared by [`super::Client`] and
-/// [`super::PrivatePool`].
-#[derive(Clone)]
+/// Worker wiring and SDK client bootstrap shared by [`super::Client`] and
+/// [`super::Account`].
 pub(crate) struct ClientCore {
-    rpc_url: String,
     storage: StorageBridge,
     prover_bridge: ProverBridge,
-    fetcher: Rc<StateFetcher>,
+    native_client: Rc<Client<StorageBridge>>,
 }
 
 impl ClientCore {
@@ -63,20 +49,27 @@ impl ClientCore {
         let prover_worker_url =
             prover_worker_url.unwrap_or_else(|| DEFAULT_PROVER_WORKER_URL.to_string());
 
-        let fetcher = Rc::new(
-            StateFetcher::new(&rpc_url, (*contract_config).clone())
-                .map_err(|e| JsError::new(&e.to_string()))?,
+        let prover_bridge = ProverBridge::new(
+            ProverWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&prover_worker_url),
         );
-        let core = Self {
+        let prover: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(Box::new(
+            prover_bridge.clone(),
+        )
+            as Box<dyn stellar_private_payments_sdk::Prover>);
+        let native_client = Rc::new(Client::new(
+            storage_bridge.clone(),
+            prover,
+            SyncMode::Background,
+            (*contract_config).clone(),
             rpc_url,
+        ));
+        let core = Self {
             storage: storage_bridge,
-            prover_bridge: ProverBridge::new(
-                ProverWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&prover_worker_url),
-            ),
-            fetcher,
+            prover_bridge,
+            native_client,
         };
 
         core.ping_storage()
@@ -86,50 +79,41 @@ impl ClientCore {
         Ok(core)
     }
 
-    pub(crate) fn storage(&self) -> StorageBridge {
+    pub(crate) fn native_client(&self) -> Rc<Client<StorageBridge>> {
+        self.native_client.clone()
+    }
+
+    pub(crate) fn storage_bridge(&self) -> StorageBridge {
         self.storage.clone()
     }
 
-    pub(crate) fn contract_config(&self) -> &ContractConfig {
-        self.fetcher.contract_config()
-    }
-
     pub(crate) fn key_derivation_message(&self) -> String {
-        KEY_DERIVATION_MESSAGE.to_string()
+        stellar_private_payments_sdk::tx::encryption::KEY_DERIVATION_MESSAGE.to_string()
     }
 
-    pub(crate) async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        let data = self
-            .fetcher
-            .all_contracts_data()
+    pub(crate) async fn sync(&self) -> Result<(), JsError> {
+        self.native_client.sync().await.map_err(pool_err)
+    }
+
+    pub(crate) async fn ensure_prover(&self) -> Result<(), JsError> {
+        self.ping_prover()
             .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&data)?)
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))
     }
 
-    pub(crate) async fn asp_state(&self) -> Result<JsValue, JsError> {
-        let data = self
-            .fetcher
-            .asp_state()
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        Ok(serde_wasm_bindgen::to_value(&data)?)
-    }
-
-    pub(crate) async fn lookup_registered_public_key(
+    pub(crate) async fn account(
         &self,
-        address: String,
-    ) -> Result<JsValue, JsError> {
-        let req = StorageWorkerRequest::RecipientLookup {
-            address,
-            public_key_registry_contract_id: self.contract_config().public_key_registry.clone(),
-        };
-        match self.storage_request(req, 2_000).await? {
-            StorageWorkerResponse::RecipientLookup(lookup) => {
-                Ok(serde_wasm_bindgen::to_value(&lookup)?)
-            }
-            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
-        }
+        wallet_signer: crate::signer::WalletSigner,
+        user_address: String,
+    ) -> Result<NativeAccount<StorageBridge>, JsError> {
+        self.ensure_prover().await?;
+        let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
+            wallet_signer,
+        )
+            as Box<dyn stellar_private_payments_sdk::Signer>);
+        self.native_client
+            .account(user_address, signer)
+            .map_err(pool_err)
     }
 
     pub(crate) async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
@@ -146,10 +130,11 @@ impl ClientCore {
         address: String,
         signature: Vec<u8>,
     ) -> Result<(), JsError> {
+        let config = deployment_config()?;
         let req = StorageWorkerRequest::DeriveSaveUserKeys(
             address,
             KeyDerivationSignature(signature),
-            self.fetcher.contract_config().network.clone(),
+            config.network.clone(),
         );
 
         match self.storage_request(req, 5_000).await? {
@@ -158,110 +143,20 @@ impl ClientCore {
         }
     }
 
-    pub(crate) async fn user_public_keys_hex(
+    /// Walletless selective-disclosure verification (Groth16 + context +
+    /// roots).
+    pub(crate) async fn verify_selective_disclosure(
         &self,
-        address: &str,
-    ) -> Result<(String, String), JsError> {
-        let req = StorageWorkerRequest::UserKeys(address.to_string());
-        match self.storage_request(req, 1_000).await? {
-            StorageWorkerResponse::UserKeys(Some(keys)) => {
-                use stellar_private_payments_sdk::types::encode_0x_hex;
-                Ok((
-                    encode_0x_hex(&keys.note_keypair.public.0),
-                    encode_0x_hex(&keys.encryption_keypair.public.0),
-                ))
-            }
-            StorageWorkerResponse::UserKeys(None) => Err(JsError::new(
-                "user keys not found in local storage; call account() first",
-            )),
-            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
-        }
-    }
-
-    pub(crate) async fn create_pool_internal(
-        &self,
-        cfg: &PoolCreateConfig,
-        wallet_signer: &crate::signer::WalletSigner,
-    ) -> Result<stellar_private_payments_sdk::PrivatePool<StorageBridge>, JsError> {
-        self.ping_prover()
-            .await
-            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
-
-        let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
-            wallet_signer.clone(),
-        )
-            as Box<dyn stellar_private_payments_sdk::Signer>);
-        let prover: Handle<dyn stellar_private_payments_sdk::Prover> =
-            Handle::from_box(Box::new(self.prover_bridge.clone())
-                as Box<dyn stellar_private_payments_sdk::Prover>);
-
-        let client = Client::new(
-            self.storage(),
-            prover,
-            SyncMode::Background,
-            self.fetcher.contract_config().clone(),
-            self.rpc_url.clone(),
-        );
-        let account = client
-            .account(cfg.user_address.clone(), signer)
-            .map_err(pool_err)?;
-        account.pool(cfg.pool_contract.clone()).map_err(pool_err)
-    }
-
-    pub(crate) async fn register_public_keys(
-        &self,
-        wallet_signer: &crate::signer::WalletSigner,
-        user_address: String,
-        note_public_key_hex: String,
-        encryption_public_key_hex: String,
-    ) -> Result<String, JsError> {
-        let note_key = parse_hex32(&note_public_key_hex, "note public key")?;
-        let encryption_key = parse_hex32(&encryption_public_key_hex, "encryption public key")?;
-        let prepared = self
-            .fetcher
-            .prepare_register(&user_address, note_key, encryption_key)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
-        let signed_tx = wallet_signer.sign_prepared_transaction(&prepared).await?;
-        let hash = self.submit(&signed_tx).await?;
-        self.confirm(&hash).await?;
-        Ok(hash)
-    }
-
-    pub(super) async fn submit(&self, signed: &TransactionEnvelope) -> Result<String, JsError> {
-        let rpc = self.fetcher.rpc();
-        chain_submit_tx(signed, rpc)
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))
-    }
-
-    pub(super) async fn confirm(&self, hash: &str) -> Result<(), JsError> {
-        let rpc = self.fetcher.rpc();
-
-        for attempt in 1..=CONFIRM_POLL_ATTEMPTS {
-            if attempt > 1 {
-                TimeoutFuture::new(CONFIRM_POLL_INTERVAL_MS).await;
-            }
-            match chain_confirm_tx(hash, rpc)
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?
-            {
-                TxConfirmStatus::Success => return Ok(()),
-                TxConfirmStatus::Failed { detail } => {
-                    return Err(JsError::new(&format!("transaction failed{detail}")));
-                }
-                TxConfirmStatus::Pending if attempt == CONFIRM_POLL_ATTEMPTS => {
-                    return Err(JsError::new(&format!(
-                        "transaction confirmation timed out after 30s (hash: {hash})"
-                    )));
-                }
-                TxConfirmStatus::Pending => {}
-            }
-        }
-
-        Err(JsError::new(&format!(
-            "transaction confirmation failed (hash: {hash})"
-        )))
+        receipt: &DisclosureReceipt,
+        expected_vk_hash: &str,
+    ) -> Result<DisclosureVerificationReport, stellar_private_payments_sdk::Error> {
+        self.ping_prover().await.map_err(|e| {
+            stellar_private_payments_sdk::Error::Other(format!("failed to load prover: {e:?}"))
+        })?;
+        let fetcher = self.native_client.state_fetcher().map_err(|e| {
+            stellar_private_payments_sdk::Error::Other(format!("state fetcher: {e:#}"))
+        })?;
+        verify_disclosure_receipt(&fetcher, &self.prover_bridge, receipt, expected_vk_hash).await
     }
 
     async fn storage_request(
@@ -282,27 +177,4 @@ impl ClientCore {
     async fn ping_prover(&self) -> anyhow::Result<()> {
         self.prover_bridge.ping().await
     }
-
-    /// Walletless selective-disclosure verification (Groth16 + context +
-    /// roots).
-    pub(crate) async fn verify_selective_disclosure(
-        &self,
-        receipt: &DisclosureReceipt,
-        expected_vk_hash: &str,
-    ) -> Result<DisclosureVerificationReport, stellar_private_payments_sdk::Error> {
-        self.ping_prover().await.map_err(|e| {
-            stellar_private_payments_sdk::Error::Other(format!("failed to load prover: {e:?}"))
-        })?;
-        verify_disclosure_receipt(
-            &self.fetcher,
-            &self.prover_bridge,
-            receipt,
-            expected_vk_hash,
-        )
-        .await
-    }
-}
-
-fn parse_hex32(hex: &str, what: &str) -> Result<[u8; 32], JsError> {
-    parse_0x_hex_32(hex.trim()).map_err(|e| JsError::new(&format!("Invalid {what}: {e}")))
 }

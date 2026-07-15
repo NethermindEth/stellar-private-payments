@@ -24,7 +24,6 @@ use crate::{
 use core::ClientCore;
 
 pub use account::Account;
-pub(crate) use pool::PoolCreateConfig;
 pub use pool::PrivatePool;
 
 pub(crate) fn pool_err(error: Error) -> JsError {
@@ -153,24 +152,36 @@ impl Client {
                 .await?;
         }
 
-        Ok(Account::new(core, wallet_signer, user_address))
+        Ok(Account::new(Rc::new(
+            core.account(wallet_signer, user_address.clone()).await?,
+        )))
+    }
+
+    /// Catch local storage up to the current chain tip for the deployment.
+    #[wasm_bindgen(js_name = sync)]
+    pub async fn sync(&mut self, options: JsValue) -> Result<(), JsError> {
+        let _opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+            VerifyDisclosureOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+        self.ensure_core(None).await?.sync().await
     }
 
     /// Look up a recipient's registered note and encryption public keys.
     #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
     pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
-        if let Some(core) = &self.core {
-            return core.lookup_registered_public_key(address).await;
-        }
-
         let config = deployment_config()?;
+        let bridge = if let Some(core) = &self.core {
+            core.storage_bridge()
+        } else {
+            self.storage.bridge()
+        };
         let req = StorageWorkerRequest::RecipientLookup {
             address,
             public_key_registry_contract_id: config.public_key_registry.clone(),
         };
-        match self
-            .storage
-            .bridge()
+        match bridge
             .call(req, 2_000)
             .await
             .map_err(|e| JsError::new(&e.to_string()))?
@@ -185,13 +196,7 @@ impl Client {
     /// On-chain ASP membership and non-membership state.
     #[wasm_bindgen(js_name = aspState)]
     pub async fn asp_state(&self) -> Result<JsValue, JsError> {
-        if let Some(core) = &self.core {
-            return core.asp_state().await;
-        }
-
-        let config = deployment_config()?;
-        let fetcher = StateFetcher::new(&self.rpc_url, (*config).clone())
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let fetcher = self.state_fetcher().await?;
         let data = fetcher
             .asp_state()
             .await
@@ -202,13 +207,7 @@ impl Client {
     /// On-chain state for all enabled pools plus shared ASP contracts.
     #[wasm_bindgen(js_name = allContractsData)]
     pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        if let Some(core) = &self.core {
-            return core.all_contracts_data().await;
-        }
-
-        let config = deployment_config()?;
-        let fetcher = StateFetcher::new(&self.rpc_url, (*config).clone())
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let fetcher = self.state_fetcher().await?;
         let data = fetcher
             .all_contracts_data()
             .await
@@ -261,6 +260,19 @@ impl Client {
         );
         self.core = Some(core.clone());
         Ok(core)
+    }
+
+    async fn state_fetcher(&self) -> Result<StateFetcher, JsError> {
+        if let Some(core) = &self.core {
+            return core
+                .native_client()
+                .state_fetcher()
+                .map_err(|e| JsError::new(&e.to_string()));
+        }
+
+        let config = deployment_config()?;
+        StateFetcher::new(&self.rpc_url, (*config).clone())
+            .map_err(|e| JsError::new(&e.to_string()))
     }
 }
 

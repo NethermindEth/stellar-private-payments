@@ -27,8 +27,9 @@ await account.registerPublicKeys();
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
 await pool.sync(); // optional foreground catch-up; prefer startSync for background indexing
+await client.sync(); // optional explicit catch-up via SDK client
 await pool.deposit(10_000_000n); // stroops (1 XLM)
-console.log(await pool.getBalance()); // bigint stroops
+console.log(await pool.balance()); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n);
 
@@ -51,6 +52,7 @@ const chain = await client.allContractsData();
 | `new({ storage, rpcUrl })` | Deployment client shell (no wallet yet) |
 | `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
 | `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
+| `sync(options?)` | Explicit foreground catch-up via SDK client |
 | `contractConfig()` | Static deployment config |
 | `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, return `Account` |
 | `lookupRegisteredPublicKey(address)` | Recipient key lookup |
@@ -63,12 +65,13 @@ const chain = await client.allContractsData();
 | Method | Description |
 |--------|-------------|
 | `userAddress` | Connected Stellar address |
+| `portfolio()` | Balances across all enabled pools |
 | `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Mutating methods do **not** call `sync` automatically — use `startSync` for background indexing and call `pool.sync()` when you need an explicit catch-up (same as the Rust SDK). Amount parameters and `getBalance` use **stroops** as JavaScript `bigint`.
+Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Mutating methods do **not** call `sync` automatically — use `startSync` for background indexing and call `pool.sync()` or `client.sync()` when you need an explicit catch-up (same as the Rust SDK). Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 

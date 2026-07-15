@@ -165,9 +165,19 @@ fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsErro
 
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
-    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
         let envelope = self
-            .sign_prepared_transaction(&prepared.soroban_tx)
+            .sign_prepared_transaction(prepared)
             .await
             .map_err(|e| Error::Other(format!("{e:?}")))?;
 

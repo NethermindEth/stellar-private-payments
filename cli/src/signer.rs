@@ -47,8 +47,18 @@ impl AliasSigner {
 
 #[async_trait::async_trait(?Send)]
 impl Signer for AliasSigner {
-    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
-        let envelope = self.sign_prepared_transaction(&prepared.soroban_tx)?;
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
+        let envelope = self.sign_prepared_transaction(prepared)?;
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())
             .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;

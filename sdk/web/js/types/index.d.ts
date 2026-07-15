@@ -41,6 +41,7 @@ export { FreighterSigner } from './freighter.js';
 /** Wallet session returned by {@link DeploymentClient.account}. */
 export interface AccountClient {
   readonly userAddress: string;
+  portfolio(): Promise<unknown>;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   pool(options: PoolOptions): Promise<PrivatePool>;
 }
@@ -49,6 +50,7 @@ export interface AccountClient {
 export interface DeploymentClient {
   checkSync(options?: SyncOptions | null): Promise<string | null>;
   startSync(options?: SyncOptions | null): Promise<void>;
+  sync(options?: SyncOptions | null): Promise<void>;
   account(options: AccountOptions, signer: WalletSigner): Promise<AccountClient>;
   lookupRegisteredPublicKey(address: string): Promise<unknown>;
   aspState(): Promise<unknown>;
