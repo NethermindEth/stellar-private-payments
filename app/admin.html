@@ -1,271 +1,236 @@
 <!DOCTYPE html>
 <html lang="en" class="scroll-smooth">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="ASP Admin console for membership and non-membership trees." />
-  <meta name="author" content="PoolStellar" />
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="ASP Admin console." />
+    <meta name="author" content="Stellar Private Payments" />
 
-  <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
+    <link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 
-  <title>ASP Admin Console</title>
+    <title>Stellar Private Payments | Admin</title>
 
-  <link rel="stylesheet" href="css/app.css" />
+    <link rel="stylesheet" href="css/app.css" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
-
-  <script type="importmap">
-  {
-    "imports": {
-      "stellar-private-payments-sdk-web": "./js/stellar-private-payments-sdk-web/js/index.js"
+    <script type="importmap">
+    {
+        "imports": {
+            "stellar-private-payments-sdk-web": "./js/stellar-private-payments-sdk-web/js/index.js"
+        }
     }
-  }
-  </script>
+    </script>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 </head>
 
-<body class="bg-dark-950 text-dark-50 font-sans min-h-screen antialiased">
-<div class="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-6 sm:py-8 flex flex-col gap-6 min-h-screen">
-  <header class="flex flex-col sm:flex-row items-center justify-between gap-4 p-4 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl overflow-visible relative z-50" role="banner">
-    <div class="flex items-center gap-3">
-      <div class="w-10 h-10 flex items-center justify-center bg-gradient-to-br from-brand-500 to-brand-600 rounded-lg shadow-lg shadow-brand-500/25" aria-hidden="true">
-        <svg class="w-6 h-6 text-dark-950" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <circle cx="12" cy="12" r="10"/>
-          <path d="M12 6v12M8 10l4-4 4 4"/>
-          <circle cx="12" cy="15" r="2" fill="currentColor"/>
-        </svg>
-      </div>
-      <div>
-        <h1 class="text-lg sm:text-xl font-semibold">
-          PoolStellar <span class="text-dark-400 font-normal">ASP Admin</span>
-        </h1>
-        <p class="text-xs text-dark-500">Manage membership and non-membership trees</p>
-      </div>
+<body class="min-h-screen bg-ink-950 font-sans text-slate-100 antialiased">
+    <a href="#main-content" class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-cyan-400 focus:px-4 focus:py-2 focus:font-semibold focus:text-ink-950">
+        Skip to main content
+    </a>
+
+    <!-- Main Page Ambient Background -->
+    <div class="pointer-events-none fixed inset-0 overflow-hidden">
+        <div class="absolute inset-x-0 top-0 h-[32rem] bg-[radial-gradient(circle_at_top,rgba(88,166,255,0.28),transparent_58%)]"></div>
+        <div class="absolute -left-24 top-44 h-72 w-72 rounded-full bg-cyan-400/10 blur-3xl"></div>
+        <div class="absolute right-0 top-24 h-96 w-96 rounded-full bg-blue-500/10 blur-3xl"></div>
     </div>
-    <div class="flex items-center gap-3 overflow-visible">
-      <div class="flex items-center gap-2 px-3 py-1.5 bg-dark-800 border border-dark-700 rounded-full text-sm text-dark-300">
-        <span class="w-2 h-2 bg-emerald-500 rounded-full animate-pulse-dot shadow-sm shadow-emerald-500" aria-hidden="true"></span>
-        <span id="networkChip">Network</span>
-      </div>
-      <div class="relative overflow-visible" id="wallet-container">
-        <button
-          type="button"
-          id="connectBtn"
-          class="flex items-center gap-2 px-4 py-2 bg-dark-800 hover:bg-dark-700 border border-dark-700 hover:border-brand-500 rounded-lg text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 focus:ring-offset-dark-950"
-          aria-label="Connect wallet"
-        >
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
-            <rect x="2" y="6" width="20" height="14" rx="2"/>
-            <path d="M22 10h-4a2 2 0 0 0 0 4h4"/>
-            <circle cx="18" cy="12" r="1" fill="currentColor"/>
-            <path d="M6 6V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v2"/>
-          </svg>
-          <span id="walletChip">Connect Freighter</span>
-        </button>
-      </div>
+
+    <div class="relative mx-auto flex min-h-screen max-w-[1200px] flex-col gap-6 px-4 py-4 sm:px-6 lg:px-8 lg:py-6">
+
+        <!-- Header -->
+        <header class="rounded-[28px] border border-white/8 bg-white/[0.03] px-5 py-4 shadow-[0_20px_80px_rgba(0,0,0,0.35)] backdrop-blur-xl">
+            <div class="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
+                <div class="flex items-center gap-4 xl:flex-1">
+                    <a href="/" title="Go to Home" class="cursor-pointer text-2xl font-semibold tracking-tight text-white transition hover:opacity-80">
+                        Stellar Private Payments <span class="text-cyan-300 font-normal tracking-normal ml-1">Admin</span>
+                    </a>
+                </div>
+
+                <div class="flex flex-col gap-3 md:flex-row md:items-center">
+                    <!-- Navigation Tabs -->
+                    <nav class="flex flex-wrap gap-2 mr-2" aria-label="Primary views">
+                        <button type="button" data-target="overview" class="tab-btn rounded-full border border-cyan-300/30 bg-cyan-400/10 px-4 py-2 text-sm font-medium text-cyan-100 transition">Overview</button>
+                        <button type="button" data-target="allowlist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Allowlist</button>
+                        <button type="button" data-target="blocklist" class="tab-btn rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Blocklist</button>
+                    </nav>
+
+                    <div class="flex items-center gap-2">
+                        <!-- Network Chip -->
+                        <div class="flex items-center gap-2 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-sm font-medium text-slate-100" title="Network status">
+                            <span id="sync-dot" class="h-2 w-2 rounded-full bg-emerald-500 shadow-sm shadow-emerald-500 animate-pulse"></span>
+                            <span id="networkChip">Disconnected</span>
+                        </div>
+                        <!-- Connect Wallet -->
+                        <button id="connectBtn" type="button" class="rounded-full bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-4 py-2 text-sm font-semibold text-ink-950 shadow-[0_10px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50">
+                            <span id="walletChip">Connect Freighter</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Status Banner -->
+        <div id="status" class="rounded-xl border border-white/10 bg-white/[0.03] px-4 py-2 text-center text-sm font-medium text-slate-300">Initializing...</div>
+
+        <main id="main-content" class="flex-1 flex flex-col gap-4 sm:gap-6">
+
+            <!-- 1. Overview Tab -->
+            <section id="overview" class="tab-content rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="state-heading">
+                <div class="flex flex-col md:flex-row md:items-end justify-between gap-4">
+                    <div>
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Contracts and State</p>
+                        <h2 id="state-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">System Overview</h2>
+                    </div>
+                    <button class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" id="refreshBtn" type="button">
+                        Refresh State
+                    </button>
+                </div>
+
+                <div class="grid gap-6 md:grid-cols-2">
+                    <!-- Contracts -->
+                    <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="membershipContract">ASP Membership Contract ID</label>
+                            <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+                            <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
+                        </div>
+                    </div>
+
+                    <!-- State Details -->
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Root</div>
+                            <div class="mt-1 font-mono text-xs text-cyan-200/80 break-all" id="membershipRoot">--</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Levels</div>
+                            <div class="mt-1 font-mono text-xs text-cyan-200/80" id="membershipLevels">--</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Next Index</div>
+                            <div class="mt-1 font-mono text-xs text-cyan-200/80" id="membershipNextIndex">--</div>
+                        </div>
+                        <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
+                            <div class="text-[10px] uppercase tracking-wide text-slate-500">Non-Membership Root</div>
+                            <div class="mt-1 font-mono text-xs text-cyan-200/80 break-all" id="nonMembershipRoot">--</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Admin Insert Only Toggle -->
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 mt-4">
+                    <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                        <div>
+                            <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Admin-Only Leaf Insert</p>
+                            <p class="mt-1 text-xs text-slate-400">When enabled, only the admin can insert membership leaves.</p>
+                        </div>
+                        <div class="flex items-center gap-4 flex-shrink-0">
+                            <span id="adminInsertOnlyStatus" class="font-mono text-sm text-slate-400">--</span>
+                            <button
+                                type="button"
+                                id="toggleAdminInsertOnlyBtn"
+                                class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                                disabled
+                                title="Please connect your wallet first"
+                            >
+                                Toggle
+                            </button>
+                        </div>
+                    </div>
+                    <!-- Warning shown when admin-only insert is disabled -->
+                    <div id="openInsertWarning" class="hidden mt-4 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+                        <span class="font-semibold uppercase tracking-wide text-amber-400 text-xs mr-1">Warning:</span>
+                        Admin-only insert is disabled. Anyone can now add membership leaves to the ASP. This bypasses the intended access-control safeguard.
+                    </div>
+                </div>
+            </section>
+
+            <!-- 2. Allowlist Tab -->
+            <section id="allowlist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="membership-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Membership</p>
+                    <h2 id="membership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Allowlist Management</h2>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
+                    <div class="space-y-4">
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistPublicKey">User Note Public Key</label>
+                            <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="allowlistPublicKey" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                        </div>
+                        <div>
+                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="allowlistAspSecret">ASP Secret</label>
+                            <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="allowlistAspSecret" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+                        </div>
+                    </div>
+                    <button class="mt-6 inline-flex w-full items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3.5 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed" id="addToAllowlistBtn" type="button" disabled title="Please connect your wallet first">
+                        Add to Allowlist
+                    </button>
+                </div>
+            </section>
+
+            <!-- 3. Blocklist Tab -->
+            <section id="blocklist" class="tab-content hidden rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl space-y-6" aria-labelledby="nonmembership-heading">
+                <div>
+                    <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Non-Membership</p>
+                    <h2 id="nonmembership-heading" class="mt-2 text-2xl font-semibold tracking-tight text-white">Blocklist Management</h2>
+                </div>
+
+                <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5">
+                    <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="blocklistPublicKey">User Note Public Key</label>
+                    <input class="mt-3 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="blocklistPublicKey" type="text" placeholder="0x..." autocomplete="off" spellcheck="false" />
+
+                    <div class="mt-6 flex flex-col sm:flex-row gap-3">
+                        <button class="flex-1 inline-flex items-center justify-center rounded-2xl bg-[linear-gradient(135deg,#74c5ff,#2f6dff)] px-5 py-3 text-sm font-semibold text-ink-950 shadow-[0_12px_30px_rgba(63,138,255,0.45)] transition hover:brightness-110 disabled:opacity-50 disabled:cursor-not-allowed" id="addToBlocklistBtn" type="button" disabled title="Please connect your wallet first">
+                            Add to Blocklist
+                        </button>
+                        <button class="flex-1 inline-flex items-center justify-center rounded-2xl border border-rose-500/30 bg-rose-500/10 px-5 py-3 text-sm font-semibold text-rose-100 transition hover:border-rose-500/50 hover:bg-rose-500/20 disabled:opacity-50 disabled:cursor-not-allowed" id="removeFromBlocklistBtn" type="button" disabled title="Please connect your wallet first">
+                            Remove from Blocklist
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+
+        <footer class="mt-8 border-t border-white/10">
+            <div class="py-6 text-xs text-slate-400 space-y-2">
+                <p class="leading-relaxed">
+                    Terms &amp; Conditions:
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
+                </p>
+                <p class="leading-relaxed">
+                    Distribution notice:
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> &middot;
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> &middot;
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> &middot;
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> &middot;
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> &middot;
+                    <a class="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 transition" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
+                </p>
+            </div>
+        </footer>
     </div>
-  </header>
 
-  <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="handoff-heading">
-    <div class="space-y-2">
-      <h2 id="handoff-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">User Handoff</h2>
-      <p class="text-xs text-dark-400">
-        The user must derive their ASP secret during onboarding, copy it, and send it here together with their note public key.
-      </p>
-    </div>
-  </section>
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-3"></div>
 
-  <main id="main-content" class="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
-    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="state-heading">
-      <div class="flex items-center justify-between gap-2">
-        <h2 id="state-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Contracts and State</h2>
-        <div id="status" class="px-3 py-1.5 text-xs font-mono rounded-lg border border-dark-700 bg-dark-800 text-dark-300">Idle</div>
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="membershipContract">ASP Membership Contract ID</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="membershipContract" type="text" placeholder="C..." />
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="nonMembershipContract" type="text" placeholder="C..." />
-      </div>
-      <button class="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="refreshBtn" type="button">
-        Refresh State
-      </button>
-      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
-          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Root</div>
-          <div class="font-mono text-xs text-dark-200 break-all" id="membershipRoot">--</div>
+    <!-- Toast Template -->
+    <template id="tpl-toast">
+        <div class="pointer-events-auto flex max-w-md items-start gap-3 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(15,23,42,0.98),rgba(7,12,23,1))] px-4 py-3 text-sm text-slate-100 shadow-[0_16px_50px_rgba(0,0,0,0.45)] transition-all duration-300 transform translate-x-full opacity-0">
+            <div class="toast-icon mt-0.5 h-2.5 w-2.5 rounded-full bg-cyan-300 shrink-0"></div>
+            <div class="min-w-0 flex-1">
+                <p class="toast-message break-words font-medium"></p>
+                <button type="button" class="toast-close mt-2 text-xs font-medium text-slate-400 hover:text-slate-200 transition underline underline-offset-4">Dismiss</button>
+            </div>
         </div>
-        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
-          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Levels</div>
-          <div class="font-mono text-xs text-dark-200" id="membershipLevels">--</div>
-        </div>
-        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
-          <div class="text-[10px] uppercase tracking-wide text-dark-400">Membership Next Index</div>
-          <div class="font-mono text-xs text-dark-200" id="membershipNextIndex">--</div>
-        </div>
-        <div class="p-3 rounded-lg bg-dark-800 border border-dark-700">
-          <div class="text-[10px] uppercase tracking-wide text-dark-400">Non-Membership Root</div>
-          <div class="font-mono text-xs text-dark-200 break-all" id="nonMembershipRoot">--</div>
-        </div>
-      </div>
-      <!-- Admin Insert Only Toggle -->
-      <div class="mt-4 p-3 rounded-lg bg-dark-800 border border-dark-700">
-        <div class="flex items-center justify-between gap-3">
-          <div>
-            <div class="text-[10px] uppercase tracking-wide text-dark-400">Admin-Only Leaf Insert</div>
-            <p class="text-xs text-dark-500 mt-0.5">When enabled, only the admin can insert membership leaves. When disabled, anyone can insert.</p>
-          </div>
-          <div class="flex items-center gap-3 flex-shrink-0">
-            <span id="adminInsertOnlyStatus" class="text-xs font-mono text-dark-300">--</span>
-            <button
-              type="button"
-              id="toggleAdminInsertOnlyBtn"
-              class="px-3 py-1.5 bg-dark-700 border border-dark-600 rounded-lg text-xs font-semibold hover:border-brand-500 hover:text-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled
-            >
-              Toggle
-            </button>
-          </div>
-        </div>
-        <!-- Warning shown when admin-only insert is disabled -->
-        <div id="openInsertWarning" class="hidden mt-3 flex items-start gap-2 rounded-lg bg-amber-950/40 border border-amber-700/50 px-3 py-2">
-          <span class="text-amber-400 text-xs mt-0.5">&#9888;</span>
-          <p class="text-xs text-amber-300 leading-relaxed">
-            <span class="font-semibold uppercase tracking-wide">Warning:</span>
-            Admin-only insert is disabled. Anyone can now add membership leaves to the ASP. This bypasses the intended access-control safeguard and may allow untrusted parties to insert themselves into the approved set.
-          </p>
-        </div>
-      </div>
-    </section>
+    </template>
 
-    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="membership-heading">
-      <div class="flex items-center justify-between gap-2">
-        <h2 id="membership-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Membership Leaf Builder</h2>
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="publicKey">User Note Public Key</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="publicKey" type="text" placeholder="0x..." />
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blinding">ASP Secret (hex or decimal)</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blinding" type="text" placeholder="0" />
-      </div>
-      <div class="flex flex-wrap gap-3">
-        <button class="flex-1 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="computeMembershipLeafBtn" type="button">
-          Compute Leaf
-        </button>
-        <button class="flex-1 px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition disabled:opacity-60" id="useMembershipLeafBtn" type="button" disabled>
-          Use Computed Leaf
-        </button>
-      </div>
-      <div class="space-y-3">
-        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">User Note Public Key</div>
-        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="derivedPubKey">--</div>
-      </div>
-      <div class="space-y-3">
-        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf (hex)</div>
-        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedMembershipLeafHex">--</div>
-      </div>
-      <div class="space-y-3">
-        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf (decimal)</div>
-        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedMembershipLeafDec">--</div>
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="membershipLeafInput">Leaf to Insert</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="membershipLeafInput" type="text" placeholder="Paste leaf hex or decimal" />
-      </div>
-      <button class="w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="insertMembershipLeafBtn" type="button">
-        Insert Membership Leaf
-      </button>
-      <p class="text-xs text-dark-400">Leaf = Poseidon2(note public key, ASP secret, domain=1).</p>
-    </section>
-
-    <section class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6 space-y-4" aria-labelledby="nonmembership-heading">
-      <div class="flex items-center justify-between gap-2">
-        <h2 id="nonmembership-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Non-Membership Insert</h2>
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blockedKey">Key (public key to block)</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blockedKey" type="text" placeholder="0x..." />
-      </div>
-      <div class="space-y-3">
-        <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="blockedValue">Value</label>
-        <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500" id="blockedValue" type="text" placeholder="0x..." />
-        <label class="flex items-center gap-2 text-xs text-dark-400" for="valueSame">
-          <input class="accent-brand-500" id="valueSame" type="checkbox" checked />
-          Value equals key
-        </label>
-      </div>
-      <button class="w-full px-4 py-2 bg-dark-800 border border-dark-700 rounded-lg text-sm font-semibold hover:border-brand-500 hover:text-brand-400 transition" id="computeNonMembershipLeafBtn" type="button">
-        Compute Leaf Hash
-      </button>
-      <div class="space-y-3">
-        <div class="text-xs font-medium text-dark-400 uppercase tracking-wide">Computed Leaf Hash (hex)</div>
-        <div class="px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg font-mono text-xs text-dark-200 break-all" id="computedNonMembershipLeafHex">--</div>
-      </div>
-      <button class="w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition" id="insertNonMembershipLeafBtn" type="button">
-        Insert Non-Membership Leaf
-      </button>
-      <p class="text-xs text-dark-400">Leaf hash uses Poseidon2(key, value, domain=1).</p>
-
-      <div class="border-t border-dark-700 pt-4 space-y-4">
-        <h3 class="text-sm uppercase tracking-[0.25em] text-rose-400">Remove Non-Membership Leaf</h3>
-        <p class="text-xs text-dark-400">Unblock a user by removing their key from the non-membership tree. Requires admin authorization.</p>
-        <div class="space-y-3">
-          <label class="block text-xs font-medium text-dark-400 uppercase tracking-wide" for="removeNonMembershipKey">Key (public key to unblock)</label>
-          <input class="w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-rose-500 focus:ring-1 focus:ring-rose-500" id="removeNonMembershipKey" type="text" placeholder="0x..." />
-        </div>
-        <button class="w-full px-4 py-2 bg-rose-600 text-white rounded-lg text-sm font-semibold shadow-lg shadow-rose-600/20 hover:bg-rose-500 transition" id="removeNonMembershipLeafBtn" type="button">
-          Remove Non-Membership Leaf
-        </button>
-      </div>
-    </section>
-
-    <section class="xl:col-span-3 bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="activity-heading">
-      <div class="flex items-center justify-between gap-2 mb-3">
-        <h2 id="activity-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400">Activity</h2>
-      </div>
-      <pre class="font-mono text-xs text-dark-400 whitespace-pre-wrap" id="log"></pre>
-    </section>
-  </main>
-
-  <footer class="mt-8 border-t border-dark-800/80">
-    <div class="py-6 text-xs text-dark-400 space-y-2">
-      <p class="leading-relaxed">
-        Terms &amp; Conditions:
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="DISCLAIMER.txt" target="_blank" rel="noreferrer noopener">Read the full disclaimer</a>.
-      </p>
-      <p class="leading-relaxed">
-        Distribution notice:
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="NOTICE.txt" target="_blank" rel="noreferrer noopener">NOTICE</a> ·
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/NOTICE.txt" target="_blank" rel="noreferrer noopener">Circuits NOTICE</a> ·
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/LGPL-3.0.txt" target="_blank" rel="noreferrer noopener">LGPL-3.0</a> ·
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="licenses/GPL-3.0.txt" target="_blank" rel="noreferrer noopener">GPL-3.0</a> ·
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="LICENSE.txt" target="_blank" rel="noreferrer noopener">Apache-2.0</a> ·
-        <a class="text-brand-400 hover:text-brand-300 underline underline-offset-2" href="circuits/source-bundle.tar.gz" download="circuits-source-bundle.tar.gz">Circuits source bundle</a>
-      </p>
-    </div>
-  </footer>
-</div>
-
-<!-- Toast Container -->
-<div id="toast-container" class="fixed bottom-4 right-4 flex flex-col gap-2 z-50" role="region" aria-label="Notifications" aria-live="polite"></div>
-
-<!-- Toast Template -->
-<template id="tpl-toast">
-  <div class="toast flex items-center gap-3 px-4 py-3 bg-dark-800 border rounded-lg shadow-xl max-w-sm animate-slide-in" role="alert">
-    <svg class="toast-icon-success hidden w-5 h-5 flex-shrink-0 text-emerald-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></svg>
-    <svg class="toast-icon-error hidden w-5 h-5 flex-shrink-0 text-red-500" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>
-    <p class="toast-message flex-1 min-w-0 text-sm break-words"></p>
-    <button type="button" class="toast-close p-1 text-dark-400 hover:text-dark-200 transition-colors" aria-label="Dismiss">
-      <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-    </button>
-  </div>
-</template>
-
-<script type="module" src="js/admin.js"></script>
+    <script type="module" src="js/admin.js"></script>
 </body>
 </html>
