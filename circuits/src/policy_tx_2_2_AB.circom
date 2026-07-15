@@ -1,5 +1,5 @@
 pragma circom 2.2.2;
-// Entry point: policy_tx_2_2_both — allowlist + blocklist proofs.
+// Entry point: policy_tx_2_2_AB — allowlist + blocklist proofs.
 include "./policyTransactionBoth.circom";
 
 // PolicyTransactionBoth(

@@ -13,8 +13,11 @@
 //! - Token integration for deposits and withdrawals
 
 #![allow(clippy::too_many_arguments)]
-use crate::merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory};
-use contract_types::{Groth16Error, Groth16Proof, PolicyMode};
+use crate::{
+    merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
+    policy,
+};
+use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractclient, contracterror,
     contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
@@ -53,6 +56,8 @@ pub enum Error {
     Overflow = 12,
     /// Public input is not canonical in the BN254 scalar field
     NonCanonicalPublicInput = 13,
+    /// Unsupported policy flag bits.
+    InvalidPolicyFlags = 14,
 }
 
 /// Conversion from MerkleTreeWithHistory errors to pool contract errors
@@ -175,8 +180,8 @@ pub(crate) enum DataKey {
     ASPMembership,
     /// Address of the ASP Non-Membership contract
     ASPNonMembership,
-    /// Pool policy mode (`Open`, `Allowlist`, `Blocklist`, or `Both`).
-    PolicyMode,
+    /// Pool ASP policy flags (bitset; see `crate::policy`).
+    PolicyFlags,
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree
@@ -231,7 +236,8 @@ impl PoolContract {
     /// * `asp_non_membership` - Address of the ASP Non-Membership contract
     /// * `maximum_deposit_amount` - Maximum allowed deposit per transaction
     /// * `levels` - Number of levels in the commitment Merkle tree (1-32)
-    /// * `policy_mode` - Which ASP policy proofs the transact circuit enforces
+    /// * `policy_flags` - ASP policy flag bitset enforced by the transact
+    ///   circuit
     ///
     /// # Returns
     ///
@@ -246,8 +252,11 @@ impl PoolContract {
         asp_non_membership: Address,
         maximum_deposit_amount: U256,
         levels: u32,
-        policy_mode: PolicyMode,
+        policy_flags: u32,
     ) -> Result<(), Error> {
+        if !policy::is_valid(policy_flags) {
+            return Err(Error::InvalidPolicyFlags);
+        }
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()
@@ -267,7 +276,7 @@ impl PoolContract {
             .set(&DataKey::Nullifiers, &Map::<U256, bool>::new(&env));
         env.storage()
             .persistent()
-            .set(&DataKey::PolicyMode, &policy_mode);
+            .set(&DataKey::PolicyFlags, &policy_flags);
 
         // Initialize the Merkle tree for commitment storage
         MerkleTreeWithHistory::init(&env, levels)?;
@@ -386,7 +395,7 @@ impl PoolContract {
     fn validate_bn256_public_inputs(
         _env: &Env,
         proof: &Proof,
-        policy_mode: PolicyMode,
+        policy_flags: u32,
         modulus: &U256,
     ) -> Result<(), Error> {
         Self::validate_bn256_public_input(&proof.root, modulus)?;
@@ -396,10 +405,10 @@ impl PoolContract {
         }
         Self::validate_bn256_public_input(&proof.output_commitment0, modulus)?;
         Self::validate_bn256_public_input(&proof.output_commitment1, modulus)?;
-        if policy_mode.requires_membership_proofs() {
+        if policy::requires_membership_proofs(policy_flags) {
             Self::validate_bn256_public_input(&proof.asp_membership_root, modulus)?;
         }
-        if policy_mode.requires_non_membership_proofs() {
+        if policy::requires_non_membership_proofs(policy_flags) {
             Self::validate_bn256_public_input(&proof.asp_non_membership_root, modulus)?;
         }
 
@@ -421,10 +430,10 @@ impl PoolContract {
         if proof.proof.is_empty() {
             return Err(Error::InvalidProof);
         }
-        let policy_mode = Self::policy_mode(env)?;
+        let policy_flags = Self::load_policy_flags(env)?;
         let verifier = Self::get_verifier(env)?;
         let client = CircomGroth16VerifierClient::new(env, &verifier);
-        Self::validate_bn256_public_inputs(env, proof, policy_mode, &bn256_modulus(env))?;
+        Self::validate_bn256_public_inputs(env, proof, policy_flags, &bn256_modulus(env))?;
 
         // Public inputs must match the policy circuit:
         // [root, public_amount, ext_data_hash, input_nullifiers,
@@ -447,7 +456,7 @@ impl PoolContract {
             env,
             &proof.output_commitment1,
         )));
-        if policy_mode.requires_membership_proofs() {
+        if policy::requires_membership_proofs(policy_flags) {
             for _ in 0..proof.input_nullifiers.len() {
                 public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
                     env,
@@ -455,7 +464,7 @@ impl PoolContract {
                 )));
             }
         }
-        if policy_mode.requires_non_membership_proofs() {
+        if policy::requires_non_membership_proofs(policy_flags) {
             for _ in 0..proof.input_nullifiers.len() {
                 public_inputs.push_back(Bn254Fr::from_bytes(Self::u256_to_bytes(
                     env,
@@ -592,14 +601,14 @@ impl PoolContract {
         }
 
         // ASP root validation
-        let policy_mode = Self::policy_mode(env)?;
-        if policy_mode.requires_non_membership_proofs() {
+        let policy_flags = Self::load_policy_flags(env)?;
+        if policy::requires_non_membership_proofs(policy_flags) {
             let non_member_root = Self::get_asp_non_membership_root(env)?;
             if non_member_root != proof.asp_non_membership_root {
                 return Err(Error::InvalidProof);
             }
         }
-        if policy_mode.requires_membership_proofs() {
+        if policy::requires_membership_proofs(policy_flags) {
             let member_root = Self::get_asp_membership_root(env)?;
             if member_root != proof.asp_membership_root {
                 return Err(Error::InvalidProof);
@@ -708,15 +717,15 @@ impl PoolContract {
             .ok_or(Error::NotInitialized)
     }
 
-    /// Get the pool's ASP policy mode.
-    pub fn get_policy_mode(env: &Env) -> Result<PolicyMode, Error> {
-        Self::policy_mode(env)
+    /// Get the pool's ASP policy flags.
+    pub fn get_policy_flags(env: &Env) -> Result<u32, Error> {
+        Self::load_policy_flags(env)
     }
 
-    fn policy_mode(env: &Env) -> Result<PolicyMode, Error> {
+    fn load_policy_flags(env: &Env) -> Result<u32, Error> {
         env.storage()
             .persistent()
-            .get(&DataKey::PolicyMode)
+            .get(&DataKey::PolicyFlags)
             .ok_or(Error::NotInitialized)
     }
 

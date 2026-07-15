@@ -11,7 +11,7 @@ use stellar_private_payments_sdk::{
 };
 use types::{
     AspNonMembershipProof, ContractEvent, ContractsEventData, Field, KeyDerivationSignature,
-    LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyMode, SMT_DEPTH,
+    LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyFlags, SMT_DEPTH,
     SyncMetadata,
 };
 
@@ -314,7 +314,7 @@ fn chain_snapshot_from_storage(
             siblings: vec![Field::ZERO; SMT_DEPTH as usize],
             root: Field::ZERO,
         }),
-        policy_mode: PolicyMode::Both,
+        policy_flags: PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
     })
 }
 

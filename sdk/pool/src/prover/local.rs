@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap};
 
 use prover::flows::TransactParams;
-use types::{DisclosureReceipt, PolicyMode};
+use types::{DisclosureReceipt, PolicyFlags};
 
 use crate::{
     disclosure::DisclosureProveParams,
@@ -13,21 +13,21 @@ use crate::{
 
 /// In-process Groth16 prover for pool transact circuits.
 ///
-/// Holds one [`ProverEngine`] per [`PolicyMode`]. Witness/proof generation
-/// follows `params.policy_mode` (on-chain pool policy).
-pub struct LocalProver(RefCell<HashMap<PolicyMode, ProverEngine>>);
+/// Holds one [`ProverEngine`] per [`PolicyFlags`]. Witness/proof generation
+/// follows `params.policy_flags` (on-chain pool policy).
+pub struct LocalProver(RefCell<HashMap<PolicyFlags, ProverEngine>>);
 
 impl LocalProver {
-    pub fn from_artifacts(artifacts: &[(PolicyMode, ProverArtifacts)]) -> Result<Self, PoolError> {
+    pub fn from_artifacts(artifacts: &[(PolicyFlags, ProverArtifacts)]) -> Result<Self, PoolError> {
         let mut engines = HashMap::with_capacity(artifacts.len());
-        for (mode, bundle) in artifacts {
+        for (flags, bundle) in artifacts {
             let engine = ProverEngine::new(
                 &bundle.proving_key,
                 &bundle.circuit_wasm,
                 &bundle.circuit_r1cs,
             )
-            .map_err(|e| PoolError::Other(format!("init prover for {mode:?}: {e:#}")))?;
-            engines.insert(*mode, engine);
+            .map_err(|e| PoolError::Other(format!("init prover for {flags:?}: {e:#}")))?;
+            engines.insert(*flags, engine);
         }
         if engines.is_empty() {
             return Err(PoolError::Other(
@@ -38,13 +38,13 @@ impl LocalProver {
     }
 
     pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
-        let mode = params.policy_mode;
+        let flags = params.policy_flags;
         self.0
             .borrow_mut()
-            .get_mut(&mode)
+            .get_mut(&flags)
             .ok_or_else(|| {
                 PoolError::Other(format!(
-                    "no transact prover configured for policy mode {mode:?}"
+                    "no transact prover configured for policy flags {flags:?}"
                 ))
             })?
             .prove_transact(params)

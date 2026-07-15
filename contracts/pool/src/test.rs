@@ -1,11 +1,11 @@
 use crate::{
     Error, ExtData, PoolContract, PoolContractClient, Proof,
     merkle_with_history::{MerkleDataKey, MerkleTreeWithHistory},
+    policy,
 };
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
-use contract_types::PolicyMode;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, I256, U256, Vec,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
@@ -119,7 +119,7 @@ fn register_pool(
     setup: &TestSetup,
     maximum_deposit_amount: U256,
     levels: u32,
-    policy_mode: PolicyMode,
+    policy_flags: u32,
 ) -> Address {
     env.register(
         PoolContract,
@@ -131,7 +131,7 @@ fn register_pool(
             setup.asp_non_membership_address.clone(),
             maximum_deposit_amount,
             levels,
-            policy_mode,
+            policy_flags,
         ),
     )
 }
@@ -183,13 +183,13 @@ enum PolicyAspRootField {
 }
 
 fn assert_policy_transact_rejects_wrong_asp_root(
-    mode: PolicyMode,
+    flags: u32,
     wrong_field: PolicyAspRootField,
     nullifier: u32,
 ) {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, flags);
     let pool = PoolContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
@@ -213,25 +213,29 @@ fn assert_policy_transact_rejects_wrong_asp_root(
             pool.try_transact(&proof, &ext, &sender),
             Err(Ok(Error::InvalidProof))
         ),
-        "expected InvalidProof for {mode:?} with wrong {wrong_field:?} root"
+        "expected InvalidProof for flags={} with wrong {wrong_field:?} root",
+        flags
     );
 }
 
-fn assert_policy_transact_skips_ignored_asp_root_validation(mode: PolicyMode, nullifier: u32) {
+fn assert_policy_transact_skips_ignored_asp_root_validation(flags: u32, nullifier: u32) {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, flags);
     let pool = PoolContractClient::new(&env, &pool_id);
     env.mock_all_auths();
     let sender = Address::generate(&env);
 
     let (member_root, non_member_root) = asp_roots(&setup);
     let non_canonical = bn256_modulus(&env);
-    let (asp_membership_root, asp_non_membership_root) = match mode {
-        PolicyMode::Open => (non_canonical.clone(), non_canonical),
-        PolicyMode::Allowlist => (member_root, non_canonical),
-        PolicyMode::Blocklist => (non_canonical, non_member_root),
-        PolicyMode::Both => panic!("both mode validates both ASP roots"),
+    let (asp_membership_root, asp_non_membership_root) = match flags {
+        0u32 => (non_canonical.clone(), non_canonical),
+        policy::ALLOWLIST_BIT => (member_root, non_canonical),
+        policy::BLOCKLIST_BIT => (non_canonical, non_member_root),
+        flags if flags == policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT => {
+            panic!("AB policy validates both ASP roots")
+        }
+        _ => panic!("unexpected policy flags in test"),
     };
     let (proof, ext) = mk_transact_proof(
         &env,
@@ -246,7 +250,8 @@ fn assert_policy_transact_skips_ignored_asp_root_validation(mode: PolicyMode, nu
             pool.try_transact(&proof, &ext, &sender),
             Err(Ok(Error::NonCanonicalPublicInput))
         ),
-        "expected ASP root field to be skipped for {mode:?}"
+        "expected ASP root field to be skipped for flags={}",
+        flags
     );
 }
 
@@ -273,7 +278,13 @@ fn pool_constructor_sets_state() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max.clone(), levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max.clone(),
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     let stored_admin: Address = env.as_contract(&pool_id, || {
@@ -311,7 +322,13 @@ fn merkle_init_only_once() {
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
     // First init should succeed
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
 
     env.as_contract(&pool_id, || {
         // Second init should return AlreadyInitialized error
@@ -326,7 +343,13 @@ fn merkle_insert_updates_root_and_index() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x01);
@@ -364,7 +387,7 @@ fn pool_is_known_root_returns_true_for_latest_root() {
         &setup,
         U256::from_u32(&env, 1000),
         8,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -382,7 +405,7 @@ fn pool_is_known_root_returns_true_for_recent_historical_root() {
         &setup,
         U256::from_u32(&env, 1000),
         8,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -416,7 +439,7 @@ fn pool_is_known_root_returns_false_for_zero_root() {
         &setup,
         U256::from_u32(&env, 1000),
         8,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
     let zero_root = U256::from_u32(&env, 0);
@@ -437,7 +460,7 @@ fn pool_is_known_root_returns_false_for_evicted_root() {
         &setup,
         U256::from_u32(&env, 1000),
         8,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -480,7 +503,13 @@ fn merkle_insert_fails_when_full() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 1u32;
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
 
     env.as_contract(&pool_id, || {
         let leaf1 = U256::from_u32(&env, 0x0A);
@@ -503,7 +532,13 @@ fn merkle_init_rejects_zero_levels() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 100);
     let levels = 8u32;
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
     let levels = 0u32;
 
     env.as_contract(&pool_id, || {
@@ -520,7 +555,13 @@ fn transact_rejects_unknown_root() {
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
     let root = U256::from_u32(&env, 0xFF); // not a known root
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -557,7 +598,13 @@ fn transact_rejects_bad_ext_hash() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -595,7 +642,13 @@ fn transact_rejects_bad_public_amount() {
     let setup = setup_test_contracts(&env);
     let max = U256::from_u32(&env, 1000);
     let levels = 3u32;
-    let pool_id = register_pool(&env, &setup, max, levels, PolicyMode::Both);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        max,
+        levels,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.mock_all_auths();
@@ -639,7 +692,7 @@ fn transact_rejects_non_canonical_nullifier() {
         &setup,
         maximum_deposit_amount.clone(),
         levels,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -677,83 +730,85 @@ fn transact_rejects_non_canonical_nullifier() {
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn transact_rejects_wrong_asp_root_when_mode_requires() {
+fn transact_rejects_wrong_asp_root_when_flags_require() {
     let cases = [
-        (PolicyMode::Allowlist, PolicyAspRootField::Membership, 0xB1),
-        (PolicyMode::Both, PolicyAspRootField::Membership, 0xB2),
+        (policy::ALLOWLIST_BIT, PolicyAspRootField::Membership, 0xB1),
         (
-            PolicyMode::Blocklist,
+            policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+            PolicyAspRootField::Membership,
+            0xB2,
+        ),
+        (
+            policy::BLOCKLIST_BIT,
             PolicyAspRootField::NonMembership,
             0xB3,
         ),
-        (PolicyMode::Both, PolicyAspRootField::NonMembership, 0xB4),
+        (
+            policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+            PolicyAspRootField::NonMembership,
+            0xB4,
+        ),
     ];
 
-    for (mode, wrong_field, nullifier) in cases {
-        assert_policy_transact_rejects_wrong_asp_root(mode, wrong_field, nullifier);
+    for (flags, wrong_field, nullifier) in cases {
+        assert_policy_transact_rejects_wrong_asp_root(flags, wrong_field, nullifier);
     }
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn transact_skips_asp_root_canonical_validation_when_mode_ignores_field() {
+fn transact_skips_asp_root_canonical_validation_when_flags_ignore_field() {
     let cases = [
-        (PolicyMode::Open, 0xB5),
-        (PolicyMode::Allowlist, 0xB6),
-        (PolicyMode::Blocklist, 0xB7),
+        (0u32, 0xB5),
+        (policy::ALLOWLIST_BIT, 0xB6),
+        (policy::BLOCKLIST_BIT, 0xB7),
     ];
 
-    for (mode, nullifier) in cases {
-        assert_policy_transact_skips_ignored_asp_root_validation(mode, nullifier);
+    for (flags, nullifier) in cases {
+        assert_policy_transact_skips_ignored_asp_root_validation(flags, nullifier);
     }
 }
 
 #[test]
-fn get_policy_mode_returns_registered_value() {
+fn get_policy_flags_returns_registered_value() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let modes = [
-        PolicyMode::Open,
-        PolicyMode::Allowlist,
-        PolicyMode::Blocklist,
-        PolicyMode::Both,
+    let flag_sets = [
+        0u32,
+        policy::ALLOWLIST_BIT,
+        policy::BLOCKLIST_BIT,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     ];
 
-    for mode in modes {
-        let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, mode);
+    for flags in flag_sets {
+        let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, flags);
         let pool = PoolContractClient::new(&env, &pool_id);
-        assert_eq!(pool.get_policy_mode(), mode);
+        assert_eq!(pool.get_policy_flags(), flags);
     }
 }
 
 #[test]
-fn get_policy_mode_errors_when_unset() {
+fn get_policy_flags_errors_when_unset() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
-    let pool_id = register_pool(
-        &env,
-        &setup,
-        U256::from_u32(&env, 1000),
-        3,
-        PolicyMode::Open,
-    );
+    let pool_id = register_pool(&env, &setup, U256::from_u32(&env, 1000), 3, 0u32);
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
         env.storage()
             .persistent()
-            .remove(&crate::pool::DataKey::PolicyMode);
+            .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
     assert!(matches!(
-        pool.try_get_policy_mode(),
+        pool.try_get_policy_flags(),
         Err(Ok(Error::NotInitialized))
     ));
 }
 
 #[test]
 #[cfg_attr(miri, ignore)]
-fn transact_errors_when_policy_mode_unset() {
+fn transact_errors_when_policy_flags_unset() {
     let env = test_env();
     let setup = setup_test_contracts(&env);
     let pool_id = register_pool(
@@ -761,14 +816,14 @@ fn transact_errors_when_policy_mode_unset() {
         &setup,
         U256::from_u32(&env, 1000),
         3,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
     env.as_contract(&pool_id, || {
         env.storage()
             .persistent()
-            .remove(&crate::pool::DataKey::PolicyMode);
+            .remove(&crate::pool::DataKey::PolicyFlags);
     });
 
     env.mock_all_auths();
@@ -794,7 +849,7 @@ fn transact_rejects_non_canonical_output_commitment() {
         &setup,
         maximum_deposit_amount.clone(),
         levels,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 
@@ -841,7 +896,7 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         &setup,
         maximum_deposit_amount.clone(),
         levels,
-        PolicyMode::Both,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
     );
     let pool = PoolContractClient::new(&env, &pool_id);
 

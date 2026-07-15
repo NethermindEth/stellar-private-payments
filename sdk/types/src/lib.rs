@@ -25,8 +25,8 @@ pub struct ContractConfig {
     pub asp_membership: String,
     /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
-    /// Groth16 verifier contracts keyed by policy mode (`open`, `allowlist`,
-    /// `blocklist`, `both`).
+    /// Groth16 verifier contracts keyed by policy circuit suffix (`""`, `A`,
+    /// `B`, `AB`).
     pub verifiers: BTreeMap<String, String>,
     /// Address of public key registry deployed contract
     pub public_key_registry: String,
@@ -46,8 +46,8 @@ pub struct PoolConfigEntry {
     pub deployment_ledger: u32,
     pub enabled: bool,
     pub asset: AssetDescriptor,
-    /// ASP policy mode for transact proofs.
-    pub policy_mode: PolicyMode,
+    /// ASP policy flags for transact proofs.
+    pub policy_flags: PolicyFlags,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -275,22 +275,21 @@ impl ContractConfig {
             .ok_or_else(|| anyhow!("at least one pool should be enabled"))
     }
 
-    /// Policy mode for a pool from `deployments.json`.
-    pub fn pool_policy_mode(&self, pool_contract_id: &str) -> Result<PolicyMode> {
+    /// Pool entry from `deployments.json`.
+    pub fn pool(&self, pool_contract_id: &str) -> Result<&PoolConfigEntry> {
         self.pools
             .iter()
             .find(|p| p.pool_contract_id == pool_contract_id)
-            .map(|p| p.policy_mode)
             .ok_or_else(|| anyhow!("pool {pool_contract_id} not found in deployment config"))
     }
 
-    /// Verifier contract for a policy mode.
-    pub fn verifier_for(&self, mode: PolicyMode) -> Result<&str> {
-        let key = mode.config_key();
+    /// Verifier contract for a policy flag set.
+    pub fn verifier_for(&self, flags: PolicyFlags) -> Result<&str> {
+        let key = flags.circuit_suffix();
         self.verifiers
-            .get(key)
+            .get(&key)
             .map(String::as_str)
-            .ok_or_else(|| anyhow!("no verifier configured for policy mode {key}"))
+            .ok_or_else(|| anyhow!("no verifier configured for policy flags {key:?}"))
     }
 }
 

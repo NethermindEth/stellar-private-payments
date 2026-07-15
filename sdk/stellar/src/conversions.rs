@@ -173,23 +173,11 @@ pub fn scval_to_bool(val: &xdr::ScVal) -> Result<bool, Error> {
     }
 }
 
-/// Decode a pool `PolicyMode` from contract storage.
-pub fn scval_to_policy_mode(val: &xdr::ScVal) -> Result<types::PolicyMode, Error> {
-    if let xdr::ScVal::Vec(Some(items)) = val {
-        let first = items
-            .first()
-            .ok_or_else(|| Error::UnexpectedScVal("empty policy mode vec".into()))?;
-        if let xdr::ScVal::Symbol(sym) = first {
-            return match sym.to_utf8_string()?.as_str() {
-                "Open" => Ok(types::PolicyMode::Open),
-                "Allowlist" => Ok(types::PolicyMode::Allowlist),
-                "Blocklist" => Ok(types::PolicyMode::Blocklist),
-                "Both" => Ok(types::PolicyMode::Both),
-                other => Err(Error::UnexpectedScVal(format!(
-                    "unknown PolicyMode variant: {other}"
-                ))),
-            };
-        }
+/// Decode pool ASP policy flags from contract storage.
+pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<types::PolicyFlags, Error> {
+    if let xdr::ScVal::U32(bits) = val {
+        return types::PolicyFlags::from_bits(*bits)
+            .map_err(|e| Error::UnexpectedScVal(e.to_string()));
     }
     Err(Error::UnexpectedScVal(format!("{val:?}")))
 }

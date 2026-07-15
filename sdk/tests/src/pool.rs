@@ -7,7 +7,7 @@ use anyhow::Result;
 use stellar_private_payments_sdk::{
     LocalProver, LocalSigner, PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
     blocking::PrivatePool,
-    types::{NoteAmount, NotePublicKey, PolicyMode},
+    types::{NoteAmount, NotePublicKey, PolicyFlags},
 };
 use types::{EncryptionPublicKey, Field};
 
@@ -22,7 +22,7 @@ const TEST_CONFIG_JSON: &str = r#"{
     "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "verifiers": {
-        "both": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
+        "AB": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
     },
     "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "pools": [{
@@ -30,7 +30,7 @@ const TEST_CONFIG_JSON: &str = r#"{
         "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "deploymentLedger": 1,
         "enabled": true,
-        "policyMode": "both",
+            "policyFlags": ["allowlist", "blocklist"],
         "asset": {"kind": "native"}
     }]
 }"#;
@@ -74,7 +74,7 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         },
         test_signer()?,
         Box::new(LocalProver::from_artifacts(&[(
-            PolicyMode::Both,
+            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
             artifacts,
         )])?),
     )?;
@@ -111,10 +111,10 @@ fn test_prover_artifacts() -> Result<ProverArtifacts> {
     let circuits = repo.join("target/circuits-artifacts").join(profile);
     Ok(ProverArtifacts {
         proving_key: std::fs::read(
-            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_both_proving_key.bin"),
+            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),
         )?,
-        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2_both.wasm"))?,
-        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_both.r1cs"))?,
+        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2_AB.wasm"))?,
+        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,
     })
 }
 

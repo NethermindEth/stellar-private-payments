@@ -1,4 +1,4 @@
-use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyMode};
+use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
 use serde::{Deserialize, Serialize};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
@@ -54,7 +54,7 @@ pub struct PoolInfo {
     pub merkle_root: Option<Field>,
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
-    pub policy_mode: PolicyMode,
+    pub policy_flags: PolicyFlags,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,7 +121,7 @@ pub struct TransactChainContext {
     pub asp_membership_contract_id: String,
     pub asp_membership_ledger: u32,
     pub non_membership_proof: Option<AspNonMembershipProof>,
-    pub policy_mode: PolicyMode,
+    pub policy_flags: PolicyFlags,
 }
 
 pub fn transact_chain_context_from_state(
@@ -150,7 +150,7 @@ pub fn transact_chain_context_from_state(
         asp_membership_contract_id: data.asp_membership.contract_id,
         asp_membership_ledger: data.asp_membership.ledger,
         non_membership_proof,
-        policy_mode: pool.policy_mode,
+        policy_flags: pool.policy_flags,
     })
 }
 

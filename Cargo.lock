@@ -989,6 +989,7 @@ dependencies = [
  "program_structure",
  "regex",
  "type_analysis",
+ "types",
  "wast",
  "zkhash",
 ]
@@ -1917,7 +1918,6 @@ dependencies = [
  "asp-non-membership",
  "circom-groth16-verifier",
  "circuits",
- "contract-types",
  "num-bigint",
  "pool",
  "soroban-sdk",
@@ -5262,6 +5262,7 @@ dependencies = [
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
  "tokio",
+ "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",

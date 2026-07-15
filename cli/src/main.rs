@@ -52,7 +52,7 @@ struct Cli {
     #[arg(long, global = true)]
     stellar_config_dir: Option<PathBuf>,
 
-    /// Directory with policy_tx_2_2_{open,allowlist,blocklist,both}.{wasm,r1cs}
+    /// Directory with policy_tx_2_2[_{A,B,AB}].{wasm,r1cs}
     /// (default: target/circuits-artifacts/release in debug builds,
     /// data_dir/circuits otherwise)
     #[arg(long, global = true)]

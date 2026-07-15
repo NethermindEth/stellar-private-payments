@@ -67,8 +67,8 @@ The main transaction circuit proves:
 - Valid Merkle proofs for input commitments
 - Correct output commitment computation
 - Balance conservation (inputs = outputs + public amount)
-- ASP membership and/or non-membership proofs, depending on pool policy mode
-  (`Open` = neither; `Allowlist`, `Blocklist`, or `Both`)
+- ASP membership and/or non-membership proofs, depending on pool policy flags
+  (`none` = unrestricted; `allowlist`, `blocklist`, or `allowlist-blocklist`)
 
 #### Smart Contracts
 

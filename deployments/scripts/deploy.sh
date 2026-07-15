@@ -22,7 +22,7 @@ usage() {
 Usage: deploy.sh <network> [OPTIONS]
 
 Deploys and runs constructors for the ASP membership, ASP non-membership,
-one Circom Groth16 verifier per policy mode used, and one or more Pool contracts.
+one Circom Groth16 verifier per policy flag combination used, and one or more Pool contracts.
 
 Arguments:
   network               Network name from Stellar CLI config (e.g. testnet, futurenet)
@@ -32,7 +32,8 @@ Options:
   --admin ADDRESS       Admin address (G... or C...). Defaults to deployer address
   --token ADDRESS       Legacy single-pool token contract address (cannot be mixed with --pool)
   --pool SPEC           Pool spec (repeatable). Optional policy prefix per pool:
-                        open:<SPEC> | allowlist:<SPEC> | blocklist:<SPEC> | both:<SPEC>
+                        none:<SPEC> | allowlist:<SPEC> | blocklist:<SPEC> |
+                        allowlist-blocklist:<SPEC>
                         where <SPEC> is one of:
                         contract:<TOKEN_CONTRACT_ID>
                         native:<TOKEN_CONTRACT_ID>
@@ -40,15 +41,15 @@ Options:
   --asp-levels N        Merkle tree levels for asp-membership (required)
   --pool-levels N       Merkle tree levels for pool (required)
   --max-deposit U256    Maximum deposit amount (required)
-  --policy-mode MODE    Default pool ASP policy when a --pool spec omits the prefix:
-                        open, allowlist, blocklist, or both (required when running constructors
-                        unless every --pool spec includes a policy prefix)
+  --policy-flags SPEC   Default pool ASP policy when a --pool spec omits the prefix:
+                        none, allowlist, blocklist, or allowlist-blocklist (required when
+                        running constructors unless every --pool spec includes a policy prefix)
   --vk-json JSON        Verification key as a JSON string (snarkjs or repo format).
-                        Applies to both-policy verifier builds only.
-  --vk-file PATH        Path to a verification key JSON file (both policy only)
+                        Applies to allowlist-blocklist (AB suffix) verifier builds only.
+  --vk-file PATH        Path to a verification key JSON file (allowlist-blocklist only)
   --skip-init           Deploy WASM only (no constructors). Writes verifiers under the
-                        policy mode key (open/allowlist/blocklist/both); use --policy-mode
-                        or a per-pool prefix when the mode is not otherwise known.
+                        circuit suffix key ("", A, B, AB); use --policy-flags or a per-pool
+                        prefix when the suffix is not otherwise known.
   --yes                 Skip confirmation for mainnet
   -h, --help            Show this help
 
@@ -57,15 +58,15 @@ Examples:
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
     --pool blocklist:native:CB... \
-    --pool both:contract:CC... \
+    --pool allowlist-blocklist:contract:CC... \
     --asp-levels 8 \
     --pool-levels 8 \
     --max-deposit 1000000000
 
-  # Same policy on every pool via --policy-mode
+  # Same policy on every pool via --policy-flags
   deployments/scripts/deploy.sh futurenet \
     --deployer alice \
-    --policy-mode blocklist \
+    --policy-flags blocklist \
     --pool native:CB... \
     --pool classic:USDC:G...:CD... \
     --asp-levels 8 \
@@ -73,10 +74,10 @@ Examples:
     --max-deposit 1000000000
 
 Notes:
-  - Each policy mode needs its own verifier contract (VK is baked into the WASM).
-  - Per-pool policyMode is written to deployments/<network>/deployments.json.
-  - Provide --vk-file/--vk-json only for ceremony both-policy keys; blocklist VK
-    is taken from deployments/<network>/circuit_keys/ automatically.
+  - Each policy flag combination needs its own verifier contract (VK is baked into the WASM).
+  - Per-pool policyFlags are written to deployments/<network>/deployments.json.
+  - Provide --vk-file/--vk-json only for ceremony allowlist-blocklist (AB) keys; other VKs
+    are taken from deployments/<network>/circuit_keys/ automatically.
   - If neither --token nor --pool is provided, one native XLM pool is deployed by default.
 USAGE
   exit 2
@@ -98,37 +99,110 @@ POOL_LEVELS=""
 MAX_DEPOSIT=""
 VK_JSON=""
 VK_FILE=""
-POLICY_MODE=""
+POLICY_FLAGS_SUFFIX=""
+POLICY_FLAGS_EXPLICIT=false
 SKIP_INIT=false
 YES=false
 
-normalize_policy_mode() {
-  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
-    open) printf '%s' "open" ;;
-    allowlist) printf '%s' "allowlist" ;;
-    blocklist) printf '%s' "blocklist" ;;
-    both) printf '%s' "both" ;;
-    *) die "invalid policy mode '$1' (expected open, allowlist, blocklist, or both)" ;;
+policy_suffix_label() {
+  if [[ -z "$1" ]]; then
+    printf '%s' "none"
+  else
+    printf '%s' "$1"
+  fi
+}
+
+parse_policy_flags_spec() {
+  local raw="$1" normalized allow=0 block=0 part
+  normalized="$(printf '%s' "$raw" | tr '[:upper:]' '[:lower:]')"
+  case "$normalized" in
+    none) printf '%s' ""; return ;;
+    allowlist) printf '%s' "A"; return ;;
+    blocklist) printf '%s' "B"; return ;;
+    allowlist-blocklist|blocklist-allowlist) printf '%s' "AB"; return ;;
+  esac
+  IFS='-' read -ra PARTS <<< "$normalized"
+  for part in "${PARTS[@]}"; do
+    case "$part" in
+      allowlist) allow=1 ;;
+      blocklist) block=1 ;;
+      *) die "invalid policy flag '$part' in '$raw' (use allowlist and/or blocklist)" ;;
+    esac
+  done
+  if [[ "$allow" == "1" && "$block" == "1" ]]; then printf '%s' "AB"
+  elif [[ "$allow" == "1" ]]; then printf '%s' "A"
+  elif [[ "$block" == "1" ]]; then printf '%s' "B"
+  else die "empty policy flags in '$raw'"
+  fi
+}
+
+policy_flags_constructor_arg() {
+  case "$1" in
+    "") echo 0 ;;
+    A) echo 1 ;;
+    B) echo 2 ;;
+    AB) echo 3 ;;
+    *) die "internal error: unknown policy suffix '$1'" ;;
   esac
 }
 
-policy_mode_constructor_arg() {
+policy_flags_to_json_array() {
   case "$1" in
-    open) printf '%s' "Open" ;;
-    allowlist) printf '%s' "Allowlist" ;;
-    blocklist) printf '%s' "Blocklist" ;;
-    both) printf '%s' "Both" ;;
-    *) die "internal error: unknown policy mode '$1'" ;;
+    "") printf '[]' ;;
+    A) printf '["allowlist"]' ;;
+    B) printf '["blocklist"]' ;;
+    AB) printf '["allowlist","blocklist"]' ;;
+    *) die "internal error: unknown policy suffix '$1'" ;;
   esac
 }
 
 default_vk_file() {
-  local network="$1" mode="$2"
-  printf '%s/deployments/%s/circuit_keys/policy_tx_2_2_%s_vk.json' "$ROOT_DIR" "$network" "$mode"
+  local network="$1" suffix="$2"
+  if [[ -z "$suffix" ]]; then
+    printf '%s/deployments/%s/circuit_keys/policy_tx_2_2_vk.json' "$ROOT_DIR" "$network"
+  else
+    printf '%s/deployments/%s/circuit_keys/policy_tx_2_2_%s_vk.json' "$ROOT_DIR" "$network" "$suffix"
+  fi
 }
 
-verifier_wasm_name_for_mode() {
-  printf 'circom_groth16_verifier_%s.wasm' "$1"
+verifier_wasm_name_for_suffix() {
+  local suffix="$1"
+  if [[ -z "$suffix" ]]; then
+    printf 'circom_groth16_verifier.wasm'
+  else
+    printf 'circom_groth16_verifier_%s.wasm' "$suffix"
+  fi
+}
+
+is_policy_flags_prefix() {
+  local prefix="$1"
+  case "$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]')" in
+    none|allowlist|blocklist) return 0 ;;
+    native|classic|contract) return 1 ;;
+  esac
+  local part
+  IFS='-' read -ra PARTS <<< "$(printf '%s' "$prefix" | tr '[:upper:]' '[:lower:]')"
+  for part in "${PARTS[@]}"; do
+    case "$part" in
+      allowlist|blocklist) ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# Sets POOL_SPEC_SUFFIX and POOL_SPEC_BODY for a --pool spec.
+resolve_pool_spec_policy() {
+  local spec="$1"
+  local first="${spec%%:*}"
+  POOL_SPEC_SUFFIX=""
+  POOL_SPEC_BODY=""
+  if [[ "$spec" == *:* ]] && is_policy_flags_prefix "$first"; then
+    POOL_SPEC_SUFFIX="$(parse_policy_flags_spec "$first")"
+    POOL_SPEC_BODY="${spec#*:}"
+  else
+    POOL_SPEC_BODY="$spec"
+  fi
 }
 
 # Stellar CLI sometimes prints contract ids wrapped in one or more layers of quotes.
@@ -141,47 +215,30 @@ strip_surrounding_quotes() {
   printf '%s' "$s"
 }
 
-# Sets POOL_SPEC_MODE and POOL_SPEC_BODY for a --pool spec.
-resolve_pool_spec_policy() {
-  local spec="$1"
-  local first="${spec%%:*}"
-  POOL_SPEC_MODE=""
-  POOL_SPEC_BODY=""
-  case "$first" in
-    open|allowlist|blocklist|both)
-      POOL_SPEC_MODE="$(normalize_policy_mode "$first")"
-      POOL_SPEC_BODY="${spec#*:}"
-      ;;
-    *)
-      POOL_SPEC_BODY="$spec"
-      ;;
-  esac
-}
-
-VERIFIER_MODE_LIST=()
+VERIFIER_SUFFIX_LIST=()
 VERIFIER_ID_LIST=()
 
 set_verifier_id() {
-  local mode="$1" id="$2" i len
-  len="$(array_len VERIFIER_MODE_LIST)"
+  local suffix="$1" id="$2" i len
+  len="$(array_len VERIFIER_SUFFIX_LIST)"
   i=0
   while [[ "$i" -lt "$len" ]]; do
-    if [[ "${VERIFIER_MODE_LIST[$i]}" == "$mode" ]]; then
+    if [[ "${VERIFIER_SUFFIX_LIST[$i]}" == "$suffix" ]]; then
       VERIFIER_ID_LIST[$i]="$id"
       return
     fi
     i=$((i + 1))
   done
-  VERIFIER_MODE_LIST+=("$mode")
+  VERIFIER_SUFFIX_LIST+=("$suffix")
   VERIFIER_ID_LIST+=("$id")
 }
 
 get_verifier_id() {
-  local mode="$1" i len
-  len="$(array_len VERIFIER_MODE_LIST)"
+  local suffix="$1" i len
+  len="$(array_len VERIFIER_SUFFIX_LIST)"
   i=0
   while [[ "$i" -lt "$len" ]]; do
-    if [[ "${VERIFIER_MODE_LIST[$i]}" == "$mode" ]]; then
+    if [[ "${VERIFIER_SUFFIX_LIST[$i]}" == "$suffix" ]]; then
       printf '%s' "${VERIFIER_ID_LIST[$i]}"
       return
     fi
@@ -198,7 +255,7 @@ while [[ $# -gt 0 ]]; do
     --asp-levels) ASP_LEVELS="$2"; shift 2 ;;
     --pool-levels) POOL_LEVELS="$2"; shift 2 ;;
     --max-deposit) MAX_DEPOSIT="$2"; shift 2 ;;
-    --policy-mode) POLICY_MODE="$(normalize_policy_mode "$2")"; shift 2 ;;
+    --policy-flags) POLICY_FLAGS_SUFFIX="$(parse_policy_flags_spec "$2")"; POLICY_FLAGS_EXPLICIT=true; shift 2 ;;
     --vk-json) VK_JSON="$2"; shift 2 ;;
     --vk-file) VK_FILE="$2"; shift 2 ;;
     --skip-init) SKIP_INIT=true; shift ;;
@@ -240,39 +297,49 @@ if [[ ${#POOL_SPECS[@]} -eq 0 ]]; then
 fi
 
 POOL_BODY_SPECS=()
-POOL_POLICY_MODES=()
+POOL_POLICY_SUFFIXES=()
 
 _ps_i=0
 _ps_len="$(array_len POOL_SPECS)"
 while [[ "$_ps_i" -lt "$_ps_len" ]]; do
   spec="$(strip_surrounding_quotes "${POOL_SPECS[$_ps_i]}")"
   resolve_pool_spec_policy "$spec"
-  mode="$POOL_SPEC_MODE"
-  body="$(strip_surrounding_quotes "$POOL_SPEC_BODY")"
-  if [[ -z "$mode" ]]; then
-    mode="$POLICY_MODE"
+  local_has_suffix=false
+  if [[ "$spec" == *:* ]] && is_policy_flags_prefix "${spec%%:*}"; then
+    local_has_suffix=true
   fi
-  if [[ "$SKIP_INIT" != "true" && -z "$mode" ]]; then
-    die "pool spec '$spec' has no policy mode; prefix with open:, allowlist:, blocklist:, or both:, or pass --policy-mode"
+  suffix="$POOL_SPEC_SUFFIX"
+  body="$(strip_surrounding_quotes "$POOL_SPEC_BODY")"
+  if [[ "$local_has_suffix" == "false" ]]; then
+    suffix="$POLICY_FLAGS_SUFFIX"
+  fi
+  if [[ "$SKIP_INIT" != "true" && "$local_has_suffix" == "false" && "$POLICY_FLAGS_EXPLICIT" != "true" ]]; then
+    die "pool spec '$spec' has no policy flags; prefix with none:, allowlist:, blocklist:, allowlist-blocklist:, or pass --policy-flags"
   fi
   POOL_BODY_SPECS+=("$body")
-  POOL_POLICY_MODES+=("$mode")
+  POOL_POLICY_SUFFIXES+=("$suffix")
   _ps_i=$((_ps_i + 1))
 done
 
-UNIQUE_POLICY_MODES=()
-for mode in $(array_values POOL_POLICY_MODES); do
-  [[ -n "$mode" ]] || continue
+UNIQUE_POLICY_SUFFIXES=()
+_ps_i=0
+_ps_len="$(array_len POOL_POLICY_SUFFIXES)"
+while [[ "$_ps_i" -lt "$_ps_len" ]]; do
+  suffix="${POOL_POLICY_SUFFIXES[$_ps_i]}"
   found=false
-  for existing in $(array_values UNIQUE_POLICY_MODES); do
-    if [[ "$existing" == "$mode" ]]; then
+  _u_i=0
+  _u_len="$(array_len UNIQUE_POLICY_SUFFIXES)"
+  while [[ "$_u_i" -lt "$_u_len" ]]; do
+    if [[ "${UNIQUE_POLICY_SUFFIXES[$_u_i]}" == "$suffix" ]]; then
       found=true
       break
     fi
+    _u_i=$((_u_i + 1))
   done
   if [[ "$found" == "false" ]]; then
-    UNIQUE_POLICY_MODES+=("$mode")
+    UNIQUE_POLICY_SUFFIXES+=("$suffix")
   fi
+  _ps_i=$((_ps_i + 1))
 done
 
 resolve_address() {
@@ -306,24 +373,24 @@ get_latest_ledger_seq() {
   echo "$seq"
 }
 
-build_verifier_wasm_for_mode() {
-  local mode="$1"
+build_verifier_wasm_for_suffix() {
+  local suffix="$1"
   local wasm_name vk_path tmp_vk=""
-  wasm_name="$(verifier_wasm_name_for_mode "$mode")"
+  wasm_name="$(verifier_wasm_name_for_suffix "$suffix")"
 
-  if [[ "$mode" == "both" && -n "$VK_FILE" ]]; then
+  if [[ "$suffix" == "AB" && -n "$VK_FILE" ]]; then
     [[ -f "$VK_FILE" ]] || die "vk file not found: $VK_FILE"
     vk_path="$VK_FILE"
-  elif [[ "$mode" == "both" && -n "$VK_JSON" ]]; then
+  elif [[ "$suffix" == "AB" && -n "$VK_JSON" ]]; then
     tmp_vk="$(mktemp "${TMPDIR:-/tmp}/deploy-vk.XXXXXX.json")"
     printf '%s' "$VK_JSON" > "$tmp_vk"
     vk_path="$tmp_vk"
   else
-    vk_path="$(default_vk_file "$NETWORK" "$mode")"
-    [[ -f "$vk_path" ]] || die "VK not found for policy mode $mode: $vk_path (pass --vk-file for both)"
+    vk_path="$(default_vk_file "$NETWORK" "$suffix")"
+    [[ -f "$vk_path" ]] || die "VK not found for policy suffix '$suffix': $vk_path (pass --vk-file for AB)"
   fi
 
-  step "building verifier WASM for $mode from $vk_path"
+  step "building verifier WASM for $(policy_suffix_label "$suffix") from $vk_path"
   "$SCRIPT_DIR/../../scripts/build-verifier-with-vk.sh" \
     "$vk_path" --out-dir "$WASM_DIR" --wasm-name "$wasm_name"
   [[ -z "$tmp_vk" ]] || rm -f "$tmp_vk"
@@ -337,8 +404,11 @@ for pkg in asp-membership asp-non-membership public-key-registry pool; do
 done
 
 if [[ "$SKIP_INIT" != "true" ]]; then
-  for mode in $(array_values UNIQUE_POLICY_MODES); do
-    build_verifier_wasm_for_mode "$mode"
+  _u_i=0
+  _u_len="$(array_len UNIQUE_POLICY_SUFFIXES)"
+  while [[ "$_u_i" -lt "$_u_len" ]]; do
+    build_verifier_wasm_for_suffix "${UNIQUE_POLICY_SUFFIXES[$_u_i]}"
+    _u_i=$((_u_i + 1))
   done
 fi
 
@@ -431,25 +501,34 @@ else
 fi
 
 if [[ "$SKIP_INIT" == "true" ]]; then
-  if [[ ${#UNIQUE_POLICY_MODES[@]} -gt 1 ]]; then
-    die "--skip-init supports at most one policy mode; deploy without --skip-init for mixed policies"
+  _uniq_len="$(array_len UNIQUE_POLICY_SUFFIXES)"
+  if [[ "$_uniq_len" -gt 1 ]]; then
+    die "--skip-init supports at most one policy suffix; deploy without --skip-init for mixed policies"
   fi
 
-  skip_init_verifier_mode="${UNIQUE_POLICY_MODES[0]:-$POLICY_MODE}"
-  [[ -n "$skip_init_verifier_mode" ]] \
-    || die "--skip-init requires a policy mode (--policy-mode or pool prefix open:|allowlist:|blocklist:|both:)"
+  if [[ "$_uniq_len" -eq 1 ]]; then
+    skip_init_verifier_suffix="${UNIQUE_POLICY_SUFFIXES[0]}"
+  elif [[ "$POLICY_FLAGS_EXPLICIT" == "true" ]]; then
+    skip_init_verifier_suffix="$POLICY_FLAGS_SUFFIX"
+  else
+    die "--skip-init requires policy flags (--policy-flags or pool prefix none:/allowlist:/blocklist:/allowlist-blocklist:)"
+  fi
 
-  verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$skip_init_verifier_mode")"
+  verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_suffix "$skip_init_verifier_suffix")"
   [[ -f "$verifier_wasm" ]] \
-    || die "missing verifier wasm for $skip_init_verifier_mode (run build-verifier-with-vk.sh or deploy without --skip-init)"
-  step "deploy circom-groth16-verifier ($skip_init_verifier_mode)"
-  set_verifier_id "$skip_init_verifier_mode" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
+    || die "missing verifier wasm for $(policy_suffix_label "$skip_init_verifier_suffix") (run build-verifier-with-vk.sh or deploy without --skip-init)"
+  step "deploy circom-groth16-verifier ($(policy_suffix_label "$skip_init_verifier_suffix"))"
+  set_verifier_id "$skip_init_verifier_suffix" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
 else
-  for mode in $(array_values UNIQUE_POLICY_MODES); do
-    verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_mode "$mode")"
+  _u_i=0
+  _u_len="$(array_len UNIQUE_POLICY_SUFFIXES)"
+  while [[ "$_u_i" -lt "$_u_len" ]]; do
+    suffix="${UNIQUE_POLICY_SUFFIXES[$_u_i]}"
+    verifier_wasm="$WASM_DIR/$(verifier_wasm_name_for_suffix "$suffix")"
     [[ -f "$verifier_wasm" ]] || die "missing wasm: $verifier_wasm"
-    step "deploy circom-groth16-verifier ($mode)"
-    set_verifier_id "$mode" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
+    step "deploy circom-groth16-verifier ($(policy_suffix_label "$suffix"))"
+    set_verifier_id "$suffix" "$(deploy_contract circom-groth16-verifier "$verifier_wasm")"
+    _u_i=$((_u_i + 1))
   done
 fi
 
@@ -465,22 +544,22 @@ _pool_i=0
 _pool_len="$(array_len POOL_BODY_SPECS)"
 while [[ "$_pool_i" -lt "$_pool_len" ]]; do
   body="$(strip_surrounding_quotes "${POOL_BODY_SPECS[$_pool_i]}")"
-  mode="${POOL_POLICY_MODES[$_pool_i]}"
+  suffix="${POOL_POLICY_SUFFIXES[$_pool_i]}"
   {
     IFS= read -r token_id
     IFS= read -r asset_json
   } < <(parse_pool_spec "$body")
 
   pool_deployment_ledger="$(get_latest_ledger_seq)"
-  step "deploy pool ($mode) for spec '$body'"
+  step "deploy pool ($(policy_suffix_label "$suffix")) for spec '$body'"
   if [[ "$SKIP_INIT" != "true" ]]; then
-    verifier_id="$(get_verifier_id "$mode")"
-    [[ -n "$verifier_id" ]] || die "internal error: missing verifier id for policy mode $mode"
+    verifier_id="$(get_verifier_id "$suffix")"
+    [[ -n "$verifier_id" ]] || die "internal error: missing verifier id for policy suffix '$suffix'"
     pool_id="$(deploy_contract pool "$POOL_WASM" \
       --admin "$ADMIN_ADDR" --token "$token_id" --verifier "$verifier_id" \
       --asp-membership "$ASP_MEMBERSHIP_ID" --asp-non-membership "$ASP_NON_MEMBERSHIP_ID" \
       --maximum-deposit-amount "$MAX_DEPOSIT" --levels "$POOL_LEVELS" \
-      --policy-mode "$(policy_mode_constructor_arg "$mode")")"
+      --policy-flags "$(policy_flags_constructor_arg "$suffix")")"
   else
     pool_id="$(deploy_contract pool "$POOL_WASM")"
   fi
@@ -510,27 +589,27 @@ Deployment complete
   Constructed:         $([[ "$SKIP_INIT" == "true" ]] && echo "no" || echo "yes")
 __DEPLOY_SUMMARY__
   _vi=0
-  _vlen="$(array_len VERIFIER_MODE_LIST)"
+  _vlen="$(array_len VERIFIER_SUFFIX_LIST)"
   while [[ "$_vi" -lt "$_vlen" ]]; do
-    printf '  Verifier (%s):     %s\n' "${VERIFIER_MODE_LIST[$_vi]}" "${VERIFIER_ID_LIST[$_vi]}" >&2
+    printf '  Verifier (%s):     %s\n' "$(policy_suffix_label "${VERIFIER_SUFFIX_LIST[$_vi]}")" "${VERIFIER_ID_LIST[$_vi]}" >&2
     _vi=$((_vi + 1))
   done
   _pi=0
   _plen="$(array_len POOL_IDS)"
   while [[ "$_pi" -lt "$_plen" ]]; do
-    printf '  Pool[%s] (%s):       %s\n' "$_pi" "${POOL_POLICY_MODES[$_pi]}" "${POOL_IDS[$_pi]}" >&2
+    printf '  Pool[%s] (%s):       %s\n' "$_pi" "$(policy_suffix_label "${POOL_POLICY_SUFFIXES[$_pi]}")" "${POOL_IDS[$_pi]}" >&2
     _pi=$((_pi + 1))
   done
 }
 
 verifiers_json="\"verifiers\":{"
 _vi=0
-_vlen="$(array_len VERIFIER_MODE_LIST)"
+_vlen="$(array_len VERIFIER_SUFFIX_LIST)"
 while [[ "$_vi" -lt "$_vlen" ]]; do
-  mode="${VERIFIER_MODE_LIST[$_vi]}"
+  suffix="${VERIFIER_SUFFIX_LIST[$_vi]}"
   id="${VERIFIER_ID_LIST[$_vi]}"
   [[ "$_vi" -gt 0 ]] && verifiers_json+=","
-  verifiers_json+="\"$mode\":\"$id\""
+  verifiers_json+="\"$suffix\":\"$id\""
   _vi=$((_vi + 1))
 done
 verifiers_json+="}"
@@ -539,9 +618,9 @@ pools_json="["
 _pi=0
 _plen="$(array_len POOL_IDS)"
 while [[ "$_pi" -lt "$_plen" ]]; do
-  mode="${POOL_POLICY_MODES[$_pi]}"
-  [[ -n "$mode" ]] || die "internal error: pool entry missing policy mode"
-  entry="{\"poolContractId\":\"${POOL_IDS[$_pi]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$_pi]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$_pi]},\"enabled\":true,\"policyMode\":\"$mode\",\"asset\":${POOL_ASSET_JSONS[$_pi]}}"
+  suffix="${POOL_POLICY_SUFFIXES[$_pi]}"
+  flags_json="$(policy_flags_to_json_array "$suffix")"
+  entry="{\"poolContractId\":\"${POOL_IDS[$_pi]}\",\"tokenContractId\":\"${POOL_TOKEN_IDS[$_pi]}\",\"deploymentLedger\":${POOL_DEPLOYMENT_LEDGERS[$_pi]},\"enabled\":true,\"policyFlags\":${flags_json},\"asset\":${POOL_ASSET_JSONS[$_pi]}}"
   [[ "$_pi" -gt 0 ]] && pools_json+=","
   pools_json+="$entry"
   _pi=$((_pi + 1))

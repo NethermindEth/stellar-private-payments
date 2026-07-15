@@ -3,38 +3,34 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use stellar_private_payments_sdk::{
     ProverArtifacts,
-    types::{PolicyMode, policy_tx_stem},
+    types::PolicyFlags,
 };
 
 use crate::config::default_data_dir;
 
 pub fn load_transact_artifacts(
     circuits_dir: Option<&Path>,
-) -> Result<Vec<(PolicyMode, ProverArtifacts)>> {
-    [
-        PolicyMode::Open,
-        PolicyMode::Allowlist,
-        PolicyMode::Blocklist,
-        PolicyMode::Both,
-    ]
-    .into_iter()
-    .map(|mode| {
-        load_transact_artifacts_for_policy(circuits_dir, mode).map(|artifacts| (mode, artifacts))
-    })
-    .collect()
+) -> Result<Vec<(PolicyFlags, ProverArtifacts)>> {
+    PolicyFlags::all_flags()
+        .into_iter()
+        .map(|flags| {
+            load_transact_artifacts_for_policy(circuits_dir, flags)
+                .map(|artifacts| (flags, artifacts))
+        })
+        .collect()
 }
 
 pub fn load_transact_artifacts_for_policy(
     circuits_dir: Option<&Path>,
-    policy_mode: PolicyMode,
+    policy_flags: PolicyFlags,
 ) -> Result<ProverArtifacts> {
     let circuits = circuits_dir
         .map(PathBuf::from)
         .unwrap_or_else(default_circuits_dir);
-    let stem = policy_tx_stem(policy_mode);
+    let stem = policy_flags.circuit_stem();
 
     Ok(ProverArtifacts {
-        proving_key: read_proving_key(&circuits, stem)?,
+        proving_key: read_proving_key(&circuits, &stem)?,
         circuit_wasm: std::fs::read(circuits.join(format!("{stem}.wasm")))
             .with_context(|| format!("read {}", circuits.join(format!("{stem}.wasm")).display()))?,
         circuit_r1cs: std::fs::read(circuits.join(format!("{stem}.r1cs")))

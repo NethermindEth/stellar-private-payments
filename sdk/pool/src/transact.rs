@@ -14,7 +14,7 @@ use tx_planner::Transact;
 use types::{
     AspMembershipProof, AspMembershipSync, AspNonMembershipProof, EncryptionKeyPair,
     EncryptionPublicKey, ExtAmount, ExtData, Field, NoteAmount, NoteKeyPair, NotePrivateKey,
-    NotePublicKey, PolicyMode, SMT_DEPTH, TransactChainContext,
+    NotePublicKey, PolicyFlags, SMT_DEPTH, TransactChainContext,
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -36,7 +36,7 @@ pub struct TransactRequest {
     pub smt_depth: u32,
     pub tree_depth: u32,
     pub non_membership_proof: Option<AspNonMembershipProof>,
-    pub policy_mode: PolicyMode,
+    pub policy_flags: PolicyFlags,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -103,7 +103,7 @@ pub fn transact_request_from_step(
         smt_depth: SMT_DEPTH,
         tree_depth: chain.pool_merkle_levels,
         non_membership_proof: chain.non_membership_proof.clone(),
-        policy_mode: chain.policy_mode,
+        policy_flags: chain.policy_flags,
     }
 }
 
@@ -118,7 +118,7 @@ pub fn build_transact_params(
     let (note_privkey, note_pubkey, encryption_pubkey, membership_blinding) =
         load_user_key_material(storage, &req.user_address)?;
 
-    let membership_proof = if req.policy_mode.requires_membership_proofs() {
+    let membership_proof = if req.policy_flags.requires_membership_proofs() {
         match build_membership_proof(
             storage,
             &req.aspmem_contract_id,
@@ -181,7 +181,7 @@ pub fn build_transact_params(
         non_membership_proof: req.non_membership_proof.clone(),
         tree_depth: req.tree_depth,
         smt_depth: req.smt_depth,
-        policy_mode: req.policy_mode,
+        policy_flags: req.policy_flags,
     })))
 }
 

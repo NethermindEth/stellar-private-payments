@@ -1,7 +1,7 @@
 use crate::{
     conversions::{
         field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool,
-        scval_to_policy_mode, scval_to_u32, scval_to_u64, scval_to_u256,
+        scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
     soroban_encode::BASE_FEE,
@@ -148,7 +148,7 @@ impl StateFetcher {
                     "CurrentRootIndex",
                     "NextIndex",
                     "MaximumDepositAmount",
-                    "PolicyMode",
+                    "PolicyFlags",
                 ],
                 valued_keys: vec![],
             });
@@ -313,9 +313,9 @@ impl StateFetcher {
                     merkle_root,
                     merkle_capacity,
                     total_commitments: merkle_next_index.to_string(),
-                    policy_mode: scval_to_policy_mode(get_state!(
+                    policy_flags: scval_to_policy_flags(get_state!(
                         pool_state,
-                        "PolicyMode",
+                        "PolicyFlags",
                         pool.pool_contract_id
                     )?)?,
                 };
@@ -485,12 +485,12 @@ impl StateFetcher {
         user_address: &str,
     ) -> Result<TransactChainContext> {
         let data = self.contracts_data_for_pool(pool_contract_id).await?;
-        let policy_mode = data
+        let policy_flags = data
             .pools
             .first()
-            .map(|pool| pool.policy_mode)
+            .map(|pool| pool.policy_flags)
             .ok_or_else(|| anyhow!("pool data not fetched for {pool_contract_id}"))?;
-        let non_membership_proof = if policy_mode.requires_non_membership_proofs() {
+        let non_membership_proof = if policy_flags.requires_non_membership_proofs() {
             Some(
                 self.get_nonmembership_proof(
                     note_pubkey,

@@ -1,6 +1,11 @@
 pragma circom 2.2.2;
 
 // Base pool transact circuit (no ASP policy proofs).
+//
+// WARNING: Do not instantiate `PolicyTransaction` as `component main`. Its
+// `inPublicKey` outputs would become public inputs and leak input note
+// public keys. Use a wrapper entry point (`policyTransactionOpen.circom`,
+// `policyTransactionAllowlist.circom`, etc.) so the base stays a subcomponent.
 
 include "./merkleProof.circom";
 include "./poseidon2/poseidon2_hash.circom";
@@ -31,7 +36,7 @@ template PolicyTransaction(nIns, nOuts, levels) {
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
 
-    // Exposed to parent wrappers for ASP policy modules; not a main-component output.
+    // Wired to parent wrappers only. As a subcomponent this stays private.
     signal output inPublicKey[nIns];
 
     component inKeypair[nIns];

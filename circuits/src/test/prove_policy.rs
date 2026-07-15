@@ -404,13 +404,13 @@ mod tests {
     /// ASP witness layout required by a policy transact circuit entry point.
     #[derive(Clone, Copy, Debug, PartialEq, Eq)]
     enum PolicyAspWitness {
-        /// `policy_tx_2_2_open`
+        /// `policy_tx_2_2`
         None,
-        /// `policy_tx_2_2_allowlist`
+        /// `policy_tx_2_2_A`
         Membership,
-        /// `policy_tx_2_2_blocklist`
+        /// `policy_tx_2_2_B`
         NonMembership,
-        /// `policy_tx_2_2_both`
+        /// `policy_tx_2_2_AB`
         Both,
     }
 
@@ -423,19 +423,19 @@ mod tests {
     /// All policy transact circuit entry points exercised by these tests.
     const POLICY_CIRCUITS: &[PolicyCircuit] = &[
         PolicyCircuit {
-            stem: "policy_tx_2_2_open",
+            stem: "policy_tx_2_2",
             asp: PolicyAspWitness::None,
         },
         PolicyCircuit {
-            stem: "policy_tx_2_2_allowlist",
+            stem: "policy_tx_2_2_A",
             asp: PolicyAspWitness::Membership,
         },
         PolicyCircuit {
-            stem: "policy_tx_2_2_blocklist",
+            stem: "policy_tx_2_2_B",
             asp: PolicyAspWitness::NonMembership,
         },
         PolicyCircuit {
-            stem: "policy_tx_2_2_both",
+            stem: "policy_tx_2_2_AB",
             asp: PolicyAspWitness::Both,
         },
     ];

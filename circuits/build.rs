@@ -12,10 +12,8 @@
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
 //! The script also generates Groth16 proving and verification keys for selected
-//! entry-point circuits (see `GROTH16_KEY_CIRCUITS` below) and outputs them to
-//! `testdata/`.
-//!
-//! The output directory is exposed as en environment variable
+//! entry-point circuits (see `types::PolicyFlags::all_stems` and
+//! `selectiveDisclosure_*` below) and outputs them to `testdata/`.
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -39,17 +37,11 @@ use std::{
     string::ToString,
 };
 use type_analysis::check_types::check_types;
+use types::PolicyFlags;
 
 const CURVE_ID: &str = "bn128";
 
-/// Circom stems whose Groth16 artifacts live under `testdata/`
-/// (`{stem}_proving_key.bin`, etc.). Append here when wiring a new entry-point
-/// through the same key-generation path.
-const GROTH16_KEY_CIRCUITS: &[&str] = &[
-    "policy_tx_2_2_open",
-    "policy_tx_2_2_allowlist",
-    "policy_tx_2_2_blocklist",
-    "policy_tx_2_2_both",
+const SELECTIVE_DISCLOSURE_CIRCUITS: &[&str] = &[
     "selectiveDisclosure_1",
     "selectiveDisclosure_2",
     "selectiveDisclosure_3",
@@ -60,8 +52,18 @@ const GROTH16_KEY_CIRCUITS: &[&str] = &[
 /// changed.
 const GROTH16_TESTDATA_SUFFIXES: &[&str] = &["_proving_key.bin", "_vk.json", "_vk_soroban.bin"];
 
-fn circuit_needs_groth16_keys(name: &str) -> bool {
-    GROTH16_KEY_CIRCUITS.contains(&name)
+fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bool {
+    groth16_key_circuits.iter().any(|stem| stem == name)
+}
+
+fn groth16_key_circuits() -> Vec<String> {
+    let mut circuits = PolicyFlags::all_stems();
+    circuits.extend(
+        SELECTIVE_DISCLOSURE_CIRCUITS
+            .iter()
+            .map(|stem| (*stem).to_owned()),
+    );
+    circuits
 }
 
 fn publish_dir_path(crate_dir: &Path) -> Result<PathBuf> {
@@ -130,12 +132,18 @@ fn main() -> Result<()> {
     // Expose the path to your runtime/tests
     println!("cargo:rustc-env=CIRCUIT_OUT_DIR={}", out_dir.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_dir.join("../sdk/types/src/policy_tx.rs").display()
+    );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
 
+    let groth16_key_circuits = groth16_key_circuits();
+
     // Rerun if testdata key files are missing or changed
     let testdata_dir = crate_dir.join("../testdata");
-    for stem in GROTH16_KEY_CIRCUITS {
+    for stem in &groth16_key_circuits {
         for suffix in GROTH16_TESTDATA_SUFFIXES {
             println!(
                 "cargo:rerun-if-changed={}",
@@ -273,7 +281,9 @@ fn main() -> Result<()> {
 
                 // Still check if we need to generate keys for circuits that ship PK/VK under
                 // testdata/
-                if circuit_needs_groth16_keys(circuit_name.as_str()) && wasm_path.exists() {
+                if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits)
+                    && wasm_path.exists()
+                {
                     match generate_keys_if_needed(&crate_dir, &out_dir, &circuit_name, &r1cs_file) {
                         Ok(_) => {}
                         Err(e) => {
@@ -358,8 +368,7 @@ fn main() -> Result<()> {
         }
 
         // === GROTH16 Proving/Verifying key generation ===
-        // Stems listed in GROTH16_KEY_CIRCUITS (must match `*.circom` file stems).
-        if circuit_needs_groth16_keys(circuit_name.as_str()) {
+        if circuit_needs_groth16_keys(circuit_name.as_str(), &groth16_key_circuits) {
             if !wasm_success {
                 bail!(
                     "Skipping key generation for {} - WASM compilation failed",
@@ -1071,7 +1080,7 @@ fn check_keys_need_generation(
 ///
 /// * `crate_dir` - The circuits crate directory
 /// * `out_dir` - The output directory containing WASM files
-/// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_both`,
+/// * `circuit_name` - Name of the circuit (e.g., `policy_tx_2_2_AB`,
 ///   `selectiveDisclosure_1`)
 /// * `r1cs_file` - Path to the R1CS file for freshness comparison
 ///

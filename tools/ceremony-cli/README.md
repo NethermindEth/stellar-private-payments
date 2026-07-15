@@ -25,14 +25,14 @@ repo-specific deployment key formats directly.
 ## Prerequisites
 
 - `snarkjs` installed and available in `PATH` (e.g. `npm install -g snarkjs`).
-- Compiled circuit (`.r1cs`). If `--circuit` is omitted the CLI auto-discovers the compiled `policy_tx_2_2_both.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
+- Compiled circuit (`.r1cs`). If `--circuit` is omitted the CLI auto-discovers the compiled `policy_tx_2_2_AB.r1cs` from `target/*/build/circuits-*/out/circuits/` (release profile preferred). Run `cargo build -p circuits --release` to compile.
 - A compatible Powers of Tau (`.ptau`) file (see below).
 
 ## Powers of Tau
 
 The ceremony requires a Phase 1 Powers of Tau file large enough for the circuit's constraint count.
 
-**Current circuit (`policy_tx_2_2_both`):** 37,616 constraints → requires **ptau power ≥ 16** (2^16 = 65,536).
+**Current circuit (`policy_tx_2_2_AB`):** 37,616 constraints → requires **ptau power ≥ 16** (2^16 = 65,536).
 
 Pick the right power: `ceil(log2(num_constraints))`. If unsure, run `npx snarkjs r1cs info $PATH.r1cs` to check.
 
@@ -116,21 +116,21 @@ If you want the web prover and deployment files to use the final ceremony key ma
 ceremony-cli export-deployment \
   --zkey ./artifacts/circuit_final.zkey \
   --out-dir ./deployments/testnet/circuit_keys \
-  --basename policy_tx_2_2_both \
+  --basename policy_tx_2_2_AB \
   --force
 ```
 
 This generates:
 
-- `deployments/testnet/circuit_keys/policy_tx_2_2_both_proving_key.bin`
-- `deployments/testnet/circuit_keys/policy_tx_2_2_both_vk.json`
-- `deployments/testnet/circuit_keys/policy_tx_2_2_both_vk_soroban.bin`
-- `deployments/testnet/circuit_keys/policy_tx_2_2_both_vk_const.rs`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_AB_vk.json`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_AB_vk_soroban.bin`
+- `deployments/testnet/circuit_keys/policy_tx_2_2_AB_vk_const.rs`
 
 Why this step exists:
 
 - `artifacts/circuit_verification_key.json` is enough to redeploy the verifier contract.
-- the app prover also needs `policy_tx_2_2_both_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
+- the app prover also needs `policy_tx_2_2_AB_proving_key.bin`, which is an arkworks-serialized `ProvingKey<Bn254>`, not a `snarkjs` `.zkey`
 - `vk_soroban.bin` and `vk_const.rs` are alternate verifier encodings used by this repo
 
 Internally, the helper exports the `.zkey` to JSON with `snarkjs`, reconstructs the arkworks proving key, writes `proving_key.bin`, and emits the verifier artifacts in the same formats as `circuits/build.rs`.

@@ -166,12 +166,8 @@ fn load_deployment(path: Option<&Path>) -> Result<(String, ContractConfig)> {
 }
 
 pub fn validate_pool(pool: &str, deployment: &ContractConfig) -> Result<()> {
-    deployment.pool_policy_mode(pool)?;
-    if deployment
-        .pools
-        .iter()
-        .any(|entry| entry.pool_contract_id == pool && entry.enabled)
-    {
+    let entry = deployment.pool(pool)?;
+    if entry.enabled {
         Ok(())
     } else {
         bail!("pool {pool} is not an enabled pool in the deployment config");

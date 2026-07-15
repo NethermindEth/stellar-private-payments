@@ -11,7 +11,7 @@
 //!     LocalProver, LocalSigner, LocalStorage, PrivatePool, PrivatePoolConfig, ProverArtifacts,
 //!     SyncMode,
 //!     types::{
-//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, PolicyMode,
+//!         ContractConfig, EncryptionPublicKey, NoteAmount, NotePublicKey, PolicyFlags,
 //!         TransferRecipient,
 //!     },
 //! };
@@ -40,7 +40,7 @@
 //!         "Test SDF Network ; September 2015",
 //!         "G...",
 //!     )?),
-//!     Box::new(LocalProver::from_artifacts(&[(PolicyMode::Both, artifacts.clone())])?),
+//!     Box::new(LocalProver::from_artifacts(&[(PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST, artifacts.clone())])?),
 //!     SyncMode::Inline,
 //! )?;
 //!
