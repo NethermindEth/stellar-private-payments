@@ -1,10 +1,15 @@
-use types::{ContractConfig, EncryptionPublicKey, NotePublicKey, PortfolioBalance};
+use types::{
+    ContractConfig, EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary,
+};
+
+use prover::crypto::asp_membership_leaf;
 
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode,
-    chain::Indexer, sync::confirm_tx, types::TransactionResult,
+    sync::{catch_up, confirm_tx},
+    types::TransactionResult,
 };
 
 /// Stellar account session
@@ -53,6 +58,11 @@ impl<S: Storage> Account<S> {
         &self.storage
     }
 
+    /// Catch local storage up to the current chain tip for the deployment.
+    pub async fn sync(&self) -> Result<(), Error> {
+        catch_up(&self.storage, &self.rpc_url, &self.contract_config).await
+    }
+
     /// Portfolio balances across all enabled pools in the deployment.
     ///
     /// With [`SyncMode::Inline`], local storage is synced before reading.
@@ -61,6 +71,56 @@ impl<S: Storage> Account<S> {
         self.storage
             .list_portfolio_balances(&self.user_address, &self.contract_config)
             .await
+    }
+
+    /// Locally derived note and encryption public keys for this account.
+    pub async fn user_public_keys(&self) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
+        self.storage.user_public_keys(&self.user_address).await
+    }
+
+    /// Locally derived ASP membership blinding for this account.
+    pub async fn asp_secret(&self) -> Result<Field, Error> {
+        self.storage.asp_secret(&self.user_address).await
+    }
+
+    /// Derive the ASP membership tree leaf for this account's note public key.
+    pub async fn derive_asp_user_leaf(
+        &self,
+        note_public_key: Option<NotePublicKey>,
+        membership_blinding: Option<Field>,
+    ) -> Result<Field, Error> {
+        let note = match note_public_key {
+            Some(note) => note,
+            None => self.storage.user_public_keys(&self.user_address).await?.0,
+        };
+        let blinding = match membership_blinding {
+            Some(blinding) => blinding,
+            None => self.storage.asp_secret(&self.user_address).await?,
+        };
+        asp_membership_leaf(&note, &blinding).map_err(|e| Error::Other(e.to_string()))
+    }
+
+    /// Notes for this account across all pools (newest first).
+    ///
+    /// With [`SyncMode::Inline`], local storage is synced before reading.
+    pub async fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {
+        self.ensure_synced().await?;
+        self.storage
+            .list_user_notes(&self.user_address, limit)
+            .await
+    }
+
+    /// Whether this account's public keys are registered on-chain.
+    ///
+    /// With [`SyncMode::Inline`], local storage is synced before reading.
+    pub async fn is_registered(&self) -> Result<bool, Error> {
+        self.ensure_synced().await?;
+        Ok(self
+            .storage
+            .recipient_lookup(&self.user_address, &self.contract_config)
+            .await?
+            .entry
+            .is_some())
     }
 
     /// Register this account's public keys on the deployment-wide registry.
@@ -117,20 +177,6 @@ impl<S: Storage> Account<S> {
             SyncMode::Inline => self.sync().await?,
             SyncMode::Background => {}
         }
-        Ok(())
-    }
-
-    async fn sync(&self) -> Result<(), Error> {
-        let rpc = stellar::Client::new(&self.rpc_url)
-            .map_err(|e| Error::Other(format!("rpc client: {e:#}")))?;
-        let indexer = Indexer::init(rpc, self.storage.fork()?, &self.contract_config)
-            .await
-            .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
-        indexer
-            .catch_up()
-            .await
-            .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
-        self.storage.process_pending_state().await?;
         Ok(())
     }
 }

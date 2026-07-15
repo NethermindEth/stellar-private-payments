@@ -115,7 +115,7 @@ async function lookupRecipient(address, refs) {
         return null;
     }
 
-    const lookup = await client().lookupRegisteredPublicKey(address);
+    const lookup = await client().recipientLookup(address);
     if (lookup?.entry) {
         refs.noteKey.value = normalizeHexKey(lookup.entry.noteKey);
         refs.encKey.value = normalizeHexKey(lookup.entry.encryptionKey);

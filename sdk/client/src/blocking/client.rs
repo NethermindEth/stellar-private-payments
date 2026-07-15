@@ -1,6 +1,6 @@
 //! Sync wrapper around [`crate::Client`] via a shared Tokio runtime.
 
-use types::ContractConfig;
+use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 
 use crate::{
     Error, Handle, Prover, Signer, SyncMode, chain::StateFetcher, client::Client as AsyncClient,
@@ -27,6 +27,18 @@ impl Client {
         }
     }
 
+    /// Read-only client with a no-op prover (balance, notes, sync, portfolio).
+    pub fn new_readonly(
+        storage: LocalStorage,
+        sync_mode: SyncMode,
+        contract_config: ContractConfig,
+        rpc_url: impl Into<String>,
+    ) -> Self {
+        Self {
+            inner: AsyncClient::new_readonly(storage, sync_mode, contract_config, rpc_url),
+        }
+    }
+
     pub fn storage(&self) -> &LocalStorage {
         self.inner.storage()
     }
@@ -45,6 +57,14 @@ impl Client {
 
     pub fn sync(&self) -> Result<(), Error> {
         block_on(self.inner.sync())
+    }
+
+    pub fn operational_feed(&self, limit: u32) -> Result<Vec<OperationalFeedItem>, Error> {
+        block_on(self.inner.operational_feed(limit))
+    }
+
+    pub fn recipient_lookup(&self, address: impl AsRef<str>) -> Result<RecipientLookup, Error> {
+        block_on(self.inner.recipient_lookup(address))
     }
 
     pub fn account(

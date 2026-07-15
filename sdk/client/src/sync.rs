@@ -1,6 +1,7 @@
-use stellar::{Client, TxConfirmStatus, confirm_tx as rpc_confirm_tx};
+use stellar::{Client, Indexer, TxConfirmStatus, confirm_tx as rpc_confirm_tx};
+use types::ContractConfig;
 
-use crate::{Error, sleep::sleep, types::TransactionResult};
+use crate::{Error, Storage, sleep::sleep, types::TransactionResult};
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
@@ -8,11 +9,28 @@ const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 /// How the pool keeps local storage in sync with on-chain contract events
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SyncMode {
-    /// The pool runs [`crate::PrivatePool::sync`] inline when needed.
-    /// No separate background sync task is required.
+    /// [`crate::Client::sync`] / [`crate::Account::sync`] (and pool reads and
+    /// mutations via `ensure_synced`) run deployment catch-up inline.
     Inline,
     /// Storage is kept in sync by a background task you start separately.
     Background,
+}
+
+/// Catch local storage up to the current chain tip for a deployment.
+pub(crate) async fn catch_up<S: Storage>(
+    storage: &S,
+    rpc_url: &str,
+    contract_config: &ContractConfig,
+) -> Result<(), Error> {
+    let rpc = Client::new(rpc_url).map_err(|e| Error::Other(format!("rpc client: {e:#}")))?;
+    let indexer = Indexer::init(rpc, storage.fork()?, contract_config)
+        .await
+        .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
+    indexer
+        .catch_up()
+        .await
+        .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
+    storage.process_pending_state().await
 }
 
 /// Poll until a submitted transaction succeeds or fails.

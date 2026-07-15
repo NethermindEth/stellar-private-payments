@@ -22,8 +22,8 @@ use stellar_private_payments_sdk::{
         flows::TransactParams,
     },
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, PortfolioBalance,
-        SyncMetadata, UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
+        OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
     },
 };
 use wasm_bindgen::JsError;
@@ -671,6 +671,73 @@ impl Storage for StorageBridge {
         }
     }
 
+    async fn list_user_notes(
+        &self,
+        user_address: &str,
+        limit: u32,
+    ) -> Result<Vec<UserNoteSummary>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::UserNotes(user_address.to_string(), limit),
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading user notes: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn operational_feed(
+        &self,
+        limit: u32,
+        config: &ContractConfig,
+    ) -> Result<Vec<OperationalFeedItem>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::OperationalFeed {
+                    limit,
+                    asp_membership_contract_id: config.asp_membership.clone(),
+                    public_key_registry_contract_id: config.public_key_registry.clone(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::OperationalFeed(list)) => Ok(list),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading operational feed: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn recipient_lookup(
+        &self,
+        address: &str,
+        config: &ContractConfig,
+    ) -> Result<RecipientLookup, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::RecipientLookup {
+                    address: address.to_string(),
+                    public_key_registry_contract_id: config.public_key_registry.clone(),
+                },
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::RecipientLookup(lookup)) => Ok(lookup),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response looking up recipient: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {
         match self
             .call(StorageWorkerRequest::Transact(req.clone()), 5_000)
@@ -709,8 +776,26 @@ impl Storage for StorageBridge {
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         let _ = user_address;
         Err(Error::Other(
-            "full user keys are not available on the storage bridge; use user_public_keys".into(),
+            "full stored user keys are not available on the storage bridge; use asp_secret".into(),
         ))
+    }
+
+    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::AspSecret(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::AspSecret(secret)) => secret
+                .ok_or_else(|| Error::Other("ASP secret not found in worker storage".into()))
+                .map(|asp| asp.membership_blinding),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading ASP secret: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn user_public_keys(

@@ -4,13 +4,14 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    Handle, LocalProver, LocalStorage, NoopProver, Prover, Signer, SyncMode, TransferRecipient,
+    Handle, LocalProver, LocalStorage, Prover, Signer, SyncMode, TransferRecipient,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
 /// SDK `Client` → `Account` session; open pools via [`Self::pool`].
 pub struct ClientSession {
+    client: Client,
     account: SdkAccount,
 }
 
@@ -27,30 +28,48 @@ impl ClientSession {
         let storage =
             LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
 
-        let prover: Handle<dyn Prover> = if readonly {
-            Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>)
+        let client = if readonly {
+            Client::new_readonly(
+                storage,
+                SyncMode::Inline,
+                config.deployment.clone(),
+                network.rpc_url.clone(),
+            )
         } else {
             let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
-            Handle::from_box(Box::new(
+            let prover = Handle::from_box(Box::new(
                 LocalProver::from_artifacts(&artifacts)
                     .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
-            ) as Box<dyn Prover>)
+            ) as Box<dyn Prover>);
+            Client::new(
+                storage,
+                prover,
+                SyncMode::Inline,
+                config.deployment.clone(),
+                network.rpc_url.clone(),
+            )
         };
-
-        let client = Client::new(
-            storage,
-            prover,
-            SyncMode::Inline,
-            config.deployment.clone(),
-            network.rpc_url.clone(),
-        );
         let sdk_account = client
             .account(&account.address, alias_signer(config, account, network))
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
         Ok(Self {
+            client,
             account: sdk_account,
         })
+    }
+
+    pub fn account(&self) -> &SdkAccount {
+        &self.account
+    }
+
+    pub fn operational_feed(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<stellar_private_payments_sdk::OperationalFeedItem>> {
+        self.client
+            .operational_feed(limit)
+            .map_err(|e| anyhow::anyhow!("operational feed: {e}"))
     }
 
     pub fn pool(&self, pool_contract_id: &str) -> Result<PrivatePool> {
@@ -58,6 +77,16 @@ impl ClientSession {
         self.account
             .pool(pool_contract_id)
             .map_err(|e| anyhow::anyhow!("open pool session: {e}"))
+    }
+
+    /// Register this account's public keys on the deployment-wide registry.
+    pub fn register_public_keys(
+        &self,
+    ) -> Result<stellar_private_payments_sdk::types::TransactionResult> {
+        log::info!("Registering public keys");
+        self.account
+            .register_public_keys(None, None)
+            .map_err(|e| anyhow::anyhow!("register public keys: {e}"))
     }
 }
 

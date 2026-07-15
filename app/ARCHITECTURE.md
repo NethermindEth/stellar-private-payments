@@ -36,10 +36,10 @@ The WASM layer exposes three JS handles with different scope:
 
 | Handle | Scope | Examples |
 |--------|-------|----------|
-| **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (raw worker RPC) |
-| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `allContractsData`, `lookupRegisteredPublicKey`, `account()` |
-| **`Account`** | Wallet session (address + signer) | `registerPublicKeys`, `pool()` |
-| **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `sync`, `getBalance` |
+| **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (app-layer settings only) |
+| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `operationalFeed`, `recipientLookup`, `account()` |
+| **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
+| **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
 `Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
 
@@ -58,7 +58,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 - Generic over a storage backend (`Indexer<S: ContractDataStorage>`).
 - On web, the backend is **`StorageBridge`**, implementing `ContractDataStorage` and the pool SDK `Storage` trait by forwarding to the storage worker.
 - `events_listener` (`sdk/web/src/events.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap.
-- Background sync is owned by the indexer, not by the UI calling `pool.sync()` on every page load (though pool ops call `sync` before/after mutations for freshness).
+- Background sync is owned by the indexer. Pool sessions do not expose `sync()`; use `client.sync()` for an explicit catch-up when needed.
 
 **`Storage` (WASM, wasm-bindgen API)**
 
@@ -68,18 +68,19 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Client` (WASM, wasm-bindgen API)**
 
-- Constructed by `Client.new({ storage, rpcUrl })` — deployment shell only, no wallet yet.
-- Spawns the prover worker at `account()`; routes storage requests through `StorageBridge`.
+- Constructed by `Client.new({ storage, rpcUrl, proverWorkerUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
+- Spawns the prover worker at `Client.new`; pings it on `account()` / prove paths. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `startSync`.
-  - Chain reads without a wallet: `contractConfig`, `allContractsData`, `lookupRegisteredPublicKey`, `aspState`, `verifySelectiveDisclosure`.
+  - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
   - Account factory via `account({ networkPassphrase, userAddress? }, signer)`.
 
 **`Account` (WASM, wasm-bindgen API)**
 
-- Wallet session: signer + user address + shared `ClientCore`.
+- Wallet session: thin wrapper over native `Account`.
 - **Account-wide operations:**
   - Key derivation on first `account()` (Freighter `signMessage` when keys missing in local DB).
+  - Reads: `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`.
   - `registerPublicKeys`.
   - Per-pool sessions via `pool({ poolContract })`.
 
@@ -87,14 +88,14 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 - Per-pool session: pool SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
 - **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
-- Exports: `sync`, `getBalance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
+- Exports: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
 - Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
 - Proving, signing, and submit run inside this session; returns tx hashes to JS.
 
 **`StorageBridge` (WASM main thread)**
 
 - Typed async bridge to the storage worker (`StorageWorkerRequest` / `StorageWorkerResponse` in `protocol.rs`).
-- Used by the indexer, `PrivatePool`, and `ClientCore` storage reads.
+- Used by the indexer, `PrivatePool`, and wasm `Client` storage reads.
 
 **Storage worker (Web Worker)**
 
@@ -173,7 +174,7 @@ Single entry for the main app pages. Owns singleton lifecycle:
 3. `client().openAccount({ networkPassphrase, userAddress }, signer)` — `Client.account`
 4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `account().pool({ poolContract })`
 
-Also wraps the SDK `Client` with storage-backed helpers still migrating to the SDK (`getUserNotes`, `getPortfolioBalances`, `loadPublicKeys`, `aspState`, etc.) via `Storage.call`.
+Also wraps the SDK `Client` for app lifecycle (`openAccount`, cached account session). Privacy key reads use SDK methods; app-only persistence (disclaimer, explorer, bootnode, operation history) stays on `client().storage()` via `Storage.call`.
 
 **`app-storage.js`**
 
@@ -201,7 +202,7 @@ Signatures are prompted during onboarding so the app can scan for notes addresse
 
 ## Public key registry
 
-Registered note + encryption public keys on-chain enable private transfers to `G...` addresses. `Client.lookupRegisteredPublicKey` / `PrivatePool.transfer` resolve recipients through the local registry index (backed by synced contract events).
+Registered note + encryption public keys on-chain enable private transfers to `G...` addresses. `Client.recipientLookup` / `PrivatePool.transfer` resolve recipients through the local registry index (backed by synced contract events).
 
 ## Recovery scenarios
 

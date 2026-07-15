@@ -160,7 +160,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await client().getUserNotes(state.address, LIMIT);
+    const list = await client().account().userNotes(LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -258,8 +258,8 @@ async function connect() {
 
 async function initializeWalletSession(address, networkPassphrase) {
   await client().openAccount({ networkPassphrase, userAddress: address }, new FreighterSigner());
-  const keys = await client().getUserKeys(address);
-  if (!keys?.noteKeypair?.public) {
+  const keys = await client().account().userPublicKeys();
+  if (!keys?.notePublicKey) {
     throw new Error('Privacy keys not found in local storage');
   }
   state.derivedKeys = true;

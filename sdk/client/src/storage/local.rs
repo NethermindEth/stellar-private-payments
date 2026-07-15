@@ -5,13 +5,14 @@ use state::{SqliteStorage, StoredUserKeys};
 use stellar::ContractDataStorage;
 use tx_planner::SpendableNote;
 use types::{
-    ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, PortfolioBalance,
-    SyncMetadata, UserNoteSummary,
+    ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
+    OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
 };
 
 use super::{
-    Storage, map_build_params, map_user_keys, pool_notes_from_storage,
-    portfolio_balances_from_storage, spendable_notes_from_storage,
+    Storage, map_build_params, map_user_keys, operational_feed_from_storage,
+    pool_notes_from_storage, portfolio_balances_from_storage, recipient_lookup_from_storage,
+    spendable_notes_from_storage, user_notes_from_storage,
 };
 use crate::{
     core::process_local_state,
@@ -105,6 +106,30 @@ impl Storage for LocalStorage {
         portfolio_balances_from_storage(&self.storage(), user_address, config)
     }
 
+    async fn list_user_notes(
+        &self,
+        user_address: &str,
+        limit: u32,
+    ) -> Result<Vec<UserNoteSummary>, Error> {
+        user_notes_from_storage(&self.storage(), user_address, limit)
+    }
+
+    async fn operational_feed(
+        &self,
+        limit: u32,
+        config: &ContractConfig,
+    ) -> Result<Vec<OperationalFeedItem>, Error> {
+        operational_feed_from_storage(&self.storage(), limit, config)
+    }
+
+    async fn recipient_lookup(
+        &self,
+        address: &str,
+        config: &ContractConfig,
+    ) -> Result<RecipientLookup, Error> {
+        recipient_lookup_from_storage(&self.storage(), address, config)
+    }
+
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {
         map_build_params(crate::transact::build_transact_params(&self.storage(), req))
     }
@@ -121,6 +146,10 @@ impl Storage for LocalStorage {
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         map_user_keys(&self.storage(), user_address)
+    }
+
+    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
+        Ok(map_user_keys(&self.storage(), user_address)?.membership_blinding)
     }
 
     async fn user_public_keys(

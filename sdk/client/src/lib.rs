@@ -119,10 +119,12 @@ pub use transact::{
     build_transact_params, build_validated_pool_tree, load_user_key_material,
     transact_request_from_step,
 };
+pub use tx::encryption::KEY_DERIVATION_MESSAGE;
 pub use tx_planner::{SpendTarget, SpendableNote, Transact};
 pub use types::{
-    Estimate, PortfolioBalance, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
-    TransactChainContext, TransactionResult, TransferRecipient,
+    Estimate, OperationalFeedItem, PolicyFlags, PortfolioBalance, PrivatePoolConfig,
+    ProverArtifacts, RecipientLookup, SignedTransaction, TransactChainContext, TransactionResult,
+    TransferRecipient, UserNoteSummary,
 };
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).

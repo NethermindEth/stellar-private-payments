@@ -67,12 +67,18 @@ fn spendable_notes() {
 }
 
 #[test]
-fn user_public_keys() {
-    let pool = test_pool(Some(&[2, 3, 5])).expect("test pool");
+fn user_notes_some() {
+    let account = test_account(Some(&[2, 3, 5])).expect("test account");
 
-    let (note, enc) = pool
-        .user_public_keys(&pool.config().user_address)
-        .expect("user public keys");
+    let notes = account.user_notes(10).expect("user notes");
+    assert_eq!(notes.len(), 3);
+}
+
+#[test]
+fn user_public_keys_on_account() {
+    let account = test_account(Some(&[2, 3, 5])).expect("test account");
+
+    let (note, enc) = account.user_public_keys().expect("user public keys");
     let (expected_note, expected_enc) = seeded_user_public_keys().expect("seeded keys");
 
     assert_eq!(note.0, expected_note.0);

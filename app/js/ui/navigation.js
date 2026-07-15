@@ -15,9 +15,8 @@ function clearRevealedAspSecret() {
     if (revealBtn) revealBtn.dataset.revealed = 'false';
 }
 
-async function fetchAspSecretForUser(address) {
-    const asp = await client().getAspSecret(address);
-    const secret = asp?.membershipBlinding;
+async function fetchAspSecretForUser() {
+    const secret = await client().account().aspSecret();
     return secret != null ? String(secret) : null;
 }
 
@@ -222,7 +221,7 @@ export const Shell = {
                 const address = App.state.wallet.address;
                 if (!address) return;
                 try {
-                    revealedAspSecret = await fetchAspSecretForUser(address);
+                    revealedAspSecret = await fetchAspSecretForUser();
                     if (!revealedAspSecret) {
                         Toast.show('ASP secret not found', 'error');
                         return;
@@ -246,7 +245,7 @@ export const Shell = {
                 if (revealedAspSecret) return revealedAspSecret;
                 const address = App.state.wallet.address;
                 if (!address) return null;
-                return fetchAspSecretForUser(address);
+                return fetchAspSecretForUser();
             },
         };
         Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
@@ -336,9 +335,9 @@ export const Wallet = {
                 });
 
                 await client().openAccount({ networkPassphrase, userAddress: address }, signer);
-                const keys = await client().loadPublicKeys(address);
-                App.state.keys.notePublicKey = keys.pubKey;
-                App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
+                const keys = await client().account().userPublicKeys();
+                App.state.keys.notePublicKey = keys.notePublicKey;
+                App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();

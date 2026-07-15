@@ -2,20 +2,20 @@
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
  * Lifecycle: `initializeRuntime` → `client().startSync` → `client().openAccount` → `account().pool`.
+ *
+ * Privacy key reads use the SDK (`account().userPublicKeys`, `account().aspSecret`, etc.).
+ * App-only persistence (disclaimer, explorer, bootnode, op history, key probe) stays on `storage()`.
  */
 
 import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
 
-import { AppStorage, storageCall } from './app-storage.js';
-
-const KEY_DERIVATION_MESSAGE = 'Privacy Pool Key Derivation [v1]';
+import { AppStorage } from './app-storage.js';
 
 let storageHandle = null;
 let appStorageInstance = null;
 let wrappedClient = null;
 let boundAccount = null;
 let wasmReady = false;
-let syncStarted = false;
 let currentRpcUrl = null;
 let boundUserAddress = null;
 
@@ -26,16 +26,11 @@ export async function ensureWasmInit() {
     }
 }
 
-function toScalarHex(value) {
-    const n = typeof value === 'bigint' ? value : BigInt(value);
-    return `0x${n.toString(16).padStart(64, '0')}`;
-}
-
 function bindAppStorage(sdkStorage) {
     appStorageInstance = new AppStorage(sdkStorage);
 }
 
-function wrapSdkClient(sdk, sdkStorage) {
+function wrapSdkClient(sdk) {
     return {
         ...sdk,
         contractConfig() {
@@ -55,10 +50,6 @@ function wrapSdkClient(sdk, sdkStorage) {
             await sdk.startSync({
                 bootnodeUrl: resolvedBootnode ?? undefined,
             });
-            syncStarted = true;
-        },
-        sync() {
-            return sdk.sync({});
         },
         async openAccount(
             { networkPassphrase, userAddress },
@@ -87,74 +78,15 @@ function wrapSdkClient(sdk, sdkStorage) {
             if (!boundAccount) {
                 throw new Error('Account session not open. Call openAccount() first.');
             }
-            return boundAccount;
-        },
-        verifySelectiveDisclosure(receiptJson, expectedVkHash) {
-            return sdk.verifySelectiveDisclosure(receiptJson, expectedVkHash);
-        },
-        async getUserKeys(address) {
-            const response = await storageCall(sdkStorage, { UserKeys: address });
-            return response.UserKeys ?? null;
-        },
-        async getAspSecret(address) {
-            const response = await storageCall(sdkStorage, { AspSecret: address });
-            return response.AspSecret ?? null;
-        },
-        async deriveAndSaveUserKeys(address, signatureBytes, network) {
-            await storageCall(
-                sdkStorage,
-                {
-                    DeriveSaveUserKeys: [address, Array.from(signatureBytes), network],
-                },
-                10_000,
-            );
-        },
-        keyDerivationMessage() {
-            return KEY_DERIVATION_MESSAGE;
-        },
-        async getOperationalFeed(limit) {
-            const config = Client.contractConfig();
-            const response = await storageCall(sdkStorage, {
-                OperationalFeed: {
-                    limit,
-                    asp_membership_contract_id: config.asp_membership,
-                    public_key_registry_contract_id: config.public_key_registry,
-                },
-            });
-            return response.OperationalFeed ?? [];
-        },
-        async getUserNotes(address, limit) {
-            const response = await storageCall(sdkStorage, { UserNotes: [address, limit] });
-            return response.UserNotes ?? [];
-        },
-        async deriveAspUserLeaf(membershipBlinding, notePublicKey) {
-            const response = await storageCall(sdkStorage, {
-                DeriveASPleaf: {
-                    membershipBlinding: toScalarHex(membershipBlinding),
-                    pubkey: toScalarHex(notePublicKey),
-                },
-            });
-            const leaf = response.DeriveASPleaf;
-            if (leaf == null) {
-                throw new Error('DeriveASPleaf returned no leaf');
-            }
-            return typeof leaf === 'string' ? leaf : String(leaf);
-        },
-        async loadPublicKeys(address) {
-            const data = await this.getUserKeys(address);
-            if (!data?.noteKeypair?.public) {
-                throw new Error('Privacy keys not found in local storage');
-            }
             return {
-                pubKey: data.noteKeypair.public,
-                encryptionKeypair: { publicKey: data.encryptionKeypair.public },
-            };
-        },
-        async aspState() {
-            const data = await sdk.aspState();
-            return {
-                aspMembership: data.aspMembership,
-                aspNonMembership: data.aspNonMembership,
+                portfolio: () => boundAccount.portfolio(),
+                userPublicKeys: () => boundAccount.userPublicKeys(),
+                aspSecret: () => boundAccount.aspSecret(),
+                userNotes: (limit) => boundAccount.userNotes(limit),
+                isRegistered: () => boundAccount.isRegistered(),
+                registerPublicKeys: (options) => boundAccount.registerPublicKeys(options ?? {}),
+                deriveAspUserLeaf: (options) => boundAccount.deriveAspUserLeaf(options),
+                pool: (options) => boundAccount.pool(options),
             };
         },
     };
@@ -162,7 +94,7 @@ function wrapSdkClient(sdk, sdkStorage) {
 
 async function openWrappedClient(sdkStorage, rpcUrl) {
     const sdk = await Client.new({ storage: sdkStorage, rpcUrl });
-    return wrapSdkClient(sdk, sdkStorage);
+    return wrapSdkClient(sdk);
 }
 
 /** Drop the in-memory SDK client and account session (e.g. on wallet disconnect). */
@@ -170,7 +102,6 @@ export function resetWalletSession() {
     boundUserAddress = null;
     boundAccount = null;
     wrappedClient = null;
-    syncStarted = false;
 }
 
 /** Open storage + client shell for the given Soroban RPC URL. */
@@ -183,7 +114,6 @@ export async function initializeRuntime(rpcUrl) {
         wrappedClient = null;
         boundAccount = null;
         currentRpcUrl = rpcUrl;
-        syncStarted = false;
         boundUserAddress = null;
     }
 
@@ -194,7 +124,7 @@ export async function initializeRuntime(rpcUrl) {
     return client();
 }
 
-/** SDK deployment client + cached account session + storage-backed reads. */
+/** SDK deployment client + cached account session. */
 export function client() {
     if (!wrappedClient) {
         throw new Error('Runtime not initialized. Call initializeRuntime first.');

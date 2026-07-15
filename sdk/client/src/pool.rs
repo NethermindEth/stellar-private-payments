@@ -3,7 +3,7 @@
 use tx_planner::{SpendableNote, Transact};
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
-use stellar::{Client, Indexer, Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
+use stellar::{Client, Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     PoolCore, PreparedTransaction, SyncMode,
@@ -19,7 +19,7 @@ use crate::{
     signer::Signer,
     sleep::sleep,
     storage::Storage,
-    sync::confirm_tx,
+    sync::{catch_up, confirm_tx},
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
@@ -94,28 +94,6 @@ impl<S: Storage> PrivatePool<S> {
         self.storage
             .notes(&self.config.pool_contract_id, &self.config.user_address)
             .await
-    }
-
-    /// Syncs the storage with the latest contract events
-    ///
-    /// Called automatically during operations when [`SyncMode::Inline`] is set.
-    /// With [`SyncMode::Background`], your background indexer should keep
-    /// storage current; you may still call this for an explicit foreground
-    /// catch-up.
-    pub async fn sync(&self) -> Result<(), Error> {
-        let indexer = Indexer::init(
-            self.client.clone(),
-            self.storage.fork()?,
-            &self.config.contract_config,
-        )
-        .await
-        .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
-        indexer
-            .catch_up()
-            .await
-            .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
-
-        self.storage.process_pending_state().await
     }
 
     pub async fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
@@ -320,13 +298,6 @@ impl<S: Storage> PrivatePool<S> {
         confirm_tx(hash, &self.client).await
     }
 
-    pub async fn user_public_keys(
-        &self,
-        user_address: &str,
-    ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
-        self.storage.user_public_keys(user_address).await
-    }
-
     pub async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
         self.signer.sign_transaction(prepared).await
     }
@@ -335,7 +306,14 @@ impl<S: Storage> PrivatePool<S> {
 
     async fn ensure_synced(&self) -> Result<(), Error> {
         match self.sync_mode {
-            SyncMode::Inline => self.sync().await?,
+            SyncMode::Inline => {
+                catch_up(
+                    &self.storage,
+                    &self.config.rpc_url,
+                    &self.config.contract_config,
+                )
+                .await?;
+            }
             SyncMode::Background => {}
         }
         Ok(())

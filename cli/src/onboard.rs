@@ -112,7 +112,7 @@ pub fn run(config: &CliConfig, args: &OnboardArgs, json: bool) -> Result<()> {
     configure_explorer(&mut storage, args, interactive)?;
 
     // 7. Optional registration.
-    maybe_register(config, &account, &mut storage, args, interactive)?;
+    maybe_register(config, &account, args, interactive)?;
 
     say(interactive, "\nOnboarding complete.");
     Ok(())
@@ -203,7 +203,6 @@ fn configure_explorer(
 fn maybe_register(
     config: &CliConfig,
     account: &Account,
-    storage: &mut SqliteStorage,
     args: &OnboardArgs,
     interactive: bool,
 ) -> Result<()> {
@@ -219,7 +218,7 @@ fn maybe_register(
         return Ok(());
     }
     let network = config.resolve_network()?;
-    let hash = register::register_account(config, account, &network, storage)?;
+    let hash = register::register_account(config, account, &network)?;
     say(interactive, &format!("Registered (tx {hash})."));
     Ok(())
 }

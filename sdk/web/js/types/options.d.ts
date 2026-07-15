@@ -9,6 +9,11 @@ export interface ClientNewOptions {
   storage?: import('./storage.js').Storage;
   /** Used only when `storage` is omitted. */
   storageWorkerUrl?: string;
+  /**
+   * Absolute URL for the prover worker. Defaults to the package
+   * `dist/workers/prover-worker.js` via `import.meta.url`.
+   */
+  proverWorkerUrl?: string;
 }
 
 /** Options for {@link DeploymentClient.checkSync} and {@link DeploymentClient.startSync}. */
@@ -21,7 +26,6 @@ export interface AccountOptions {
   networkPassphrase: string;
   /** Optional when `signer.getPublicKey()` is implemented. */
   userAddress?: string;
-  proverWorkerUrl?: string;
 }
 
 /** Options for {@link AccountClient.pool}. */
@@ -33,9 +37,4 @@ export interface PoolOptions {
 export interface RegisterPublicKeysOptions {
   notePublicKeyHex?: string;
   encryptionPublicKeyHex?: string;
-}
-
-/** Options for {@link DeploymentClient.verifySelectiveDisclosure}. */
-export interface VerifyDisclosureOptions {
-  proverWorkerUrl?: string;
 }

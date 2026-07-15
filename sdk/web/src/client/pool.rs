@@ -38,10 +38,6 @@ impl PrivatePool {
 
 #[wasm_bindgen]
 impl PrivatePool {
-    pub async fn sync(&self) -> Result<(), JsError> {
-        self.inner().sync().await.map_err(pool_err)
-    }
-
     /// Balance in stroops (`bigint` in JS).
     pub async fn balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;

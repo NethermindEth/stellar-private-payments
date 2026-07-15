@@ -18,22 +18,27 @@ const storage = await Storage.open();
 const client = await Client.new({
   storage,
   rpcUrl: 'https://soroban-testnet.stellar.org',
+  // proverWorkerUrl defaults to package dist/workers/prover-worker.js
 });
 
 const bootnodeUrl = await client.checkSync();
 await client.startSync({ bootnodeUrl: bootnodeUrl ?? undefined });
+
 const account = await client.account({ networkPassphrase }, signer);
-await account.registerPublicKeys();
+console.log(await account.userPublicKeys());
+console.log(await account.aspSecret()); // ASP membership blinding only
+console.log(await account.isRegistered());
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
-await pool.sync(); // optional foreground catch-up; prefer startSync for background indexing
-await client.sync(); // optional explicit catch-up via SDK client
+await client.sync(); // optional explicit catch-up
 await pool.deposit(10_000_000n); // stroops (1 XLM)
 console.log(await pool.balance()); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
 await pool.withdraw(3_000_000n);
 
 const cfg = Client.contractConfig();
+const feed = await client.operationalFeed(10);
+const lookup = await client.recipientLookup('G...');
 const chain = await client.allContractsData();
 ```
 
@@ -43,22 +48,23 @@ const chain = await client.allContractsData();
 |--------|----------------------------------------------------------|
 | `open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence                 |
+| `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ UserKeys: address }` probe) |
 
 ### `Client`
 
 | Method | Description |
 |--------|-------------|
-| `new({ storage, rpcUrl })` | Deployment client shell (no wallet yet) |
+| `new({ storage, rpcUrl, proverWorkerUrl? })` | Build native client + spawn prover worker (no wallet yet) |
+| `contractConfig()` | Static deployment config |
 | `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
 | `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
-| `sync(options?)` | Explicit foreground catch-up via SDK client |
-| `contractConfig()` | Static deployment config |
-| `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, return `Account` |
-| `lookupRegisteredPublicKey(address)` | Recipient key lookup |
+| `sync()` | Explicit foreground catch-up |
+| `operationalFeed(limit)` | Recent deployment activity |
+| `recipientLookup(address)` | Recipient registry lookup |
+| `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, derive keys if missing, return `Account` |
 | `aspState()` | On-chain ASP membership state |
 | `allContractsData()` | On-chain pool + ASP state |
-| `verifySelectiveDisclosure(receiptJson, expectedVkHash, options?)` | Walletless disclosure receipt verification |
+| `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Walletless disclosure receipt verification |
 
 ### `Account`
 
@@ -66,12 +72,17 @@ const chain = await client.allContractsData();
 |--------|-------------|
 | `userAddress` | Connected Stellar address |
 | `portfolio()` | Balances across all enabled pools |
-| `registerPublicKeys(options?)` | On-chain key registry (keys from storage by default) |
+| `userPublicKeys()` | Note + encryption public keys |
+| `aspSecret()` | ASP membership blinding |
+| `userNotes(limit)` | Notes across pools (newest first) |
+| `isRegistered()` | On-chain public key registry entry exists |
+| `deriveAspUserLeaf({ notePublicKey?, membershipBlinding? })` | ASP membership tree leaf |
+| `registerPublicKeys(options?)` | On-chain key registry |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `sync`, `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. Mutating methods do **not** call `sync` automatically — use `startSync` for background indexing and call `pool.sync()` or `client.sync()` when you need an explicit catch-up (same as the Rust SDK). Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
+Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. There is **no** `pool.sync()` — use `startSync` for background indexing and `client.sync()` when you need an explicit catch-up. Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 
@@ -129,4 +140,4 @@ The Pool Stellar web app uses the same legal layout via Trunk (`deployments/scri
 
 ## Workers
 
-`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults similarly on `client.account()`. Circuit artifacts default to `dist/circuits/` via the prover worker loader.
+`Storage.open()` defaults to the bundled storage worker URL via `import.meta.url`. Override with `workerUrl` on `Storage.open()` or `storageWorkerUrl` on `Client.new()` when storage is omitted. Prover worker URL defaults the same way on `Client.new()` (`proverWorkerUrl`). Circuit artifacts default to `dist/circuits/` via the prover worker loader.

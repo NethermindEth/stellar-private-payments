@@ -379,7 +379,10 @@ async function insertMembershipLeaf() {
     setStatus('Computing and submitting allowlist insert transaction...', 'info');
     await ensureCryptoReady();
 
-    const leafHex = await client().deriveAspUserLeaf(aspSecret, notePublicKey);
+    const leafHex = await client().account().deriveAspUserLeaf({
+        membershipBlinding: aspSecret,
+        notePublicKey,
+    });
     const leafValue = BigInt(leafHex);
 
     const mClient = await getMembershipClient(contractId);

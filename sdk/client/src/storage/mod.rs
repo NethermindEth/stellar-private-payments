@@ -4,7 +4,8 @@ use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
 use types::{
-    ContractConfig, EncryptionPublicKey, NotePublicKey, PortfolioBalance, UserNoteSummary,
+    ContractConfig, EncryptionPublicKey, Field, NotePublicKey, OperationalFeedItem,
+    PortfolioBalance, RecipientLookup, UserNoteSummary,
 };
 
 use crate::{
@@ -79,6 +80,36 @@ pub(crate) fn portfolio_balances_from_storage(
         .map_err(|e| Error::Other(e.to_string()))
 }
 
+pub(crate) fn user_notes_from_storage(
+    storage: &SqliteStorage,
+    user_address: &str,
+    limit: u32,
+) -> Result<Vec<UserNoteSummary>, Error> {
+    storage
+        .list_user_notes(user_address, limit)
+        .map_err(|e| Error::Other(e.to_string()))
+}
+
+pub(crate) fn operational_feed_from_storage(
+    storage: &SqliteStorage,
+    limit: u32,
+    config: &ContractConfig,
+) -> Result<Vec<OperationalFeedItem>, Error> {
+    storage
+        .get_operational_feed(limit, &config.asp_membership, &config.public_key_registry)
+        .map_err(|e| Error::Other(e.to_string()))
+}
+
+pub(crate) fn recipient_lookup_from_storage(
+    storage: &SqliteStorage,
+    address: &str,
+    config: &ContractConfig,
+) -> Result<RecipientLookup, Error> {
+    storage
+        .recipient_lookup(address, &config.public_key_registry)
+        .map_err(|e| Error::Other(e.to_string()))
+}
+
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
 #[async_trait::async_trait(?Send)]
 pub trait Storage: stellar::ContractDataStorage {
@@ -107,6 +138,24 @@ pub trait Storage: stellar::ContractDataStorage {
         config: &ContractConfig,
     ) -> Result<Vec<PortfolioBalance>, Error>;
 
+    async fn list_user_notes(
+        &self,
+        user_address: &str,
+        limit: u32,
+    ) -> Result<Vec<UserNoteSummary>, Error>;
+
+    async fn operational_feed(
+        &self,
+        limit: u32,
+        config: &ContractConfig,
+    ) -> Result<Vec<OperationalFeedItem>, Error>;
+
+    async fn recipient_lookup(
+        &self,
+        address: &str,
+        config: &ContractConfig,
+    ) -> Result<RecipientLookup, Error>;
+
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error>;
 
     async fn build_disclosure_inputs(
@@ -115,6 +164,8 @@ pub trait Storage: stellar::ContractDataStorage {
     ) -> Result<Vec<DisclosureInputs>, Error>;
 
     async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error>;
+
+    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error>;
 
     async fn user_public_keys(
         &self,
