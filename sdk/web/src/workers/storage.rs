@@ -22,8 +22,8 @@ use stellar_private_payments_sdk::{
         flows::TransactParams,
     },
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata,
-        UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, PortfolioBalance,
+        SyncMetadata, UserNoteSummary,
     },
 };
 use wasm_bindgen::JsError;
@@ -643,6 +643,29 @@ impl Storage for StorageBridge {
             Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
             Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading notes: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn list_portfolio_balances(
+        &self,
+        user_address: &str,
+        config: &ContractConfig,
+    ) -> Result<Vec<PortfolioBalance>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::PortfolioBalances(user_address.to_string()),
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PortfolioBalances(balances)) => {
+                let _ = config;
+                Ok(balances)
+            }
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading portfolio balances: {other:?}"
             ))),
             Err(e) => Err(Error::Other(e.to_string())),
         }

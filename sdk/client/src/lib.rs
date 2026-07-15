@@ -120,8 +120,8 @@ pub use transact::{
 };
 pub use tx_planner::{SpendTarget, SpendableNote, Transact};
 pub use types::{
-    Estimate, PrivatePoolConfig, ProverArtifacts, SignedTransaction, TransactChainContext,
-    TransactionResult, TransferRecipient,
+    Estimate, PortfolioBalance, PrivatePoolConfig, ProverArtifacts, SignedTransaction,
+    TransactChainContext, TransactionResult, TransferRecipient,
 };
 
 /// Groth16 prove output for a transact step (simulate / sign / submit).

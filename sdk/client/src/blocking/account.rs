@@ -1,8 +1,10 @@
 //! Sync wrapper around [`crate::Account`] via a shared Tokio runtime.
 
+use types::PortfolioBalance;
+
 use crate::{Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage};
 
-use super::pool::PrivatePool;
+use super::{pool::PrivatePool, runtime::block_on};
 
 /// Stellar account session (address + signer) with blocking pool factory.
 ///
@@ -26,6 +28,10 @@ impl Account {
 
     pub fn storage(&self) -> &LocalStorage {
         self.inner.storage()
+    }
+
+    pub fn portfolio(&self) -> Result<Vec<PortfolioBalance>, Error> {
+        block_on(self.inner.portfolio())
     }
 
     pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, Error> {

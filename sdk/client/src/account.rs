@@ -1,6 +1,9 @@
-use types::ContractConfig;
+use types::{ContractConfig, PortfolioBalance};
 
-use crate::{Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode};
+use crate::{
+    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode,
+    chain::Indexer,
+};
 
 /// Stellar account session
 ///
@@ -48,6 +51,16 @@ impl<S: Storage> Account<S> {
         &self.storage
     }
 
+    /// Portfolio balances across all enabled pools in the deployment.
+    ///
+    /// With [`SyncMode::Inline`], local storage is synced before reading.
+    pub async fn portfolio(&self) -> Result<Vec<PortfolioBalance>, Error> {
+        self.ensure_synced().await?;
+        self.storage
+            .list_portfolio_balances(&self.user_address, &self.contract_config)
+            .await
+    }
+
     /// Create an owned pool session for `pool_contract_id`.
     pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, Error> {
         let cfg = PrivatePoolConfig {
@@ -64,5 +77,27 @@ impl<S: Storage> Account<S> {
             self.prover.clone(),
             self.sync_mode,
         )
+    }
+
+    async fn ensure_synced(&self) -> Result<(), Error> {
+        match self.sync_mode {
+            SyncMode::Inline => self.sync().await?,
+            SyncMode::Background => {}
+        }
+        Ok(())
+    }
+
+    async fn sync(&self) -> Result<(), Error> {
+        let rpc = stellar::Client::new(&self.rpc_url)
+            .map_err(|e| Error::Other(format!("rpc client: {e:#}")))?;
+        let indexer = Indexer::init(rpc, self.storage.fork()?, &self.contract_config)
+            .await
+            .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
+        indexer
+            .catch_up()
+            .await
+            .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
+        self.storage.process_pending_state().await?;
+        Ok(())
     }
 }

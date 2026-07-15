@@ -5,11 +5,13 @@ use state::{SqliteStorage, StoredUserKeys};
 use stellar::ContractDataStorage;
 use tx_planner::SpendableNote;
 use types::{
-    ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata, UserNoteSummary,
+    ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, PortfolioBalance,
+    SyncMetadata, UserNoteSummary,
 };
 
 use super::{
-    Storage, map_build_params, map_user_keys, pool_notes_from_storage, spendable_notes_from_storage,
+    Storage, map_build_params, map_user_keys, pool_notes_from_storage,
+    portfolio_balances_from_storage, spendable_notes_from_storage,
 };
 use crate::{
     core::process_local_state,
@@ -93,6 +95,14 @@ impl Storage for LocalStorage {
         user_address: &str,
     ) -> Result<Vec<UserNoteSummary>, Error> {
         pool_notes_from_storage(&self.storage(), pool_contract_id, user_address)
+    }
+
+    async fn list_portfolio_balances(
+        &self,
+        user_address: &str,
+        config: &ContractConfig,
+    ) -> Result<Vec<PortfolioBalance>, Error> {
+        portfolio_balances_from_storage(&self.storage(), user_address, config)
     }
 
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {

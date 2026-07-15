@@ -3,7 +3,9 @@
 use prover::flows::TransactParams;
 use state::{SqliteStorage, StoredUserKeys};
 use tx_planner::SpendableNote;
-use types::{EncryptionPublicKey, NotePublicKey, UserNoteSummary};
+use types::{
+    ContractConfig, EncryptionPublicKey, NotePublicKey, PortfolioBalance, UserNoteSummary,
+};
 
 use crate::{
     disclosure::{DisclosureInputs, DisclosureInputsRequest},
@@ -67,6 +69,16 @@ pub(crate) fn pool_notes_from_storage(
         .map_err(|e| Error::Other(e.to_string()))
 }
 
+pub(crate) fn portfolio_balances_from_storage(
+    storage: &SqliteStorage,
+    user_address: &str,
+    config: &ContractConfig,
+) -> Result<Vec<PortfolioBalance>, Error> {
+    storage
+        .list_portfolio_balances(user_address, config)
+        .map_err(|e| Error::Other(e.to_string()))
+}
+
 /// Wallet reads and sync lifecycle for [`crate::pool::PrivatePool`].
 #[async_trait::async_trait(?Send)]
 pub trait Storage: stellar::ContractDataStorage {
@@ -88,6 +100,12 @@ pub trait Storage: stellar::ContractDataStorage {
         pool_contract_id: &str,
         user_address: &str,
     ) -> Result<Vec<UserNoteSummary>, Error>;
+
+    async fn list_portfolio_balances(
+        &self,
+        user_address: &str,
+        config: &ContractConfig,
+    ) -> Result<Vec<PortfolioBalance>, Error>;
 
     async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error>;
 

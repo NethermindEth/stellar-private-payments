@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::Result;
 use stellar_private_payments_sdk::{
     Handle, LocalProver, LocalSigner, LocalStorage, Signer, SyncMode, TransferRecipient,
-    blocking::{Client, PrivatePool},
+    blocking::{Account, Client, PrivatePool},
     types::{ContractConfig, NoteAmount, NotePublicKey},
 };
 use types::{EncryptionPublicKey, Field};
@@ -40,7 +40,15 @@ const TEST_SIGNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOB
 
 pub use crate::seed::TEST_NETWORK;
 
-pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+pub fn test_account(wallet: Option<&[u64]>) -> Result<Account> {
+    Ok(test_client_and_account(wallet)?.1)
+}
+
+pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+    Ok(test_client_and_account(wallet)?.1.pool(POOL_CONTRACT_ID)?)
+}
+
+fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> {
     static RUN: AtomicUsize = AtomicUsize::new(0);
     let db_path = std::env::temp_dir().join(format!(
         "stellar-sdk-test-{}-{}.sqlite",
@@ -74,13 +82,8 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         "https://soroban-testnet.stellar.org",
     );
     let account = client.account(USER_ADDRESS, test_signer()?)?;
-    let pool = account.pool(POOL_CONTRACT_ID)?;
 
-    Ok(pool)
-}
-
-pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
-    test_session(wallet)
+    Ok((client, account))
 }
 
 pub fn test_recipient() -> TransferRecipient {
