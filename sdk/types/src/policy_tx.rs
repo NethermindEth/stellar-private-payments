@@ -195,7 +195,10 @@ mod tests {
             let stem = flags.circuit_stem();
             assert_eq!(PolicyFlags::from_stem(&stem).expect("parse stem"), flags);
         }
-        assert_eq!(PolicyFlags::all_stems().len(), PolicyFlags::all_flags().len());
+        assert_eq!(
+            PolicyFlags::all_stems().len(),
+            PolicyFlags::all_flags().len()
+        );
     }
 
     #[test]

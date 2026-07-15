@@ -1,10 +1,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use stellar_private_payments_sdk::{
-    ProverArtifacts,
-    types::PolicyFlags,
-};
+use stellar_private_payments_sdk::{ProverArtifacts, types::PolicyFlags};
 
 use crate::config::default_data_dir;
 
