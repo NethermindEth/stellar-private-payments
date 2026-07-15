@@ -8,24 +8,24 @@ use crate::{
     config::{CliConfig, validate_pool},
     explorer::Explorer,
     onboard, output,
-    session::{PoolSession, parse_amount, parse_transfer_recipient},
+    session::{ClientSession, parse_amount, parse_transfer_recipient},
 };
 
-fn open(config: &CliConfig, pool: &str) -> Result<PoolSession> {
+fn open_pool(
+    config: &CliConfig,
+    pool: &str,
+) -> Result<stellar_private_payments_sdk::blocking::PrivatePool> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     validate_pool(pool, &config.deployment)?;
     let network = config.resolve_network()?;
-    PoolSession::open(config, &account, &network, pool)
+    ClientSession::new(config, &account, &network, false)?.pool(pool)
 }
 
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
-    let session = open(config, pool)?;
+    let pool = open_pool(config, pool)?;
     let amount = parse_amount(amount)?;
-    let result = session
-        .pool()
-        .deposit(amount)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = pool.deposit(amount).map_err(|e| anyhow::anyhow!("{e}"))?;
     print_tx_results(
         config,
         "Deposit submitted",
@@ -43,11 +43,10 @@ pub fn transfer(
     encryption_key: Option<&str>,
     json: bool,
 ) -> Result<()> {
-    let session = open(config, pool)?;
+    let pool = open_pool(config, pool)?;
     let recipient = parse_transfer_recipient(to, note_key, encryption_key)?;
     let amount = parse_amount(amount)?;
-    let results = session
-        .pool()
+    let results = pool
         .transfer(recipient, amount)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     print_tx_results(config, "Transfer submitted", &results, json)
@@ -64,10 +63,9 @@ pub fn withdraw(
         Some(address) => address.to_string(),
         None => config.require_account()?.address,
     };
-    let session = open(config, pool)?;
+    let pool = open_pool(config, pool)?;
     let amount = parse_amount(amount)?;
-    let results = session
-        .pool()
+    let results = pool
         .withdraw(amount, recipient)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     print_tx_results(config, "Withdraw submitted", &results, json)

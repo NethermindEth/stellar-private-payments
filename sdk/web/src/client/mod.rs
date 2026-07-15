@@ -9,7 +9,7 @@ mod transact;
 use std::rc::Rc;
 
 use serde::Deserialize;
-use stellar_private_payments_sdk::{PoolError, chain::StateFetcher, types::DisclosureReceipt};
+use stellar_private_payments_sdk::{Error, chain::StateFetcher, types::DisclosureReceipt};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -27,21 +27,21 @@ pub use account::Account;
 pub(crate) use pool::PoolCreateConfig;
 pub use pool::PrivatePool;
 
-pub(crate) fn pool_err(error: PoolError) -> JsError {
+pub(crate) fn pool_err(error: Error) -> JsError {
     use stellar_private_payments_sdk::types::AspMembershipSync;
 
     match &error {
-        PoolError::MembershipSync(AspMembershipSync::RegisterAtASP) => {
+        Error::MembershipSync(AspMembershipSync::RegisterAtASP) => {
             JsError::new("register at ASP before transacting")
         }
-        PoolError::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
+        Error::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
             JsError::new("indexer sync in progress; try again shortly")
         }
         _ => JsError::new(&error.to_string()),
     }
 }
 
-pub(crate) fn pool_err_message(error: PoolError) -> String {
+pub(crate) fn pool_err_message(error: Error) -> String {
     error.to_string()
 }
 

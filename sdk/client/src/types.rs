@@ -31,14 +31,14 @@ pub struct PrivatePoolConfig {
 }
 
 impl PrivatePoolConfig {
-    pub fn validate(&self) -> Result<(), crate::error::PoolError> {
+    pub fn validate(&self) -> Result<(), crate::error::Error> {
         if self.pool_contract_id.is_empty() {
-            return Err(crate::error::PoolError::InvalidConfig(
+            return Err(crate::error::Error::InvalidConfig(
                 "pool_contract_id must not be empty".into(),
             ));
         }
         if self.user_address.is_empty() {
-            return Err(crate::error::PoolError::InvalidConfig(
+            return Err(crate::error::Error::InvalidConfig(
                 "user_address must not be empty".into(),
             ));
         }

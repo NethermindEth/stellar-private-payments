@@ -4,7 +4,7 @@ mod progress;
 
 use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
-use stellar_private_payments_sdk::{PoolError, PreparedTransactionPlan, types::AspMembershipSync};
+use stellar_private_payments_sdk::{Error, PreparedTransactionPlan, types::AspMembershipSync};
 use wasm_bindgen::{JsError, JsValue};
 
 use super::{pool::PrivatePool, pool_err_message};
@@ -17,10 +17,7 @@ const SYNC_MAX_RETRIES: u32 = 30;
 type ExecuteOutcome = Result<Vec<String>, ExecuteFailure>;
 
 enum ExecuteFailure {
-    PlanFailed {
-        hashes: Vec<String>,
-        error: PoolError,
-    },
+    PlanFailed { hashes: Vec<String>, error: Error },
     AspNotReady,
 }
 
@@ -39,7 +36,7 @@ enum ExecuteJsResponse {
 }
 
 impl ExecuteFailure {
-    fn plan(hashes: Vec<String>, error: PoolError) -> ExecuteOutcome {
+    fn plan(hashes: Vec<String>, error: Error) -> ExecuteOutcome {
         Err(Self::PlanFailed { hashes, error })
     }
 }
@@ -107,18 +104,18 @@ impl PrivatePool {
 
                 match pool.prove_next(plan).await {
                     Ok(prepared) => break prepared,
-                    Err(error @ PoolError::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
+                    Err(error @ Error::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
                         if hashes.is_empty() {
                             return Err(ExecuteFailure::AspNotReady);
                         }
                         return ExecuteFailure::plan(hashes, error);
                     }
-                    Err(PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
+                    Err(Error::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
                         sync_waits = sync_waits.saturating_add(1);
                         if sync_waits > SYNC_MAX_RETRIES {
                             return ExecuteFailure::plan(
                                 hashes,
-                                PoolError::MembershipSync(AspMembershipSync::SyncRequired(gap)),
+                                Error::MembershipSync(AspMembershipSync::SyncRequired(gap)),
                             );
                         }
                         progress::emit(

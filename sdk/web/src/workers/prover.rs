@@ -12,7 +12,7 @@ use gloo_worker::{
 use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, fmt::Write as _};
 use stellar_private_payments_sdk::{
-    PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
+    Error, PreparedProverTx, Prover, ProverEngine, disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
     tx::flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
     types::{
@@ -544,32 +544,32 @@ impl ProverBridge {
 
 #[async_trait::async_trait(?Send)]
 impl Prover for ProverBridge {
-    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
+    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
         match self
             .call(ProverWorkerRequest::Transact(params), PROVE_TIMEOUT_MS)
             .await
         {
             Ok(ProverWorkerResponse::TransactPrepared(prepared)) => Ok(prepared),
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
     async fn prove_disclosure(
         &self,
         params: stellar_private_payments_sdk::DisclosureProveParams,
-    ) -> Result<DisclosureReceipt, PoolError> {
+    ) -> Result<DisclosureReceipt, Error> {
         match self
             .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)
             .await
         {
             Ok(ProverWorkerResponse::Disclosure(receipt)) => Ok(receipt),
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
@@ -577,7 +577,7 @@ impl Prover for ProverBridge {
         &self,
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
-    ) -> Result<bool, PoolError> {
+    ) -> Result<bool, Error> {
         match self
             .call(
                 ProverWorkerRequest::VerifyDisclosureProof(
@@ -589,10 +589,10 @@ impl Prover for ProverBridge {
             .await
         {
             Ok(ProverWorkerResponse::DisclosureProofVerified(v)) => Ok(v),
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected prover worker response: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 }

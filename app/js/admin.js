@@ -1,5 +1,5 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeWasm } from './wasm-facade.js';
+import { client, initializeRuntime } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
@@ -194,7 +194,8 @@ async function ensureCryptoReady() {
     setStatus('Loading app...', 'info');
     const { sorobanRpcUrl, ...network } = await getWalletNetwork();
     try {
-      await initializeWasm(sorobanRpcUrl);
+      await initializeRuntime(sorobanRpcUrl);
+      await client().startSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
       throw e;

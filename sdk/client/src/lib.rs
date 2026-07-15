@@ -105,7 +105,7 @@ pub use disclosure::{
     BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
     DisclosureRequest, build_disclosure_inputs, verify_disclosure_receipt,
 };
-pub use error::PoolError;
+pub use error::Error;
 pub use handle::Handle;
 pub use plan::PreparedTransactionPlan;
 pub use pool::PrivatePool;

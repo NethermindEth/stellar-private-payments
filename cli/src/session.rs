@@ -1,8 +1,7 @@
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    Handle, LocalProver, LocalStorage, NoopProver, Prover, ProverArtifacts, Signer, SyncMode,
-    TransferRecipient,
-    blocking::{Client, PrivatePool},
+    Handle, LocalProver, LocalStorage, NoopProver, Prover, Signer, SyncMode, TransferRecipient,
+    blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
@@ -11,52 +10,18 @@ use crate::{
     stellar_cli::StellarNetwork,
 };
 
-pub struct PoolSession {
-    pool: PrivatePool,
+/// SDK `Client` → `Account` session; open pools via [`Self::pool`].
+pub struct ClientSession {
+    account: SdkAccount,
 }
 
-impl PoolSession {
-    /// Open one pool with a full prover. `account` and `network` are resolved
-    /// once by the caller (so callers can reuse them across pools). Loads
-    /// circuit artifacts (proving key + circuit) — required for transacting
-    /// commands (deposit/transfer/withdraw), which is the only caller of this
-    /// path.
-    pub fn open(
+impl ClientSession {
+    /// Bind wallet + deployment. `readonly` skips circuit artifact load
+    /// (balance/notes/sync only).
+    pub fn new(
         config: &CliConfig,
         account: &Account,
         network: &StellarNetwork,
-        pool_contract_id: &str,
-    ) -> Result<Self> {
-        let artifacts = load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?;
-        Self::open_with(config, account, network, pool_contract_id, artifacts, false)
-    }
-
-    /// Open one pool without a prover. Skips loading the circuit artifacts
-    /// entirely (no proving-key deserialization, no WASM compile), so
-    /// read-only commands (`overview`, `feed`) are cheap. The resulting pool
-    /// can read balances/notes and sync, but any transact/prove call errors.
-    pub fn open_readonly(
-        config: &CliConfig,
-        account: &Account,
-        network: &StellarNetwork,
-        pool_contract_id: &str,
-    ) -> Result<Self> {
-        Self::open_with(
-            config,
-            account,
-            network,
-            pool_contract_id,
-            ProverArtifacts::empty(),
-            true,
-        )
-    }
-
-    fn open_with(
-        config: &CliConfig,
-        account: &Account,
-        network: &StellarNetwork,
-        pool_contract_id: &str,
-        prover_artifacts: ProverArtifacts,
         readonly: bool,
     ) -> Result<Self> {
         let storage_path = config.db_path().to_string_lossy().into_owned();
@@ -66,9 +31,8 @@ impl PoolSession {
         let prover: Handle<dyn Prover> = if readonly {
             Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>)
         } else {
-            Handle::from_box(
-                Box::new(LocalProver::from_artifacts(&prover_artifacts)?) as Box<dyn Prover>
-            )
+            let artifacts = load_prover_artifacts(Some(config.circuits_dir_path().as_path()))?;
+            Handle::from_box(Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>)
         };
 
         let client = Client::new(
@@ -82,16 +46,16 @@ impl PoolSession {
             .account(&account.address, alias_signer(config, account, network))
             .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
-        log::info!("Opening pool {pool_contract_id}");
-        let pool = sdk_account
-            .pool(pool_contract_id)
-            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
-
-        Ok(Self { pool })
+        Ok(Self {
+            account: sdk_account,
+        })
     }
 
-    pub fn pool(&self) -> &PrivatePool {
-        &self.pool
+    pub fn pool(&self, pool_contract_id: &str) -> Result<PrivatePool> {
+        log::info!("Opening pool {pool_contract_id}");
+        self.account
+            .pool(pool_contract_id)
+            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))
     }
 }
 

@@ -16,7 +16,7 @@ use witness::WitnessCalculator;
 
 use crate::{
     disclosure::DisclosureProveParams,
-    error::PoolError,
+    error::Error,
     transact::{PreparedProverTx, PreparedTxPublic},
 };
 use types::DisclosureReceipt;
@@ -89,16 +89,16 @@ impl ProverEngine {
 /// worker-backed implementation over channels.
 #[async_trait::async_trait(?Send)]
 pub trait Prover {
-    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError>;
+    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error>;
 
     async fn prove_disclosure(
         &self,
         params: DisclosureProveParams,
-    ) -> Result<DisclosureReceipt, PoolError>;
+    ) -> Result<DisclosureReceipt, Error>;
 
     async fn verify_disclosure_proof(
         &self,
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
-    ) -> Result<bool, PoolError>;
+    ) -> Result<bool, Error>;
 }

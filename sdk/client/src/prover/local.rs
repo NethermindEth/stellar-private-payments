@@ -5,7 +5,7 @@ use types::DisclosureReceipt;
 
 use crate::{
     disclosure::DisclosureProveParams,
-    error::PoolError,
+    error::Error,
     prover::{Prover, ProverEngine},
     transact::PreparedProverTx,
     types::ProverArtifacts,
@@ -15,35 +15,35 @@ use crate::{
 pub struct LocalProver(RefCell<ProverEngine>);
 
 impl LocalProver {
-    pub fn from_artifacts(artifacts: &ProverArtifacts) -> Result<Self, PoolError> {
+    pub fn from_artifacts(artifacts: &ProverArtifacts) -> Result<Self, Error> {
         ProverEngine::new(
             &artifacts.proving_key,
             &artifacts.circuit_wasm,
             &artifacts.circuit_r1cs,
         )
         .map(|engine| Self(RefCell::new(engine)))
-        .map_err(|e| PoolError::Other(format!("init prover: {e:#}")))
+        .map_err(|e| Error::Other(format!("init prover: {e:#}")))
     }
 
-    pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
+    pub fn prove(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
         self.0
             .borrow_mut()
             .prove_transact(params)
-            .map_err(|e| PoolError::Other(format!("prove: {e:#}")))
+            .map_err(|e| Error::Other(format!("prove: {e:#}")))
     }
 }
 
 #[async_trait::async_trait(?Send)]
 impl Prover for LocalProver {
-    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, PoolError> {
+    async fn prove_transact(&self, params: TransactParams) -> Result<PreparedProverTx, Error> {
         self.prove(params)
     }
 
     async fn prove_disclosure(
         &self,
         _params: DisclosureProveParams,
-    ) -> Result<DisclosureReceipt, PoolError> {
-        Err(PoolError::Other(
+    ) -> Result<DisclosureReceipt, Error> {
+        Err(Error::Other(
             "disclosure proving is not configured for this prover".into(),
         ))
     }
@@ -52,8 +52,8 @@ impl Prover for LocalProver {
         &self,
         _receipt: &DisclosureReceipt,
         _expected_vk_hash: &str,
-    ) -> Result<bool, PoolError> {
-        Err(PoolError::Other(
+    ) -> Result<bool, Error> {
+        Err(Error::Other(
             "disclosure verification is not configured for this prover".into(),
         ))
     }

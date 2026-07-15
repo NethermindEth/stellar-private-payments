@@ -2,7 +2,7 @@ use tx_planner::{PlanError, SpendSessionError};
 use types::AspMembershipSync;
 
 #[derive(Debug, thiserror::Error)]
-pub enum PoolError {
+pub enum Error {
     #[error("not implemented")]
     NotImplemented,
 
@@ -22,7 +22,7 @@ pub enum PoolError {
     Other(String),
 }
 
-impl PoolError {
+impl Error {
     pub fn other(msg: impl Into<String>) -> Self {
         Self::Other(msg.into())
     }

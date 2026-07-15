@@ -11,7 +11,7 @@ use types::{
 };
 
 use crate::{
-    error::PoolError,
+    error::Error,
     prover::Prover,
     transact::{build_validated_pool_tree, load_user_key_material},
 };
@@ -125,10 +125,10 @@ pub fn build_disclosure_inputs(
 
 pub(crate) fn map_build_disclosure_inputs(
     result: anyhow::Result<BuildDisclosureInputs>,
-) -> Result<Vec<DisclosureInputs>, PoolError> {
-    match result.map_err(|e| PoolError::Other(e.to_string()))? {
+) -> Result<Vec<DisclosureInputs>, Error> {
+    match result.map_err(|e| Error::Other(e.to_string()))? {
         BuildDisclosureInputs::Ready(inputs) => Ok(inputs),
-        BuildDisclosureInputs::MembershipSync(status) => Err(PoolError::MembershipSync(status)),
+        BuildDisclosureInputs::MembershipSync(status) => Err(Error::MembershipSync(status)),
     }
 }
 
@@ -139,12 +139,12 @@ pub async fn verify_disclosure_receipt(
     prover: &dyn Prover,
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
-) -> Result<DisclosureVerificationReport, PoolError> {
+) -> Result<DisclosureVerificationReport, Error> {
     let proof_verified = prover
         .verify_disclosure_proof(receipt, expected_vk_hash)
         .await?;
     let context_verified = ::disclosure::verify_receipt_context(receipt)
-        .map_err(|e| PoolError::Other(format!("context verification failed: {e}")))?;
+        .map_err(|e| Error::Other(format!("context verification failed: {e}")))?;
 
     let pool_contract_id = receipt.context.pool_address.clone();
     let mut known_root_status = true;
@@ -152,7 +152,7 @@ pub async fn verify_disclosure_receipt(
         let is_known = fetcher
             .is_pool_known_root(&pool_contract_id, *root)
             .await
-            .map_err(|e| PoolError::Other(format!("root freshness check failed: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("root freshness check failed: {e:#}")))?;
         if !is_known {
             known_root_status = false;
             break;
@@ -165,13 +165,12 @@ pub async fn verify_disclosure_receipt(
         let spent = fetcher
             .is_nullifier_spent(&pool_contract_id, *nullifier)
             .await
-            .map_err(|e| PoolError::Other(format!("nullifier spent check failed: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("nullifier spent check failed: {e:#}")))?;
         if spent {
             nullifiers_unspent = false;
             spent_nullifier_indices.push(
-                u32::try_from(index).map_err(|_| {
-                    PoolError::Other("nullifier index out of u32 range".to_string())
-                })?,
+                u32::try_from(index)
+                    .map_err(|_| Error::Other("nullifier index out of u32 range".to_string()))?,
             );
         }
     }

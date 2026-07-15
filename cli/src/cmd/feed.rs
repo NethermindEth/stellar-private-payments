@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::PoolSession};
+use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::ClientSession};
 
 const DEFAULT_LIMIT: u32 = 5;
 
@@ -14,13 +14,13 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
     let network = config.resolve_network()?;
 
     // Sync every enabled pool so the local event tables are current. Feed reads
-    // storage directly (not via the SDK), so sync explicitly here. A
-    // read-only session skips the prover load; sync is best-effort, so one
-    // unreachable pool warns and we still render the feed from what synced.
+    // storage directly (not via the SDK), so sync explicitly here. Sync is
+    // best-effort: one unreachable pool warns and we still render the feed.
+    let session = ClientSession::new(config, &account, &network, true)?;
     for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
-        match PoolSession::open_readonly(config, &account, &network, &entry.pool_contract_id) {
-            Ok(session) => {
-                if let Err(e) = session.pool().sync() {
+        match session.pool(&entry.pool_contract_id) {
+            Ok(pool) => {
+                if let Err(e) = pool.sync() {
                     log::warn!("pool {}: sync: {e:#}", entry.pool_contract_id);
                 }
             }

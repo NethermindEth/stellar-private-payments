@@ -14,7 +14,7 @@ use super::{
 use crate::{
     core::process_local_state,
     disclosure::{DisclosureInputs, DisclosureInputsRequest, map_build_disclosure_inputs},
-    error::PoolError,
+    error::Error,
     transact::TransactRequest,
 };
 
@@ -25,10 +25,10 @@ pub struct LocalStorage {
 }
 
 impl LocalStorage {
-    pub fn open(storage_path: &str) -> Result<Self, PoolError> {
+    pub fn open(storage_path: &str) -> Result<Self, Error> {
         let path = PathBuf::from(storage_path);
         let db = SqliteStorage::connect_file(&path)
-            .map_err(|e| PoolError::Other(format!("open storage: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("open storage: {e:#}")))?;
         Ok(Self {
             path,
             db: RefCell::new(db),
@@ -66,16 +66,16 @@ impl ContractDataStorage for LocalStorage {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for LocalStorage {
-    fn fork(&self) -> Result<Self, PoolError> {
+    fn fork(&self) -> Result<Self, Error> {
         let db = SqliteStorage::connect_file(self.path.as_path())
-            .map_err(|e| PoolError::Other(format!("fork storage: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("fork storage: {e:#}")))?;
         Ok(Self {
             path: self.path.clone(),
             db: RefCell::new(db),
         })
     }
 
-    async fn ensure_ready(&self) -> Result<(), PoolError> {
+    async fn ensure_ready(&self) -> Result<(), Error> {
         Ok(())
     }
 
@@ -83,7 +83,7 @@ impl Storage for LocalStorage {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-    ) -> Result<Vec<SpendableNote>, PoolError> {
+    ) -> Result<Vec<SpendableNote>, Error> {
         spendable_notes_from_storage(&self.storage(), pool_contract_id, user_address)
     }
 
@@ -91,35 +91,32 @@ impl Storage for LocalStorage {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-    ) -> Result<Vec<UserNoteSummary>, PoolError> {
+    ) -> Result<Vec<UserNoteSummary>, Error> {
         pool_notes_from_storage(&self.storage(), pool_contract_id, user_address)
     }
 
-    async fn build_transact_params(
-        &self,
-        req: &TransactRequest,
-    ) -> Result<TransactParams, PoolError> {
+    async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {
         map_build_params(crate::transact::build_transact_params(&self.storage(), req))
     }
 
     async fn build_disclosure_inputs(
         &self,
         req: &DisclosureInputsRequest,
-    ) -> Result<Vec<DisclosureInputs>, PoolError> {
+    ) -> Result<Vec<DisclosureInputs>, Error> {
         map_build_disclosure_inputs(crate::disclosure::build_disclosure_inputs(
             &self.storage(),
             req,
         ))
     }
 
-    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {
+    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         map_user_keys(&self.storage(), user_address)
     }
 
     async fn user_public_keys(
         &self,
         user_address: &str,
-    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         let keys = map_user_keys(&self.storage(), user_address)?;
         Ok((keys.note_keypair.public, keys.encryption_keypair.public))
     }
@@ -128,13 +125,13 @@ impl Storage for LocalStorage {
         &self,
         address: &str,
         _public_key_registry_contract_id: &str,
-    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         let entry = self
             .storage()
             .lookup_public_key_by_address(address)
-            .map_err(|e| PoolError::Other(format!("lookup recipient: {e:#}")))?
+            .map_err(|e| Error::Other(format!("lookup recipient: {e:#}")))?
             .ok_or_else(|| {
-                PoolError::Other(format!(
+                Error::Other(format!(
                     "recipient {address} not found in the public key registry; \
                      they must register keys on-chain"
                 ))
@@ -142,7 +139,7 @@ impl Storage for LocalStorage {
         Ok((entry.note_key, entry.encryption_key))
     }
 
-    async fn process_pending_state(&self) -> Result<(), PoolError> {
+    async fn process_pending_state(&self) -> Result<(), Error> {
         process_local_state(&mut self.storage_mut())
     }
 }

@@ -24,9 +24,6 @@ export interface AccountOptions {
   proverWorkerUrl?: string;
 }
 
-/** @deprecated Use {@link AccountOptions}. */
-export type InitializeOptions = AccountOptions;
-
 /** Options for {@link AccountClient.pool}. */
 export interface PoolOptions {
   poolContract: string;

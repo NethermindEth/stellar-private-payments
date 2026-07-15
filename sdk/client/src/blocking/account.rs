@@ -1,6 +1,6 @@
 //! Sync wrapper around [`crate::Account`] via a shared Tokio runtime.
 
-use crate::{Handle, PoolError, Signer, account::Account as AsyncAccount, storage::LocalStorage};
+use crate::{Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage};
 
 use super::pool::PrivatePool;
 
@@ -28,7 +28,7 @@ impl Account {
         self.inner.storage()
     }
 
-    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, PoolError> {
+    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool, Error> {
         Ok(PrivatePool::from_inner(self.inner.pool(pool_contract_id)?))
     }
 }

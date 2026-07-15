@@ -43,7 +43,7 @@ function wrapSdkClient(sdk, sdkStorage) {
         },
         storage() {
             if (!appStorageInstance) {
-                throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
+                throw new Error('Runtime not initialized. Call initializeRuntime first.');
             }
             return appStorageInstance;
         },
@@ -195,40 +195,10 @@ export async function initializeRuntime(rpcUrl) {
     return client();
 }
 
-/**
- * Legacy entry for admin/disclosure pages: runtime + event sync, no wallet.
- * Prefer `initializeRuntime` + `client().startSync` in new code.
- */
-export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
-    if (storageHandle && currentRpcUrl === rpcUrl && syncStarted && bootnodeUrl == null) {
-        return client();
-    }
-
-    const activeClient = await initializeRuntime(rpcUrl);
-
-    if (bootnodeUrl) {
-        await activeClient.startSync({ bootnodeUrl });
-    } else if (!syncStarted) {
-        await activeClient.startSync();
-    }
-
-    return client();
-}
-
 /** SDK deployment client + cached account session + storage-backed reads. */
 export function client() {
     if (!wrappedClient) {
-        throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
+        throw new Error('Runtime not initialized. Call initializeRuntime first.');
     }
     return wrappedClient;
-}
-
-/** @deprecated Use {@link client}().openAccount */
-export async function openAccount(options, signer) {
-    return client().openAccount(options, signer);
-}
-
-/** @deprecated Use {@link client}().openAccount */
-export async function initializeWallet(options, signer) {
-    return client().openAccount(options, signer);
 }

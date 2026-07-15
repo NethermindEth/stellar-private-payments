@@ -1,8 +1,8 @@
 use types::ContractConfig;
 
-use crate::{Handle, PoolError, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode};
+use crate::{Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode};
 
-/// Stellar account session (address + signer).
+/// Stellar account session
 ///
 /// Construct via [`crate::Client::account`].
 pub struct Account<S: Storage> {
@@ -49,7 +49,7 @@ impl<S: Storage> Account<S> {
     }
 
     /// Create an owned pool session for `pool_contract_id`.
-    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, PoolError> {
+    pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, Error> {
         let cfg = PrivatePoolConfig {
             rpc_url: self.rpc_url.clone(),
             contract_config: self.contract_config.clone(),

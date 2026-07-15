@@ -1,7 +1,7 @@
 use types::ContractConfig;
 
 use crate::{
-    Account, Handle, PoolError, Prover, Signer, Storage, SyncMode,
+    Account, Error, Handle, Prover, Signer, Storage, SyncMode,
     chain::{Indexer, StateFetcher},
 };
 
@@ -51,16 +51,16 @@ impl<S: Storage> Client<S> {
     }
 
     /// Catch local storage up to the current chain tip for the deployment.
-    pub async fn sync(&self) -> Result<(), PoolError> {
+    pub async fn sync(&self) -> Result<(), Error> {
         let rpc = stellar::Client::new(&self.rpc_url)
-            .map_err(|e| PoolError::Other(format!("rpc client: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("rpc client: {e:#}")))?;
         let indexer = Indexer::init(rpc, self.storage.fork()?, &self.contract_config)
             .await
-            .map_err(|e| PoolError::Other(format!("indexer: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
         indexer
             .catch_up()
             .await
-            .map_err(|e| PoolError::Other(format!("indexer catch-up: {e:#}")))?;
+            .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
         self.storage.process_pending_state().await?;
         Ok(())
     }
@@ -70,7 +70,7 @@ impl<S: Storage> Client<S> {
         &self,
         user_address: impl Into<String>,
         signer: Handle<dyn Signer>,
-    ) -> Result<Account<S>, PoolError> {
+    ) -> Result<Account<S>, Error> {
         Ok(Account::new(
             self.storage.fork()?,
             self.prover.clone(),
@@ -83,8 +83,8 @@ impl<S: Storage> Client<S> {
     }
 
     /// Chain-state accessor for this deployment.
-    pub fn state_fetcher(&self) -> Result<StateFetcher, PoolError> {
+    pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
         StateFetcher::new(&self.rpc_url, self.contract_config.clone())
-            .map_err(|e| PoolError::Other(format!("state fetcher: {e:#}")))
+            .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))
     }
 }

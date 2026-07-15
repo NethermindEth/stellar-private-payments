@@ -4,12 +4,12 @@ use state::{
     process_notes,
 };
 
-use crate::error::PoolError;
+use crate::error::Error;
 
 const PROCESS_FETCH_LIMIT: u32 = 50;
 
-pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), PoolError> {
-    while process_local_state_batch(storage).map_err(|e| PoolError::Other(e.to_string()))? {}
+pub(crate) fn process_local_state(storage: &mut SqliteStorage) -> Result<(), Error> {
+    while process_local_state_batch(storage).map_err(|e| Error::Other(e.to_string()))? {}
     Ok(())
 }
 

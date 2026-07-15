@@ -289,9 +289,9 @@ impl ClientCore {
         &self,
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
-    ) -> Result<DisclosureVerificationReport, stellar_private_payments_sdk::PoolError> {
+    ) -> Result<DisclosureVerificationReport, stellar_private_payments_sdk::Error> {
         self.ping_prover().await.map_err(|e| {
-            stellar_private_payments_sdk::PoolError::Other(format!("failed to load prover: {e:?}"))
+            stellar_private_payments_sdk::Error::Other(format!("failed to load prover: {e:?}"))
         })?;
         verify_disclosure_receipt(
             &self.fetcher,

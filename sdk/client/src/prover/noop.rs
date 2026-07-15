@@ -8,7 +8,7 @@
 use prover::flows::TransactParams;
 use types::DisclosureReceipt;
 
-use crate::{disclosure::DisclosureProveParams, error::PoolError, transact::PreparedProverTx};
+use crate::{disclosure::DisclosureProveParams, error::Error, transact::PreparedProverTx};
 
 use super::Prover;
 
@@ -19,22 +19,22 @@ pub struct NoopProver;
 
 #[async_trait::async_trait(?Send)]
 impl Prover for NoopProver {
-    async fn prove_transact(&self, _params: TransactParams) -> Result<PreparedProverTx, PoolError> {
-        Err(PoolError::Other(READ_ONLY.into()))
+    async fn prove_transact(&self, _params: TransactParams) -> Result<PreparedProverTx, Error> {
+        Err(Error::Other(READ_ONLY.into()))
     }
 
     async fn prove_disclosure(
         &self,
         _params: DisclosureProveParams,
-    ) -> Result<DisclosureReceipt, PoolError> {
-        Err(PoolError::Other(READ_ONLY.into()))
+    ) -> Result<DisclosureReceipt, Error> {
+        Err(Error::Other(READ_ONLY.into()))
     }
 
     async fn verify_disclosure_proof(
         &self,
         _receipt: &DisclosureReceipt,
         _expected_vk_hash: &str,
-    ) -> Result<bool, PoolError> {
-        Err(PoolError::Other(READ_ONLY.into()))
+    ) -> Result<bool, Error> {
+        Err(Error::Other(READ_ONLY.into()))
     }
 }

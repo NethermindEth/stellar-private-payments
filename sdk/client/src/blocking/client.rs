@@ -3,8 +3,8 @@
 use types::ContractConfig;
 
 use crate::{
-    Handle, PoolError, Prover, Signer, SyncMode, chain::StateFetcher,
-    client::Client as AsyncClient, storage::LocalStorage,
+    Error, Handle, Prover, Signer, SyncMode, chain::StateFetcher, client::Client as AsyncClient,
+    storage::LocalStorage,
 };
 
 use super::{account::Account, runtime::block_on};
@@ -43,7 +43,7 @@ impl Client {
         self.inner.rpc_url()
     }
 
-    pub fn sync(&self) -> Result<(), PoolError> {
+    pub fn sync(&self) -> Result<(), Error> {
         block_on(self.inner.sync())
     }
 
@@ -51,13 +51,13 @@ impl Client {
         &self,
         user_address: impl Into<String>,
         signer: Handle<dyn Signer>,
-    ) -> Result<Account, PoolError> {
+    ) -> Result<Account, Error> {
         Ok(Account::from_inner(
             self.inner.account(user_address, signer)?,
         ))
     }
 
-    pub fn state_fetcher(&self) -> Result<StateFetcher, PoolError> {
+    pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
         self.inner.state_fetcher()
     }
 }
