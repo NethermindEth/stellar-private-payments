@@ -37,7 +37,11 @@ pub use pool::PrivatePool;
 pub(crate) fn pool_err(error: Error) -> JsError {
     use stellar_private_payments_sdk::types::AspMembershipSync;
 
-    match &error {
+    let cause = match &error {
+        Error::PlanExecution(plan) => plan.cause(),
+        other => other,
+    };
+    match cause {
         Error::MembershipSync(AspMembershipSync::RegisterAtASP) => {
             JsError::new("register at ASP before transacting")
         }
@@ -49,7 +53,10 @@ pub(crate) fn pool_err(error: Error) -> JsError {
 }
 
 pub(crate) fn pool_err_message(error: Error) -> String {
-    error.to_string()
+    match &error {
+        Error::PlanExecution(plan) => plan.cause().to_string(),
+        other => other.to_string(),
+    }
 }
 
 /// Deployment-scoped browser SDK runtime: native [`NativeClient`] plus worker

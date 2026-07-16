@@ -2,7 +2,7 @@
 //! contract id and requires a ready account.
 
 use anyhow::Result;
-use stellar_private_payments_sdk::types::TransactionResult;
+use stellar_private_payments_sdk::{Error, types::TransactionResult};
 
 use crate::{
     config::{CliConfig, validate_pool},
@@ -25,7 +25,9 @@ fn open_pool(
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
     let pool = open_pool(config, pool)?;
     let amount = parse_amount(amount)?;
-    let result = pool.deposit(amount).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let result = pool
+        .deposit(amount)
+        .map_err(|e| map_pool_err(config, e, json))?;
     print_tx_results(
         config,
         "Deposit submitted",
@@ -48,7 +50,7 @@ pub fn transfer(
     let amount = parse_amount(amount)?;
     let results = pool
         .transfer(recipient, amount)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| map_pool_err(config, e, json))?;
     print_tx_results(config, "Transfer submitted", &results, json)
 }
 
@@ -67,8 +69,24 @@ pub fn withdraw(
     let amount = parse_amount(amount)?;
     let results = pool
         .withdraw(amount, recipient)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        .map_err(|e| map_pool_err(config, e, json))?;
     print_tx_results(config, "Withdraw submitted", &results, json)
+}
+
+fn map_pool_err(config: &CliConfig, error: Error, json: bool) -> anyhow::Error {
+    if let Error::PlanExecution(plan) = &error {
+        if !plan.completed.is_empty() {
+            if json {
+                let _ = output::emit(&plan.completed, true);
+            } else {
+                let _ =
+                    print_tx_results(config, "Completed before failure", &plan.completed, false);
+            }
+        }
+        anyhow::anyhow!("{}", plan.cause())
+    } else {
+        anyhow::anyhow!("{error}")
+    }
 }
 
 fn print_tx_results(
