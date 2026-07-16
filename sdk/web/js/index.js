@@ -68,7 +68,15 @@ async function newClient(options) {
 }
 
 export const Storage = { open: openStorage };
-export const Client = { new: newClient, contractConfig: WasmClient.contractConfig };
+export const Client = {
+  new: newClient,
+  contractConfig: WasmClient.contractConfig,
+  verifySelectiveDisclosureStandalone: (rpcUrl, receiptJson, expectedVkHash, options = {}) =>
+    WasmClient.verifySelectiveDisclosureStandalone(rpcUrl, receiptJson, expectedVkHash, {
+      proverWorkerUrl,
+      ...options,
+    }),
+};
 export { PrivatePool };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

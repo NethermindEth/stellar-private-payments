@@ -4,7 +4,7 @@ Selective disclosure lets a privacy-pool note owner prove ownership of one or mo
 
 The result is a portable JSON **DisclosureReceipt** that can be inspected and verified offline by anyone with the receipt file and the canonical verifying-key hash for the circuit named in the receipt.
 
-> **Scope**: This page documents the disclosure receipt format, the standalone `disclosure.html` page, and the three-check verification semantics. Circuit and cryptography details are in the [API Reference](./api.md) and crate-level rustdocs.
+> **Scope**: This page documents the disclosure receipt format, the **Disclosure** view in the main app, and the three-check verification semantics. Circuit and cryptography details are in the [API Reference](./api.md) and crate-level rustdocs.
 
 ---
 
@@ -55,7 +55,7 @@ The `extContextHash` is a SHA-256 hash of all context fields (network, pool addr
 
 ## Generating a Receipt
 
-Note owners generate receipts through the standalone **Disclosure** page at `/disclosure.html`.
+Note owners generate receipts through the **Disclosure** view in the main app, reached via the **Disclosure** tab (`/#disclosure`).
 
 ### Prerequisites
 - Freighter wallet extension installed and switched to testnet.
@@ -63,7 +63,7 @@ Note owners generate receipts through the standalone **Disclosure** page at `/di
 - The account has at least one **unspent** note in the pool.
 
 ### Steps
-1. Open `/disclosure.html` and connect your wallet.
+1. Click the **Disclosure** tab (or navigate to `/#disclosure`) and connect your wallet.
 2. The page loads your unspent notes automatically from local storage.
 3. Select 1–4 notes you want to disclose.
 4. Fill in the context form:
@@ -76,10 +76,10 @@ Note owners generate receipts through the standalone **Disclosure** page at `/di
 7. Download the receipt JSON.
 
 ### Preselection via URL
-A per-row "Disclose" button in the main app's notes table (planned post-merge) links to:
+A per-row **Disclose** button in the main app's notes table (Advanced tab → Actions column) links to:
 
 ```
-/disclosure.html?commitment=0x<note-commitment>
+/#disclosure?commitment=0x<note-commitment>
 ```
 
 This pre-selects the matching notes if they are owned and unspent. Multiple `commitment` parameters may be provided to select up to four notes.
@@ -88,13 +88,13 @@ This pre-selects the matching notes if they are owned and unspent. Multiple `com
 
 ## Verifying a Receipt
 
-Anyone with the receipt JSON can verify it at `/disclosure.html`, **no wallet required**.
+Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify section, **no wallet required**.
 
 ### Prerequisites
 - The canonical `expected_vk_hash` for the circuit named in the receipt.
 
 ### Steps
-1. Scroll to the **Verify Disclosure Receipt** section (or open `/disclosure.html?verify=1`).
+1. Scroll to the **Verify Disclosure Receipt** section (or open `/#disclosure?verify=1`).
 2. Upload the receipt JSON via the file picker, or paste it into the textarea and click **Load Receipt**.
 3. Review the receipt context summary to confirm *what* is being attested.
 4. Confirm the **Expected VK hash** field. It defaults to the canonical hash published in this documentation and in `deployments/testnet/circuit_keys/README.md`. Authorities who pin a different key can click **Override** and paste their own hash.
@@ -121,7 +121,7 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 1. Open the main app and connect your Freighter wallet on Testnet.
 2. Scroll to **Your Notes** and find an unspent note you want to disclose.
-3. Click **Disclose** in the note's Actions column. This opens `/disclosure.html?commitment=0x<note-commitment>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
+3. Click **Disclose** in the note's Actions column. This opens `/#disclosure?commitment=0x<note-commitment>` with the note preselected. To preselect multiple notes, repeat the `commitment` query parameter.
 4. Enter the context requested by the authority:
    - **Authority label** — e.g. the company or regulator name.
    - **Authority identity payload** — an `0x`-prefixed hex string the authority associates with you.
@@ -134,8 +134,8 @@ The verifier **must not** trust the `vkHash` value embedded inside the receipt i
 
 ### For authorities: verifying a receipt walletlessly
 
-1. Open `/disclosure.html?verify=1` (or click **Verify** in the main app header).
-2. No wallet is required. The page initializes against the Testnet RPC automatically.
+1. Open `/#disclosure?verify=1` (or click the **Disclosure** tab in the main app header, then scroll to Verify).
+2. No wallet is required. The page connects to a public Testnet RPC automatically when you click Verify.
 3. Upload the receipt JSON or paste it into the import area and click **Load Receipt**.
 4. Confirm the **Expected VK hash** field matches the canonical hash for the receipt's `circuit.name`. If you pin a different disclosure key, click **Override** and enter your hash.
 5. Review the receipt context summary to ensure it describes the attestation you requested.

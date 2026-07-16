@@ -4,8 +4,9 @@
 //
 // This module is intentionally PURE and STATELESS: it has no dependency on
 // App.state, App.events, polling, or DOM <template> tags. Every element is
-// built with el()/elc(), so the module works on any page (index.html and
-// disclosure.html). Callers own their state/lifecycle and pass in data +
+// built with el()/elc(), so the module works regardless of which view panel
+// mounts it (the Advanced notes table or the Disclosure view, both in
+// index.html). Callers own their state/lifecycle and pass in data +
 // callbacks; the module returns DOM and derived values.
 //
 // Reuse boundary (by design): the table view keeps its own <tr>/<td> row

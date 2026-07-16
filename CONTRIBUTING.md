@@ -35,9 +35,8 @@ stellar-private-payments/
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
 │   ├── assets/                 # Static assets (logo, favicon)
-│   ├── index.html              # Main web application entry
-│   ├── admin.html              # Admin entry
-│   └── disclosure.html         # Selective disclosure entry
+│   ├── index.html              # Main web application entry (includes the Disclosure view)
+│   └── admin.html              # Admin entry
 ├── sdk/                        # Platform-agnostic Rust SDK crates
 │   ├── web/                    # Browser npm package (WASM, workers, bundled circuits)
 │   ├── disclosure/             # Selective disclosure

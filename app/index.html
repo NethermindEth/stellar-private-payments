@@ -57,6 +57,7 @@
                         <button type="button" data-view="dashboard" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Overview</button>
                         <button type="button" data-view="move-funds" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Move Funds</button>
                         <button type="button" data-view="advanced" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Advanced</button>
+                        <button type="button" data-view="disclosure" class="rounded-full border border-white/10 px-4 py-2 text-sm font-medium text-slate-400 transition hover:border-cyan-300/30 hover:text-cyan-100">Disclosure</button>
                     </nav>
 
                     <div class="flex items-center gap-2">
@@ -238,7 +239,7 @@
                                             <th class="px-3 py-3 font-medium">Note</th>
                                             <th class="px-3 py-3 font-medium">Amount</th>
                                             <th class="px-3 py-3 font-medium">Status</th>
-                                            <th class="px-3 py-3 font-medium">Actions</th>
+                                            <th class="px-3 py-3 font-medium text-right">Actions</th>
                                         </tr>
                                     </thead>
                                     <tbody id="advanced-notes-tbody"></tbody>
@@ -291,6 +292,33 @@
                             <span class="btn-text">Execute Advanced Transaction</span>
                             <span class="btn-loading hidden"></span>
                         </button>
+                    </section>
+                </div>
+            </section>
+
+            <section class="view-panel hidden" data-view-panel="disclosure">
+                <div class="space-y-6">
+                    <section class="rounded-[28px] border border-white/8 bg-white/[0.03] p-6 backdrop-blur-xl">
+                        <div class="flex flex-col gap-4">
+                            <div>
+                                <p class="text-[11px] font-semibold uppercase tracking-[0.34em] text-cyan-200/70">Disclosure Workspace</p>
+                                <h2 class="mt-2 text-2xl font-semibold tracking-tight text-white">Selective Disclosure</h2>
+                                <p class="mt-2 max-w-xl text-sm text-slate-400">Generate and verify selective disclosure receipts.</p>
+                            </div>
+                        </div>
+                        <div class="mt-8 space-y-6">
+                            <!-- Generate Section -->
+                            <section id="disclosure-generate" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="generate-heading">
+                                <h2 id="generate-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Generate Disclosure Receipt</h2>
+                                <!-- Rendered by disclosure.js -->
+                            </section>
+
+                            <!-- Verify Section -->
+                            <section id="disclosure-verify" class="bg-dark-900/80 backdrop-blur-sm border border-dark-800 rounded-xl p-4 sm:p-6" aria-labelledby="verify-heading">
+                                <h2 id="verify-heading" class="text-sm uppercase tracking-[0.25em] text-brand-400 mb-4">Verify Disclosure Receipt</h2>
+                                <!-- Rendered by disclosure.js -->
+                            </section>
+                        </div>
                     </section>
                 </div>
             </section>
@@ -591,10 +619,10 @@
             <td class="note-amount px-3 py-3 font-mono text-sm"></td>
             <td class="px-3 py-3"><span class="note-status inline-flex rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-1 text-[11px] font-medium text-cyan-100"></span></td>
             <td class="px-3 py-3">
-                <div class="flex flex-wrap gap-1.5">
-                    <button type="button" class="note-use rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
-                    <button type="button" class="note-copy rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
-                    <a class="note-disclose rounded-full border border-white/10 px-3 py-1.5 text-xs font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" href="disclosure.html" title="Selective disclosure">Disclose</a>
+                <div class="flex flex-nowrap justify-end gap-0.5">
+                    <button type="button" class="note-use rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Use</button>
+                    <button type="button" class="note-copy rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100">Copy</button>
+                    <button type="button" class="note-disclose rounded-full border border-white/10 px-2 py-1.5 text-[11px] font-medium text-slate-300 transition hover:border-cyan-300/30 hover:text-cyan-100" data-view="disclosure" title="Selective disclosure">Disclose</button>
                 </div>
             </td>
         </tr>
