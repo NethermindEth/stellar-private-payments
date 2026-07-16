@@ -315,6 +315,32 @@ impl Client {
         Ok(serde_wasm_bindgen::to_value(&report)?)
     }
 
+    /// Verify a selective-disclosure receipt with no wallet, no local storage,
+    /// and no `Client` instance — just an RPC URL. Skips the OPFS/SQLite
+    /// storage worker entirely, since verification never reads local state.
+    #[wasm_bindgen(js_name = verifySelectiveDisclosureStandalone)]
+    pub async fn verify_selective_disclosure_standalone(
+        rpc_url: String,
+        receipt_json: String,
+        expected_vk_hash: String,
+        options: JsValue,
+    ) -> Result<JsValue, JsError> {
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+            VerifyDisclosureOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+
+        let core = ClientCore::connect_stateless(rpc_url, opts.prover_worker_url).await?;
+        let report = core
+            .verify_selective_disclosure(&receipt, &expected_vk_hash)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&report)?)
+    }
+
     /// Open a private pool session for this account.
     pub async fn pool(&self, options: JsValue) -> Result<PrivatePool, JsError> {
         let (core, signer, user_address) = self.initialized()?;

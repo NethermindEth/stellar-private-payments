@@ -35,7 +35,7 @@ const DEFAULT_PROVER_WORKER_URL: &str = "./workers/prover-worker.js";
 #[derive(Clone)]
 pub(crate) struct ClientCore {
     rpc_url: String,
-    storage: StorageBridge,
+    storage: Option<StorageBridge>,
     prover_bridge: ProverBridge,
     fetcher: Rc<StateFetcher>,
 }
@@ -68,7 +68,7 @@ impl ClientCore {
         );
         let core = Self {
             rpc_url,
-            storage: storage_bridge,
+            storage: Some(storage_bridge),
             prover_bridge: ProverBridge::new(
                 ProverWorker::spawner()
                     .with_loader(true)
@@ -85,7 +85,38 @@ impl ClientCore {
         Ok(core)
     }
 
-    pub(crate) fn storage(&self) -> StorageBridge {
+    /// Connect without a local storage worker (no OPFS/SQLite init). Only
+    /// [`Self::verify_selective_disclosure`] is safe to call on the result —
+    /// any method touching `self.storage` returns an error.
+    pub(crate) async fn connect_stateless(
+        rpc_url: String,
+        prover_worker_url: Option<String>,
+    ) -> Result<Self, JsError> {
+        crate::wasm_start();
+
+        let contract_config = deployment_config()?;
+        let prover_worker_url =
+            prover_worker_url.unwrap_or_else(|| DEFAULT_PROVER_WORKER_URL.to_string());
+
+        let fetcher = Rc::new(
+            StateFetcher::new(&rpc_url, (*contract_config).clone())
+                .map_err(|e| JsError::new(&e.to_string()))?,
+        );
+
+        Ok(Self {
+            rpc_url,
+            storage: None,
+            prover_bridge: ProverBridge::new(
+                ProverWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&prover_worker_url),
+            ),
+            fetcher,
+        })
+    }
+
+    pub(crate) fn storage(&self) -> Option<StorageBridge> {
         self.storage.clone()
     }
 
@@ -186,6 +217,10 @@ impl ClientCore {
             .await
             .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
+        let storage = self
+            .storage()
+            .ok_or_else(|| JsError::new("pool creation requires a storage-backed client"))?;
+
         let contract_config = self.fetcher.contract_config().clone();
         let pool_config = build_pool_config(
             self.rpc_url.clone(),
@@ -199,7 +234,7 @@ impl ClientCore {
 
         stellar_private_payments_sdk::PrivatePool::init(
             pool_config,
-            self.storage(),
+            storage,
             signer,
             prover,
             stellar_private_payments_sdk::SyncMode::Background,
@@ -268,14 +303,21 @@ impl ClientCore {
         req: StorageWorkerRequest,
         timeout_ms: u32,
     ) -> Result<StorageWorkerResponse, JsError> {
-        self.storage
+        let storage = self
+            .storage
+            .as_ref()
+            .ok_or_else(|| JsError::new("local storage is not available in walletless mode"))?;
+        storage
             .call(req, timeout_ms)
             .await
             .map_err(|e| JsError::new(&format!("storage worker error: {e}")))
     }
 
     async fn ping_storage(&self) -> anyhow::Result<()> {
-        self.storage.ping().await
+        match &self.storage {
+            Some(storage) => storage.ping().await,
+            None => Ok(()),
+        }
     }
 
     async fn ping_prover(&self) -> anyhow::Result<()> {

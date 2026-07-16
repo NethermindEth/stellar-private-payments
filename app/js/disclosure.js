@@ -1,4 +1,4 @@
-import { client, initializeRuntime } from './wasm-facade.js';
+import { client, isRuntimeReady, verifySelectiveDisclosureStandalone } from './wasm-facade.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
@@ -24,6 +24,9 @@ const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_4:
     '0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9',
 };
+
+// Public testnet endpoint used to verify a receipt when no wallet is connected.
+const DEFAULT_TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
 
 // ---------------------------------------------------------------------------
 // State
@@ -903,6 +906,43 @@ export function mountVerify(container) {
   vkWrap.appendChild(vkErrorEl);
   summaryWrap.appendChild(vkWrap);
 
+  // -------------------------------------------------------------------------
+  // RPC endpoint (only used when no wallet is connected)
+  // -------------------------------------------------------------------------
+  const rpcDetails = document.createElement('details');
+  rpcDetails.className = 'text-xs';
+  const rpcSummary = document.createElement('summary');
+  rpcSummary.className = 'cursor-pointer text-dark-400 hover:text-brand-400 select-none';
+  rpcSummary.textContent = 'Advanced: RPC endpoint';
+  rpcDetails.appendChild(rpcSummary);
+
+  const rpcWrap = document.createElement('div');
+  rpcWrap.className = 'mt-2 space-y-1';
+  const rpcInput = document.createElement('input');
+  rpcInput.type = 'text';
+  rpcInput.value = DEFAULT_TESTNET_RPC_URL;
+  rpcInput.className =
+    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
+  rpcWrap.appendChild(rpcInput);
+
+  const rpcHintEl = document.createElement('div');
+  rpcHintEl.className = 'text-[10px] text-dark-500';
+  rpcWrap.appendChild(rpcHintEl);
+
+  rpcDetails.appendChild(rpcWrap);
+  summaryWrap.appendChild(rpcDetails);
+
+  const updateRpcFieldState = () => {
+    const walletActive = isRuntimeReady() && App.state.wallet.connected;
+    rpcInput.disabled = walletActive;
+    rpcHintEl.textContent = walletActive
+      ? "Using the connected wallet's Soroban RPC network. No separate connection is needed to verify."
+      : 'No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint is only used to confirm the Merkle root is still recognized on-chain and the nullifiers are unspent.';
+  };
+  updateRpcFieldState();
+  App.events.addEventListener('wallet:ready', updateRpcFieldState);
+  App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
+
   // Verify button
   const verifyBtn = document.createElement('button');
   verifyBtn.type = 'button';
@@ -1159,10 +1199,20 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await client().verifySelectiveDisclosure(
-        JSON.stringify(receipt),
-        expectedVkHash
-      );
+      let walletClient;
+      try {
+        walletClient = client();
+      } catch {
+        walletClient = null;
+      }
+
+      const report = walletClient
+        ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
+        : await verifySelectiveDisclosureStandalone(
+            rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL,
+            JSON.stringify(receipt),
+            expectedVkHash
+          );
 
       const proofOk = !!report.proofVerified;
       const contextOk = !!report.contextVerified;
@@ -1266,6 +1316,9 @@ export function mountVerify(container) {
       }
     } catch (err) {
       console.error('Verification failed:', err);
+      if (isDbLockedError(err?.message)) {
+        showDbLockedModal(err.message);
+      }
       resultsWrap.replaceChildren(
         el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
           `Verification could not be completed: ${err.message || 'Unknown error'}`),
