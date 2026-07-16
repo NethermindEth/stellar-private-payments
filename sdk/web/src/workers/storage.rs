@@ -506,36 +506,6 @@ impl StorageBridge {
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }
-
-    pub(crate) async fn clear_indexing_cursors(&self) -> anyhow::Result<()> {
-        match self
-            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
-            .await?
-        {
-            StorageWorkerResponse::Saved => Ok(()),
-            other => Err(anyhow!("unexpected response: {other:?}")),
-        }
-    }
-
-    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        match self
-            .call(
-                StorageWorkerRequest::GetSetting(
-                    stellar_private_payments_sdk::state::APP_SETTING_BOOTNODE_CONFIG.to_string(),
-                ),
-                2_000,
-            )
-            .await
-        {
-            Ok(StorageWorkerResponse::Setting(Some(json))) => {
-                serde_json::from_str::<stellar_private_payments_sdk::types::BootnodeSetting>(&json)
-                    .ok()
-                    .filter(|config| config.enabled && !config.url.is_empty())
-                    .map(|config| config.url)
-            }
-            _ => None,
-        }
-    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -590,6 +560,17 @@ impl Storage for StorageBridge {
         // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
         // in the worker background loop without blocking this bridge.
         Ok(())
+    }
+
+    async fn clear_indexing_cursors(&self) -> Result<(), Error> {
+        match self
+            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
+            .await
+            .map_err(|e| Error::Other(e.to_string()))?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+        }
     }
 
     async fn ensure_ready(&self) -> Result<(), Error> {

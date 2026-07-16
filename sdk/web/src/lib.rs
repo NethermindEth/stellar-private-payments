@@ -18,8 +18,13 @@ pub(crate) mod artifact_hashes {
 pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
 
 pub use client::{Account, Client, PrivatePool};
+pub use events::bootnode_required_js as bootnode_required;
 pub use storage::Storage;
 
 pub(crate) fn wasm_start() {
     console_error_panic_hook::set_once();
+    static LOG: std::sync::Once = std::sync::Once::new();
+    LOG.call_once(|| {
+        wasm_log::init(wasm_log::Config::default());
+    });
 }

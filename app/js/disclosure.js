@@ -1,4 +1,4 @@
-import { client, initializeRuntime } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
@@ -200,8 +200,14 @@ async function ensureDisclosureRuntime(rpcUrl) {
   if (!rpcUrl) {
     throw new Error('Soroban RPC URL is required. Configure a testnet RPC in Freighter.');
   }
+  const storage = await ensureStorage();
+  if (await bootnodeRequired(rpcUrl)) {
+    if (!(await storage.getStoredBootnodeUrl())) {
+      throw new Error('RPC_SYNC_GAP: bootnode required');
+    }
+  }
   await initializeRuntime(rpcUrl);
-  await client().startSync();
+  await client().backgroundSync();
 }
 
 // Read the user's Soroban RPC preference from Freighter (not a hardcoded default).

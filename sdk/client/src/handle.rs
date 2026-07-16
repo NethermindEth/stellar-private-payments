@@ -19,6 +19,12 @@ impl<T: ?Sized> Handle<T> {
     }
 }
 
+impl<T> Handle<T> {
+    pub fn new(value: T) -> Self {
+        Self(Inner::new(value))
+    }
+}
+
 impl<T: ?Sized> std::ops::Deref for Handle<T> {
     type Target = T;
 

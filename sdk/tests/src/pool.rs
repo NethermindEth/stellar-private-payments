@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    Handle, LocalProver, LocalSigner, LocalStorage, Signer, SyncMode, TransferRecipient,
+    Handle, LocalProver, LocalSigner, LocalStorage, Signer, TransferRecipient,
     blocking::{Account, Client, PrivatePool},
     types::{ContractConfig, NoteAmount, NotePublicKey, PolicyFlags},
 };
@@ -78,13 +78,18 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
         artifacts,
     )])?) as Box<dyn stellar_private_payments_sdk::Prover>);
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
-    let client = Client::init(
+    let mut client = Client::init(
         "https://soroban-testnet.stellar.org",
         storage,
         prover,
-        SyncMode::Background,
         contract_config,
+        None,
     )?;
+    // Mode flip only — tests do not run the indexer loop.
+    #[allow(unused_must_use)]
+    {
+        let _ = client.background_sync()?;
+    }
     let account = client.account(USER_ADDRESS, test_signer()?)?;
 
     Ok((client, account))

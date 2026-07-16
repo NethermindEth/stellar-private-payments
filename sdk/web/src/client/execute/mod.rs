@@ -11,8 +11,8 @@ use super::{pool::PrivatePool, pool_err_message};
 
 pub(crate) use progress::emit;
 
-const POLL_INTERVAL_MS: u32 = 1_000;
-const SYNC_MAX_RETRIES: u32 = 30;
+const POLL_INTERVAL_MS: u32 = 200;
+const SYNC_MAX_RETRIES: u32 = 50;
 
 type ExecuteOutcome = Result<Vec<String>, ExecuteFailure>;
 

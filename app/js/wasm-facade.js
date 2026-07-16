@@ -1,13 +1,19 @@
 /**
  * Browser runtime facade — single entry for SDK `Storage`, `Client`, `Account`, and app persistence.
  *
- * Lifecycle: `initializeRuntime` → `client().startSync` → `client().openAccount` → `account().pool`.
+ * Lifecycle: `bootnodeCheck` / `bootnodeRequired` → `initializeRuntime` →
+ * `client().backgroundSync` → `client().openAccount` → `account().pool`.
  *
  * Privacy key reads use the SDK (`account().userPublicKeys`, `account().aspSecret`, etc.).
  * App-only persistence (disclaimer, explorer, bootnode, op history, key probe) stays on `storage()`.
  */
 
-import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
+import init, {
+  Client,
+  FreighterSigner,
+  Storage,
+  bootnodeRequired as sdkBootnodeRequired,
+} from 'stellar-private-payments-sdk-web';
 
 import { AppStorage } from './app-storage.js';
 
@@ -17,6 +23,7 @@ let wrappedClient = null;
 let boundAccount = null;
 let wasmReady = false;
 let currentRpcUrl = null;
+let currentBootnodeUrl = null;
 let boundUserAddress = null;
 
 export async function ensureWasmInit() {
@@ -38,18 +45,12 @@ function wrapSdkClient(sdk) {
         },
         storage() {
             if (!appStorageInstance) {
-                throw new Error('Runtime not initialized. Call initializeRuntime first.');
+                throw new Error('Storage not ready. Call ensureStorage or initializeRuntime first.');
             }
             return appStorageInstance;
         },
-        async startSync({ bootnodeUrl } = {}) {
-            let resolvedBootnode = bootnodeUrl;
-            if (resolvedBootnode === undefined) {
-                resolvedBootnode = await sdk.checkSync();
-            }
-            await sdk.startSync({
-                bootnodeUrl: resolvedBootnode ?? undefined,
-            });
+        async backgroundSync() {
+            await sdk.backgroundSync();
         },
         async openAccount(
             { networkPassphrase, userAddress },
@@ -57,11 +58,6 @@ function wrapSdkClient(sdk) {
         ) {
             if (boundUserAddress === userAddress && boundAccount) {
                 return boundAccount;
-            }
-
-            if (boundUserAddress != null) {
-                wrappedClient = await openWrappedClient(storageHandle, currentRpcUrl);
-                boundAccount = null;
             }
 
             boundAccount = await sdk.account(
@@ -92,8 +88,12 @@ function wrapSdkClient(sdk) {
     };
 }
 
-async function openWrappedClient(sdkStorage, rpcUrl) {
-    const sdk = await Client.new({ storage: sdkStorage, rpcUrl });
+async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
+    const sdk = await Client.new({
+        storage: sdkStorage,
+        rpcUrl,
+        bootnodeUrl: bootnodeUrl ?? undefined,
+    });
     return wrapSdkClient(sdk);
 }
 
@@ -104,21 +104,67 @@ export function resetWalletSession() {
     wrappedClient = null;
 }
 
-/** Open storage + client shell for the given Soroban RPC URL. */
-export async function initializeRuntime(rpcUrl) {
+/**
+ * Open local persistence (and app storage helpers) without building a Client.
+ * @returns {Promise<import('./app-storage.js').AppStorage>}
+ */
+export async function ensureStorage() {
     await ensureWasmInit();
-
-    if (!storageHandle || currentRpcUrl !== rpcUrl) {
+    if (!storageHandle) {
         storageHandle = await Storage.open();
         bindAppStorage(storageHandle);
+    }
+    return appStorageInstance;
+}
+
+/**
+ * Probe whether the wallet RPC needs a historical-sync bootnode.
+ * Opens storage if needed; does not build a Client.
+ * @param {string} rpcUrl
+ */
+export async function bootnodeRequired(rpcUrl) {
+    if (!rpcUrl) {
+        throw new Error('rpcUrl is required');
+    }
+    await ensureStorage();
+    return sdkBootnodeRequired(rpcUrl, storageHandle);
+}
+
+/**
+ * Open storage + client shell for the given Soroban RPC URL.
+ * Prefer resolving bootnode (via {@link bootnodeRequired} + settings/modal)
+ * before this so the Client is built once with the right URL.
+ * @param {string} rpcUrl
+ * @param {{ bootnodeUrl?: string|null }} [options]
+ */
+export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
+    await ensureStorage();
+
+    if (currentRpcUrl !== rpcUrl) {
         wrappedClient = null;
         boundAccount = null;
         currentRpcUrl = rpcUrl;
         boundUserAddress = null;
+        currentBootnodeUrl = null;
     }
 
-    if (!wrappedClient) {
-        wrappedClient = await openWrappedClient(storageHandle, rpcUrl);
+    let resolvedBootnode = bootnodeUrl;
+    if (resolvedBootnode === undefined && appStorageInstance) {
+        resolvedBootnode = await appStorageInstance.getStoredBootnodeUrl();
+    }
+
+    if (
+        !wrappedClient ||
+        (resolvedBootnode ?? null) !== (currentBootnodeUrl ?? null)
+    ) {
+        currentBootnodeUrl = resolvedBootnode ?? null;
+        wrappedClient = await openWrappedClient(
+            storageHandle,
+            rpcUrl,
+            currentBootnodeUrl,
+        );
+        boundAccount = null;
+        boundUserAddress = null;
     }
 
     return client();

@@ -3,18 +3,19 @@ use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 use crate::{
     Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
-    sync::catch_up,
+    sync::{BackgroundSync, Sync, catch_up},
 };
 
 /// Top-level SDK client for a privacy pools deployment.
 ///
 /// Configure with local storage, a prover, and RPC; then sync and open
-/// [`Account`] sessions.
+/// [`Account`] sessions. Starts in [`SyncMode::Inline`]; call
+/// [`Self::background_sync`] to switch to background indexing.
 pub struct Client<S: Storage> {
     rpc: RpcClient,
     storage: S,
     prover: Handle<dyn Prover>,
-    sync_mode: SyncMode,
+    sync: Sync,
     contract_config: ContractConfig,
 }
 
@@ -23,8 +24,8 @@ impl<S: Storage> Client<S> {
         rpc_url: impl AsRef<str>,
         storage: S,
         prover: Handle<dyn Prover>,
-        sync_mode: SyncMode,
         contract_config: ContractConfig,
+        bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
         let rpc = RpcClient::new(rpc_url.as_ref())
             .map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
@@ -32,7 +33,7 @@ impl<S: Storage> Client<S> {
             rpc,
             storage,
             prover,
-            sync_mode,
+            sync: Sync::inline(bootnode_url),
             contract_config,
         })
     }
@@ -41,15 +42,15 @@ impl<S: Storage> Client<S> {
     pub fn init_readonly(
         rpc_url: impl AsRef<str>,
         storage: S,
-        sync_mode: SyncMode,
         contract_config: ContractConfig,
+        bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
         Self::init(
             rpc_url,
             storage,
             Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>),
-            sync_mode,
             contract_config,
+            bootnode_url,
         )
     }
 
@@ -71,8 +72,34 @@ impl<S: Storage> Client<S> {
     }
 
     /// Catch local storage up to the current chain tip for the deployment.
+    ///
+    /// Uses the bootnode URL from [`Self::init`] when the wallet RPC has a
+    /// retention gap.
     pub async fn sync(&self) -> Result<(), Error> {
-        catch_up(&self.rpc, &self.storage, &self.contract_config).await
+        catch_up(
+            &self.rpc,
+            &self.storage,
+            &self.contract_config,
+            self.sync.bootnode_url.as_deref(),
+        )
+        .await
+    }
+
+    /// Keep client synced in [`SyncMode::Background`] mode.
+    ///
+    /// Uses the bootnode URL from [`Self::init`] when the wallet RPC has a
+    /// retention gap. Does not spawn — call/spawn [`BackgroundSync::run`] on
+    /// your runtime.
+    #[must_use = "client sync is now in background mode; call/spawn BackgroundSync::run to keep the client up-to-date"]
+    pub fn background_sync(&mut self) -> Result<BackgroundSync<S>, Error> {
+        self.sync.set_mode(SyncMode::Background);
+        Ok(BackgroundSync::new(
+            self.rpc.clone(),
+            self.storage.fork()?,
+            self.contract_config.clone(),
+            self.sync.bootnode_url.clone(),
+            self.sync.kick.clone(),
+        ))
     }
 
     /// Recent deployment activity (pool events, registry registrations, ASP
@@ -111,7 +138,7 @@ impl<S: Storage> Client<S> {
             self.prover.clone(),
             user_address.into(),
             signer,
-            self.sync_mode,
+            self.sync.clone(),
             self.contract_config.clone(),
         ))
     }
@@ -123,9 +150,9 @@ impl<S: Storage> Client<S> {
     }
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync_mode {
+        match self.sync.mode() {
             SyncMode::Inline => self.sync().await?,
-            SyncMode::Background => {}
+            SyncMode::Background => self.sync.kick(),
         }
         Ok(())
     }

@@ -5226,6 +5226,7 @@ dependencies = [
  "anyhow",
  "async-trait",
  "disclosure",
+ "futures",
  "futures-timer",
  "gloo-timers",
  "log",
@@ -5238,6 +5239,7 @@ dependencies = [
  "tokio",
  "tx-planner",
  "types",
+ "wiremock",
  "witness",
 ]
 
@@ -5261,13 +5263,11 @@ dependencies = [
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
- "tokio",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-log",
  "web-sys",
- "wiremock",
 ]
 
 [[package]]

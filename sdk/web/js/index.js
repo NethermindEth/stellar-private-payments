@@ -2,10 +2,14 @@ import init, {
   Client as WasmClient,
   PrivatePool,
   Storage as WasmStorage,
+  bootnodeRequired as wasmBootnodeRequired,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
+
+/** Once per page — matches prior wasm `INDEXER_STARTED` (not cleared on disconnect). */
+let syncStarted = false;
 
 /**
  * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
@@ -15,6 +19,16 @@ async function openStorage(options = {}) {
   return WasmStorage.open({
     workerUrl: options.workerUrl ?? storageWorkerUrl,
   });
+}
+
+/**
+ * Probe whether the wallet RPC needs a historical-sync bootnode.
+ * @param {string} rpcUrl
+ * @param {import('../dist/stellar_private_payments_sdk_web.js').Storage} storage
+ * @returns {Promise<boolean>}
+ */
+async function bootnodeRequired(rpcUrl, storage) {
+  return wasmBootnodeRequired(rpcUrl, storage);
 }
 
 function wrapAccount(wasmAccount) {
@@ -35,8 +49,11 @@ function wrapAccount(wasmAccount) {
 
 function wrapClient(wasmClient) {
   return {
-    checkSync: (options) => wasmClient.checkSync(options),
-    startSync: (options) => wasmClient.startSync(options),
+    backgroundSync: async () => {
+      if (syncStarted) return;
+      await wasmClient.backgroundSync();
+      syncStarted = true;
+    },
     sync: () => wasmClient.sync(),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
     account: async (options, signer) => {
@@ -66,7 +83,8 @@ function wrapClient(wasmClient) {
 }
 
 /**
- * Create a deployment client. Call `startSync` then `account` before pool ops.
+ * Create a deployment client. Call {@link bootnodeRequired} (configure bootnode
+ * if needed), then `backgroundSync`, then `account` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
  * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
@@ -83,6 +101,7 @@ async function newClient(options) {
       options.rpcUrl,
       storage,
       options.proverWorkerUrl ?? proverWorkerUrl,
+      options.bootnodeUrl ?? undefined,
     ),
   );
 }
@@ -92,6 +111,6 @@ export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
 };
-export { PrivatePool };
+export { PrivatePool, bootnodeRequired };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

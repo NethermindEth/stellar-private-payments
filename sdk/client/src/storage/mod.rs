@@ -184,4 +184,8 @@ pub trait Storage: stellar::ContractDataStorage {
 
     /// Finalize local processing after RPC ingest
     async fn process_pending_state(&self) -> Result<(), Error>;
+
+    /// Clear RPC pagination cursors so the indexer resumes by ledger (used on
+    /// wallet↔bootnode handoff).
+    async fn clear_indexing_cursors(&self) -> Result<(), Error>;
 }
