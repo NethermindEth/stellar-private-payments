@@ -25,6 +25,8 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
 - **Stellar Integration**: Built on Soroban smart contracts
 
+Learn more in [the blogpost](https://www.nethermind.io/blog/stellar-private-payments-confidential-and-compliant-transfers-on-public-rails).
+
 ## Demo Application
 [The demo application](https://nethermindeth.github.io/stellar-private-payments/) consists on three main parts:
 - **Frontend**: Provides a nice user interface for interacting with the system. 
