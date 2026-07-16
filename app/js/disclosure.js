@@ -47,6 +47,9 @@ const state = {
   generateStage: null,
   generateStageMessage: null,
   lastReceipt: null,
+  storeReceipts: false,
+  receiptsHistory: [],
+  historyLoading: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -250,6 +253,10 @@ async function connect() {
 
     // Load notes and render generate section
     await loadNotes();
+
+    // Load the opt-in setting and (if any) the encrypted receipt history.
+    await loadStoreReceiptsSetting();
+    await loadReceiptsHistory();
   } catch (err) {
     if (err.code === 'USER_REJECTED') {
       showToast('Connection cancelled', 'info');
@@ -402,6 +409,30 @@ export function mountGenerate(container) {
   const statusLine = el('div', 'text-xs text-dark-500 mb-4');
   statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(state.address)));
   container.appendChild(statusLine);
+
+  // Opt-in: store generated receipts locally (encrypted). Default off.
+  const optRow = el('label', 'flex items-start gap-2 mb-4 cursor-pointer select-none');
+  const optBox = el('input', 'accent-brand-500 mt-0.5');
+  optBox.type = 'checkbox';
+  optBox.checked = !!state.storeReceipts;
+  optBox.addEventListener('change', async () => {
+    try {
+      const enabled = await client().setStoreReceiptsSetting(optBox.checked);
+      state.storeReceipts = !!enabled;
+    } catch (e) {
+      console.warn('[Disclosure] failed to update store-receipts setting:', e);
+      optBox.checked = !!state.storeReceipts; // revert on failure
+      showToast('Could not update setting', 'error');
+    }
+  });
+  optRow.append(
+    optBox,
+    elc('div', 'min-w-0', [
+      el('div', 'text-xs text-dark-200', 'Store generated receipts locally (encrypted)'),
+      el('div', 'text-[10px] text-dark-500', 'Kept only on this device, encrypted with your keys. Clear anytime from Disclosure History.'),
+    ]),
+  );
+  container.appendChild(optRow);
 
   if (state.notesLoading) {
     const spinner = el('div', 'text-sm text-dark-400 flex items-center gap-2');
@@ -705,6 +736,23 @@ export function mountGenerate(container) {
     state.lastReceipt = receipt;
     resultArea.classList.remove('hidden');
     const json = JSON.stringify(receipt, null, 2);
+
+    // Persist (encrypted) when the opt-in is enabled. Non-blocking: storage
+    // failures must not break the generate flow.
+    let savedNote = null;
+    if (state.storeReceipts && state.address) {
+      savedNote = el('div', 'text-xs text-dark-500', 'Saving to history…');
+      client()
+        .saveDisclosureReceipt(state.address, JSON.stringify(receipt), new Date().toISOString())
+        .then(() => {
+          if (savedNote) savedNote.textContent = 'Saved to history (encrypted).';
+          return loadReceiptsHistory();
+        })
+        .catch((e) => {
+          console.warn('[Disclosure] failed to store receipt:', e);
+          if (savedNote) savedNote.textContent = 'Could not save to history.';
+        });
+    }
     const commitmentPrefix = state.selectedNotes.length
       ? `${state.selectedNotes.length}-note`
       : 'receipt';
@@ -717,6 +765,7 @@ export function mountGenerate(container) {
 
     const box = el('div', 'space-y-3');
     box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    if (savedNote) box.appendChild(savedNote);
     if (receipt.publicInputs) {
       box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
     }
@@ -1372,6 +1421,279 @@ export function mountVerify(container) {
 // Init
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Disclosure history (encrypted, opt-in local storage of generated receipts)
+// ---------------------------------------------------------------------------
+
+async function loadStoreReceiptsSetting() {
+  try {
+    state.storeReceipts = await client().getStoreReceiptsSetting();
+  } catch (e) {
+    console.warn('[Disclosure] failed to read store-receipts setting:', e);
+    state.storeReceipts = false;
+  }
+}
+
+async function loadReceiptsHistory() {
+  const container = document.getElementById('disclosure-history');
+  if (!state.address) {
+    state.receiptsHistory = [];
+    if (container) mountHistory(container);
+    return;
+  }
+  state.historyLoading = true;
+  if (container) mountHistory(container);
+  try {
+    const list = await client().listDisclosureReceipts(state.address);
+    state.receiptsHistory = Array.isArray(list) ? list : [];
+  } catch (e) {
+    console.warn('[Disclosure] failed to load receipt history:', e);
+    state.receiptsHistory = [];
+  } finally {
+    state.historyLoading = false;
+    if (container) mountHistory(container);
+  }
+}
+
+// Compact, LIVE re-verification summary. Never a cached verdict — recomputed
+// against current chain state each time.
+function reverifyResultEl(report) {
+  const proofOk = !!report.proofVerified;
+  const contextOk = !!report.contextVerified;
+  const rootOk = !!report.knownRootStatus;
+  const unspentOk = !!report.nullifiersUnspent;
+  const spent = Array.isArray(report.spentNullifierIndices)
+    ? report.spentNullifierIndices.map((i) => Number(i))
+    : [];
+
+  const line = (ok, text) =>
+    elc('div', `flex items-center gap-2 ${ok ? 'text-emerald-300' : 'text-rose-300'}`, [
+      el('span', 'font-mono', ok ? '✓' : '✗'),
+      el('span', '', text),
+    ]);
+
+  const wrap = el('div', 'mt-2 text-xs space-y-1');
+  wrap.append(line(proofOk, 'Proof'), line(contextOk, 'Context'), line(rootOk, 'Root fresh'));
+  if (spent.length) {
+    wrap.appendChild(
+      el('div', 'text-amber-300', `Note(s) ${spent.map((i) => i + 1).join(', ')} already spent on-chain`),
+    );
+  } else {
+    wrap.appendChild(
+      el('div', unspentOk ? 'text-emerald-300' : 'text-amber-300', unspentOk ? 'Nullifiers unspent' : 'Spent status unavailable'),
+    );
+  }
+  return wrap;
+}
+
+// Two-step inline confirm for destructive actions (no modal): the first click
+// arms the button (label -> confirmText, rose styling) and starts a revert
+// timer; a second click within the window runs onConfirm; otherwise it reverts.
+function armConfirm(btn, { confirmText, confirmClass, onConfirm, timeoutMs = 3000 }) {
+  const originalText = btn.textContent;
+  const originalClass = btn.className;
+  let armed = false;
+  let timer = null;
+  const reset = () => {
+    armed = false;
+    if (timer) {
+      clearTimeout(timer);
+      timer = null;
+    }
+    btn.textContent = originalText;
+    btn.className = originalClass;
+  };
+  btn.addEventListener('click', async () => {
+    if (!armed) {
+      armed = true;
+      btn.textContent = confirmText;
+      if (confirmClass) btn.className = confirmClass;
+      timer = setTimeout(reset, timeoutMs);
+      return;
+    }
+    reset();
+    await onConfirm();
+  });
+}
+
+function renderHistoryRow(item) {
+  let receipt = null;
+  try {
+    receipt = JSON.parse(item.receiptJson);
+  } catch {
+    /* leave receipt null; row still shows id + date */
+  }
+  const ctx = receipt?.context || {};
+  const pub = receipt?.publicInputs || {};
+  const symbol = tokenLabelForPool(ctx.poolAddress || '');
+  const amounts = Array.isArray(pub.amounts) ? pub.amounts : [];
+  let total = 0n;
+  for (const a of amounts) {
+    try {
+      total += BigInt(a);
+    } catch {
+      /* skip unparseable */
+    }
+  }
+  const amountText = amounts.length ? formatAmount(total, symbol) : '';
+  const noteCount = Array.isArray(pub.nullifiers) ? pub.nullifiers.length : amounts.length;
+
+  const row = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg');
+
+  const top = el('div', 'flex items-start justify-between gap-3');
+  top.append(
+    elc('div', 'min-w-0 space-y-0.5', [
+      el('div', 'text-sm text-dark-100 truncate', ctx.authorityLabel || 'Unknown authority'),
+      el('div', 'text-xs text-dark-400 truncate', ctx.purpose || ''),
+      el(
+        'div',
+        'text-[10px] text-dark-500',
+        `${noteCount} note${noteCount === 1 ? '' : 's'}${amountText ? ` · ${amountText}` : ''} · ${item.createdAt}`,
+      ),
+    ]),
+    el('div', 'text-xs font-medium text-brand-300 whitespace-nowrap', amountText),
+  );
+  row.appendChild(top);
+
+  const statusArea = el('div');
+  row.appendChild(statusArea);
+
+  const actions = el('div', 'flex flex-wrap gap-2 mt-2');
+  const btnClass =
+    'px-3 py-1 text-xs bg-dark-900 border border-dark-700 rounded-lg hover:border-brand-500 hover:text-brand-400 transition';
+
+  const dl = el('button', btnClass, 'Download');
+  dl.type = 'button';
+  dl.addEventListener('click', () => {
+    const blob = new Blob([item.receiptJson], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `disclosure-receipt-${(item.id || 'receipt').slice(0, 8)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  const copy = el('button', btnClass, 'Copy');
+  copy.type = 'button';
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(item.receiptJson);
+      showToast('Copied to clipboard', 'success');
+    } catch {
+      showToast('Failed to copy', 'error');
+    }
+  });
+
+  const rv = el('button', btnClass, 'Re-verify');
+  rv.type = 'button';
+  rv.addEventListener('click', async () => {
+    statusArea.replaceChildren();
+    const loading = el('div', 'mt-2 text-xs text-dark-400 flex items-center gap-2');
+    loading.append(spinnerEl(), 'Verifying against chain…');
+    statusArea.appendChild(loading);
+    try {
+      const name = receipt?.circuit?.name;
+      const vk =
+        (name && CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES[name]) ||
+        CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES.selectiveDisclosure_1;
+      const report = await client().verifySelectiveDisclosure(item.receiptJson, vk);
+      statusArea.replaceChildren(reverifyResultEl(report));
+    } catch (e) {
+      console.warn('[Disclosure] re-verify failed:', e);
+      statusArea.replaceChildren(el('div', 'mt-2 text-xs text-rose-300', 'Re-verify failed.'));
+    }
+  });
+
+  const del = el(
+    'button',
+    'px-3 py-1 text-xs bg-dark-900 border border-dark-700 rounded-lg hover:border-rose-500 hover:text-rose-300 transition',
+    'Delete',
+  );
+  del.type = 'button';
+  armConfirm(del, {
+    confirmText: 'Confirm?',
+    confirmClass:
+      'px-3 py-1 text-xs bg-rose-500/20 border border-rose-500/50 rounded-lg text-rose-200 transition',
+    onConfirm: async () => {
+      try {
+        await client().deleteDisclosureReceipt(state.address, item.id);
+        await loadReceiptsHistory();
+      } catch (e) {
+        console.warn('[Disclosure] delete failed:', e);
+        showToast('Failed to delete', 'error');
+      }
+    },
+  });
+
+  actions.append(dl, copy, rv, del);
+  row.appendChild(actions);
+  return row;
+}
+
+export function mountHistory(container) {
+  container.replaceChildren();
+
+  const heading = el('h2', 'text-sm uppercase tracking-[0.25em] text-brand-400 mb-4', 'Disclosure History');
+  heading.id = 'history-heading';
+  container.appendChild(heading);
+
+  if (!state.address || !state.derivedKeys) {
+    container.appendChild(
+      el('div', 'text-sm text-dark-400', 'Connect your wallet to view stored disclosure receipts.'),
+    );
+    return;
+  }
+
+  if (state.historyLoading) {
+    const spinner = el('div', 'text-sm text-dark-400 flex items-center gap-2');
+    spinner.append(spinnerEl(), 'Loading history…');
+    container.appendChild(spinner);
+    return;
+  }
+
+  const items = state.receiptsHistory || [];
+  if (items.length === 0) {
+    container.appendChild(
+      el(
+        'div',
+        'text-sm text-dark-400',
+        state.storeReceipts
+          ? 'No stored receipts yet. Generated receipts will appear here.'
+          : 'Receipt storage is off. Enable “Store generated receipts locally” in the Generate section to keep a history.',
+      ),
+    );
+    return;
+  }
+
+  const topRow = el('div', 'flex items-center justify-between mb-3');
+  topRow.appendChild(
+    el('div', 'text-xs text-dark-500', `${items.length} stored receipt${items.length === 1 ? '' : 's'}`),
+  );
+  const clearBtn = el('button', 'text-xs text-rose-300 hover:text-rose-200 transition', 'Clear all');
+  clearBtn.type = 'button';
+  armConfirm(clearBtn, {
+    confirmText: 'Confirm clear all?',
+    confirmClass: 'text-xs font-semibold text-rose-200 hover:text-rose-100 transition',
+    onConfirm: async () => {
+      try {
+        await client().clearDisclosureReceipts(state.address);
+        await loadReceiptsHistory();
+        showToast('History cleared', 'success');
+      } catch (e) {
+        console.warn('[Disclosure] clear failed:', e);
+        showToast('Failed to clear history', 'error');
+      }
+    },
+  });
+  topRow.appendChild(clearBtn);
+  container.appendChild(topRow);
+
+  const list = el('div', 'space-y-2');
+  items.forEach((item) => list.appendChild(renderHistoryRow(item)));
+  container.appendChild(list);
+}
+
 async function init() {
   networkChip = document.getElementById('networkChip');
   walletChip = document.getElementById('walletChip');
@@ -1401,8 +1723,11 @@ async function init() {
   const generateContainer = document.getElementById('disclosure-generate');
   const verifyContainer = document.getElementById('disclosure-verify');
 
+  const historyContainer = document.getElementById('disclosure-history');
+
   if (generateContainer) mountGenerate(generateContainer);
   if (verifyContainer) mountVerify(verifyContainer);
+  if (historyContainer) mountHistory(historyContainer);
 
   if (query.verify && verifyContainer) {
     verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });

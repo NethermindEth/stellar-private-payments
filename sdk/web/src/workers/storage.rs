@@ -1,7 +1,7 @@
 use crate::protocol::{
     AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureInputsRequest,
     PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
-    UserKeys,
+    StoredDisclosureReceipt, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -18,7 +18,10 @@ use stellar_private_payments_sdk::{
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
     tx::{
         crypto::asp_membership_leaf,
-        encryption::{derive_encryption_and_note_keypairs, derive_membership_blinding},
+        encryption::{
+            decrypt_blob, derive_encryption_and_note_keypairs, derive_membership_blinding,
+            encrypt_blob,
+        },
         flows::TransactParams,
     },
     types::{
@@ -34,6 +37,18 @@ use wasm_bindgen_futures::spawn_local;
 // wasm threads?
 
 const WORKER_NAME: &str = "WORKER-STORAGE";
+
+/// Content hash used as the opaque primary key for a stored disclosure receipt.
+fn sha256_hex(bytes: &[u8]) -> String {
+    use sha2::{Digest, Sha256};
+    use std::fmt::Write as _;
+    let digest = Sha256::digest(bytes);
+    let mut out = String::with_capacity(64);
+    for b in digest {
+        let _ = write!(out, "{b:02x}");
+    }
+    out
+}
 
 #[derive(Clone, Debug)]
 enum InitState {
@@ -294,6 +309,52 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 list.len()
             );
             StorageWorkerResponse::UserNotes(list)
+        }
+        StorageWorkerRequest::SaveDisclosureReceipt {
+            address,
+            receipt_json,
+            created_at,
+        } => {
+            let keys = with_storage!(s => s.get_user_keys(&address)?)?
+                .ok_or_else(|| anyhow!("user keys not found for {address}"))?;
+            let id = sha256_hex(receipt_json.as_bytes());
+            let ciphertext =
+                encrypt_blob(&keys.encryption_keypair.public, receipt_json.as_bytes())?;
+            with_storage_mut!(s => s.save_disclosure_receipt(&address, &id, &ciphertext, &created_at)?)?;
+            StorageWorkerResponse::DisclosureReceiptSaved(id)
+        }
+        StorageWorkerRequest::ListDisclosureReceipts(address) => {
+            let keys = with_storage!(s => s.get_user_keys(&address)?)?
+                .ok_or_else(|| anyhow!("user keys not found for {address}"))?;
+            let rows = with_storage!(s => s.list_disclosure_receipts(&address)?)?;
+            let mut out = Vec::with_capacity(rows.len());
+            for row in rows {
+                let bytes = decrypt_blob(&keys.encryption_keypair.private, &row.ciphertext)?;
+                let receipt_json = String::from_utf8(bytes)
+                    .map_err(|e| anyhow!("stored receipt is not valid UTF-8: {e}"))?;
+                out.push(StoredDisclosureReceipt {
+                    id: row.id,
+                    created_at: row.created_at,
+                    receipt_json,
+                });
+            }
+            StorageWorkerResponse::DisclosureReceipts(out)
+        }
+        StorageWorkerRequest::DeleteDisclosureReceipt { address, id } => {
+            with_storage_mut!(s => s.delete_disclosure_receipt(&address, &id)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::ClearDisclosureReceipts(address) => {
+            with_storage_mut!(s => s.clear_disclosure_receipts(&address)?)?;
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::GetStoreReceiptsSetting => {
+            let enabled = with_storage!(s => s.get_store_receipts_setting()?)?;
+            StorageWorkerResponse::StoreReceiptsSetting(enabled)
+        }
+        StorageWorkerRequest::SetStoreReceiptsSetting(enabled) => {
+            with_storage_mut!(s => s.set_store_receipts_setting(enabled)?)?;
+            StorageWorkerResponse::StoreReceiptsSetting(enabled)
         }
         StorageWorkerRequest::PortfolioBalances(address) => {
             log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");

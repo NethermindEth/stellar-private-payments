@@ -16,12 +16,34 @@ use types::{
 const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
+pub const APP_SETTING_STORE_RECEIPTS: &str = "store_receipts";
 
-const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
+const MIGRATION_ARRAY: &[M] = &[
+    M::up(include_str!("schema.sql")),
+    M::up(
+        "CREATE TABLE disclosure_receipts (
+            id TEXT PRIMARY KEY,
+            account_id INTEGER NOT NULL REFERENCES accounts(id),
+            ciphertext BLOB NOT NULL,
+            created_at TEXT NOT NULL
+        );
+        CREATE INDEX idx_disclosure_receipts_account
+            ON disclosure_receipts(account_id, created_at);",
+    ),
+];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
 
 pub struct Storage {
     conn: Connection,
+}
+
+/// A stored disclosure receipt row. `ciphertext` is opaque to this layer — the
+/// storage worker encrypts/decrypts it under the account's encryption keypair.
+#[derive(Debug, Clone)]
+pub struct StoredReceiptRow {
+    pub id: String,
+    pub ciphertext: Vec<u8>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone)]
@@ -380,6 +402,84 @@ impl Storage {
                 url: url.to_string(),
             },
         )
+    }
+
+    /// Whether generated disclosure receipts should be persisted locally.
+    /// Opt-in: defaults to false when the setting has never been written.
+    pub fn get_store_receipts_setting(&self) -> Result<bool> {
+        Ok(self
+            .get_setting_json(APP_SETTING_STORE_RECEIPTS)?
+            .unwrap_or(false))
+    }
+
+    pub fn set_store_receipts_setting(&mut self, enabled: bool) -> Result<()> {
+        self.set_setting_json(APP_SETTING_STORE_RECEIPTS, &enabled)
+    }
+
+    /// Persist an already-encrypted disclosure receipt for `address`.
+    /// `id` is an opaque content hash; `ciphertext` is opaque to this layer.
+    pub fn save_disclosure_receipt(
+        &mut self,
+        address: &str,
+        id: &str,
+        ciphertext: &[u8],
+        created_at: &str,
+    ) -> Result<()> {
+        let tx = self.conn.transaction()?;
+        let account_id = Self::get_or_create_account(&tx, address)?;
+        tx.execute(
+            "INSERT OR REPLACE INTO disclosure_receipts (id, account_id, ciphertext, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![id, account_id, ciphertext, created_at],
+        )
+        .context("failed to insert disclosure receipt")?;
+        tx.commit()?;
+        Ok(())
+    }
+
+    /// List stored (encrypted) disclosure receipts for `address`, newest first.
+    pub fn list_disclosure_receipts(&self, address: &str) -> Result<Vec<StoredReceiptRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.id, r.ciphertext, r.created_at
+             FROM disclosure_receipts r
+             JOIN accounts a ON a.id = r.account_id
+             WHERE a.address = ?1
+             ORDER BY r.created_at DESC, r.id DESC",
+        )?;
+        let rows = stmt
+            .query_map(params![address], |row| {
+                Ok(StoredReceiptRow {
+                    id: row.get(0)?,
+                    ciphertext: row.get(1)?,
+                    created_at: row.get(2)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .context("failed to read disclosure receipts")?;
+        Ok(rows)
+    }
+
+    pub fn delete_disclosure_receipt(&mut self, address: &str, id: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM disclosure_receipts
+                 WHERE id = ?1
+                   AND account_id = (SELECT id FROM accounts WHERE address = ?2)",
+                params![id, address],
+            )
+            .context("failed to delete disclosure receipt")?;
+        Ok(())
+    }
+
+    pub fn clear_disclosure_receipts(&mut self, address: &str) -> Result<()> {
+        self.conn
+            .execute(
+                "DELETE FROM disclosure_receipts
+                 WHERE account_id = (SELECT id FROM accounts WHERE address = ?1)",
+                params![address],
+            )
+            .context("failed to clear disclosure receipts")?;
+        Ok(())
     }
 
     /// Internal helper to handle the "Get or Create" logic for accounts
@@ -2640,6 +2740,41 @@ mod tests {
             .get_pool_commitment_leaves_ordered("CPOOL")
             .expect_err("gap should error");
         assert!(err.to_string().contains("gap/out-of-order"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn disclosure_receipts_persist_list_delete_clear() -> Result<()> {
+        let mut storage = Storage::connect_in_memory()?;
+
+        // Opt-in defaults to false, then round-trips.
+        assert!(!storage.get_store_receipts_setting()?);
+        storage.set_store_receipts_setting(true)?;
+        assert!(storage.get_store_receipts_setting()?);
+
+        storage.save_disclosure_receipt("GA", "id1", b"ct1", "2026-07-10T00:00:01Z")?;
+        storage.save_disclosure_receipt("GA", "id2", b"ct2", "2026-07-10T00:00:02Z")?;
+        storage.save_disclosure_receipt("GB", "id3", b"ct3", "2026-07-10T00:00:03Z")?;
+
+        // Newest-first, opaque ciphertext preserved, per-account isolation.
+        let ga = storage.list_disclosure_receipts("GA")?;
+        assert_eq!(ga.len(), 2);
+        assert_eq!(ga[0].id, "id2");
+        assert_eq!(ga[0].ciphertext, b"ct2");
+        assert_eq!(ga[1].id, "id1");
+        assert_eq!(storage.list_disclosure_receipts("GB")?.len(), 1);
+
+        // Delete is scoped by account.
+        storage.delete_disclosure_receipt("GA", "id3")?; // wrong account => no-op
+        assert_eq!(storage.list_disclosure_receipts("GB")?.len(), 1);
+        storage.delete_disclosure_receipt("GA", "id1")?;
+        assert_eq!(storage.list_disclosure_receipts("GA")?.len(), 1);
+
+        // Clear only affects the target account.
+        storage.clear_disclosure_receipts("GA")?;
+        assert!(storage.list_disclosure_receipts("GA")?.is_empty());
+        assert_eq!(storage.list_disclosure_receipts("GB")?.len(), 1);
 
         Ok(())
     }
