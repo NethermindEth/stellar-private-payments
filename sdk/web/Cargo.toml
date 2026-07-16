@@ -56,4 +56,4 @@ wiremock = { workspace = true }
 workspace = true
 
 [dev-dependencies]
-wasm-bindgen-test = "0.3.34"
+wasm-bindgen-test = { workspace = true }
