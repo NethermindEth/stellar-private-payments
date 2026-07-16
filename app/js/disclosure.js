@@ -7,6 +7,7 @@ import {
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
+import { filterNotes, createNoteRow } from './ui/notes-view.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -37,6 +38,8 @@ const state = {
   notes: [],
   pools: [],
   selectedNotes: [],
+  noteStatusFilter: 'all',
+  notePoolFilter: null,
   notesLoading: false,
   notesError: null,
   generating: false,
@@ -176,14 +179,14 @@ async function loadNotes() {
     const query = parseQueryParams();
     if (query.commitments && query.commitments.length > 0) {
       const targets = query.commitments.map(normalizeCommitment);
-      const matches = state.notes.filter(
-        (n) => targets.includes(normalizeCommitment(n.id)) && !n.spent
+      const matches = state.notes.filter((n) =>
+        targets.includes(normalizeCommitment(n.id))
       );
       if (matches.length > 0) {
         state.selectedNotes = matches.slice(0, 4);
       } else {
         state.notesError =
-          'Preselected notes not found, already spent, or not owned by this account.';
+          'Preselected notes not found or not owned by this account.';
       }
     }
   } catch (e) {
@@ -322,6 +325,61 @@ function normalizeCommitment(s) {
   return t;
 }
 
+// Filter controls for the Generate selector: spent-status buttons plus a
+// token/pool select (shown only when the account holds notes across more than
+// one pool). Mutating a control updates state and re-renders in place.
+function buildGenerateFilters(container) {
+  const wrap = el('div', 'flex flex-wrap items-center gap-2 mb-3');
+
+  const statusGroup = el('div', 'inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5');
+  const statuses = [
+    { key: 'all', label: 'All' },
+    { key: 'unspent', label: 'Available' },
+    { key: 'spent', label: 'Spent' },
+  ];
+  statuses.forEach(({ key, label }) => {
+    const active = state.noteStatusFilter === key;
+    const btn = el(
+      'button',
+      `px-3 py-1 text-xs rounded-md transition-colors ${
+        active ? 'bg-brand-500/20 text-brand-300' : 'text-dark-400 hover:text-dark-200'
+      }`,
+      label,
+    );
+    btn.type = 'button';
+    btn.addEventListener('click', () => {
+      state.noteStatusFilter = key;
+      mountGenerate(container);
+    });
+    statusGroup.appendChild(btn);
+  });
+  wrap.appendChild(statusGroup);
+
+  const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
+  if (poolIds.length > 1) {
+    const select = el(
+      'select',
+      'text-xs bg-dark-800 border border-dark-700 rounded-lg px-2 py-1 text-dark-200',
+    );
+    const optAll = el('option', null, 'All tokens');
+    optAll.value = '';
+    select.appendChild(optAll);
+    poolIds.forEach((pid) => {
+      const opt = el('option', null, tokenLabelForPool(pid));
+      opt.value = pid;
+      select.appendChild(opt);
+    });
+    select.value = state.notePoolFilter || '';
+    select.addEventListener('change', () => {
+      state.notePoolFilter = select.value || null;
+      mountGenerate(container);
+    });
+    wrap.appendChild(select);
+  }
+
+  return wrap;
+}
+
 export function mountGenerate(container) {
   container.replaceChildren();
 
@@ -335,7 +393,7 @@ export function mountGenerate(container) {
     const msg = document.createElement('div');
     msg.className = 'text-sm text-dark-400';
     msg.textContent =
-      'Connect your Freighter wallet to generate disclosure receipts for your unspent notes.';
+      'Connect your Freighter wallet to generate disclosure receipts for your notes.';
     container.appendChild(msg);
     return;
   }
@@ -360,74 +418,59 @@ export function mountGenerate(container) {
     return;
   }
 
-  const unspent = state.notes.filter((n) => !n.spent);
-
-  if (unspent.length === 0) {
+  if (state.notes.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'text-sm text-dark-400';
-    empty.textContent = 'No unspent notes found for this account.';
+    empty.textContent = 'No notes found for this account.';
     container.appendChild(empty);
     return;
   }
 
+  container.appendChild(buildGenerateFilters(container));
+
+  const notes = filterNotes(state.notes, {
+    status: state.noteStatusFilter,
+    poolId: state.notePoolFilter,
+  });
+
   // Note picker
   const pickerLabel = document.createElement('label');
   pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
-  pickerLabel.textContent = `Select up to 4 unspent notes (${unspent.length})`;
+  pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
   container.appendChild(pickerLabel);
 
   const list = document.createElement('div');
   list.className = 'space-y-2 mb-4';
   list.setAttribute('role', 'group');
-  list.setAttribute('aria-label', 'Unspent notes');
+  list.setAttribute('aria-label', 'Notes');
 
   const isSelected = (note) => state.selectedNotes.some((n) => n.id === note.id);
   const atMaxSelection = () => state.selectedNotes.length >= 4;
 
-  unspent.forEach((note) => {
-    const selected = isSelected(note);
-
-    const row = document.createElement('label');
-    row.className = `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 cursor-pointer ${
-      selected
-        ? 'bg-brand-500/10 border-brand-500/40 text-brand-300'
-        : 'bg-dark-800 border-dark-700 hover:border-dark-600 text-dark-200'
-    }`;
-
-    const noteLabel = tokenLabelForPool(note.poolContractId);
-    const rowInner = el('div', 'flex items-center gap-3 min-w-0');
-    const checkbox = el('input', 'accent-brand-500');
-    checkbox.type = 'checkbox';
-    checkbox.checked = selected;
-    if (!selected && atMaxSelection()) checkbox.disabled = true;
-    rowInner.appendChild(checkbox);
-
-    const rowInfo = el('div', 'min-w-0');
-    rowInfo.append(
-      el('div', 'font-mono text-xs truncate', shortCommitment(note.id)),
-      el('div', 'text-[10px] text-dark-500 mt-0.5', `${noteLabel} · Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
+  if (notes.length === 0) {
+    list.appendChild(
+      el('div', 'text-sm text-dark-400 p-3', 'No notes match this filter.'),
     );
-    rowInner.appendChild(rowInfo);
-
-    row.append(
-      rowInner,
-      el('div', `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount, noteLabel)),
-    );
-
-    const rowCheckbox = row.querySelector('input');
-    rowCheckbox.addEventListener('change', () => {
-      if (rowCheckbox.checked) {
-        if (!isSelected(note)) {
-          state.selectedNotes.push(note);
-        }
-      } else {
-        state.selectedNotes = state.selectedNotes.filter((n) => n.id !== note.id);
-      }
-      mountGenerate(container);
+  } else {
+    notes.forEach((note) => {
+      const selected = isSelected(note);
+      const row = createNoteRow(note, {
+        symbol: tokenLabelForPool(note.poolContractId),
+        selectable: true,
+        selected,
+        disabled: !selected && atMaxSelection(),
+        onToggle: (n, checked) => {
+          if (checked) {
+            if (!isSelected(n)) state.selectedNotes.push(n);
+          } else {
+            state.selectedNotes = state.selectedNotes.filter((x) => x.id !== n.id);
+          }
+          mountGenerate(container);
+        },
+      });
+      list.appendChild(row);
     });
-
-    list.appendChild(row);
-  });
+  }
 
   container.appendChild(list);
 
