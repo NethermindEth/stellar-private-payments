@@ -21,10 +21,9 @@ impl ProverArtifacts {
     }
 }
 
-/// Per-pool session config (RPC URL, deployment, pool contract, user address).
+/// Per-pool session config (deployment, pool contract, user address).
 #[derive(Debug, Clone)]
 pub struct PrivatePoolConfig {
-    pub rpc_url: String,
     pub contract_config: ContractConfig,
     pub pool_contract_id: String,
     pub user_address: String,

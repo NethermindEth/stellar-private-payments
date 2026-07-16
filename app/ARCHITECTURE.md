@@ -68,7 +68,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Client` (WASM, wasm-bindgen API)**
 
-- Constructed by `Client.new({ storage, rpcUrl, proverWorkerUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
+- Constructed by `Client.new({ rpcUrl, storage, proverWorkerUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
 - Spawns the prover worker at `Client.new`; pings it on `account()` / prove paths. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
   - Background sync via `startSync`.

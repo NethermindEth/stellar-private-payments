@@ -16,8 +16,8 @@ await init();
 
 const storage = await Storage.open();
 const client = await Client.new({
-  storage,
   rpcUrl: 'https://soroban-testnet.stellar.org',
+  storage,
   // proverWorkerUrl defaults to package dist/workers/prover-worker.js
 });
 
@@ -54,7 +54,7 @@ const chain = await client.allContractsData();
 
 | Method | Description |
 |--------|-------------|
-| `new({ storage, rpcUrl, proverWorkerUrl? })` | Build native client + spawn prover worker (no wallet yet) |
+| `new({ rpcUrl, storage?, proverWorkerUrl? })` | Build native client + spawn prover worker (no wallet yet) |
 | `contractConfig()` | Static deployment config |
 | `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
 | `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |

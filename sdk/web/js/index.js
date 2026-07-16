@@ -80,8 +80,8 @@ async function newClient(options) {
 
   return wrapClient(
     await WasmClient.new(
-      storage,
       options.rpcUrl,
+      storage,
       options.proverWorkerUrl ?? proverWorkerUrl,
     ),
   );

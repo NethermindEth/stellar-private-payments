@@ -29,25 +29,27 @@ impl ClientSession {
             LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
 
         let client = if readonly {
-            Client::new_readonly(
+            Client::init_readonly(
+                network.rpc_url.clone(),
                 storage,
                 SyncMode::Inline,
                 config.deployment.clone(),
-                network.rpc_url.clone(),
             )
+            .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
             let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
             let prover = Handle::from_box(Box::new(
                 LocalProver::from_artifacts(&artifacts)
                     .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
             ) as Box<dyn Prover>);
-            Client::new(
+            Client::init(
+                network.rpc_url.clone(),
                 storage,
                 prover,
                 SyncMode::Inline,
                 config.deployment.clone(),
-                network.rpc_url.clone(),
             )
+            .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };
         let sdk_account = client
             .account(&account.address, alias_signer(config, account, network))

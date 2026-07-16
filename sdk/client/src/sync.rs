@@ -1,7 +1,7 @@
-use stellar::{Client, Indexer, TxConfirmStatus, confirm_tx as rpc_confirm_tx};
+use stellar::{Indexer, TxConfirmStatus, confirm_tx as rpc_confirm_tx};
 use types::ContractConfig;
 
-use crate::{Error, Storage, sleep::sleep, types::TransactionResult};
+use crate::{Error, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult};
 
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
@@ -18,12 +18,11 @@ pub enum SyncMode {
 
 /// Catch local storage up to the current chain tip for a deployment.
 pub(crate) async fn catch_up<S: Storage>(
+    rpc: &RpcClient,
     storage: &S,
-    rpc_url: &str,
     contract_config: &ContractConfig,
 ) -> Result<(), Error> {
-    let rpc = Client::new(rpc_url).map_err(|e| Error::Other(format!("rpc client: {e:#}")))?;
-    let indexer = Indexer::init(rpc, storage.fork()?, contract_config)
+    let indexer = Indexer::init(rpc.clone(), storage.fork()?, contract_config)
         .await
         .map_err(|e| Error::Other(format!("indexer: {e:#}")))?;
     indexer
@@ -35,8 +34,8 @@ pub(crate) async fn catch_up<S: Storage>(
 
 /// Poll until a submitted transaction succeeds or fails.
 pub(crate) async fn confirm_tx(
+    rpc: &RpcClient,
     hash: impl AsRef<str>,
-    rpc: &Client,
 ) -> Result<TransactionResult, Error> {
     let hash = hash.as_ref();
 
@@ -44,7 +43,7 @@ pub(crate) async fn confirm_tx(
         if attempt > 1 {
             sleep(CONFIRM_POLL_INTERVAL_MS).await;
         }
-        match rpc_confirm_tx(hash, rpc)
+        match rpc_confirm_tx(rpc, hash)
             .await
             .map_err(|e| Error::Other(format!("confirm transaction: {e:#}")))?
         {
