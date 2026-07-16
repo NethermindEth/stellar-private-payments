@@ -253,7 +253,37 @@ impl Prover {
         // Deserialize proving key. Unchecked, proving key is trusted
         let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
             .map_err(|e| anyhow!("Failed to load proving key: {}", e))?;
+        Self::from_pk(pk, r1cs_bytes)
+    }
 
+    /// Create a new Prover from an arkworks-*uncompressed* proving key.
+    ///
+    /// Mirrors [`Prover::new`] but reads the encoding produced by
+    /// [`Prover::get_uncompressed_proving_key`]. The uncompressed encoding
+    /// stores full curve-point coordinates, so reloading it skips the point
+    /// decompression (a modular square root per point) that `new` performs —
+    /// this is the fast path for a warm circuit cache.
+    ///
+    /// Uses unchecked deserialization since the proving key is trusted
+    /// (locally derived from the verified compressed key and integrity-checked
+    /// before caching).
+    ///
+    /// # Arguments
+    /// * `pk_bytes` - Serialized proving key (uncompressed)
+    /// * `r1cs_bytes` - R1CS binary file contents
+    pub fn new_from_uncompressed_pk(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
+        // Deserialize proving key. Unchecked, proving key is trusted.
+        let pk = ProvingKey::<Bn254>::deserialize_uncompressed_unchecked(pk_bytes)
+            .map_err(|e| anyhow!("Failed to load uncompressed proving key: {}", e))?;
+        Self::from_pk(pk, r1cs_bytes)
+    }
+
+    /// Shared construction tail for [`Prover::new`] and
+    /// [`Prover::new_from_uncompressed_pk`]: derive the prepared verifying key,
+    /// parse the R1CS, and validate that the key and circuit agree on the
+    /// public-input count. Only the proving-key *encoding* differs between the
+    /// two constructors; everything from here on is identical.
+    fn from_pk(pk: ProvingKey<Bn254>, r1cs_bytes: &[u8]) -> Result<Prover> {
         // Extract verifying key from proving key
         let vk = pk.vk.clone();
 
@@ -295,6 +325,21 @@ impl Prover {
             .serialize_compressed(&mut vk_bytes)
             .map_err(|e| anyhow!("Failed to serialize VK: {}", e))?;
         Ok(vk_bytes)
+    }
+
+    /// Serialize the proving key in arkworks-*uncompressed* form.
+    ///
+    /// The output is the exact byte layout expected by
+    /// [`Prover::new_from_uncompressed_pk`]. Storing this (larger) encoding in
+    /// a cache lets subsequent loads skip point decompression. The bytes
+    /// are deterministic for a given key, so callers may key/verify a cache
+    /// entry by hashing them.
+    pub fn get_uncompressed_proving_key(&self) -> Result<Vec<u8>> {
+        let mut buf = Vec::new();
+        self.pk
+            .serialize_uncompressed(&mut buf)
+            .map_err(|e| anyhow!("Failed to serialize proving key: {}", e))?;
+        Ok(buf)
     }
 
     /// Generate a Groth16 proof from witness data
@@ -508,4 +553,115 @@ pub fn verify_proof(
         .checked_sub(1)
         .ok_or_else(|| anyhow!("Invalid verifying key"))?;
     verify_proof_with_processed_vk(&pvk, expected_inputs, &proof, public_inputs_bytes)
+}
+
+#[cfg(test)]
+mod tests {
+    // Tests favour `unwrap()` for brevity; the workspace-wide `unwrap_used` deny
+    // targets production paths, not assertions. `lc!() + var` is the idiomatic
+    // way to build a constraint in a test circuit; the arithmetic-side-effects
+    // deny is aimed at production integer math, not linear-combination sugar.
+    #![allow(clippy::unwrap_used, clippy::arithmetic_side_effects)]
+
+    use super::*;
+    use alloc::vec;
+    use ark_groth16::Groth16;
+
+    /// Trivial one-public-input circuit (`a * 1 = a`) used only to produce a
+    /// real Groth16 proving key for serialization round-trip tests. It has
+    /// exactly one public input, so its verifying key has
+    /// `gamma_abc_g1.len() == 2`, matching `num_public == 1` in the hand-built
+    /// R1CS below.
+    struct DummyCircuit;
+
+    impl ConstraintSynthesizer<Fr> for DummyCircuit {
+        fn generate_constraints(self, cs: ConstraintSystemRef<Fr>) -> Result<(), SynthesisError> {
+            let a = cs.new_input_variable(|| Ok(Fr::from(7u64)))?;
+            cs.enforce_r1cs_constraint(|| lc!() + a, || lc!() + Variable::One, || lc!() + a)?;
+            Ok(())
+        }
+    }
+
+    /// Build a minimal, header-only Circom `.r1cs` blob (zero constraints) with
+    /// the given public-input/wire counts. This is enough for `Prover`
+    /// construction, which only reads the header to cross-check the
+    /// public-input count against the verifying key. The real `.r1cs`
+    /// artifacts are gitignored build outputs, so tests must not depend on
+    /// them.
+    fn minimal_r1cs(num_pub_out: u32, num_pub_in: u32, num_wires: u32) -> Vec<u8> {
+        // Header section body: field_size(4) + prime(32) + wires/pubout/pubin/prvin
+        // (4*4) + num_labels(8) + num_constraints(4) = 64 bytes.
+        let mut header = Vec::new();
+        header.extend_from_slice(&32u32.to_le_bytes()); // field_size
+        header.extend_from_slice(&[0u8; 32]); // prime (skipped by parser)
+        header.extend_from_slice(&num_wires.to_le_bytes());
+        header.extend_from_slice(&num_pub_out.to_le_bytes());
+        header.extend_from_slice(&num_pub_in.to_le_bytes());
+        header.extend_from_slice(&0u32.to_le_bytes()); // num_prv_in
+        header.extend_from_slice(&0u64.to_le_bytes()); // num_labels
+        header.extend_from_slice(&0u32.to_le_bytes()); // num_constraints
+
+        let mut out = Vec::new();
+        out.extend_from_slice(b"r1cs"); // magic
+        out.extend_from_slice(&1u32.to_le_bytes()); // version
+        out.extend_from_slice(&1u32.to_le_bytes()); // num_sections
+        out.extend_from_slice(&1u32.to_le_bytes()); // section type: header
+        out.extend_from_slice(&(header.len() as u64).to_le_bytes()); // section size
+        out.extend_from_slice(&header);
+        out
+    }
+
+    /// The compressed and uncompressed proving-key encodings must reload into
+    /// an identical key: a `Prover` built from an uncompressed round-trip
+    /// of the key yields byte-identical uncompressed bytes and an identical
+    /// verifying key.
+    #[test]
+    fn uncompressed_proving_key_round_trips() {
+        let pk = Groth16::<Bn254, CircomReduction>::generate_random_parameters_with_reduction(
+            DummyCircuit,
+            &mut OsRng,
+        )
+        .expect("groth16 setup should succeed");
+
+        let mut pk_compressed = vec![];
+        pk.serialize_compressed(&mut pk_compressed)
+            .expect("compressed serialization should succeed");
+
+        // One public input => gamma_abc_g1.len() == 2 => num_public == 1.
+        let r1cs_bytes = minimal_r1cs(1, 0, 2);
+
+        let prover =
+            Prover::new(&pk_compressed, &r1cs_bytes).expect("compressed construction should work");
+
+        let uncompressed = prover
+            .get_uncompressed_proving_key()
+            .expect("uncompressed export should work");
+
+        // Uncompressed points are larger than compressed ones.
+        assert!(
+            uncompressed.len() > pk_compressed.len(),
+            "uncompressed encoding ({}) should exceed compressed ({})",
+            uncompressed.len(),
+            pk_compressed.len()
+        );
+
+        let prover2 = Prover::new_from_uncompressed_pk(&uncompressed, &r1cs_bytes)
+            .expect("uncompressed construction should work");
+
+        // Full proving key survived the round trip byte-for-byte.
+        assert_eq!(
+            prover2
+                .get_uncompressed_proving_key()
+                .expect("re-export should work"),
+            uncompressed,
+            "proving key must round-trip identically through the uncompressed encoding"
+        );
+
+        // Derived verifying keys match too.
+        assert_eq!(
+            prover.get_verifying_key().expect("vk export"),
+            prover2.get_verifying_key().expect("vk export"),
+            "verifying keys must match after uncompressed round trip"
+        );
+    }
 }
