@@ -295,18 +295,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             log::trace!(
                 "[{WORKER_NAME}] list user notes for the account {address} (offset={offset}, limit={limit}, spent={spent:?})"
             );
-            let list = with_storage!(s => s.list_user_notes(&address, offset, limit, spent)?)?;
+            let page = with_storage!(s => s.list_user_notes_page(&address, offset, limit, spent)?)?;
             log::trace!(
-                "[{WORKER_NAME}] fetched {} notes for the account {address}",
-                list.len()
+                "[{WORKER_NAME}] fetched {} of {} notes for the account {address}",
+                page.notes.len(),
+                page.total
             );
-            StorageWorkerResponse::UserNotes(list)
-        }
-        StorageWorkerRequest::CountUserNotes { address, spent } => {
-            log::trace!("[{WORKER_NAME}] count user notes for the account {address}");
-            let count = with_storage!(s => s.count_user_notes(&address, spent)?)?;
-            log::trace!("[{WORKER_NAME}] total notes for {address}: {count}");
-            StorageWorkerResponse::UserNotesCount(count)
+            StorageWorkerResponse::UserNotesPage(page)
         }
         StorageWorkerRequest::PortfolioBalances(address) => {
             log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");

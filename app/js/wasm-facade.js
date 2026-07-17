@@ -115,11 +115,8 @@ function wrapSdkClient(sdk, sdkStorage) {
         },
         async getUserNotes(address, offset, limit, spent = null) {
             const response = await storageCall(sdkStorage, { UserNotes: { address, offset, limit, spent } });
-            return response.UserNotes ?? [];
-        },
-        async getUserNotesCount(address, spent = null) {
-            const response = await storageCall(sdkStorage, { CountUserNotes: { address, spent } });
-            return response.UserNotesCount ?? 0;
+            const page = response.UserNotesPage ?? { notes: [], total: 0 };
+            return { notes: page.notes ?? [], total: page.total ?? 0 };
         },
         async deriveAspUserLeaf(membershipBlinding, notePublicKey) {
             const response = await storageCall(sdkStorage, {

@@ -143,7 +143,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await client().getUserNotes(state.address, 0, LIMIT);
+    const { notes: list } = await client().getUserNotes(state.address, 0, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({

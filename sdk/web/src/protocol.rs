@@ -10,7 +10,7 @@ use stellar_private_payments_sdk::{
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
-        RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
+        RecipientLookup, SyncMetadata, UserNoteSummary, UserNotesPage, UserOperation,
     },
 };
 
@@ -76,10 +76,6 @@ pub enum StorageWorkerRequest {
         limit: u32,
         spent: Option<bool>,
     },
-    CountUserNotes {
-        address: Address,
-        spent: Option<bool>,
-    },
     PortfolioBalances(Address),
     RecordOperation {
         address: Address,
@@ -129,7 +125,7 @@ pub enum StorageWorkerResponse {
     UserKeys(Option<UserKeys>),
     AspSecret(Option<AspSecret>),
     UserNotes(Vec<UserNoteSummary>),
-    UserNotesCount(u32),
+    UserNotesPage(UserNotesPage),
     PortfolioBalances(Vec<PortfolioBalance>),
     Operations(Vec<UserOperation>),
     RecipientLookup(RecipientLookup),

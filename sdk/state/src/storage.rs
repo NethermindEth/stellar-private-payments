@@ -9,7 +9,7 @@ use types::{
     EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
     NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
     PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
-    UserOperation,
+    UserNotesPage, UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -437,78 +437,80 @@ impl Storage {
             .context("lookup_public_key_by_address")
     }
 
-    /// List notes derived for `address` (newest first), with pagination.
+    /// List a page of notes derived for `address` (newest first), together
+    /// with the total number of matching notes across all pages.
     ///
     /// `spent` filters to spent-only (`Some(true)`), unspent-only
     /// (`Some(false)`), or all notes (`None`) — applied in SQL so `offset`/
-    /// `limit` page over the filtered set, matching [`Self::count_user_notes`].
-    pub fn list_user_notes(
+    /// `limit` page over the filtered set and `total` counts the same set.
+    ///
+    /// Both queries run inside one read transaction so they observe the same
+    /// database snapshot — otherwise a note landing between the two queries
+    /// could make `total` inconsistent with the page contents.
+    pub fn list_user_notes_page(
         &self,
         address: &str,
         offset: u32,
         limit: u32,
         spent: Option<bool>,
-    ) -> Result<Vec<UserNoteSummary>> {
-        let spent_clause = match spent {
-            Some(true) => "AND n.nullifier_id IS NOT NULL",
-            Some(false) => "AND n.nullifier_id IS NULL",
-            None => "",
-        };
-        let mut stmt = self.conn.prepare(&format!(
-            "SELECT
-                n.id,
-                pool.address,
-                n.amount,
-                c.leaf_index,
-                r.ledger,
-                CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
-             FROM user_notes n
-             JOIN accounts a ON a.id = n.account_id
-             JOIN pool_commitments c ON c.id = n.commitment_id
-             JOIN raw_contract_events r ON r.id = c.event_id
-             JOIN contracts pool ON pool.contract_id = r.contract_id
-             WHERE a.address = ?1 {spent_clause}
-             ORDER BY r.ledger DESC
-             LIMIT ?2 OFFSET ?3"
-        ))?;
-
-        let rows = stmt.query_map(params![address, limit, offset], |row| {
-            let id: Field = row.get(0)?;
-            let pool_contract_id: String = row.get(1)?;
-            let amount: NoteAmount = row.get(2)?;
-            let leaf_index_i64: i64 = row.get(3)?;
-            let leaf_index = col_u32(leaf_index_i64, 3)?;
-            let created_at_ledger_i64: i64 = row.get(4)?;
-            let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
-            let spent_i64: i64 = row.get(5)?;
-
-            Ok(UserNoteSummary {
-                id,
-                pool_contract_id,
-                amount,
-                leaf_index,
-                created_at_ledger,
-                spent: spent_i64 != 0,
-            })
-        })?;
-
-        let mut out = Vec::new();
-        for r in rows {
-            out.push(r?);
-        }
-        Ok(out)
-    }
-
-    /// Total number of notes derived for `address`, under the same `spent`
-    /// filter as [`Self::list_user_notes`].
-    pub fn count_user_notes(&self, address: &str, spent: Option<bool>) -> Result<u32> {
-        let spent_clause = match spent {
-            Some(true) => "AND n.nullifier_id IS NOT NULL",
-            Some(false) => "AND n.nullifier_id IS NULL",
-            None => "",
-        };
-        let count: i64 = self
+    ) -> Result<UserNotesPage> {
+        let tx = self
             .conn
+            .unchecked_transaction()
+            .context("list_user_notes_page: begin transaction")?;
+        let spent_clause = match spent {
+            Some(true) => "AND n.nullifier_id IS NOT NULL",
+            Some(false) => "AND n.nullifier_id IS NULL",
+            None => "",
+        };
+
+        let notes = {
+            let mut stmt = tx.prepare(&format!(
+                "SELECT
+                    n.id,
+                    pool.address,
+                    n.amount,
+                    c.leaf_index,
+                    r.ledger,
+                    CASE WHEN n.nullifier_id IS NULL THEN 0 ELSE 1 END AS spent
+                 FROM user_notes n
+                 JOIN accounts a ON a.id = n.account_id
+                 JOIN pool_commitments c ON c.id = n.commitment_id
+                 JOIN raw_contract_events r ON r.id = c.event_id
+                 JOIN contracts pool ON pool.contract_id = r.contract_id
+                 WHERE a.address = ?1 {spent_clause}
+                 ORDER BY r.ledger DESC
+                 LIMIT ?2 OFFSET ?3"
+            ))?;
+
+            let rows = stmt.query_map(params![address, limit, offset], |row| {
+                let id: Field = row.get(0)?;
+                let pool_contract_id: String = row.get(1)?;
+                let amount: NoteAmount = row.get(2)?;
+                let leaf_index_i64: i64 = row.get(3)?;
+                let leaf_index = col_u32(leaf_index_i64, 3)?;
+                let created_at_ledger_i64: i64 = row.get(4)?;
+                let created_at_ledger = col_u32(created_at_ledger_i64, 4)?;
+                let spent_i64: i64 = row.get(5)?;
+
+                Ok(UserNoteSummary {
+                    id,
+                    pool_contract_id,
+                    amount,
+                    leaf_index,
+                    created_at_ledger,
+                    spent: spent_i64 != 0,
+                })
+            })?;
+
+            let mut out = Vec::new();
+            for r in rows {
+                out.push(r?);
+            }
+            out
+        };
+
+        let total: i64 = tx
             .query_row(
                 &format!(
                     "SELECT COUNT(*)
@@ -519,8 +521,10 @@ impl Storage {
                 params![address],
                 |row| row.get(0),
             )
-            .context("count_user_notes")?;
-        u32::try_from(count).context("count_user_notes: count exceeds u32")
+            .context("list_user_notes_page: count")?;
+        let total = u32::try_from(total).context("list_user_notes_page: count exceeds u32")?;
+
+        Ok(UserNotesPage { notes, total })
     }
 
     /// All notes for `address` in `pool_contract_id` (newest first), spent and
