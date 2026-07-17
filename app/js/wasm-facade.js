@@ -203,10 +203,25 @@ export async function initializeWasm(rpcUrl, bootnodeUrl = null) {
     return client();
 }
 
+/**
+ * Verify a selective-disclosure receipt with no wallet, no local storage, and
+ * no prior `initializeRuntime` call — skips the OPFS/SQLite storage worker
+ * entirely, since verification never reads local state.
+ */
+export async function verifySelectiveDisclosureStandalone(rpcUrl, receiptJson, expectedVkHash) {
+    await ensureWasmInit();
+    return Client.verifySelectiveDisclosureStandalone(rpcUrl, receiptJson, expectedVkHash);
+}
+
 /** SDK session + storage-backed reads (keys, notes, feeds, ASP helpers). */
 export function client() {
     if (!wrappedClient) {
         throw new Error('Runtime not initialized. Call initializeRuntime or initializeWasm first.');
     }
     return wrappedClient;
+}
+
+/** Whether a runtime (wallet-bound or anonymous) is already open. */
+export function isRuntimeReady() {
+    return wrappedClient !== null;
 }

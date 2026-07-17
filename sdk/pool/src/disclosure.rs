@@ -94,10 +94,10 @@ pub fn build_disclosure_inputs(
     let mut notes = Vec::with_capacity(req.selected_commitments.len());
     for commitment in &req.selected_commitments {
         let (amount, blinding, leaf_index) = storage
-            .get_unspent_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
+            .get_user_note_by_commitment(&req.pool_address, &req.user_address, commitment)?
             .ok_or_else(|| {
                 anyhow::anyhow!(
-                    "unspent note not found for commitment {commitment} in pool {}",
+                    "note not found for commitment {commitment} in pool {}",
                     req.pool_address
                 )
             })?;
@@ -132,8 +132,8 @@ pub(crate) fn map_build_disclosure_inputs(
     }
 }
 
-/// Verify a selective-disclosure receipt: Groth16 proof, context hash, and root
-/// freshness.
+/// Verify a selective-disclosure receipt: Groth16 proof, context hash, root
+/// freshness, and spent-nullifier status.
 pub async fn verify_disclosure_receipt(
     fetcher: &StateFetcher,
     prover: &dyn Prover,
@@ -159,9 +159,28 @@ pub async fn verify_disclosure_receipt(
         }
     }
 
+    let mut nullifiers_unspent = true;
+    let mut spent_nullifier_indices = Vec::new();
+    for (index, nullifier) in receipt.public_inputs.nullifiers.iter().enumerate() {
+        let spent = fetcher
+            .is_nullifier_spent(&pool_contract_id, *nullifier)
+            .await
+            .map_err(|e| PoolError::Other(format!("nullifier spent check failed: {e:#}")))?;
+        if spent {
+            nullifiers_unspent = false;
+            spent_nullifier_indices.push(
+                u32::try_from(index).map_err(|_| {
+                    PoolError::Other("nullifier index out of u32 range".to_string())
+                })?,
+            );
+        }
+    }
+
     Ok(DisclosureVerificationReport {
         proof_verified,
         context_verified,
         known_root_status,
+        nullifiers_unspent,
+        spent_nullifier_indices,
     })
 }

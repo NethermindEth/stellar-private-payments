@@ -38,11 +38,11 @@ const chain = await client.allContractsData();
 
 ### `Storage`
 
-| Method | Description |
-|--------|-------------|
-| `open({ workerUrl? })` | Spawn storage worker once per page (`poolstellar.sqlite` on OPFS) |
+| Method | Description                                              |
+|--------|----------------------------------------------------------|
+| `open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
-| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence |
+| `call(request, timeoutMs?)` | Raw worker RPC for app-layer persistence                 |
 
 ### `Client`
 

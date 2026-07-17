@@ -2,13 +2,16 @@ mod amounts;
 mod chain_data;
 mod disclosure;
 mod ext_data;
+mod policy_tx;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
 pub use disclosure::*;
 pub use ext_data::*;
+pub use policy_tx::*;
 
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 pub const SMT_DEPTH: u32 = 10;
 
@@ -22,8 +25,9 @@ pub struct ContractConfig {
     pub asp_membership: String,
     /// Address of ASP nonmembership deployed contract
     pub asp_non_membership: String,
-    /// Address of verifier deployed contract
-    pub verifier: String,
+    /// Groth16 verifier contracts keyed by policy circuit suffix (`""`, `A`,
+    /// `B`, `AB`).
+    pub verifiers: BTreeMap<String, String>,
     /// Address of public key registry deployed contract
     pub public_key_registry: String,
     /// Pool deployments (one per supported asset/token).
@@ -42,6 +46,8 @@ pub struct PoolConfigEntry {
     pub deployment_ledger: u32,
     pub enabled: bool,
     pub asset: AssetDescriptor,
+    /// ASP policy flags for transact proofs.
+    pub policy_flags: PolicyFlags,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +285,23 @@ impl ContractConfig {
             .map(|p| p.deployment_ledger)
             .min()
             .ok_or_else(|| anyhow!("at least one pool should be enabled"))
+    }
+
+    /// Pool entry from `deployments.json`.
+    pub fn pool(&self, pool_contract_id: &str) -> Result<&PoolConfigEntry> {
+        self.pools
+            .iter()
+            .find(|p| p.pool_contract_id == pool_contract_id)
+            .ok_or_else(|| anyhow!("pool {pool_contract_id} not found in deployment config"))
+    }
+
+    /// Verifier contract for a policy flag set.
+    pub fn verifier_for(&self, flags: PolicyFlags) -> Result<&str> {
+        let key = flags.circuit_suffix();
+        self.verifiers
+            .get(&key)
+            .map(String::as_str)
+            .ok_or_else(|| anyhow!("no verifier configured for policy flags {key:?}"))
     }
 }
 

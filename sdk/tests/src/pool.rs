@@ -5,9 +5,9 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use anyhow::Result;
 
 use stellar_private_payments_sdk::{
-    LocalSigner, PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
+    LocalProver, LocalSigner, PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
     blocking::PrivatePool,
-    types::{NoteAmount, NotePublicKey},
+    types::{NoteAmount, NotePublicKey, PolicyFlags},
 };
 use types::{EncryptionPublicKey, Field};
 
@@ -21,13 +21,16 @@ const TEST_CONFIG_JSON: &str = r#"{
     "admin": "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
     "asp_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "asp_non_membership": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
-    "verifier": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
+    "verifiers": {
+        "AB": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4"
+    },
     "public_key_registry": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
     "pools": [{
         "poolContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "tokenContractId": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4",
         "deploymentLedger": 1,
         "enabled": true,
+            "policyFlags": ["allowlist", "blocklist"],
         "asset": {"kind": "native"}
     }]
 }"#;
@@ -60,6 +63,7 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         &amounts,
     )?;
 
+    let artifacts = test_prover_artifacts()?;
     let pool = PrivatePool::open_local(
         PrivatePoolConfig {
             rpc_url: "https://soroban-testnet.stellar.org".into(),
@@ -67,9 +71,12 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
             pool_contract_id: POOL_CONTRACT_ID.into(),
             user_address: USER_ADDRESS.into(),
             storage_path: db_path.to_string_lossy().into_owned(),
-            prover_artifacts: test_prover_artifacts()?,
         },
         test_signer()?,
+        Box::new(LocalProver::from_artifacts(&[(
+            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+            artifacts,
+        )])?),
     )?;
 
     Ok(pool)
@@ -104,10 +111,10 @@ fn test_prover_artifacts() -> Result<ProverArtifacts> {
     let circuits = repo.join("target/circuits-artifacts").join(profile);
     Ok(ProverArtifacts {
         proving_key: std::fs::read(
-            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin"),
+            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),
         )?,
-        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2.wasm"))?,
-        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2.r1cs"))?,
+        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2_AB.wasm"))?,
+        circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,
     })
 }
 

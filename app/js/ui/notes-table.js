@@ -1,6 +1,7 @@
 import { client } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { Templates } from './templates.js';
+import { filterNotes } from './notes-view.js';
 
 const PAGE_SIZE = 20;
 
@@ -113,9 +114,10 @@ export const NotesTable = {
         if (!tbody || !empty) return;
 
         tbody.replaceChildren();
-        const filtered = App.state.notes
-            .filter(note => !App.state.selectedPoolId || note.poolContractId === App.state.selectedPoolId)
-            .map(noteWithLabels);
+        const filtered = filterNotes(App.state.notes, {
+            status: this.filter,
+            poolId: App.state.selectedPoolId,
+        }).map(noteWithLabels);
 
         if (!filtered.length) {
             empty.classList.remove('hidden');

@@ -3,14 +3,14 @@ use crate::{
     protocol::{ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
-use futures::{FutureExt, try_join};
+use futures::FutureExt;
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
     Registrable,
     oneshot::{OneshotBridge, oneshot},
 };
 use sha2::{Digest as _, Sha256};
-use std::{cell::RefCell, fmt::Write as _};
+use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments_sdk::{
     PoolError, PreparedProverTx, Prover, ProverEngine, disclosure,
     proving::{Prover as Groth16Prover, WitnessCalculator},
@@ -36,9 +36,6 @@ enum InitState {
     Ready,
     Failed(String),
 }
-
-const PROVING_KEY: &[u8] =
-    include_bytes!("../../../../deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin");
 
 const DISCLOSURE_PROVING_KEYS: [&[u8]; 4] = [
     include_bytes!(
@@ -101,12 +98,45 @@ fn ensure_sha256_matches(
 // wasm threads?
 
 thread_local! {
-    static TRANSACT_PROVER: RefCell<Option<ProverEngine>> = const { RefCell::new(None) };
+    static TRANSACT_PROVERS: RefCell<HashMap<String, ProverEngine>> =
+        RefCell::new(HashMap::new());
     static DISCLOSURE_WITNESS_CALCS: RefCell<[Option<WitnessCalculator>; 4]> =
         const { RefCell::new([None, None, None, None]) };
     static DISCLOSURE_PROVERS: RefCell<[Option<Groth16Prover>; 4]> =
         const { RefCell::new([None, None, None, None]) };
     static INIT_STATE: RefCell<InitState> = const { RefCell::new(InitState::Pending) };
+}
+
+fn init_transact_prover(
+    stem: &str,
+    proving_key: &[u8],
+    wasm_bytes: &[u8],
+    r1cs_bytes: &[u8],
+) -> Result<ProverEngine, JsError> {
+    let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
+        .unwrap_or_else(|| panic!("unsupported transact circuit stem: {stem}"));
+
+    ensure_sha256_matches(
+        &format!("{stem}_proving_key.bin"),
+        proving_key,
+        hashes.proving_key_len,
+        hashes.proving_key_sha256,
+    )?;
+    ensure_sha256_matches(
+        &format!("{stem}.wasm"),
+        wasm_bytes,
+        hashes.wasm_len,
+        hashes.wasm_sha256,
+    )?;
+    ensure_sha256_matches(
+        &format!("{stem}.r1cs"),
+        r1cs_bytes,
+        hashes.r1cs_len,
+        hashes.r1cs_sha256,
+    )?;
+
+    ProverEngine::new(proving_key, wasm_bytes, r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init {stem} transact prover: {e:#}")))
 }
 
 struct DisclosureArtifactHashes {
@@ -174,56 +204,53 @@ fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
 }
 
 async fn load_circuit_artifacts() -> Result<(), JsError> {
-    let all_ready = TRANSACT_PROVER.with(|s| s.borrow().is_some())
+    let transact_ready = TRANSACT_PROVERS.with(|s| {
+        crate::artifact_hashes::POLICY_TRANSACT_CIRCUIT_STEMS
+            .iter()
+            .all(|stem| s.borrow().contains_key(*stem))
+    });
+    let all_ready = transact_ready
         && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow().iter().all(|c| c.is_some()))
         && DISCLOSURE_PROVERS.with(|s| s.borrow().iter().all(|p| p.is_some()));
     if all_ready {
         return Ok(());
     }
 
-    let (wasm_bytes, r1cs_bytes) = try_join!(
-        async {
-            let wasm_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.wasm").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.wasm: {} bytes",
-                wasm_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(wasm_bytes)
-        },
-        async {
-            let r1cs_bytes: Vec<u8> = fetch_circuit_file("policy_tx_2_2.r1cs").await?;
-            log::debug!(
-                "[{WORKER_NAME}] fetched policy_tx_2_2.r1cs: {} bytes",
-                r1cs_bytes.len()
-            );
-            Ok::<Vec<u8>, JsError>(r1cs_bytes)
+    let to_load: Vec<(&str, &[u8])> = crate::artifact_hashes::POLICY_TRANSACT_CIRCUIT_STEMS
+        .iter()
+        .filter_map(|&stem| {
+            if TRANSACT_PROVERS.with(|s| s.borrow().contains_key(stem)) {
+                return None;
+            }
+            crate::artifact_hashes::bundled_policy_proving_key(stem)
+                .map(|proving_key| (stem, proving_key))
+        })
+        .collect();
+
+    if !to_load.is_empty() {
+        let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
+            futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
+                let wasm = fetch_circuit_file(&format!("{stem}.wasm")).await?;
+                let r1cs = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
+                Ok::<_, JsError>((wasm, r1cs))
+            }))
+            .await?;
+
+        let mut loaded = Vec::with_capacity(to_load.len());
+        for (&(stem, proving_key), (wasm_bytes, r1cs_bytes)) in
+            to_load.iter().zip(transact_artifacts.iter())
+        {
+            let prover = init_transact_prover(stem, proving_key, wasm_bytes, r1cs_bytes)?;
+            loaded.push((stem.to_owned(), prover));
         }
-    )?;
 
-    ensure_sha256_matches(
-        "policy_tx_2_2_proving_key.bin",
-        PROVING_KEY,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_PROVING_KEY_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "policy_tx_2_2.wasm",
-        &wasm_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_WASM_SHA256,
-    )?;
-    ensure_sha256_matches(
-        "policy_tx_2_2.r1cs",
-        &r1cs_bytes,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_LEN,
-        crate::artifact_hashes::EXPECTED_POLICY_TX_2_2_R1CS_SHA256,
-    )?;
-
-    let transact_prover = ProverEngine::new(PROVING_KEY, &wasm_bytes, &r1cs_bytes)
-        .map_err(|e| JsError::new(&format!("failed to init transact prover: {e:#}")))?;
-    TRANSACT_PROVER.with(|cell| {
-        *cell.borrow_mut() = Some(transact_prover);
-    });
+        TRANSACT_PROVERS.with(|cell| {
+            let mut borrow = cell.borrow_mut();
+            for (stem, prover) in loaded {
+                borrow.insert(stem, prover);
+            }
+        });
+    }
 
     let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
         futures::future::try_join_all((1..=4).map(|n_notes| async move {
@@ -343,11 +370,12 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::Transact(params) => {
             log::debug!("[{WORKER_NAME}] transact");
-            let prepared = TRANSACT_PROVER.with(|cell| {
+            let stem = params.policy_flags.circuit_stem();
+            let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
-                let engine = borrow
-                    .as_mut()
-                    .ok_or_else(|| anyhow::anyhow!("transact prover is not initialized"))?;
+                let engine = borrow.get_mut(&stem).ok_or_else(|| {
+                    anyhow::anyhow!("transact prover for {stem} is not initialized")
+                })?;
                 engine.prove_transact(params)
             })?;
             ProverWorkerResponse::TransactPrepared(prepared)
@@ -388,6 +416,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             };
 
             let artifacts = selective_disclosure(params)?;
+            let nullifiers = artifacts.nullifiers.clone();
+            let amounts = artifacts.amounts.clone();
             let circuit_inputs_json = serde_json::to_string(&artifacts.circuit_inputs)?;
 
             let witness_bytes = DISCLOSURE_WITNESS_CALCS.with(|cell| {
@@ -451,6 +481,8 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
                     roots,
                     note_commitments,
                     ext_context_hash,
+                    nullifiers,
+                    amounts,
                 },
                 proof_compressed_hex,
                 issued_at: js_sys::Date::new_0()
@@ -486,7 +518,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
     Ok(resp)
 }
 
-const PROVE_TIMEOUT_MS: u32 = 20_000;
+const PROVE_TIMEOUT_MS: u32 = 30_000;
 
 /// Prover worker bridge — main-thread ↔ worker I/O for Groth16 proving.
 pub(crate) struct ProverBridge {
@@ -531,7 +563,10 @@ impl ProverBridge {
     }
 
     pub(crate) async fn ping(&self) -> anyhow::Result<()> {
-        match self.call(ProverWorkerRequest::Ping, 20_000).await? {
+        match self
+            .call(ProverWorkerRequest::Ping, PROVE_TIMEOUT_MS)
+            .await?
+        {
             ProverWorkerResponse::Pong => Ok(()),
             other => Err(anyhow!("unexpected response: {other:?}")),
         }

@@ -1,4 +1,4 @@
-import { client, initializeRuntime } from './wasm-facade.js';
+import { client, isRuntimeReady, verifySelectiveDisclosureStandalone } from './wasm-facade.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import {
   connectWallet,
@@ -7,6 +7,8 @@ import {
 } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
+import { filterNotes, createNoteRow } from './ui/notes-view.js';
+import { App, Toast } from './ui/core.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -14,14 +16,17 @@ import { getActivePoolContractId } from './ui/pool.js';
 
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_1:
-    '0xe8c9879c1239deeaab3cda366419e3536a6f66502f88c3eec09da1e52843e5af',
+    '0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e',
   selectiveDisclosure_2:
-    '0xfb94f1a99c96bd4f0bcde813acdf23af25bcf7a292a9d77f0046b94d3cd028c1',
+    '0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d',
   selectiveDisclosure_3:
-    '0x0902ecd9e05270b8f68073d8b05b44c1a9bfd2ebd349699374ab3e6f614d7f73',
+    '0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62',
   selectiveDisclosure_4:
-    '0xfc1f2648fba94e325de3022ec380401b617ef0653f12acb91d2e5f9431d5134c',
+    '0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9',
 };
+
+// Public testnet endpoint used to verify a receipt when no wallet is connected.
+const DEFAULT_TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
 
 // ---------------------------------------------------------------------------
 // State
@@ -32,14 +37,12 @@ const BN254_PRIME = 218882428718392752222464057452572750885483644004160343436982
 const PICKER_PAGE_SIZE = 10;
 
 const state = {
-  address: null,
-  networkPassphrase: null,
-  sorobanRpcUrl: null,
-  derivedKeys: null,
   notes: [],
   pools: [],
   selectedNotes: [],
   pickerPage: 0,
+  noteStatusFilter: 'all',
+  notePoolFilter: null,
   notesLoading: false,
   notesError: null,
   generating: false,
@@ -56,8 +59,7 @@ const state = {
 let networkChip;
 let walletChip;
 let connectBtn;
-let toastContainer;
-let toastTemplate;
+
 
 // ---------------------------------------------------------------------------
 // Utilities
@@ -76,10 +78,23 @@ function svgEl(tag, attrs = {}, children = []) {
   for (const c of children) node.appendChild(c);
   return node;
 }
+// Create an element with optional class and text. Text always goes through
+// textContent, so it is never interpreted as HTML.
 function el(tag, className, text) {
   const node = document.createElement(tag);
   if (className) node.className = className;
-  if (text != null) node.textContent = text;
+  if (text != null) node.textContent = String(text);
+  return node;
+}
+// Create an element and append DOM-node children. `children` only ever
+// contains Nodes (or null) built via el()/svgEl() — never raw strings — so
+// nothing untrusted reaches appendChild as markup.
+function elc(tag, className, children) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  for (const child of children) {
+    if (child instanceof Node) node.appendChild(child);
+  }
   return node;
 }
 function spinnerEl() {
@@ -98,6 +113,13 @@ function xCircleIcon(cls) {
     svgEl('line', { x1: '9', y1: '9', x2: '15', y2: '15' }),
   ]);
 }
+function alertTriangleIcon(cls) {
+  return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
+    svgEl('path', { d: 'M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z' }),
+    svgEl('line', { x1: '12', y1: '9', x2: '12', y2: '13' }),
+    svgEl('line', { x1: '12', y1: '17', x2: '12.01', y2: '17' }),
+  ]);
+}
 function shieldIcon(cls) {
   return svgEl('svg', { class: cls, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', 'stroke-width': '2' }, [
     svgEl('path', { d: 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z' }),
@@ -105,34 +127,14 @@ function shieldIcon(cls) {
   ]);
 }
 
-function showToast(message, type = 'success', duration = 4000) {
-  if (!toastContainer || !toastTemplate) return;
-  const toast = toastTemplate.content.cloneNode(true).firstElementChild;
 
-  toast.querySelector('.toast-message').textContent = message;
-
-  const isSuccess = type === 'success';
-  toast.querySelector('.toast-icon-success').classList.toggle('hidden', !isSuccess);
-  toast.querySelector('.toast-icon-error').classList.toggle('hidden', isSuccess);
-  toast.classList.add(isSuccess ? 'border-emerald-500/50' : 'border-red-500/50');
-
-  toast.querySelector('.toast-close').addEventListener('click', () => toast.remove());
-
-  toastContainer.appendChild(toast);
-
-  setTimeout(() => {
-    toast.style.opacity = '0';
-    toast.style.transform = 'translateX(100%)';
-    setTimeout(() => toast.remove(), 200);
-  }, duration);
-}
 
 // ---------------------------------------------------------------------------
 // Wallet
 // ---------------------------------------------------------------------------
 
 async function loadNotes() {
-  if (!state.address) return;
+  if (!App.state.wallet.address) return;
   state.notesLoading = true;
   state.notesError = null;
 
@@ -143,7 +145,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const { notes: list } = await client().getUserNotes(state.address, 0, LIMIT);
+    const { notes: list } = await client().getUserNotes(App.state.wallet.address, 0, LIMIT);
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -159,14 +161,14 @@ async function loadNotes() {
     const query = parseQueryParams();
     if (query.commitments && query.commitments.length > 0) {
       const targets = query.commitments.map(normalizeCommitment);
-      const matches = state.notes.filter(
-        (n) => targets.includes(normalizeCommitment(n.id)) && !n.spent
+      const matches = state.notes.filter((n) =>
+        targets.includes(normalizeCommitment(n.id))
       );
       if (matches.length > 0) {
         state.selectedNotes = matches.slice(0, 4);
       } else {
         state.notesError =
-          'Preselected notes not found, already spent, or not owned by this account.';
+          'Preselected notes not found or not owned by this account.';
       }
     }
   } catch (e) {
@@ -179,86 +181,19 @@ async function loadNotes() {
   }
 }
 
-async function ensureDisclosureRuntime(rpcUrl) {
-  if (!rpcUrl) {
-    throw new Error('Soroban RPC URL is required. Configure a testnet RPC in Freighter.');
-  }
-  await initializeRuntime(rpcUrl);
-  await client().startSync();
-}
-
-// Read the user's Soroban RPC preference from Freighter (not a hardcoded default).
-async function loadWalletRpcPreference() {
-  const net = await getWalletNetwork();
-  const rpcUrl = (net.sorobanRpcUrl || '').trim();
-  if (!rpcUrl.toLowerCase().includes('testnet')) {
-    throw new Error(
-      'This page supports Stellar testnet only. Configure a testnet Soroban RPC in Freighter.',
-    );
-  }
-  state.sorobanRpcUrl = rpcUrl;
-  return { rpcUrl, network: net.network, networkPassphrase: net.networkPassphrase };
-}
-
-async function connect() {
-  try {
-    const address = await connectWallet();
-    const { rpcUrl, network, networkPassphrase } = await loadWalletRpcPreference();
-
-    // This page is testnet-only. Refuse connection from wallets on other networks.
-    const TESTNET_PASSPHRASE = 'Test SDF Network ; September 2015';
-    if (networkPassphrase !== TESTNET_PASSPHRASE) {
-      showToast(
-        `Network mismatch: expected Testnet, got ${network || 'unknown network'}. Please switch your wallet to Testnet.`,
-        'error',
-        8000
-      );
-      return;
-    }
-
-    state.address = address;
-    state.networkPassphrase = networkPassphrase;
-
-    walletChip.textContent = shortAddress(address);
-    networkChip.textContent = network || 'Testnet';
-
-    showToast(`Connected: ${shortAddress(address)}`, 'success');
-
-    await ensureDisclosureRuntime(rpcUrl);
-    // Load derived keys (cached keys load instantly).
-    await initializeWalletSession(address, networkPassphrase);
-
-    // Load notes and render generate section
-    await loadNotes();
-  } catch (err) {
-    if (err.code === 'USER_REJECTED') {
-      showToast('Connection cancelled', 'info');
-    } else {
-      showToast(err.message || 'Wallet connection failed', 'error');
-    }
-  }
-}
-
-async function initializeWalletSession(address, networkPassphrase) {
-  await client().initializeWallet({ networkPassphrase, userAddress: address }, new FreighterSigner());
-  const keys = await client().getUserKeys(address);
-  if (!keys?.noteKeypair?.public) {
-    throw new Error('Privacy keys not found in local storage');
-  }
-  state.derivedKeys = true;
-  showToast('Privacy keys ready', 'success');
-}
-
 // ---------------------------------------------------------------------------
 // Query params
 // ---------------------------------------------------------------------------
 
 function parseQueryParams() {
-  const params = new URLSearchParams(window.location.search);
-  const commitments = params.getAll('commitment');
+  const searchParams = new URLSearchParams(window.location.search);
+  const hashString = window.location.hash.includes('?') ? window.location.hash.split('?')[1] : '';
+  const hashParams = new URLSearchParams(hashString);
+  
+  const commitments = hashParams.getAll('commitment').concat(searchParams.getAll('commitment')).filter(Boolean);
   return {
     commitments: commitments.length > 0 ? commitments : null,
-    verify: params.get('verify') === '1' || params.get('verify') === 'true',
+    verify: hashParams.get('verify') === '1' || searchParams.get('verify') === '1' || hashParams.get('verify') === 'true' || searchParams.get('verify') === 'true',
   };
 }
 
@@ -305,6 +240,61 @@ function normalizeCommitment(s) {
   return t;
 }
 
+// Filter controls for the Generate selector: spent-status buttons plus a
+// token/pool select (shown only when the account holds notes across more than
+// one pool). Mutating a control updates state and re-renders in place.
+function buildGenerateFilters(container) {
+  const wrap = el('div', 'flex flex-wrap items-center gap-2 mb-3');
+
+  const statusGroup = el('div', 'inline-flex rounded-lg border border-dark-700 bg-dark-800 p-0.5');
+  const statuses = [
+    { key: 'all', label: 'All' },
+    { key: 'unspent', label: 'Available' },
+    { key: 'spent', label: 'Spent' },
+  ];
+  statuses.forEach(({ key, label }) => {
+    const active = state.noteStatusFilter === key;
+    const btn = el(
+      'button',
+      `px-3 py-1 text-xs rounded-md transition-colors ${
+        active ? 'bg-brand-500/20 text-brand-300' : 'text-dark-400 hover:text-dark-200'
+      }`,
+      label,
+    );
+    btn.type = 'button';
+    btn.addEventListener('click', () => {
+      state.noteStatusFilter = key;
+      mountGenerate(container);
+    });
+    statusGroup.appendChild(btn);
+  });
+  wrap.appendChild(statusGroup);
+
+  const poolIds = [...new Set(state.notes.map((n) => n.poolContractId))];
+  if (poolIds.length > 1) {
+    const select = el(
+      'select',
+      'text-xs bg-dark-800 border border-dark-700 rounded-lg pl-3 pr-8 py-1.5 text-dark-200',
+    );
+    const optAll = el('option', null, 'All tokens');
+    optAll.value = '';
+    select.appendChild(optAll);
+    poolIds.forEach((pid) => {
+      const opt = el('option', null, tokenLabelForPool(pid));
+      opt.value = pid;
+      select.appendChild(opt);
+    });
+    select.value = state.notePoolFilter || '';
+    select.addEventListener('change', () => {
+      state.notePoolFilter = select.value || null;
+      mountGenerate(container);
+    });
+    wrap.appendChild(select);
+  }
+
+  return wrap;
+}
+
 export function mountGenerate(container) {
   container.replaceChildren();
 
@@ -314,18 +304,18 @@ export function mountGenerate(container) {
   heading.textContent = 'Generate Disclosure Receipt';
   container.appendChild(heading);
 
-  if (!state.address || !state.derivedKeys) {
+  if (!App.state.wallet.address || !App.state.keys.notePublicKey) {
     const msg = document.createElement('div');
     msg.className = 'text-sm text-dark-400';
     msg.textContent =
-      'Connect your Freighter wallet to generate disclosure receipts for your unspent notes.';
+      'Connect your Freighter wallet to generate disclosure receipts for your notes.';
     container.appendChild(msg);
     return;
   }
 
   // Wallet status line
   const statusLine = el('div', 'text-xs text-dark-500 mb-4');
-  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(state.address)));
+  statusLine.append('Connected: ', el('span', 'font-mono text-dark-300', shortAddress(App.state.wallet.address)));
   container.appendChild(statusLine);
 
   if (state.notesLoading) {
@@ -343,81 +333,66 @@ export function mountGenerate(container) {
     return;
   }
 
-  const unspent = state.notes.filter((n) => !n.spent);
-
-  if (unspent.length === 0) {
+  if (state.notes.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'text-sm text-dark-400';
-    empty.textContent = 'No unspent notes found for this account.';
+    empty.textContent = 'No notes found for this account.';
     container.appendChild(empty);
     return;
   }
 
-  // Note picker
-  const totalPickerPages = Math.max(1, Math.ceil(unspent.length / PICKER_PAGE_SIZE));
+  container.appendChild(buildGenerateFilters(container));
+
+  const notes = filterNotes(state.notes, {
+    status: state.noteStatusFilter,
+    poolId: state.notePoolFilter,
+  });
+
+  // Note picker — paginated over the status/pool-filtered `notes` set.
+  const totalPickerPages = Math.max(1, Math.ceil(notes.length / PICKER_PAGE_SIZE));
   if (state.pickerPage >= totalPickerPages) state.pickerPage = totalPickerPages - 1;
-  const pageUnspent = unspent.slice(
+  const pageNotes = notes.slice(
     state.pickerPage * PICKER_PAGE_SIZE,
     (state.pickerPage + 1) * PICKER_PAGE_SIZE,
   );
 
   const pickerLabel = document.createElement('label');
   pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
-  pickerLabel.textContent = `Select up to 4 unspent notes (${unspent.length})`;
+  pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
   container.appendChild(pickerLabel);
 
   const list = document.createElement('div');
   list.className = 'space-y-2 mb-2';
   list.setAttribute('role', 'group');
-  list.setAttribute('aria-label', 'Unspent notes');
+  list.setAttribute('aria-label', 'Notes');
 
   const isSelected = (note) => state.selectedNotes.some((n) => n.id === note.id);
   const atMaxSelection = () => state.selectedNotes.length >= 4;
 
-  pageUnspent.forEach((note) => {
-    const selected = isSelected(note);
-
-    const row = document.createElement('label');
-    row.className = `w-full text-left p-3 rounded-lg border transition-all duration-200 flex items-center justify-between gap-3 cursor-pointer ${
-      selected
-        ? 'bg-brand-500/10 border-brand-500/40 text-brand-300'
-        : 'bg-dark-800 border-dark-700 hover:border-dark-600 text-dark-200'
-    }`;
-
-    const noteLabel = tokenLabelForPool(note.poolContractId);
-    const rowInner = el('div', 'flex items-center gap-3 min-w-0');
-    const checkbox = el('input', 'accent-brand-500');
-    checkbox.type = 'checkbox';
-    checkbox.checked = selected;
-    if (!selected && atMaxSelection()) checkbox.disabled = true;
-    rowInner.appendChild(checkbox);
-
-    const rowInfo = el('div', 'min-w-0');
-    rowInfo.append(
-      el('div', 'font-mono text-xs truncate', shortCommitment(note.id)),
-      el('div', 'text-[10px] text-dark-500 mt-0.5', `${noteLabel} · Leaf ${note.leafIndex} · Ledger ${note.createdAtLedger}`),
+  if (notes.length === 0) {
+    list.appendChild(
+      el('div', 'text-sm text-dark-400 p-3', 'No notes match this filter.'),
     );
-    rowInner.appendChild(rowInfo);
-
-    row.append(
-      rowInner,
-      el('div', `text-xs font-medium whitespace-nowrap ${selected ? 'text-brand-300' : 'text-dark-300'}`, formatAmount(note.amount, noteLabel)),
-    );
-
-    const rowCheckbox = row.querySelector('input');
-    rowCheckbox.addEventListener('change', () => {
-      if (rowCheckbox.checked) {
-        if (!isSelected(note)) {
-          state.selectedNotes.push(note);
-        }
-      } else {
-        state.selectedNotes = state.selectedNotes.filter((n) => n.id !== note.id);
-      }
-      mountGenerate(container);
+  } else {
+    pageNotes.forEach((note) => {
+      const selected = isSelected(note);
+      const row = createNoteRow(note, {
+        symbol: tokenLabelForPool(note.poolContractId),
+        selectable: true,
+        selected,
+        disabled: !selected && atMaxSelection(),
+        onToggle: (n, checked) => {
+          if (checked) {
+            if (!isSelected(n)) state.selectedNotes.push(n);
+          } else {
+            state.selectedNotes = state.selectedNotes.filter((x) => x.id !== n.id);
+          }
+          mountGenerate(container);
+        },
+      });
+      list.appendChild(row);
     });
-
-    list.appendChild(row);
-  });
+  }
 
   container.appendChild(list);
 
@@ -609,6 +584,58 @@ export function mountGenerate(container) {
     }
   };
 
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotes = (publicInputs, selectedNotesForSymbol) => {
+    const notesWrap = el('div', 'space-y-2');
+    notesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const symbol = selectedNotesForSymbol[i]?.symbol || 'Token';
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+
+      const card = el('div', 'p-3 bg-dark-800 border border-dark-700 rounded-lg space-y-1');
+      card.appendChild(
+        elc('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          el('span', 'font-medium text-brand-300', amountText),
+        ])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500', 'Commitment')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(
+        el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier')
+      );
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      notesWrap.appendChild(card);
+    }
+    return notesWrap;
+  };
+
   const showResult = (receipt) => {
     state.lastReceipt = receipt;
     resultArea.classList.remove('hidden');
@@ -619,8 +646,15 @@ export function mountGenerate(container) {
     const date = new Date().toISOString().slice(0, 10);
     const filename = `disclosure-receipt-${commitmentPrefix}-${date}.json`;
 
+    const selectedNotesForSymbol = state.selectedNotes.map((n) => ({
+      symbol: tokenLabelForPool(n.poolContractId),
+    }));
+
     const box = el('div', 'space-y-3');
     box.appendChild(el('div', 'text-sm text-emerald-300 bg-emerald-500/10 border border-emerald-500/40 rounded-lg p-3', 'Disclosure receipt generated successfully.'));
+    if (receipt.publicInputs) {
+      box.appendChild(renderDisclosedNotes(receipt.publicInputs, selectedNotesForSymbol));
+    }
     box.appendChild(el('pre', 'p-3 bg-dark-950 border border-dark-800 rounded-lg text-xs font-mono text-dark-200 overflow-auto max-h-64', json));
     const actions = el('div', 'flex gap-2');
     const dlBtn = el('button', 'px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold hover:bg-brand-400 transition', 'Download JSON');
@@ -644,15 +678,15 @@ export function mountGenerate(container) {
       a.download = filename;
       a.click();
       URL.revokeObjectURL(url);
-      showToast('Receipt downloaded', 'success');
+      Toast.show('Receipt downloaded', 'success');
     });
 
     document.getElementById('btn-copy-receipt')?.addEventListener('click', async () => {
       try {
         await navigator.clipboard.writeText(json);
-        showToast('Copied to clipboard', 'success');
+        Toast.show('Copied to clipboard', 'success');
       } catch {
-        showToast('Failed to copy', 'error');
+        Toast.show('Failed to copy', 'error');
       }
     });
 
@@ -687,7 +721,7 @@ export function mountGenerate(container) {
 
   generateBtn.addEventListener('click', async () => {
     if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
-      showToast('Please select 1 to 4 notes', 'error');
+      Toast.show('Please select 1 to 4 notes', 'error');
       return;
     }
 
@@ -787,6 +821,7 @@ export function mountVerify(container) {
 
   let receipt = null;
   let receiptError = null;
+  let receiptPoolSymbol = 'Token';
 
   // -------------------------------------------------------------------------
   // Import area
@@ -894,6 +929,43 @@ export function mountVerify(container) {
   vkWrap.appendChild(vkErrorEl);
   summaryWrap.appendChild(vkWrap);
 
+  // -------------------------------------------------------------------------
+  // RPC endpoint (only used when no wallet is connected)
+  // -------------------------------------------------------------------------
+  const rpcDetails = document.createElement('details');
+  rpcDetails.className = 'text-xs';
+  const rpcSummary = document.createElement('summary');
+  rpcSummary.className = 'cursor-pointer text-dark-400 hover:text-brand-400 select-none';
+  rpcSummary.textContent = 'Advanced: RPC endpoint';
+  rpcDetails.appendChild(rpcSummary);
+
+  const rpcWrap = document.createElement('div');
+  rpcWrap.className = 'mt-2 space-y-1';
+  const rpcInput = document.createElement('input');
+  rpcInput.type = 'text';
+  rpcInput.value = DEFAULT_TESTNET_RPC_URL;
+  rpcInput.className =
+    'w-full px-3 py-2 bg-dark-800 border border-dark-700 rounded-lg text-xs font-mono focus:outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500 disabled:opacity-60';
+  rpcWrap.appendChild(rpcInput);
+
+  const rpcHintEl = document.createElement('div');
+  rpcHintEl.className = 'text-[10px] text-dark-500';
+  rpcWrap.appendChild(rpcHintEl);
+
+  rpcDetails.appendChild(rpcWrap);
+  summaryWrap.appendChild(rpcDetails);
+
+  const updateRpcFieldState = () => {
+    const walletActive = isRuntimeReady() && App.state.wallet.connected;
+    rpcInput.disabled = walletActive;
+    rpcHintEl.textContent = walletActive
+      ? "Using the connected wallet's Soroban RPC network. No separate connection is needed to verify."
+      : 'No wallet connection is required to verify. The proof and receipt context are checked locally; this public endpoint is only used to confirm the Merkle root is still recognized on-chain and the nullifiers are unspent.';
+  };
+  updateRpcFieldState();
+  App.events.addEventListener('wallet:ready', updateRpcFieldState);
+  App.events.addEventListener('wallet:disconnected', updateRpcFieldState);
+
   // Verify button
   const verifyBtn = document.createElement('button');
   verifyBtn.type = 'button';
@@ -901,6 +973,11 @@ export function mountVerify(container) {
     'w-full px-4 py-2 bg-brand-500 text-dark-950 rounded-lg text-sm font-semibold shadow-lg shadow-brand-500/20 hover:bg-brand-400 transition disabled:opacity-50 disabled:cursor-not-allowed';
   verifyBtn.textContent = 'Verify Receipt';
   summaryWrap.appendChild(verifyBtn);
+
+  // Disclosed notes section (populated after loading a receipt)
+  const disclosedNotesWrap = document.createElement('div');
+  disclosedNotesWrap.className = 'hidden space-y-2';
+  summaryWrap.appendChild(disclosedNotesWrap);
 
   container.appendChild(summaryWrap);
 
@@ -947,7 +1024,87 @@ export function mountVerify(container) {
     if (!r.context || typeof r.context !== 'object') return 'Missing receipt context';
     if (!r.publicInputs || typeof r.publicInputs !== 'object') return 'Missing public inputs';
 
+    if (typeof r.circuit.nNotes !== 'number' || r.circuit.nNotes < 1 || r.circuit.nNotes > 4)
+      return 'Missing or invalid circuit.nNotes (expected 1..4)';
+
+    const nNotes = r.circuit.nNotes;
+    const validateArray = (name) => {
+      const arr = r.publicInputs[name];
+      if (!Array.isArray(arr)) return `publicInputs.${name} must be an array`;
+      if (arr.length !== nNotes)
+        return `publicInputs.${name} length mismatch: expected ${nNotes}, got ${arr.length}`;
+      for (let i = 0; i < arr.length; i += 1) {
+        if (typeof arr[i] !== 'string') return `publicInputs.${name}[${i}] must be a string`;
+      }
+      return null;
+    };
+
+    for (const name of ['roots', 'noteCommitments', 'nullifiers', 'amounts']) {
+      const err = validateArray(name);
+      if (err) return err;
+    }
+
+    if (typeof r.publicInputs.extContextHash !== 'string')
+      return 'publicInputs.extContextHash must be a string';
+
     return null;
+  };
+
+  const parseReceiptAmount = (value) => {
+    try {
+      if (typeof value === 'string' && /^0x[0-9a-fA-F]+$/.test(value)) {
+        return BigInt(value);
+      }
+      return BigInt(value);
+    } catch {
+      return null;
+    }
+  };
+
+  const renderDisclosedNotesVerify = (publicInputs, symbol = 'Token', spentIndices = []) => {
+    disclosedNotesWrap.replaceChildren();
+    disclosedNotesWrap.classList.remove('hidden');
+    disclosedNotesWrap.appendChild(
+      el('h3', 'text-xs font-medium text-dark-400 uppercase tracking-wide', 'Disclosed notes')
+    );
+
+    const n = Math.min(
+      publicInputs.noteCommitments?.length || 0,
+      publicInputs.amounts?.length || 0,
+      publicInputs.nullifiers?.length || 0
+    );
+
+    for (let i = 0; i < n; i += 1) {
+      const isSpent = spentIndices.includes(i);
+      const amountValue = parseReceiptAmount(publicInputs.amounts[i]);
+      const amountText = amountValue != null ? formatAmount(amountValue, symbol) : publicInputs.amounts[i];
+
+      const card = el('div', `p-3 border rounded-lg space-y-1.5 ${
+        isSpent
+          ? 'bg-amber-500/5 border-amber-500/30'
+          : 'bg-dark-800 border-dark-700'
+      }`);
+      card.appendChild(
+        elc('div', 'flex justify-between text-xs', [
+          el('span', 'text-dark-500', `Note ${i + 1}`),
+          elc('div', 'flex items-center gap-2', [
+            isSpent
+              ? el('span', 'text-[10px] font-medium uppercase tracking-wider px-1.5 py-0.5 bg-amber-500/20 text-amber-300 rounded', 'Spent')
+              : null,
+            el('span', `font-medium ${isSpent ? 'text-amber-300 line-through' : 'text-brand-300'}`, amountText),
+          ]),
+        ])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500', 'Commitment'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.noteCommitments[i])
+      );
+      card.appendChild(el('div', 'text-[10px] text-dark-500 mt-1', 'Nullifier'));
+      card.appendChild(
+        el('div', 'text-xs font-mono text-dark-200 break-all', publicInputs.nullifiers[i])
+      );
+      disclosedNotesWrap.appendChild(card);
+    }
   };
 
   const renderSummary = (r) => {
@@ -960,6 +1117,15 @@ export function mountVerify(container) {
       vkInput.value = defaultVkHash;
     }
 
+    const poolSymbol = tokenLabelForPool(r.context.poolAddress);
+    receiptPoolSymbol = poolSymbol;
+    const totalAmount = r.publicInputs?.amounts?.reduce((sum, value) => {
+      const v = parseReceiptAmount(value);
+      return v != null ? sum + v : sum;
+    }, 0n);
+    const amountSummary = totalAmount != null ? formatAmount(totalAmount, poolSymbol) : '—';
+    const nullifierCount = r.publicInputs?.nullifiers?.length ?? 0;
+
     const items = [
       { label: 'Network', value: r.context.network },
       { label: 'Pool address', value: r.context.poolAddress },
@@ -969,6 +1135,8 @@ export function mountVerify(container) {
       { label: 'Issued at', value: r.issuedAt },
       { label: 'Circuit', value: r.circuit.name },
       { label: 'Receipt VK hash', value: shortCommitment(r.circuit.vkHash) },
+      { label: 'Disclosed amount', value: amountSummary },
+      { label: 'Nullifiers', value: `${nullifierCount} disclosed` },
     ];
     items.forEach((item) => {
       const cell = el('div', 'p-2 bg-dark-800 border border-dark-700 rounded-lg');
@@ -978,6 +1146,10 @@ export function mountVerify(container) {
       );
       summaryGrid.appendChild(cell);
     });
+
+    if (r.publicInputs) {
+      renderDisclosedNotesVerify(r.publicInputs, poolSymbol, []);
+    }
   };
 
   const loadReceipt = (raw) => {
@@ -1021,7 +1193,7 @@ export function mountVerify(container) {
   // -------------------------------------------------------------------------
   verifyBtn.addEventListener('click', async () => {
     if (!receipt) {
-      showToast('Load a receipt first', 'error');
+      Toast.show('Load a receipt first', 'error');
       return;
     }
 
@@ -1050,15 +1222,29 @@ export function mountVerify(container) {
     resultsWrap.replaceChildren(verifyingRow);
 
     try {
-      const report = await client().verifySelectiveDisclosure(
-        JSON.stringify(receipt),
-        expectedVkHash
-      );
+      let walletClient;
+      try {
+        walletClient = client();
+      } catch {
+        walletClient = null;
+      }
+
+      const report = walletClient
+        ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
+        : await verifySelectiveDisclosureStandalone(
+            rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL,
+            JSON.stringify(receipt),
+            expectedVkHash
+          );
 
       const proofOk = !!report.proofVerified;
       const contextOk = !!report.contextVerified;
       const rootOk = !!report.knownRootStatus;
-      const fullyVerified = proofOk && contextOk && rootOk;
+      const unspentOk = !!report.nullifiersUnspent;
+      const spentIndices = Array.isArray(report.spentNullifierIndices)
+        ? report.spentNullifierIndices.map((i) => Number(i))
+        : [];
+      const fullyVerified = proofOk && contextOk && rootOk && unspentOk;
 
       resultsWrap.replaceChildren();
 
@@ -1067,14 +1253,23 @@ export function mountVerify(container) {
       list.setAttribute('role', 'list');
       list.setAttribute('aria-label', 'Verification results');
 
-      const makeCheck = (label, pass, failText, passText) => {
+      const makeCheck = (label, pass, failText, passText, failSeverity = 'error') => {
+        const isInfo = !pass && failSeverity === 'info';
         const li = el('li', `flex items-start gap-3 p-3 rounded-lg border ${
           pass
             ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
-            : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+            : isInfo
+              ? 'bg-amber-500/10 border-amber-500/40 text-amber-300'
+              : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
         }`);
         const iconWrap = el('div', 'mt-0.5 w-4 h-4 flex-shrink-0');
-        iconWrap.appendChild(pass ? checkCircleIcon('w-4 h-4') : xCircleIcon('w-4 h-4'));
+        if (pass) {
+          iconWrap.appendChild(checkCircleIcon('w-4 h-4'));
+        } else if (isInfo) {
+          iconWrap.appendChild(alertTriangleIcon('w-4 h-4'));
+        } else {
+          iconWrap.appendChild(xCircleIcon('w-4 h-4'));
+        }
         const textWrap = el('div');
         textWrap.append(
           el('div', 'text-sm font-medium', pass ? passText[0] : passText[1]),
@@ -1108,8 +1303,33 @@ export function mountVerify(container) {
           ['Root fresh', 'Root stale or unknown', 'Every root in the receipt is still in the pool\'s on-chain root history.']
         )
       );
+      const unspentFailText = (() => {
+        if (spentIndices.length === 0) {
+          return 'At least one disclosed nullifier has already been spent on-chain. The note(s) are no longer unspent.';
+        }
+        const spentAmounts = spentIndices.map((idx) => {
+          const v = parseReceiptAmount(receipt.publicInputs.amounts[idx]);
+          return v != null ? formatAmount(v, receiptPoolSymbol) : receipt.publicInputs.amounts[idx];
+        });
+        const noteLabels = spentIndices.map((idx) => `Note ${idx + 1}`);
+        return `Disclosed ${noteLabels.join(', ')} ${spentIndices.length === 1 ? 'has' : 'have'} already been spent on-chain (${spentAmounts.join(', ')}).`;
+      })();
+
+      list.appendChild(
+        makeCheck(
+          'unspent',
+          unspentOk,
+          unspentFailText,
+          ['Nullifiers unspent', 'Nullifier already spent', 'None of the disclosed nullifiers appear in the pool\'s spent-nullifier event history.'],
+          'info'
+        )
+      );
 
       resultsWrap.appendChild(list);
+
+      if (receipt.publicInputs) {
+        renderDisclosedNotesVerify(receipt.publicInputs, receiptPoolSymbol, spentIndices);
+      }
 
       if (fullyVerified) {
         const badge = el('div', 'mt-3 p-3 bg-emerald-500/10 border border-emerald-500/40 rounded-lg text-emerald-300 text-sm font-medium flex items-center gap-2');
@@ -1119,6 +1339,9 @@ export function mountVerify(container) {
       }
     } catch (err) {
       console.error('Verification failed:', err);
+      if (isDbLockedError(err?.message)) {
+        showDbLockedModal(err.message);
+      }
       resultsWrap.replaceChildren(
         el('div', 'text-sm text-rose-300 bg-rose-500/10 border border-rose-500/40 rounded-lg p-3',
           `Verification could not be completed: ${err.message || 'Unknown error'}`),
@@ -1134,30 +1357,7 @@ export function mountVerify(container) {
 // Init
 // ---------------------------------------------------------------------------
 
-async function init() {
-  networkChip = document.getElementById('networkChip');
-  walletChip = document.getElementById('walletChip');
-  connectBtn = document.getElementById('connectBtn');
-  toastContainer = document.getElementById('toast-container');
-  toastTemplate = document.getElementById('tpl-toast');
-
-  connectBtn?.addEventListener('click', () => connect());
-
-  // Initialize wasm eagerly so the walletless verify section works immediately.
-  // RPC comes from the user's Freighter network settings (see connect()).
-  try {
-    const { rpcUrl, network } = await loadWalletRpcPreference();
-    await ensureDisclosureRuntime(rpcUrl);
-    networkChip.textContent = (network || 'Testnet').toUpperCase();
-  } catch (e) {
-    console.error('WASM init failed:', e);
-    if (isDbLockedError(e?.message)) {
-      showDbLockedModal(e.message);
-      return;
-    }
-    showToast(e?.message || 'Failed to initialize cryptography', 'error', 8000);
-  }
-
+export async function initDisclosure() {
   const query = parseQueryParams();
 
   const generateContainer = document.getElementById('disclosure-generate');
@@ -1170,15 +1370,28 @@ async function init() {
     verifyContainer.scrollIntoView({ behavior: 'smooth', block: 'start' });
   }
 
-  // If a wallet is already connected/allowed for this origin (e.g. connected on
-  // the main app page), restore the session automatically without a popup.
-  const existingAddress = await getConnectedAddress();
-  if (existingAddress) {
-    await connect();
+  App.events.addEventListener('wallet:ready', () => {
+    loadNotes();
+  });
+  
+  App.events.addEventListener('wallet:disconnected', () => {
+    state.notes = [];
+    state.selectedNotes = [];
+    if (generateContainer) mountGenerate(generateContainer);
+  });
+  App.events.addEventListener('disclosure:select-note', (event) => {
+    const { noteId } = event.detail;
+    const targets = [normalizeCommitment(noteId)];
+    const matches = state.notes.filter((n) => targets.includes(normalizeCommitment(n.id)));
+    if (matches.length > 0) {
+      state.selectedNotes = [matches[0]];
+      if (generateContainer) mountGenerate(generateContainer);
+    }
+  });
+
+  if (App.state.wallet.connected) {
+    loadNotes();
   }
 }
 
-init().catch((err) => {
-  console.error('Init failed:', err);
-  showToast('Page initialization failed', 'error', 8000);
-});
+
