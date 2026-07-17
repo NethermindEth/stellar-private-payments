@@ -81,6 +81,12 @@ struct AccountOptions {
     user_address: Option<String>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VerifyDisclosureOptions {
+    prover_worker_url: Option<String>,
+}
+
 #[wasm_bindgen]
 impl Client {
     /// Build the native client and spawn the prover worker.
@@ -271,6 +277,53 @@ impl Client {
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
     }
+}
+
+/// Verify a selective-disclosure receipt with no wallet, no local storage,
+/// and no [`Client`] instance — just an RPC URL. Skips the OPFS/SQLite
+/// storage worker entirely, since verification never reads local state.
+#[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+pub async fn verify_selective_disclosure_standalone(
+    rpc_url: String,
+    receipt_json: String,
+    expected_vk_hash: String,
+    options: JsValue,
+) -> Result<JsValue, JsError> {
+    crate::wasm_start();
+
+    let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+    let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+        VerifyDisclosureOptions::default()
+    } else {
+        serde_wasm_bindgen::from_value(options)?
+    };
+
+    let prover_worker_url = opts
+        .prover_worker_url
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| {
+            JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
+        })?;
+
+    let contract_config = deployment_config()?;
+    let fetcher = StateFetcher::new(&rpc_url, (*contract_config).clone())
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let prover = ProverBridge::new(
+        ProverWorker::spawner()
+            .with_loader(true)
+            .as_module(true)
+            .spawn(&prover_worker_url),
+    );
+    prover
+        .ping()
+        .await
+        .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+    let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
+        .await
+        .map_err(pool_err)?;
+    Ok(serde_wasm_bindgen::to_value(&report)?)
 }
 
 impl Client {

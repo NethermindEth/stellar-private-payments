@@ -64,7 +64,13 @@ function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
     });
 }
 
+let disclosureLoaded = false;
+
 function setActiveView(view) {
+    const currentHashView = window.location.hash.split('?')[0];
+    if (currentHashView !== `#${view}`) {
+        window.history.replaceState(null, '', `#${view}`);
+    }
     App.state.views.active = view;
     document.querySelectorAll('[data-view]').forEach(btn => {
         const active = btn.dataset.view === view;
@@ -75,6 +81,16 @@ function setActiveView(view) {
     document.querySelectorAll('.view-panel').forEach(panel => {
         panel.classList.toggle('hidden', panel.dataset.viewPanel !== view);
     });
+
+    if (view === 'disclosure' && !disclosureLoaded) {
+        disclosureLoaded = true;
+        import('../disclosure.js').then(m => {
+            if (m.initDisclosure) m.initDisclosure();
+        }).catch(err => {
+            console.error('Failed to load disclosure.js', err);
+            disclosureLoaded = false;
+        });
+    }
 }
 
 function setMoveFlow(flow) {
@@ -280,9 +296,33 @@ export const Shell = {
             App.events.dispatchEvent(new CustomEvent('pool:selected', { detail: { poolId } }));
         });
 
+        App.events.addEventListener('dashboard:view-receipt', (event) => {
+            const { noteId } = event.detail;
+            window.history.replaceState(null, '', `#disclosure?commitment=${encodeURIComponent(noteId)}`);
+            setActiveView('disclosure');
+            // Give the disclosure view a moment to load if it hasn't already
+            setTimeout(() => {
+                App.events.dispatchEvent(new CustomEvent('disclosure:select-note', { detail: { noteId } }));
+            }, 50);
+        });
+
         App.events.addEventListener('profile:updated', renderSyncStatus);
 
-        setActiveView('dashboard');
+        window.addEventListener('hashchange', () => {
+            const hashStr = window.location.hash.replace('#', '');
+            const hashView = hashStr.split('?')[0];
+            if (hashView && document.querySelector(`[data-view="${hashView}"]`)) {
+                setActiveView(hashView);
+            }
+        });
+
+        const initialHashStr = window.location.hash.replace('#', '');
+        const initialHash = initialHashStr.split('?')[0];
+        if (initialHash && document.querySelector(`[data-view="${initialHash}"]`)) {
+            setActiveView(initialHash);
+        } else {
+            setActiveView('dashboard');
+        }
         setMoveFlow('deposit');
         renderSyncStatus();
     },

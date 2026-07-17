@@ -83,7 +83,10 @@ export const Templates = {
         row.querySelector('.note-copy')?.addEventListener('click', () => opts.onCopy?.(note));
         const disclose = row.querySelector('.note-disclose');
         if (disclose) {
-            disclose.href = `disclosure.html?commitment=${encodeURIComponent(note.id)}`;
+            disclose.addEventListener('click', (e) => {
+                e.preventDefault();
+                App.events.dispatchEvent(new CustomEvent('dashboard:view-receipt', { detail: { noteId: note.id } }));
+            });
         }
         return row;
     },

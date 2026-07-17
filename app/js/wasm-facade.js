@@ -7,7 +7,12 @@
  * App-only persistence (disclaimer, explorer, bootnode, op history, key probe) stays on `storage()`.
  */
 
-import init, { Client, FreighterSigner, Storage } from 'stellar-private-payments-sdk-web';
+import init, {
+    Client,
+    FreighterSigner,
+    Storage,
+    verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
+} from 'stellar-private-payments-sdk-web';
 
 import { AppStorage } from './app-storage.js';
 
@@ -124,10 +129,25 @@ export async function initializeRuntime(rpcUrl) {
     return client();
 }
 
+/**
+ * Verify a selective-disclosure receipt with no wallet, no local storage, and
+ * no prior `initializeRuntime` call — skips the OPFS/SQLite storage worker
+ * entirely, since verification never reads local state.
+ */
+export async function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash) {
+    await ensureWasmInit();
+    return sdkVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash);
+}
+
 /** SDK deployment client + cached account session. */
 export function client() {
     if (!wrappedClient) {
         throw new Error('Runtime not initialized. Call initializeRuntime first.');
     }
     return wrappedClient;
+}
+
+/** Whether a runtime (wallet-bound or anonymous) is already open. */
+export function isRuntimeReady() {
+    return wrappedClient !== null;
 }
