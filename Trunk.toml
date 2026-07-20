@@ -46,7 +46,6 @@ cp -R sdk/web/dist/. "$SDK/dist/"
 
 # Static files
 cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
-cp app/disclosure.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 
 # Top-level legal files (NOTICE, LICENSE, circuits/NOTICE for footer links).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"

@@ -3,6 +3,7 @@ import init, {
   PrivatePool,
   Storage as WasmStorage,
   bootnodeRequired as wasmBootnodeRequired,
+  verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
@@ -106,11 +107,22 @@ async function newClient(options) {
   );
 }
 
+/**
+ * Walletless selective-disclosure verification (no storage / Client).
+ * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
+ */
+function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options = {}) {
+  return wasmVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
+    proverWorkerUrl,
+    ...options,
+  });
+}
+
 export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
 };
-export { PrivatePool, bootnodeRequired };
+export { PrivatePool, bootnodeRequired, verifySelectiveDisclosure };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

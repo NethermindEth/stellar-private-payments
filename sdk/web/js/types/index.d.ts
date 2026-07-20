@@ -7,6 +7,7 @@ import type {
   ClientNewOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
 import type { DisclosureVerificationReport } from './disclosure.js';
 import type { Storage, StorageOpenOptions } from './storage.js';
@@ -26,6 +27,7 @@ export type {
   ClientNewOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
 export type { DisclosureVerificationReport } from './disclosure.js';
 export type { StorageOpenOptions } from './storage.js';
@@ -80,6 +82,14 @@ export declare function bootnodeRequired(
   rpcUrl: string,
   storage: Storage,
 ): Promise<boolean>;
+
+/** Walletless selective-disclosure verification (no storage / Client). */
+export declare function verifySelectiveDisclosure(
+  rpcUrl: string,
+  receiptJson: string,
+  expectedVkHash: string,
+  options?: VerifyDisclosureOptions,
+): Promise<DisclosureVerificationReport>;
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
 export declare const Client: {

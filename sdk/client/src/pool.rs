@@ -13,7 +13,7 @@ use crate::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
         verify_disclosure_receipt,
     },
-    error::Error,
+    error::{Error, PlanExecutionError},
     handle::Handle,
     plan::PreparedTransactionPlan,
     prover::Prover,
@@ -402,21 +402,35 @@ impl<S: Storage> PrivatePool<S> {
                         Err(Error::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
                             sync_waits = sync_waits.saturating_add(1);
                             if sync_waits > SYNC_MAX_RETRIES {
-                                return Err(Error::MembershipSync(
-                                    AspMembershipSync::SyncRequired(gap),
+                                return Err(PlanExecutionError::into_error(
+                                    results,
+                                    Error::MembershipSync(AspMembershipSync::SyncRequired(gap)),
                                 ));
                             }
-                            self.ensure_synced().await?;
+                            if let Err(error) = self.ensure_synced().await {
+                                return Err(PlanExecutionError::into_error(results, error));
+                            }
                             sleep(POLL_INTERVAL_MS).await;
                         }
-                        Err(error) => return Err(error),
+                        Err(error) => return Err(PlanExecutionError::into_error(results, error)),
                     }
                 }
             };
-            self.simulate(&mut prepared).await?;
-            let signed = self.sign(&prepared).await?;
-            let hash = self.submit(signed).await?;
-            let result = self.confirm(&hash).await?;
+            if let Err(error) = self.simulate(&mut prepared).await {
+                return Err(PlanExecutionError::into_error(results, error));
+            }
+            let signed = match self.sign(&prepared).await {
+                Ok(signed) => signed,
+                Err(error) => return Err(PlanExecutionError::into_error(results, error)),
+            };
+            let hash = match self.submit(signed).await {
+                Ok(hash) => hash,
+                Err(error) => return Err(PlanExecutionError::into_error(results, error)),
+            };
+            let result = match self.confirm(&hash).await {
+                Ok(result) => result,
+                Err(error) => return Err(PlanExecutionError::into_error(results, error)),
+            };
             results.push(result);
         }
         Ok(results)

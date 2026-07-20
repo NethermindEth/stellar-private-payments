@@ -4,7 +4,10 @@ mod progress;
 
 use gloo_timers::future::TimeoutFuture;
 use serde::Serialize;
-use stellar_private_payments_sdk::{Error, PreparedTransactionPlan, types::AspMembershipSync};
+use stellar_private_payments_sdk::{
+    Error, PlanExecutionError, PreparedTransactionPlan,
+    types::{AspMembershipSync, TransactionResult},
+};
 use wasm_bindgen::{JsError, JsValue};
 
 use super::{pool::PrivatePool, pool_err_message};
@@ -17,7 +20,9 @@ const SYNC_MAX_RETRIES: u32 = 50;
 type ExecuteOutcome = Result<Vec<String>, ExecuteFailure>;
 
 enum ExecuteFailure {
-    PlanFailed { hashes: Vec<String>, error: Error },
+    /// Mid-plan failure; may be [`Error::PlanExecution`] when some txs already
+    /// confirmed, otherwise the bare cause.
+    Failed(Error),
     AspNotReady,
 }
 
@@ -36,8 +41,10 @@ enum ExecuteJsResponse {
 }
 
 impl ExecuteFailure {
-    fn plan(hashes: Vec<String>, error: Error) -> ExecuteOutcome {
-        Err(Self::PlanFailed { hashes, error })
+    fn plan(completed: Vec<TransactionResult>, error: Error) -> ExecuteOutcome {
+        Err(Self::Failed(PlanExecutionError::into_error(
+            completed, error,
+        )))
     }
 }
 
@@ -45,10 +52,18 @@ impl From<ExecuteOutcome> for ExecuteJsResponse {
     fn from(outcome: ExecuteOutcome) -> Self {
         match outcome {
             Ok(hashes) => Self::Complete { hashes },
-            Err(ExecuteFailure::PlanFailed { hashes, error }) => Self::Failed {
-                hashes,
-                message: pool_err_message(error),
-            },
+            Err(ExecuteFailure::Failed(error)) => {
+                let hashes = match &error {
+                    Error::PlanExecution(plan) => {
+                        plan.completed.iter().map(|tx| tx.tx_hash.clone()).collect()
+                    }
+                    _ => Vec::new(),
+                };
+                Self::Failed {
+                    hashes,
+                    message: pool_err_message(error),
+                }
+            }
             Err(ExecuteFailure::AspNotReady) => Self::AspNotReady,
         }
     }
@@ -87,7 +102,7 @@ impl PrivatePool {
     ) -> ExecuteOutcome {
         let pool = self.inner();
         let total = plan.tx_count();
-        let mut hashes = Vec::new();
+        let mut completed = Vec::new();
 
         while !plan.is_complete() {
             let current = plan.current_tx().saturating_add(1);
@@ -105,16 +120,16 @@ impl PrivatePool {
                 match pool.prove_next(plan).await {
                     Ok(prepared) => break prepared,
                     Err(error @ Error::MembershipSync(AspMembershipSync::RegisterAtASP)) => {
-                        if hashes.is_empty() {
+                        if completed.is_empty() {
                             return Err(ExecuteFailure::AspNotReady);
                         }
-                        return ExecuteFailure::plan(hashes, error);
+                        return ExecuteFailure::plan(completed, error);
                     }
                     Err(Error::MembershipSync(AspMembershipSync::SyncRequired(gap))) => {
                         sync_waits = sync_waits.saturating_add(1);
                         if sync_waits > SYNC_MAX_RETRIES {
                             return ExecuteFailure::plan(
-                                hashes,
+                                completed,
                                 Error::MembershipSync(AspMembershipSync::SyncRequired(gap)),
                             );
                         }
@@ -131,7 +146,7 @@ impl PrivatePool {
                         );
                         TimeoutFuture::new(POLL_INTERVAL_MS).await;
                     }
-                    Err(error) => return ExecuteFailure::plan(hashes, error),
+                    Err(error) => return ExecuteFailure::plan(completed, error),
                 }
             };
 
@@ -143,7 +158,7 @@ impl PrivatePool {
                 Some(total),
             );
             if let Err(error) = pool.simulate(&mut prepared).await {
-                return ExecuteFailure::plan(hashes, error);
+                return ExecuteFailure::plan(completed, error);
             }
 
             progress::emit(
@@ -155,7 +170,7 @@ impl PrivatePool {
             );
             let signed = match pool.sign(&prepared).await {
                 Ok(signed) => signed,
-                Err(error) => return ExecuteFailure::plan(hashes, error),
+                Err(error) => return ExecuteFailure::plan(completed, error),
             };
 
             progress::emit(
@@ -167,14 +182,14 @@ impl PrivatePool {
             );
             let hash = match pool.submit(signed).await {
                 Ok(hash) => hash,
-                Err(error) => return ExecuteFailure::plan(hashes, error),
+                Err(error) => return ExecuteFailure::plan(completed, error),
             };
             if let Err(error) = pool.confirm(&hash).await {
-                return ExecuteFailure::plan(hashes, error);
+                return ExecuteFailure::plan(completed, error);
             }
-            hashes.push(hash);
+            completed.push(TransactionResult { tx_hash: hash });
         }
 
-        Ok(hashes)
+        Ok(completed.into_iter().map(|tx| tx.tx_hash).collect())
     }
 }

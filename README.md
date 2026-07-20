@@ -4,7 +4,6 @@
 [![Lint](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/linter.yml)
 [![Build](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/build-and-test.yml)
 [![Dependencies](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/dependency-audit.yml)
-[![UB](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/ub-detection.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/ub-detection.yml)
 [![Coverage](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml/badge.svg)](https://github.com/NethermindEth/stellar-private-payments/actions/workflows/coverage.yml)
 
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
@@ -25,6 +24,8 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 - **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
 - **Stellar Integration**: Built on Soroban smart contracts
+
+Learn more in [the blogpost](https://www.nethermind.io/blog/stellar-private-payments-confidential-and-compliant-transfers-on-public-rails).
 
 ## Demo Application
 [The demo application](https://nethermindeth.github.io/stellar-private-payments/) consists on three main parts:

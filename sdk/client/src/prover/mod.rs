@@ -35,6 +35,32 @@ impl ProverEngine {
         Ok(Self { witness, prover })
     }
 
+    /// Create a new ProverEngine from an arkworks-*uncompressed* proving key.
+    ///
+    /// Mirrors [`ProverEngine::new`] but reads the encoding produced by
+    /// [`ProverEngine::get_uncompressed_proving_key`], skipping point
+    /// decompression on the (larger) proving key. This is the fast path for a
+    /// warm circuit cache.
+    pub fn new_from_uncompressed_pk(
+        proving_key: &[u8],
+        circuit_wasm: &[u8],
+        r1cs: &[u8],
+    ) -> Result<Self> {
+        let witness = WitnessCalculator::new(circuit_wasm, r1cs)
+            .context("failed to init witness calculator")?;
+        let prover = Groth16Prover::new_from_uncompressed_pk(proving_key, r1cs)
+            .context("failed to init prover from uncompressed proving key")?;
+        Ok(Self { witness, prover })
+    }
+
+    /// Serialize the proving key in arkworks-*uncompressed* form, for caching.
+    ///
+    /// The output is the exact byte layout expected by
+    /// [`ProverEngine::new_from_uncompressed_pk`].
+    pub fn get_uncompressed_proving_key(&self) -> Result<Vec<u8>> {
+        self.prover.get_uncompressed_proving_key()
+    }
+
     pub fn prove_transact(&mut self, params: TransactParams) -> Result<PreparedProverTx> {
         let artifacts = transact(params, hash_ext_data_offchain)?;
         self.prove(artifacts)

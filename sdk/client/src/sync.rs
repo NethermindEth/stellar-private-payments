@@ -14,7 +14,8 @@ use crate::{Error, Handle, Storage, chain::RpcClient, sleep::sleep, types::Trans
 const CONFIRM_POLL_ATTEMPTS: u32 = 30;
 const CONFIRM_POLL_INTERVAL_MS: u32 = 1_000;
 const BACKGROUND_SYNC_INTERVAL_MS: u32 = 5_000;
-/// Bootnode JSON-RPC code: historical range complete, continue on the wallet
+const BOOTNODE_CATCH_UP_MAX_FAILURES: u32 = 10;
+/// Bootnode JSON-RPC code: historical range complete, continue on the main
 /// RPC.
 const RETENTION_HANDOFF_CODE: i64 = -32_002;
 
@@ -186,8 +187,8 @@ impl<S: Storage> BackgroundSync<S> {
     /// Between rounds, waits up to [`BACKGROUND_SYNC_INTERVAL_MS`] or until
     /// [`SyncKick::kick`].
     ///
-    /// On a wallet RPC retention gap, syncs historical events via the optional
-    /// bootnode until handoff, then resumes on the wallet RPC.
+    /// On a main RPC retention gap, syncs historical events via the optional
+    /// bootnode until handoff, then resumes on the main RPC.
     ///
     /// Returns [`Err`] only if indexer init fails fatally. Per-round
     /// fetch/process errors are logged and the loop continues.
@@ -205,13 +206,13 @@ impl<S: Storage> BackgroundSync<S> {
         .await
         {
             Ok(indexer) => {
-                log::info!("background sync: wallet RPC indexer ready");
+                log::info!("background sync: main RPC indexer ready");
                 indexer
             }
             Err(e) if is_rpc_sync_gap(&e) => {
-                log::warn!("background sync: wallet RPC sync gap, switching to bootnode");
+                log::warn!("background sync: main RPC sync gap, switching to bootnode");
                 self.bootnode_catch_up().await?;
-                log::info!("background sync: bootnode catch-up finished, resuming wallet RPC");
+                log::info!("background sync: bootnode catch-up finished, resuming main RPC");
                 Indexer::init(
                     self.rpc.clone(),
                     self.storage.fork()?,
@@ -234,7 +235,7 @@ impl<S: Storage> BackgroundSync<S> {
     }
 
     /// Sync historical range via bootnode until retention handoff, then clear
-    /// cursors for wallet RPC resume.
+    /// cursors for main RPC resume.
     async fn bootnode_catch_up(&self) -> Result<(), Error> {
         bootnode_catch_up(
             &self.storage,
@@ -270,7 +271,7 @@ fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
 }
 
 /// Sync historical range via bootnode until retention handoff, then clear
-/// cursors for wallet RPC resume.
+/// cursors for main RPC resume.
 async fn bootnode_catch_up<S: Storage>(
     storage: &S,
     contract_config: &ContractConfig,
@@ -278,13 +279,13 @@ async fn bootnode_catch_up<S: Storage>(
 ) -> Result<(), Error> {
     let Some(bootnode) = bootnode_url else {
         return Err(Error::Other(
-            "RPC sync gap: wallet RPC lacks history; configure a bootnode \
+            "RPC sync gap: main RPC lacks history; configure a bootnode \
              or use a different RPC / fresher deployment"
                 .to_string(),
         ));
     };
 
-    log::info!("wallet RPC sync gap, trying bootnode at {bootnode}");
+    log::info!("main RPC sync gap, trying bootnode at {bootnode}");
     storage.clear_indexing_cursors().await?;
 
     let bootnode_client =
@@ -294,28 +295,43 @@ async fn bootnode_catch_up<S: Storage>(
         match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
             Ok(indexer) => indexer,
             Err(e) if is_retention_handoff_err(&e) => {
-                log::info!("bootnode handoff, resuming on wallet RPC");
+                log::info!("bootnode handoff, resuming on main RPC");
                 return Ok(());
             }
             Err(e) => return Err(Error::Other(format!("bootnode indexer: {e:#}"))),
         };
 
+    let mut consecutive_failures = 0u32;
     loop {
         match bootnode_indexer.fetch_contract_events().await {
+            // bootnode success fetch
             Ok(_) => {
+                consecutive_failures = 0;
                 if let Err(e) = storage.process_pending_state().await {
                     log::error!("bootnode sync process_pending_state failed: {e}");
                 }
             }
+            // bootnode handoff, use main RPC
             Err(e)
                 if e.downcast_ref::<RpcError>()
                     .is_some_and(is_retention_handoff) =>
             {
-                log::info!("bootnode handoff, resuming on wallet RPC");
+                log::info!("bootnode handoff, resuming on main RPC");
                 storage.clear_indexing_cursors().await?;
                 return Ok(());
             }
-            Err(e) => log::error!("bootnode sync round failed: {e:#}"),
+            // bootnode generic error
+            Err(e) => {
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                log::error!(
+                    "bootnode sync round failed ({consecutive_failures}/{BOOTNODE_CATCH_UP_MAX_FAILURES}): {e:#}"
+                );
+                if consecutive_failures >= BOOTNODE_CATCH_UP_MAX_FAILURES {
+                    return Err(Error::Other(format!(
+                        "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors: {e:#}"
+                    )));
+                }
+            }
         }
         sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
     }
@@ -323,8 +339,8 @@ async fn bootnode_catch_up<S: Storage>(
 
 /// Catch local storage up to the current chain tip for a deployment.
 ///
-/// On a wallet RPC retention gap, syncs via `bootnode_url` until handoff, then
-/// resumes on the wallet RPC.
+/// On a main RPC retention gap, syncs via `bootnode_url` until handoff, then
+/// resumes on the main RPC.
 pub(crate) async fn catch_up<S: Storage>(
     rpc: &RpcClient,
     storage: &S,

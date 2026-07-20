@@ -17,7 +17,7 @@ pub(crate) mod artifact_hashes {
 
 pub(crate) const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");
 
-pub use client::{Account, Client, PrivatePool};
+pub use client::{Account, Client, PrivatePool, verify_selective_disclosure_standalone};
 pub use events::bootnode_required_js as bootnode_required;
 pub use storage::Storage;
 
