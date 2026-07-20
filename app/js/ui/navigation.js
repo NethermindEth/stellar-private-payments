@@ -1,6 +1,6 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import { client, initializeRuntime, resetWalletSession, bootnodeRequired as rpcNeedsBootnode, ensureStorage } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -105,9 +105,9 @@ function setMoveFlow(flow) {
 async function bootnodeCheck(rpcUrl) {
     const storage = await ensureStorage();
     const stored = await storage.getStoredBootnodeUrl();
-    const bootnodeRequired = await rpcNeedsBootnode(rpcUrl);
+    const required = await bootnodeRequired(rpcUrl);
 
-    if (bootnodeRequired && !stored) {
+    if (required && !stored) {
         const modal = await showBootnodeConsentModal({
             defaultUrl: '',
             rpcUrl,
@@ -119,7 +119,7 @@ async function bootnodeCheck(rpcUrl) {
         await storage.setBootnodeConfig(modal.url);
     }
 
-    return { bootnodeRequired };
+    return { bootnodeRequired: required };
 }
 
 async function loadRuntimeState() {
@@ -416,7 +416,7 @@ export const Wallet = {
     disconnect() {
         this._stopWatcher?.();
         this._stopWatcher = null;
-        resetWalletSession();
+        disposeClient();
         closeAppPool();
         clearRevealedAspSecret();
         App.state.wallet = {
