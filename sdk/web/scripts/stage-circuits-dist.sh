@@ -40,6 +40,21 @@ for name in "${ARTIFACTS[@]}"; do
   cp "$src" "$DIST/circuits/$name"
 done
 
+KEYS=(
+  policy_tx_2_2_proving_key.bin
+  selectiveDisclosure_1_proving_key.bin
+  selectiveDisclosure_2_proving_key.bin
+  selectiveDisclosure_3_proving_key.bin
+  selectiveDisclosure_4_proving_key.bin
+)
+
+for name in "${KEYS[@]}"; do
+  src="$ROOT/deployments/testnet/circuit_keys/$name"
+  [[ -f "$src" ]] || { echo "error: missing proving key $src" >&2; exit 1; }
+  cp "$src" "$DIST/circuits/$name"
+done
+
+
 echo "==> Packaging circuits source bundle (LGPL corresponding source)..."
 sh "$ROOT/deployments/scripts/package-circuits-source-bundle.sh" \
   "$DIST/circuits/source-bundle.tar.gz"
