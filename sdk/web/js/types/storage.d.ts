@@ -6,11 +6,10 @@ export interface StorageOpenOptions {
 /**
  * Worker-backed local persistence (`spp.db` on OPFS).
  *
- * Open once per page. {@link Storage.fork} for additional handles (e.g. app
- * code alongside {@link Client.new}).
+ * Open once per page via {@link Storage.open}. Call {@link Storage.fork} for
+ * additional handles (e.g. app code alongside {@link Client.new}).
  */
-export declare class Storage {
-  static open(options?: StorageOpenOptions | null): Promise<Storage>;
+export interface Storage {
   fork(): Storage;
   /**
    * Raw storage-worker RPC. Shapes match the worker protocol (externally tagged
@@ -18,3 +17,8 @@ export declare class Storage {
    */
   call(request: unknown, timeoutMs?: number): Promise<unknown>;
 }
+
+/** Package entry: `Storage.open()` only (instance methods live on the handle). */
+export declare const Storage: {
+  open(options?: StorageOpenOptions | null): Promise<Storage>;
+};

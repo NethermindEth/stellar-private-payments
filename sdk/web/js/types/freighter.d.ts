@@ -1,6 +1,6 @@
 import type { SignAuthEntryResult, SignMessageResult, SignOptions, SignTransactionResult } from './signer.js';
 
-/** Freighter wallet adapter for {@link DeploymentClient.account}. */
+/** Freighter wallet adapter for {@link Client.account}. */
 export declare class FreighterSigner {
   ensureReady(): Promise<void>;
   getPublicKey(): Promise<string>;

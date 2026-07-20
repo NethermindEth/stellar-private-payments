@@ -9,7 +9,7 @@ This document describes how the application manages local state, including persi
 | Layer | Location | Role |
 |-------|----------|------|
 | **Rust SDK** | `sdk/client` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
-| **Web SDK** | `sdk/web` | npm package `stellar-private-payments-sdk-web` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
+| **Web SDK** | `sdk/web` | npm package `@nethermindeth/stellar-private-payments` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
 | **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
 Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx builders, proving, SQLite schema). The browser SDK (`sdk/web`) compiles that logic to WASM and exposes a typed JavaScript API. The `app/` directory is the web UI and a thin runtime facade — it does not embed its own WASM crate.
@@ -49,7 +49,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **Main thread (WASM)**
 
-- Entry: `init()` from `stellar-private-payments-sdk-web` (wasm-bindgen module init).
+- Entry: `init()` from `@nethermindeth/stellar-private-payments` (wasm-bindgen module init).
 - `Client::new` forks a `Storage` handle and holds RPC URL + optional bootnode; wallet binding happens at `account`.
 - `Client::backgroundSync` spawns the native SDK `BackgroundSync` loop (`wasm_bindgen_futures::spawn_local`).
 
@@ -121,7 +121,7 @@ flowchart LR
     AS["AppStorage (settings, disclaimer, op history)"]
   end
 
-  subgraph PKG["stellar-private-payments-sdk-web"]
+  subgraph PKG["@nethermindeth/stellar-private-payments"]
     ST["Storage"]
     CL["Client"]
     AC["Account"]
@@ -188,7 +188,7 @@ Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freigh
 
 **Build (Trunk)**
 
-`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` into `js/stellar-private-payments-sdk-web/`. App bundles (`ui.js`, etc.) import `stellar-private-payments-sdk-web` as an external package via import maps in `index.html`.
+`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` into `js/@nethermindeth/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `@nethermindeth/stellar-private-payments` as an external package via import maps in `index.html`.
 
 Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
 

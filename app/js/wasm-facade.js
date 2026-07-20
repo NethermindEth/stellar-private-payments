@@ -14,7 +14,7 @@ import init, {
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
-} from 'stellar-private-payments-sdk-web';
+} from '@nethermindeth/stellar-private-payments';
 
 import { AppStorage } from './app-storage.js';
 

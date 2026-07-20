@@ -18,19 +18,19 @@ export interface ClientNewOptions {
   bootnodeUrl?: string;
 }
 
-/** Options for {@link DeploymentClient.account}. */
+/** Options for {@link Client.account}. */
 export interface AccountOptions {
   networkPassphrase: string;
   /** Optional when `signer.getPublicKey()` is implemented. */
   userAddress?: string;
 }
 
-/** Options for {@link AccountClient.pool}. */
+/** Options for {@link Account.pool}. */
 export interface PoolOptions {
   poolContract: string;
 }
 
-/** Options for {@link AccountClient.registerPublicKeys}. */
+/** Options for {@link Account.registerPublicKeys}. */
 export interface RegisterPublicKeysOptions {
   notePublicKeyHex?: string;
   encryptionPublicKeyHex?: string;

@@ -1,13 +1,17 @@
 {
-  "name": "stellar-private-payments-sdk-web",
-  "version": "0.1.0",
-  "description": "Stellar Private Payments browser SDK",
+  "name": "@nethermindeth/stellar-private-payments",
+  "version": "0.1.0-alpha.0",
+  "description": "Stellar Private Payments browser SDK (alpha)",
   "license": "Apache-2.0",
   "type": "module",
   "repository": {
     "type": "git",
-    "url": "https://github.com/NethermindEth/stellar-private-transactions",
+    "url": "https://github.com/NethermindEth/stellar-private-payments",
     "directory": "sdk/web"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
   },
   "main": "./js/index.js",
   "types": "./js/types/index.d.ts",
