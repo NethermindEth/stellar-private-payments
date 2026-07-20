@@ -1,4 +1,5 @@
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';
 import {
@@ -507,7 +508,8 @@ export async function runOnboardingWizard({
             const bootnodeEnabledInput = bootnodeBox.querySelector('#wizard-bootnode-enabled');
             bootnodeEnabledInput.checked = bootnodeEnabled;
             bootnodeEnabledInput.disabled = bootnodeRequired;
-            bootnodeBox.querySelector('#wizard-bootnode-url').value = state.bootnode?.url || '';
+            bootnodeBox.querySelector('#wizard-bootnode-url').value =
+                state.bootnode?.url || DEFAULT_BOOTNODE_URL;
             inputWrap.appendChild(bootnodeBox);
 
             if (bootnodeRequired) {
