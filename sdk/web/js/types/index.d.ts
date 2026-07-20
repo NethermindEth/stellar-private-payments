@@ -62,6 +62,7 @@ export interface DeriveAspUserLeafOptions {
 /** Deployment runtime returned by {@link Client.new}. */
 export interface DeploymentClient {
   backgroundSync(): Promise<void>;
+  stopBackgroundSync(): void;
   sync(): Promise<void>;
   operationalFeed(limit: number): Promise<unknown>;
   account(options: AccountOptions, signer: WalletSigner): Promise<AccountClient>;

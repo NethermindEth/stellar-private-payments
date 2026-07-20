@@ -113,7 +113,7 @@ pub use pool::PrivatePool;
 pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
-pub use sync::{BackgroundSync, Sync, SyncKick, SyncMode};
+pub use sync::{BackgroundSync, BackgroundSyncStop, SyncHandle, SyncMode, bootnode_required};
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,

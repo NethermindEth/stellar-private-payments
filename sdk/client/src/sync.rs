@@ -1,7 +1,10 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::atomic::{AtomicBool, AtomicU8, Ordering},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicU8, Ordering},
+    },
     task::{Context, Poll},
 };
 
@@ -50,26 +53,19 @@ impl SyncMode {
     }
 }
 
-/// Sync configuration: optional historical-sync bootnode, plus a shared wake /
-/// mode handle for Client / Account / Pool.
+/// Shared sync handle: optional historical-sync bootnode, plus a wake / mode
+/// handle for Client / Account / Pool.
 #[derive(Clone)]
-pub struct Sync {
-    pub bootnode_url: Option<String>,
+pub struct SyncHandle {
+    bootnode_url: Option<String>,
     pub(crate) kick: Handle<SyncKick>,
 }
 
-impl Sync {
+impl SyncHandle {
     pub fn inline(bootnode_url: Option<String>) -> Self {
         Self {
             bootnode_url,
             kick: SyncKick::new(SyncMode::Inline),
-        }
-    }
-
-    pub fn background(bootnode_url: Option<String>) -> Self {
-        Self {
-            bootnode_url,
-            kick: SyncKick::new(SyncMode::Background),
         }
     }
 
@@ -88,17 +84,37 @@ impl Sync {
     pub fn kick(&self) {
         self.kick.kick();
     }
+
+    pub fn bootnode_url(&self) -> Option<&str> {
+        self.bootnode_url.as_deref()
+    }
+
+    /// Inline catch-up, or kick the background indexer, depending on mode.
+    pub(crate) async fn ensure_synced<S: Storage>(
+        &self,
+        rpc: &RpcClient,
+        storage: &S,
+        contract_config: &ContractConfig,
+    ) -> Result<(), Error> {
+        match self.mode() {
+            SyncMode::Inline => catch_up(rpc, storage, contract_config, self.bootnode_url()).await,
+            SyncMode::Background => {
+                self.kick();
+                Ok(())
+            }
+        }
+    }
 }
 
 /// Shared sync coordination: mode flag + wake for background idle waits.
-pub struct SyncKick {
+pub(crate) struct SyncKick {
     mode: AtomicU8,
     waker: AtomicWaker,
     signaled: AtomicBool,
 }
 
 impl SyncKick {
-    pub fn new(mode: SyncMode) -> Handle<Self> {
+    pub(crate) fn new(mode: SyncMode) -> Handle<Self> {
         Handle::new(Self {
             mode: AtomicU8::new(mode.as_u8()),
             waker: AtomicWaker::new(),
@@ -115,7 +131,7 @@ impl SyncKick {
     }
 
     /// Request an early sync pass. Coalesces with in-flight rounds.
-    pub fn kick(&self) {
+    pub(crate) fn kick(&self) {
         self.signaled.store(true, Ordering::SeqCst);
         self.waker.wake();
     }
@@ -153,6 +169,22 @@ impl Future for KickWait<'_> {
     }
 }
 
+/// Stop signal for a [`BackgroundSync`] task: sets a flag and wakes the idle
+/// wait so the loop can exit promptly.
+#[derive(Clone)]
+pub struct BackgroundSyncStop {
+    stop: Arc<AtomicBool>,
+    kick: Handle<SyncKick>,
+}
+
+impl BackgroundSyncStop {
+    /// Request the background loop to exit after the current round / wait.
+    pub fn request(&self) {
+        self.stop.store(true, Ordering::Release);
+        self.kick.kick();
+    }
+}
+
 /// Owned contract-event indexer task. Built from
 /// [`crate::Client::background_sync`]; call [`Self::run`] on your runtime (does
 /// not spawn).
@@ -163,6 +195,7 @@ pub struct BackgroundSync<S: Storage> {
     contract_config: ContractConfig,
     bootnode_url: Option<String>,
     kick: Handle<SyncKick>,
+    stop: Arc<AtomicBool>,
 }
 
 impl<S: Storage> BackgroundSync<S> {
@@ -179,20 +212,34 @@ impl<S: Storage> BackgroundSync<S> {
             contract_config,
             bootnode_url,
             kick,
+            stop: Arc::new(AtomicBool::new(false)),
         }
     }
 
-    /// Long-running indexer loop. Polls until the future is dropped.
+    /// Cloneable handle to stop this task (also wakes the idle wait).
+    pub fn stop_handle(&self) -> BackgroundSyncStop {
+        BackgroundSyncStop {
+            stop: Arc::clone(&self.stop),
+            kick: self.kick.clone(),
+        }
+    }
+
+    fn is_stopped(&self) -> bool {
+        self.stop.load(Ordering::Acquire)
+    }
+
+    /// Long-running indexer loop. Polls until stopped or the future is dropped.
     ///
     /// Between rounds, waits up to [`BACKGROUND_SYNC_INTERVAL_MS`] or until
     /// [`SyncKick::kick`].
     ///
     /// On a main RPC retention gap, syncs historical events via the optional
     /// bootnode until handoff, then resumes on the main RPC.
-    ///
-    /// Returns [`Err`] only if indexer init fails fatally. Per-round
-    /// fetch/process errors are logged and the loop continues.
     pub async fn run(self) -> Result<(), Error> {
+        if self.is_stopped() {
+            return Ok(());
+        }
+
         log::info!(
             "background sync starting (bootnode={})",
             self.bootnode_url.as_deref().unwrap_or("<none>")
@@ -210,8 +257,21 @@ impl<S: Storage> BackgroundSync<S> {
                 indexer
             }
             Err(e) if is_rpc_sync_gap(&e) => {
+                if self.is_stopped() {
+                    return Ok(());
+                }
                 log::warn!("background sync: main RPC sync gap, switching to bootnode");
-                self.bootnode_catch_up().await?;
+                match self.bootnode_catch_up().await {
+                    Ok(()) => {}
+                    Err(_) if self.is_stopped() => {
+                        log::info!("background sync stopped during bootnode catch-up");
+                        return Ok(());
+                    }
+                    Err(e) => return Err(e),
+                }
+                if self.is_stopped() {
+                    return Ok(());
+                }
                 log::info!("background sync: bootnode catch-up finished, resuming main RPC");
                 Indexer::init(
                     self.rpc.clone(),
@@ -225,6 +285,10 @@ impl<S: Storage> BackgroundSync<S> {
         };
 
         loop {
+            if self.is_stopped() {
+                log::info!("background sync stopped");
+                return Ok(());
+            }
             if let Err(e) = indexer.fetch_contract_events().await {
                 log::error!("background sync fetch failed: {e:#}");
             } else if let Err(e) = self.storage.process_pending_state().await {
@@ -241,6 +305,7 @@ impl<S: Storage> BackgroundSync<S> {
             &self.storage,
             &self.contract_config,
             self.bootnode_url.as_deref(),
+            Some(&self.stop),
         )
         .await
     }
@@ -263,6 +328,22 @@ fn is_rpc_sync_gap(err: &anyhow::Error) -> bool {
     )
 }
 
+/// Probe whether the main RPC needs a historical-sync bootnode.
+///
+/// Returns `true` on an RPC retention gap, `false` when the RPC can serve
+/// history. Other indexer init errors are returned as [`Err`].
+pub async fn bootnode_required<S: Storage>(
+    rpc: &RpcClient,
+    storage: &S,
+    contract_config: &ContractConfig,
+) -> Result<bool, Error> {
+    match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
+        Ok(_) => Ok(false),
+        Err(e) if is_rpc_sync_gap(&e) => Ok(true),
+        Err(e) => Err(Error::Other(format!("bootnode probe: {e:#}"))),
+    }
+}
+
 fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
     matches!(
         err.downcast_ref::<RpcError>(),
@@ -276,6 +357,7 @@ async fn bootnode_catch_up<S: Storage>(
     storage: &S,
     contract_config: &ContractConfig,
     bootnode_url: Option<&str>,
+    stop: Option<&AtomicBool>,
 ) -> Result<(), Error> {
     let Some(bootnode) = bootnode_url else {
         return Err(Error::Other(
@@ -303,6 +385,9 @@ async fn bootnode_catch_up<S: Storage>(
 
     let mut consecutive_failures = 0u32;
     loop {
+        if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+            return Err(Error::Other("background sync stopped".into()));
+        }
         match bootnode_indexer.fetch_contract_events().await {
             // bootnode success fetch
             Ok(_) => {
@@ -350,7 +435,7 @@ pub(crate) async fn catch_up<S: Storage>(
     let indexer = match Indexer::init(rpc.clone(), storage.fork()?, contract_config).await {
         Ok(indexer) => indexer,
         Err(e) if is_rpc_sync_gap(&e) => {
-            bootnode_catch_up(storage, contract_config, bootnode_url).await?;
+            bootnode_catch_up(storage, contract_config, bootnode_url, None).await?;
             Indexer::init(rpc.clone(), storage.fork()?, contract_config)
                 .await
                 .map_err(|e| Error::Other(format!("indexer: {e:#}")))?
@@ -436,7 +521,7 @@ mod tests {
 
     #[tokio::test]
     async fn sync_mode_is_shared_across_clones() {
-        let sync = Sync::inline(None);
+        let sync = SyncHandle::inline(None);
         let clone = sync.clone();
         assert_eq!(sync.mode(), SyncMode::Inline);
         assert_eq!(clone.mode(), SyncMode::Inline);

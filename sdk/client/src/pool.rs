@@ -6,7 +6,7 @@ use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    PoolCore, PreparedTransaction, SyncMode,
+    PoolCore, PreparedTransaction,
     chain::RpcClient,
     core::{pool_transact_input, transact_step_for_plan},
     disclosure::{
@@ -20,7 +20,7 @@ use crate::{
     signer::Signer,
     sleep::sleep,
     storage::Storage,
-    sync::{Sync, catch_up, confirm_tx},
+    sync::{SyncHandle, confirm_tx},
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
@@ -44,7 +44,7 @@ pub struct PrivatePool<S> {
     storage: S,
     prover: Handle<dyn Prover>,
     signer: Handle<dyn Signer>,
-    sync: Sync,
+    sync: SyncHandle,
 }
 
 impl<S> PrivatePool<S> {
@@ -54,7 +54,7 @@ impl<S> PrivatePool<S> {
         storage: S,
         signer: Handle<dyn Signer>,
         prover: Handle<dyn Prover>,
-        sync: Sync,
+        sync: SyncHandle,
     ) -> Result<Self, Error> {
         config.validate()?;
         let fetcher = StateFetcher::new(rpc.clone(), config.contract_config.clone())
@@ -306,19 +306,9 @@ impl<S: Storage> PrivatePool<S> {
     // helpers
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync.mode() {
-            SyncMode::Inline => {
-                catch_up(
-                    &self.rpc,
-                    &self.storage,
-                    &self.config.contract_config,
-                    self.sync.bootnode_url.as_deref(),
-                )
-                .await?;
-            }
-            SyncMode::Background => self.sync.kick(),
-        }
-        Ok(())
+        self.sync
+            .ensure_synced(&self.rpc, &self.storage, &self.config.contract_config)
+            .await
     }
 
     async fn resolve_transfer_recipient(

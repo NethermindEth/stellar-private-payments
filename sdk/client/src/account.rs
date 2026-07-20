@@ -7,9 +7,9 @@ use prover::crypto::asp_membership_leaf;
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode,
+    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage,
     chain::RpcClient,
-    sync::{Sync, catch_up, confirm_tx},
+    sync::{SyncHandle, catch_up, confirm_tx},
     types::TransactionResult,
 };
 
@@ -22,7 +22,7 @@ pub struct Account<S: Storage> {
     prover: Handle<dyn Prover>,
     user_address: String,
     signer: Handle<dyn Signer>,
-    sync: Sync,
+    sync: SyncHandle,
     contract_config: ContractConfig,
 }
 
@@ -33,7 +33,7 @@ impl<S: Storage> Account<S> {
         prover: Handle<dyn Prover>,
         user_address: String,
         signer: Handle<dyn Signer>,
-        sync: Sync,
+        sync: SyncHandle,
         contract_config: ContractConfig,
     ) -> Self {
         Self {
@@ -65,7 +65,7 @@ impl<S: Storage> Account<S> {
             &self.rpc,
             &self.storage,
             &self.contract_config,
-            self.sync.bootnode_url.as_deref(),
+            self.sync.bootnode_url(),
         )
         .await
     }
@@ -180,10 +180,8 @@ impl<S: Storage> Account<S> {
     }
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync.mode() {
-            SyncMode::Inline => self.sync().await?,
-            SyncMode::Background => self.sync.kick(),
-        }
-        Ok(())
+        self.sync
+            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
+            .await
     }
 }

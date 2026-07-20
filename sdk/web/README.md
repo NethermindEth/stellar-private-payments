@@ -73,7 +73,8 @@ const chain = await client.allContractsData();
 |--------|-------------|
 | `new({ rpcUrl, storage?, proverWorkerUrl?, bootnodeUrl? })` | Build native client + spawn prover worker (no wallet yet) |
 | `contractConfig()` | Static deployment config |
-| `backgroundSync()` | Background contract-event sync (once per page) |
+| `backgroundSync()` | Background contract-event sync |
+| `stopBackgroundSync()` | Stop the background indexer (also on Client drop) |
 | `sync()` | Explicit foreground catch-up |
 | `operationalFeed(limit)` | Recent deployment activity |
 | `recipientLookup(address)` | Recipient registry lookup |

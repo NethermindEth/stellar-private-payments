@@ -9,9 +9,6 @@ import init, {
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
 const proverWorkerUrl = new URL('../dist/workers/prover-worker.js', import.meta.url).href;
 
-/** Once per page — matches prior wasm `INDEXER_STARTED` (not cleared on disconnect). */
-let syncStarted = false;
-
 /**
  * Open worker-backed local persistence. Prefer one `Storage.open()` per page,
  * then pass the instance (or a fork) to {@link Client.new}.
@@ -50,11 +47,8 @@ function wrapAccount(wasmAccount) {
 
 function wrapClient(wasmClient) {
   return {
-    backgroundSync: async () => {
-      if (syncStarted) return;
-      await wasmClient.backgroundSync();
-      syncStarted = true;
-    },
+    backgroundSync: () => wasmClient.backgroundSync(),
+    stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     sync: () => wasmClient.sync(),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
     account: async (options, signer) => {

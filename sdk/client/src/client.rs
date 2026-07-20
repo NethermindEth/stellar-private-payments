@@ -3,7 +3,7 @@ use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 use crate::{
     Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
-    sync::{BackgroundSync, Sync, catch_up},
+    sync::{BackgroundSync, SyncHandle, catch_up},
 };
 
 /// Top-level SDK client for a privacy pools deployment.
@@ -15,7 +15,7 @@ pub struct Client<S: Storage> {
     rpc: RpcClient,
     storage: S,
     prover: Handle<dyn Prover>,
-    sync: Sync,
+    sync: SyncHandle,
     contract_config: ContractConfig,
 }
 
@@ -33,7 +33,7 @@ impl<S: Storage> Client<S> {
             rpc,
             storage,
             prover,
-            sync: Sync::inline(bootnode_url),
+            sync: SyncHandle::inline(bootnode_url),
             contract_config,
         })
     }
@@ -80,7 +80,7 @@ impl<S: Storage> Client<S> {
             &self.rpc,
             &self.storage,
             &self.contract_config,
-            self.sync.bootnode_url.as_deref(),
+            self.sync.bootnode_url(),
         )
         .await
     }
@@ -97,7 +97,7 @@ impl<S: Storage> Client<S> {
             self.rpc.clone(),
             self.storage.fork()?,
             self.contract_config.clone(),
-            self.sync.bootnode_url.clone(),
+            self.sync.bootnode_url().map(Into::into),
             self.sync.kick.clone(),
         ))
     }
@@ -150,10 +150,8 @@ impl<S: Storage> Client<S> {
     }
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync.mode() {
-            SyncMode::Inline => self.sync().await?,
-            SyncMode::Background => self.sync.kick(),
-        }
-        Ok(())
+        self.sync
+            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
+            .await
     }
 }

@@ -53,6 +53,9 @@ function wrapSdkClient(sdk) {
         async backgroundSync() {
             await sdk.backgroundSync();
         },
+        stopBackgroundSync() {
+            sdk.stopBackgroundSync();
+        },
         async openAccount(
             { networkPassphrase, userAddress },
             signer = new FreighterSigner(),
@@ -98,11 +101,16 @@ async function openWrappedClient(sdkStorage, rpcUrl, bootnodeUrl) {
     return wrapSdkClient(sdk);
 }
 
-/** Drop the in-memory SDK client and account session (e.g. on wallet disconnect). */
-export function resetWalletSession() {
-    boundUserAddress = null;
-    boundAccount = null;
+/** Stop background sync and drop the in-memory client/account (e.g. disconnect or rebuild). */
+export function disposeClient() {
+    try {
+        wrappedClient?.stopBackgroundSync?.();
+    } catch {
+        // Client may already be tearing down.
+    }
     wrappedClient = null;
+    boundAccount = null;
+    boundUserAddress = null;
 }
 
 /**
@@ -142,10 +150,8 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
     await ensureStorage();
 
     if (currentRpcUrl !== rpcUrl) {
-        wrappedClient = null;
-        boundAccount = null;
+        disposeClient();
         currentRpcUrl = rpcUrl;
-        boundUserAddress = null;
         currentBootnodeUrl = null;
     }
 
@@ -158,14 +164,13 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
         !wrappedClient ||
         (resolvedBootnode ?? null) !== (currentBootnodeUrl ?? null)
     ) {
+        disposeClient();
         currentBootnodeUrl = resolvedBootnode ?? null;
         wrappedClient = await openWrappedClient(
             storageHandle,
             rpcUrl,
             currentBootnodeUrl,
         );
-        boundAccount = null;
-        boundUserAddress = null;
     }
 
     return client();
