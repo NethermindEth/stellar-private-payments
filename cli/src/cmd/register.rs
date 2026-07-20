@@ -2,26 +2,17 @@
 //! address book (public key registry), so others can transfer to the account
 //! by its Stellar address.
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
-use stellar_private_payments_sdk::{
-    blocking::{confirm_tx, prepare_register, submit_tx},
-    chain::StateFetcher,
-    state::SqliteStorage,
-};
 
-use crate::{
-    account::Account, config::CliConfig, onboard, output, signer::AliasSigner,
-    stellar_cli::StellarNetwork,
-};
+use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;
-    let storage = config.open_storage()?;
 
-    let hash = register_account(config, &account, &network, &storage)?;
+    let hash = register_account(config, &account, &network)?;
 
     #[derive(Serialize)]
     struct RegisterOut<'a> {
@@ -41,40 +32,16 @@ pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     Ok(())
 }
 
-/// Prepare → sign → submit → confirm the registry `register` call. Returns the
-/// transaction hash. Registration is idempotent on-chain (re-registering just
-/// updates the stored keys), so no local pre-check is required.
+/// Register the account's privacy keys on-chain. Returns the transaction hash.
+/// Registration is idempotent on-chain (re-registering just updates the stored
+/// keys), so no local pre-check is required.
 pub fn register_account(
     config: &CliConfig,
-    account: &Account,
-    network: &StellarNetwork,
-    storage: &SqliteStorage,
+    account: &crate::account::Account,
+    network: &crate::stellar_cli::StellarNetwork,
 ) -> Result<String> {
-    let keys = storage
-        .get_user_keys(&account.address)?
-        .context("privacy keys not found; run `spp onboard` first")?;
-    let note_key = keys.note_keypair.public.0;
-    let encryption_key = keys.encryption_keypair.public.0;
-
-    let fetcher = StateFetcher::new(&network.rpc_url, config.deployment.clone())
-        .map_err(|e| anyhow::anyhow!("state fetcher: {e}"))?;
-
     log::info!("Preparing address registration for {}", account.address);
-    let prepared = prepare_register(&fetcher, &account.address, note_key, encryption_key)?;
-
-    let signer = AliasSigner {
-        alias: account.alias.clone(),
-        rpc_url: network.rpc_url.clone(),
-        network_passphrase: network.passphrase.clone(),
-        config_dir: config.stellar_config_dir.clone(),
-    };
-    let envelope = signer
-        .sign_prepared_transaction(&prepared)
-        .context("sign registration transaction")?;
-
-    log::info!("Submitting registration…");
-    let hash = submit_tx(&envelope, fetcher.rpc())?;
-    confirm_tx(&hash, fetcher.rpc())?;
-    log::info!("Registration confirmed: {hash}");
-    Ok(hash)
+    let result = ClientSession::new(config, account, network, true)?.register_public_keys()?;
+    log::info!("Registration confirmed: {}", result.tx_hash);
+    Ok(result.tx_hash)
 }

@@ -4,7 +4,7 @@
 use tx_planner::{SpendSession, Transact};
 use types::{Field, NoteAmount};
 
-use crate::error::PoolError;
+use crate::error::Error;
 
 #[derive(Debug)]
 pub(crate) enum PlanKind {
@@ -100,7 +100,7 @@ impl PreparedTransactionPlan {
     pub(crate) fn finish_proved_tx(
         &mut self,
         output_commitments: &[Field; 2],
-    ) -> Result<(), PoolError> {
+    ) -> Result<(), Error> {
         match self.kind_mut() {
             PlanKind::Deposit { .. } | PlanKind::Raw(_) => self.advance(),
             PlanKind::Spend(_) => self.complete_pending_spend(output_commitments)?,

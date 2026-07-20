@@ -3,8 +3,8 @@
 import type { PrivatePool } from '../../dist/stellar_private_payments_sdk_web.js';
 
 import type {
+  AccountOptions,
   ClientNewOptions,
-  InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
@@ -15,12 +15,12 @@ import type { Storage, StorageOpenOptions } from './storage.js';
 import type { WalletSigner } from './signer.js';
 
 export { default } from '../../dist/stellar_private_payments_sdk_web.js';
-export { PrivatePool, Storage } from '../../dist/stellar_private_payments_sdk_web.js';
+export { Account, PrivatePool, Storage } from '../../dist/stellar_private_payments_sdk_web.js';
 export type { Client as WasmClient } from '../../dist/stellar_private_payments_sdk_web.js';
 
 export type {
+  AccountOptions,
   ClientNewOptions,
-  InitializeOptions,
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
@@ -38,25 +38,50 @@ export type {
 
 export { FreighterSigner } from './freighter.js';
 
-/** Account session returned by {@link Client.new}. */
+/** Wallet session returned by {@link DeploymentClient.account}. */
 export interface AccountClient {
+  readonly userAddress: string;
+  portfolio(): Promise<unknown>;
+  userPublicKeys(): Promise<unknown>;
+  aspSecret(): Promise<string>;
+  userNotes(limit: number): Promise<unknown>;
+  isRegistered(): Promise<boolean>;
+  deriveAspUserLeaf(options?: DeriveAspUserLeafOptions | null): Promise<string>;
+  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
+  pool(options: PoolOptions): Promise<PrivatePool>;
+}
+
+export interface DeriveAspUserLeafOptions {
+  notePublicKey?: string;
+  membershipBlinding?: string;
+}
+
+/** Deployment runtime returned by {@link Client.new}. */
+export interface DeploymentClient {
   checkSync(options?: SyncOptions | null): Promise<string | null>;
   startSync(options?: SyncOptions | null): Promise<void>;
-  initialize(options: InitializeOptions, signer: WalletSigner): Promise<void>;
-  registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
-  lookupRegisteredPublicKey(address: string): Promise<unknown>;
-  allContractsData(): Promise<unknown>;
+  sync(): Promise<void>;
+  operationalFeed(limit: number): Promise<unknown>;
+  account(options: AccountOptions, signer: WalletSigner): Promise<AccountClient>;
+  recipientLookup(address: string): Promise<unknown>;
   aspState(): Promise<unknown>;
+  allContractsData(): Promise<unknown>;
   verifySelectiveDisclosure(
     receiptJson: string,
     expectedVkHash: string,
-    options?: VerifyDisclosureOptions | null,
   ): Promise<DisclosureVerificationReport>;
-  pool(options: PoolOptions): Promise<PrivatePool>;
 }
 
 /** Public SDK entry — worker URL defaults and optional `userAddress` resolution. */
 export declare const Client: {
-  new(options: ClientNewOptions): Promise<AccountClient>;
+  new(options: ClientNewOptions): Promise<DeploymentClient>;
   contractConfig(): unknown;
 };
+
+/** Walletless selective-disclosure verification (no storage / Client). */
+export declare function verifySelectiveDisclosure(
+  rpcUrl: string,
+  receiptJson: string,
+  expectedVkHash: string,
+  options?: VerifyDisclosureOptions,
+): Promise<DisclosureVerificationReport>;

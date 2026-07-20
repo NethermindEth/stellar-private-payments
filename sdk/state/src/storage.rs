@@ -8,8 +8,7 @@ use types::{
     AspMembershipSync, BootnodeSetting, ContractConfig, ContractEvent, EncryptionKeyPair,
     EncryptionPrivateKey, EncryptionPublicKey, Field, LeafAddedEvent, NewCommitmentEvent,
     NewNullifierEvent, NoteAmount, NoteKeyPair, NotePrivateKey, NotePublicKey, OperationalFeedItem,
-    PoolConfigEntry, PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary,
-    UserOperation,
+    PortfolioBalance, PublicKeyEvent, RecipientLookup, UserNoteSummary, UserOperation,
 };
 
 // shouldn't be changed for WASM OPFS otherwise the db will be lost
@@ -624,7 +623,7 @@ impl Storage {
             balances.push(PortfolioBalance {
                 pool_contract_id: pool.pool_contract_id.clone(),
                 token_contract_id: pool.token_contract_id.clone(),
-                token_label: token_label(pool),
+                token_label: pool.token_label(),
                 amount,
                 note_count,
             });
@@ -1586,14 +1585,6 @@ impl Storage {
             out.push(r?);
         }
         Ok(out)
-    }
-}
-
-fn token_label(pool: &PoolConfigEntry) -> String {
-    match &pool.asset {
-        types::AssetDescriptor::Native => "XLM".to_string(),
-        types::AssetDescriptor::Classic { code, .. } => code.clone(),
-        types::AssetDescriptor::Contract { symbol, .. } => symbol.clone(),
     }
 }
 

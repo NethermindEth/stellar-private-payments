@@ -3,7 +3,7 @@
 
 use js_sys::{Array, Function, Object, Promise, Reflect};
 use stellar_private_payments_sdk::{
-    PoolError, PreparedTransaction, Signer,
+    Error, PreparedTransaction, Signer,
     chain::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,
         auth_sign_steps, unsigned_tx_for_signing,
@@ -165,15 +165,25 @@ fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsErro
 
 #[async_trait::async_trait(?Send)]
 impl Signer for WalletSigner {
-    async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, PoolError> {
+    async fn sign_transaction(
+        &self,
+        prepared: &PreparedTransaction,
+    ) -> Result<SignedTransaction, Error> {
+        self.sign_soroban_transaction(&prepared.soroban_tx).await
+    }
+
+    async fn sign_soroban_transaction(
+        &self,
+        prepared: &PreparedSorobanTx,
+    ) -> Result<SignedTransaction, Error> {
         let envelope = self
-            .sign_prepared_transaction(&prepared.soroban_tx)
+            .sign_prepared_transaction(prepared)
             .await
-            .map_err(|e| PoolError::Other(format!("{e:?}")))?;
+            .map_err(|e| Error::Other(format!("{e:?}")))?;
 
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())
-            .map_err(|e| PoolError::Other(format!("encode signed transaction xdr: {e}")))?;
+            .map_err(|e| Error::Other(format!("encode signed transaction xdr: {e}")))?;
 
         Ok(SignedTransaction { signed_xdr })
     }

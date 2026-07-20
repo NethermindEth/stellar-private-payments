@@ -57,7 +57,7 @@ export const NotesTable = {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
         try {
-            const list = await client().getUserNotes(App.state.wallet.address, 200);
+            const list = await client().account().userNotes(200);
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
                 id: note.id,
                 poolContractId: note.poolContractId,

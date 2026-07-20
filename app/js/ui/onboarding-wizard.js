@@ -255,8 +255,8 @@ async function persistStorageIfWanted() {
 
 async function registerNow({ address, notePublicKey, encryptionPublicKey, networkPassphrase, signer }) {
     if (!networkPassphrase) throw new Error('Missing Stellar network passphrase');
-    await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
-    return client().registerPublicKeys({
+    await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+    return client().account().registerPublicKeys({
         notePublicKeyHex: notePublicKey,
         encryptionPublicKeyHex: encryptionPublicKey,
     });
@@ -271,12 +271,12 @@ export async function runOnboardingWizard({
     if (!address) throw new Error('Wallet address required for onboarding');
 
     const storage = client().storage();
-    const session = client();
     const disclaimerState = await storage.getDisclaimerState(address);
-    const existingKeys = await session.getUserKeys(address);
+    const storedPublicKeys = await storage.getUserPublicKeys(address).catch(() => null);
+    const keysExist = !!storedPublicKeys?.noteKeypair?.public;
     const explorerSetting = await storage.getExplorerSetting();
     const bootnodeSetting = await storage.getBootnodeConfig();
-    const registryLookup = await client().lookupRegisteredPublicKey(address).catch(() => null);
+    const registryLookup = await client().recipientLookup(address).catch(() => null);
 
     const storageAvailable = hasStorageManager();
     const persisted = storageAvailable ? await isPersisted() : false;
@@ -287,7 +287,7 @@ export async function runOnboardingWizard({
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
         ...(needsStorageStep ? ['storage'] : []),
-        ...(!existingKeys?.noteKeypair?.public ? ['keys'] : []),
+        ...(!keysExist ? ['keys'] : []),
         ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
@@ -302,10 +302,7 @@ export async function runOnboardingWizard({
     // e.g. it keeps reappearing while permanent storage hasn't been granted.
     const hasRequiredStep = steps.some(step => step !== 'registration');
     if (!hasRequiredStep) {
-        return {
-            pubKey: existingKeys.noteKeypair.public,
-            encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-        };
+        return;
     }
 
     showModal();
@@ -321,10 +318,12 @@ export async function runOnboardingWizard({
     closeBtn.onclick = cancelOnboarding;
 
     const state = {
-        keys: existingKeys ? {
-            pubKey: existingKeys.noteKeypair.public,
-            encryptionKeypair: { publicKey: existingKeys.encryptionKeypair.public },
-        } : null,
+        keys: keysExist
+            ? {
+                pubKey: storedPublicKeys.noteKeypair.public,
+                encryptionKeypair: { publicKey: storedPublicKeys.encryptionKeypair.public },
+            }
+            : null,
         explorerBaseUrl: explorerSetting?.baseUrl || DEFAULT_EXPLORER_BASE_URL,
         bootnode: bootnodeSetting || { enabled: false, url: '' },
         registered: !!registryLookup?.entry,
@@ -453,8 +452,7 @@ export async function runOnboardingWizard({
             });
             secretWrap.querySelector('[data-copy="asp"]').addEventListener('click', async () => {
                 try {
-                    const asp = await session.getAspSecret(address);
-                    const secret = asp?.membershipBlinding;
+                    const secret = await client().account().aspSecret();
                     if (secret != null) Utils.copyToClipboard(String(secret));
                 } catch (error) {
                     setError(error?.message || 'Failed to load ASP secret');
@@ -476,13 +474,16 @@ export async function runOnboardingWizard({
                     onClick: async () => {
                         try {
                             derive.disabled = true;
-                            await client().initializeWallet(
+                            await client().openAccount(
                                 { networkPassphrase, userAddress: address },
                                 signer,
                             );
-                            const result = await session.loadPublicKeys(address);
-                            state.keys = result;
-                            noteField.textContent = result.pubKey;
+                            const result = await client().account().userPublicKeys();
+                            state.keys = {
+                                pubKey: result.notePublicKey,
+                                encryptionKeypair: { publicKey: result.encryptionPublicKey },
+                            };
+                            noteField.textContent = result.notePublicKey;
                             aspField.textContent = HIDDEN_SECRET_PLACEHOLDER;
                             renderActions([makeButton({ text: 'Continue', variant: 'primary', onClick: () => resolve() })]);
                         } catch (error) {

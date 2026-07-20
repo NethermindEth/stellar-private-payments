@@ -3,11 +3,8 @@
 use std::rc::Rc;
 
 use stellar_private_payments_sdk::{
-    DisclosureRequest, PrivatePool as SdkPrivatePool, PrivatePoolConfig,
-    types::{
-        ContractConfig, DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey,
-        TransferRecipient,
-    },
+    DisclosureRequest, PrivatePool as NativePrivatePool,
+    types::{DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };
 use wasm_bindgen::prelude::*;
 
@@ -16,22 +13,16 @@ use crate::{
     workers::storage::StorageBridge,
 };
 
-#[derive(Debug, Clone)]
-pub(crate) struct PoolCreateConfig {
-    pub pool_contract: String,
-    pub user_address: String,
-}
-
 /// Per-pool session for deposits, transfers, and withdrawals.
 #[wasm_bindgen]
 pub struct PrivatePool {
-    inner: Rc<SdkPrivatePool<StorageBridge>>,
+    inner: Rc<NativePrivatePool<StorageBridge>>,
     user_address: String,
 }
 
 impl PrivatePool {
     pub(crate) fn from_parts(
-        inner: Rc<SdkPrivatePool<StorageBridge>>,
+        inner: Rc<NativePrivatePool<StorageBridge>>,
         user_address: String,
     ) -> Self {
         Self {
@@ -40,20 +31,15 @@ impl PrivatePool {
         }
     }
 
-    pub(crate) fn inner(&self) -> &SdkPrivatePool<StorageBridge> {
+    pub(crate) fn inner(&self) -> &NativePrivatePool<StorageBridge> {
         &self.inner
     }
 }
 
 #[wasm_bindgen]
 impl PrivatePool {
-    pub async fn sync(&self) -> Result<(), JsError> {
-        self.inner().sync().await.map_err(pool_err)
-    }
-
     /// Balance in stroops (`bigint` in JS).
-    #[wasm_bindgen(js_name = getBalance)]
-    pub async fn get_balance(&self) -> Result<u128, JsError> {
+    pub async fn balance(&self) -> Result<u128, JsError> {
         let amount = self.inner().balance().await.map_err(pool_err)?;
         Ok(u128::from(amount))
     }
@@ -167,20 +153,5 @@ impl PrivatePool {
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
-    }
-}
-
-pub(crate) fn build_pool_config(
-    rpc_url: String,
-    contract_config: ContractConfig,
-    pool_contract_id: String,
-    user_address: String,
-) -> PrivatePoolConfig {
-    PrivatePoolConfig {
-        rpc_url,
-        contract_config,
-        pool_contract_id,
-        user_address,
-        storage_path: String::new(),
     }
 }

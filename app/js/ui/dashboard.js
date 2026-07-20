@@ -60,9 +60,9 @@ export const Dashboard = {
         if (!App.state.wallet.address) return;
         const address = App.state.wallet.address;
         const [balancesRes, feedRes, lookupRes] = await Promise.allSettled([
-            client().getPortfolioBalances(address),
-            client().getOperationalFeed(5),
-            client().lookupRegisteredPublicKey(address),
+            client().account().portfolio(),
+            client().operationalFeed(5),
+            client().recipientLookup(address),
         ]);
 
         if (balancesRes.status === 'fulfilled') {

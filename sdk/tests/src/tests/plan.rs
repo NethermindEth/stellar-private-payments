@@ -1,7 +1,7 @@
 //! PrivatePool per-step planning.
 
 use crate::pool::{test_pool, test_recipient};
-use stellar_private_payments_sdk::{PoolError, types::NoteAmount};
+use stellar_private_payments_sdk::{Error, types::NoteAmount};
 
 #[test]
 fn transfer_two_steps() {
@@ -75,7 +75,7 @@ fn transfer_insufficient_funds() {
         .prepare_transfer(&wallet, test_recipient(), NoteAmount::from(100u128))
         .expect_err("transfer above wallet sum should not plan");
 
-    assert!(matches!(err, PoolError::SpendSession(_)));
+    assert!(matches!(err, Error::SpendSession(_)));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn estimate_empty_wallet() {
         .estimate(NoteAmount::from(10u128))
         .expect_err("empty wallet should not estimate");
 
-    assert!(matches!(err, PoolError::Plan(_)));
+    assert!(matches!(err, Error::Plan(_)));
 }
 
 #[test]
@@ -97,7 +97,7 @@ fn prepare_deposit_zero() {
         .prepare_deposit(NoteAmount::ZERO)
         .expect_err("zero deposit should not plan");
 
-    assert!(matches!(err, PoolError::InvalidConfig(_)));
+    assert!(matches!(err, Error::InvalidConfig(_)));
 }
 
 #[test]
@@ -108,5 +108,5 @@ fn withdraw_zero() {
         .prepare_withdraw(&[], NoteAmount::ZERO, pool.config().user_address.clone())
         .expect_err("zero withdraw should not plan");
 
-    assert!(matches!(err, PoolError::InvalidConfig(_)));
+    assert!(matches!(err, Error::InvalidConfig(_)));
 }

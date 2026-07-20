@@ -22,7 +22,7 @@ export async function storageCall(storage, request, timeoutMs = 5_000) {
 }
 
 /**
- * App-only persistence: settings, disclaimer, operation history.
+ * App-only persistence: settings, disclaimer, operation history, onboarding key probe.
  */
 export class AppStorage {
     #storage;
@@ -66,6 +66,18 @@ export class AppStorage {
     async getDisclaimerState(address) {
         const response = await this.#call({ DisclaimerState: address });
         return response.DisclaimerState ?? null;
+    }
+
+    /** Whether privacy keys are stored locally for an address (onboarding only). */
+    async userKeysExist(address) {
+        const response = await this.#call({ UserKeys: address }, 1_000);
+        return response.UserKeys != null;
+    }
+
+    /** Public note/encryption keys only (onboarding; no ASP secret). */
+    async getUserPublicKeys(address) {
+        const response = await this.#call({ UserKeys: address }, 1_000);
+        return response.UserKeys ?? null;
     }
 
     async acceptDisclaimer(address, disclaimerHashHex) {

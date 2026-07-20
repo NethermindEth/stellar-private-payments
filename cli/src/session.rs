@@ -4,86 +4,103 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    LocalProver, PrivatePoolConfig, Signer, TransferRecipient,
-    blocking::PrivatePool,
+    Handle, LocalProver, LocalStorage, Prover, Signer, SyncMode, TransferRecipient,
+    blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
 
-pub struct PoolSession {
-    pool: PrivatePool,
+/// SDK `Client` → `Account` session; open pools via [`Self::pool`].
+pub struct ClientSession {
+    client: Client,
+    account: SdkAccount,
 }
 
-impl PoolSession {
-    /// Open one pool with a full prover. `account` and `network` are resolved
-    /// once by the caller (so callers can reuse them across pools). Loads
-    /// circuit artifacts (proving key + circuit) — required for transacting
-    /// commands (deposit/transfer/withdraw), which is the only caller of this
-    /// path.
-    pub fn open(
+impl ClientSession {
+    /// Bind wallet + deployment. `readonly` skips circuit artifact load
+    /// (balance/notes/sync only).
+    pub fn new(
         config: &CliConfig,
         account: &Account,
         network: &StellarNetwork,
-        pool_contract_id: &str,
+        readonly: bool,
     ) -> Result<Self> {
-        let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
-        let prover = Box::new(
-            LocalProver::from_artifacts(&artifacts)
-                .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
-        );
-        Self::open_pool(config, account, network, pool_contract_id, prover)
-    }
+        let storage_path = config.db_path().to_string_lossy().into_owned();
+        let storage =
+            LocalStorage::open(&storage_path).map_err(|e| anyhow::anyhow!("open storage: {e}"))?;
 
-    /// Open one pool without a prover. Skips loading the circuit artifacts
-    /// entirely (no proving-key deserialization, no WASM compile), so
-    /// read-only commands (`overview`, `feed`) are cheap. The resulting pool
-    /// can read balances/notes and sync, but any transact/prove call errors.
-    pub fn open_readonly(
-        config: &CliConfig,
-        account: &Account,
-        network: &StellarNetwork,
-        pool_contract_id: &str,
-    ) -> Result<Self> {
-        Self::open_pool(
-            config,
-            account,
-            network,
-            pool_contract_id,
-            Box::new(stellar_private_payments_sdk::NoopProver),
-        )
-    }
-
-    fn open_pool(
-        config: &CliConfig,
-        account: &Account,
-        network: &StellarNetwork,
-        pool_contract_id: &str,
-        prover: Box<dyn stellar_private_payments_sdk::Prover>,
-    ) -> Result<Self> {
-        let signer: Box<dyn Signer> = Box::new(AliasSigner {
-            alias: account.alias.clone(),
-            rpc_url: network.rpc_url.clone(),
-            network_passphrase: network.passphrase.clone(),
-            config_dir: config.stellar_config_dir.clone(),
-        });
-
-        let pool_config = PrivatePoolConfig {
-            rpc_url: network.rpc_url.clone(),
-            contract_config: config.deployment.clone(),
-            pool_contract_id: pool_contract_id.to_string(),
-            user_address: account.address.clone(),
-            storage_path: config.db_path().to_string_lossy().into_owned(),
+        let client = if readonly {
+            Client::new_readonly(
+                storage,
+                SyncMode::Inline,
+                config.deployment.clone(),
+                network.rpc_url.clone(),
+            )
+        } else {
+            let artifacts = load_transact_artifacts(Some(config.circuits_dir_path().as_path()))?;
+            let prover = Handle::from_box(Box::new(
+                LocalProver::from_artifacts(&artifacts)
+                    .map_err(|e| anyhow::anyhow!("init transact prover: {e}"))?,
+            ) as Box<dyn Prover>);
+            Client::new(
+                storage,
+                prover,
+                SyncMode::Inline,
+                config.deployment.clone(),
+                network.rpc_url.clone(),
+            )
         };
+        let sdk_account = client
+            .account(&account.address, alias_signer(config, account, network))
+            .map_err(|e| anyhow::anyhow!("open account session: {e}"))?;
 
+        Ok(Self {
+            client,
+            account: sdk_account,
+        })
+    }
+
+    pub fn account(&self) -> &SdkAccount {
+        &self.account
+    }
+
+    pub fn operational_feed(
+        &self,
+        limit: u32,
+    ) -> Result<Vec<stellar_private_payments_sdk::OperationalFeedItem>> {
+        self.client
+            .operational_feed(limit)
+            .map_err(|e| anyhow::anyhow!("operational feed: {e}"))
+    }
+
+    pub fn pool(&self, pool_contract_id: &str) -> Result<PrivatePool> {
         log::info!("Opening pool {pool_contract_id}");
-        let pool = PrivatePool::open(pool_config, signer, prover)
-            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))?;
-
-        Ok(Self { pool })
+        self.account
+            .pool(pool_contract_id)
+            .map_err(|e| anyhow::anyhow!("open pool session: {e}"))
     }
 
-    pub fn pool(&self) -> &PrivatePool {
-        &self.pool
+    /// Register this account's public keys on the deployment-wide registry.
+    pub fn register_public_keys(
+        &self,
+    ) -> Result<stellar_private_payments_sdk::types::TransactionResult> {
+        log::info!("Registering public keys");
+        self.account
+            .register_public_keys(None, None)
+            .map_err(|e| anyhow::anyhow!("register public keys: {e}"))
     }
+}
+
+fn alias_signer(
+    config: &CliConfig,
+    account: &Account,
+    network: &StellarNetwork,
+) -> Handle<dyn Signer> {
+    Handle::from_box(Box::new(AliasSigner {
+        alias: account.alias.clone(),
+        rpc_url: network.rpc_url.clone(),
+        network_passphrase: network.passphrase.clone(),
+        config_dir: config.stellar_config_dir.clone(),
+    }) as Box<dyn Signer>)
 }
 
 pub fn parse_amount(raw: &str) -> Result<NoteAmount> {

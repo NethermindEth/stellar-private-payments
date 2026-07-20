@@ -1,21 +1,23 @@
 //! `keys` — show the account's privacy public keys; `asp-secret` reveals
 //! the ASP secret (membership blinding).
 
-use anyhow::{Context, Result};
+use anyhow::Result;
 use serde::Serialize;
 
-use crate::{config::CliConfig, onboard, output};
+use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
 pub fn show(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
-    let storage = config.open_storage()?;
-    let keys = storage
-        .get_user_keys(&account.address)?
-        .context("privacy keys not found; run `spp onboard` first")?;
+    let network = config.resolve_network()?;
+    let session = ClientSession::new(config, &account, &network, true)?;
+    let (note, enc) = session
+        .account()
+        .user_public_keys()
+        .map_err(|e| anyhow::anyhow!("privacy keys: {e}"))?;
 
-    let note = hex0x(&keys.note_keypair.public)?;
-    let encryption = hex0x(&keys.encryption_keypair.public)?;
+    let note = hex0x(&note)?;
+    let encryption = hex0x(&enc)?;
 
     #[derive(Serialize)]
     struct KeysOut<'a> {
@@ -41,11 +43,13 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
 pub fn asp_secret(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
-    let storage = config.open_storage()?;
-    let keys = storage
-        .get_user_keys(&account.address)?
-        .context("privacy keys not found; run `spp onboard` first")?;
-    let secret = keys.membership_blinding.to_string();
+    let network = config.resolve_network()?;
+    let session = ClientSession::new(config, &account, &network, true)?;
+    let secret = session
+        .account()
+        .asp_secret()
+        .map_err(|e| anyhow::anyhow!("ASP secret: {e}"))?;
+    let secret = secret.to_string();
 
     eprintln!(
         "WARNING: this is your ASP secret. Anyone who learns it can link your notes. \

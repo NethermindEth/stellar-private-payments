@@ -3,7 +3,7 @@
 use anyhow::Result;
 use serde::Serialize;
 
-use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::PoolSession};
+use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::ClientSession};
 
 const DEFAULT_LIMIT: u32 = 5;
 
@@ -13,28 +13,11 @@ pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;
 
-    // Sync every enabled pool so the local event tables are current. Feed reads
-    // storage directly (not via the SDK), so sync explicitly here. A
-    // read-only session skips the prover load; sync is best-effort, so one
-    // unreachable pool warns and we still render the feed from what synced.
-    for entry in config.deployment.pools.iter().filter(|p| p.enabled) {
-        match PoolSession::open_readonly(config, &account, &network, &entry.pool_contract_id) {
-            Ok(session) => {
-                if let Err(e) = session.pool().sync() {
-                    log::warn!("pool {}: sync: {e:#}", entry.pool_contract_id);
-                }
-            }
-            Err(e) => log::warn!("pool {}: {e:#}", entry.pool_contract_id),
-        }
-    }
+    let session = ClientSession::new(config, &account, &network, true)?;
+    let items = session.operational_feed(limit)?;
 
     let storage = config.open_storage()?;
     let explorer = Explorer::new(crate::explorer::base_url(&storage)?);
-    let items = storage.get_operational_feed(
-        limit,
-        &config.deployment.asp_membership,
-        &config.deployment.public_key_registry,
-    )?;
 
     #[derive(Serialize)]
     struct FeedRow {

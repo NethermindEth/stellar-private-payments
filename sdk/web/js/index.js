@@ -2,6 +2,7 @@ import init, {
   Client as WasmClient,
   PrivatePool,
   Storage as WasmStorage,
+  verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
@@ -17,11 +18,29 @@ async function openStorage(options = {}) {
   });
 }
 
+function wrapAccount(wasmAccount) {
+  return {
+    get userAddress() {
+      return wasmAccount.userAddress;
+    },
+    portfolio: () => wasmAccount.portfolio(),
+    userPublicKeys: () => wasmAccount.userPublicKeys(),
+    aspSecret: () => wasmAccount.aspSecret(),
+    userNotes: (limit) => wasmAccount.userNotes(limit),
+    isRegistered: () => wasmAccount.isRegistered(),
+    deriveAspUserLeaf: (options) => wasmAccount.deriveAspUserLeaf(options),
+    registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
+    pool: (options) => wasmAccount.pool(options),
+  };
+}
+
 function wrapClient(wasmClient) {
   return {
     checkSync: (options) => wasmClient.checkSync(options),
     startSync: (options) => wasmClient.startSync(options),
-    initialize: async (options, signer) => {
+    sync: () => wasmClient.sync(),
+    operationalFeed: (limit) => wasmClient.operationalFeed(limit),
+    account: async (options, signer) => {
       const userAddress =
         options.userAddress ??
         (typeof signer?.getPublicKey === 'function' ? await signer.getPublicKey() : undefined);
@@ -30,32 +49,28 @@ function wrapClient(wasmClient) {
         throw new Error('options.userAddress is required (or signer must implement getPublicKey)');
       }
 
-      return wasmClient.initialize(
+      const wasmAccount = await wasmClient.account(
         {
-          proverWorkerUrl,
           ...options,
           userAddress,
         },
         signer,
       );
+      return wrapAccount(wasmAccount);
     },
-    registerPublicKeys: (options) => wasmClient.registerPublicKeys(options),
-    lookupRegisteredPublicKey: (address) => wasmClient.lookupRegisteredPublicKey(address),
-    allContractsData: () => wasmClient.allContractsData(),
+    recipientLookup: (address) => wasmClient.recipientLookup(address),
     aspState: () => wasmClient.aspState(),
-    verifySelectiveDisclosure: (receiptJson, expectedVkHash, options = {}) =>
-      wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash, {
-        proverWorkerUrl,
-        ...options,
-      }),
-    pool: (options) => wasmClient.pool(options),
+    allContractsData: () => wasmClient.allContractsData(),
+    verifySelectiveDisclosure: (receiptJson, expectedVkHash) =>
+      wasmClient.verifySelectiveDisclosure(receiptJson, expectedVkHash),
   };
 }
 
 /**
- * Create a client shell. Call `startSync` then `initialize` before pool ops.
+ * Create a deployment client. Call `startSync` then `account` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
+ * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
  */
 async function newClient(options) {
   const storage =
@@ -64,19 +79,31 @@ async function newClient(options) {
       workerUrl: options.storageWorkerUrl ?? storageWorkerUrl,
     }));
 
-  return wrapClient(await WasmClient.new(storage, options.rpcUrl));
+  return wrapClient(
+    await WasmClient.new(
+      storage,
+      options.rpcUrl,
+      options.proverWorkerUrl ?? proverWorkerUrl,
+    ),
+  );
+}
+
+/**
+ * Walletless selective-disclosure verification (no storage worker / Client).
+ * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
+ */
+function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options = {}) {
+  return wasmVerifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, {
+    proverWorkerUrl,
+    ...options,
+  });
 }
 
 export const Storage = { open: openStorage };
 export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
-  verifySelectiveDisclosureStandalone: (rpcUrl, receiptJson, expectedVkHash, options = {}) =>
-    WasmClient.verifySelectiveDisclosureStandalone(rpcUrl, receiptJson, expectedVkHash, {
-      proverWorkerUrl,
-      ...options,
-    }),
 };
-export { PrivatePool };
+export { PrivatePool, verifySelectiveDisclosure };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

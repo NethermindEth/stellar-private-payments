@@ -1,6 +1,7 @@
-//! Wasm [`Client`] — `new` → `startSync` → `initialize`, then pool factory.
+//! Wasm [`Client`] — thin browser wrapper around the native SDK
+//! [`Client`](NativeClient).
 
-mod core;
+mod account;
 mod execute;
 mod pool;
 mod transact;
@@ -8,7 +9,12 @@ mod transact;
 use std::rc::Rc;
 
 use serde::Deserialize;
-use stellar_private_payments_sdk::{PoolError, chain::StateFetcher, types::DisclosureReceipt};
+use stellar_private_payments_sdk::{
+    Account as NativeAccount, Client as NativeClient, Error, Handle, SyncMode,
+    chain::StateFetcher,
+    types::{DisclosureReceipt, KeyDerivationSignature},
+    verify_disclosure_receipt,
+};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
@@ -18,40 +24,48 @@ use crate::{
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
     storage::Storage,
+    workers::{
+        prover::{ProverBridge, ProverWorker},
+        storage::StorageBridge,
+    },
 };
+use gloo_worker::Spawnable;
 
-use core::ClientCore;
-
+pub use account::Account;
 pub use pool::PrivatePool;
-pub(crate) use pool::{PoolCreateConfig, build_pool_config};
 
-pub(crate) fn pool_err(error: PoolError) -> JsError {
+pub(crate) fn pool_err(error: Error) -> JsError {
     use stellar_private_payments_sdk::types::AspMembershipSync;
 
-    match &error {
-        PoolError::MembershipSync(AspMembershipSync::RegisterAtASP) => {
+    let cause = match &error {
+        Error::PlanExecution(plan) => plan.cause(),
+        other => other,
+    };
+    match cause {
+        Error::MembershipSync(AspMembershipSync::RegisterAtASP) => {
             JsError::new("register at ASP before transacting")
         }
-        PoolError::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
+        Error::MembershipSync(AspMembershipSync::SyncRequired(_)) => {
             JsError::new("indexer sync in progress; try again shortly")
         }
         _ => JsError::new(&error.to_string()),
     }
 }
 
-pub(crate) fn pool_err_message(error: PoolError) -> String {
-    error.to_string()
+pub(crate) fn pool_err_message(error: Error) -> String {
+    match &error {
+        Error::PlanExecution(plan) => plan.cause().to_string(),
+        other => other.to_string(),
+    }
 }
 
-/// Browser SDK entry point for one Stellar account (workers, RPC, wallet
-/// signer).
+/// Deployment-scoped browser SDK runtime: native [`NativeClient`] plus worker
+/// handles.
 #[wasm_bindgen]
 pub struct Client {
-    rpc_url: String,
     storage: Storage,
-    core: Option<Rc<ClientCore>>,
-    signer: Option<WalletSigner>,
-    user_address: Option<String>,
+    inner: Rc<NativeClient<StorageBridge>>,
+    prover: ProverBridge,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -62,16 +76,9 @@ struct SyncOptions {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct InitializeOptions {
+struct AccountOptions {
     network_passphrase: String,
     user_address: Option<String>,
-    prover_worker_url: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct PoolOptions {
-    pool_contract: String,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -80,26 +87,57 @@ struct VerifyDisclosureOptions {
     prover_worker_url: Option<String>,
 }
 
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct RegisterPublicKeysOptions {
-    note_public_key_hex: Option<String>,
-    encryption_public_key_hex: Option<String>,
-}
-
 #[wasm_bindgen]
 impl Client {
-    /// Create a client shell (storage + RPC URL). Call
-    /// [`Client::start_sync`] then [`Client::initialize`] before pool
-    /// or account operations.
+    /// Build the native client and spawn the prover worker.
+    ///
+    /// `prover_worker_url` must be an absolute URL (the JS package entry
+    /// resolves it via `import.meta.url`). Call [`Client::start_sync`] then
+    /// [`Client::account`] before pool operations.
     #[wasm_bindgen(js_name = new)]
-    pub fn new(storage: &Storage, rpc_url: String) -> Result<Client, JsError> {
-        Ok(Self {
+    pub async fn new(
+        storage: &Storage,
+        rpc_url: String,
+        prover_worker_url: String,
+    ) -> Result<Client, JsError> {
+        crate::wasm_start();
+
+        if prover_worker_url.trim().is_empty() {
+            return Err(JsError::new(
+                "proverWorkerUrl is required (absolute URL to prover-worker.js)",
+            ));
+        }
+
+        let storage = storage.fork();
+        let storage_bridge = storage.bridge();
+        storage_bridge
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let contract_config = deployment_config()?;
+        let prover = ProverBridge::new(
+            ProverWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&prover_worker_url),
+        );
+        let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
+            Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
+        );
+
+        let inner = Rc::new(NativeClient::new(
+            storage_bridge,
+            prover_handle,
+            SyncMode::Background,
+            (*contract_config).clone(),
             rpc_url,
-            storage: storage.fork(),
-            core: None,
-            signer: None,
-            user_address: None,
+        ));
+
+        Ok(Self {
+            storage,
+            inner,
+            prover,
         })
     }
 
@@ -111,9 +149,6 @@ impl Client {
 
     /// Probe wallet RPC retention. Returns `null` when sufficient, or a
     /// bootnode URL when historical sync requires one.
-    ///
-    /// Throws when the RPC has a sync gap and no bootnode URL is available
-    /// (message contains `RPC_SYNC_GAP`).
     #[wasm_bindgen(js_name = checkSync)]
     pub async fn check_sync(&self, options: JsValue) -> Result<JsValue, JsError> {
         let opts: SyncOptions = if options.is_null() || options.is_undefined() {
@@ -123,7 +158,7 @@ impl Client {
         };
         let config = deployment_config()?;
         match events::bootnode_check(
-            &self.rpc_url,
+            self.inner.rpc_url(),
             self.storage.bridge(),
             config,
             opts.bootnode_url.as_deref(),
@@ -147,7 +182,7 @@ impl Client {
         };
         let config = deployment_config()?;
         events::start_indexer(
-            self.rpc_url.clone(),
+            self.inner.rpc_url().to_string(),
             opts.bootnode_url,
             self.storage.bridge(),
             config,
@@ -155,58 +190,58 @@ impl Client {
         .await
     }
 
-    /// Bind a wallet signer, spawn workers, and derive privacy keys when
-    /// missing.
-    pub async fn initialize(&mut self, options: JsValue, signer: JsValue) -> Result<(), JsError> {
-        if self.core.is_some() {
-            return Err(JsError::new("client already initialized"));
-        }
-
-        let opts: InitializeOptions = serde_wasm_bindgen::from_value(options)?;
+    /// Bind a wallet signer, derive privacy keys when missing, and return an
+    /// [`Account`] session.
+    pub async fn account(&self, options: JsValue, signer: JsValue) -> Result<Account, JsError> {
+        let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
         let user_address = resolve_user_address(&signer, opts.user_address).await?;
         let wallet_signer =
             WalletSigner::new(signer, opts.network_passphrase, user_address.clone())?;
 
-        let core = Rc::new(
-            ClientCore::connect(
-                self.rpc_url.clone(),
-                Some(self.storage.clone()),
-                None,
-                opts.prover_worker_url,
-            )
-            .await?,
-        );
+        self.ensure_prover().await?;
 
-        if !core.user_keys_exist(&user_address).await? {
-            let message = core.key_derivation_message();
+        if !self.user_keys_exist(&user_address).await? {
+            let message = stellar_private_payments_sdk::KEY_DERIVATION_MESSAGE.to_string();
             let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
             let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
-            core.derive_save_user_keys(user_address.clone(), signature)
+            self.derive_save_user_keys(user_address.clone(), signature)
                 .await?;
         }
 
-        self.core = Some(core);
-        self.signer = Some(wallet_signer);
-        self.user_address = Some(user_address);
-        Ok(())
+        Ok(Account::new(Rc::new(
+            self.open_native_account(wallet_signer, user_address)?,
+        )))
     }
 
-    /// On-chain state for all enabled pools plus shared ASP contracts.
-    #[wasm_bindgen(js_name = allContractsData)]
-    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
-        self.initialized()?.0.all_contracts_data().await
+    /// Catch local storage up to the current chain tip for the deployment.
+    #[wasm_bindgen(js_name = sync)]
+    pub async fn sync(&self) -> Result<(), JsError> {
+        self.inner.sync().await.map_err(pool_err)
+    }
+
+    /// Recent deployment activity (pool events, registry registrations, ASP
+    /// updates).
+    #[wasm_bindgen(js_name = operationalFeed)]
+    pub async fn operational_feed(&self, limit: u32) -> Result<JsValue, JsError> {
+        let feed = self.inner.operational_feed(limit).await.map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&feed)?)
+    }
+
+    /// Look up a recipient's registered note and encryption public keys.
+    #[wasm_bindgen(js_name = recipientLookup)]
+    pub async fn recipient_lookup(&self, address: String) -> Result<JsValue, JsError> {
+        let lookup = self
+            .inner
+            .recipient_lookup(&address)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&lookup)?)
     }
 
     /// On-chain ASP membership and non-membership state.
     #[wasm_bindgen(js_name = aspState)]
     pub async fn asp_state(&self) -> Result<JsValue, JsError> {
-        if let Some(core) = &self.core {
-            return core.asp_state().await;
-        }
-
-        let config = deployment_config()?;
-        let fetcher = StateFetcher::new(&self.rpc_url, (*config).clone())
-            .map_err(|e| JsError::new(&e.to_string()))?;
+        let fetcher = self.state_fetcher()?;
         let data = fetcher
             .asp_state()
             .await
@@ -214,161 +249,145 @@ impl Client {
         Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
-    /// Register this account's public keys on the deployment-wide registry.
-    ///
-    /// `options` may omit key hex strings to use keys from local storage after
-    /// [`Client::initialize`].
-    #[wasm_bindgen(js_name = registerPublicKeys)]
-    pub async fn register_public_keys(&self, options: JsValue) -> Result<String, JsError> {
-        let (core, signer, user_address) = self.initialized()?;
-        let opts: RegisterPublicKeysOptions = if options.is_null() || options.is_undefined() {
-            RegisterPublicKeysOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-
-        let (note_public_key_hex, encryption_public_key_hex) = match (
-            opts.note_public_key_hex,
-            opts.encryption_public_key_hex,
-        ) {
-            (Some(note), Some(enc)) => (note, enc),
-            (None, None) => core.user_public_keys_hex(user_address).await?,
-            _ => {
-                return Err(JsError::new(
-                    "notePublicKeyHex and encryptionPublicKeyHex must both be set or both omitted",
-                ));
-            }
-        };
-
-        core.register_public_keys(
-            signer,
-            user_address.to_string(),
-            note_public_key_hex,
-            encryption_public_key_hex,
-        )
-        .await
-    }
-
-    /// Look up a recipient's registered note and encryption public keys.
-    #[wasm_bindgen(js_name = lookupRegisteredPublicKey)]
-    pub async fn lookup_registered_public_key(&self, address: String) -> Result<JsValue, JsError> {
-        if let Some(core) = &self.core {
-            return core.lookup_registered_public_key(address).await;
-        }
-
-        let config = deployment_config()?;
-        let req = StorageWorkerRequest::RecipientLookup {
-            address,
-            public_key_registry_contract_id: config.public_key_registry.clone(),
-        };
-        match self
-            .storage
-            .bridge()
-            .call(req, 2_000)
+    /// On-chain state for all enabled pools plus shared ASP contracts.
+    #[wasm_bindgen(js_name = allContractsData)]
+    pub async fn all_contracts_data(&self) -> Result<JsValue, JsError> {
+        let fetcher = self.state_fetcher()?;
+        let data = fetcher
+            .all_contracts_data()
             .await
-            .map_err(|e| JsError::new(&e.to_string()))?
-        {
-            StorageWorkerResponse::RecipientLookup(lookup) => {
-                Ok(serde_wasm_bindgen::to_value(&lookup)?)
-            }
-            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
-        }
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        Ok(serde_wasm_bindgen::to_value(&data)?)
     }
 
     /// Verify a selective-disclosure receipt without a wallet session.
-    ///
-    /// Spawns the prover worker on demand when [`Client::initialize`] has not
-    /// been called (e.g. the disclosure verify page).
     #[wasm_bindgen(js_name = verifySelectiveDisclosure)]
     pub async fn verify_selective_disclosure(
         &self,
         receipt_json: String,
         expected_vk_hash: String,
-        options: JsValue,
     ) -> Result<JsValue, JsError> {
         let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
             .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
-        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
-            VerifyDisclosureOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
 
-        let core = if let Some(core) = &self.core {
-            core.clone()
-        } else {
-            Rc::new(
-                ClientCore::connect(
-                    self.rpc_url.clone(),
-                    Some(self.storage.clone()),
-                    None,
-                    opts.prover_worker_url,
-                )
-                .await?,
-            )
-        };
-
-        let report = core
-            .verify_selective_disclosure(&receipt, &expected_vk_hash)
+        self.ensure_prover().await?;
+        let fetcher = self.state_fetcher()?;
+        let report = verify_disclosure_receipt(&fetcher, &self.prover, &receipt, &expected_vk_hash)
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
-    }
-
-    /// Verify a selective-disclosure receipt with no wallet, no local storage,
-    /// and no `Client` instance — just an RPC URL. Skips the OPFS/SQLite
-    /// storage worker entirely, since verification never reads local state.
-    #[wasm_bindgen(js_name = verifySelectiveDisclosureStandalone)]
-    pub async fn verify_selective_disclosure_standalone(
-        rpc_url: String,
-        receipt_json: String,
-        expected_vk_hash: String,
-        options: JsValue,
-    ) -> Result<JsValue, JsError> {
-        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
-            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
-        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
-            VerifyDisclosureOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-
-        let core = ClientCore::connect_stateless(rpc_url, opts.prover_worker_url).await?;
-        let report = core
-            .verify_selective_disclosure(&receipt, &expected_vk_hash)
-            .await
-            .map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&report)?)
-    }
-
-    /// Open a private pool session for this account.
-    pub async fn pool(&self, options: JsValue) -> Result<PrivatePool, JsError> {
-        let (core, signer, user_address) = self.initialized()?;
-        let opts: PoolOptions = serde_wasm_bindgen::from_value(options)?;
-        let pool_cfg = PoolCreateConfig {
-            pool_contract: opts.pool_contract,
-            user_address: user_address.to_string(),
-        };
-        let inner = Rc::new(core.create_pool_internal(&pool_cfg, signer).await?);
-        Ok(PrivatePool::from_parts(inner, user_address.to_string()))
     }
 }
 
+/// Verify a selective-disclosure receipt with no wallet, no local storage,
+/// and no [`Client`] instance — just an RPC URL. Skips the OPFS/SQLite
+/// storage worker entirely, since verification never reads local state.
+#[wasm_bindgen(js_name = verifySelectiveDisclosure)]
+pub async fn verify_selective_disclosure_standalone(
+    rpc_url: String,
+    receipt_json: String,
+    expected_vk_hash: String,
+    options: JsValue,
+) -> Result<JsValue, JsError> {
+    crate::wasm_start();
+
+    let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+    let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+        VerifyDisclosureOptions::default()
+    } else {
+        serde_wasm_bindgen::from_value(options)?
+    };
+
+    let prover_worker_url = opts
+        .prover_worker_url
+        .filter(|url| !url.trim().is_empty())
+        .ok_or_else(|| {
+            JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
+        })?;
+
+    let contract_config = deployment_config()?;
+    let fetcher = StateFetcher::new(&rpc_url, (*contract_config).clone())
+        .map_err(|e| JsError::new(&e.to_string()))?;
+    let prover = ProverBridge::new(
+        ProverWorker::spawner()
+            .with_loader(true)
+            .as_module(true)
+            .spawn(&prover_worker_url),
+    );
+    prover
+        .ping()
+        .await
+        .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+
+    let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
+        .await
+        .map_err(pool_err)?;
+    Ok(serde_wasm_bindgen::to_value(&report)?)
+}
+
 impl Client {
-    fn initialized(&self) -> Result<(&Rc<ClientCore>, &WalletSigner, &str), JsError> {
-        let core = self
-            .core
-            .as_ref()
-            .ok_or_else(|| JsError::new("call initialize() first"))?;
-        let signer = self
-            .signer
-            .as_ref()
-            .ok_or_else(|| JsError::new("call initialize() first"))?;
-        let user_address = self
-            .user_address
-            .as_ref()
-            .ok_or_else(|| JsError::new("call initialize() first"))?;
-        Ok((core, signer, user_address))
+    fn state_fetcher(&self) -> Result<StateFetcher, JsError> {
+        self.inner
+            .state_fetcher()
+            .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    async fn ensure_prover(&self) -> Result<(), JsError> {
+        self.prover
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))
+    }
+
+    fn open_native_account(
+        &self,
+        wallet_signer: WalletSigner,
+        user_address: String,
+    ) -> Result<NativeAccount<StorageBridge>, JsError> {
+        let signer: Handle<dyn stellar_private_payments_sdk::Signer> = Handle::from_box(Box::new(
+            wallet_signer,
+        )
+            as Box<dyn stellar_private_payments_sdk::Signer>);
+        self.inner.account(user_address, signer).map_err(pool_err)
+    }
+
+    async fn user_keys_exist(&self, address: &str) -> Result<bool, JsError> {
+        let req = StorageWorkerRequest::UserKeys(address.to_string());
+        match self.storage_request(req, 1_000).await? {
+            StorageWorkerResponse::UserKeys(Some(_)) => Ok(true),
+            StorageWorkerResponse::UserKeys(None) => Ok(false),
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn derive_save_user_keys(
+        &self,
+        address: String,
+        signature: Vec<u8>,
+    ) -> Result<(), JsError> {
+        let config = deployment_config()?;
+        let req = StorageWorkerRequest::DeriveSaveUserKeys(
+            address,
+            KeyDerivationSignature(signature),
+            config.network.clone(),
+        );
+        match self.storage_request(req, 5_000).await? {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(JsError::new(&format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn storage_request(
+        &self,
+        req: StorageWorkerRequest,
+        timeout_ms: u32,
+    ) -> Result<StorageWorkerResponse, JsError> {
+        self.storage
+            .bridge()
+            .call(req, timeout_ms)
+            .await
+            .map_err(|e| JsError::new(&format!("storage worker error: {e}")))
     }
 }
 

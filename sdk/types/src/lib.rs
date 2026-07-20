@@ -253,6 +253,16 @@ pub fn parse_0x_hex_32(s: &str) -> Result<[u8; 32]> {
     Ok(out)
 }
 
+impl PoolConfigEntry {
+    pub fn token_label(&self) -> String {
+        match &self.asset {
+            AssetDescriptor::Native => "XLM".to_string(),
+            AssetDescriptor::Classic { code, .. } => code.clone(),
+            AssetDescriptor::Contract { symbol, .. } => symbol.clone(),
+        }
+    }
+}
+
 impl ContractConfig {
     pub fn enabled_pools(&self) -> impl Iterator<Item = &PoolConfigEntry> {
         self.pools.iter().filter(|p| p.enabled)

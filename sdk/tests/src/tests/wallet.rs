@@ -1,8 +1,35 @@
 //! Wallet reads through
 //! [`stellar_private_payments_sdk::blocking::PrivatePool`].
 
-use crate::{pool::test_pool, seed::seeded_user_public_keys};
+use crate::{
+    pool::{test_account, test_pool},
+    seed::seeded_user_public_keys,
+};
 use stellar_private_payments_sdk::types::NoteAmount;
+
+const POOL_CONTRACT_ID: &str = "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAABSC4";
+
+#[test]
+fn portfolio_zero() {
+    let account = test_account(Some(&[])).expect("test account");
+
+    let portfolio = account.portfolio().expect("portfolio");
+    assert_eq!(portfolio.len(), 1);
+    assert_eq!(portfolio[0].pool_contract_id, POOL_CONTRACT_ID);
+    assert_eq!(portfolio[0].amount, NoteAmount::from(0u128));
+    assert_eq!(portfolio[0].note_count, 0);
+}
+
+#[test]
+fn portfolio_some() {
+    let account = test_account(Some(&[2, 3, 5])).expect("test account");
+
+    let portfolio = account.portfolio().expect("portfolio");
+    assert_eq!(portfolio.len(), 1);
+    assert_eq!(portfolio[0].pool_contract_id, POOL_CONTRACT_ID);
+    assert_eq!(portfolio[0].amount, NoteAmount::from(10u128));
+    assert_eq!(portfolio[0].note_count, 3);
+}
 
 #[test]
 fn balance_zero() {
@@ -40,12 +67,18 @@ fn spendable_notes() {
 }
 
 #[test]
-fn user_public_keys() {
-    let pool = test_pool(Some(&[2, 3, 5])).expect("test pool");
+fn user_notes_some() {
+    let account = test_account(Some(&[2, 3, 5])).expect("test account");
 
-    let (note, enc) = pool
-        .user_public_keys(&pool.config().user_address)
-        .expect("user public keys");
+    let notes = account.user_notes(10).expect("user notes");
+    assert_eq!(notes.len(), 3);
+}
+
+#[test]
+fn user_public_keys_on_account() {
+    let account = test_account(Some(&[2, 3, 5])).expect("test account");
+
+    let (note, enc) = account.user_public_keys().expect("user public keys");
     let (expected_note, expected_enc) = seeded_user_public_keys().expect("seeded keys");
 
     assert_eq!(note.0, expected_note.0);
