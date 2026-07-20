@@ -1,7 +1,9 @@
 use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode, chain::StateFetcher,
+    Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
+    chain::{RpcClient, StateFetcher},
+    sync::catch_up,
 };
 
 /// Top-level SDK client for a privacy pools deployment.
@@ -9,43 +11,45 @@ use crate::{
 /// Configure with local storage, a prover, and RPC; then sync and open
 /// [`Account`] sessions.
 pub struct Client<S: Storage> {
+    rpc: RpcClient,
     storage: S,
     prover: Handle<dyn Prover>,
     sync_mode: SyncMode,
     contract_config: ContractConfig,
-    rpc_url: String,
 }
 
 impl<S: Storage> Client<S> {
-    pub fn new(
+    pub fn init(
+        rpc_url: impl AsRef<str>,
         storage: S,
         prover: Handle<dyn Prover>,
         sync_mode: SyncMode,
         contract_config: ContractConfig,
-        rpc_url: impl Into<String>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, Error> {
+        let rpc = RpcClient::new(rpc_url.as_ref())
+            .map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
+        Ok(Self {
+            rpc,
             storage,
             prover,
             sync_mode,
             contract_config,
-            rpc_url: rpc_url.into(),
-        }
+        })
     }
 
     /// Read-only client with a no-op prover (balance, notes, sync, portfolio).
-    pub fn new_readonly(
+    pub fn init_readonly(
+        rpc_url: impl AsRef<str>,
         storage: S,
         sync_mode: SyncMode,
         contract_config: ContractConfig,
-        rpc_url: impl Into<String>,
-    ) -> Self {
-        Self::new(
+    ) -> Result<Self, Error> {
+        Self::init(
+            rpc_url,
             storage,
             Handle::from_box(Box::new(NoopProver) as Box<dyn Prover>),
             sync_mode,
             contract_config,
-            rpc_url,
         )
     }
 
@@ -61,13 +65,14 @@ impl<S: Storage> Client<S> {
         &self.contract_config
     }
 
-    pub fn rpc_url(&self) -> &str {
-        &self.rpc_url
+    /// Shared Stellar RPC client (cheap to clone).
+    pub fn rpc(&self) -> &RpcClient {
+        &self.rpc
     }
 
     /// Catch local storage up to the current chain tip for the deployment.
     pub async fn sync(&self) -> Result<(), Error> {
-        crate::sync::catch_up(&self.storage, &self.rpc_url, &self.contract_config).await
+        catch_up(&self.rpc, &self.storage, &self.contract_config).await
     }
 
     /// Recent deployment activity (pool events, registry registrations, ASP
@@ -101,19 +106,19 @@ impl<S: Storage> Client<S> {
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
         Ok(Account::new(
+            self.rpc.clone(),
             self.storage.fork()?,
             self.prover.clone(),
             user_address.into(),
             signer,
             self.sync_mode,
             self.contract_config.clone(),
-            self.rpc_url.clone(),
         ))
     }
 
     /// Chain-state accessor for this deployment.
     pub fn state_fetcher(&self) -> Result<StateFetcher, Error> {
-        StateFetcher::new(&self.rpc_url, self.contract_config.clone())
+        StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))
     }
 

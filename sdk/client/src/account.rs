@@ -8,6 +8,7 @@ use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode,
+    chain::RpcClient,
     sync::{catch_up, confirm_tx},
     types::TransactionResult,
 };
@@ -16,33 +17,33 @@ use crate::{
 ///
 /// Construct via [`crate::Client::account`].
 pub struct Account<S: Storage> {
+    rpc: RpcClient,
     storage: S,
     prover: Handle<dyn Prover>,
     user_address: String,
     signer: Handle<dyn Signer>,
     sync_mode: SyncMode,
     contract_config: ContractConfig,
-    rpc_url: String,
 }
 
 impl<S: Storage> Account<S> {
     pub(crate) fn new(
+        rpc: RpcClient,
         storage: S,
         prover: Handle<dyn Prover>,
         user_address: String,
         signer: Handle<dyn Signer>,
         sync_mode: SyncMode,
         contract_config: ContractConfig,
-        rpc_url: String,
     ) -> Self {
         Self {
+            rpc,
             storage,
             prover,
             user_address,
             signer,
             sync_mode,
             contract_config,
-            rpc_url,
         }
     }
 
@@ -60,7 +61,7 @@ impl<S: Storage> Account<S> {
 
     /// Catch local storage up to the current chain tip for the deployment.
     pub async fn sync(&self) -> Result<(), Error> {
-        catch_up(&self.storage, &self.rpc_url, &self.contract_config).await
+        catch_up(&self.rpc, &self.storage, &self.contract_config).await
     }
 
     /// Portfolio balances across all enabled pools in the deployment.
@@ -139,7 +140,7 @@ impl<S: Storage> Account<S> {
             }
         };
 
-        let fetcher = StateFetcher::new(&self.rpc_url, self.contract_config.clone())
+        let fetcher = StateFetcher::new(self.rpc.clone(), self.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
         let prepared = fetcher
             .prepare_register(&self.user_address, note_pk.0, enc_pk.0)
@@ -148,22 +149,22 @@ impl<S: Storage> Account<S> {
         let signed = self.signer.sign_soroban_transaction(&prepared).await?;
         let envelope = TransactionEnvelope::from_xdr_base64(&signed.signed_xdr, Limits::none())
             .map_err(|e| Error::Other(format!("invalid signed transaction xdr: {e}")))?;
-        let hash = submit_tx(&envelope, fetcher.rpc())
+        let hash = submit_tx(fetcher.rpc(), &envelope)
             .await
             .map_err(|e| Error::Other(format!("submit register: {e:#}")))?;
-        confirm_tx(hash, fetcher.rpc()).await
+        confirm_tx(fetcher.rpc(), hash).await
     }
 
     /// Create an owned pool session for `pool_contract_id`.
     pub fn pool(&self, pool_contract_id: impl Into<String>) -> Result<PrivatePool<S>, Error> {
         let cfg = PrivatePoolConfig {
-            rpc_url: self.rpc_url.clone(),
             contract_config: self.contract_config.clone(),
             pool_contract_id: pool_contract_id.into(),
             user_address: self.user_address.clone(),
         };
 
         PrivatePool::init(
+            self.rpc.clone(),
             cfg,
             self.storage.fork()?,
             self.signer.clone(),

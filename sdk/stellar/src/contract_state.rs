@@ -85,11 +85,8 @@ impl StateFetcher {
         Ok(value)
     }
 
-    pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
-        Ok(Self {
-            client: Client::new(rpc_url)?,
-            config,
-        })
+    pub fn new(client: Client, config: ContractConfig) -> Result<Self> {
+        Ok(Self { client, config })
     }
 
     pub fn contract_config(&self) -> &ContractConfig {

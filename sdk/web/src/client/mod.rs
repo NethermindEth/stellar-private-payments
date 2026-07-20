@@ -11,7 +11,7 @@ use std::rc::Rc;
 use serde::Deserialize;
 use stellar_private_payments_sdk::{
     Account as NativeAccount, Client as NativeClient, Error, Handle, SyncMode,
-    chain::StateFetcher,
+    chain::{RpcClient, StateFetcher},
     types::{DisclosureReceipt, KeyDerivationSignature},
     verify_disclosure_receipt,
 };
@@ -96,8 +96,8 @@ impl Client {
     /// [`Client::account`] before pool operations.
     #[wasm_bindgen(js_name = new)]
     pub async fn new(
-        storage: &Storage,
         rpc_url: String,
+        storage: &Storage,
         prover_worker_url: String,
     ) -> Result<Client, JsError> {
         crate::wasm_start();
@@ -126,13 +126,16 @@ impl Client {
             Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
         );
 
-        let inner = Rc::new(NativeClient::new(
-            storage_bridge,
-            prover_handle,
-            SyncMode::Background,
-            (*contract_config).clone(),
-            rpc_url,
-        ));
+        let inner = Rc::new(
+            NativeClient::init(
+                rpc_url,
+                storage_bridge,
+                prover_handle,
+                SyncMode::Background,
+                (*contract_config).clone(),
+            )
+            .map_err(pool_err)?,
+        );
 
         Ok(Self {
             storage,
@@ -158,7 +161,7 @@ impl Client {
         };
         let config = deployment_config()?;
         match events::bootnode_check(
-            self.inner.rpc_url(),
+            self.inner.rpc(),
             self.storage.bridge(),
             config,
             opts.bootnode_url.as_deref(),
@@ -182,7 +185,7 @@ impl Client {
         };
         let config = deployment_config()?;
         events::start_indexer(
-            self.inner.rpc_url().to_string(),
+            self.inner.rpc().clone(),
             opts.bootnode_url,
             self.storage.bridge(),
             config,
@@ -307,7 +310,8 @@ pub async fn verify_selective_disclosure_standalone(
         })?;
 
     let contract_config = deployment_config()?;
-    let fetcher = StateFetcher::new(&rpc_url, (*contract_config).clone())
+    let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
+    let fetcher = StateFetcher::new(rpc, (*contract_config).clone())
         .map_err(|e| JsError::new(&e.to_string()))?;
     let prover = ProverBridge::new(
         ProverWorker::spawner()

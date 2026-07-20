@@ -4,7 +4,7 @@ use crate::workers::storage::StorageBridge;
 use gloo_timers::future::TimeoutFuture;
 use stellar_private_payments_sdk::{
     Storage,
-    chain::{Client, Indexer, RpcError},
+    chain::{Indexer, RpcClient, RpcError},
     types::ContractConfig,
 };
 use wasm_bindgen::JsError;
@@ -44,13 +44,18 @@ fn fork_storage(storage: &StorageBridge) -> Option<StorageBridge> {
 /// Probes wallet RPC retention; returns a bootnode URL when one is needed and
 /// available.
 pub(crate) async fn bootnode_check(
-    rpc_url: &str,
+    rpc: &RpcClient,
     storage: StorageBridge,
     config: &'static ContractConfig,
     bootnode_url: Option<&str>,
 ) -> Result<Option<String>, anyhow::Error> {
-    let client = Client::new(rpc_url)?;
-    match Indexer::init(client, storage.fork().map_err(anyhow::Error::msg)?, config).await {
+    match Indexer::init(
+        rpc.clone(),
+        storage.fork().map_err(anyhow::Error::msg)?,
+        config,
+    )
+    .await
+    {
         Ok(_) => Ok(None),
         Err(e) if is_rpc_sync_gap(&e) => {
             let url = bootnode_url
@@ -73,7 +78,7 @@ fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
 }
 
 pub(crate) async fn events_listener(
-    rpc_url: String,
+    wallet_client: RpcClient,
     bootnode_url: Option<String>,
     storage: StorageBridge,
     config: &'static ContractConfig,
@@ -84,14 +89,6 @@ pub(crate) async fn events_listener(
         log::error!("[EVENTS] invalid deployment config: at least one pool should be enabled");
         return;
     }
-
-    let wallet_client = match Client::new(&rpc_url) {
-        Ok(client) => client,
-        Err(e) => {
-            log::error!("[EVENTS] RPC client init failed: {e}");
-            return;
-        }
-    };
 
     let Some(storage_fork) = fork_storage(&storage) else {
         return;
@@ -116,7 +113,7 @@ Use a different RPC, a fresher deployment, or configure a bootnode."
             let Some(storage_fork) = fork_storage(&storage) else {
                 return;
             };
-            let bootnode_client = match Client::new(bootnode) {
+            let bootnode_client = match RpcClient::new(bootnode) {
                 Ok(client) => client,
                 Err(e) => {
                     log::error!("[EVENTS] bootnode client init failed: {e}");
@@ -192,7 +189,7 @@ fn ensure_log_init() {
 
 /// Resolve bootnode (if needed) and spawn the background indexer loop.
 pub(crate) async fn start_indexer(
-    rpc_url: String,
+    rpc: RpcClient,
     bootnode_url: Option<String>,
     storage: StorageBridge,
     config: &'static ContractConfig,
@@ -204,7 +201,7 @@ pub(crate) async fn start_indexer(
         return Ok(());
     }
 
-    let bootnode = bootnode_check(&rpc_url, storage.clone(), config, bootnode_url.as_deref())
+    let bootnode = bootnode_check(&rpc, storage.clone(), config, bootnode_url.as_deref())
         .await
         .map_err(|e| JsError::new(&e.to_string()))?;
 
@@ -213,7 +210,7 @@ pub(crate) async fn start_indexer(
         return Ok(());
     }
 
-    wasm_bindgen_futures::spawn_local(events_listener(rpc_url, bootnode, storage, config));
+    wasm_bindgen_futures::spawn_local(events_listener(rpc, bootnode, storage, config));
 
     Ok(())
 }
@@ -224,7 +221,7 @@ mod tests {
     use serde_json::json;
     use std::{cell::RefCell, rc::Rc};
     use stellar_private_payments_sdk::{
-        chain::{Client, ContractDataStorage},
+        chain::{ContractDataStorage, RpcClient},
         types::{ContractsEventData, SyncMetadata},
     };
     use wiremock::{
@@ -311,7 +308,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = Client::new(&server.uri()).expect("client");
+        let client = RpcClient::new(&server.uri()).expect("client");
         let err = client
             .get_contract_events(&["CA".to_string()], 1, 1, None)
             .await
@@ -328,7 +325,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = Client::new(&server.uri()).expect("client");
+        let client = RpcClient::new(&server.uri()).expect("client");
         let err = client
             .get_contract_events(&["CA".to_string()], 1, 1, None)
             .await
@@ -345,7 +342,7 @@ mod tests {
             .mount(&server)
             .await;
 
-        let client = Client::new(&server.uri()).expect("client");
+        let client = RpcClient::new(&server.uri()).expect("client");
         let err = client
             .get_contract_events(&["CA".to_string()], 3_000_001, 1, None)
             .await
@@ -481,7 +478,7 @@ mod tests {
         };
         let batches = Rc::clone(&storage.batches);
 
-        let bootnode_client = Client::new(&bootnode.uri()).expect("bootnode client");
+        let bootnode_client = RpcClient::new(&bootnode.uri()).expect("bootnode client");
         let bootnode_indexer = Indexer::init(bootnode_client, storage.clone(), config)
             .await
             .expect("bootnode indexer");
@@ -496,7 +493,7 @@ mod tests {
         );
 
         storage.clear_indexing_cursors();
-        let wallet_client = Client::new(&wallet.uri()).expect("wallet client");
+        let wallet_client = RpcClient::new(&wallet.uri()).expect("wallet client");
         let wallet_indexer = Indexer::init(wallet_client, storage, config)
             .await
             .expect("wallet indexer");

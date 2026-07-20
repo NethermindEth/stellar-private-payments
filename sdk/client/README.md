@@ -30,13 +30,13 @@ let prover = Handle::from_box(
     Box::new(LocalProver::from_artifacts(&artifacts)?) as Box<dyn Prover>,
 );
 
-let client = Client::new(
+let client = Client::init(
+    "https://soroban-testnet.stellar.org",
     storage,
     prover,
     SyncMode::Inline,
     deployment,
-    "https://soroban-testnet.stellar.org",
-);
+)?;
 
 let signer = Handle::from_box(
     Box::new(LocalSigner::new("S...", "Test SDF Network ; September 2015", "G...")?)
@@ -55,7 +55,7 @@ let balance = pool.balance().await?;
 For balance, portfolio, notes, and sync without transact proving:
 
 ```rust
-let client = Client::new_readonly(storage, SyncMode::Inline, deployment, rpc_url);
+let client = Client::init_readonly(rpc_url, storage, SyncMode::Inline, deployment)?;
 ```
 
 The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
@@ -67,7 +67,7 @@ For CLI and synchronous hosts, use `stellar_private_payments_sdk::blocking`:
 ```rust
 use stellar_private_payments_sdk::blocking::{Client, Account};
 
-let client = Client::new(storage, prover, SyncMode::Inline, deployment, rpc_url);
+let client = Client::init(rpc_url, storage, prover, SyncMode::Inline, deployment)?;
 let account = client.account("G...", signer)?;
 let portfolio = account.portfolio()?;
 ```

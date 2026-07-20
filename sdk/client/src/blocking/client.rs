@@ -15,28 +15,28 @@ pub struct Client {
 }
 
 impl Client {
-    pub fn new(
+    pub fn init(
+        rpc_url: impl AsRef<str>,
         storage: LocalStorage,
         prover: Handle<dyn Prover>,
         sync_mode: SyncMode,
         contract_config: ContractConfig,
-        rpc_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            inner: AsyncClient::new(storage, prover, sync_mode, contract_config, rpc_url),
-        }
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            inner: AsyncClient::init(rpc_url, storage, prover, sync_mode, contract_config)?,
+        })
     }
 
     /// Read-only client with a no-op prover (balance, notes, sync, portfolio).
-    pub fn new_readonly(
+    pub fn init_readonly(
+        rpc_url: impl AsRef<str>,
         storage: LocalStorage,
         sync_mode: SyncMode,
         contract_config: ContractConfig,
-        rpc_url: impl Into<String>,
-    ) -> Self {
-        Self {
-            inner: AsyncClient::new_readonly(storage, sync_mode, contract_config, rpc_url),
-        }
+    ) -> Result<Self, Error> {
+        Ok(Self {
+            inner: AsyncClient::init_readonly(rpc_url, storage, sync_mode, contract_config)?,
+        })
     }
 
     pub fn storage(&self) -> &LocalStorage {
@@ -49,10 +49,6 @@ impl Client {
 
     pub fn contract_config(&self) -> &ContractConfig {
         self.inner.contract_config()
-    }
-
-    pub fn rpc_url(&self) -> &str {
-        self.inner.rpc_url()
     }
 
     pub fn sync(&self) -> Result<(), Error> {

@@ -78,13 +78,13 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
         artifacts,
     )])?) as Box<dyn stellar_private_payments_sdk::Prover>);
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
-    let client = Client::new(
+    let client = Client::init(
+        "https://soroban-testnet.stellar.org",
         storage,
         prover,
         SyncMode::Background,
         contract_config,
-        "https://soroban-testnet.stellar.org",
-    );
+    )?;
     let account = client.account(USER_ADDRESS, test_signer()?)?;
 
     Ok((client, account))

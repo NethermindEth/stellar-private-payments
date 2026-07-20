@@ -3,10 +3,11 @@
 use tx_planner::{SpendableNote, Transact};
 use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 
-use stellar::{Client, Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
+use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
     PoolCore, PreparedTransaction, SyncMode,
+    chain::RpcClient,
     core::{pool_transact_input, transact_step_for_plan},
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
@@ -36,9 +37,9 @@ const DISCLOSE_MAX_RETRIES: u32 = 30;
 ///
 /// Construct via [`crate::Account::pool`].
 pub struct PrivatePool<S> {
+    rpc: RpcClient,
     config: PrivatePoolConfig,
     core: PoolCore,
-    client: Client,
     fetcher: StateFetcher,
     storage: S,
     prover: Handle<dyn Prover>,
@@ -48,6 +49,7 @@ pub struct PrivatePool<S> {
 
 impl<S> PrivatePool<S> {
     pub(crate) fn init(
+        rpc: RpcClient,
         config: PrivatePoolConfig,
         storage: S,
         signer: Handle<dyn Signer>,
@@ -55,13 +57,12 @@ impl<S> PrivatePool<S> {
         sync_mode: SyncMode,
     ) -> Result<Self, Error> {
         config.validate()?;
-        let fetcher = StateFetcher::new(&config.rpc_url, config.contract_config.clone())
+        let fetcher = StateFetcher::new(rpc.clone(), config.contract_config.clone())
             .map_err(|e| Error::Other(format!("state fetcher: {e:#}")))?;
-        let client = fetcher.rpc().clone();
         Ok(Self {
+            rpc,
             core: PoolCore::new(config.clone())?,
             config,
-            client,
             fetcher,
             storage,
             prover,
@@ -289,13 +290,13 @@ impl<S: Storage> PrivatePool<S> {
         let envelope = TransactionEnvelope::from_xdr_base64(&signed_tx.signed_xdr, Limits::none())
             .map_err(|e| Error::Other(format!("invalid signed transaction xdr: {e}")))?;
 
-        submit_tx(&envelope, &self.client)
+        submit_tx(&self.rpc, &envelope)
             .await
             .map_err(|e| Error::Other(format!("submit transaction: {e:#}")))
     }
 
     pub async fn confirm(&self, hash: &str) -> Result<TransactionResult, Error> {
-        confirm_tx(hash, &self.client).await
+        confirm_tx(&self.rpc, hash).await
     }
 
     pub async fn sign(&self, prepared: &PreparedTransaction) -> Result<SignedTransaction, Error> {
@@ -307,12 +308,7 @@ impl<S: Storage> PrivatePool<S> {
     async fn ensure_synced(&self) -> Result<(), Error> {
         match self.sync_mode {
             SyncMode::Inline => {
-                catch_up(
-                    &self.storage,
-                    &self.config.rpc_url,
-                    &self.config.contract_config,
-                )
-                .await?;
+                catch_up(&self.rpc, &self.storage, &self.config.contract_config).await?;
             }
             SyncMode::Background => {}
         }

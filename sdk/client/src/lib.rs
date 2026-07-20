@@ -22,13 +22,13 @@
 //!         as Box<dyn stellar_private_payments_sdk::Signer>,
 //! );
 //!
-//! let client = Client::new(
+//! let client = Client::init(
+//!     "https://soroban-testnet.stellar.org",
 //!     storage,
 //!     prover,
 //!     SyncMode::Inline,
 //!     deployment,
-//!     "https://soroban-testnet.stellar.org",
-//! );
+//! )?;
 //! let account = client.account("G...", signer)?;
 //! let pool = account.pool("CA2TZ...")?;
 //!
@@ -47,10 +47,10 @@ pub mod types;
 pub mod chain {
     //! Stellar RPC client, indexer, and contract state reads.
     pub use stellar::{
-        Client, ContractDataStorage, Indexer, Limits, LocalSigner, OnchainProofPublicInputs,
-        PoolTransactInput, PreparedSorobanTx, ReadXdr, RpcError, Signature, StateFetcher,
-        TransactionEnvelope, TxConfirmStatus, WriteXdr, auth_sign_steps, confirm_tx,
-        hash_ext_data_offchain, submit_tx, unsigned_tx_for_signing, verify_tx,
+        Client as RpcClient, ContractDataStorage, Indexer, Limits, LocalSigner,
+        OnchainProofPublicInputs, PoolTransactInput, PreparedSorobanTx, ReadXdr, RpcError,
+        Signature, StateFetcher, TransactionEnvelope, TxConfirmStatus, WriteXdr, auth_sign_steps,
+        confirm_tx, hash_ext_data_offchain, submit_tx, unsigned_tx_for_signing, verify_tx,
     };
 }
 
