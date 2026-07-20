@@ -44,7 +44,7 @@ fn test_config(port: u16, initial_ledger_tip: u32) -> Config {
         ledger_seconds: 5,
         indexer_sleep_ms: 60_000,
         max_pages_per_round: 1,
-        page_size: 300,
+        page_size: 1000,
         rate_limit_rps: 1_000,
         rate_limit_burst: 1_000,
         otel: None,
@@ -120,7 +120,7 @@ async fn cached_get_events() {
     let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
-    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 1000);
     let cached = GetEventsResponse {
         cursor: "cursor-out".into(),
         events: vec![sample_event()],
@@ -168,10 +168,10 @@ async fn handoff_get_events() {
     let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
-    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 1000);
 
     let storage = Arc::new(InMemory::new());
-    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 1000);
     let prev = GetEventsResponse {
         cursor: "cursor-in".into(),
         events: vec![sample_event()],
@@ -226,7 +226,7 @@ async fn request_on_warm_cache() {
     let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
-    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 1000);
     let cached = GetEventsResponse {
         cursor: "cursor-out".into(),
         events: vec![sample_event()],
@@ -294,7 +294,7 @@ async fn request_on_cold_cache() {
     let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
-    let request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+    let request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 1000);
 
     let server = spawn_bootnode(Arc::new(InMemory::new()), test_config(PORT, 0)).await;
 
@@ -317,10 +317,10 @@ async fn handoff_when_in_sync() {
     let base = format!("http://127.0.0.1:{PORT}");
 
     let ids = contract_ids();
-    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 300);
+    let request = GetEventsParams::for_contracts(&ids, None, Some("cursor-in"), 1000);
 
     let storage = Arc::new(InMemory::new());
-    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 300);
+    let prev_request = GetEventsParams::for_contracts(&ids, Some(2_997_687), None, 1000);
     let prev = GetEventsResponse {
         cursor: "cursor-in".into(),
         events: vec![sample_event()],

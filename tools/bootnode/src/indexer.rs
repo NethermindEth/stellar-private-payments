@@ -14,17 +14,26 @@ impl Indexer {
 
     pub(crate) async fn run(self) {
         loop {
-            if let Err(e) = self.run_round().await {
-                tracing::error!(error = %e, "indexer round failed");
-                counter!("bootnode_indexer_round_errors_total").increment(1);
-                sleep(Duration::from_millis(2_000)).await;
-                continue;
+            match self.run_round().await {
+                Ok(may_have_more) => {
+                    if !may_have_more {
+                        sleep(Duration::from_millis(self.state.cfg.indexer_sleep_ms)).await;
+                    }
+                }
+                Err(e) => {
+                    tracing::error!(error = %e, "indexer round failed");
+                    counter!("bootnode_indexer_round_errors_total").increment(1);
+                    sleep(Duration::from_millis(2_000)).await;
+                }
             }
-            sleep(Duration::from_millis(self.state.cfg.indexer_sleep_ms)).await;
         }
     }
 
-    async fn run_round(&self) -> anyhow::Result<()> {
+    /// Fetch up to `max_pages_per_round` event pages from upstream.
+    ///
+    /// Returns `true` when another round may be needed (page budget exhausted
+    /// while still behind tip). Returns `false` when caught up for now.
+    async fn run_round(&self) -> anyhow::Result<bool> {
         let t0 = Instant::now();
 
         let latest = self.state.upstream.get_latest_ledger().await?;
@@ -39,20 +48,28 @@ impl Indexer {
         let mut cursor = kv.last_cursor;
 
         let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
+        let page_size = self.state.cfg.page_size;
+        let mut may_have_more = false;
 
         for _page in 0..self.state.cfg.max_pages_per_round {
             let params = GetEventsParams::for_contracts(
                 self.state.contract_ids.as_ref(),
                 start_ledger,
                 cursor.as_deref(),
-                self.state.cfg.page_size,
+                page_size,
             );
             let result = self.state.upstream.get_events(params.clone()).await?;
 
             let cursor_out = result.cursor.clone();
             let last_event_ledger = result.events.last().map(|event| event.ledger);
+            let event_count = result.events.len() as u32;
+            let is_empty = event_count == 0;
+            let full_page = event_count == page_size;
+            let progress_ledger = last_event_ledger.unwrap_or(result.latest_ledger);
+            let at_events_tip = !is_empty && !full_page && progress_ledger >= result.latest_ledger;
+            let fully_indexed = is_empty || at_events_tip;
 
-            if !result.events.is_empty() {
+            if !is_empty {
                 self.state.storage.set_in_sync(false).await?;
                 self.state
                     .storage
@@ -72,12 +89,13 @@ impl Indexer {
             cursor = Some(cursor_out);
             start_ledger = None;
 
-            if result.events.is_empty() {
+            if fully_indexed {
                 self.state
                     .storage
                     .mark_caught_up(cursor.as_deref().expect("cursor set"), result.latest_ledger)
                     .await?;
                 gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(result.latest_ledger));
+                may_have_more = false;
                 break;
             }
 
@@ -85,12 +103,13 @@ impl Indexer {
                 .storage
                 .update_cursor(cursor.as_deref().expect("cursor set"))
                 .await?;
+            may_have_more = true;
         }
 
         counter!("bootnode_indexer_rounds_total").increment(1);
         metrics::histogram!("bootnode_indexer_round_duration_seconds")
             .record(t0.elapsed().as_secs_f64());
 
-        Ok(())
+        Ok(may_have_more)
     }
 }
