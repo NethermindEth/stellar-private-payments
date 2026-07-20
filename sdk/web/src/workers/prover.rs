@@ -1,15 +1,17 @@
 use crate::{
-    circuits::fetch_circuit_file,
+    circuits::{
+        ensure_sha256_matches, fetch_circuit_file, fetch_circuit_file_verified,
+        get_or_derive_uncompressed,
+    },
     protocol::{ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
-use futures::FutureExt;
+use futures::{FutureExt, try_join};
 use gloo_timers::future::TimeoutFuture;
 use gloo_worker::{
     Registrable,
     oneshot::{OneshotBridge, oneshot},
 };
-use sha2::{Digest as _, Sha256};
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
 use stellar_private_payments_sdk::{
     Error, PreparedProverTx, Prover, ProverEngine, disclosure,
@@ -37,60 +39,12 @@ enum InitState {
     Failed(String),
 }
 
-const DISCLOSURE_PROVING_KEYS: [&[u8]; 4] = [
-    include_bytes!(
-        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin"
-    ),
-    include_bytes!(
-        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_2_proving_key.bin"
-    ),
-    include_bytes!(
-        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_3_proving_key.bin"
-    ),
-    include_bytes!(
-        "../../../../deployments/testnet/circuit_keys/selectiveDisclosure_4_proving_key.bin"
-    ),
-];
-
-fn sha256(bytes: &[u8]) -> [u8; 32] {
-    let mut hasher = Sha256::new();
-    hasher.update(bytes);
-    let digest = hasher.finalize();
-    let mut out = [0u8; 32];
-    out.copy_from_slice(&digest[..]);
-    out
-}
-
 fn to_hex(bytes: &[u8]) -> String {
     let mut out = String::with_capacity(bytes.len().wrapping_mul(2));
     for b in bytes {
         write!(&mut out, "{:02x}", b).expect("writing to String should not fail");
     }
     out
-}
-
-fn ensure_sha256_matches(
-    name: &str,
-    bytes: &[u8],
-    expected_len: usize,
-    expected_sha256: [u8; 32],
-) -> Result<(), JsError> {
-    if bytes.len() != expected_len {
-        return Err(JsError::new(&format!(
-            "{name} length mismatch: expected={}, got={}",
-            expected_len,
-            bytes.len(),
-        )));
-    }
-    let actual = sha256(bytes);
-    if actual != expected_sha256 {
-        return Err(JsError::new(&format!(
-            "{name} SHA256 mismatch: expected={}, got={}",
-            to_hex(&expected_sha256),
-            to_hex(&actual),
-        )));
-    }
-    Ok(())
 }
 
 // TODO for now it is a mix of async (because we want an async bridge for the
@@ -203,6 +157,121 @@ fn disclosure_index(n_notes: usize) -> Result<usize, JsError> {
         .ok_or_else(|| JsError::new("selective disclosure supports 1..=4 notes"))
 }
 
+async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
+    let idx = disclosure_index(n_notes)?;
+    let is_ready = DISCLOSURE_PROVERS.with(|s| s.borrow()[idx].is_some())
+        && DISCLOSURE_WITNESS_CALCS.with(|s| s.borrow()[idx].is_some());
+
+    if is_ready {
+        return Ok(());
+    }
+
+    let pk_name = format!("selectiveDisclosure_{n_notes}_proving_key.bin");
+    let wasm_name = format!("selectiveDisclosure_{n_notes}.wasm");
+    let r1cs_name = format!("selectiveDisclosure_{n_notes}.r1cs");
+
+    let hashes = disclosure_hashes(n_notes);
+
+    // wasm + r1cs are needed on both the warm and the fallback path, so fetch
+    // them concurrently up front. The (large) proving key is fetched lazily —
+    // only on an uncompressed-cache miss or during fallback.
+    let (wasm_bytes, r1cs_bytes) = try_join!(
+        fetch_circuit_file_verified(&wasm_name, hashes.wasm_len, hashes.wasm_sha256),
+        fetch_circuit_file_verified(&r1cs_name, hashes.r1cs_len, hashes.r1cs_sha256)
+    )?;
+
+    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes).map_err(|e| {
+        JsError::new(&format!(
+            "failed to init selectiveDisclosure_{n_notes} witness calculator: {e:#}"
+        ))
+    })?;
+
+    // Warm fast path: build from cached/derived uncompressed bytes (no point
+    // decompression). Any failure degrades to the original compressed path so a
+    // cache problem can never break proving.
+    let prover = match uncompressed_pk_bytes(
+        &pk_name,
+        hashes.proving_key_len,
+        hashes.proving_key_sha256,
+        &r1cs_bytes,
+    )
+    .await
+    {
+        Ok(uncompressed_pk) => {
+            match Groth16Prover::new_from_uncompressed_pk(&uncompressed_pk, &r1cs_bytes) {
+                Ok(prover) => prover,
+                Err(e) => {
+                    log::warn!(
+                        "[{WORKER_NAME}] uncompressed disclosure({n_notes}) prover build failed ({e:#}), falling back to compressed"
+                    );
+                    build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "[{WORKER_NAME}] uncompressed disclosure({n_notes}) proving key unavailable ({e:?}), falling back to compressed"
+            );
+            build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
+        }
+    };
+
+    DISCLOSURE_WITNESS_CALCS.with(|cell| {
+        cell.borrow_mut()[idx] = Some(witness_calc);
+    });
+    DISCLOSURE_PROVERS.with(|cell| {
+        cell.borrow_mut()[idx] = Some(prover);
+    });
+
+    Ok(())
+}
+
+/// Fallback disclosure builder: fetch the compressed proving key and build the
+/// prover via the original [`Groth16Prover::new`] (with point decompression).
+async fn build_disclosure_from_compressed(
+    pk_name: &str,
+    hashes: &DisclosureArtifactHashes,
+    r1cs_bytes: &[u8],
+) -> Result<Groth16Prover, JsError> {
+    let compressed =
+        fetch_circuit_file_verified(pk_name, hashes.proving_key_len, hashes.proving_key_sha256)
+            .await?;
+    Groth16Prover::new(&compressed, r1cs_bytes)
+        .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))
+}
+
+/// Return uncompressed proving-key bytes for `pk_name`, served from the Cache
+/// API when warm and derived from the compressed artifact on a miss.
+///
+/// The derive path (miss only) fetches the compressed proving key, builds a
+/// throwaway [`Groth16Prover`] purely to re-serialize the key in arkworks
+/// uncompressed form, and lets [`get_or_derive_uncompressed`] store it. On a
+/// warm cache neither the compressed fetch nor the point-decompression happens.
+/// Any error (cache, fetch, or build) is returned so the caller can fall back
+/// to the compressed constructor. Shared by the transact and disclosure
+/// loaders.
+async fn uncompressed_pk_bytes(
+    pk_name: &str,
+    pk_len: usize,
+    pk_sha256: [u8; 32],
+    r1cs_bytes: &[u8],
+) -> Result<Vec<u8>, JsError> {
+    get_or_derive_uncompressed(pk_name, pk_sha256, move || async move {
+        let compressed = fetch_circuit_file_verified(pk_name, pk_len, pk_sha256).await?;
+        let tmp = Groth16Prover::new(&compressed, r1cs_bytes).map_err(|e| {
+            JsError::new(&format!(
+                "failed to build prover for uncompressed export ({pk_name}): {e:#}"
+            ))
+        })?;
+        tmp.get_uncompressed_proving_key().map_err(|e| {
+            JsError::new(&format!(
+                "failed to export uncompressed proving key ({pk_name}): {e:#}"
+            ))
+        })
+    })
+    .await
+}
+
 async fn load_circuit_artifacts() -> Result<(), JsError> {
     let transact_ready = TRANSACT_PROVERS.with(|s| {
         crate::artifact_hashes::POLICY_TRANSACT_CIRCUIT_STEMS
@@ -240,7 +309,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         for (&(stem, proving_key), (wasm_bytes, r1cs_bytes)) in
             to_load.iter().zip(transact_artifacts.iter())
         {
-            let prover = init_transact_prover(stem, proving_key, wasm_bytes, r1cs_bytes)?;
+            let prover = build_transact_prover(stem, proving_key, wasm_bytes, r1cs_bytes).await?;
             loaded.push((stem.to_owned(), prover));
         }
 
@@ -252,62 +321,65 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
         });
     }
 
-    let disclosure_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
-        futures::future::try_join_all((1..=4).map(|n_notes| async move {
-            let wasm = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.wasm")).await?;
-            let r1cs = fetch_circuit_file(&format!("selectiveDisclosure_{n_notes}.r1cs")).await?;
-            Ok::<_, JsError>((wasm, r1cs))
-        }))
-        .await?;
+    Ok(())
+}
 
-    let mut witness_calcs: [Option<WitnessCalculator>; 4] = [None, None, None, None];
-    let mut provers: [Option<Groth16Prover>; 4] = [None, None, None, None];
+/// Build the transact [`ProverEngine`] for `stem`, preferring the uncompressed
+/// Cache-API fast path (skips point decompression) and falling back to
+/// [`init_transact_prover`] (full verification, compressed decompression) on
+/// any cache or build failure.
+///
+/// `bundled_compressed_pk` is the compile-time embedded proving key for `stem`
+/// (see `crate::artifact_hashes::bundled_policy_proving_key`) — it is never
+/// fetched over the network, so the fast path derives its uncompressed cache
+/// entry directly from it with no additional I/O; only the CPU cost of point
+/// decompression is skipped on a warm cache, not a network round trip.
+async fn build_transact_prover(
+    stem: &str,
+    bundled_compressed_pk: &[u8],
+    wasm_bytes: &[u8],
+    r1cs_bytes: &[u8],
+) -> Result<ProverEngine, JsError> {
+    let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
+        .unwrap_or_else(|| panic!("unsupported transact circuit stem: {stem}"));
+    let pk_name = format!("{stem}_proving_key.bin");
+    let pk_name_for_log = pk_name.clone();
+    let pk_name_for_closure = pk_name.clone();
 
-    for (idx, (wasm_bytes, r1cs_bytes)) in disclosure_artifacts.iter().enumerate() {
-        let n_notes = idx
-            .checked_add(1)
-            .expect("disclosure artifact index maps to 1..=4 note count");
-        let hashes = disclosure_hashes(n_notes);
+    let fast_path =
+        get_or_derive_uncompressed(&pk_name, hashes.proving_key_sha256, move || async move {
+            let tmp = Groth16Prover::new(bundled_compressed_pk, r1cs_bytes).map_err(|e| {
+                JsError::new(&format!(
+                    "failed to build prover for uncompressed export ({pk_name_for_closure}): {e:#}"
+                ))
+            })?;
+            tmp.get_uncompressed_proving_key().map_err(|e| {
+                JsError::new(&format!(
+                    "failed to export uncompressed proving key ({pk_name_for_closure}): {e:#}"
+                ))
+            })
+        })
+        .await;
 
-        ensure_sha256_matches(
-            &format!("selectiveDisclosure_{n_notes}_proving_key.bin"),
-            DISCLOSURE_PROVING_KEYS[idx],
-            hashes.proving_key_len,
-            hashes.proving_key_sha256,
-        )?;
-        ensure_sha256_matches(
-            &format!("selectiveDisclosure_{n_notes}.wasm"),
-            wasm_bytes,
-            hashes.wasm_len,
-            hashes.wasm_sha256,
-        )?;
-        ensure_sha256_matches(
-            &format!("selectiveDisclosure_{n_notes}.r1cs"),
-            r1cs_bytes,
-            hashes.r1cs_len,
-            hashes.r1cs_sha256,
-        )?;
-
-        let witness_calc = WitnessCalculator::new(wasm_bytes, r1cs_bytes).map_err(|e| {
-            JsError::new(&format!(
-                "failed to init selectiveDisclosure_{n_notes} witness calculator: {e:#}"
-            ))
-        })?;
-        let prover = Groth16Prover::new(DISCLOSURE_PROVING_KEYS[idx], r1cs_bytes)
-            .map_err(|e| JsError::new(&format!("failed to init disclosure prover: {e:#}")))?;
-
-        witness_calcs[idx] = Some(witness_calc);
-        provers[idx] = Some(prover);
+    match fast_path {
+        Ok(uncompressed_pk) => {
+            match ProverEngine::new_from_uncompressed_pk(&uncompressed_pk, wasm_bytes, r1cs_bytes) {
+                Ok(engine) => return Ok(engine),
+                Err(e) => {
+                    log::warn!(
+                        "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) prover build failed ({e:#}), falling back to compressed"
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            log::warn!(
+                "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) proving key unavailable ({e:?}), falling back to compressed"
+            );
+        }
     }
 
-    DISCLOSURE_WITNESS_CALCS.with(|cell| {
-        *cell.borrow_mut() = witness_calcs;
-    });
-    DISCLOSURE_PROVERS.with(|cell| {
-        *cell.borrow_mut() = provers;
-    });
-
-    Ok(())
+    init_transact_prover(stem, bundled_compressed_pk, wasm_bytes, r1cs_bytes)
 }
 
 pub fn worker_main() {
@@ -387,6 +459,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
 
             let n_notes = req.notes.len();
+            ensure_disclosure_prover(n_notes)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let idx = disclosure_index(n_notes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
             let roots: Vec<_> = req.notes.iter().map(|input| input.root).collect();
@@ -500,6 +575,9 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             let n_notes = usize::try_from(receipt.circuit.n_notes)
                 .map_err(|e| anyhow::anyhow!("invalid n_notes: {e}"))?;
+            ensure_disclosure_prover(n_notes)
+                .await
+                .map_err(|e| anyhow::anyhow!("{e:?}"))?;
             let idx = disclosure_index(n_notes).map_err(|e| anyhow::anyhow!("{e:?}"))?;
 
             let proof_verified = DISCLOSURE_PROVERS.with(|cell| {

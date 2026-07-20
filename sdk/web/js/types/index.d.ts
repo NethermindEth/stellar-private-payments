@@ -8,6 +8,7 @@ import type {
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
 import type { DisclosureVerificationReport } from './disclosure.js';
 import type { Storage, StorageOpenOptions } from './storage.js';
@@ -23,6 +24,7 @@ export type {
   PoolOptions,
   RegisterPublicKeysOptions,
   SyncOptions,
+  VerifyDisclosureOptions,
 } from './options.js';
 export type { DisclosureVerificationReport } from './disclosure.js';
 export type { StorageOpenOptions } from './storage.js';
@@ -75,3 +77,11 @@ export declare const Client: {
   new(options: ClientNewOptions): Promise<DeploymentClient>;
   contractConfig(): unknown;
 };
+
+/** Walletless selective-disclosure verification (no storage / Client). */
+export declare function verifySelectiveDisclosure(
+  rpcUrl: string,
+  receiptJson: string,
+  expectedVkHash: string,
+  options?: VerifyDisclosureOptions,
+): Promise<DisclosureVerificationReport>;
