@@ -1,5 +1,6 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
@@ -109,7 +110,7 @@ async function bootnodeCheck(rpcUrl) {
 
     if (required && !stored) {
         const modal = await showBootnodeConsentModal({
-            defaultUrl: '',
+            defaultUrl: stored || DEFAULT_BOOTNODE_URL,
             rpcUrl,
             errorMessage: 'RPC sync gap: configure a bootnode to sync historical events',
         });

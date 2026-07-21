@@ -1,10 +1,7 @@
 use std::{
     future::Future,
     pin::Pin,
-    sync::{
-        Arc,
-        atomic::{AtomicBool, AtomicU8, Ordering},
-    },
+    sync::atomic::{AtomicBool, AtomicU8, Ordering},
     task::{Context, Poll},
 };
 
@@ -175,7 +172,7 @@ impl Future for KickWait<'_> {
 /// wait so the loop can exit promptly.
 #[derive(Clone)]
 pub struct BackgroundSyncStop {
-    stop: Arc<AtomicBool>,
+    stop: Handle<AtomicBool>,
     kick: Handle<SyncKick>,
 }
 
@@ -197,7 +194,7 @@ pub struct BackgroundSync<S: Storage> {
     contract_config: ContractConfig,
     bootnode_url: Option<String>,
     kick: Handle<SyncKick>,
-    stop: Arc<AtomicBool>,
+    stop: Handle<AtomicBool>,
 }
 
 impl<S: Storage> BackgroundSync<S> {
@@ -214,20 +211,20 @@ impl<S: Storage> BackgroundSync<S> {
             contract_config,
             bootnode_url,
             kick,
-            stop: Arc::new(AtomicBool::new(false)),
+            stop: Handle::new(AtomicBool::new(false)),
         }
     }
 
     /// Cloneable handle to stop this task (also wakes the idle wait).
     pub fn stop_handle(&self) -> BackgroundSyncStop {
         BackgroundSyncStop {
-            stop: Arc::clone(&self.stop),
+            stop: self.stop.clone(),
             kick: self.kick.clone(),
         }
     }
 
-    fn enabled(&self) -> bool {
-        !self.stop.load(Ordering::Acquire)
+    fn is_stopped(&self) -> bool {
+        self.stop.load(Ordering::Acquire)
     }
 
     /// Long-running indexer loop. Polls until stopped or the future is dropped.
@@ -238,7 +235,7 @@ impl<S: Storage> BackgroundSync<S> {
     /// On a main RPC retention gap, syncs historical events via the optional
     /// bootnode until handoff, then resumes on the main RPC.
     pub async fn run(self) -> Result<(), Error> {
-        if !self.enabled() {
+        if self.is_stopped() {
             return Ok(());
         }
 
@@ -259,19 +256,19 @@ impl<S: Storage> BackgroundSync<S> {
                 indexer
             }
             Err(e) if is_rpc_sync_gap(&e) => {
-                if !self.enabled() {
+                if self.is_stopped() {
                     return Ok(());
                 }
                 log::warn!("background sync: main RPC sync gap, switching to bootnode");
                 match self.bootnode_catch_up().await {
                     Ok(()) => {}
-                    Err(_) if !self.enabled() => {
+                    Err(_) if self.is_stopped() => {
                         log::info!("background sync stopped during bootnode catch-up");
                         return Ok(());
                     }
                     Err(e) => return Err(e),
                 }
-                if !self.enabled() {
+                if self.is_stopped() {
                     return Ok(());
                 }
                 log::info!("background sync: bootnode catch-up finished, resuming main RPC");
@@ -286,16 +283,16 @@ impl<S: Storage> BackgroundSync<S> {
             Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
         };
 
-        // main sync loop
-        while self.enabled() {
-            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(&self.stop)).await {
+        loop {
+            if self.is_stopped() {
+                log::info!("background sync stopped");
+                return Ok(());
+            }
+            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
                 log::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
         }
-
-        log::info!("background sync stopped");
-        Ok(())
     }
 
     /// Sync historical range via bootnode until retention handoff, then clear
@@ -305,7 +302,7 @@ impl<S: Storage> BackgroundSync<S> {
             &self.storage,
             &self.contract_config,
             self.bootnode_url.as_deref(),
-            Some(&self.stop),
+            Some(self.stop.as_ref()),
         )
         .await
     }
