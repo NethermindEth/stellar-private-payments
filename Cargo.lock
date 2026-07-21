@@ -1916,8 +1916,8 @@ dependencies = [
  "prover",
  "sha2 0.11.0",
  "tracing",
- "tracing-subscriber",
  "types",
+ "web-time",
 ]
 
 [[package]]
@@ -4038,8 +4038,8 @@ dependencies = [
  "serde",
  "sha2 0.11.0",
  "tracing",
- "tracing-subscriber",
  "types",
+ "web-time",
  "x25519-dalek",
  "zkhash",
 ]
@@ -5312,7 +5312,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "hex",
- "log",
  "prover",
  "rusqlite",
  "rusqlite_migration",
@@ -5343,7 +5342,6 @@ dependencies = [
  "futures",
  "gloo-timers",
  "http",
- "log",
  "pool",
  "public-key-registry",
  "reqwest",
@@ -5357,7 +5355,6 @@ dependencies = [
  "stellar-xdr",
  "thiserror 2.0.19",
  "tracing",
- "tracing-subscriber",
  "types",
  "wasm-bindgen-test",
 ]
@@ -5375,8 +5372,10 @@ dependencies = [
  "serde_json",
  "stellar-private-payments-sdk",
  "toml",
+ "tracing",
  "tracing-log",
  "tracing-subscriber",
+ "types",
 ]
 
 [[package]]
@@ -5388,7 +5387,6 @@ dependencies = [
  "disclosure",
  "futures",
  "futures-timer",
- "getrandom 0.2.17",
  "gloo-timers",
  "prover",
  "serde",
@@ -5398,7 +5396,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "tx-planner",
  "types",
  "wiremock",
@@ -5414,11 +5411,9 @@ dependencies = [
  "base64",
  "console_error_panic_hook",
  "futures",
- "getrandom 0.2.17",
  "gloo-timers",
  "gloo-worker",
  "js-sys",
- "log",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -5426,14 +5421,13 @@ dependencies = [
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
+ "tokio",
  "tracing",
- "tracing-log",
  "tracing-subscriber",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
- "wasm-log",
  "web-sys",
 ]
 
@@ -6002,7 +5996,6 @@ version = "0.1.0"
 dependencies = [
  "thiserror 2.0.19",
  "tracing",
- "tracing-subscriber",
  "types",
 ]
 
@@ -6318,17 +6311,6 @@ checksum = "ac92cf547bc18d27ecc521015c08c353b4f18b84ab388bb6d1b6b682c620d9b6"
 dependencies = [
  "leb128fmt",
  "wasmparser 0.248.0",
-]
-
-[[package]]
-name = "wasm-log"
-version = "0.3.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "def95b2a762924804037f77e3de791f1c177d6ecbe0385a64e519bd7902a5f81"
-dependencies = [
- "log",
- "wasm-bindgen",
- "web-sys",
 ]
 
 [[package]]
@@ -6839,8 +6821,9 @@ dependencies = [
  "proptest",
  "serde_json",
  "tracing",
- "tracing-subscriber",
+ "types",
  "wasmer",
+ "web-time",
 ]
 
 [[package]]

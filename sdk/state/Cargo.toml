@@ -16,7 +16,6 @@ types = { workspace = true, features = ["rusqlite"] }
 # external
 anyhow = { workspace = true }
 hex = { workspace = true }
-log = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rusqlite_migration = { version = "2.6.0", default-features = false }

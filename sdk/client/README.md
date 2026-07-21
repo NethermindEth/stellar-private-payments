@@ -99,16 +99,28 @@ Private note/encryption keys stay in storage and are not exposed through the SDK
 
 ## Logging & Diagnostics
 
-The SDK integrates with the `tracing` ecosystem. You can initialize a default tracing subscriber for native binaries/tests:
+The SDK emits `tracing` spans and events but does **not** install a subscriber —
+that is the consumer's responsibility, so the library stays free of a
+`tracing-subscriber` dependency. Install one in your binary/tests, and include
+[`types::CorrelationIdLayer`] so nested SDK calls inherit an ambient
+`correlation_id`:
 
 ```rust
-use stellar_private_payments_sdk::init_tracing;
+use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
+use stellar_private_payments_sdk::types::CorrelationIdLayer;
 
 fn main() {
-    // Installs a subscriber logging to stdout based on RUST_LOG env var
-    init_tracing();
+    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
+        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
+    let _ = tracing_subscriber::registry()
+        .with(filter)
+        .with(tracing_subscriber::fmt::layer())
+        .with(CorrelationIdLayer)
+        .try_init();
 }
 ```
+
+See the CLI's `logging` module for a full example (human vs. JSON output).
 
 ## Browser / WASM
 

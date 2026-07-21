@@ -69,7 +69,7 @@ clap = { version = "4.6.3", default-features = false, features = ["std", "color"
   "suggestions", "derive", "env"] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
 futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
-getrandom = { version = "0.2", default-features = false }
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
@@ -99,6 +99,7 @@ tracing-subscriber = { version = "0.3", default-features = false, features = ["r
 # see also https://github.com/NethermindEth/stellar-private-payments/issues/192
 wasmer = { version = "7.2", default-features = false }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
+web-time = "1"
 wiremock = "0.6"
 zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
 
