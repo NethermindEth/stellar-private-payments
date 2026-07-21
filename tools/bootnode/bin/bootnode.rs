@@ -70,7 +70,7 @@ struct Cli {
     max_pages_per_round: u32,
 
     /// Events page size.
-    #[arg(long, env = "BOOTNODE_PAGE_SIZE", default_value_t = 300)]
+    #[arg(long, env = "BOOTNODE_PAGE_SIZE", default_value_t = 1000)]
     page_size: u32,
 
     /// Rate limit per IP (requests per second).

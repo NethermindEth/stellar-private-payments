@@ -182,10 +182,10 @@ mod tests {
     #[test]
     fn for_contracts_shape() {
         let ids = vec!["CABC".to_string(), "CDEF".to_string()];
-        let params = GetEventsParams::for_contracts(&ids, Some(100), Some("cursor-1"), 300);
+        let params = GetEventsParams::for_contracts(&ids, Some(100), Some("cursor-1"), 1000);
 
         assert_eq!(params.start_ledger, Some(100));
-        assert_eq!(params.pagination.limit, Some(300));
+        assert_eq!(params.pagination.limit, Some(1000));
         assert_eq!(params.pagination.cursor.as_deref(), Some("cursor-1"));
         assert_eq!(params.filters[0].filter_type, "contract");
         assert_eq!(params.filters[0].topics, vec![vec!["**".to_string()]]);

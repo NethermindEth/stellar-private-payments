@@ -6,7 +6,9 @@ use std::{
 };
 
 use futures::task::AtomicWaker;
-use stellar::{Indexer, RpcError, TxConfirmStatus, confirm_tx as rpc_confirm_tx};
+use stellar::{
+    ContractDataStorage, Indexer, RpcError, TxConfirmStatus, confirm_tx as rpc_confirm_tx,
+};
 use types::ContractConfig;
 
 use crate::{Error, Handle, Storage, chain::RpcClient, sleep::sleep, types::TransactionResult};
@@ -286,10 +288,8 @@ impl<S: Storage> BackgroundSync<S> {
                 log::info!("background sync stopped");
                 return Ok(());
             }
-            if let Err(e) = indexer.fetch_contract_events().await {
+            if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
                 log::error!("background sync fetch failed: {e:#}");
-            } else if let Err(e) = self.storage.process_pending_state().await {
-                log::error!("background sync process_pending_state failed: {e}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
         }
@@ -348,6 +348,34 @@ fn is_retention_handoff_err(err: &anyhow::Error) -> bool {
     )
 }
 
+/// Run indexer rounds until caught up, stopped, or an error.
+///
+/// When `stop` is set, returns `Ok(())` without draining further. Applies
+/// pending state after each successful round.
+async fn catch_up_loop<I, S>(
+    indexer: &Indexer<I>,
+    storage: &S,
+    stop: Option<&AtomicBool>,
+) -> anyhow::Result<()>
+where
+    I: ContractDataStorage,
+    S: Storage,
+{
+    loop {
+        if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+            return Ok(());
+        }
+        let may_have_more = indexer.fetch_contract_events().await?;
+        storage
+            .process_pending_state()
+            .await
+            .map_err(|e| anyhow::anyhow!("process_pending_state: {e}"))?;
+        if !may_have_more {
+            return Ok(());
+        }
+    }
+}
+
 /// Sync historical range via bootnode until retention handoff, then clear
 /// cursors for main RPC resume.
 async fn bootnode_catch_up<S: Storage>(
@@ -383,15 +411,16 @@ async fn bootnode_catch_up<S: Storage>(
     let mut consecutive_failures = 0u32;
     loop {
         if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
-            return Err(Error::Other("background sync stopped".into()));
+            return Ok(());
         }
-        match bootnode_indexer.fetch_contract_events().await {
-            // bootnode success fetch
-            Ok(_) => {
+        match catch_up_loop(&bootnode_indexer, storage, stop).await {
+            // Caught up to bootnode tip (or stopped): wait, then poll for handoff.
+            Ok(()) => {
                 consecutive_failures = 0;
-                if let Err(e) = storage.process_pending_state().await {
-                    log::error!("bootnode sync process_pending_state failed: {e}");
+                if stop.is_some_and(|s| s.load(Ordering::Acquire)) {
+                    return Ok(());
                 }
+                sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
             // bootnode handoff, use main RPC
             Err(e)
@@ -413,9 +442,9 @@ async fn bootnode_catch_up<S: Storage>(
                         "bootnode sync failed after {BOOTNODE_CATCH_UP_MAX_FAILURES} consecutive errors: {e:#}"
                     )));
                 }
+                sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
             }
         }
-        sleep(BACKGROUND_SYNC_INTERVAL_MS).await;
     }
 }
 
@@ -439,11 +468,9 @@ pub(crate) async fn catch_up<S: Storage>(
         }
         Err(e) => return Err(Error::Other(format!("indexer: {e:#}"))),
     };
-    indexer
-        .catch_up()
+    catch_up_loop(&indexer, storage, None)
         .await
-        .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))?;
-    storage.process_pending_state().await
+        .map_err(|e| Error::Other(format!("indexer catch-up: {e:#}")))
 }
 
 /// Poll until a submitted transaction succeeds or fails.
