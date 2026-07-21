@@ -25,19 +25,19 @@ The web SDK runs Rust on the main thread via WASM, with blocking work offloaded 
 ### Lifecycle
 
 ```
-init() → Storage.open() → Client.new() → checkSync() → startSync() → client.account(signer) → account.pool() → PrivatePool ops
+init() → Storage.open() → bootnodeRequired() → Client.new() → backgroundSync() → client.account(signer) → account.pool() → PrivatePool ops
 ```
 
-The app wraps this in `wasm-facade.js` and `ui/pool.js`: `initializeRuntime` → `client().startSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.
+The app wraps this in `wasm-facade.js` and `ui/pool.js`: `bootnodeRequired` → `initializeRuntime` → `client().backgroundSync` → `client().openAccount` → `account().pool()` via `createAppPool()` / `ensureAppPool()`.
 
 ### Components
 
-The WASM layer exposes three JS handles with different scope:
+The WASM layer exposes four JS handles with different scope:
 
 | Handle | Scope | Examples |
 |--------|-------|----------|
 | **`Storage`** | Page-local persistence (one worker per tab) | `open`, `fork`, `call` (app-layer settings only) |
-| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `checkSync`, `startSync`, `operationalFeed`, `recipientLookup`, `account()` |
+| **`Client`** | Deployment runtime (storage, RPC, sync) | `contractConfig`, `backgroundSync`, `operationalFeed`, `recipientLookup`, `account()` |
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
@@ -50,15 +50,15 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 **Main thread (WASM)**
 
 - Entry: `init()` from `stellar-private-payments-sdk-web` (wasm-bindgen module init).
-- `Client::new` forks a `Storage` handle and holds RPC URL; wallet binding happens at `account`.
-- `events::start_indexer` spawns the background contract-event loop (`events_listener`).
+- `Client::new` forks a `Storage` handle and holds RPC URL + optional bootnode; wallet binding happens at `account`.
+- `Client::backgroundSync` spawns the native SDK `BackgroundSync` loop (`wasm_bindgen_futures::spawn_local`).
 
-**Indexer (pool SDK + web SDK)**
+**Indexer (client SDK + web SDK)**
 
 - Generic over a storage backend (`Indexer<S: ContractDataStorage>`).
-- On web, the backend is **`StorageBridge`**, implementing `ContractDataStorage` and the pool SDK `Storage` trait by forwarding to the storage worker.
-- `events_listener` (`sdk/web/src/events.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap.
-- Background sync is owned by the indexer. Pool sessions do not expose `sync()`; use `client.sync()` for an explicit catch-up when needed.
+- On web, the backend is **`StorageBridge`**, implementing `ContractDataStorage` and the client SDK `Storage` trait by forwarding to the storage worker.
+- `BackgroundSync::run` (`sdk/client/src/sync.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap. `bootnodeRequired` (native `bootnode_required`, wasm in `sdk/web/src/bootnode.rs`) is a one-shot probe only.
+- Background sync is owned by that loop. Pool sessions do not expose `sync()`; use `client.sync()` for an explicit catch-up when needed.
 
 **`Storage` (WASM, wasm-bindgen API)**
 
@@ -68,10 +68,10 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`Client` (WASM, wasm-bindgen API)**
 
-- Constructed by `Client.new({ rpcUrl, storage, proverWorkerUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
+- Constructed by `Client.new({ rpcUrl, storage, proverWorkerUrl?, bootnodeUrl? })` — wraps native SDK `Client` plus worker bridges; no wallet yet.
 - Spawns the prover worker at `Client.new`; pings it on `account()` / prove paths. Routes storage through `StorageBridge`.
 - **Deployment-wide operations:**
-  - Background sync via `startSync`.
+  - Background sync via `backgroundSync`.
   - Chain reads without a wallet: `contractConfig`, `operationalFeed`, `recipientLookup`, `allContractsData`, `aspState`, `verifySelectiveDisclosure`.
   - Account factory via `account({ networkPassphrase, userAddress? }, signer)`.
 
@@ -86,7 +86,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **`PrivatePool` (WASM, wasm-bindgen API)**
 
-- Per-pool session: pool SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
+- Per-pool session: client SDK `PrivatePool<StorageBridge>` with RPC fetcher, shared storage bridge, prover bridge, and wallet signer.
 - **Pool-scoped operations** — the app caches the handle in `ui/pool.js` (`activeSession` via `createAppPool` / `ensureAppPool` / `closeAppPool`) until wallet disconnect or pool switch.
 - Exports: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `transferToKeys`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`.
 - Amounts are **stroops** as JavaScript `bigint` (same units as Rust `NoteAmount`).
@@ -127,7 +127,7 @@ flowchart LR
     AC["Account"]
     PP["PrivatePool"]
     SB["StorageBridge"]
-    EL["events_listener"]
+    BS["BackgroundSync"]
     IDX["Indexer"]
   end
 
@@ -151,10 +151,11 @@ flowchart LR
   CL --> ST
   CL --> SB
   CL -->|"account()"| AC
+  CL -->|"backgroundSync()"| BS
   AC -->|"pool()"| PP
   PP --> SB
   PP --> PW
-  EL --> IDX
+  BS --> IDX
   IDX --> RPCAPI
   IDX --> SB
   SB --> SW
@@ -169,10 +170,11 @@ flowchart LR
 
 Single entry for the main app pages. Owns singleton lifecycle:
 
-1. `initializeRuntime(rpcUrl)` — `init()`, `Storage.open`, `Client.new`
-2. `client().startSync({ bootnodeUrl? })` — `checkSync` when bootnode omitted, then background indexer
-3. `client().openAccount({ networkPassphrase, userAddress }, signer)` — `Client.account`
-4. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `account().pool({ poolContract })`
+1. `bootnodeRequired(rpcUrl)` — probe retention; configure/persist bootnode if needed
+2. `initializeRuntime(rpcUrl)` — `init()`, `Storage.open`, `Client.new` (loads stored bootnode)
+3. `client().backgroundSync()` — spawn indexer
+4. `client().openAccount({ networkPassphrase, userAddress }, signer)` — `Client.account`
+5. `createAppPool()` / `ensureAppPool()` in `ui/pool.js` — `account().pool({ poolContract })`
 
 Also wraps the SDK `Client` for app lifecycle (`openAccount`, cached account session). Privacy key reads use SDK methods; app-only persistence (disclaimer, explorer, bootnode, operation history) stays on `client().storage()` via `Storage.call`.
 
@@ -222,4 +224,4 @@ Freighter account change triggers disconnect. The user reconnects and re-runs on
 
 ### RPC sync gap
 
-When the wallet RPC cannot serve the full event history, `checkSync` / `startSync` surface `RPC_SYNC_GAP`. The app prompts for a bootnode URL, persists it in app settings, and the indexer catches up via bootnode before handing off to the wallet RPC.
+When the wallet RPC cannot serve the full event history, `bootnodeRequired` returns true. The app prompts for a bootnode URL, persists it in app settings, and the indexer catches up via bootnode before handing off to the wallet RPC.

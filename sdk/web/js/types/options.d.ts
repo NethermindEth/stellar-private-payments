@@ -14,10 +14,7 @@ export interface ClientNewOptions {
    * `dist/workers/prover-worker.js` via `import.meta.url`.
    */
   proverWorkerUrl?: string;
-}
-
-/** Options for {@link DeploymentClient.checkSync} and {@link DeploymentClient.startSync}. */
-export interface SyncOptions {
+  /** Optional historical-sync bootnode for retention gaps. */
   bootnodeUrl?: string;
 }
 

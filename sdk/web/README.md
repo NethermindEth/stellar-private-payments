@@ -2,12 +2,17 @@
 
 Browser SDK for Stellar Private Payments.
 
-**`Storage.open`** → **`Client.new`** → **`checkSync`** → **`startSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
+**`Storage.open`** → **`bootnodeRequired`** → **`Client.new`** → **`backgroundSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
 ## Usage
 
 ```js
-import init, { Storage, Client, FreighterSigner } from 'stellar-private-payments-sdk-web';
+import init, {
+  Storage,
+  Client,
+  FreighterSigner,
+  bootnodeRequired,
+} from 'stellar-private-payments-sdk-web';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const signer = new FreighterSigner();
@@ -15,14 +20,20 @@ const signer = new FreighterSigner();
 await init();
 
 const storage = await Storage.open();
+const rpcUrl = 'https://soroban-testnet.stellar.org';
+
+if (await bootnodeRequired(rpcUrl, storage)) {
+  // load or prompt for a bootnode URL, then pass it to Client.new
+}
+
 const client = await Client.new({
-  rpcUrl: 'https://soroban-testnet.stellar.org',
+  rpcUrl,
   storage,
+  // bootnodeUrl: '...',
   // proverWorkerUrl defaults to package dist/workers/prover-worker.js
 });
 
-const bootnodeUrl = await client.checkSync();
-await client.startSync({ bootnodeUrl: bootnodeUrl ?? undefined });
+await client.backgroundSync();
 
 const account = await client.account({ networkPassphrase }, signer);
 console.log(await account.userPublicKeys());
@@ -50,14 +61,20 @@ const chain = await client.allContractsData();
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ UserKeys: address }` probe) |
 
+### Free functions
+
+| Function | Description |
+|----------|-------------|
+| `bootnodeRequired(rpcUrl, storage)` | `true` if wallet RPC needs a historical-sync bootnode |
+
 ### `Client`
 
 | Method | Description |
 |--------|-------------|
-| `new({ rpcUrl, storage?, proverWorkerUrl? })` | Build native client + spawn prover worker (no wallet yet) |
+| `new({ rpcUrl, storage?, proverWorkerUrl?, bootnodeUrl? })` | Build native client + spawn prover worker (no wallet yet) |
 | `contractConfig()` | Static deployment config |
-| `checkSync({ bootnodeUrl? })` | Probe RPC retention; returns bootnode URL or `null` |
-| `startSync({ bootnodeUrl? })` | Background contract-event sync (once per page) |
+| `backgroundSync()` | Background contract-event sync |
+| `stopBackgroundSync()` | Stop the background indexer (also on Client drop) |
 | `sync()` | Explicit foreground catch-up |
 | `operationalFeed(limit)` | Recent deployment activity |
 | `recipientLookup(address)` | Recipient registry lookup |
@@ -82,7 +99,7 @@ const chain = await client.allContractsData();
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. There is **no** `pool.sync()` — use `startSync` for background indexing and `client.sync()` when you need an explicit catch-up. Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
+Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up. Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 

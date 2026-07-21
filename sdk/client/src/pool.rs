@@ -6,7 +6,7 @@ use types::{EncryptionPublicKey, NoteAmount, NotePublicKey, UserNoteSummary};
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    PoolCore, PreparedTransaction, SyncMode,
+    PoolCore, PreparedTransaction,
     chain::RpcClient,
     core::{pool_transact_input, transact_step_for_plan},
     disclosure::{
@@ -20,7 +20,7 @@ use crate::{
     signer::Signer,
     sleep::sleep,
     storage::Storage,
-    sync::{catch_up, confirm_tx},
+    sync::{SyncHandle, confirm_tx},
     transact::transact_request_from_step,
     types::{
         AspMembershipSync, DisclosureContext, DisclosureReceipt, DisclosureVerificationReport,
@@ -29,9 +29,9 @@ use crate::{
     },
 };
 
-const POLL_INTERVAL_MS: u32 = 1_000;
-const SYNC_MAX_RETRIES: u32 = 30;
-const DISCLOSE_MAX_RETRIES: u32 = 30;
+const POLL_INTERVAL_MS: u32 = 200;
+const SYNC_MAX_RETRIES: u32 = 50;
+const DISCLOSE_MAX_RETRIES: u32 = 50;
 
 /// Main entry point for a single privacy pool.
 ///
@@ -44,7 +44,7 @@ pub struct PrivatePool<S> {
     storage: S,
     prover: Handle<dyn Prover>,
     signer: Handle<dyn Signer>,
-    sync_mode: SyncMode,
+    sync: SyncHandle,
 }
 
 impl<S> PrivatePool<S> {
@@ -54,7 +54,7 @@ impl<S> PrivatePool<S> {
         storage: S,
         signer: Handle<dyn Signer>,
         prover: Handle<dyn Prover>,
-        sync_mode: SyncMode,
+        sync: SyncHandle,
     ) -> Result<Self, Error> {
         config.validate()?;
         let fetcher = StateFetcher::new(rpc.clone(), config.contract_config.clone())
@@ -67,7 +67,7 @@ impl<S> PrivatePool<S> {
             storage,
             prover,
             signer,
-            sync_mode,
+            sync,
         })
     }
 
@@ -306,13 +306,9 @@ impl<S: Storage> PrivatePool<S> {
     // helpers
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync_mode {
-            SyncMode::Inline => {
-                catch_up(&self.rpc, &self.storage, &self.config.contract_config).await?;
-            }
-            SyncMode::Background => {}
-        }
-        Ok(())
+        self.sync
+            .ensure_synced(&self.rpc, &self.storage, &self.config.contract_config)
+            .await
     }
 
     async fn resolve_transfer_recipient(

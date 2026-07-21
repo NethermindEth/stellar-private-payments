@@ -4,7 +4,7 @@ use crate::{
 };
 use anyhow::Result;
 use stellar_private_payments_sdk::{
-    Handle, LocalProver, LocalStorage, Prover, Signer, SyncMode, TransferRecipient,
+    Handle, LocalProver, LocalStorage, Prover, Signer, TransferRecipient,
     blocking::{Account as SdkAccount, Client, PrivatePool},
     types::{EncryptionPublicKey, NoteAmount, NotePublicKey},
 };
@@ -32,8 +32,8 @@ impl ClientSession {
             Client::init_readonly(
                 network.rpc_url.clone(),
                 storage,
-                SyncMode::Inline,
                 config.deployment.clone(),
+                None,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         } else {
@@ -46,8 +46,8 @@ impl ClientSession {
                 network.rpc_url.clone(),
                 storage,
                 prover,
-                SyncMode::Inline,
                 config.deployment.clone(),
+                None,
             )
             .map_err(|e| anyhow::anyhow!("init client: {e}"))?
         };

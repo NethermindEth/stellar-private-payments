@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 use serde::Deserialize;
 use stellar_private_payments_sdk::{
-    Account as NativeAccount, Client as NativeClient, Error, Handle, SyncMode,
+    Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
     types::{DisclosureReceipt, KeyDerivationSignature},
     verify_disclosure_receipt,
@@ -20,7 +20,6 @@ use wasm_bindgen_futures::JsFuture;
 
 use crate::{
     deployment::deployment_config,
-    events,
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
     storage::Storage,
@@ -64,14 +63,9 @@ pub(crate) fn pool_err_message(error: Error) -> String {
 #[wasm_bindgen]
 pub struct Client {
     storage: Storage,
-    inner: Rc<NativeClient<StorageBridge>>,
+    inner: NativeClient<StorageBridge>,
     prover: ProverBridge,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SyncOptions {
-    bootnode_url: Option<String>,
+    background_sync_stop: Option<BackgroundSyncStop>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -89,16 +83,13 @@ struct VerifyDisclosureOptions {
 
 #[wasm_bindgen]
 impl Client {
-    /// Build the native client and spawn the prover worker.
-    ///
-    /// `prover_worker_url` must be an absolute URL (the JS package entry
-    /// resolves it via `import.meta.url`). Call [`Client::start_sync`] then
-    /// [`Client::account`] before pool operations.
+    /// Build the client and spawn the prover worker
     #[wasm_bindgen(js_name = new)]
     pub async fn new(
         rpc_url: String,
         storage: &Storage,
         prover_worker_url: String,
+        bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
         crate::wasm_start();
 
@@ -126,21 +117,20 @@ impl Client {
             Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
         );
 
-        let inner = Rc::new(
-            NativeClient::init(
-                rpc_url,
-                storage_bridge,
-                prover_handle,
-                SyncMode::Background,
-                (*contract_config).clone(),
-            )
-            .map_err(pool_err)?,
-        );
+        let inner = NativeClient::init(
+            rpc_url,
+            storage_bridge,
+            prover_handle,
+            (*contract_config).clone(),
+            bootnode_url.clone(),
+        )
+        .map_err(pool_err)?;
 
         Ok(Self {
             storage,
             inner,
             prover,
+            background_sync_stop: None,
         })
     }
 
@@ -150,47 +140,35 @@ impl Client {
         Ok(serde_wasm_bindgen::to_value(deployment_config()?)?)
     }
 
-    /// Probe wallet RPC retention. Returns `null` when sufficient, or a
-    /// bootnode URL when historical sync requires one.
-    #[wasm_bindgen(js_name = checkSync)]
-    pub async fn check_sync(&self, options: JsValue) -> Result<JsValue, JsError> {
-        let opts: SyncOptions = if options.is_null() || options.is_undefined() {
-            SyncOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-        let config = deployment_config()?;
-        match events::bootnode_check(
-            self.inner.rpc(),
-            self.storage.bridge(),
-            config,
-            opts.bootnode_url.as_deref(),
-        )
-        .await
-        {
-            Ok(None) => Ok(JsValue::NULL),
-            Ok(Some(url)) => Ok(JsValue::from_str(&url)),
-            Err(e) => Err(JsError::new(&e.to_string())),
+    /// Start background contract-event sync into local storage.
+    ///
+    /// No-op if already started on this instance. After
+    /// [`Self::stop_background_sync`], call again to respawn. A fatal indexer
+    /// exit leaves the slot set — use a new [`Client`] to recover.
+    #[wasm_bindgen(js_name = backgroundSync)]
+    pub async fn background_sync(&mut self) -> Result<(), JsError> {
+        if self.background_sync_stop.is_some() {
+            return Ok(());
         }
+        let sync = self.inner.background_sync().map_err(pool_err)?;
+        self.background_sync_stop = Some(sync.stop_handle());
+        wasm_bindgen_futures::spawn_local(async move {
+            if let Err(e) = sync.run().await {
+                log::error!("background sync stopped: {e}");
+            }
+        });
+        Ok(())
     }
 
-    /// Start background contract-event sync into local storage (idempotent per
-    /// page).
-    #[wasm_bindgen(js_name = startSync)]
-    pub async fn start_sync(&self, options: JsValue) -> Result<(), JsError> {
-        let opts: SyncOptions = if options.is_null() || options.is_undefined() {
-            SyncOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-        let config = deployment_config()?;
-        events::start_indexer(
-            self.inner.rpc().clone(),
-            opts.bootnode_url,
-            self.storage.bridge(),
-            config,
-        )
-        .await
+    /// Request the background indexer to exit (wakes its idle wait).
+    ///
+    /// Call before rebuilding this [`Client`] so a new instance does not race
+    /// the old loop on the same storage DB. Also runs from [`Drop`].
+    #[wasm_bindgen(js_name = stopBackgroundSync)]
+    pub fn stop_background_sync(&mut self) {
+        if let Some(stop) = self.background_sync_stop.take() {
+            stop.request();
+        }
     }
 
     /// Bind a wallet signer, derive privacy keys when missing, and return an
@@ -279,6 +257,14 @@ impl Client {
             .await
             .map_err(pool_err)?;
         Ok(serde_wasm_bindgen::to_value(&report)?)
+    }
+}
+
+impl Drop for Client {
+    fn drop(&mut self) {
+        if let Some(stop) = self.background_sync_stop.take() {
+            stop.request();
+        }
     }
 }
 

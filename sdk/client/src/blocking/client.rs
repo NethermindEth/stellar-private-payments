@@ -3,8 +3,8 @@
 use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 
 use crate::{
-    Error, Handle, Prover, Signer, SyncMode, chain::StateFetcher, client::Client as AsyncClient,
-    storage::LocalStorage,
+    BackgroundSync, Error, Handle, Prover, Signer, chain::StateFetcher,
+    client::Client as AsyncClient, storage::LocalStorage,
 };
 
 use super::{account::Account, runtime::block_on};
@@ -19,11 +19,11 @@ impl Client {
         rpc_url: impl AsRef<str>,
         storage: LocalStorage,
         prover: Handle<dyn Prover>,
-        sync_mode: SyncMode,
         contract_config: ContractConfig,
+        bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
         Ok(Self {
-            inner: AsyncClient::init(rpc_url, storage, prover, sync_mode, contract_config)?,
+            inner: AsyncClient::init(rpc_url, storage, prover, contract_config, bootnode_url)?,
         })
     }
 
@@ -31,11 +31,11 @@ impl Client {
     pub fn init_readonly(
         rpc_url: impl AsRef<str>,
         storage: LocalStorage,
-        sync_mode: SyncMode,
         contract_config: ContractConfig,
+        bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
         Ok(Self {
-            inner: AsyncClient::init_readonly(rpc_url, storage, sync_mode, contract_config)?,
+            inner: AsyncClient::init_readonly(rpc_url, storage, contract_config, bootnode_url)?,
         })
     }
 
@@ -53,6 +53,12 @@ impl Client {
 
     pub fn sync(&self) -> Result<(), Error> {
         block_on(self.inner.sync())
+    }
+
+    /// Switch to background sync mode and return an owned [`BackgroundSync`]
+    /// task. Does not spawn — call [`BackgroundSync::run`] on an async runtime.
+    pub fn background_sync(&mut self) -> Result<BackgroundSync<LocalStorage>, Error> {
+        self.inner.background_sync()
     }
 
     pub fn operational_feed(&self, limit: u32) -> Result<Vec<OperationalFeedItem>, Error> {

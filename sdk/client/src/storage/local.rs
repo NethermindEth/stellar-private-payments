@@ -181,4 +181,10 @@ impl Storage for LocalStorage {
     async fn process_pending_state(&self) -> Result<(), Error> {
         process_local_state(&mut self.storage_mut())
     }
+
+    async fn clear_indexing_cursors(&self) -> Result<(), Error> {
+        self.storage_mut()
+            .clear_indexing_cursors()
+            .map_err(|e| Error::Other(e.to_string()))
+    }
 }

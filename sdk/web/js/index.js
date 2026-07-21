@@ -2,6 +2,7 @@ import init, {
   Client as WasmClient,
   PrivatePool,
   Storage as WasmStorage,
+  bootnodeRequired as wasmBootnodeRequired,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
@@ -16,6 +17,16 @@ async function openStorage(options = {}) {
   return WasmStorage.open({
     workerUrl: options.workerUrl ?? storageWorkerUrl,
   });
+}
+
+/**
+ * Probe whether the wallet RPC needs a historical-sync bootnode.
+ * @param {string} rpcUrl
+ * @param {import('../dist/stellar_private_payments_sdk_web.js').Storage} storage
+ * @returns {Promise<boolean>}
+ */
+async function bootnodeRequired(rpcUrl, storage) {
+  return wasmBootnodeRequired(rpcUrl, storage);
 }
 
 function wrapAccount(wasmAccount) {
@@ -36,8 +47,8 @@ function wrapAccount(wasmAccount) {
 
 function wrapClient(wasmClient) {
   return {
-    checkSync: (options) => wasmClient.checkSync(options),
-    startSync: (options) => wasmClient.startSync(options),
+    backgroundSync: () => wasmClient.backgroundSync(),
+    stopBackgroundSync: () => wasmClient.stopBackgroundSync(),
     sync: () => wasmClient.sync(),
     operationalFeed: (limit) => wasmClient.operationalFeed(limit),
     account: async (options, signer) => {
@@ -67,7 +78,8 @@ function wrapClient(wasmClient) {
 }
 
 /**
- * Create a deployment client. Call `startSync` then `account` before pool ops.
+ * Create a deployment client. Call {@link bootnodeRequired} (configure bootnode
+ * if needed), then `backgroundSync`, then `account` before pool ops.
  *
  * When `options.storage` is omitted, opens a default storage worker automatically.
  * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
@@ -84,12 +96,13 @@ async function newClient(options) {
       options.rpcUrl,
       storage,
       options.proverWorkerUrl ?? proverWorkerUrl,
+      options.bootnodeUrl ?? undefined,
     ),
   );
 }
 
 /**
- * Walletless selective-disclosure verification (no storage worker / Client).
+ * Walletless selective-disclosure verification (no storage / Client).
  * Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
  */
 function verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, options = {}) {
@@ -104,6 +117,6 @@ export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
 };
-export { PrivatePool, verifySelectiveDisclosure };
+export { PrivatePool, bootnodeRequired, verifySelectiveDisclosure };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

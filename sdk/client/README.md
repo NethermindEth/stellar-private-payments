@@ -10,14 +10,15 @@ Client (deployment: sync, operational_feed, recipient_lookup)
        └─ pool(id) → PrivatePool (deposit / transfer / withdraw / balance / notes)
 ```
 
-- **Sync**: `Client::sync()` / `Account::sync()` catch local SQLite state up to chain tip via Soroban RPC.
-- **`SyncMode::Inline`**: reads auto-sync before returning data (CLI default).
+- **Sync**: `Client::sync()` / `Account::sync()` catch local SQLite state up to chain tip via Soroban RPC. Pass an optional bootnode URL to `Client::init` for retention gaps.
+- **`SyncMode::Inline`**: reads auto-sync before returning data (CLI default). Starts here after `init`.
+- **`SyncMode::Background`**: after `Client::background_sync()`, `ensure_synced` kicks the background loop instead of awaiting catch-up (web default).
 
 ## Quick start
 
 ```rust
 use stellar_private_payments_sdk::{
-    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, ProverArtifacts, SyncMode,
+    Client, Handle, LocalProver, LocalSigner, LocalStorage, Prover, ProverArtifacts,
     types::{ContractConfig, PolicyFlags},
 };
 
@@ -34,8 +35,8 @@ let client = Client::init(
     "https://soroban-testnet.stellar.org",
     storage,
     prover,
-    SyncMode::Inline,
     deployment,
+    None, // optional bootnode URL
 )?;
 
 let signer = Handle::from_box(
@@ -55,7 +56,7 @@ let balance = pool.balance().await?;
 For balance, portfolio, notes, and sync without transact proving:
 
 ```rust
-let client = Client::init_readonly(rpc_url, storage, SyncMode::Inline, deployment)?;
+let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 ```
 
 The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
@@ -67,7 +68,7 @@ For CLI and synchronous hosts, use `stellar_private_payments_sdk::blocking`:
 ```rust
 use stellar_private_payments_sdk::blocking::{Client, Account};
 
-let client = Client::init(rpc_url, storage, prover, SyncMode::Inline, deployment)?;
+let client = Client::init(rpc_url, storage, prover, deployment, None)?;
 let account = client.account("G...", signer)?;
 let portfolio = account.portfolio()?;
 ```

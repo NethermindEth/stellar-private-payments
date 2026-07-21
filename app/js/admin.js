@@ -1,5 +1,5 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
@@ -194,8 +194,14 @@ async function ensureCryptoReady() {
     setStatus('Loading app...', 'info');
     const { sorobanRpcUrl, ...network } = await getWalletNetwork();
     try {
+      const storage = await ensureStorage();
+      if (await bootnodeRequired(sorobanRpcUrl)) {
+        if (!(await storage.getStoredBootnodeUrl())) {
+          throw new Error('RPC_SYNC_GAP: bootnode required');
+        }
+      }
       await initializeRuntime(sorobanRpcUrl);
-      await client().startSync();
+      await client().backgroundSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
       throw e;

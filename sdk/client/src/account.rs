@@ -7,9 +7,9 @@ use prover::crypto::asp_membership_leaf;
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
-    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage, SyncMode,
+    Error, Handle, PrivatePool, PrivatePoolConfig, Prover, Signer, Storage,
     chain::RpcClient,
-    sync::{catch_up, confirm_tx},
+    sync::{SyncHandle, catch_up, confirm_tx},
     types::TransactionResult,
 };
 
@@ -22,7 +22,7 @@ pub struct Account<S: Storage> {
     prover: Handle<dyn Prover>,
     user_address: String,
     signer: Handle<dyn Signer>,
-    sync_mode: SyncMode,
+    sync: SyncHandle,
     contract_config: ContractConfig,
 }
 
@@ -33,7 +33,7 @@ impl<S: Storage> Account<S> {
         prover: Handle<dyn Prover>,
         user_address: String,
         signer: Handle<dyn Signer>,
-        sync_mode: SyncMode,
+        sync: SyncHandle,
         contract_config: ContractConfig,
     ) -> Self {
         Self {
@@ -42,7 +42,7 @@ impl<S: Storage> Account<S> {
             prover,
             user_address,
             signer,
-            sync_mode,
+            sync,
             contract_config,
         }
     }
@@ -61,7 +61,13 @@ impl<S: Storage> Account<S> {
 
     /// Catch local storage up to the current chain tip for the deployment.
     pub async fn sync(&self) -> Result<(), Error> {
-        catch_up(&self.rpc, &self.storage, &self.contract_config).await
+        catch_up(
+            &self.rpc,
+            &self.storage,
+            &self.contract_config,
+            self.sync.bootnode_url(),
+        )
+        .await
     }
 
     /// Portfolio balances across all enabled pools in the deployment.
@@ -169,15 +175,13 @@ impl<S: Storage> Account<S> {
             self.storage.fork()?,
             self.signer.clone(),
             self.prover.clone(),
-            self.sync_mode,
+            self.sync.clone(),
         )
     }
 
     async fn ensure_synced(&self) -> Result<(), Error> {
-        match self.sync_mode {
-            SyncMode::Inline => self.sync().await?,
-            SyncMode::Background => {}
-        }
-        Ok(())
+        self.sync
+            .ensure_synced(&self.rpc, &self.storage, &self.contract_config)
+            .await
     }
 }

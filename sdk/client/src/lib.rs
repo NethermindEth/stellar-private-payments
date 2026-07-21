@@ -6,7 +6,7 @@
 //!
 //! ```no_run
 //! use stellar_private_payments_sdk::{
-//!     Client, Handle, LocalProver, LocalSigner, LocalStorage, ProverArtifacts, SyncMode,
+//!     Client, Handle, LocalProver, LocalSigner, LocalStorage, ProverArtifacts,
 //!     types::{ContractConfig, NoteAmount, PolicyFlags, TransferRecipient},
 //! };
 //!
@@ -26,8 +26,8 @@
 //!     "https://soroban-testnet.stellar.org",
 //!     storage,
 //!     prover,
-//!     SyncMode::Inline,
 //!     deployment,
+//!     None,
 //! )?;
 //! let account = client.account("G...", signer)?;
 //! let pool = account.pool("CA2TZ...")?;
@@ -113,7 +113,7 @@ pub use pool::PrivatePool;
 pub use prover::{LocalProver, NoopProver, Prover, ProverEngine};
 pub use signer::{LocalSigner, Signer};
 pub use storage::{LocalStorage, Storage};
-pub use sync::SyncMode;
+pub use sync::{BackgroundSync, BackgroundSyncStop, SyncHandle, SyncMode, bootnode_required};
 pub use transact::{
     BuildTransactParams, PreparedProverTx, PreparedTxPublic, TransactRequest,
     build_transact_params, build_validated_pool_tree, load_user_key_material,

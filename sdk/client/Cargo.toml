@@ -14,6 +14,7 @@ name = "stellar_private_payments_sdk"
 anyhow = { workspace = true }
 async-trait = { workspace = true }
 disclosure = { workspace = true }
+futures = { workspace = true }
 log = { workspace = true }
 prover = { workspace = true }
 serde = { workspace = true }
@@ -31,6 +32,10 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 gloo-timers = { workspace = true }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+wiremock = { workspace = true }
 
 [lints]
 workspace = true
