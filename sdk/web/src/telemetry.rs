@@ -3,12 +3,17 @@
 //! Provides a lightweight subscriber initialization point used by the main
 //! thread (`wasm_start`) and by each web worker.
 
-use std::sync::{Arc, Mutex, Once};
-use tracing::{Event, Subscriber};
-use tracing_subscriber::{
-    Layer, Registry,
-    layer::{Context, SubscriberExt},
-    util::SubscriberInitExt,
+use std::{
+    cell::RefCell,
+    collections::HashMap,
+    sync::{
+        Arc, Mutex, Once,
+        atomic::{AtomicU64, Ordering},
+    },
+};
+use tracing::{
+    Event, Id, Metadata, Subscriber,
+    span::{Attributes, Record},
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -19,6 +24,15 @@ static PANIC_HOOK_INIT: Once = Once::new();
 static RING_BUFFER: Mutex<Option<Arc<RingBuffer>>> = Mutex::new(None);
 static LOG_LEVEL: Mutex<tracing::level_filters::LevelFilter> =
     Mutex::new(tracing::level_filters::LevelFilter::INFO);
+
+#[allow(dead_code)]
+struct SpanData {
+    correlation_id: Option<String>,
+}
+
+thread_local! {
+    static SPAN_TABLE: RefCell<HashMap<u64, SpanData>> = RefCell::new(HashMap::new());
+}
 
 /// Bounded in-memory byte buffer used as a recent-log sink.
 pub struct RingBuffer {
@@ -53,14 +67,18 @@ impl RingBuffer {
 struct MessageVisitor {
     message: String,
     fields: Vec<String>,
+    correlation_id: Option<String>,
 }
 
 impl tracing::field::Visit for MessageVisitor {
     fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
-        if field.name() == "message" {
+        if field.name() == "correlation_id" {
+            self.correlation_id = Some(format!("{value:?}"));
+        } else if field.name() == "message" {
             let s = format!("{value:?}");
             if s.starts_with('"') && s.ends_with('"') && s.len() >= 2 {
-                self.message = s[1..s.len() - 1].to_string();
+                let end = s.len().saturating_sub(1);
+                self.message = s[1..end].to_string();
             } else {
                 self.message = s;
             }
@@ -70,7 +88,9 @@ impl tracing::field::Visit for MessageVisitor {
     }
 
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
-        if field.name() == "message" {
+        if field.name() == "correlation_id" {
+            self.correlation_id = Some(value.to_string());
+        } else if field.name() == "message" {
             self.message = value.to_string();
         } else {
             self.fields.push(format!("{}={:?}", field.name(), value));
@@ -78,23 +98,82 @@ impl tracing::field::Visit for MessageVisitor {
     }
 }
 
-/// Minimal, zero-overhead tracing layer for WASM and client logging.
-pub struct CustomTelemetryLayer {
+/// Minimal, zero-overhead tracing subscriber for WASM and web logging.
+pub struct CustomTelemetrySubscriber {
     ring_buffer: Option<Arc<RingBuffer>>,
     #[allow(dead_code)]
     use_console: bool,
+    next_id: AtomicU64,
 }
 
-impl<S> Layer<S> for CustomTelemetryLayer
-where
-    S: Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
-{
-    fn enabled(&self, metadata: &tracing::Metadata<'_>, _ctx: Context<'_, S>) -> bool {
+impl CustomTelemetrySubscriber {
+    #[allow(dead_code)]
+    pub fn new(ring_buffer: Option<Arc<RingBuffer>>, use_console: bool) -> Self {
+        Self {
+            ring_buffer,
+            use_console,
+            next_id: AtomicU64::new(0),
+        }
+    }
+}
+
+impl Subscriber for CustomTelemetrySubscriber {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
         let current_filter = *LOG_LEVEL.lock().unwrap_or_else(|e| e.into_inner());
         metadata.level() <= &current_filter
     }
 
-    fn on_event(&self, event: &Event<'_>, _ctx: Context<'_, S>) {
+    fn new_span(&self, attrs: &Attributes<'_>) -> Id {
+        let mut visitor = MessageVisitor::default();
+        attrs.record(&mut visitor);
+
+        let id_val = self
+            .next_id
+            .fetch_add(1, Ordering::Relaxed)
+            .saturating_add(1);
+        let id = Id::from_u64(id_val);
+
+        if visitor.correlation_id.is_some() {
+            SPAN_TABLE.with(|table| {
+                table.borrow_mut().insert(
+                    id_val,
+                    SpanData {
+                        correlation_id: visitor.correlation_id,
+                    },
+                );
+            });
+        }
+
+        id
+    }
+
+    fn record(&self, _span: &Id, _values: &Record<'_>) {}
+
+    fn record_follows_from(&self, _span: &Id, _follows: &Id) {}
+
+    fn enter(&self, _id: &Id) {
+        #[cfg(target_arch = "wasm32")]
+        SPAN_TABLE.with(|table| {
+            if let Some(data) = table.borrow().get(&_id.into_u64()) {
+                if let Some(ref corr) = data.correlation_id {
+                    crate::correlation::push_active_correlation_id(corr.clone());
+                }
+            }
+        });
+    }
+
+    fn exit(&self, _id: &Id) {
+        #[cfg(target_arch = "wasm32")]
+        SPAN_TABLE.with(|table| {
+            if let Some(data) = table.borrow().get(&_id.into_u64()) {
+                if data.correlation_id.is_some() {
+                    crate::correlation::pop_active_correlation_id();
+                }
+            }
+        });
+    }
+
+    fn event(&self, event: &Event<'_>) {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
 
@@ -197,13 +276,6 @@ pub fn init_telemetry(config: Option<stellar_private_payments_sdk::types::Teleme
 
         stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
 
-        let _ = tracing_log::LogTracer::init();
-
-        #[cfg(not(debug_assertions))]
-        log::set_max_level(log::LevelFilter::Info);
-        #[cfg(debug_assertions)]
-        log::set_max_level(log::LevelFilter::Trace);
-
         let level_directive = std::env::var("SPP_LOG_LEVEL")
             .ok()
             .or_else(|| option_env!("SPP_LOG_LEVEL").map(|s| s.to_string()))
@@ -221,19 +293,17 @@ pub fn init_telemetry(config: Option<stellar_private_payments_sdk::types::Teleme
             == stellar_private_payments_sdk::types::TelemetrySink::Console
             || config.sink == stellar_private_payments_sdk::types::TelemetrySink::Both;
 
-        let custom_layer = CustomTelemetryLayer {
+        let subscriber = CustomTelemetrySubscriber {
             ring_buffer: if use_ring_buffer {
                 Some(ring_buffer.clone())
             } else {
                 None
             },
             use_console,
+            next_id: AtomicU64::new(0),
         };
 
-        let _ = Registry::default()
-            .with(custom_layer)
-            .with(crate::correlation::CorrelationIdLayer)
-            .try_init();
+        let _ = tracing::subscriber::set_global_default(subscriber);
 
         *RING_BUFFER.lock().expect("ring buffer lock poisoned") = Some(ring_buffer);
     });

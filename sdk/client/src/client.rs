@@ -12,26 +12,6 @@ use crate::{
 /// Configure with local storage, a prover, and RPC; then sync and open
 /// [`Account`] sessions. Starts in [`SyncMode::Inline`]; call
 /// [`Self::background_sync`] to switch to background indexing.
-///
-/// Initialize a native tracing subscriber for CLI or non-WASM consumers.
-///
-/// Reads the `RUST_LOG` environment variable (or defaults to `info`) and
-/// installs a [`tracing_subscriber`] console formatter, plus
-/// [`types::CorrelationIdLayer`] so nested calls can inherit an ambient
-/// `correlation_id` via [`crate::correlation::correlation_id_or_new`].
-/// Subsequent calls are ignored if a subscriber is already installed.
-#[cfg(not(target_arch = "wasm32"))]
-pub fn init_tracing() {
-    use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(types::CorrelationIdLayer)
-        .try_init();
-}
 pub struct Client<S: Storage> {
     rpc: RpcClient,
     storage: S,

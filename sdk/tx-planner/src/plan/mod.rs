@@ -6,7 +6,7 @@ mod error;
 pub use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
 pub use error::PlanError;
 
-use types::{Field, NoteAmount};
+use types::{Field, NoteAmount, correlation_id_or_new};
 
 /// Full plan: one or more on-chain `transact` calls (2-in / 2-out each).
 #[derive(Clone, Debug)]
@@ -95,7 +95,7 @@ impl<'a> IntoIterator for &'a TransactionPlan {
 }
 
 /// Build a plan from unspent notes and a target spend amount.
-#[tracing::instrument(skip(notes), fields(stage = "transaction_planning", amount = ?amount, note_count = notes.len()))]
+#[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(&amount), note_count = notes.len()))]
 pub fn plan(
     amount: NoteAmount,
     notes: &[SpendableNote],

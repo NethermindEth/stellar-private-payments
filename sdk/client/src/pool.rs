@@ -103,7 +103,7 @@ impl<S: Storage> PrivatePool<S> {
         self.core.estimate(&wallet, amount)
     }
 
-    #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new()))]
+    #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(amount)))]
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, Error> {
         tracing::info!(amount = ?types::Sensitive(amount), "deposit started");
         let mut plan = self.prepare_deposit(amount)?;
@@ -113,7 +113,7 @@ impl<S: Storage> PrivatePool<S> {
             .ok_or_else(|| Error::Other("deposit produced no transaction".into()))
     }
 
-    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new()))]
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(amount)))]
     pub async fn transfer(
         &self,
         recipient: impl Into<TransferRecipient>,
@@ -126,7 +126,7 @@ impl<S: Storage> PrivatePool<S> {
         self.execute(&mut plan).await
     }
 
-    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new()))]
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(amount)))]
     pub async fn withdraw(
         &self,
         amount: NoteAmount,

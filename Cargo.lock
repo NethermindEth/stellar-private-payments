@@ -5395,7 +5395,6 @@ dependencies = [
  "thiserror 2.0.19",
  "tokio",
  "tracing",
- "tracing-subscriber",
  "tx-planner",
  "types",
  "wiremock",
@@ -5414,7 +5413,6 @@ dependencies = [
  "gloo-timers",
  "gloo-worker",
  "js-sys",
- "log",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -5424,7 +5422,6 @@ dependencies = [
  "stellar-private-payments-sdk",
  "tokio",
  "tracing",
- "tracing-log",
  "tracing-subscriber",
  "types",
  "wasm-bindgen",
@@ -5901,7 +5898,6 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
- "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",

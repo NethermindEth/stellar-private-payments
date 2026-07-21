@@ -94,49 +94,58 @@ impl Client {
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
         with_correlation_id(new_correlation_id(), async {
-            crate::wasm_start();
-
-            if prover_worker_url.trim().is_empty() {
-                return Err(JsError::new(
-                    "proverWorkerUrl is required (absolute URL to prover-worker.js)",
-                ));
-            }
-
-            let storage = storage.fork();
-            let storage_bridge = storage.bridge();
-            storage_bridge
-                .ping()
-                .await
-                .map_err(|e| JsError::new(&e.to_string()))?;
-
-            let contract_config = deployment_config()?;
-            let prover = ProverBridge::new(
-                ProverWorker::spawner()
-                    .with_loader(true)
-                    .as_module(true)
-                    .spawn(&prover_worker_url),
-            );
-            let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
-                Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
-            );
-
-            let inner = NativeClient::init(
-                rpc_url,
-                storage_bridge,
-                prover_handle,
-                (*contract_config).clone(),
-                bootnode_url,
-            )
-            .map_err(pool_err)?;
-
-            Ok(Self {
-                storage,
-                inner,
-                prover,
-                background_sync_stop: None,
-            })
+            Self::new_inner(rpc_url, storage, prover_worker_url, bootnode_url).await
         })
         .await
+    }
+
+    async fn new_inner(
+        rpc_url: String,
+        storage: &Storage,
+        prover_worker_url: String,
+        bootnode_url: Option<String>,
+    ) -> Result<Client, JsError> {
+        crate::wasm_start();
+
+        if prover_worker_url.trim().is_empty() {
+            return Err(JsError::new(
+                "proverWorkerUrl is required (absolute URL to prover-worker.js)",
+            ));
+        }
+
+        let storage = storage.fork();
+        let storage_bridge = storage.bridge();
+        storage_bridge
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&e.to_string()))?;
+
+        let contract_config = deployment_config()?;
+        let prover = ProverBridge::new(
+            ProverWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&prover_worker_url),
+        );
+        let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
+            Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
+        );
+
+        let inner = NativeClient::init(
+            rpc_url,
+            storage_bridge,
+            prover_handle,
+            (*contract_config).clone(),
+            bootnode_url,
+        )
+        .map_err(pool_err)?;
+
+        Ok(Self {
+            storage,
+            inner,
+            prover,
+            background_sync_stop: None,
+        })
     }
 
     /// Bundled deployment config (contract addresses, pools, network).
