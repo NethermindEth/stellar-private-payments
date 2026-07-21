@@ -5,6 +5,9 @@ import init, {
   bootnodeRequired as wasmBootnodeRequired,
   deriveAspUserLeaf as wasmDeriveAspUserLeaf,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
+  configureTelemetry,
+  set_log_level,
+  dump_recent_logs,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
@@ -129,5 +132,6 @@ export const Client = {
   contractConfig: WasmClient.contractConfig,
 };
 export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { configureTelemetry, set_log_level, dump_recent_logs };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

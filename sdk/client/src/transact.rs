@@ -274,7 +274,7 @@ fn build_pool_inputs(
         let Some((amount, blinding, leaf_index)) =
             storage.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?
         else {
-            log::info!(
+            tracing::info!(
                 "unspent note not found for commitment {commitment}; waiting for note derivation"
             );
             return Ok(Err(AspMembershipSync::SyncRequired(None)));
@@ -296,7 +296,7 @@ pub fn build_validated_pool_tree(
     let leaves = storage.get_pool_commitment_leaves_ordered(pool_address)?;
 
     if leaves.len() != pool_next_index as usize {
-        log::info!(
+        tracing::info!(
             "pool commitments not synced: local={}, chain={}",
             leaves.len(),
             pool_next_index

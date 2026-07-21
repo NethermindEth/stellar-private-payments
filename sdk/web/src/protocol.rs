@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+/// Wrapper that carries a correlation/operation ID across the gloo-worker
+/// boundary. The worker re-attaches `correlation_id` as a tracing span field.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CorrelatedRequest<T> {
+    pub correlation_id: String,
+    pub payload: T,
+}
+
 pub use stellar_private_payments_sdk::{
     DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
     TransactRequest,

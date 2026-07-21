@@ -19,6 +19,8 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 log.workspace = true
+tracing-subscriber = { workspace = true, features = ["fmt", "json", "env-filter"] }
+tracing-log = { workspace = true }
 # Not referenced directly, but pulls in reqwest's rustls TLS backend for the
 # binary (the `stellar` crate depends on reqwest without a TLS feature).
 reqwest = { workspace = true, features = ["rustls"] }

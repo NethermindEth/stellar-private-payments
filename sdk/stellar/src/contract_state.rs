@@ -230,7 +230,7 @@ impl StateFetcher {
 
             if !drift.is_empty() {
                 last_drift = drift.join(", ");
-                log::debug!(
+                tracing::debug!(
                     "snapshot drift detected while fetching pool roots (attempt {attempt}/{MAX_SNAPSHOT_ATTEMPTS}): {last_drift}"
                 );
                 if attempt < MAX_SNAPSHOT_ATTEMPTS {

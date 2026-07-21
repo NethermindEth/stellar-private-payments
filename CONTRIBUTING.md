@@ -290,3 +290,16 @@ To make a production release of CLI
 git tag v0.1.0 # with a proper new version
 git push origin v0.1.0
 ```
+
+## Instrumentation & Logging Guidelines
+
+All contributions to the SDK must adhere to the following telemetry and instrumentation guidelines to prevent credential/key leaks:
+
+### 1. Instrumentation House Rules
+* Always use `#[tracing::instrument(skip_all, fields(...))]` on public functions or functions processing transaction requests.
+* Do not log parameters by default; instead, explicitly list only **non-sensitive** fields in the `fields(...)` allowlist of the macro.
+* Wrap all **Tier-1** parameters (such as amounts, recipient/sender addresses, note commitments, nullifiers, and public keys) inside the `types::Sensitive(value)` wrapper when logging or recording them inside spans.
+
+### 2. Tier Classification
+* **Tier-0 (Private/Secret)**: Private keys, seeds, signatures, circuit witness arrays, and membership blinding factors. **Strictly forbidden from being formatted or logged.** Do not wrap them; keep them out of logs completely.
+* **Tier-1 (Sensitive/Redactable)**: Stellar addresses, token amounts, commitments, and nullifiers. **Must be wrapped in `types::Sensitive`.**

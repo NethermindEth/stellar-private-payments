@@ -192,10 +192,10 @@ async fn decompress_gzip_response(url: &str, resp: Response) -> Result<Vec<u8>, 
 
 pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsError> {
     let url_string = circuit_fetch_url(filename)?;
-    log::debug!("[circuits] fetching {url_string}");
+    tracing::debug!("[circuits] fetching {url_string}");
 
     let cache_opt = open_cache().await.unwrap_or_else(|e| {
-        log::warn!("[circuits] failed to open cache: {:?}", e);
+        tracing::warn!("[circuits] failed to open cache: {:?}", e);
         None
     });
 
@@ -205,7 +205,7 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
             .map_err(|e| JsError::new(&format!("cache.match error: {e:?}")))?;
 
         if !match_val.is_undefined() {
-            log::debug!("[circuits] cache hit for {url_string}");
+            tracing::debug!("[circuits] cache hit for {url_string}");
             let resp: Response = match_val
                 .dyn_into()
                 .map_err(|_| JsError::new("cache hit cast failed"))?;
@@ -224,17 +224,17 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
         match fetch_network_response(&gz_url).await {
             Ok(resp) => match decompress_gzip_response(&gz_url, resp).await {
                 Ok(bytes) => {
-                    log::debug!("[circuits] decoded {gz_url} -> {} bytes", bytes.len());
+                    tracing::debug!("[circuits] decoded {gz_url} -> {} bytes", bytes.len());
                     raw_bytes = Some(bytes);
                 }
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "[circuits] gzip decode failed for {gz_url}: {e:?}; falling back to raw"
                     );
                 }
             },
             Err(e) => {
-                log::debug!(
+                tracing::debug!(
                     "[circuits] compressed fetch failed for {gz_url}: {e:?}; falling back to raw"
                 );
             }
@@ -272,7 +272,7 @@ pub(crate) async fn fetch_circuit_file_verified(
 ) -> Result<Vec<u8>, JsError> {
     let bytes = fetch_circuit_file(filename).await?;
     if let Err(err) = ensure_sha256_matches(filename, &bytes, expected_len, expected_sha256) {
-        log::warn!("[circuits] hash mismatch for {filename}: {err:?}, evicting and refetching");
+        tracing::warn!("[circuits] hash mismatch for {filename}: {err:?}, evicting and refetching");
         let url_string = circuit_fetch_url(filename)?;
         if let Some(cache) = open_cache().await.unwrap_or(None) {
             let _ = JsFuture::from(cache.delete_with_str(&url_string)).await;
@@ -336,7 +336,7 @@ where
     ))?;
 
     let cache_opt = open_cache().await.unwrap_or_else(|e| {
-        log::warn!("[circuits] failed to open cache for uncompressed {filename}: {e:?}");
+        tracing::warn!("[circuits] failed to open cache for uncompressed {filename}: {e:?}");
         None
     });
 
@@ -347,34 +347,36 @@ where
                 Ok(resp) => match response_to_bytes(resp).await {
                     Ok(framed) => {
                         if let Some(payload) = verify_framed_uncompressed(&framed) {
-                            log::debug!("[circuits] uncompressed cache hit for {filename}");
+                            tracing::debug!("[circuits] uncompressed cache hit for {filename}");
                             return Ok(payload);
                         }
-                        log::warn!(
+                        tracing::warn!(
                             "[circuits] uncompressed cache entry for {filename} failed integrity check, evicting"
                         );
                         let _ = JsFuture::from(cache.delete_with_str(&key)).await;
                     }
                     Err(e) => {
-                        log::warn!(
+                        tracing::warn!(
                             "[circuits] failed to read uncompressed cache bytes for {filename}: {e:?}"
                         );
                         let _ = JsFuture::from(cache.delete_with_str(&key)).await;
                     }
                 },
                 Err(_) => {
-                    log::warn!("[circuits] uncompressed cache match cast failed for {filename}");
+                    tracing::warn!(
+                        "[circuits] uncompressed cache match cast failed for {filename}"
+                    );
                 }
             },
             Ok(_) => { /* undefined => cache miss */ }
             Err(e) => {
-                log::warn!("[circuits] uncompressed cache match error for {filename}: {e:?}");
+                tracing::warn!("[circuits] uncompressed cache match error for {filename}: {e:?}");
             }
         }
     }
 
     // Miss or corrupt entry: derive fresh bytes (the expensive path).
-    log::debug!("[circuits] deriving uncompressed bytes for {filename}");
+    tracing::debug!("[circuits] deriving uncompressed bytes for {filename}");
     let payload = derive().await?;
 
     // Best-effort store; a storage failure must never break the load.
@@ -385,11 +387,11 @@ where
         match Response::new_with_opt_u8_array(Some(&mut framed[..])) {
             Ok(resp) => {
                 if let Err(e) = JsFuture::from(cache.put_with_str(&key, &resp)).await {
-                    log::warn!("[circuits] failed to store uncompressed {filename}: {e:?}");
+                    tracing::warn!("[circuits] failed to store uncompressed {filename}: {e:?}");
                 }
             }
             Err(e) => {
-                log::warn!(
+                tracing::warn!(
                     "[circuits] failed to build response for uncompressed {filename}: {e:?}"
                 );
             }

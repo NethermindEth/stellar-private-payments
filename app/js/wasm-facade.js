@@ -15,6 +15,8 @@ import init, {
   bootnodeRequired as sdkBootnodeRequired,
   deriveAspUserLeaf as sdkDeriveAspUserLeaf,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
+  configureTelemetry,
+  dump_recent_logs,
 } from 'stellar-private-payments-sdk-web';
 
 import { AppStorage } from './app-storage.js';
@@ -209,4 +211,16 @@ export function client() {
 /** Whether a runtime (wallet-bound or anonymous) is already open. */
 export function isRuntimeReady() {
     return wrappedClient !== null;
+}
+
+/** Configure telemetry settings in the WASM SDK. */
+export async function configureTelemetrySettings(config) {
+    await ensureWasmInit();
+    configureTelemetry(config);
+}
+
+/** Dump recent logs from the WASM SDK ring buffer. */
+export async function dumpTelemetryLogs() {
+    await ensureWasmInit();
+    return dump_recent_logs();
 }

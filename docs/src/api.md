@@ -28,3 +28,30 @@ Detailed API documentation generated from source code via `rustdoc`.
 ## Tests
 
 - [e2e-tests](api/e2e_tests/index.html)
+
+## Logging & Telemetry JS API
+
+The browser-based WASM package (`stellar-private-payments-sdk-web`) exposes three public telemetry functions:
+
+### 1. `configureTelemetry(config?: TelemetryConfig): void`
+Initializes or dynamically updates the active subscriber's logging filter, target sinks, and diagnostic buffers.
+* **Signature**:
+  ```typescript
+  export function configureTelemetry(config?: {
+    level?: string;
+    sink?: 'console' | 'ringBuffer' | 'both';
+    ringBufferBytes?: number;
+    revealSensitive?: boolean;
+  }): void;
+  ```
+* **Configuration Knobs**:
+  - `level`: Log filter directive (e.g. `"info"`, `"debug"`, `"trace"`).
+  - `sink`: Where logs are directed (`"console"`, `"ringBuffer"`, or `"both"`).
+  - `ringBufferBytes`: Capacity of the in-memory diagnostic ring buffer.
+  - `revealSensitive`: Gated by profile (`cfg(debug_assertions)`). Set to `true` to reveal Tier-1 values.
+
+### 2. `set_log_level(level: string): void`
+Dynamically overrides the active log level filter directive at runtime (e.g., changes to `"debug"`).
+
+### 3. `dump_recent_logs(): string`
+Dumps the current contents of the log ring buffer as a single formatted string for diagnostic reports.

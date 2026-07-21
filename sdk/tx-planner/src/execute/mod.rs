@@ -75,6 +75,8 @@ pub struct SpendSession {
 }
 
 impl SpendSession {
+    /// Create a new SpendSession from a wallet, amount, and target.
+    #[tracing::instrument(skip(wallet), fields(stage = "spend_session_setup", wallet_size = wallet.len(), amount = ?amount, target = ?target))]
     pub fn setup(
         wallet: Vec<SpendableNote>,
         amount: NoteAmount,
@@ -114,6 +116,8 @@ impl SpendSession {
             .is_some_and(|s| matches!(s.action, StepAction::Consolidate { .. }))
     }
 
+    /// Materialize the next planned step into a transaction payload.
+    #[tracing::instrument(skip(self), fields(stage = "spend_session_step", step_index = self.step_index, is_done = self.is_done()))]
     pub fn step(&self) -> Result<Option<Transact>, SpendSessionError> {
         if self.is_done() {
             return Ok(None);

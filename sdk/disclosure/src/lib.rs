@@ -347,6 +347,7 @@ pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
 }
 
 /// Validates a receipt against the registered circuit named in the receipt.
+#[tracing::instrument(skip(receipt), fields(stage = "disclosure_receipt_validation", circuit_name = %receipt.circuit.name))]
 ///
 /// # Arguments
 /// * `receipt` - Receipt to validate.
@@ -378,6 +379,7 @@ pub struct ProvedReceiptProof {
 }
 
 /// Proves a disclosure witness using the real Groth16 prover.
+#[tracing::instrument(skip(proving_key_bytes, r1cs_bytes, witness_bytes), fields(stage = "disclosure_proof_generation", pk_size = proving_key_bytes.len(), r1cs_size = r1cs_bytes.len(), witness_size = witness_bytes.len()))]
 ///
 /// # Arguments
 /// * `proving_key_bytes` - Serialized compressed Groth16 proving key.
@@ -402,6 +404,7 @@ pub fn prove_receipt_proof(
 }
 
 /// Proves a disclosure witness using an existing Groth16 prover.
+#[tracing::instrument(skip(prover, witness_bytes), fields(stage = "disclosure_proof_generation_cached", witness_size = witness_bytes.len()))]
 ///
 /// This is identical to [`prove_receipt_proof`] but reuses an already
 /// initialised [`Prover`] instance, avoiding the cost of re-deserialising
@@ -467,6 +470,7 @@ pub fn validate_and_serialize_receipt_public_inputs(
 }
 
 /// Verifies the Groth16 proof carried by a disclosure receipt.
+#[tracing::instrument(skip(receipt, vk_bytes), fields(stage = "disclosure_receipt_proof_verification", circuit_name = %receipt.circuit.name))]
 ///
 /// # Arguments
 /// * `receipt` - Receipt containing proof bytes and named public inputs.
