@@ -62,9 +62,9 @@ impl Indexer {
 
             let cursor_out = result.cursor.clone();
             let last_event_ledger = result.events.last().map(|event| event.ledger);
-            let event_count = result.events.len() as u32;
+            let event_count = result.events.len();
             let is_empty = event_count == 0;
-            let full_page = event_count == page_size;
+            let full_page = event_count == page_size as usize;
             let progress_ledger = last_event_ledger.unwrap_or(result.latest_ledger);
             let at_events_tip = !is_empty && !full_page && progress_ledger >= result.latest_ledger;
             let fully_indexed = is_empty || at_events_tip;
