@@ -101,7 +101,9 @@ mod sync;
 mod transact;
 
 pub use account::Account;
-pub use client::{Client, init_tracing};
+pub use client::Client;
+#[cfg(not(target_arch = "wasm32"))]
+pub use client::init_tracing;
 pub use core::PoolCore;
 pub use disclosure::{
     BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
