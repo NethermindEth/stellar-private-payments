@@ -9,6 +9,7 @@ use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
 use num_bigint::{BigInt, Sign};
 // These are part of the reduced STD that is browser compatible
 use std::{collections::HashMap, io::Cursor, string::String, vec::Vec};
+use types::correlation_id_or_new;
 use wasmer::{Module, Store};
 
 /// BN254 scalar field modulus
@@ -39,7 +40,10 @@ impl WitnessCalculator {
     /// # Arguments
     /// * `circuit_wasm` - The compiled circuit WASM bytes
     /// * `r1cs_bytes` - The R1CS constraint system bytes
+    #[tracing::instrument(name = "witness_calculator_new", skip_all, fields(correlation_id = %correlation_id_or_new(), wasm_len = circuit_wasm.len(), r1cs_len = r1cs_bytes.len()))]
     pub fn new(circuit_wasm: &[u8], r1cs_bytes: &[u8]) -> Result<WitnessCalculator> {
+        tracing::debug!("creating witness calculator");
+
         // Parse R1CS from bytes
         let cursor = Cursor::new(r1cs_bytes);
         let r1cs_file: R1CSFile<Fr> = R1CSFile::new(cursor).context("Failed to parse R1CS")?;
@@ -49,11 +53,30 @@ impl WitnessCalculator {
 
         // Create wasmer store and load circuit module from bytes
         let mut store = Store::default();
-        let module = Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
 
-        // Create witness calculator from module
-        let calculator = ArkWitnessCalculator::from_module(&mut store, module)
-            .map_err(|e| anyhow::anyhow!("Failed to init witness calc: {e}"))?;
+        // Compile and instantiate the circuit WASM module (the expensive part)
+        let start = web_time::Instant::now();
+        tracing::debug!("compiling circuit WASM module");
+        let calculator = (|| -> Result<ArkWitnessCalculator> {
+            let module =
+                Module::new(&store, circuit_wasm).context("Failed to load circuit WASM")?;
+            ArkWitnessCalculator::from_module(&mut store, module)
+                .map_err(|e| anyhow::anyhow!("Failed to init witness calc: {e}"))
+        })();
+        let calculator = match calculator {
+            Ok(calculator) => calculator,
+            Err(e) => {
+                tracing::debug!(
+                    elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "circuit WASM compile/instantiate failed"
+                );
+                return Err(e);
+            }
+        };
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "circuit WASM compiled and instantiated"
+        );
 
         Ok(WitnessCalculator {
             store,
@@ -71,13 +94,17 @@ impl WitnessCalculator {
     ///
     /// # Returns
     /// * Witness as Little-Endian bytes (32 bytes per field element)
+    #[tracing::instrument(skip_all, fields(correlation_id = %correlation_id_or_new(), inputs_json_len = inputs_json.len(), input_keys = tracing::field::Empty))]
     pub fn compute_witness(&mut self, inputs_json: &str) -> Result<Vec<u8>> {
         use serde_json::Value;
+
+        tracing::debug!("computing witness");
 
         // Parse JSON inputs
         let inputs: Value = serde_json::from_str(inputs_json).context("Invalid JSON")?;
 
         let inputs_map = inputs.as_object().context("Inputs must be a JSON object")?;
+        tracing::Span::current().record("input_keys", inputs_map.len());
 
         // Convert to HashMap<String, Vec<BigInt>> by flattening nested structures
         let mut inputs_hashmap: HashMap<String, Vec<BigInt>> = HashMap::new();
@@ -87,10 +114,25 @@ impl WitnessCalculator {
         }
 
         // Calculate witness
+        let start = web_time::Instant::now();
         let witness = self
             .calculator
             .calculate_witness(&mut self.store, inputs_hashmap, false)
-            .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
+            .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"));
+        let witness = match witness {
+            Ok(witness) => witness,
+            Err(e) => {
+                tracing::debug!(
+                    elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+                    "witness calculation failed"
+                );
+                return Err(e);
+            }
+        };
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "witness calculation completed"
+        );
 
         // Convert to Little-Endian bytes
         Ok(witness_to_bytes(&witness))

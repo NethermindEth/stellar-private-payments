@@ -17,9 +17,7 @@ base64 = { workspace = true }
 ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
 futures = { workspace = true, features = ["executor"] }
 http = "1.4.0"
-log = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde-aux = "4.7.0"
@@ -31,7 +29,6 @@ stellar-xdr = { version = "26.0.0", features = ["curr", "serde", "base64", "std"
 thiserror = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
-# external
 gloo-timers = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]

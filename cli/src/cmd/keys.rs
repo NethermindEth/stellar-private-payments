@@ -7,6 +7,12 @@ use serde::Serialize;
 use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
 pub fn show(config: &CliConfig, json: bool) -> Result<()> {
+    // No value fields: this command prints secrets to stdout; logs get nothing.
+    let _span = tracing::info_span!(
+        "cmd_keys_show",
+        correlation_id = %types::correlation_id_or_new()
+    )
+    .entered();
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;
@@ -41,6 +47,12 @@ pub fn show(config: &CliConfig, json: bool) -> Result<()> {
 }
 
 pub fn asp_secret(config: &CliConfig, json: bool) -> Result<()> {
+    // No value fields: this command prints secrets to stdout; logs get nothing.
+    let _span = tracing::info_span!(
+        "cmd_keys_asp_secret",
+        correlation_id = %types::correlation_id_or_new()
+    )
+    .entered();
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;

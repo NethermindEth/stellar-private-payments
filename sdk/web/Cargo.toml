@@ -27,21 +27,16 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 console_error_panic_hook = { workspace = true }
 futures = { workspace = true }
-getrandom = { workspace = true }
 gloo-timers = { workspace = true, features = ["futures"] }
 gloo-worker = { workspace = true }
 js-sys = { workspace = true }
-log = { workspace = true }
 serde = { workspace = true }
 serde-wasm-bindgen = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 sha2 = { workspace = true }
 wasm-bindgen = { workspace = true }
 wasm-bindgen-futures = { workspace = true }
-wasm-log = { workspace = true }
 tracing = { workspace = true }
-tracing-log = { workspace = true }
-tracing-subscriber = { workspace = true }
 web-sys = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
@@ -52,6 +47,9 @@ sqlite-wasm-vfs = { workspace = true }
 sha2 = { workspace = true }
 types = { workspace = true }
 
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+tokio = { workspace = true, features = ["macros", "rt"] }
+tracing-subscriber = { workspace = true }
 [lints]
 workspace = true
 
