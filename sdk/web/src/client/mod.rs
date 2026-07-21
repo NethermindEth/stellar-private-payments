@@ -19,6 +19,7 @@ use wasm_bindgen::prelude::*;
 use wasm_bindgen_futures::JsFuture;
 
 use crate::{
+    correlation::{new_correlation_id, with_correlation_id},
     deployment::deployment_config,
     protocol::{StorageWorkerRequest, StorageWorkerResponse},
     signer::WalletSigner,
@@ -91,31 +92,32 @@ impl Client {
         prover_worker_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
-        crate::wasm_start();
+        with_correlation_id(new_correlation_id(), async {
+            crate::wasm_start();
 
-        if prover_worker_url.trim().is_empty() {
-            return Err(JsError::new(
-                "proverWorkerUrl is required (absolute URL to prover-worker.js)",
-            ));
-        }
+            if prover_worker_url.trim().is_empty() {
+                return Err(JsError::new(
+                    "proverWorkerUrl is required (absolute URL to prover-worker.js)",
+                ));
+            }
 
-        let storage = storage.fork();
-        let storage_bridge = storage.bridge();
-        storage_bridge
-            .ping()
-            .await
-            .map_err(|e| JsError::new(&e.to_string()))?;
+            let storage = storage.fork();
+            let storage_bridge = storage.bridge();
+            storage_bridge
+                .ping()
+                .await
+                .map_err(|e| JsError::new(&e.to_string()))?;
 
-        let contract_config = deployment_config()?;
-        let prover = ProverBridge::new(
-            ProverWorker::spawner()
-                .with_loader(true)
-                .as_module(true)
-                .spawn(&prover_worker_url),
-        );
-        let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
-            Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
-        );
+            let contract_config = deployment_config()?;
+            let prover = ProverBridge::new(
+                ProverWorker::spawner()
+                    .with_loader(true)
+                    .as_module(true)
+                    .spawn(&prover_worker_url),
+            );
+            let prover_handle: Handle<dyn stellar_private_payments_sdk::Prover> = Handle::from_box(
+                Box::new(prover.clone()) as Box<dyn stellar_private_payments_sdk::Prover>,
+            );
 
         let inner = NativeClient::init(
             rpc_url,
@@ -132,6 +134,8 @@ impl Client {
             prover,
             background_sync_stop: None,
         })
+        })
+        .await
     }
 
     /// Bundled deployment config (contract addresses, pools, network).
@@ -147,17 +151,20 @@ impl Client {
     /// exit leaves the slot set — use a new [`Client`] to recover.
     #[wasm_bindgen(js_name = backgroundSync)]
     pub async fn background_sync(&mut self) -> Result<(), JsError> {
-        if self.background_sync_stop.is_some() {
-            return Ok(());
-        }
-        let sync = self.inner.background_sync().map_err(pool_err)?;
-        self.background_sync_stop = Some(sync.stop_handle());
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Err(e) = sync.run().await {
-                log::error!("background sync stopped: {e}");
+        with_correlation_id(new_correlation_id(), async {
+            if self.background_sync_stop.is_some() {
+                return Ok(());
             }
-        });
-        Ok(())
+            let sync = self.inner.background_sync().map_err(pool_err)?;
+            self.background_sync_stop = Some(sync.stop_handle());
+            wasm_bindgen_futures::spawn_local(async move {
+                if let Err(e) = sync.run().await {
+                    tracing::error!("background sync stopped: {e}");
+                }
+            });
+            Ok(())
+        })
+        .await
     }
 
     /// Request the background indexer to exit (wakes its idle wait).
@@ -174,24 +181,27 @@ impl Client {
     /// Bind a wallet signer, derive privacy keys when missing, and return an
     /// [`Account`] session.
     pub async fn account(&self, options: JsValue, signer: JsValue) -> Result<Account, JsError> {
-        let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
-        let user_address = resolve_user_address(&signer, opts.user_address).await?;
-        let wallet_signer =
-            WalletSigner::new(signer, opts.network_passphrase, user_address.clone())?;
+        with_correlation_id(new_correlation_id(), async {
+            let opts: AccountOptions = serde_wasm_bindgen::from_value(options)?;
+            let user_address = resolve_user_address(&signer, opts.user_address).await?;
+            let wallet_signer =
+                WalletSigner::new(signer, opts.network_passphrase, user_address.clone())?;
 
-        self.ensure_prover().await?;
+            self.ensure_prover().await?;
 
-        if !self.user_keys_exist(&user_address).await? {
-            let message = stellar_private_payments_sdk::KEY_DERIVATION_MESSAGE.to_string();
-            let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
-            let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
-            self.derive_save_user_keys(user_address.clone(), signature)
-                .await?;
-        }
+            if !self.user_keys_exist(&user_address).await? {
+                let message = stellar_private_payments_sdk::KEY_DERIVATION_MESSAGE.to_string();
+                let sig_hex = wallet_signer.sign_wallet_message(&message).await?;
+                let signature = crate::signer::wallet_message_signature_to_bytes(&sig_hex)?;
+                self.derive_save_user_keys(user_address.clone(), signature)
+                    .await?;
+            }
 
-        Ok(Account::new(Rc::new(
-            self.open_native_account(wallet_signer, user_address)?,
-        )))
+            Ok(Account::new(Rc::new(
+                self.open_native_account(wallet_signer, user_address)?,
+            )))
+        })
+        .await
     }
 
     /// Catch local storage up to the current chain tip for the deployment.
@@ -278,42 +288,45 @@ pub async fn verify_selective_disclosure_standalone(
     expected_vk_hash: String,
     options: JsValue,
 ) -> Result<JsValue, JsError> {
-    crate::wasm_start();
+    with_correlation_id(new_correlation_id(), async {
+        crate::wasm_start();
 
-    let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
-        .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
-    let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
-        VerifyDisclosureOptions::default()
-    } else {
-        serde_wasm_bindgen::from_value(options)?
-    };
+        let receipt: DisclosureReceipt = serde_json::from_str(&receipt_json)
+            .map_err(|e| JsError::new(&format!("invalid receipt JSON: {e}")))?;
+        let opts: VerifyDisclosureOptions = if options.is_null() || options.is_undefined() {
+            VerifyDisclosureOptions::default()
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
 
-    let prover_worker_url = opts
-        .prover_worker_url
-        .filter(|url| !url.trim().is_empty())
-        .ok_or_else(|| {
-            JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
-        })?;
+        let prover_worker_url = opts
+            .prover_worker_url
+            .filter(|url| !url.trim().is_empty())
+            .ok_or_else(|| {
+                JsError::new("proverWorkerUrl is required (absolute URL to prover-worker.js)")
+            })?;
 
-    let contract_config = deployment_config()?;
-    let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
-    let fetcher = StateFetcher::new(rpc, (*contract_config).clone())
-        .map_err(|e| JsError::new(&e.to_string()))?;
-    let prover = ProverBridge::new(
-        ProverWorker::spawner()
-            .with_loader(true)
-            .as_module(true)
-            .spawn(&prover_worker_url),
-    );
-    prover
-        .ping()
-        .await
-        .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
+        let contract_config = deployment_config()?;
+        let rpc = RpcClient::new(&rpc_url).map_err(|e| JsError::new(&e.to_string()))?;
+        let fetcher = StateFetcher::new(rpc, (*contract_config).clone())
+            .map_err(|e| JsError::new(&e.to_string()))?;
+        let prover = ProverBridge::new(
+            ProverWorker::spawner()
+                .with_loader(true)
+                .as_module(true)
+                .spawn(&prover_worker_url),
+        );
+        prover
+            .ping()
+            .await
+            .map_err(|e| JsError::new(&format!("failed to load prover: {e:?}")))?;
 
-    let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
-        .await
-        .map_err(pool_err)?;
-    Ok(serde_wasm_bindgen::to_value(&report)?)
+        let report = verify_disclosure_receipt(&fetcher, &prover, &receipt, &expected_vk_hash)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&report)?)
+    })
+    .await
 }
 
 impl Client {

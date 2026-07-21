@@ -21,15 +21,31 @@ tailwindcss = "4.1.18"
 stage = "pre_build"
 command = "sh"
 command_arguments = ["-c", """
+set -e
+
 # Compiled circuits ship inside sdk/web/dist/ (npm package). Proving loads them via
 # the prover worker's __STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__ (see sdk/web/scripts/build.sh).
-if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ]; then
-    echo "trunk:error: missing sdk/web/dist — run 'make sdk-web-build'" >&2
-    exit 1
+#
+# WASM_PROFILE (or LOGS=1 as shorthand for WASM_PROFILE=release-with-logs) selects
+# the quiet, privacy-first default vs. the verbose diagnostic build — matching
+# `make build`/`make build LOGS=1`. Rebuild only when missing or the profile
+# changed, so plain `trunk serve` file-watch reloads stay fast.
+if [ "${LOGS:-}" = "1" ] || [ "${LOGS:-}" = "true" ]; then
+    export WASM_PROFILE="${WASM_PROFILE:-release-with-logs}"
+else
+    export WASM_PROFILE="${WASM_PROFILE:-release}"
+fi
+
+PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
+LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
+if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ]; then
+    echo "trunk: building stellar-private-payments-sdk-web (WASM_PROFILE=$WASM_PROFILE)..."
+    npm run build --prefix sdk/web
+    echo "$WASM_PROFILE" > "$PROFILE_MARKER"
 fi
 
 if [ ! -f "sdk/web/dist/circuits/source-bundle.tar.gz" ]; then
-    echo "trunk:error: missing sdk/web/dist/circuits — run 'make sdk-web-build'" >&2
+    echo "trunk:error: missing sdk/web/dist/circuits after build" >&2
     exit 1
 fi
 

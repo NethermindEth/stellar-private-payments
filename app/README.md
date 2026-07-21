@@ -58,3 +58,23 @@ make clean
 
 - `Trunk.toml` - Trunk bundler configuration (at repository root)
 - `package.json` - npm dependencies and scripts
+
+## Diagnostics & Telemetry UI
+
+The web application settings drawer includes a dedicated **Diagnostics & Telemetry** configuration panel.
+
+### Settings and Actions:
+- **Log Level**: Dropdown select controlling verbosity (`Info`, `Debug`, `Trace`).
+- **Reveal Sensitive Info**: Gated checkbox to reveal Tier-1 values (e.g., amounts, addresses) in logs (forces to `false` in production compiles).
+- **Copy Logs**: Copies formatted in-memory ring-buffer logs to the clipboard.
+- **Download Logs**: Downloads the diagnostics trace logs as a `.log` file (`spp-diagnostics.log`).
+
+### Enabling Debug Logs (Release-with-logs profile):
+To enable telemetry collection and sensitive-reveal features in the web application browser console, serve/build the frontend using the debug-telemetry target:
+```bash
+# Serve with debug logs enabled
+make serve-debug
+
+# Build frontend with debug logs enabled
+make build-debug
+```

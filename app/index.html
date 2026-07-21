@@ -422,6 +422,30 @@
                         <label for="settings-bootnode-url" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Bootnode RPC URL</label>
                         <input id="settings-bootnode-url" type="text" placeholder="https://..." class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" autocomplete="off" spellcheck="false">
                     </div>
+                    <div class="border-t border-white/10 pt-5">
+                        <p class="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500 mb-4">Diagnostics & Telemetry</p>
+                        <div class="space-y-4">
+                            <div>
+                                <label for="settings-log-level" class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Log Level</label>
+                                <select id="settings-log-level" class="mt-3 w-full rounded-2xl border border-white/10 bg-ink-950 px-4 py-3 text-sm text-slate-100 outline-none transition focus:border-cyan-300/40">
+                                    <option value="info">Info (Default)</option>
+                                    <option value="debug">Debug (Verbose)</option>
+                                    <option value="trace">Trace (Diagnostic)</option>
+                                </select>
+                            </div>
+                            <label class="flex items-center justify-between gap-4">
+                                <span>
+                                    <span class="block text-xs font-medium uppercase tracking-[0.22em] text-slate-500">Reveal Sensitive Info</span>
+                                    <span class="mt-2 block text-sm text-slate-400">Reveal Tier-1 values (amounts, addresses) in debug logs (always gated by compile profile).</span>
+                                </span>
+                                <input id="settings-reveal-sensitive" type="checkbox" class="h-5 w-5 rounded border-white/10 bg-ink-950 text-cyan-300 focus:ring-cyan-300">
+                            </label>
+                            <div class="flex gap-3 mt-4">
+                                <button id="settings-copy-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Copy Logs</button>
+                                <button id="settings-download-logs-btn" type="button" class="flex-1 rounded-2xl bg-white/5 border border-white/10 px-4 py-3 text-sm font-medium text-slate-200 hover:bg-white/10 hover:border-cyan-300/20 transition">Download Logs</button>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="mt-6 flex flex-col gap-3 sm:flex-row">

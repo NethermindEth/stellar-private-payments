@@ -93,10 +93,14 @@ wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-s
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
 wasm-log = { version = "0.3", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["log", "std", "release_max_level_info"] }
+tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "fmt", "env-filter", "std"] }
 # see also https://github.com/NethermindEth/stellar-private-payments/issues/192
 wasmer = { git = "https://github.com/wasmerio/wasmer", rev = "763e9f2800644f51ce27f6f5c1752776da16ddd1", shallow = true, default-features = false }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
 wiremock = "0.6"
+zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
 
 [workspace.lints.rust]
 missing_docs = "allow"

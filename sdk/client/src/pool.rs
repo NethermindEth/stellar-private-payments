@@ -9,6 +9,7 @@ use crate::{
     PoolCore, PreparedTransaction,
     chain::RpcClient,
     core::{pool_transact_input, transact_step_for_plan},
+    correlation::correlation_id_or_new,
     disclosure::{
         DisclosureInputsRequest, DisclosureProveParams, DisclosureRequest,
         verify_disclosure_receipt,
@@ -102,7 +103,9 @@ impl<S: Storage> PrivatePool<S> {
         self.core.estimate(&wallet, amount)
     }
 
+    #[tracing::instrument(skip(self), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, Error> {
+        tracing::info!(amount = ?types::Sensitive(amount), "deposit started");
         let mut plan = self.prepare_deposit(amount)?;
         self.execute(&mut plan)
             .await?
@@ -110,27 +113,35 @@ impl<S: Storage> PrivatePool<S> {
             .ok_or_else(|| Error::Other("deposit produced no transaction".into()))
     }
 
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn transfer(
         &self,
         recipient: impl Into<TransferRecipient>,
         amount: NoteAmount,
     ) -> Result<Vec<TransactionResult>, Error> {
+        let recipient = recipient.into();
+        tracing::info!(recipient = ?types::Sensitive(&recipient), amount = ?types::Sensitive(amount), "transfer started");
         let wallet = self.spendable_notes().await?;
         let mut plan = self.prepare_transfer(&wallet, recipient, amount).await?;
         self.execute(&mut plan).await
     }
 
+    #[tracing::instrument(skip(self, recipient), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn withdraw(
         &self,
         amount: NoteAmount,
         recipient: impl Into<String>,
     ) -> Result<Vec<TransactionResult>, Error> {
+        let recipient = recipient.into();
+        tracing::info!(amount = ?types::Sensitive(amount), recipient = ?types::Sensitive(&recipient), "withdraw started");
         let wallet = self.spendable_notes().await?;
         let mut plan = self.prepare_withdraw(&wallet, amount, recipient)?;
         self.execute(&mut plan).await
     }
 
+    #[tracing::instrument(skip(self, step), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn transact(&self, step: Transact) -> Result<TransactionResult, Error> {
+        tracing::info!(step = ?types::Sensitive(&step), "transact started");
         let mut plan = self.prepare_transact(step);
         self.execute(&mut plan)
             .await?
@@ -138,10 +149,12 @@ impl<S: Storage> PrivatePool<S> {
             .ok_or_else(|| Error::Other("transact produced no transaction".into()))
     }
 
+    #[tracing::instrument(skip(self, req), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn disclose(
         &self,
         req: DisclosureRequest,
     ) -> Result<Option<DisclosureReceipt>, Error> {
+        tracing::info!(selected_commitments = ?types::Sensitive(&req.selected_commitments), "disclose started");
         if req.selected_commitments.is_empty() || req.selected_commitments.len() > 4 {
             return Err(Error::Other(
                 "selective disclosure requires 1..=4 selected commitments".into(),
@@ -212,11 +225,13 @@ impl<S: Storage> PrivatePool<S> {
         }
     }
 
+    #[tracing::instrument(skip(self, receipt, expected_vk_hash), fields(correlation_id = %correlation_id_or_new()))]
     pub async fn verify_disclosure(
         &self,
         receipt: &DisclosureReceipt,
         expected_vk_hash: &str,
     ) -> Result<DisclosureVerificationReport, Error> {
+        tracing::info!(expected_vk_hash = ?types::Sensitive(expected_vk_hash), "verify_disclosure started");
         verify_disclosure_receipt(
             &self.fetcher,
             self.prover.as_ref(),
@@ -384,6 +399,8 @@ impl<S: Storage> PrivatePool<S> {
     ) -> Result<Vec<TransactionResult>, Error> {
         let mut results = Vec::new();
         while !plan.is_complete() {
+            let step_index = results.len();
+            tracing::info!(step_index, "execute plan step");
             let mut prepared = {
                 let mut sync_waits = 0u32;
                 loop {
@@ -414,11 +431,17 @@ impl<S: Storage> PrivatePool<S> {
                 Err(error) => return Err(PlanExecutionError::into_error(results, error)),
             };
             let hash = match self.submit(signed).await {
-                Ok(hash) => hash,
+                Ok(hash) => {
+                    tracing::info!(hash, "transaction submitted");
+                    hash
+                }
                 Err(error) => return Err(PlanExecutionError::into_error(results, error)),
             };
             let result = match self.confirm(&hash).await {
-                Ok(result) => result,
+                Ok(result) => {
+                    tracing::info!(hash, "transaction confirmed");
+                    result
+                }
                 Err(error) => return Err(PlanExecutionError::into_error(results, error)),
             };
             results.push(result);

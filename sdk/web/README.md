@@ -107,6 +107,28 @@ Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estima
 
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
 
+## Logging & Diagnostics
+
+The SDK provides integrated telemetry logging using `tracing` in Rust. You can configure and control logging from JavaScript:
+
+```js
+import { configureTelemetry, dump_recent_logs, set_log_level } from 'stellar-private-payments-sdk-web';
+
+// Initialize or update telemetry settings
+configureTelemetry({
+  level: 'debug',             // 'info' | 'debug' | 'trace'
+  sink: 'both',               // 'console' | 'ringBuffer' | 'both'
+  ringBufferBytes: 256 * 1024, // 256 KiB buffer
+  revealSensitive: true       // Reveal Tier-1 values (debug profile only)
+});
+
+// Dump current ring buffer logs for diagnostic reports
+const logs = dump_recent_logs();
+
+// Update log level filter on the fly
+set_log_level('info');
+```
+
 ## TypeScript
 
 Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments-sdk-web'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments-sdk-web/wasm`.

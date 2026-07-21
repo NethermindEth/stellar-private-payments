@@ -1862,6 +1862,8 @@ dependencies = [
  "hex",
  "prover",
  "sha2 0.11.0",
+ "tracing",
+ "tracing-subscriber",
  "types",
 ]
 
@@ -3309,6 +3311,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "matchers"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d1525a2a28c7f4fa0fc98bb91ae755d1e2d1505079e05539e35bc876b5d65ae9"
+dependencies = [
+ "regex-automata",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3941,6 +3952,8 @@ dependencies = [
  "getrandom 0.2.17",
  "serde",
  "sha2 0.11.0",
+ "tracing",
+ "tracing-subscriber",
  "types",
  "x25519-dalek",
  "zkhash",
@@ -4585,6 +4598,8 @@ dependencies = [
  "rusqlite",
  "serde_json",
  "stellar-private-payments-sdk",
+ "tracing",
+ "tracing-subscriber",
  "types",
 ]
 
@@ -5166,6 +5181,8 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "stellar",
+ "tracing",
+ "tracing-subscriber",
  "types",
 ]
 
@@ -5200,6 +5217,8 @@ dependencies = [
  "stellar-strkey 0.0.16",
  "stellar-xdr",
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
  "types",
  "wasm-bindgen-test",
 ]
@@ -5217,6 +5236,8 @@ dependencies = [
  "serde_json",
  "stellar-private-payments-sdk",
  "toml",
+ "tracing-log",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -5228,8 +5249,8 @@ dependencies = [
  "disclosure",
  "futures",
  "futures-timer",
+ "getrandom 0.2.17",
  "gloo-timers",
- "log",
  "prover",
  "serde",
  "serde_json",
@@ -5237,6 +5258,8 @@ dependencies = [
  "stellar",
  "thiserror 2.0.18",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "tx-planner",
  "types",
  "wiremock",
@@ -5252,6 +5275,7 @@ dependencies = [
  "base64",
  "console_error_panic_hook",
  "futures",
+ "getrandom 0.2.17",
  "gloo-timers",
  "gloo-worker",
  "js-sys",
@@ -5263,6 +5287,9 @@ dependencies = [
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
  "stellar-private-payments-sdk",
+ "tracing",
+ "tracing-log",
+ "tracing-subscriber",
  "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
@@ -5714,6 +5741,7 @@ version = "0.1.44"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "63e71662fa4b2a2c3a26f570f037eb95bb1f85397f3cd8076caed2f026a6d100"
 dependencies = [
+ "log",
  "pin-project-lite",
  "tracing-attributes",
  "tracing-core",
@@ -5762,17 +5790,34 @@ dependencies = [
 ]
 
 [[package]]
+name = "tracing-serde"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "704b1aeb7be0d0a84fc9828cae51dab5970fee5088f83d1dd7ee6f6246fc6ff1"
+dependencies = [
+ "serde",
+ "tracing-core",
+]
+
+[[package]]
 name = "tracing-subscriber"
 version = "0.3.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cb7f578e5945fb242538965c2d0b04418d38ec25c79d160cd279bf0731c8d319"
 dependencies = [
+ "matchers",
  "nu-ansi-term",
+ "once_cell",
+ "regex-automata",
+ "serde",
+ "serde_json",
  "sharded-slab",
  "smallvec",
  "thread_local",
+ "tracing",
  "tracing-core",
  "tracing-log",
+ "tracing-serde",
 ]
 
 [[package]]
@@ -5792,6 +5837,8 @@ name = "tx-planner"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.18",
+ "tracing",
+ "tracing-subscriber",
  "types",
 ]
 
@@ -5816,11 +5863,15 @@ name = "types"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "getrandom 0.2.17",
  "hex",
  "rusqlite",
  "serde",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
  "uint",
+ "zeroize",
 ]
 
 [[package]]
@@ -6589,6 +6640,8 @@ dependencies = [
  "ark-circom",
  "num-bigint",
  "serde_json",
+ "tracing",
+ "tracing-subscriber",
  "wasmer",
 ]
 

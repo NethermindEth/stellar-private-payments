@@ -18,6 +18,8 @@ ed25519-dalek = { version = "2.2", default-features = false, features = ["digest
 futures = { workspace = true, features = ["executor"] }
 http = "1.4.0"
 log = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 serde-aux = "4.7.0"
