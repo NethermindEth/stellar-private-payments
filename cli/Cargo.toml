@@ -19,6 +19,7 @@ anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
 log.workspace = true
+tracing = { workspace = true, features = ["attributes"] }
 tracing-subscriber = { workspace = true, features = ["fmt", "json", "env-filter"] }
 tracing-log = { workspace = true }
 # Not referenced directly, but pulls in reqwest's rustls TLS backend for the
@@ -28,6 +29,7 @@ serde.workspace = true
 serde_json.workspace = true
 stellar-private-payments-sdk.workspace = true
 toml = "0.8"
+types.workspace = true
 
 [lints]
 workspace = true

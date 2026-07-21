@@ -9,8 +9,9 @@ use types::{
     SELECTIVE_DISCLOSURE_1_N_NOTES, SELECTIVE_DISCLOSURE_2_CIRCUIT, SELECTIVE_DISCLOSURE_2_LEVELS,
     SELECTIVE_DISCLOSURE_2_N_NOTES, SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
     SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT, SELECTIVE_DISCLOSURE_4_LEVELS,
-    SELECTIVE_DISCLOSURE_4_N_NOTES,
+    SELECTIVE_DISCLOSURE_4_N_NOTES, correlation_id_or_new,
 };
+use web_time::Instant;
 
 /// Domain prefix for `ext_context_hash` derivation.
 const CONTEXT_HASH_DOMAIN: &[u8] = b"disclosure-context-v1";
@@ -43,6 +44,7 @@ pub fn vk_hash_hex(vk_bytes: &[u8]) -> String {
 ///
 /// # Errors
 /// Returns an error if context validation fails.
+#[tracing::instrument(level = "debug", skip_all, fields(correlation_id = %correlation_id_or_new(), context_fields = 6usize))]
 pub fn derive_ext_context_hash(context: &DisclosureContext) -> Result<Field> {
     context.validate()?;
 
@@ -154,6 +156,7 @@ impl RegisteredCircuit {
     /// Returns an error if the receipt schema is invalid, the circuit metadata
     /// does not match this circuit, or the verifying-key hash differs from
     /// `expected_vk_hash`.
+    #[tracing::instrument(skip_all, fields(correlation_id = %correlation_id_or_new(), circuit = self.name))]
     pub fn validate_receipt(
         &self,
         receipt: &DisclosureReceipt,
@@ -165,9 +168,16 @@ impl RegisteredCircuit {
         expected.validate()?;
 
         if receipt.circuit != expected {
+            tracing::debug!(
+                levels_match = receipt.circuit.levels == expected.levels,
+                n_notes_match = receipt.circuit.n_notes == expected.n_notes,
+                vk_hash_match = receipt.circuit.vk_hash == expected.vk_hash,
+                "receipt circuit metadata mismatch"
+            );
             return Err(anyhow!("Disclosure receipt circuit metadata mismatch"));
         }
 
+        tracing::debug!("receipt circuit metadata validated");
         Ok(())
     }
 
@@ -347,7 +357,6 @@ pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
 }
 
 /// Validates a receipt against the registered circuit named in the receipt.
-#[tracing::instrument(skip(receipt), fields(stage = "disclosure_receipt_validation", circuit_name = %receipt.circuit.name))]
 ///
 /// # Arguments
 /// * `receipt` - Receipt to validate.
@@ -359,6 +368,7 @@ pub fn find_circuit(name: &str) -> Option<&'static RegisteredCircuit> {
 /// # Errors
 /// Returns an error if the receipt names an unknown circuit, fails schema
 /// validation, or does not match the expected circuit metadata.
+#[tracing::instrument(skip(receipt), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_validation", circuit_name = %receipt.circuit.name, expected_vk_hash = ?types::Sensitive(expected_vk_hash)))]
 pub fn validate_registered_receipt(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
@@ -366,6 +376,7 @@ pub fn validate_registered_receipt(
     let circuit = find_circuit(&receipt.circuit.name)
         .ok_or_else(|| anyhow!("Unknown disclosure circuit: {}", receipt.circuit.name))?;
     circuit.validate_receipt(receipt, expected_vk_hash)?;
+    tracing::debug!(circuit = circuit.name, "registered receipt validated");
     Ok(circuit)
 }
 
@@ -379,7 +390,6 @@ pub struct ProvedReceiptProof {
 }
 
 /// Proves a disclosure witness using the real Groth16 prover.
-#[tracing::instrument(skip(proving_key_bytes, r1cs_bytes, witness_bytes), fields(stage = "disclosure_proof_generation", pk_size = proving_key_bytes.len(), r1cs_size = r1cs_bytes.len(), witness_size = witness_bytes.len()))]
 ///
 /// # Arguments
 /// * `proving_key_bytes` - Serialized compressed Groth16 proving key.
@@ -394,17 +404,23 @@ pub struct ProvedReceiptProof {
 /// Returns an error if the proving key or R1CS cannot be loaded, proving
 /// fails, public input extraction fails, or the generated proof does not verify
 /// locally.
+#[tracing::instrument(skip(proving_key_bytes, r1cs_bytes, witness_bytes), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_proof_generation", pk_size = proving_key_bytes.len(), r1cs_size = r1cs_bytes.len(), witness_size = witness_bytes.len()))]
 pub fn prove_receipt_proof(
     proving_key_bytes: &[u8],
     r1cs_bytes: &[u8],
     witness_bytes: &[u8],
 ) -> Result<ProvedReceiptProof> {
-    let prover = Prover::new(proving_key_bytes, r1cs_bytes)?;
-    prove_receipt_proof_with_prover(&prover, witness_bytes)
+    let start = Instant::now();
+    let result = Prover::new(proving_key_bytes, r1cs_bytes)
+        .and_then(|prover| prove_receipt_proof_with_prover(&prover, witness_bytes));
+    tracing::debug!(
+        elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "disclosure proof generation completed"
+    );
+    result
 }
 
 /// Proves a disclosure witness using an existing Groth16 prover.
-#[tracing::instrument(skip(prover, witness_bytes), fields(stage = "disclosure_proof_generation_cached", witness_size = witness_bytes.len()))]
 ///
 /// This is identical to [`prove_receipt_proof`] but reuses an already
 /// initialised [`Prover`] instance, avoiding the cost of re-deserialising
@@ -422,21 +438,31 @@ pub fn prove_receipt_proof(
 /// # Errors
 /// Returns an error if proving fails, public input extraction fails, or the
 /// generated proof does not verify locally.
+#[tracing::instrument(skip(prover, witness_bytes), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_proof_generation_cached", witness_size = witness_bytes.len()))]
 pub fn prove_receipt_proof_with_prover(
     prover: &Prover,
     witness_bytes: &[u8],
 ) -> Result<ProvedReceiptProof> {
-    let proof_compressed = prover.prove_bytes(witness_bytes)?;
-    let public_inputs = prover.extract_public_inputs(witness_bytes)?;
+    let start = Instant::now();
+    let result = (|| {
+        let proof_compressed = prover.prove_bytes(witness_bytes)?;
+        let public_inputs = prover.extract_public_inputs(witness_bytes)?;
 
-    if !prover.verify(&proof_compressed, &public_inputs)? {
-        return Err(anyhow!("Generated disclosure proof did not verify"));
-    }
+        if !prover.verify(&proof_compressed, &public_inputs)? {
+            tracing::warn!("generated disclosure proof failed self-verify");
+            return Err(anyhow!("Generated disclosure proof did not verify"));
+        }
 
-    Ok(ProvedReceiptProof {
-        proof_compressed,
-        public_inputs,
-    })
+        Ok(ProvedReceiptProof {
+            proof_compressed,
+            public_inputs,
+        })
+    })();
+    tracing::debug!(
+        elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "disclosure proof generation completed"
+    );
+    result
 }
 
 /// Validates a receipt, then serializes its public inputs for Groth16
@@ -470,7 +496,6 @@ pub fn validate_and_serialize_receipt_public_inputs(
 }
 
 /// Verifies the Groth16 proof carried by a disclosure receipt.
-#[tracing::instrument(skip(receipt, vk_bytes), fields(stage = "disclosure_receipt_proof_verification", circuit_name = %receipt.circuit.name))]
 ///
 /// # Arguments
 /// * `receipt` - Receipt containing proof bytes and named public inputs.
@@ -485,17 +510,28 @@ pub fn validate_and_serialize_receipt_public_inputs(
 /// Returns an error if `vk_bytes` do not match `expected_vk_hash`, the receipt
 /// is malformed, targets an unsupported circuit, has unexpected metadata, or
 /// contains malformed proof bytes.
+#[tracing::instrument(skip(receipt, vk_bytes), fields(correlation_id = %correlation_id_or_new(), stage = "disclosure_receipt_proof_verification", circuit_name = %receipt.circuit.name, expected_vk_hash = ?types::Sensitive(expected_vk_hash)))]
 pub fn verify_receipt_proof(
     receipt: &DisclosureReceipt,
     vk_bytes: &[u8],
     expected_vk_hash: &str,
 ) -> Result<bool> {
-    validate_verifying_key_hash(vk_bytes, expected_vk_hash)?;
+    let start = Instant::now();
+    let result = (|| {
+        validate_verifying_key_hash(vk_bytes, expected_vk_hash)?;
 
-    let circuit = validate_registered_receipt(receipt, expected_vk_hash)?;
-    let proof_bytes = receipt.proof_compressed_bytes()?;
-    let public_inputs = circuit.public_inputs_bytes(receipt)?;
-    verify_proof(vk_bytes, &proof_bytes, &public_inputs)
+        let circuit = validate_registered_receipt(receipt, expected_vk_hash)?;
+        let proof_bytes = receipt.proof_compressed_bytes()?;
+        let public_inputs = circuit.public_inputs_bytes(receipt)?;
+        verify_proof(vk_bytes, &proof_bytes, &public_inputs)
+    })();
+    tracing::debug!(
+        elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "receipt proof verification completed"
+    );
+    let valid = result?;
+    tracing::debug!(valid, "receipt proof verification outcome");
+    Ok(valid)
 }
 
 /// Checks that every receipt root is still known by the pool.
@@ -511,6 +547,7 @@ pub fn verify_receipt_proof(
 /// # Errors
 /// Returns an error if receipt metadata is invalid or if `is_known_root`
 /// fails for any root.
+#[tracing::instrument(name = "verify_receipt_known_roots", level = "debug", skip_all, fields(correlation_id = %correlation_id_or_new(), root_count = receipt.public_inputs.roots.len()))]
 pub fn verify_receipt_known_roots_with<F>(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
@@ -520,8 +557,9 @@ where
     F: FnMut(Field) -> Result<bool>,
 {
     validate_registered_receipt(receipt, expected_vk_hash)?;
-    for root in &receipt.public_inputs.roots {
+    for (index, root) in receipt.public_inputs.roots.iter().enumerate() {
         if !is_known_root(*root)? {
+            tracing::debug!(index, "receipt root not known, short-circuiting");
             return Ok(false);
         }
     }
@@ -543,6 +581,7 @@ where
 ///
 /// # Errors
 /// Returns an error if receipt metadata is invalid or if callbacks fail.
+#[tracing::instrument(name = "verify_receipt_report", skip_all, fields(correlation_id = %correlation_id_or_new(), expected_vk_hash = ?types::Sensitive(expected_vk_hash)))]
 pub fn verify_receipt_report_with<P, R>(
     receipt: &DisclosureReceipt,
     expected_vk_hash: &str,
@@ -557,8 +596,14 @@ where
     validate_registered_receipt(receipt, expected_vk_hash)?;
 
     let proof_verified = verify_proof(receipt, expected_vk_hash)?;
+    tracing::debug!(proof_verified, "receipt proof check outcome");
     let known_root_status =
         verify_receipt_known_roots_with(receipt, expected_vk_hash, &mut is_known_root)?;
+    tracing::debug!(
+        context_verified,
+        known_root_status,
+        "receipt context and root checks outcome"
+    );
 
     Ok(DisclosureVerificationReport {
         proof_verified,

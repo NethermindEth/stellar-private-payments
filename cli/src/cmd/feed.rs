@@ -8,6 +8,12 @@ use crate::{config::CliConfig, explorer::Explorer, onboard, output, session::Cli
 const DEFAULT_LIMIT: u32 = 5;
 
 pub fn run(config: &CliConfig, limit: Option<u32>, json: bool) -> Result<()> {
+    let _span = tracing::info_span!(
+        "cmd_feed",
+        correlation_id = %types::correlation_id_or_new(),
+        limit = ?limit
+    )
+    .entered();
     let limit = limit.unwrap_or(DEFAULT_LIMIT);
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;

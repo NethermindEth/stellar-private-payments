@@ -11,8 +11,15 @@ use tracing::Instrument;
 // shared with the native SDK; they live in `types` so both crates use one
 // implementation. Reached via the client crate re-export so the path
 // resolves on native and wasm targets alike.
+pub use stellar_private_payments_sdk::types::{current_correlation_id, new_correlation_id};
+
+#[cfg(not(target_arch = "wasm32"))]
+#[allow(unused_imports)]
+pub use stellar_private_payments_sdk::types::CorrelationIdLayer;
+
+#[cfg(target_arch = "wasm32")]
 pub use stellar_private_payments_sdk::types::{
-    CorrelationIdLayer, current_correlation_id, new_correlation_id,
+    pop_active_correlation_id, push_active_correlation_id,
 };
 
 /// Run a future with `correlation_id` active. Supports nested operations.
@@ -34,7 +41,6 @@ mod tests {
 
     #[tokio::test]
     async fn test_span_propagation_concurrency() {
-        // Initialize a local subscriber with our layer for this test thread
         let subscriber = Registry::default().with(CorrelationIdLayer);
         let _guard = tracing::subscriber::set_default(subscriber);
 

@@ -23,6 +23,12 @@ fn open_pool(
 }
 
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
+    let _span = tracing::info_span!(
+        "cmd_deposit",
+        correlation_id = %types::correlation_id_or_new(),
+        amount = ?types::Sensitive(&amount)
+    )
+    .entered();
     let pool = open_pool(config, pool)?;
     let amount = parse_amount(amount)?;
     let result = pool
@@ -45,6 +51,13 @@ pub fn transfer(
     encryption_key: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    let _span = tracing::info_span!(
+        "cmd_transfer",
+        correlation_id = %types::correlation_id_or_new(),
+        amount = ?types::Sensitive(&amount),
+        recipient = ?types::Sensitive(&to)
+    )
+    .entered();
     let pool = open_pool(config, pool)?;
     let recipient = parse_transfer_recipient(to, note_key, encryption_key)?;
     let amount = parse_amount(amount)?;
@@ -61,6 +74,13 @@ pub fn withdraw(
     to: Option<&str>,
     json: bool,
 ) -> Result<()> {
+    let _span = tracing::info_span!(
+        "cmd_withdraw",
+        correlation_id = %types::correlation_id_or_new(),
+        amount = ?types::Sensitive(&amount),
+        recipient = ?types::Sensitive(&to)
+    )
+    .entered();
     let recipient = match to {
         Some(address) => address.to_string(),
         None => config.require_account()?.address,

@@ -8,6 +8,11 @@ use serde::Serialize;
 use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
+    let _span = tracing::info_span!(
+        "cmd_register",
+        correlation_id = %types::correlation_id_or_new()
+    )
+    .entered();
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;

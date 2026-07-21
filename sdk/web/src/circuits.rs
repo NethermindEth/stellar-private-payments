@@ -138,7 +138,7 @@ fn compression_supported() -> bool {
 }
 
 async fn fetch_network_response(url: &str) -> Result<Response, JsError> {
-    log::debug!("[circuits] network fetch for {url}");
+    tracing::debug!("[circuits] network fetch for {url}");
     let opts = RequestInit::new();
     opts.set_method("GET");
     opts.set_mode(RequestMode::Cors);
@@ -257,7 +257,7 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
                 let _ = JsFuture::from(cache.put_with_str(&url_string, &resp)).await;
             }
             Err(e) => {
-                log::warn!("[circuits] failed to build cache response for {url_string}: {e:?}");
+                tracing::warn!("[circuits] failed to build cache response for {url_string}: {e:?}");
             }
         }
     }
