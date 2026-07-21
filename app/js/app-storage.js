@@ -6,6 +6,9 @@
 const SETTING_EXPLORER = 'explorer';
 const SETTING_BOOTNODE_CONFIG = 'bootnode_config';
 
+/** Suggested archive URL when none is stored yet (wizard + sync-gap consent). */
+export const DEFAULT_BOOTNODE_URL = 'https://bootnode.dev-nethermind.xyz';
+
 function unwrapResponse(response) {
     if (response == null) {
         throw new Error('Empty storage response');

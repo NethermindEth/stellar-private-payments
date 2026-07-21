@@ -1,5 +1,6 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, resetWalletSession } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
@@ -117,7 +118,7 @@ async function ensureEventSync(rpcUrl) {
         if (!isRpcSyncGapError(message)) throw error;
 
         const modal = await showBootnodeConsentModal({
-            defaultUrl: storedBootnodeUrl || '',
+            defaultUrl: storedBootnodeUrl || DEFAULT_BOOTNODE_URL,
             rpcUrl,
             errorMessage: message,
         });
