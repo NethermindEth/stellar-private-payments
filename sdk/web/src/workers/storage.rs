@@ -1,7 +1,7 @@
 use crate::protocol::{
-    AdminASPRequest, AspSecret, DisclaimerStatePayload, DisclosureInputs, DisclosureInputsRequest,
-    PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest, StorageWorkerResponse,
-    UserKeys,
+    AdminASPRequest, AspSecret, CorrelatedRequest, DisclaimerStatePayload, DisclosureInputs,
+    DisclosureInputsRequest, PublicEncryptionKeyPair, PublicNoteKeyPair, StorageWorkerRequest,
+    StorageWorkerResponse, UserKeys,
 };
 use anyhow::{Result, anyhow};
 use futures::{FutureExt, channel::mpsc, stream::StreamExt};
@@ -23,9 +23,11 @@ use stellar_private_payments_sdk::{
     },
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
-        OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+        OperationalFeedItem, PortfolioBalance, RecipientLookup, Sensitive, SyncMetadata,
+        UserNoteSummary,
     },
 };
+use tracing::Instrument;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
@@ -84,15 +86,22 @@ macro_rules! with_storage_mut {
 }
 
 pub fn worker_main() {
-    console_error_panic_hook::set_once();
-    wasm_log::init(wasm_log::Config::default());
-    log::debug!("[{WORKER_NAME}] starting...");
+    let worker_span = tracing::info_span!("worker", worker = WORKER_NAME);
+    {
+        let _guard = worker_span.enter();
+        crate::telemetry::init_telemetry(None);
+        crate::telemetry::install_panic_hook();
+        tracing::debug!("[{WORKER_NAME}] starting...");
+    }
     StorageWorker::registrar().register();
-    spawn_local(async {
-        if let Err(e) = init().await {
-            log::error!("[{WORKER_NAME}] init failed: {e:?}");
+    spawn_local(
+        async move {
+            if let Err(e) = init().await {
+                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
+            }
         }
-    });
+        .instrument(worker_span),
+    );
 }
 
 async fn init() -> Result<(), JsError> {
@@ -105,12 +114,12 @@ async fn init() -> Result<(), JsError> {
     )
     .await
     {
-        let debug = format!("{e:?}");
+        let error_details = format!("{e:?}");
         let text = e.to_string();
         let combined = if text.is_empty() {
-            debug.clone()
+            error_details.clone()
         } else {
-            format!("{text} {debug}")
+            format!("{text} {error_details}")
         };
 
         let msg = if is_opfs_locked_error(&combined) {
@@ -119,7 +128,7 @@ async fn init() -> Result<(), JsError> {
             "Failed to initialize local database storage.".to_string()
         };
 
-        log::error!("[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS: {debug}");
+        tracing::error!(details = %error_details, "[{WORKER_NAME}] fatal error installing OPFS Sqlite VFS");
         INIT_STATE.with(|s| *s.borrow_mut() = InitState::Failed(msg.clone()));
         return Err(JsError::new(&msg));
     }
@@ -148,34 +157,46 @@ async fn init() -> Result<(), JsError> {
     });
 
     INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-    log::debug!("[{WORKER_NAME}] initialized");
+    tracing::debug!("[{WORKER_NAME}] initialized");
 
     Ok(())
 }
 
 #[oneshot]
-pub(crate) async fn StorageWorker(req: StorageWorkerRequest) -> StorageWorkerResponse {
-    match router(req).await {
-        Ok(r) => r,
-        Err(e) => StorageWorkerResponse::Error(e.to_string()),
+pub(crate) async fn StorageWorker(
+    req: CorrelatedRequest<StorageWorkerRequest>,
+) -> StorageWorkerResponse {
+    let correlation_id = req.correlation_id;
+    let worker_span = tracing::info_span!(
+        "worker_request",
+        worker = WORKER_NAME,
+        correlation_id = correlation_id.as_str()
+    );
+    async move {
+        match router(req.payload).await {
+            Ok(r) => r,
+            Err(e) => StorageWorkerResponse::Error(e.to_string()),
+        }
     }
+    .instrument(worker_span)
+    .await
 }
 
 // Main router of worker requests
 pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerResponse> {
     let resp = match req {
         StorageWorkerRequest::Ping => {
-            log::trace!("[{WORKER_NAME}] ping");
+            tracing::trace!("[{WORKER_NAME}] ping");
             loop {
                 let state = INIT_STATE.with(|s| s.borrow().clone());
                 match state {
                     InitState::Ready => {
-                        log::trace!("[{WORKER_NAME}] pong");
+                        tracing::trace!("[{WORKER_NAME}] pong");
                         kick_processor();
                         return Ok(StorageWorkerResponse::Pong);
                     }
                     InitState::Failed(msg) => {
-                        log::debug!("[{WORKER_NAME}] ping -> init failed");
+                        tracing::debug!("[{WORKER_NAME}] ping -> init failed");
                         return Ok(StorageWorkerResponse::Error(msg));
                     }
                     InitState::Pending => {}
@@ -185,19 +206,19 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }
         }
         StorageWorkerRequest::SyncState => {
-            log::trace!("[{WORKER_NAME}] get current sync");
+            tracing::trace!("[{WORKER_NAME}] get current sync");
             let state = with_storage!(s => s.get_sync_metadata()?)?;
             let resp = StorageWorkerResponse::SyncState(state);
-            log::trace!("[{WORKER_NAME}] sending current sync");
+            tracing::trace!("[{WORKER_NAME}] sending current sync");
             resp
         }
         StorageWorkerRequest::SaveEvents(events_data) => {
-            log::trace!(
+            tracing::trace!(
                 "[{WORKER_NAME}] saving {} raw contract events",
                 events_data.events.len()
             );
             with_storage_mut!(s => s.save_events_batch(&events_data)?)?;
-            log::trace!(
+            tracing::trace!(
                 "[{WORKER_NAME}] sending {} raw contract events to process",
                 events_data.events.len()
             );
@@ -208,7 +229,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             metadata,
             fully_indexed,
         } => {
-            log::trace!(
+            tracing::trace!(
                 "[{WORKER_NAME}] saving bulk sync progress for {} contracts (fully_indexed={fully_indexed})",
                 metadata.len()
             );
@@ -216,24 +237,31 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::ClearIndexingCursors => {
-            log::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
+            tracing::trace!("[{WORKER_NAME}] clearing indexing cursors for RPC handoff");
             with_storage_mut!(s => s.clear_indexing_cursors()?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DeriveSaveUserKeys(address, signature, network_context) => {
-            log::trace!("[{WORKER_NAME}] deriving and saving user keys for the account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] deriving and saving user keys for the account {}",
+                Sensitive(&address)
+            );
             let (note_keypair, encryption_keypair) =
                 derive_encryption_and_note_keypairs(signature.clone())?;
             let membership_blinding = derive_membership_blinding(&signature, &network_context)?;
             with_storage_mut!(s => s.save_encryption_and_note_keypairs(&address, &note_keypair, &encryption_keypair, &membership_blinding)?)?;
-            log::trace!(
-                "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {address}"
+            tracing::trace!(
+                "[{WORKER_NAME}] saved notes, encryption keys, and ASP secret for the account {}",
+                Sensitive(&address)
             );
             kick_processor();
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::DisclaimerState(address) => {
-            log::trace!("[{WORKER_NAME}] disclaimer state for account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] disclaimer state for account {}",
+                Sensitive(&address)
+            );
             let state = with_storage_mut!(s => s.get_disclaimer_state(&address)?)?;
             StorageWorkerResponse::DisclaimerState(DisclaimerStatePayload {
                 disclaimer_text_md: state.disclaimer_text_md,
@@ -242,32 +270,40 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             })
         }
         StorageWorkerRequest::AcceptDisclaimer(address, disclaimer_hash_hex) => {
-            log::trace!("[{WORKER_NAME}] accept disclaimer for account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] accept disclaimer for account {}",
+                Sensitive(&address)
+            );
             with_storage_mut!(s => s.accept_current_disclaimer(&address, &disclaimer_hash_hex)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::GetSetting(key) => {
-            log::trace!("[{WORKER_NAME}] fetch setting {key}");
+            tracing::trace!("[{WORKER_NAME}] fetch setting {key}");
             let value_json = with_storage!(s => s.get_setting_json::<serde_json::Value>(&key)?)?
                 .map(|value| value.to_string());
             StorageWorkerResponse::Setting(value_json)
         }
         StorageWorkerRequest::SetSetting { key, value_json } => {
-            log::trace!("[{WORKER_NAME}] set setting {key}");
+            tracing::trace!("[{WORKER_NAME}] set setting {key}");
             let value: serde_json::Value = serde_json::from_str(&value_json)?;
             with_storage_mut!(s => s.set_setting_json(&key, &value)?)?;
             StorageWorkerResponse::Saved
         }
         StorageWorkerRequest::UserKeys(address) => {
-            log::trace!("[{WORKER_NAME}] fetch user keys for the account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] fetch user keys for the account {}",
+                Sensitive(&address)
+            );
             let opt = with_storage!(s => s.get_user_keys(&address)?)?;
             if opt.is_some() {
-                log::trace!(
-                    "[{WORKER_NAME}] fetched notes and encryption keys for the account {address}"
+                tracing::trace!(
+                    "[{WORKER_NAME}] fetched notes and encryption keys for the account {}",
+                    Sensitive(&address)
                 );
             } else {
-                log::trace!(
-                    "[{WORKER_NAME}] not found notes and encryption keys for the account {address}"
+                tracing::trace!(
+                    "[{WORKER_NAME}] not found notes and encryption keys for the account {}",
+                    Sensitive(&address)
                 );
             }
             StorageWorkerResponse::UserKeys(opt.map(|keys| UserKeys {
@@ -280,23 +316,33 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             }))
         }
         StorageWorkerRequest::AspSecret(address) => {
-            log::trace!("[{WORKER_NAME}] fetch ASP secret for the account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] fetch ASP secret for the account {}",
+                Sensitive(&address)
+            );
             let opt = with_storage!(s => s.get_user_keys(&address)?)?;
             StorageWorkerResponse::AspSecret(opt.map(|keys| AspSecret {
                 membership_blinding: keys.membership_blinding,
             }))
         }
         StorageWorkerRequest::UserNotes(address, limit) => {
-            log::trace!("[{WORKER_NAME}] list user notes for the account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] list user notes for the account {}",
+                Sensitive(&address)
+            );
             let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
-            log::trace!(
-                "[{WORKER_NAME}] fetched {} notes for the account {address}",
-                list.len()
+            tracing::trace!(
+                "[{WORKER_NAME}] fetched {} notes for the account {}",
+                list.len(),
+                Sensitive(&address)
             );
             StorageWorkerResponse::UserNotes(list)
         }
         StorageWorkerRequest::PortfolioBalances(address) => {
-            log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] list portfolio balances for the account {}",
+                Sensitive(&address)
+            );
             // Load the contract config from the embedded deployment JSON rather than
             // receiving it over the worker bridge: ContractConfig contains the
             // internally-tagged `AssetDescriptor` enum, which the bincode worker codec
@@ -337,15 +383,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             user_address,
             pool_contract_id,
         } => {
-            log::trace!(
-                "[{WORKER_NAME}] list all unspent notes for the account {user_address} in pool {pool_contract_id}"
+            tracing::trace!(
+                "[{WORKER_NAME}] list all unspent notes for the account {} in pool {pool_contract_id}",
+                Sensitive(&user_address)
             );
             let list = with_storage!(s =>
                 s.list_unspent_user_notes(&pool_contract_id, &user_address)?
             )?;
-            log::trace!(
-                "[{WORKER_NAME}] fetched {} unspent notes for the account {user_address}",
-                list.len()
+            tracing::trace!(
+                "[{WORKER_NAME}] fetched {} unspent notes for the account {}",
+                list.len(),
+                Sensitive(&user_address)
             );
             StorageWorkerResponse::UserNotes(list)
         }
@@ -353,15 +401,17 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             user_address,
             pool_contract_id,
         } => {
-            log::trace!(
-                "[{WORKER_NAME}] list all notes for the account {user_address} in pool {pool_contract_id}"
+            tracing::trace!(
+                "[{WORKER_NAME}] list all notes for the account {} in pool {pool_contract_id}",
+                Sensitive(&user_address)
             );
             let list = with_storage!(s =>
                 s.list_pool_user_notes(&pool_contract_id, &user_address)?
             )?;
-            log::trace!(
-                "[{WORKER_NAME}] fetched {} notes for the account {user_address}",
-                list.len()
+            tracing::trace!(
+                "[{WORKER_NAME}] fetched {} notes for the account {}",
+                list.len(),
+                Sensitive(&user_address)
             );
             StorageWorkerResponse::UserNotes(list)
         }
@@ -369,7 +419,10 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             address,
             public_key_registry_contract_id,
         } => {
-            log::trace!("[{WORKER_NAME}] lookup public keys for {address}");
+            tracing::trace!(
+                "[{WORKER_NAME}] lookup public keys for {}",
+                Sensitive(&address)
+            );
             let lookup = with_storage!(s =>
                 s.recipient_lookup(&address, &public_key_registry_contract_id)?
             )?;
@@ -380,7 +433,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             asp_membership_contract_id,
             public_key_registry_contract_id,
         } => {
-            log::trace!("[{WORKER_NAME}] fetch operational feed");
+            tracing::trace!("[{WORKER_NAME}] fetch operational feed");
             let list = with_storage!(s =>
                 s.get_operational_feed(
                     limit,
@@ -391,7 +444,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             StorageWorkerResponse::OperationalFeed(list)
         }
         StorageWorkerRequest::DisclosureInputs(req) => {
-            log::trace!(
+            tracing::trace!(
                 "[{WORKER_NAME}] build selective disclosure inputs for {}",
                 req.user_address
             );
@@ -409,13 +462,13 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             membership_blinding,
             pubkey,
         }) => {
-            log::trace!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
+            tracing::trace!("[{WORKER_NAME}] derive user leaf from the pubkey for the admin");
             let user_leaf = asp_membership_leaf(&pubkey, &membership_blinding)?;
-            log::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
+            tracing::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
             StorageWorkerResponse::DeriveASPleaf(user_leaf)
         }
         StorageWorkerRequest::Transact(req) => {
-            log::trace!("[{WORKER_NAME}] transact");
+            tracing::trace!("[{WORKER_NAME}] transact");
             with_storage_mut!(storage => match build_transact_params(storage, &req)? {
                 BuildTransactParams::Ready(params) => StorageWorkerResponse::TransactParams(*params),
                 BuildTransactParams::MembershipSync(status) => {
@@ -438,7 +491,7 @@ fn kick_processor() {
 async fn run_processor_loop(mut rx: mpsc::Receiver<()>) {
     while let Some(()) = rx.next().await {
         if let Err(e) = process_until_empty().await {
-            log::error!("[{WORKER_NAME}] events processing failed: {e:#}");
+            tracing::error!("[{WORKER_NAME}] events processing failed: {e:#}");
         }
     }
 }
@@ -477,8 +530,13 @@ impl StorageBridge {
         req: StorageWorkerRequest,
         timeout_ms: u32,
     ) -> anyhow::Result<StorageWorkerResponse> {
+        let correlated_req = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".to_string()),
+            payload: req,
+        };
         let mut bridge = self.bridge.fork();
-        let fut = bridge.run(req).fuse();
+        let fut = bridge.run(correlated_req).fuse();
         let timeout = TimeoutFuture::new(timeout_ms).fuse();
 
         futures::pin_mut!(fut, timeout);

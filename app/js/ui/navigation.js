@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -146,6 +146,17 @@ async function loadRuntimeState() {
     const bootnodeSetting = await storage.getBootnodeConfig();
     App.state.settings.bootnode = bootnodeSetting || { enabled: false, url: '' };
 
+    const telemetrySetting = await storage.getSetting('telemetry_config');
+    App.state.settings.telemetry = telemetrySetting || { level: 'info', revealSensitive: false };
+    try {
+        await configureTelemetrySettings({
+            level: App.state.settings.telemetry.level,
+            revealSensitive: App.state.settings.telemetry.revealSensitive,
+        });
+    } catch (e) {
+        console.warn('Failed to configure telemetry:', e);
+    }
+
     App.events.dispatchEvent(new CustomEvent('pool:config'));
     App.events.dispatchEvent(new CustomEvent('settings:updated'));
 }
@@ -203,6 +214,8 @@ function renderSettingsDrawer() {
     document.getElementById('settings-explorer-input').value = App.state.settings.explorerBaseUrl || Utils.defaultExplorerBaseUrl;
     document.getElementById('settings-bootnode-enabled').checked = !!App.state.settings.bootnode?.enabled;
     document.getElementById('settings-bootnode-url').value = App.state.settings.bootnode?.url || '';
+    document.getElementById('settings-log-level').value = App.state.settings.telemetry?.level || 'info';
+    document.getElementById('settings-reveal-sensitive').checked = !!App.state.settings.telemetry?.revealSensitive;
 }
 
 export const Shell = {
@@ -224,6 +237,32 @@ export const Shell = {
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
         document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
+        document.getElementById('settings-copy-logs-btn')?.addEventListener('click', async () => {
+            try {
+                const logs = await dumpTelemetryLogs();
+                await navigator.clipboard.writeText(logs);
+                Toast.show('Diagnostic logs copied to clipboard', 'success');
+            } catch (error) {
+                Toast.show('Failed to copy logs: ' + error.message, 'error');
+            }
+        });
+        document.getElementById('settings-download-logs-btn')?.addEventListener('click', async () => {
+            try {
+                const logs = await dumpTelemetryLogs();
+                const blob = new Blob([logs], { type: 'text/plain;charset=utf-8' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = 'spp-diagnostics.log';
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(url);
+                Toast.show('Diagnostic logs download started', 'success');
+            } catch (error) {
+                Toast.show('Failed to download logs: ' + error.message, 'error');
+            }
+        });
         document.getElementById('settings-reveal-secret')?.addEventListener('click', async (e) => {
             const btn = e.currentTarget;
             const revealing = btn.dataset.revealed !== 'true';
@@ -452,6 +491,8 @@ export const Wallet = {
             const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
+            const logLevel = document.getElementById('settings-log-level')?.value || 'info';
+            const revealSensitive = !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
             await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });
@@ -459,9 +500,17 @@ export const Wallet = {
                 enabled: !!bootnodeEnabled,
                 url: bootnodeEnabled ? bootnodeUrl : '',
             });
+            await storage.setSetting('telemetry_config', { level: logLevel, revealSensitive });
 
             App.state.settings.explorerBaseUrl = explorerBaseUrl;
             App.state.settings.bootnode = { enabled: !!bootnodeEnabled, url: bootnodeEnabled ? bootnodeUrl : '' };
+            App.state.settings.telemetry = { level: logLevel, revealSensitive };
+
+            await configureTelemetrySettings({
+                level: logLevel,
+                revealSensitive,
+            });
+
             Toast.show('Settings saved', 'success');
             App.events.dispatchEvent(new CustomEvent('settings:updated'));
         } catch (error) {

@@ -239,7 +239,7 @@ impl<S: Storage> BackgroundSync<S> {
             return Ok(());
         }
 
-        log::info!(
+        tracing::info!(
             "background sync starting (bootnode={})",
             self.bootnode_url.as_deref().unwrap_or("<none>")
         );
@@ -252,18 +252,18 @@ impl<S: Storage> BackgroundSync<S> {
         .await
         {
             Ok(indexer) => {
-                log::info!("background sync: main RPC indexer ready");
+                tracing::info!("background sync: main RPC indexer ready");
                 indexer
             }
             Err(e) if is_rpc_sync_gap(&e) => {
                 if self.is_stopped() {
                     return Ok(());
                 }
-                log::warn!("background sync: main RPC sync gap, switching to bootnode");
+                tracing::warn!("background sync: main RPC sync gap, switching to bootnode");
                 match self.bootnode_catch_up().await {
                     Ok(()) => {}
                     Err(_) if self.is_stopped() => {
-                        log::info!("background sync stopped during bootnode catch-up");
+                        tracing::info!("background sync stopped during bootnode catch-up");
                         return Ok(());
                     }
                     Err(e) => return Err(e),
@@ -271,7 +271,7 @@ impl<S: Storage> BackgroundSync<S> {
                 if self.is_stopped() {
                     return Ok(());
                 }
-                log::info!("background sync: bootnode catch-up finished, resuming main RPC");
+                tracing::info!("background sync: bootnode catch-up finished, resuming main RPC");
                 Indexer::init(
                     self.rpc.clone(),
                     self.storage.fork()?,
@@ -285,11 +285,11 @@ impl<S: Storage> BackgroundSync<S> {
 
         loop {
             if self.is_stopped() {
-                log::info!("background sync stopped");
+                tracing::info!("background sync stopped");
                 return Ok(());
             }
             if let Err(e) = catch_up_loop(&indexer, &self.storage, Some(self.stop.as_ref())).await {
-                log::error!("background sync fetch failed: {e:#}");
+                tracing::error!("background sync fetch failed: {e:#}");
             }
             self.kick.wait_timeout(BACKGROUND_SYNC_INTERVAL_MS).await;
         }
@@ -392,7 +392,7 @@ async fn bootnode_catch_up<S: Storage>(
         ));
     };
 
-    log::info!("main RPC sync gap, trying bootnode at {bootnode}");
+    tracing::info!("main RPC sync gap, trying bootnode at {bootnode}");
     storage.clear_indexing_cursors().await?;
 
     let bootnode_client =
@@ -402,7 +402,7 @@ async fn bootnode_catch_up<S: Storage>(
         match Indexer::init(bootnode_client, storage.fork()?, contract_config).await {
             Ok(indexer) => indexer,
             Err(e) if is_retention_handoff_err(&e) => {
-                log::info!("bootnode handoff, resuming on main RPC");
+                tracing::info!("bootnode handoff, resuming on main RPC");
                 return Ok(());
             }
             Err(e) => return Err(Error::Other(format!("bootnode indexer: {e:#}"))),
@@ -427,14 +427,14 @@ async fn bootnode_catch_up<S: Storage>(
                 if e.downcast_ref::<RpcError>()
                     .is_some_and(is_retention_handoff) =>
             {
-                log::info!("bootnode handoff, resuming on main RPC");
+                tracing::info!("bootnode handoff, resuming on main RPC");
                 storage.clear_indexing_cursors().await?;
                 return Ok(());
             }
             // bootnode generic error
             Err(e) => {
                 consecutive_failures = consecutive_failures.saturating_add(1);
-                log::error!(
+                tracing::error!(
                     "bootnode sync round failed ({consecutive_failures}/{BOOTNODE_CATCH_UP_MAX_FAILURES}): {e:#}"
                 );
                 if consecutive_failures >= BOOTNODE_CATCH_UP_MAX_FAILURES {

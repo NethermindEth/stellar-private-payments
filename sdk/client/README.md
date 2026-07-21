@@ -97,6 +97,19 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 
 Private note/encryption keys stay in storage and are not exposed through the SDK.
 
+## Logging & Diagnostics
+
+The SDK integrates with the `tracing` ecosystem. You can initialize a default tracing subscriber for native binaries/tests:
+
+```rust
+use stellar_private_payments_sdk::init_tracing;
+
+fn main() {
+    // Installs a subscriber logging to stdout based on RUST_LOG env var
+    init_tracing();
+}
+```
+
 ## Browser / WASM
 
 See [`../web/README.md`](../web/README.md). JS method names align with Rust where possible (`operationalFeed`, `recipientLookup`, `userPublicKeys`, `isRegistered`).

@@ -88,6 +88,7 @@ mod account;
 pub mod blocking;
 mod client;
 mod core;
+mod correlation;
 mod error;
 mod handle;
 mod plan;
@@ -100,7 +101,7 @@ mod sync;
 mod transact;
 
 pub use account::Account;
-pub use client::Client;
+pub use client::{Client, init_tracing};
 pub use core::PoolCore;
 pub use disclosure::{
     BuildDisclosureInputs, DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams,
