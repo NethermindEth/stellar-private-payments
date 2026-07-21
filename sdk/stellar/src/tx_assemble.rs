@@ -1,7 +1,7 @@
 //! Apply Soroban RPC simulation output to an unsigned transaction envelope.
 
 use anyhow::{Result, anyhow};
-use stellar_xdr::curr::{
+use stellar_xdr::{
     self as xdr, Limits, ReadXdr, SorobanAuthorizationEntry, SorobanTransactionData, WriteXdr,
 };
 
@@ -146,7 +146,7 @@ impl PreparedSorobanTx {
 #[cfg(test)]
 pub(crate) mod test_fixtures {
     use super::*;
-    use stellar_xdr::curr::{
+    use stellar_xdr::{
         HostFunction, InvokeContractArgs, InvokeHostFunctionOp, LedgerFootprint, Memo,
         MuxedAccount, Operation, OperationBody, Preconditions, ScAddress, ScSymbol, SequenceNumber,
         SorobanAddressCredentials, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
@@ -226,7 +226,7 @@ pub(crate) mod test_fixtures {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use stellar_xdr::curr::{Limits, TransactionExt, WriteXdr};
+    use stellar_xdr::{Limits, TransactionExt, WriteXdr};
     use test_fixtures::{empty_envelope, empty_soroban_data};
 
     #[test]

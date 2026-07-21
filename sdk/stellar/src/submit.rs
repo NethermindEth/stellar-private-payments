@@ -1,7 +1,7 @@
 //! Submit and confirm Soroban transactions via RPC.
 
 use anyhow::{Context, Result, bail};
-use stellar_xdr::curr::TransactionEnvelope;
+use stellar_xdr::TransactionEnvelope;
 
 use crate::rpc::Client;
 

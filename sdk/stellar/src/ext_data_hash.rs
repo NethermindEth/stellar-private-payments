@@ -2,7 +2,7 @@ use anyhow::Result;
 use core::ops::Rem;
 use sha3::{Digest, Keccak256};
 use std::convert::TryInto;
-use stellar_xdr::curr::{Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr};
+use stellar_xdr::{Limits, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal, WriteXdr};
 use types::{BN254_MODULUS_BE, ExtData, U256};
 
 use crate::conversions::i128_to_i256_scval;
@@ -32,7 +32,7 @@ pub fn hash_ext_data_offchain(ext: &ExtData) -> Result<[u8; 32]> {
 
     let mut map_entries: Vec<ScMapEntry> = Vec::with_capacity(entries.len());
     for (k, v) in entries {
-        let sym: stellar_xdr::curr::StringM<32> = k.try_into()?;
+        let sym: stellar_xdr::StringM<32> = k.try_into()?;
         map_entries.push(ScMapEntry {
             key: ScVal::Symbol(ScSymbol(sym)),
             val: v,
