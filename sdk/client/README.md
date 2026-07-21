@@ -100,31 +100,16 @@ Private note/encryption keys stay in storage and are not exposed through the SDK
 
 ## Logging & Diagnostics
 
-The SDK emits `tracing` spans and events but does **not** install a subscriber —
-that is the consumer's responsibility, so the library stays free of a
-`tracing-subscriber` dependency. Install one in your binary/tests, and include
-[`types::CorrelationIdLayer`] so nested SDK calls inherit an ambient
-`correlation_id`:
+The SDK integrates with the `tracing` ecosystem. You can initialize a default tracing subscriber for native binaries/tests:
 
 ```rust
-use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
-use stellar_private_payments_sdk::types::CorrelationIdLayer;
+use stellar_private_payments_sdk::init_tracing;
 
 fn main() {
-    let filter = tracing_subscriber::EnvFilter::try_from_default_env()
-        .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info"));
-    let _ = tracing_subscriber::registry()
-        .with(filter)
-        .with(tracing_subscriber::fmt::layer())
-        .with(CorrelationIdLayer)
-        .try_init();
+    // Installs a subscriber logging to stdout based on RUST_LOG env var
+    init_tracing();
 }
 ```
-
-See the CLI's `logging` module for a full example (human vs. JSON output) configuring the `TelemetryConfig` sink.
-
-### Intermediate SDK Logs
-Intermediate transaction lifecycle steps (simulating, submitting, confirming) are instrumented at the `info!` level in the `stellar` and `client` crates. Every operation uses an inherited or generated `correlation_id` so that the entire blocking call trace (e.g., `pool.deposit()`) can be correlated end-to-end. To view these steps, ensure your tracing subscriber or `TelemetryConfig` filters include at least `info` for `stellar_private_payments_sdk` and `stellar`.
 
 ## Browser / WASM
 

@@ -78,7 +78,7 @@ pub struct SpendSession {
 
 impl SpendSession {
     /// Create a new SpendSession from a wallet, amount, and target.
-    #[tracing::instrument(skip_all, fields(stage = "spend_session_setup", correlation_id = %correlation_id_or_new(), wallet_size = wallet.len(), amount = ?types::Sensitive(&amount), target = ?types::Sensitive(&target)))]
+    #[tracing::instrument(skip(wallet), fields(stage = "spend_session_setup", wallet_size = wallet.len(), amount = ?amount, target = ?target))]
     pub fn setup(
         wallet: Vec<SpendableNote>,
         amount: NoteAmount,
@@ -119,7 +119,7 @@ impl SpendSession {
     }
 
     /// Materialize the next planned step into a transaction payload.
-    #[tracing::instrument(skip_all, fields(stage = "spend_session_step", correlation_id = %correlation_id_or_new(), step_index = self.step_index, is_done = self.is_done()))]
+    #[tracing::instrument(skip(self), fields(stage = "spend_session_step", step_index = self.step_index, is_done = self.is_done()))]
     pub fn step(&self) -> Result<Option<Transact>, SpendSessionError> {
         if self.is_done() {
             tracing::debug!(
