@@ -77,5 +77,9 @@ generate() {
     echo "Generated $txt_path ($count dependencies)"
 }
 
+# circuits/src/circomlib is intentionally excluded here: its npm dependencies
+# are build/test-time-only tooling (see the GPL-3.0/LGPL-3.0 exceptions in
+# .github/js-license-policy.json), never shipped in a distributed artifact —
+# do not add a third `generate` call for it without re-checking that.
 generate "app" "app/package-lock.json"
 generate "sdk-web" "sdk/web/package-lock.json"

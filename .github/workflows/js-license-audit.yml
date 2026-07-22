@@ -3,6 +3,8 @@ name: JS License Audit
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
   schedule:
     - cron: '0 3 * * *'
   workflow_dispatch:
@@ -26,7 +28,29 @@ jobs:
           # the dependency-review action, which expects a comma-separated string.
           # Only allow-licenses is wired; deny-licenses is intentionally omitted
           # because the two inputs are mutually exclusive upstream.
-          ALLOWLIST=$(jq -r '.allowlist | join(", ")' .github/js-license-policy.json)
+          #
+          # IMPORTANT: dependency-review-action's allow-licenses matcher
+          # (@onebeyond/spdx-license-satisfies, via parseLicensesArray) throws
+          # if ANY entry in the list is a compound AND/OR SPDX expression —
+          # and that exception is caught internally and silently treated as
+          # "no match", which would fail EVERY dependency in the PR, not just
+          # the one with a compound license. Filter those entries out here;
+          # the affected package is excused individually below instead via
+          # allow-dependencies-licenses. (Verified against the action's actual
+          # source and its @onebeyond/spdx-license-satisfies@1.0.1 dependency
+          # at the pinned SHA — this is not hypothetical.)
+          #
+          # ALSO: the action's own config validation rejects any allow-licenses
+          # entry that its bundled spdx-expression-parse@3.0.1 (via
+          # spdx-license-ids@3.0.16, both pinned at this action's SHA) doesn't
+          # recognize as a real SPDX id — confirmed live in CI with
+          # "Invalid license(s) in allow-licenses: Unicode-3.0" (that id was
+          # added to the official SPDX list after this pinned version was
+          # published). Checked every remaining allowlist entry against these
+          # exact pinned versions locally; Unicode-3.0 is the only failure.
+          # No dependency in app/ or sdk/web/ actually uses Unicode-3.0, so
+          # dropping it here has no effect on real coverage.
+          ALLOWLIST=$(jq -r '[.allowlist[] | select(test(" AND | OR ") | not) | select(. != "Unicode-3.0")] | join(", ")' .github/js-license-policy.json)
           echo "allowlist=$ALLOWLIST" >> $GITHUB_OUTPUT
 
       - name: Dependency Review Action
@@ -34,6 +58,11 @@ jobs:
         with:
           # Wire allowlist into the action. Any license not on this list fails the PR.
           allow-licenses: ${{ steps.policy.outputs.allowlist }}
+          # app's sha.js reports the compound license "(MIT AND BSD-3-Clause)",
+          # which cannot be expressed in allow-licenses (see comment above) —
+          # excuse it by package identity instead, which uses a separate code
+          # path unaffected by the same-array conjunction restriction.
+          allow-dependencies-licenses: "pkg:npm/sha.js"
 
   full-tree-scan:
     name: Full-Tree License Scan
@@ -41,6 +70,22 @@ jobs:
     steps:
       - name: Check out
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Check out circomlib
+        # circomlib is not vendored in this repo (circuits/build.rs clones it
+        # at build time); check-js-licenses.sh scans its package-lock.json as
+        # one of its three targets, and treats a missing target as a hard
+        # failure (not just reduced coverage) — so it must be present here.
+        # Mirrors cli-release.yml's build-cli "Prepare circuits inputs" step.
+        shell: bash
+        run: |
+          set -eu
+          LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          if [ ! -d circuits/src/circomlib/.git ]; then
+            git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
+          fi
+          git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
+          git -C circuits/src/circomlib checkout --detach FETCH_HEAD
 
       - name: Run Full-Tree License Audit
         run: |

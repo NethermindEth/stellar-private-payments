@@ -7,11 +7,11 @@
     "0BSD",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    "BlueOak-1.0.0",
     "BSD-2-Clause",
     "BSD-2-Clause-Patent",
     "BSD-3-Clause",
     "BSL-1.0",
+    "BlueOak-1.0.0",
     "CC-BY-1.0",
     "CC-BY-2.0",
     "CC-BY-3.0",
@@ -26,13 +26,12 @@
     "MS-PL",
     "OpenSSL",
     "PostgreSQL",
-    "Python-2.0",
     "SHL-0.5",
     "SHL-0.51",
     "TCP-wrappers",
+    "UPL-1.0",
     "Unicode-3.0",
     "Unicode-DFS-2016",
-    "UPL-1.0",
     "W3C-20150513",
     "WTFPL",
     "Xnet",
@@ -68,7 +67,7 @@
       "license": "UNKNOWN",
       "target": "app/package-lock.json",
       "justification": "Local workspace package loaded via file reference. Actual package is Apache-2.0.",
-      "approver": "PENDING_PR_REVIEW"
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -90,25 +89,33 @@
       ],
       "license": "GPL-3.0",
       "target": "circuits/src/circomlib/package-lock.json",
-      "justification": "Build-tool only, not linked into or distributed with runtime artifacts; mirrors deny.toml circuits exception. circomlib build-time dependencies.",
+      "justification": "Build-tool only, not linked into or distributed with runtime artifacts; mirrors deny.toml circuits exception. circomlib build-time dependencies. circuits/build.rs never invokes npm/node (only git clone/fetch of .circom sources), so node_modules is never populated in CI; deployments/scripts/package-circuits-source-bundle.sh additionally prunes any node_modules directory from the redistributed source bundle as a guarantee, in case node_modules exists on a machine running the script outside CI.",
       "approver": "PENDING_PR_REVIEW"
     },
     {
       "package": "circomlib",
       "license": "LGPL-3.0",
       "target": "circuits/src/circomlib/package-lock.json",
-      "justification": "Build-tool only, not linked into or distributed with runtime artifacts; mirrors deny.toml circuits exception.",
+      "justification": "circomlib's .circom sources ARE compiled into shipped circuit artifacts (unlike the GPL-3.0 devDependency exception above, which is genuinely build-tool-only). LGPL-3.0's source-availability obligation for this linked component is satisfied via deployments/scripts/package-circuits-source-bundle.sh, which redistributes circomlib's source alongside the compiled dist/circuits/ artifacts; mirrors deny.toml circuits exception.",
       "approver": "PENDING_PR_REVIEW"
     },
     {
       "packages": [
-        "b4a",
         "web-worker"
       ],
       "license": "Apache-2.0",
       "target": "circuits/src/circomlib/package-lock.json",
-      "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to Apache-2.0 via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to Apache-2.0 via npm registry metadata at the locked version (verified with scripts/verify-exception-licenses.sh). See: https://www.npmjs.com/package/web-worker",
+      "approver": "marko.cupic@nethermind.io"
+    },
+    {
+      "packages": [
+        "b4a"
+      ],
+      "license": "ISC",
+      "target": "circuits/src/circomlib/package-lock.json",
+      "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to ISC via npm registry metadata at the locked version (b4a@1.5.3). Note: b4a relicensed to Apache-2.0 in later major versions, but the version pinned in this lockfile is ISC — verified with scripts/verify-exception-licenses.sh, which checks the locked version specifically rather than `latest` to avoid this exact class of error. See: https://www.npmjs.com/package/b4a",
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -116,8 +123,8 @@
       ],
       "license": "BSD-2-Clause",
       "target": "circuits/src/circomlib/package-lock.json",
-      "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to BSD-2-Clause via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to BSD-2-Clause via npm registry metadata. The registry only exposes a generic \"BSD\" tag for this version (not a specific SPDX identifier); manually confirmed BSD-2-Clause by inspecting the bundled esprima.js license header (exactly the two BSD-2-Clause clauses, no advertising/endorsement clause) — see https://www.npmjs.com/package/esprima.",
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -126,7 +133,7 @@
       "license": "BSD-3-Clause",
       "target": "circuits/src/circomlib/package-lock.json",
       "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to BSD-3-Clause via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -147,7 +154,7 @@
       "license": "ISC",
       "target": "circuits/src/circomlib/package-lock.json",
       "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to ISC via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -210,7 +217,7 @@
       "license": "MIT",
       "target": "circuits/src/circomlib/package-lock.json",
       "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to MIT via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "approver": "marko.cupic@nethermind.io"
     },
     {
       "packages": [
@@ -219,7 +226,7 @@
       "license": "Python-2.0",
       "target": "circuits/src/circomlib/package-lock.json",
       "justification": "License field missing in package-lock.json for circomlib build-tool dependencies; resolved to Python-2.0 via npm registry metadata.",
-      "approver": "PENDING_PR_REVIEW"
+      "approver": "marko.cupic@nethermind.io"
     }
   ]
 }
