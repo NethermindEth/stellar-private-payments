@@ -1,4 +1,8 @@
-use crate::{AppState, messages::GetEventsParams, storage::InsertGetEventsPage};
+use crate::{
+    AppState,
+    messages::GetEventsParams,
+    storage::{InsertGetEventsPage, InsertPageOutcome},
+};
 use metrics::{counter, gauge};
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
@@ -46,6 +50,7 @@ impl Indexer {
 
         let kv = self.state.storage.load_kv().await?;
         let mut cursor = kv.last_cursor;
+        let mut progress_ledger = kv.last_fully_indexed_ledger;
 
         let mut start_ledger = cursor.is_none().then_some(self.state.min_deployment_ledger);
         let page_size = self.state.cfg.page_size;
@@ -65,36 +70,65 @@ impl Indexer {
             let event_count = result.events.len();
             let is_empty = event_count == 0;
             let full_page = event_count == page_size as usize;
-            let progress_ledger = last_event_ledger.unwrap_or(result.latest_ledger);
-            let at_events_tip = !is_empty && !full_page && progress_ledger >= result.latest_ledger;
-            let fully_indexed = is_empty || at_events_tip;
+            if let Some(ledger) = last_event_ledger {
+                progress_ledger = progress_ledger.max(ledger);
+            }
+            let at_tip = is_empty
+                || (!full_page && progress_ledger > 0 && progress_ledger >= result.latest_ledger);
 
             if !is_empty {
                 self.state.storage.set_in_sync(false).await?;
-                self.state
-                    .storage
-                    .insert_get_events_page(InsertGetEventsPage {
-                        cursor_in: cursor.as_deref(),
-                        start_ledger,
-                        request: &params,
-                        result: &result,
-                        cursor_out: &cursor_out,
-                        last_event_ledger,
-                        latest_ledger: result.latest_ledger,
-                        oldest_ledger: result.oldest_ledger,
-                    })
-                    .await?;
+            }
+            // Always persist, including empty pages, so clients can follow
+            // upstream cursors across sparse/empty gaps.
+            //
+            // Persist before advancing `last_cursor`. A no-op insert of a
+            // non-empty page (historical bug: sealed empty ignored events)
+            // must not move the indexer past a cursor clients are still on.
+            let outcome = self
+                .state
+                .storage
+                .insert_get_events_page(InsertGetEventsPage {
+                    cursor_in: cursor.as_deref(),
+                    start_ledger,
+                    request: &params,
+                    result: &result,
+                    cursor_out: &cursor_out,
+                    last_event_ledger,
+                    latest_ledger: result.latest_ledger,
+                    oldest_ledger: result.oldest_ledger,
+                })
+                .await?;
+            if !is_empty
+                && cursor.is_some()
+                && matches!(
+                    outcome,
+                    InsertPageOutcome::Unchanged {
+                        existing_had_events: false
+                    }
+                )
+            {
+                anyhow::bail!(
+                    "non-empty upstream page not cached for cursor_in={}; \
+                     refusing to advance indexer cursor",
+                    cursor.as_deref().expect("cursor checked")
+                );
             }
 
             cursor = Some(cursor_out);
             start_ledger = None;
 
-            if fully_indexed {
+            if at_tip {
+                let caught_up_ledger = if is_empty {
+                    result.latest_ledger
+                } else {
+                    progress_ledger
+                };
                 self.state
                     .storage
-                    .mark_caught_up(cursor.as_deref().expect("cursor set"), result.latest_ledger)
+                    .mark_caught_up(cursor.as_deref().expect("cursor set"), caught_up_ledger)
                     .await?;
-                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(result.latest_ledger));
+                gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(caught_up_ledger));
                 may_have_more = false;
                 break;
             }
@@ -102,6 +136,10 @@ impl Indexer {
             self.state
                 .storage
                 .update_cursor(cursor.as_deref().expect("cursor set"))
+                .await?;
+            self.state
+                .storage
+                .set_last_fully_indexed_ledger(progress_ledger)
                 .await?;
             may_have_more = true;
         }
