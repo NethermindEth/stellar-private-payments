@@ -9,12 +9,23 @@ pragma circom 2.2.2;
 // circuit. Encryption is a field addition of a Poseidon2-derived keystream
 //  whose security rests on ECDH hardness and the pseudo-randomness of Poseidon2.
 //
-// Domain separation tags 
+// Domain separation tags
 //   0x05 - ephemeral scalar `r` derivation
-//   0x06 - keystream KDF lanes
+//   0x06 - keystream KDF
+//
+// Encryption is deterministic: R = H(note, D, nonce, idx)*G, so confidentiality also rests on the entropy of
+// `blinding`.
+// Some of the requirements that cannot be enforced in-circuit and need to be 
+// done at the contract level:
+//   - `nonce` must be unique per transaction; a reused nonce makes identical
+//     notes produce identical (R, c) and publicly linkable.
+//   - every encryption sharing a nonce must receive a distinct `idx`, including
+//     across input and output note sets when composed into a transaction circuit.
 
 include "./poseidon2/poseidon2_hash.circom";
+include "./poseidon2/poseidon2_perm.circom";
 include "./circomlib/circuits/babyjub.circom";
+include "./circomlib/circuits/comparators.circom";
 include "./circomlib/circuits/escalarmulfix.circom";
 include "./circomlib/circuits/escalarmulany.circom";
 include "./circomlib/circuits/bitify.circom";
@@ -24,7 +35,7 @@ template GlobalViewKeyEncryption() {
     /** PUBLIC INPUTS **/
     signal input D[2];          // D (authority Baby JubJub public key)
     signal input nonce;         // Unique nonce
-    signal input idx;           // Note iper-note index, so sibling notes in the same transaction never reuse a keystream.
+    signal input idx;           // Per-note index, so sibling notes in the same transaction never reuse a keystream.
     
     /** PRIVATE INPUTS **/
     signal input pk;            // pk of note
@@ -46,7 +57,7 @@ template GlobalViewKeyEncryption() {
 
     // 2. Derive the ephemeral scalar r
     // Chained absorb over all context to bind r and prevent nonce/keystream reuse.
-    // TODO: Support larger Poseidon2 sizes to reduce the chaning
+    // TODO: Support larger Poseidon2 sizes to reduce the chaining
     component h1 = Poseidon2(3);
     h1.inputs[0] <== pk;
     h1.inputs[1] <== amount;
@@ -103,6 +114,14 @@ template GlobalViewKeyEncryption() {
     dbl3.x <== dbl2.xout;
     dbl3.y <== dbl2.yout;
 
+    // Reject low-order D. 8*D always lies in the prime-order
+    // subgroup, so x(8*D) = 0 iff 8*D is the identity. In which case
+    // EscalarMulAny silently outputs S = (0,1) and the keystream becomes
+    // publicly computable. BabyCheck does not catch this as low-order points are still on the curve.
+    component lowOrderCheck = IsZero();
+    lowOrderCheck.in <== dbl3.xout;
+    lowOrderCheck.out === 0;
+
     component mulD = EscalarMulAny(254);
     for (var i = 0; i < 254; i++) {
         mulD.e[i] <== rBits.out[i];
@@ -116,30 +135,20 @@ template GlobalViewKeyEncryption() {
 
 
     // 5. Keystream
-    // One field element per lane: k_i = H(S.x, S.y, i). The nonce is already
-    // bound into r (and into S), so it does not re-enter the KDF.
-    component kdf1 = Poseidon2(3);
-    kdf1.inputs[0] <== S[0];
-    kdf1.inputs[1] <== S[1];
-    kdf1.inputs[2] <== 1;
-    kdf1.domainSeparation <== 0x06;
+    // One Poseidon2 permutation over (S.x, S.y, 0, dom) yields all three pads
+    // as distinct rate lanes k_i = out[i]. out[3] is never exposed and acts as
+    // the capacity. The nonce is already bound into r (and into S), so it does
+    // not re-enter the KDF.
+    component kdf = Permutation(4);
+    kdf.inputs[0] <== S[0];
+    kdf.inputs[1] <== S[1];
+    kdf.inputs[2] <== 0;
+    kdf.inputs[3] <== 0x06;
 
-    component kdf2 = Poseidon2(3);
-    kdf2.inputs[0] <== S[0];
-    kdf2.inputs[1] <== S[1];
-    kdf2.inputs[2] <== 2;
-    kdf2.domainSeparation <== 0x06;
-
-    component kdf3 = Poseidon2(3);
-    kdf3.inputs[0] <== S[0];
-    kdf3.inputs[1] <== S[1];
-    kdf3.inputs[2] <== 3;
-    kdf3.domainSeparation <== 0x06;
-
-    // 6. Encrypt (additive stream cipher)
-    c1 <== pk + kdf1.out;
-    c2 <== amount + kdf2.out;
-    c3 <== blinding + kdf3.out;
+    // 6. Encrypt
+    c1 <== pk + kdf.out[0];
+    c2 <== amount + kdf.out[1];
+    c3 <== blinding + kdf.out[2];
 }
 
 // Encrypts `nNotes` notes under a shared administrator key `D` and `nonce`.
