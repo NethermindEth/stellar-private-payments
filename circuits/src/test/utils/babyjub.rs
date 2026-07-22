@@ -140,7 +140,10 @@ mod tests {
 
     #[test]
     fn base8_is_on_curve() {
-        assert!(is_on_curve(base8()), "BASE8 must satisfy the curve equation");
+        assert!(
+            is_on_curve(base8()),
+            "BASE8 must satisfy the curve equation"
+        );
     }
 
     #[test]
@@ -164,6 +167,9 @@ mod tests {
         let g = base8();
         let a = Scalar::from(123456u64);
         let b = Scalar::from(654321u64);
-        assert_eq!(scalar_mul(g, a + b), add(scalar_mul(g, a), scalar_mul(g, b)));
+        assert_eq!(
+            scalar_mul(g, a + b),
+            add(scalar_mul(g, a), scalar_mul(g, b))
+        );
     }
 }
