@@ -6,6 +6,7 @@ use stellar_xdr::curr::TransactionEnvelope;
 use crate::rpc::Client;
 
 /// Submits a signed transaction; returns the transaction hash.
+#[tracing::instrument(name = "submit_tx", level = "info", skip_all, fields(correlation_id = %types::correlation_id_or_new()))]
 pub async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<String> {
     let send = rpc
         .send_transaction(signed_tx)
@@ -15,6 +16,7 @@ pub async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<
     if hash.is_empty() {
         bail!("sendTransaction returned empty hash");
     }
+    tracing::info!(hash = %hash, "transaction_submitted");
     Ok(hash)
 }
 
@@ -26,20 +28,28 @@ pub enum TxConfirmStatus {
 }
 
 /// Polls transaction status once.
+#[tracing::instrument(name = "confirm_tx", level = "info", skip_all, fields(correlation_id = %types::correlation_id_or_new(), hash = %hash))]
 pub async fn confirm_tx(rpc: &Client, hash: &str) -> Result<TxConfirmStatus> {
     let status = rpc
         .get_transaction(hash)
         .await
         .with_context(|| format!("getTransaction failed for {hash}"))?;
     match status.status.as_str() {
-        "SUCCESS" => Ok(TxConfirmStatus::Success),
+        "SUCCESS" => {
+            tracing::info!(hash = %hash, status = "SUCCESS", "transaction_confirmed");
+            Ok(TxConfirmStatus::Success)
+        }
         "FAILED" => {
             let detail = status
                 .result_xdr
                 .map(|xdr| format!(" (resultXdr: {xdr})"))
                 .unwrap_or_default();
+            tracing::warn!(hash = %hash, status = "FAILED", detail_len = detail.len(), "transaction_failed");
             Ok(TxConfirmStatus::Failed { detail })
         }
-        _ => Ok(TxConfirmStatus::Pending),
+        _ => {
+            tracing::debug!(hash = %hash, "transaction_pending");
+            Ok(TxConfirmStatus::Pending)
+        }
     }
 }

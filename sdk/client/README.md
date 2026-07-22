@@ -120,7 +120,10 @@ fn main() {
 }
 ```
 
-See the CLI's `logging` module for a full example (human vs. JSON output).
+See the CLI's `logging` module for a full example (human vs. JSON output) configuring the `TelemetryConfig` sink.
+
+### Intermediate SDK Logs
+Intermediate transaction lifecycle steps (simulating, submitting, confirming) are instrumented at the `info!` level in the `stellar` and `client` crates. Every operation uses an inherited or generated `correlation_id` so that the entire blocking call trace (e.g., `pool.deposit()`) can be correlated end-to-end. To view these steps, ensure your tracing subscriber or `TelemetryConfig` filters include at least `info` for `stellar_private_payments_sdk` and `stellar`.
 
 ## Browser / WASM
 
