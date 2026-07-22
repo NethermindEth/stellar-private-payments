@@ -48,7 +48,12 @@ const SELECTIVE_DISCLOSURE_CIRCUITS: &[&str] = &[
     "selectiveDisclosure_4",
 ];
 
-const GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &["globalViewKey_2", "globalViewKey_4"];
+const GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
+    "globalViewKey_2",
+    "globalViewKey_4",
+    "tx_gvk_2_2_viewonly",
+    "tx_gvk_2_2_traceable",
+];
 
 /// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
 /// changed.
