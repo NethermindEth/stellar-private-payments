@@ -15,6 +15,7 @@ pub struct Client {
 }
 
 impl Client {
+    #[tracing::instrument(name = "blocking_client_init", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new()))]
     pub fn init(
         rpc_url: impl AsRef<str>,
         storage: LocalStorage,
