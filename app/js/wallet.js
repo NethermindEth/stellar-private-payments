@@ -1,3 +1,21 @@
+/**
+ * Wallet adapter boundary for the Freighter browser extension.
+ *
+ * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
+ * signMessage, and getNetwork. The additional Freighter-only symbols imported
+ * below (WatchWalletChanges, getNetworkDetails, isConnected, isAllowed,
+ * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
+ * still Draft and defines no connect/permission-gating or watch/change API,
+ * so the app relies on Freighter's extension for those capabilities.
+ *
+ * getNetworkDetails is used in place of the SEP-0043-standard getNetwork for
+ * a different reason: the app needs the Soroban RPC URL to pick the correct
+ * endpoint per network, and no field for that exists on getNetwork's
+ * `{network, networkPassphrase}` result — RPC-URL discovery is out of scope
+ * for SEP-0043 entirely, not a temporary Draft gap. This is the one place
+ * where the app depends on a Freighter-only method with no SEP path at all;
+ * see getWalletNetwork() below.
+ */
 import {
     WatchWalletChanges,
     getAddress,
@@ -140,6 +158,10 @@ export function startWalletWatcher(opts) {
  *
  * Useful for displaying network name and ensuring app/network alignment.
  *
+ * Uses the Freighter-only getNetworkDetails rather than SEP-0043's
+ * getNetwork because the app needs sorobanRpcUrl, which getNetwork has no
+ * field for (see the module header for why this isn't a Draft-gap issue).
+ *
  * @returns {Promise<{network: string, networkUrl: string, networkPassphrase: string, sorobanRpcUrl?: string}>}
  */
 export async function getWalletNetwork() {
@@ -165,7 +187,16 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     const message = error?.message || fallbackMessage;
     const lower = String(message).toLowerCase();
     const err = new Error(message);
-    err.code = /reject|declin|denied|cancel/.test(lower) ? 'USER_REJECTED' : 'WALLET_ERROR';
+    // SEP-0043 v1.2.1 defines code -4 as user rejection. Check the structured
+    // code first, then fall back to the message regex for wallets/versions that
+    // do not yet set it.
+    if (error?.code === -4) {
+        err.code = 'USER_REJECTED';
+    } else if (/reject|declin|denied|cancel/.test(lower)) {
+        err.code = 'USER_REJECTED';
+    } else {
+        err.code = 'WALLET_ERROR';
+    }
     err.cause = error;
     return err;
 }

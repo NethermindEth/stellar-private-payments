@@ -23,6 +23,10 @@ pub enum Error {
     #[error(transparent)]
     PlanExecution(#[from] PlanExecutionError),
 
+    /// The user rejected the wallet signing request (SEP-0043 error code -4).
+    #[error("wallet request rejected by user: {0}")]
+    UserRejected(String),
+
     #[error("{0}")]
     Other(String),
 }

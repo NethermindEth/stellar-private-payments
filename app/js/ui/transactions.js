@@ -11,6 +11,7 @@ import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { getTransactionErrorMessage } from './errors.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -280,7 +281,7 @@ export const Transactions = {
                     document.getElementById('deposit-amount').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Deposit failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -342,7 +343,7 @@ export const Transactions = {
                     transferRefs.manual.classList.add('hidden');
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Transfer failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -374,7 +375,7 @@ export const Transactions = {
                     document.getElementById('withdraw-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Withdraw failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -433,7 +434,7 @@ export const Transactions = {
                     document.getElementById('advanced-public-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Advanced transaction failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -454,7 +455,7 @@ export const Transactions = {
             if (Array.isArray(result.hashes) && result.hashes.length) {
                 this.showSubmittedToasts(result.hashes, label);
             }
-            Toast.show(result.message || `${label} failed`, 'error', 7000);
+            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000);
             return false;
         }
         if (result?.status === 'ok') {
