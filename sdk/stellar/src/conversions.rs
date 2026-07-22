@@ -3,7 +3,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use core::ops::Shl;
 use std::{collections::HashMap, convert::TryInto};
 use stellar_strkey::ed25519;
-use stellar_xdr::curr::{self as xdr, Int256Parts, ReadXdr, WriteXdr};
+use stellar_xdr::{self as xdr, Int256Parts, ReadXdr, WriteXdr};
 use types::{ContractEvent, Field, U256};
 
 impl From<crate::rpc::Event> for ContractEvent {

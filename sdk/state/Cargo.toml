@@ -17,7 +17,7 @@ types = { workspace = true, features = ["rusqlite"] }
 anyhow = { workspace = true }
 hex = { workspace = true }
 log = { workspace = true }
-rusqlite_migration = { version = "2.5.0", default-features = false }
+rusqlite_migration = { version = "2.6.0", default-features = false }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
 

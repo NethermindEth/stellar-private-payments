@@ -21,7 +21,7 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use ed25519_dalek::{Signature as DalekSignature, Signer as _, SigningKey, Verifier, VerifyingKey};
 use sha2::{Digest, Sha256};
 use stellar_strkey::ed25519::{self, PrivateKey};
-use stellar_xdr::curr::{
+use stellar_xdr::{
     self as xdr, DecoratedSignature, Hash, HashIdPreimage, HashIdPreimageSorobanAuthorization,
     Limits, OperationBody, ReadXdr, ScBytes, ScMap, ScSymbol, ScVal, SorobanAuthorizationEntry,
     SorobanCredentials, TransactionEnvelope, VecM, WriteXdr,
@@ -70,19 +70,25 @@ pub struct LocalSigner {
 }
 
 impl LocalSigner {
-    pub fn from_secret(secret: &str) -> Result<Self> {
-        let private_key: PrivateKey = secret
-            .parse()
-            .map_err(|e| anyhow!("invalid secret key: {e}"))?;
-        let signing_key = SigningKey::from_bytes(&private_key.0);
+    /// Builds a signer from a 32-byte Ed25519 seed.
+    pub fn from_seed(seed: [u8; 32]) -> Self {
+        let signing_key = SigningKey::from_bytes(&seed);
         let verifying_key = signing_key.verifying_key();
         let public_key = ed25519::PublicKey(verifying_key.to_bytes())
             .to_string()
             .to_string();
-        Ok(Self {
+        Self {
             public_key,
             signing_key,
-        })
+        }
+    }
+
+    /// Builds a signer from a Stellar secret-key strkey (`S…`).
+    pub fn from_secret(secret: &str) -> Result<Self> {
+        let private_key: PrivateKey = secret
+            .parse()
+            .map_err(|e| anyhow!("invalid secret key: {e}"))?;
+        Ok(Self::from_seed(private_key.0))
     }
 
     pub fn public_key(&self) -> &str {
@@ -421,18 +427,15 @@ pub fn verify_tx(
 mod tests {
     use super::*;
     use crate::tx_assemble::test_fixtures;
-    use ed25519_dalek::SigningKey;
 
     const TEST_PASSPHRASE: &str = "Test SDF Network ; September 2015";
 
     fn test_signer() -> LocalSigner {
-        let signing_key = SigningKey::from_bytes(&[7u8; 32]);
-        let secret = PrivateKey(signing_key.to_bytes()).to_string().to_string();
-        LocalSigner::from_secret(&secret).expect("fixture signer")
+        LocalSigner::from_seed([7u8; 32])
     }
 
     fn test_prepared_tx(user_address: &str) -> PreparedSorobanTx {
-        use stellar_xdr::curr::{
+        use stellar_xdr::{
             AccountId, InvokeContractArgs, PublicKey, ScAddress, ScSymbol,
             SorobanAddressCredentials, SorobanAuthorizationEntry, SorobanAuthorizedFunction,
             SorobanAuthorizedInvocation, SorobanCredentials, Uint256, VecM, WriteXdr,
