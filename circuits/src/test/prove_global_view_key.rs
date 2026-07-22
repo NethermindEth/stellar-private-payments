@@ -6,6 +6,11 @@ mod tests {
         },
         general::load_artifacts,
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
+        keypair::derive_public_key,
+        transaction::prepopulated_leaves,
+        transaction_case::{
+            InputNote, OutputNote, TxCase, build_base_inputs, prepare_transaction_witness,
+        },
     };
     use anyhow::Result;
     use ark_bn254::Fr;
@@ -267,5 +272,126 @@ mod tests {
             !proof_verifies(&wasm, &r1cs, &inputs, &keys),
             "low-order D unexpectedly verified; expected rejection",
         );
+    }
+
+    // === Combined transaction + GVK proofs (expensive) ===
+
+    const LEVELS: usize = 10;
+
+    /// Prove a `tx_gvk_2_2_*` circuit for a balanced 2-in/2-out transaction and
+    /// confirm the encrypted notes appear among the public signals and decrypt
+    /// back to their plaintext. In view-only mode only outputs are encrypted; in
+    /// traceable mode inputs are encrypted too.
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_tx_gvk(circuit: &str, encrypt_inputs: bool) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts(circuit)?;
+        let keys = generate_keys(&wasm, &r1cs)?;
+
+        let d_priv = Scalar::from(0x5EEDu64);
+        let d = admin_public_key(d_priv);
+        let nonce = Scalar::from(0xFEED_FACEu64);
+
+        // 2 inputs (50 + 30) and 2 outputs (60 + 20) balance with publicAmount 0.
+        let in_notes = vec![
+            InputNote {
+                leaf_index: 3,
+                priv_key: Scalar::from(111u64),
+                blinding: Scalar::from(11u64),
+                amount: Scalar::from(50u64),
+            },
+            InputNote {
+                leaf_index: 8,
+                priv_key: Scalar::from(222u64),
+                blinding: Scalar::from(22u64),
+                amount: Scalar::from(30u64),
+            },
+        ];
+        let out_notes = vec![
+            OutputNote {
+                pub_key: derive_public_key(Scalar::from(333u64)),
+                blinding: Scalar::from(33u64),
+                amount: Scalar::from(60u64),
+            },
+            OutputNote {
+                pub_key: derive_public_key(Scalar::from(444u64)),
+                blinding: Scalar::from(44u64),
+                amount: Scalar::from(20u64),
+            },
+        ];
+        let n_ins = in_notes.len();
+
+        let case = TxCase::new(in_notes.clone(), out_notes.clone());
+        let leaves = prepopulated_leaves(LEVELS, 0xABCDu64, &[3, 8], 20);
+        let witness = prepare_transaction_witness(&case, leaves, LEVELS)?;
+        let mut inputs = build_base_inputs(&case, &witness, Scalar::from(0u64));
+        inputs.set("D", vec![d.0, d.1]);
+        inputs.set("nonce", nonce);
+
+        let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)?;
+        assert!(res.verified, "{circuit} proof did not verify");
+
+        let publics: Vec<Scalar> = res
+            .public_inputs
+            .iter()
+            .map(|fr| fr_to_scalar(*fr))
+            .collect();
+
+        // The admin decrypts each emitted ciphertext back to its note. Outputs are
+        // encrypted at idx nIns+k; inputs (traceable only) at idx k.
+        let check = |note: Note, idx: usize| {
+            let ct = encrypt_note(
+                &note,
+                d,
+                nonce,
+                Scalar::from(u64::try_from(idx).expect("idx")),
+            );
+            assert_eq!(
+                decrypt_note(&ct, d_priv),
+                note,
+                "admin must recover the note"
+            );
+            for v in [ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3] {
+                assert!(
+                    publics.contains(&v),
+                    "ciphertext value missing from public signals"
+                );
+            }
+        };
+
+        for (k, out) in out_notes.iter().enumerate() {
+            check(
+                Note {
+                    pk: out.pub_key,
+                    amount: out.amount,
+                    blinding: out.blinding,
+                },
+                n_ins + k,
+            );
+        }
+        if encrypt_inputs {
+            for (k, inp) in in_notes.iter().enumerate() {
+                check(
+                    Note {
+                        pk: derive_public_key(inp.priv_key),
+                        amount: inp.amount,
+                        blinding: inp.blinding,
+                    },
+                    k,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn tx_gvk_2_2_viewonly_proves_and_roundtrips() -> Result<()> {
+        run_tx_gvk("tx_gvk_2_2_viewonly", false)
+    }
+
+    #[test]
+    #[ignore]
+    fn tx_gvk_2_2_traceable_proves_and_roundtrips() -> Result<()> {
+        run_tx_gvk("tx_gvk_2_2_traceable", true)
     }
 }
