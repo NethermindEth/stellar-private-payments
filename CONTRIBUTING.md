@@ -290,3 +290,12 @@ To make a production release of CLI
 git tag v0.1.0 # with a proper new version
 git push origin v0.1.0
 ```
+
+## JS license policy maintenance
+
+The JS/npm license policy lives in `.github/js-license-policy.json` and is enforced by `.github/workflows/js-license-audit.yml`. The tooling is POSIX sh + jq (`scripts/check-js-licenses.sh`, `scripts/generate-js-attribution.sh`), so jq must be installed locally; GitHub runners provide it.
+
+- **Allowlist updates**: add a new permissive SPDX identifier to `allowlist` when a PR introduces a dependency whose license is not already listed. Keep the list alphabetically sorted.
+- **Exceptions**: if a dependency's license is not on the allowlist (or its `license` field is missing in `package-lock.json`), add an entry to `exceptions` with `approver: PENDING_PR_REVIEW`, a written justification, and the affected package(s). Scope every exception to its lockfile with `target` (e.g. `"target": "circuits/src/circomlib/package-lock.json"` for circom build tooling) so build-tool carve-outs cannot cover the same package in a runtime footprint; omitting `target` applies the exception repo-wide — avoid unless intentional. Exceptions marked `PENDING_PR_REVIEW` must be ratified by a maintainer before merge.
+- **Nightly job**: the `schedule: cron: 0 3 * * *` trigger runs a full-tree scan (`scripts/check-js-licenses.sh`) and uploads `js-license-scan-report.json` as an artifact, catching newly published advisory/license metadata even when no PR changed.
+- **Attribution**: `dist/licenses/THIRD-PARTY-{app,sdk-web}.{json,txt}` are generated at build time by `scripts/generate-js-attribution.sh` (called from `deployments/scripts/stage-dist-legal.sh`). Do not edit them by hand.

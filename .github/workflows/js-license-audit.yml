@@ -1,0 +1,54 @@
+name: JS License Audit
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    name: Dependency Review PR Gate
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Load License Policy
+        id: policy
+        run: |
+          # Parse the shared JS license policy JSON to extract the allowlist for
+          # the dependency-review action, which expects a comma-separated string.
+          # Only allow-licenses is wired; deny-licenses is intentionally omitted
+          # because the two inputs are mutually exclusive upstream.
+          ALLOWLIST=$(jq -r '.allowlist | join(", ")' .github/js-license-policy.json)
+          echo "allowlist=$ALLOWLIST" >> $GITHUB_OUTPUT
+
+      - name: Dependency Review Action
+        uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.3.4
+        with:
+          # Wire allowlist into the action. Any license not on this list fails the PR.
+          allow-licenses: ${{ steps.policy.outputs.allowlist }}
+
+  full-tree-scan:
+    name: Full-Tree License Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Run Full-Tree License Audit
+        run: |
+          sh scripts/check-js-licenses.sh
+
+      - name: Upload Scan Report Artifact
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: js-license-scan-report
+          path: js-license-scan-report.json
