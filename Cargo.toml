@@ -92,8 +92,7 @@ uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
-wasm-log = { version = "0.3", default-features = false }
-tracing = { version = "0.1", default-features = false, features = ["log", "std", "release_max_level_info"] }
+tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }
 tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 # see also https://github.com/NethermindEth/stellar-private-payments/issues/192
