@@ -140,6 +140,29 @@ fn wallet_js_error(method: &str, stage: &str, rejection: JsValue) -> JsError {
     err
 }
 
+/// SEP-0043 user-rejection error code.
+const SEP43_USER_REJECTED_CODE: f64 = -4.0;
+
+/// Convert a JS signer error into an SDK [`Error`]. A SEP-0043 user rejection
+/// (`code: -4`, copied onto the error by [`wallet_js_error`]) becomes
+/// [`Error::UserRejected`] so it survives the wasm/JS boundary without relying
+/// on message wording; everything else keeps the previous debug formatting.
+fn wallet_sign_error(error: JsError) -> Error {
+    let value = JsValue::from(error.clone());
+    let code = Reflect::get(&value, &JsValue::from_str("code"))
+        .ok()
+        .and_then(|code| code.as_f64());
+    if code == Some(SEP43_USER_REJECTED_CODE) {
+        let message = Reflect::get(&value, &JsValue::from_str("message"))
+            .ok()
+            .and_then(|message| message.as_string())
+            .unwrap_or_else(|| "request rejected".to_string());
+        Error::UserRejected(message)
+    } else {
+        Error::Other(format!("{error:?}"))
+    }
+}
+
 fn normalize_sign_result(method: &str, result: JsValue) -> Result<String, JsError> {
     if let Some(s) = result.as_string() {
         return Ok(s);
@@ -179,7 +202,7 @@ impl Signer for WalletSigner {
         let envelope = self
             .sign_prepared_transaction(prepared)
             .await
-            .map_err(|e| Error::Other(format!("{e:?}")))?;
+            .map_err(wallet_sign_error)?;
 
         let signed_xdr = envelope
             .to_xdr_base64(Limits::none())

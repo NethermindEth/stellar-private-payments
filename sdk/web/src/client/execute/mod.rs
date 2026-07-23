@@ -36,6 +36,10 @@ enum ExecuteJsResponse {
     Failed {
         hashes: Vec<String>,
         message: String,
+        /// SEP-0043 error code, present when the failure was a wallet user
+        /// rejection (-4). Lets JS callers classify without parsing `message`.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        code: Option<i32>,
     },
     AspNotReady,
 }
@@ -59,9 +63,11 @@ impl From<ExecuteOutcome> for ExecuteJsResponse {
                     }
                     _ => Vec::new(),
                 };
+                let code = wallet_rejection_code(&error);
                 Self::Failed {
                     hashes,
                     message: pool_err_message(error),
+                    code,
                 }
             }
             Err(ExecuteFailure::AspNotReady) => Self::AspNotReady,
@@ -82,6 +88,19 @@ fn step_msg(verb: &str, current: u32, total: u32) -> String {
         format!("{verb} step {current}/{total}…")
     } else {
         format!("{verb}…")
+    }
+}
+
+/// SEP-0043 error code when the failure cause is a wallet user rejection,
+/// unwrapping [`Error::PlanExecution`] to reach the underlying cause.
+fn wallet_rejection_code(error: &Error) -> Option<i32> {
+    let cause = match error {
+        Error::PlanExecution(plan) => plan.cause(),
+        other => other,
+    };
+    match cause {
+        Error::UserRejected(_) => Some(-4),
+        _ => None,
     }
 }
 

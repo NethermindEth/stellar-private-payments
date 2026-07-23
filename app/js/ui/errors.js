@@ -150,8 +150,13 @@ export function isProofVerificationError(message) {
  * @returns {boolean} True if user cancelled
  */
 export function isUserCancelledError(error) {
+    // SEP-0043 v1.2.1 defines -4 as the user-rejection code. Some adapters
+    // also expose a string 'USER_REJECTED' code for app-level compatibility.
+    if (error && (error.code === -4 || error.code === 'USER_REJECTED')) {
+        return true;
+    }
     const msg = getErrorMessage(error).toLowerCase();
-    return msg.includes('rejected') || 
+    return msg.includes('rejected') ||
            msg.includes('denied') ||
            msg.includes('cancelled') ||
            msg.includes('user_rejected');
