@@ -698,3 +698,28 @@ fn test_merkle_consistency() {
         );
     }
 }
+
+#[test]
+fn test_leaf_added_event_exact_shape() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPMembership, (admin, 3u32));
+    let client = ASPMembershipClient::new(&env, &contract_id);
+    let leaf = U256::from_u32(&env, 12345);
+
+    env.mock_all_auths();
+    client.insert_leaf(&leaf);
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+
+    let root = client.get_root();
+    let expected = LeafAddedEvent {
+        leaf,
+        index: 0,
+        root,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[0], expected);
+}
