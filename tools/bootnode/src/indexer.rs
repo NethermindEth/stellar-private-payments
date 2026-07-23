@@ -1,7 +1,7 @@
 use crate::{
     AppState,
     messages::GetEventsParams,
-    storage::{InsertGetEventsPage, InsertPageOutcome},
+    storage::InsertGetEventsPage,
 };
 use metrics::{counter, gauge};
 use std::time::Instant;
@@ -80,13 +80,9 @@ impl Indexer {
                 self.state.set_in_sync(false).await?;
             }
             // Always persist, including empty pages, so clients can follow
-            // upstream cursors across sparse/empty gaps.
-            //
-            // Persist before advancing `last_cursor`. A no-op insert of a
-            // non-empty page (historical bug: sealed empty ignored events)
-            // must not move the indexer past a cursor clients are still on.
-            let outcome = self
-                .state
+            // upstream cursors across sparse/empty gaps. Persist before
+            // advancing `last_cursor` so a failed insert cannot skip a page.
+            self.state
                 .storage
                 .insert_get_events_page(InsertGetEventsPage {
                     cursor_in: cursor.as_deref(),
@@ -99,21 +95,6 @@ impl Indexer {
                     oldest_ledger: result.oldest_ledger,
                 })
                 .await?;
-            if !is_empty
-                && cursor.is_some()
-                && matches!(
-                    outcome,
-                    InsertPageOutcome::Unchanged {
-                        existing_had_events: false
-                    }
-                )
-            {
-                anyhow::bail!(
-                    "non-empty upstream page not cached for cursor_in={}; \
-                     refusing to advance indexer cursor",
-                    cursor.as_deref().expect("cursor checked")
-                );
-            }
 
             cursor = Some(cursor_out);
             start_ledger = None;
