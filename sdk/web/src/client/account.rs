@@ -2,12 +2,10 @@
 
 use std::rc::Rc;
 
-use std::str::FromStr;
-
 use serde::{Deserialize, Serialize};
 use stellar_private_payments_sdk::{
     Account as NativeAccount,
-    types::{EncryptionPublicKey, Field, NotePublicKey},
+    types::{EncryptionPublicKey, NotePublicKey},
 };
 
 use wasm_bindgen::prelude::*;
@@ -28,13 +26,6 @@ struct UserPublicKeysOut {
 struct RegisterPublicKeysOptions {
     note_public_key_hex: Option<String>,
     encryption_public_key_hex: Option<String>,
-}
-
-#[derive(Debug, Default, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DeriveAspUserLeafOptions {
-    note_public_key: Option<String>,
-    membership_blinding: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -93,31 +84,13 @@ impl Account {
         Ok(secret.to_string())
     }
 
-    /// Derive the ASP membership tree leaf for this account's note public key.
+    /// Derive the ASP membership tree leaf for this account's stored keys.
+    ///
+    /// For explicit inputs without a session, use the free
+    /// [`derive_asp_user_leaf`](super::derive_asp_user_leaf) export.
     #[wasm_bindgen(js_name = deriveAspUserLeaf)]
-    pub async fn derive_asp_user_leaf(&self, options: JsValue) -> Result<String, JsError> {
-        let opts: DeriveAspUserLeafOptions = if options.is_null() || options.is_undefined() {
-            DeriveAspUserLeafOptions::default()
-        } else {
-            serde_wasm_bindgen::from_value(options)?
-        };
-
-        let note_public_key = match opts.note_public_key {
-            Some(raw) => {
-                Some(NotePublicKey::parse(&raw).map_err(|e| JsError::new(&e.to_string()))?)
-            }
-            None => None,
-        };
-        let membership_blinding = match opts.membership_blinding {
-            Some(raw) => Some(Field::from_str(&raw).map_err(|e| JsError::new(&e.to_string()))?),
-            None => None,
-        };
-
-        let leaf = self
-            .inner
-            .derive_asp_user_leaf(note_public_key, membership_blinding)
-            .await
-            .map_err(pool_err)?;
+    pub async fn derive_asp_user_leaf(&self) -> Result<String, JsError> {
+        let leaf = self.inner.derive_asp_user_leaf().await.map_err(pool_err)?;
         Ok(leaf.to_string())
     }
 

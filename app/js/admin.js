@@ -1,5 +1,5 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
@@ -373,11 +373,15 @@ async function insertMembershipLeaf() {
     const contractId = membershipContractInput.value.trim();
     if (!contractId) throw new Error('Membership contract ID is required');
 
-    const notePublicKey = parseBigIntInput(allowlistPublicKeyInput.value, 'Public key');
-    if (notePublicKey === null) throw new Error('User note public key is required');
+    const notePublicKey = allowlistPublicKeyInput.value.trim();
+    if (parseBigIntInput(notePublicKey, 'Public key') === null) {
+      throw new Error('User note public key is required');
+    }
 
-    const aspSecret = parseBigIntInput(allowlistAspSecretInput.value, 'ASP secret');
-    if (aspSecret === null) throw new Error('ASP secret is required');
+    const aspSecret = allowlistAspSecretInput.value.trim();
+    if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
+      throw new Error('ASP secret is required');
+    }
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.textContent = 'Processing...';
@@ -385,10 +389,7 @@ async function insertMembershipLeaf() {
     setStatus('Computing and submitting allowlist insert transaction...', 'info');
     await ensureCryptoReady();
 
-    const leafHex = await client().account().deriveAspUserLeaf({
-        membershipBlinding: aspSecret,
-        notePublicKey,
-    });
+    const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
 
     const mClient = await getMembershipClient(contractId);
