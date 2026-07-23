@@ -2,7 +2,9 @@ mod compress;
 mod in_memory;
 mod postgres;
 
-pub use compress::{CompressStats, PageRecord, plan_empty_compression};
+pub use compress::{
+    CompressStats, CompressUpdate, PageMeta, apply_result_cursor, plan_empty_compression,
+};
 pub use in_memory::InMemory;
 pub use postgres::Postgres;
 

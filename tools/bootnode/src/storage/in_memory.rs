@@ -1,5 +1,6 @@
 use super::{
-    CompressStats, InsertGetEventsPage, KvState, PageRecord, Storage, plan_empty_compression,
+    CompressStats, InsertGetEventsPage, KvState, PageMeta, Storage, apply_result_cursor,
+    plan_empty_compression,
 };
 use crate::messages::GetEventsResponse;
 use anyhow::Result;
@@ -9,6 +10,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
+#[derive(Clone)]
+struct StoredPage {
+    meta: PageMeta,
+    result: GetEventsResponse,
+}
+
 #[derive(Default)]
 struct DeploymentState {
     last_cursor: Option<String>,
@@ -17,7 +24,7 @@ struct DeploymentState {
     in_sync: bool,
     last_empty_compress_ledger: u32,
     next_page_id: i64,
-    pages: Vec<PageRecord>,
+    pages: Vec<StoredPage>,
     cache_by_cursor_in: HashMap<String, GetEventsResponse>,
     cache_by_start_ledger: HashMap<u32, GetEventsResponse>,
     ledger_by_cursor_out: HashMap<String, u32>,
@@ -96,19 +103,19 @@ fn rebuild_indexes(state: &mut DeploymentState) {
     state.cache_by_start_ledger.clear();
     state.ledger_by_cursor_out.clear();
     for page in &state.pages {
-        if let Some(cursor_in) = page.cursor_in.as_deref() {
+        if let Some(cursor_in) = page.meta.cursor_in.as_deref() {
             state
                 .cache_by_cursor_in
                 .insert(cursor_in.to_owned(), page.result.clone());
-        } else if let Some(start_ledger) = page.start_ledger {
+        } else if let Some(start_ledger) = page.meta.start_ledger {
             state
                 .cache_by_start_ledger
                 .insert(start_ledger, page.result.clone());
         }
-        if let Some(ledger) = page.last_event_ledger {
+        if let Some(ledger) = page.meta.last_event_ledger {
             state
                 .ledger_by_cursor_out
-                .insert(page.cursor_out.clone(), ledger);
+                .insert(page.meta.cursor_out.clone(), ledger);
         }
     }
 }
@@ -169,13 +176,15 @@ impl Storage for InMemory {
         self.with_deployment_mut(|state| {
             state.next_page_id = state.next_page_id.saturating_add(1);
             let id = state.next_page_id;
-            state.pages.push(PageRecord {
-                id,
-                cursor_in: page.cursor_in.map(str::to_owned),
-                start_ledger: page.start_ledger,
-                cursor_out: page.cursor_out.to_owned(),
-                last_event_ledger: page.last_event_ledger,
-                latest_ledger: page.latest_ledger,
+            state.pages.push(StoredPage {
+                meta: PageMeta {
+                    id,
+                    cursor_in: page.cursor_in.map(str::to_owned),
+                    start_ledger: page.start_ledger,
+                    cursor_out: page.cursor_out.to_owned(),
+                    last_event_ledger: page.last_event_ledger,
+                    latest_ledger: page.latest_ledger,
+                },
                 result: page.result.clone(),
             });
             rebuild_indexes(state);
@@ -192,13 +201,13 @@ impl Storage for InMemory {
             let Some(existing) = state
                 .pages
                 .iter_mut()
-                .find(|p| p.cursor_in.as_deref() == Some(cursor_in))
+                .find(|p| p.meta.cursor_in.as_deref() == Some(cursor_in))
             else {
                 return;
             };
-            existing.cursor_out = page.cursor_out.to_owned();
-            existing.last_event_ledger = page.last_event_ledger;
-            existing.latest_ledger = page.latest_ledger;
+            existing.meta.cursor_out = page.cursor_out.to_owned();
+            existing.meta.last_event_ledger = page.last_event_ledger;
+            existing.meta.latest_ledger = page.latest_ledger;
             existing.result = page.result.clone();
             rebuild_indexes(state);
         });
@@ -214,28 +223,34 @@ impl Storage for InMemory {
 
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats> {
         Ok(self.with_deployment_mut(|state| {
-            let plan = plan_empty_compression(&state.pages, cutoff_ledger);
+            let meta: Vec<PageMeta> = state.pages.iter().map(|p| p.meta.clone()).collect();
+            let plan = plan_empty_compression(&meta, cutoff_ledger);
             if plan.is_empty() {
                 return plan.stats();
             }
 
             let delete: std::collections::HashSet<i64> = plan.deletes.iter().copied().collect();
-            let updates: HashMap<i64, (String, GetEventsResponse, u32)> = plan
-                .updates
+            let results: HashMap<i64, GetEventsResponse> = state
+                .pages
                 .iter()
-                .map(|(id, cursor_out, result, latest)| {
-                    (*id, (cursor_out.clone(), result.clone(), *latest))
-                })
+                .filter(|p| plan.updates.iter().any(|u| u.result_from_id == p.meta.id))
+                .map(|p| (p.meta.id, p.result.clone()))
                 .collect();
+            let updates: HashMap<i64, _> = plan.updates.iter().map(|u| (u.id, u)).collect();
 
             state.pages.retain_mut(|page| {
-                if delete.contains(&page.id) {
+                if delete.contains(&page.meta.id) {
                     return false;
                 }
-                if let Some((cursor_out, result, latest)) = updates.get(&page.id) {
-                    page.cursor_out = cursor_out.clone();
-                    page.result = result.clone();
-                    page.latest_ledger = *latest;
+                if let Some(update) = updates.get(&page.meta.id) {
+                    page.meta.cursor_out = update.cursor_out.clone();
+                    page.meta.latest_ledger = update.latest_ledger;
+                    let mut result = results
+                        .get(&update.result_from_id)
+                        .cloned()
+                        .expect("compress result_from_id");
+                    apply_result_cursor(&mut result, &update.cursor_out);
+                    page.result = result;
                 }
                 true
             });

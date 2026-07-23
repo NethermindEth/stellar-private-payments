@@ -1,5 +1,6 @@
 use super::{
-    CompressStats, InsertGetEventsPage, KvState, PageRecord, Storage, plan_empty_compression,
+    CompressStats, InsertGetEventsPage, KvState, PageMeta, Storage, apply_result_cursor,
+    plan_empty_compression,
 };
 use crate::messages::GetEventsResponse;
 use anyhow::{Context, Result, bail};
@@ -51,11 +52,11 @@ ON CONFLICT (deployment_id) DO NOTHING
         &self.deployment_id
     }
 
-    async fn list_pages(&self, client: &Client) -> Result<Vec<PageRecord>> {
+    async fn list_page_meta(&self, client: &Client) -> Result<Vec<PageMeta>> {
         let rows = client
             .query(
                 r#"
-SELECT id, cursor_in, start_ledger, cursor_out, last_event_ledger, latest_ledger, result
+SELECT id, cursor_in, start_ledger, cursor_out, last_event_ledger, latest_ledger
 FROM get_events_pages
 WHERE deployment_id = $1
 ORDER BY id
@@ -72,8 +73,7 @@ ORDER BY id
             let cursor_out: String = row.get(3);
             let last_event_ledger: Option<i32> = row.get(4);
             let latest_ledger: i32 = row.get(5);
-            let Json(result): Json<GetEventsResponse> = row.get(6);
-            pages.push(PageRecord {
+            pages.push(PageMeta {
                 id,
                 cursor_in,
                 start_ledger: start_ledger
@@ -85,10 +85,21 @@ ORDER BY id
                     .transpose()?,
                 latest_ledger: u32::try_from(latest_ledger.max(0))
                     .context("latest_ledger exceeds u32")?,
-                result,
             });
         }
         Ok(pages)
+    }
+
+    async fn load_result(&self, client: &Client, id: i64) -> Result<GetEventsResponse> {
+        let row = client
+            .query_one(
+                "SELECT result FROM get_events_pages WHERE id = $1 AND deployment_id = $2",
+                &[&id, &self.deployment_id()],
+            )
+            .await
+            .with_context(|| format!("load result for page id={id}"))?;
+        let Json(result): Json<GetEventsResponse> = row.get(0);
+        Ok(result)
     }
 }
 
@@ -471,15 +482,33 @@ LIMIT 1
 
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats> {
         let mut client = self.pool.get().await?;
-        let pages = self.list_pages(&client).await?;
+        let pages = self.list_page_meta(&client).await?;
         let plan = plan_empty_compression(&pages, cutoff_ledger);
         if plan.is_empty() {
             return Ok(plan.stats());
         }
 
+        // Load JSONB only for pages whose result will be copied onto a kept row
+        // (before deletes in the transaction).
+        let mut results = std::collections::HashMap::new();
+        for update in &plan.updates {
+            if results.contains_key(&update.result_from_id) {
+                continue;
+            }
+            results.insert(
+                update.result_from_id,
+                self.load_result(&client, update.result_from_id).await?,
+            );
+        }
+
         let tx = client.transaction().await?;
-        for (id, cursor_out, result, latest_ledger) in &plan.updates {
-            let latest_ledger = i32::try_from(*latest_ledger)
+        for update in &plan.updates {
+            let mut result = results
+                .get(&update.result_from_id)
+                .cloned()
+                .context("missing compress result")?;
+            apply_result_cursor(&mut result, &update.cursor_out);
+            let latest_ledger = i32::try_from(update.latest_ledger)
                 .context("latest_ledger exceeds postgres INTEGER range")?;
             let updated = tx
                 .execute(
@@ -489,16 +518,16 @@ SET cursor_out = $1, result = $2, latest_ledger = $3
 WHERE id = $4 AND deployment_id = $5
 "#,
                     &[
-                        cursor_out,
+                        &update.cursor_out,
                         &Json(result),
                         &latest_ledger,
-                        id,
+                        &update.id,
                         &self.deployment_id(),
                     ],
                 )
                 .await?;
             if updated != 1 {
-                bail!("compress update missed page id={id}");
+                bail!("compress update missed page id={}", update.id);
             }
         }
         for id in &plan.deletes {
