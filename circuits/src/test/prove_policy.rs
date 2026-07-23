@@ -1,8 +1,11 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{Inputs, SignalKey, prove_and_verify},
+        circom_tester::{
+            Inputs, SignalKey, generate_keys, prove_and_verify, prove_and_verify_with_keys,
+        },
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
+        global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
         keypair::derive_public_key,
         merkle_tree::{merkle_proof, merkle_root},
         sparse_merkle_tree::{SMTProof, prepare_smt_proof_with_overrides},
@@ -12,6 +15,8 @@ mod tests {
         },
     };
     use anyhow::{Context, Result, ensure};
+    use ark_bn254::Fr;
+    use ark_ff::{BigInteger, PrimeField};
     use num_bigint::BigInt;
     use std::{
         convert::TryInto,
@@ -1517,6 +1522,219 @@ mod tests {
             }
 
             Ok(())
+        })
+    }
+
+    // Policy transaction + Global View Key
+    fn fr_to_scalar(fr: Fr) -> Scalar {
+        Scalar::from_le_bytes_mod_order(&fr.into_bigint().to_bytes_le())
+    }
+
+    /// One policy + GVK entry point and the witness layout it expects.
+    #[derive(Clone, Copy)]
+    struct PolicyGvkCircuit {
+        stem: &'static str,
+        asp: PolicyAspWitness,
+        encrypt_inputs: bool,
+    }
+
+    /// Prove a `policy_tx_gvk_2_2*` circuit for a balanced 2-in/2-out
+    /// transaction and confirm the encrypted notes appear among the public
+    /// signals and decrypt back to their plaintext. View-only encrypts
+    /// outputs only; traceable also encrypts inputs (reusing the in-circuit
+    /// input public keys).
+    #[allow(clippy::arithmetic_side_effects)]
+    fn run_policy_gvk(circuit: PolicyGvkCircuit) -> Result<()> {
+        let (wasm, r1cs) = load_artifacts(circuit.stem)
+            .with_context(|| format!("load policy+gvk circuit {}", circuit.stem))?;
+        let keys = generate_keys(&wasm, &r1cs)?;
+
+        let d_priv = Scalar::from(0x5EEDu64);
+        let d = admin_public_key(d_priv);
+        let nonce = Scalar::from(0xFEED_FACEu64);
+
+        // 2 inputs (50 + 30) and 2 outputs (60 + 20) balance with publicAmount 0.
+        let in_notes = vec![
+            InputNote {
+                leaf_index: 3,
+                priv_key: Scalar::from(111u64),
+                blinding: Scalar::from(11u64),
+                amount: Scalar::from(50u64),
+            },
+            InputNote {
+                leaf_index: 8,
+                priv_key: Scalar::from(222u64),
+                blinding: Scalar::from(22u64),
+                amount: Scalar::from(30u64),
+            },
+        ];
+        let out_notes = vec![
+            OutputNote {
+                pub_key: derive_public_key(Scalar::from(333u64)),
+                blinding: Scalar::from(33u64),
+                amount: Scalar::from(60u64),
+            },
+            OutputNote {
+                pub_key: derive_public_key(Scalar::from(444u64)),
+                blinding: Scalar::from(44u64),
+                amount: Scalar::from(20u64),
+            },
+        ];
+        let n_ins = in_notes.len();
+
+        let case = TxCase::new(in_notes.clone(), out_notes.clone());
+        let leaves = prepopulated_leaves(LEVELS, 0xABCDu64, &[3, 8], 20);
+        let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
+        let non_membership = default_non_membership_keys(&case);
+
+        let witness = prepare_transaction_witness(&case, leaves, LEVELS)?;
+        let mut inputs = build_base_inputs(&case, &witness, Scalar::from(0u64));
+        apply_policy_asp_witness(
+            &mut inputs,
+            &case,
+            &witness.public_keys,
+            &membership_trees,
+            &non_membership,
+            default_non_membership_proof_builder,
+            circuit.asp,
+        )?;
+        inputs.set("D", vec![d.0, d.1]);
+        inputs.set("nonce", nonce);
+
+        let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)?;
+        assert!(res.verified, "{} proof did not verify", circuit.stem);
+
+        let publics: Vec<Scalar> = res
+            .public_inputs
+            .iter()
+            .map(|fr| fr_to_scalar(*fr))
+            .collect();
+
+        // The admin decrypts each emitted ciphertext back to its note. Outputs are
+        // encrypted at idx nIns+k; inputs (traceable only) at idx k.
+        let check = |note: Note, idx: usize| {
+            let ct = encrypt_note(
+                &note,
+                d,
+                nonce,
+                Scalar::from(u64::try_from(idx).expect("idx")),
+            );
+            assert_eq!(
+                decrypt_note(&ct, d_priv),
+                note,
+                "admin must recover the note"
+            );
+            for v in [ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3] {
+                assert!(
+                    publics.contains(&v),
+                    "ciphertext value missing from public signals for {}",
+                    circuit.stem
+                );
+            }
+        };
+
+        for (k, out) in out_notes.iter().enumerate() {
+            check(
+                Note {
+                    pk: out.pub_key,
+                    amount: out.amount,
+                    blinding: out.blinding,
+                },
+                n_ins + k,
+            );
+        }
+        if circuit.encrypt_inputs {
+            for (k, inp) in in_notes.iter().enumerate() {
+                check(
+                    Note {
+                        pk: derive_public_key(inp.priv_key),
+                        amount: inp.amount,
+                        blinding: inp.blinding,
+                    },
+                    k,
+                );
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_open_viewonly() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_viewonly",
+            asp: PolicyAspWitness::None,
+            encrypt_inputs: false,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_open_traceable() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_traceable",
+            asp: PolicyAspWitness::None,
+            encrypt_inputs: true,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_allowlist_viewonly() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_A_viewonly",
+            asp: PolicyAspWitness::Membership,
+            encrypt_inputs: false,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_allowlist_traceable() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_A_traceable",
+            asp: PolicyAspWitness::Membership,
+            encrypt_inputs: true,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_blocklist_viewonly() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_B_viewonly",
+            asp: PolicyAspWitness::NonMembership,
+            encrypt_inputs: false,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_blocklist_traceable() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_B_traceable",
+            asp: PolicyAspWitness::NonMembership,
+            encrypt_inputs: true,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_both_viewonly() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_AB_viewonly",
+            asp: PolicyAspWitness::Both,
+            encrypt_inputs: false,
+        })
+    }
+
+    #[test]
+    #[ignore]
+    fn policy_gvk_both_traceable() -> Result<()> {
+        run_policy_gvk(PolicyGvkCircuit {
+            stem: "policy_tx_gvk_2_2_AB_traceable",
+            asp: PolicyAspWitness::Both,
+            encrypt_inputs: true,
         })
     }
 }

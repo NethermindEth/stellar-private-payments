@@ -48,8 +48,8 @@ sqlite-wasm-vfs = { workspace = true }
 sha2 = { workspace = true }
 types = { workspace = true }
 
-[lints]
-workspace = true
-
 [dev-dependencies]
 wasm-bindgen-test = { workspace = true }
+
+[lints]
+workspace = true
