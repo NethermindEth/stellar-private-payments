@@ -29,5 +29,9 @@ wasmer = { workspace = true, features = ["cranelift"] }
 ark-circom = { workspace = true }
 wasmer = { workspace = true, features = ["js", "js-default"] }
 
+[dev-dependencies]
+# Property-based testing of field-element conversion
+proptest = "1"
+
 [lints]
 workspace = true
