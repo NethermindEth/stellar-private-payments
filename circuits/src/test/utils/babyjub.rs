@@ -1,17 +1,9 @@
 //! Baby JubJub curve helpers for the Global View Key test utilities.
 //!
-//! Baby JubJub is the twisted Edwards curve `a*x^2 + y^2 = 1 + d*x^2*y^2` with
-//! `a = 168700`, `d = 168696` over BN254's scalar field. We implement the group
-//! law directly in this affine form so it matches circomlib's `babyjub.circom`
-//! exactly (`BabyAdd`/`BabyDbl`).
-//!
-//! Note: `ark-ed-on-bn254` represents the *isomorphic* `a = 1` form (with
-//! `x`-coordinates scaled by `sqrt(168700)`), so its points and generator are
-//! incompatible with circomlib's coordinates. Implementing the law here avoids
-//! any isomorphism bookkeeping when crossing the circuit boundary.
+//! We reimplement here some of the logic, instead of using `ark-ed-on-bn254`
+//! directly, because Circom and `ark-ed-on-bn254` employt different curve forms.
 
-// Finite-field arithmetic cannot overflow, so the side-effect lint is a false
-// positive throughout the group law.
+// Finite-field arithmetic cannot overflow, adding here because of clippy
 #![allow(clippy::arithmetic_side_effects)]
 
 use core::str::FromStr;
@@ -55,8 +47,8 @@ pub fn identity() -> Point {
 /// The circomlib `BASE8` generator.
 pub fn base8() -> Point {
     Point {
-        x: Scalar::from_str(BASE8_X).expect("valid BASE8 x coordinate"),
-        y: Scalar::from_str(BASE8_Y).expect("valid BASE8 y coordinate"),
+        x: Scalar::from_str(BASE8_X).expect("Invalid BASE8 x coordinate"),
+        y: Scalar::from_str(BASE8_Y).expect("Invvalid BASE8 y coordinate"),
     }
 }
 

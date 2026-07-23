@@ -48,11 +48,17 @@ const SELECTIVE_DISCLOSURE_CIRCUITS: &[&str] = &[
     "selectiveDisclosure_4",
 ];
 
-const GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
-    "globalViewKey_2",
-    "globalViewKey_4",
-    "tx_gvk_2_2_viewonly",
-    "tx_gvk_2_2_traceable",
+/// Policy transaction circuits combined with Global View Key encryption. Each
+/// of the 4 ASP policy configs is offered in view-only and traceable modes.
+const POLICY_GLOBAL_VIEW_KEY_CIRCUITS: &[&str] = &[
+    "policy_tx_gvk_2_2_viewonly",
+    "policy_tx_gvk_2_2_traceable",
+    "policy_tx_gvk_2_2_A_viewonly",
+    "policy_tx_gvk_2_2_A_traceable",
+    "policy_tx_gvk_2_2_B_viewonly",
+    "policy_tx_gvk_2_2_B_traceable",
+    "policy_tx_gvk_2_2_AB_viewonly",
+    "policy_tx_gvk_2_2_AB_traceable",
 ];
 
 /// `testdata/` filenames (`{stem}{suffix}`) that invalidate the build when
@@ -71,7 +77,7 @@ fn groth16_key_circuits() -> Vec<String> {
             .map(|stem| (*stem).to_owned()),
     );
     circuits.extend(
-        GLOBAL_VIEW_KEY_CIRCUITS
+        POLICY_GLOBAL_VIEW_KEY_CIRCUITS
             .iter()
             .map(|stem| (*stem).to_owned()),
     );

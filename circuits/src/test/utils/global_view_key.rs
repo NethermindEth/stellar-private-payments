@@ -2,15 +2,13 @@
 //! scheme, mirroring `circuits/src/globalViewKey.circom`.
 //!
 //! Used by the circuit tests to compute known-answer values and to check the
-//! admin-side decryption round-trip. The math is intentionally a straight
-//! transcription of the circuit so any divergence surfaces as a failed witness
-//! or verification.
+//! admin-side decryption round-trip.
 //!
-//! Domain-separation tags (extend the 0x01-0x04 registry):
+//! Domain-separation tags
 //!   0x05 - ephemeral scalar `r` derivation
 //!   0x06 - keystream KDF
 
-// Finite-field arithmetic (masking, unmasking) cannot overflow.
+// Finite-field arithmetic cannot overflow. Adding here because of clippy warnings
 #![allow(clippy::arithmetic_side_effects)]
 
 use zkhash::{
@@ -40,7 +38,7 @@ pub struct Note {
 /// masked field elements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ciphertext {
-    pub r: (Scalar, Scalar),
+    pub r: (Scalar, Scalar),        // It should be uppercase, as it's an EC point
     pub c1: Scalar,
     pub c2: Scalar,
     pub c3: Scalar,

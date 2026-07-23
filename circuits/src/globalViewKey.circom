@@ -188,3 +188,72 @@ template GlobalViewKey(nNotes) {
         c3[i] <== enc[i].c3;
     }
 }
+
+// Batch encryptor for transaction composition: encrypts nOuts output notes
+// (idx = nIns + k) and, in traceable mode (encryptInputs == 1), nIns input
+// notes (idx = k) under a shared D and nonce. The output index is always offset
+// by nIns so an output note's ciphertext is identical whether or not inputs are
+// encrypted. Callers pass note public keys directly (e.g. the policy wrappers
+// feed the transaction's in-circuit input public keys), so no Keypair
+// recomputation happens here.
+template GvkNotes(nIns, nOuts, encryptInputs) {
+    /** PUBLIC INPUTS **/
+    signal input D[2];
+    signal input nonce;
+
+    /** PRIVATE INPUTS **/
+    signal input inPubkey[nIns];
+    signal input inAmount[nIns];
+    signal input inBlinding[nIns];
+    signal input outPubkey[nOuts];
+    signal input outAmount[nOuts];
+    signal input outBlinding[nOuts];
+
+    /** OUTPUTS **/
+    var nEnc = encryptInputs ? (nIns + nOuts) : nOuts;
+    var outBase = encryptInputs ? nIns : 0;
+    signal output R[nEnc][2];
+    signal output c1[nEnc];
+    signal output c2[nEnc];
+    signal output c3[nEnc];
+
+    // Encrypt output notes (idx = nIns + k)
+    component encOut[nOuts];
+    for (var k = 0; k < nOuts; k++) {
+        encOut[k] = GlobalViewKeyEncryption();
+        encOut[k].D[0] <== D[0];
+        encOut[k].D[1] <== D[1];
+        encOut[k].nonce <== nonce;
+        encOut[k].idx <== nIns + k;
+        encOut[k].pk <== outPubkey[k];
+        encOut[k].amount <== outAmount[k];
+        encOut[k].blinding <== outBlinding[k];
+
+        R[outBase + k][0] <== encOut[k].R[0];
+        R[outBase + k][1] <== encOut[k].R[1];
+        c1[outBase + k] <== encOut[k].c1;
+        c2[outBase + k] <== encOut[k].c2;
+        c3[outBase + k] <== encOut[k].c3;
+    }
+
+    // Encrypt input notes in traceable mode (idx = k)
+    if (encryptInputs == 1) {
+        component encIn[nIns];
+        for (var k = 0; k < nIns; k++) {
+            encIn[k] = GlobalViewKeyEncryption();
+            encIn[k].D[0] <== D[0];
+            encIn[k].D[1] <== D[1];
+            encIn[k].nonce <== nonce;
+            encIn[k].idx <== k;
+            encIn[k].pk <== inPubkey[k];
+            encIn[k].amount <== inAmount[k];
+            encIn[k].blinding <== inBlinding[k];
+
+            R[k][0] <== encIn[k].R[0];
+            R[k][1] <== encIn[k].R[1];
+            c1[k] <== encIn[k].c1;
+            c2[k] <== encIn[k].c2;
+            c3[k] <== encIn[k].c3;
+        }
+    }
+}
