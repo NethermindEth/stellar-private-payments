@@ -81,11 +81,7 @@ impl BootnodeRpc {
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);
         let tip_known = tip > 0;
         let cutoff_ledger = tip.saturating_sub(self.state.cfg.cutoff_ledgers());
-        let in_sync = if tip_known {
-            self.load_in_sync().await?
-        } else {
-            false
-        };
+        let in_sync = tip_known && self.state.in_sync.load(Ordering::Relaxed);
 
         let handoff_ledger = match (parsed.start_ledger, parsed.cursor.as_deref()) {
             (Some(start_ledger), None) => Some(start_ledger),
@@ -163,19 +159,6 @@ impl BootnodeRpc {
 
         counter!("bootnode_cache_hits_total").increment(1);
         Ok(result)
-    }
-
-    async fn load_in_sync(&self) -> RpcResult<bool> {
-        Ok(self
-            .state
-            .storage
-            .load_kv()
-            .await
-            .map_err(|e| {
-                counter!("bootnode_handler_errors_total").increment(1);
-                internal_error(e)
-            })?
-            .in_sync)
     }
 
     fn cache_miss_or_handoff(

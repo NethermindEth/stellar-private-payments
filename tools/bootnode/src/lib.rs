@@ -16,7 +16,10 @@ mod upstream;
 
 use anyhow::Result;
 use config::Config;
-use std::sync::{Arc, atomic::AtomicU32};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, AtomicU32, Ordering},
+};
 use storage::Storage;
 
 use self::{
@@ -55,9 +58,24 @@ pub(crate) struct AppState {
     pub(crate) storage: Arc<dyn Storage>,
     pub(crate) upstream: UpstreamClient,
     pub(crate) ledger_tip: Arc<AtomicU32>,
+    pub(crate) in_sync: Arc<AtomicBool>,
     pub(crate) prom_handle: metrics_exporter_prometheus::PrometheusHandle,
     pub(crate) contract_ids: Arc<Vec<String>>,
     pub(crate) min_deployment_ledger: u32,
+}
+
+impl AppState {
+    pub(crate) async fn set_in_sync(&self, in_sync: bool) -> Result<()> {
+        self.storage.set_in_sync(in_sync).await?;
+        self.in_sync.store(in_sync, Ordering::Relaxed);
+        Ok(())
+    }
+
+    pub(crate) async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {
+        self.storage.mark_caught_up(cursor, latest_ledger).await?;
+        self.in_sync.store(true, Ordering::Relaxed);
+        Ok(())
+    }
 }
 
 impl Bootnode {
@@ -94,6 +112,7 @@ impl Bootnode {
             state: AppState {
                 upstream: UpstreamClient::new(cfg.upstream_rpc_url.clone())?,
                 ledger_tip: Arc::new(AtomicU32::new(ledger_tip)),
+                in_sync: Arc::new(AtomicBool::new(kv.in_sync)),
                 cfg,
                 storage,
                 prom_handle,

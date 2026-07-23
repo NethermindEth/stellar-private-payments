@@ -32,11 +32,11 @@ impl EmptyPageCompressor {
     }
 
     async fn tick(&self) -> anyhow::Result<()> {
-        let kv = self.state.storage.load_kv().await?;
-        if !kv.in_sync {
+        if !self.state.in_sync.load(Ordering::Relaxed) {
             return Ok(());
         }
 
+        let kv = self.state.storage.load_kv().await?;
         let tip = self
             .state
             .ledger_tip

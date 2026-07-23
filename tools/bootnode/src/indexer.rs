@@ -77,7 +77,7 @@ impl Indexer {
                 || (!full_page && progress_ledger > 0 && progress_ledger >= result.latest_ledger);
 
             if !is_empty {
-                self.state.storage.set_in_sync(false).await?;
+                self.state.set_in_sync(false).await?;
             }
             // Always persist, including empty pages, so clients can follow
             // upstream cursors across sparse/empty gaps.
@@ -125,7 +125,6 @@ impl Indexer {
                     progress_ledger
                 };
                 self.state
-                    .storage
                     .mark_caught_up(cursor.as_deref().expect("cursor set"), caught_up_ledger)
                     .await?;
                 gauge!("bootnode_last_fully_indexed_ledger").set(f64::from(caught_up_ledger));
