@@ -33,7 +33,7 @@ if [ ! -f "sdk/web/dist/circuits/source-bundle.tar.gz" ]; then
     exit 1
 fi
 
-SDK="$TRUNK_STAGING_DIR/js/stellar-private-payments-sdk-web"
+SDK="$TRUNK_STAGING_DIR/js/@nethermindeth/stellar-private-payments"
 mkdir -p "$SDK/dist" "$SDK/js"
 cp -R sdk/web/dist/. "$SDK/dist/"
 
@@ -59,9 +59,9 @@ cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/sourc
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/ui.js --bundle --external:@nethermindeth/stellar-private-payments --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --bundle --external:@nethermindeth/stellar-private-payments --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --external:@nethermindeth/stellar-private-payments --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
 
 # Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
 cp app/js/sw.js "$TRUNK_STAGING_DIR/sw.js"

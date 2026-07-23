@@ -5,7 +5,7 @@ edition.workspace = true
 repository.workspace = true
 license.workspace = true
 publish.workspace = true
-description = "Web/WASM bindings for stellar-private-payments-sdk (stellar-private-payments-sdk-web on npm)"
+description = "Web/WASM bindings for stellar-private-payments-sdk (npm: @nethermindeth/stellar-private-payments)"
 
 [lib]
 name = "stellar_private_payments_sdk_web"

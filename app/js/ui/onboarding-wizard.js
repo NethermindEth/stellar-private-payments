@@ -1,4 +1,4 @@
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { FreighterSigner } from '@nethermindeth/stellar-private-payments';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { Utils, Toast } from './core.js';

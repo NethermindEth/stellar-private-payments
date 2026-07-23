@@ -1,0 +1,137 @@
+# Publish @nethermindeth/stellar-private-payments to npm.
+#
+# Idempotent: publishes only when package.json's version is not already on
+# the registry.
+name: npm release
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.ref }}"
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  publish:
+    name: Publish npm package
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: sdk/web
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: Read package identity
+        id: pkg
+        working-directory: .
+        run: |
+          set -euo pipefail
+          name="$(node -p "JSON.parse(require('fs').readFileSync('sdk/web/package.json','utf8')).name")"
+          version="$(node -p "JSON.parse(require('fs').readFileSync('sdk/web/package.json','utf8')).version")"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "package: $name@$version"
+
+      - name: Check whether version already exists on npm
+        id: version_check
+        working-directory: .
+        run: |
+          set -euo pipefail
+          name="${{ steps.pkg.outputs.name }}"
+          version="${{ steps.pkg.outputs.version }}"
+          if npm view "${name}@${version}" version >/dev/null 2>&1; then
+            echo "should_publish=false" >> "$GITHUB_OUTPUT"
+            echo "npm already has ${name}@${version} — skip"
+          else
+            echo "should_publish=true" >> "$GITHUB_OUTPUT"
+            echo "npm does not have ${name}@${version} — will publish"
+          fi
+
+      - name: Setup Rust
+        if: steps.version_check.outputs.should_publish == 'true'
+        uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          profile: minimal
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+          override: true
+
+      - name: Cache Rust
+        if: steps.version_check.outputs.should_publish == 'true'
+        uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+        with:
+          cache-targets: "true"
+
+      - name: Build circuit artifacts
+        if: steps.version_check.outputs.should_publish == 'true'
+        working-directory: .
+        run: cargo build -p circuits --release
+
+      - name: Install wasm-bindgen-cli
+        if: steps.version_check.outputs.should_publish == 'true'
+        working-directory: .
+        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+
+      - name: Setup Node.js
+        if: steps.version_check.outputs.should_publish == 'true'
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+          cache: npm
+          cache-dependency-path: sdk/web/package-lock.json
+
+      - name: Install npm dependencies
+        if: steps.version_check.outputs.should_publish == 'true'
+        run: npm ci
+
+      - name: Build package
+        if: steps.version_check.outputs.should_publish == 'true'
+        run: npm run build
+
+      - name: Check artifacts and types
+        if: steps.version_check.outputs.should_publish == 'true'
+        run: |
+          npm run check:artifacts
+          npm run check:types
+
+      - name: Pack tarball
+        if: steps.version_check.outputs.should_publish == 'true'
+        id: pack
+        run: |
+          set -euo pipefail
+          # --ignore-scripts: build already ran; avoid double prepublishOnly.
+          tarball="$(npm pack --ignore-scripts --json | node -p "JSON.parse(require('fs').readFileSync(0,'utf8'))[0].filename")"
+          echo "tarball=$tarball" >> "$GITHUB_OUTPUT"
+          ls -lh "$tarball"
+
+      - name: Upload pack artifact
+        if: steps.version_check.outputs.should_publish == 'true'
+        uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: npm-pack-${{ steps.pkg.outputs.version }}
+          path: sdk/web/${{ steps.pack.outputs.tarball }}
+          if-no-files-found: error
+
+      - name: Publish to npm
+        if: steps.version_check.outputs.should_publish == 'true'
+        env:
+          # Trusted Publisher (OIDC) does not need this; keep as optional fallback.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          # publishConfig.tag=alpha and access=public live in package.json.
+          # --ignore-scripts: dist already built and checked above.
+          npm publish --ignore-scripts --provenance

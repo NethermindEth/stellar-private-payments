@@ -9,7 +9,7 @@ import {
 } from '@stellar/freighter-api';
 
 /**
- * Freighter wallet adapter for {@link DeploymentClient.account}.
+ * Freighter wallet adapter for {@link Client.account}.
  *
  * Pass an instance as the second argument: `client.account(options, signer)`.
  */

@@ -1,6 +1,8 @@
-# stellar-private-payments-sdk-web (`sdk/web`)
+# @nethermindeth/stellar-private-payments (`sdk/web`)
 
 Browser SDK for Stellar Private Payments.
+
+> **Alpha (`0.1.0-alpha.x`)** — not audited and not production-ready.
 
 **`Storage.open`** → **`bootnodeRequired`** → **`Client.new`** → **`backgroundSync`** → **`client.account()`** → **`account.pool()`** → **`PrivatePool`** (Rust SDK parity).
 
@@ -12,15 +14,16 @@ import init, {
   Client,
   FreighterSigner,
   bootnodeRequired,
-} from 'stellar-private-payments-sdk-web';
+  verifySelectiveDisclosure,
+} from '@nethermindeth/stellar-private-payments';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
+const rpcUrl = 'https://soroban-testnet.stellar.org';
 const signer = new FreighterSigner();
 
 await init();
 
 const storage = await Storage.open();
-const rpcUrl = 'https://soroban-testnet.stellar.org';
 
 if (await bootnodeRequired(rpcUrl, storage)) {
   // load or prompt for a bootnode URL, then pass it to Client.new
@@ -37,7 +40,6 @@ await client.backgroundSync();
 
 const account = await client.account({ networkPassphrase }, signer);
 console.log(await account.userPublicKeys());
-console.log(await account.aspSecret()); // ASP membership blinding only
 console.log(await account.isRegistered());
 
 const pool = await account.pool({ poolContract: 'CA2TZ...' });
@@ -45,21 +47,26 @@ await client.sync(); // optional explicit catch-up
 await pool.deposit(10_000_000n); // stroops (1 XLM)
 console.log(await pool.balance()); // bigint stroops
 await pool.transfer('G...', 5_000_000n);
-await pool.withdraw(3_000_000n);
+await pool.withdraw(3_000_000n); // defaults to connected wallet
 
 const cfg = Client.contractConfig();
 const feed = await client.operationalFeed(10);
 const lookup = await client.recipientLookup('G...');
 const chain = await client.allContractsData();
+
+// Walletless verify (no Client / storage)
+const report = await verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash);
 ```
 
 ### `Storage`
 
 | Method | Description                                              |
 |--------|----------------------------------------------------------|
-| `open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
+| `Storage.open({ workerUrl? })` | Spawn storage worker once per page (`spp.db` on OPFS)    |
 | `fork()` | Extra handle to the same worker (app + SDK share one DB) |
 | `call(request, timeoutMs?)` | Raw worker RPC — **app-layer only** (disclaimer, explorer, bootnode, op history, `{ UserKeys: address }` probe) |
+
+The package exports a `Storage` namespace with `open` only; `fork` / `call` are on the opened handle.
 
 ### Free functions
 
@@ -81,7 +88,15 @@ const chain = await client.allContractsData();
 | `account({ networkPassphrase, userAddress? }, signer)` | Bind wallet, spawn workers, derive keys if missing, return `Account` |
 | `aspState()` | On-chain ASP membership state |
 | `allContractsData()` | On-chain pool + ASP state |
-| `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Walletless disclosure receipt verification |
+| `verifySelectiveDisclosure(receiptJson, expectedVkHash)` | Verify a disclosure receipt (uses this client's prover) |
+
+### `verifySelectiveDisclosure` (standalone)
+
+```ts
+verifySelectiveDisclosure(rpcUrl, receiptJson, expectedVkHash, { proverWorkerUrl? })
+```
+
+Walletless verification — no `Storage` / `Client`. Prover worker URL defaults to the package `dist/workers/` via `import.meta.url`.
 
 ### `Account`
 
@@ -99,7 +114,20 @@ const chain = await client.allContractsData();
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estimate`, `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `verifyDisclosure`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up. Amount parameters and `balance` use **stroops** as JavaScript `bigint`.
+Matches `stellar_private_payments_sdk::PrivatePool`. Amount parameters and `balance` use **stroops** as JavaScript `bigint`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up.
+
+| Method | Description |
+|--------|-------------|
+| `balance()` | Spendable balance (stroops) |
+| `notes()` | Notes for this pool |
+| `estimate(amount)` | How many on-chain txs a spend needs |
+| `deposit(amount)` | Deposit stroops |
+| `transfer(recipient, amount)` | Private transfer to a `G...` address |
+| `transferToKeys(notePkHex, encPkHex, amount)` | Private transfer to explicit note + encryption keys |
+| `withdraw(amount, recipient?)` | Withdraw; `recipient` defaults to the connected wallet |
+| `transact(config)` | Low-level pool transact |
+| `disclose(config)` | Selective disclosure (`selectedCommitments` 1..=4); may return `null` if ASP registration is needed |
+| `verifyDisclosure(receipt, expectedVkHash)` | Verify a disclosure receipt in this pool session |
 
 `disclose` accepts `selectedCommitments` (1..=4 note commitment IDs); the prover picks the matching `selectiveDisclosure_N` circuit automatically.
 
@@ -109,10 +137,17 @@ Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `s
 
 ## TypeScript
 
-Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from 'stellar-private-payments-sdk-web'`) is fully typed; wasm-bindgen types are also available via `stellar-private-payments-sdk-web/wasm`.
+Public types live in [`js/types/`](./js/types/). The package entry (`import { Client } from '@nethermindeth/stellar-private-payments'`) is fully typed; wasm-bindgen types are also available via `@nethermindeth/stellar-private-payments/wasm`.
 
 ```ts
-import init, { Storage, Client, FreighterSigner, type WalletSigner } from 'stellar-private-payments-sdk-web';
+import init, {
+  Storage,
+  Client,
+  FreighterSigner,
+  verifySelectiveDisclosure,
+  type Account,
+  type WalletSigner,
+} from '@nethermindeth/stellar-private-payments';
 ```
 
 After building WASM:
@@ -134,10 +169,12 @@ npm pack
 
 Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
 
+CI publishes from `main` when `version` in this file is new on the registry (see `.github/workflows/npm-release.yml`).
+
 ## npm install (app developers)
 
 ```bash
-npm install stellar-private-payments-sdk-web
+npm install @nethermindeth/stellar-private-payments@alpha
 ```
 
 One package — no separate circuit hosting or Cargo build. Circuit artifacts ship under `dist/circuits/` and load automatically from the prover worker. Your bundler must serve static files from the package `dist/` tree (same as WASM and workers).

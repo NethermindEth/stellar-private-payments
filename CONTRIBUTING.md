@@ -31,7 +31,7 @@ stellar-private-payments/
 │   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
 │   │   ├── wallet.js           # Freighter connect/watch/sign UX
-│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments-sdk-web
+│   │   ├── wasm-facade.js      # Runtime facade over @nethermindeth/stellar-private-payments
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
 │   ├── assets/                 # Static assets (logo, favicon)
@@ -248,7 +248,7 @@ make release
 
 ### Browser SDK (`sdk/web`)
 
-Standalone npm package (`stellar-private-payments-sdk-web`). See [`sdk/web/README.md`](sdk/web/README.md).
+Standalone npm package (`@nethermindeth/stellar-private-payments`, alpha). See [`sdk/web/README.md`](sdk/web/README.md).
 
 Requires [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (version must match `Cargo.lock`).
 
