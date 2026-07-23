@@ -370,7 +370,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn compress_merges_empty_run_below_cutoff() {
+    async fn compress_leaves_historical_empty_run_below_cutoff() {
         let storage = InMemory::with_deployment_id("test");
         let p1 = empty_response("c1", 400);
         let p2 = empty_response("c2", 500);
@@ -390,42 +390,6 @@ mod tests {
             .expect("insert c3");
 
         let stats = storage.compress_empty_pages(600).await.expect("compress");
-        assert_eq!(stats.spans_joined, 1);
-        assert_eq!(stats.pages_removed, 2);
-
-        let kept = storage
-            .get_cached_get_events_by_start_ledger(100)
-            .await
-            .expect("lookup root")
-            .expect("kept root");
-        assert_eq!(kept.cursor, "c3");
-        assert!(kept.events.is_empty());
-
-        assert!(
-            storage
-                .get_cached_get_events_by_cursor("c1")
-                .await
-                .expect("lookup c1")
-                .is_none()
-        );
-    }
-
-    #[tokio::test]
-    async fn compress_skips_run_touching_handoff_window() {
-        let storage = InMemory::with_deployment_id("test");
-        let p1 = empty_response("c1", 400);
-        let p2 = empty_response("c2", 700);
-
-        storage
-            .insert_get_events_page(empty_insert(None, Some(100), "c1", 400, &p1))
-            .await
-            .expect("insert c1");
-        storage
-            .insert_get_events_page(empty_insert(Some("c1"), None, "c2", 700, &p2))
-            .await
-            .expect("insert c2");
-
-        let stats = storage.compress_empty_pages(600).await.expect("compress");
         assert_eq!(stats.spans_joined, 0);
         assert_eq!(stats.pages_removed, 0);
 
@@ -433,7 +397,7 @@ mod tests {
             storage
                 .get_cached_get_events_by_start_ledger(100)
                 .await
-                .expect("lookup")
+                .expect("lookup root")
                 .expect("root")
                 .cursor,
             "c1"
@@ -444,6 +408,51 @@ mod tests {
                 .await
                 .expect("lookup c1")
                 .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn compress_merges_tip_suffix_in_handoff_window() {
+        let storage = InMemory::with_deployment_id("test");
+        let events = sample_response("e1", 550);
+        let p1 = empty_response("c1", 650);
+        let p2 = empty_response("c2", 700);
+
+        storage
+            .insert_get_events_page({
+                let mut page = sample_page(None, Some(100), "e1", &events);
+                page.last_event_ledger = Some(550);
+                page.latest_ledger = 550;
+                page
+            })
+            .await
+            .expect("insert events");
+        storage
+            .insert_get_events_page(empty_insert(Some("e1"), None, "c1", 650, &p1))
+            .await
+            .expect("insert c1");
+        storage
+            .insert_get_events_page(empty_insert(Some("c1"), None, "c2", 700, &p2))
+            .await
+            .expect("insert c2");
+
+        let stats = storage.compress_empty_pages(600).await.expect("compress");
+        assert_eq!(stats.spans_joined, 1);
+        assert_eq!(stats.pages_removed, 1);
+
+        let kept = storage
+            .get_cached_get_events_by_cursor("e1")
+            .await
+            .expect("lookup")
+            .expect("merged empty");
+        assert_eq!(kept.cursor, "c2");
+        assert!(kept.events.is_empty());
+        assert!(
+            storage
+                .get_cached_get_events_by_cursor("c1")
+                .await
+                .expect("lookup c1")
+                .is_none()
         );
     }
 

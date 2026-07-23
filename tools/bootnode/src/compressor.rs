@@ -3,12 +3,10 @@ use metrics::counter;
 use std::sync::atomic::Ordering;
 use tokio::time::{Duration, sleep};
 
-/// Periodically collapses contiguous empty `getEvents` pages once the indexer
-/// is at tip.
+/// Periodically collapses recent empty `getEvents` pages once the indexer is
+/// at tip (handoff-window / tip-suffix policy in `storage::compress`).
 ///
-/// Cadence is one "ledger day" (`86400 / ledger_seconds`). Only empty runs that
-/// lie entirely below the retention cutoff are joined — clients may still be
-/// paginating empty cursor chains inside the handoff window.
+/// Cadence is one ledger-day (`86400 / ledger_seconds`).
 pub(crate) struct EmptyPageCompressor {
     state: AppState,
 }
@@ -69,7 +67,7 @@ impl EmptyPageCompressor {
                 tip,
                 spans_joined = stats.spans_joined,
                 pages_removed = stats.pages_removed,
-                "compressed empty getEvents pages below cutoff"
+                "compressed empty getEvents pages in handoff window"
             );
             counter!("bootnode_compressor_pages_removed_total")
                 .increment(u64::from(stats.pages_removed));

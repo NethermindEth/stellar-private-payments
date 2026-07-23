@@ -43,12 +43,13 @@ fn is_empty_page(page: &PageRecord) -> bool {
     page.last_event_ledger.is_none() && page.result.events.is_empty()
 }
 
-/// Plan merges of contiguous empty pages that lie **entirely below**
-/// `cutoff_ledger` (the retention handoff threshold).
+/// Plan merges of contiguous empty pages near tip (handoff window), not in
+/// the historical archive below `cutoff_ledger`.
 ///
-/// Clients may still paginate empty cursor chains inside the handoff window, so
-/// those pages are left alone. Historical empty runs (every page's
-/// `latest_ledger < cutoff_ledger`) collapse into the first page.
+/// A run merges when every page has `latest_ledger >= cutoff`, length ≥ 2, and
+/// either the prior event is already in-window or the run is a tip suffix
+/// (no following page). Mid-history empties between old events stay intact
+/// even if they were ingested with a tip-valued `latest_ledger`.
 pub fn plan_empty_compression(pages: &[PageRecord], cutoff_ledger: u32) -> CompressPlan {
     let by_cursor_in: HashMap<&str, &PageRecord> = pages
         .iter()
@@ -62,12 +63,14 @@ pub fn plan_empty_compression(pages: &[PageRecord], cutoff_ledger: u32) -> Compr
 
     for root in roots {
         let mut current = Some(root);
+        let mut prior_event_ledger: Option<u32> = None;
         while let Some(page) = current {
             if !visited.insert(page.id) {
                 break;
             }
 
             if !is_empty_page(page) {
+                prior_event_ledger = page.last_event_ledger;
                 current = by_cursor_in.get(page.cursor_out.as_str()).copied();
                 continue;
             }
@@ -84,8 +87,11 @@ pub fn plan_empty_compression(pages: &[PageRecord], cutoff_ledger: u32) -> Compr
                 next = by_cursor_in.get(n.cursor_out.as_str()).copied();
             }
 
-            let entirely_below_cutoff = run.iter().all(|p| p.latest_ledger < cutoff_ledger);
-            if entirely_below_cutoff && run.len() >= 2 {
+            let entirely_in_window = run.iter().all(|p| p.latest_ledger >= cutoff_ledger);
+            let after_handoff_events =
+                prior_event_ledger.is_some_and(|ledger| ledger >= cutoff_ledger);
+            let tip_suffix = next.is_none();
+            if entirely_in_window && run.len() >= 2 && (after_handoff_events || tip_suffix) {
                 let first = run[0];
                 let last = run.last().expect("run len >= 2");
                 let mut result = last.result.clone();
@@ -164,24 +170,19 @@ mod tests {
     }
 
     #[test]
-    fn merges_empty_run_entirely_below_cutoff() {
-        // cutoff = 600; run ends at 590 → compress.
+    fn leaves_historical_empty_run_below_cutoff() {
+        // cutoff = 600; historical quiet gap — do not compress.
         let pages = vec![
             empty_page(1, None, Some(100), "c1", 400),
             empty_page(2, Some("c1"), None, "c2", 500),
             empty_page(3, Some("c2"), None, "c3", 590),
         ];
         let plan = plan_empty_compression(&pages, 600);
-        assert_eq!(plan.updates.len(), 1);
-        assert_eq!(plan.updates[0].0, 1);
-        assert_eq!(plan.updates[0].1, "c3");
-        assert_eq!(plan.updates[0].3, 590);
-        assert_eq!(plan.deletes, vec![2, 3]);
+        assert!(plan.is_empty());
     }
 
     #[test]
-    fn leaves_run_that_touches_handoff_window() {
-        // cutoff = 600; last page at 700 → do not compress.
+    fn leaves_run_that_straddles_cutoff() {
         let pages = vec![
             empty_page(1, None, Some(100), "c1", 400),
             empty_page(2, Some("c1"), None, "c2", 500),
@@ -193,11 +194,44 @@ mod tests {
     }
 
     #[test]
-    fn leaves_run_entirely_in_handoff_window() {
+    fn merges_tip_suffix_empties_in_handoff_window() {
+        // Events below cutoff, then tip empties observed at tip — compress suffix.
         let pages = vec![
             event_page(1, None, Some(100), "e1", 550, 550),
             empty_page(2, Some("e1"), None, "c1", 650),
             empty_page(3, Some("c1"), None, "c2", 700),
+        ];
+        let plan = plan_empty_compression(&pages, 600);
+        assert_eq!(plan.updates.len(), 1);
+        assert_eq!(plan.updates[0].0, 2);
+        assert_eq!(plan.updates[0].1, "c2");
+        assert_eq!(plan.updates[0].3, 700);
+        assert_eq!(plan.deletes, vec![3]);
+    }
+
+    #[test]
+    fn merges_empties_after_events_in_handoff_window() {
+        let pages = vec![
+            event_page(1, None, Some(100), "e1", 650, 650),
+            empty_page(2, Some("e1"), None, "c1", 680),
+            empty_page(3, Some("c1"), None, "c2", 700),
+            event_page(4, Some("c2"), None, "e2", 710, 710),
+        ];
+        let plan = plan_empty_compression(&pages, 600);
+        assert_eq!(plan.updates.len(), 1);
+        assert_eq!(plan.updates[0].0, 2);
+        assert_eq!(plan.updates[0].1, "c2");
+        assert_eq!(plan.deletes, vec![3]);
+    }
+
+    #[test]
+    fn leaves_mid_history_empties_even_if_latest_ledger_is_tip() {
+        // Fresh catch-up: empties carry tip latest_ledger but sit between old events.
+        let pages = vec![
+            event_page(1, None, Some(100), "e1", 100, 700),
+            empty_page(2, Some("e1"), None, "c1", 700),
+            empty_page(3, Some("c1"), None, "c2", 700),
+            event_page(4, Some("c2"), None, "e2", 200, 700),
         ];
         let plan = plan_empty_compression(&pages, 600);
         assert!(plan.is_empty());
@@ -205,23 +239,8 @@ mod tests {
 
     #[test]
     fn does_not_merge_singleton_empty() {
-        let pages = vec![empty_page(1, None, Some(100), "c1", 400)];
+        let pages = vec![empty_page(1, None, Some(100), "c1", 700)];
         let plan = plan_empty_compression(&pages, 600);
         assert!(plan.is_empty());
-    }
-
-    #[test]
-    fn stops_empty_run_at_event_page() {
-        let pages = vec![
-            empty_page(1, None, Some(100), "c1", 400),
-            empty_page(2, Some("c1"), None, "c2", 500),
-            event_page(3, Some("c2"), None, "e1", 550, 550),
-            empty_page(4, Some("e1"), None, "c3", 580),
-            empty_page(5, Some("c3"), None, "c4", 590),
-        ];
-        let plan = plan_empty_compression(&pages, 600);
-        assert_eq!(plan.updates.len(), 2);
-        assert_eq!(plan.updates[0].1, "c2");
-        assert_eq!(plan.updates[1].1, "c4");
     }
 }

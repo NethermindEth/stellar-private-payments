@@ -73,11 +73,10 @@ pub trait Storage: Send + Sync {
         cursor_in: &str,
         page: InsertGetEventsPage<'_>,
     ) -> Result<()>;
-    /// Collapse contiguous empty pages that lie entirely below `cutoff_ledger`.
+    /// Collapse contiguous empty pages in the handoff window / tip suffix.
     ///
-    /// Runs that touch the handoff window (`latest_ledger >= cutoff_ledger`)
-    /// are left alone so mid-pagination clients there keep a valid cursor
-    /// chain.
+    /// Historical empty runs below `cutoff_ledger` are left alone so cold
+    /// clients keep a valid archive cursor chain.
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats>;
 
     async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {
