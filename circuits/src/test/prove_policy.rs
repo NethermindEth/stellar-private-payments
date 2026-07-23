@@ -1,7 +1,9 @@
 #[cfg(test)]
 mod tests {
     use crate::test::utils::{
-        circom_tester::{Inputs, SignalKey, generate_keys, prove_and_verify, prove_and_verify_with_keys},
+        circom_tester::{
+            Inputs, SignalKey, generate_keys, prove_and_verify, prove_and_verify_with_keys,
+        },
         general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
         global_view_key::{Note, admin_public_key, decrypt_note, encrypt_note},
         keypair::derive_public_key,
@@ -1536,10 +1538,11 @@ mod tests {
         encrypt_inputs: bool,
     }
 
-    /// Prove a `policy_tx_gvk_2_2*` circuit for a balanced 2-in/2-out transaction
-    /// and confirm the encrypted notes appear among the public signals and decrypt
-    /// back to their plaintext. View-only encrypts outputs only; traceable also
-    /// encrypts inputs (reusing the in-circuit input public keys).
+    /// Prove a `policy_tx_gvk_2_2*` circuit for a balanced 2-in/2-out
+    /// transaction and confirm the encrypted notes appear among the public
+    /// signals and decrypt back to their plaintext. View-only encrypts
+    /// outputs only; traceable also encrypts inputs (reusing the in-circuit
+    /// input public keys).
     #[allow(clippy::arithmetic_side_effects)]
     fn run_policy_gvk(circuit: PolicyGvkCircuit) -> Result<()> {
         let (wasm, r1cs) = load_artifacts(circuit.stem)
@@ -1610,8 +1613,17 @@ mod tests {
         // The admin decrypts each emitted ciphertext back to its note. Outputs are
         // encrypted at idx nIns+k; inputs (traceable only) at idx k.
         let check = |note: Note, idx: usize| {
-            let ct = encrypt_note(&note, d, nonce, Scalar::from(u64::try_from(idx).expect("idx")));
-            assert_eq!(decrypt_note(&ct, d_priv), note, "admin must recover the note");
+            let ct = encrypt_note(
+                &note,
+                d,
+                nonce,
+                Scalar::from(u64::try_from(idx).expect("idx")),
+            );
+            assert_eq!(
+                decrypt_note(&ct, d_priv),
+                note,
+                "admin must recover the note"
+            );
             for v in [ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3] {
                 assert!(
                     publics.contains(&v),

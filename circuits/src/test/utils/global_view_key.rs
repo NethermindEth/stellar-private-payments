@@ -66,8 +66,8 @@ pub fn shared_secret(r: Scalar, d: (Scalar, Scalar)) -> Point {
 }
 
 /// The three keystream pads from a single width-4 Poseidon2 permutation over
-/// `(S.x, S.y, 0, 0x06)`. Only the first three lanes are used; the fourth is the
-/// capacity and never exposed.
+/// `(S.x, S.y, 0, 0x06)`. Only the first three lanes are used; the fourth is
+/// the capacity and never exposed.
 pub fn keystream(s: Point) -> [Scalar; 3] {
     let (sx, sy) = point_to_coords(s);
     let h = Poseidon2::new(&POSEIDON2_BN256_PARAMS_4);

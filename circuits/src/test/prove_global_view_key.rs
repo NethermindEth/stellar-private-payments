@@ -27,7 +27,8 @@ mod tests {
         }
     }
 
-    /// Distinct sample notes so multi-note circuits exercise different plaintext.
+    /// Distinct sample notes so multi-note circuits exercise different
+    /// plaintext.
     #[allow(clippy::arithmetic_side_effects)]
     fn sample_notes(n: usize) -> Vec<Note> {
         (0..n)
@@ -42,8 +43,9 @@ mod tests {
             .collect()
     }
 
-    /// Build the circuit inputs for `GlobalViewKey(n)`: shared `D`/`nonce` and a
-    /// per-note plaintext vector. The circuit assigns `idx = 0..n-1` internally.
+    /// Build the circuit inputs for `GlobalViewKey(n)`: shared `D`/`nonce` and
+    /// a per-note plaintext vector. The circuit assigns `idx = 0..n-1`
+    /// internally.
     fn gvk_inputs(notes: &[Note], d: (Scalar, Scalar), nonce: Scalar) -> Inputs {
         let mut inputs = Inputs::new();
         inputs.set("D", vec![d.0, d.1]);
@@ -200,7 +202,8 @@ mod tests {
     #[test]
     #[ignore]
     fn gvk_2_off_curve_d_rejected() {
-        let (wasm, r1cs) = load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
+        let (wasm, r1cs) =
+            load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         // (1, 1) does not satisfy the Baby JubJub curve equation, so BabyCheck fails.
@@ -216,7 +219,8 @@ mod tests {
     #[test]
     #[ignore]
     fn gvk_2_low_order_d_rejected() {
-        let (wasm, r1cs) = load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
+        let (wasm, r1cs) =
+            load_artifacts("globalViewKey_2_test").expect("globalViewKey_2 artifacts");
         let keys = generate_keys(&wasm, &r1cs).expect("Groth16 key generation failed");
 
         // (0, -1) is on-curve but has order 2, so 8*D is the identity and the
@@ -230,5 +234,4 @@ mod tests {
             "low-order D unexpectedly verified; expected rejection",
         );
     }
-
 }
