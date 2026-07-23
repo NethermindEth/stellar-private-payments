@@ -145,3 +145,27 @@ fn register_rejects_short_note_key() {
     env.mock_all_auths();
     client.register(&account);
 }
+
+#[test]
+fn test_public_key_event_exact_shape() {
+    use soroban_sdk::events::Event;
+    let env = test_env();
+    let contract_id = env.register(PublicKeyRegistry, ());
+    let client = PublicKeyRegistryClient::new(&env, &contract_id);
+    let owner = Address::generate(&env);
+    let account = account(&env, owner.clone(), 0x11, 0x22);
+
+    env.mock_all_auths();
+    client.register(&account);
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+
+    let expected = PublicKeyEvent {
+        owner,
+        encryption_key: account.encryption_key,
+        note_key: account.note_key,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[0], expected);
+}

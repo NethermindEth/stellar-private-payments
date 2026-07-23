@@ -879,3 +879,40 @@ fn test_verify_non_membership_comprehensive_scenario() {
         "key_c non-membership should be false"
     );
 }
+
+#[test]
+fn test_leaf_inserted_and_deleted_event_exact_shapes() {
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let admin = Address::generate(&env);
+    let contract_id = env.register(ASPNonMembership, (admin,));
+    let client = ASPNonMembershipClient::new(&env, &contract_id);
+    let key = U256::from_u32(&env, 1u32);
+    let value = U256::from_u32(&env, 42u32);
+
+    env.mock_all_auths();
+    client.insert_leaf(&key, &value);
+
+    let events_after_insert = env.events().all();
+    assert_eq!(events_after_insert.events().len(), 1);
+    let root_after_insert = client.get_root();
+    let expected_inserted = LeafInsertedEvent {
+        key: key.clone(),
+        value,
+        root: root_after_insert,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events_after_insert.events()[0], expected_inserted);
+
+    client.delete_leaf(&key);
+
+    let events_after_delete = env.events().all();
+    assert_eq!(events_after_delete.events().len(), 1);
+    let root_after_delete = client.get_root();
+    let expected_deleted = LeafDeletedEvent {
+        key,
+        root: root_after_delete,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events_after_delete.events()[0], expected_deleted);
+}

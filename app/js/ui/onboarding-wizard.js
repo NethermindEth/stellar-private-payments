@@ -644,7 +644,8 @@ export async function runOnboardingWizard({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Register your public keys in the address book',
                 body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
-                aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.',
+                aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings. Note: registering publishes your public address to key binding on-chain as an opt-in public event.',
+
             });
             renderContent(panel);
 
