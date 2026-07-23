@@ -9,7 +9,7 @@ use std::{
     collections::{BTreeSet, HashMap},
     str::FromStr,
 };
-use stellar_xdr::curr::{
+use stellar_xdr::{
     self as xdr, AccountEntry, AccountId, ContractId, Error as XdrError, LedgerEntryData,
     LedgerKey, LedgerKeyAccount, Limits, PublicKey, ReadXdr, Uint256, WriteXdr,
 };
