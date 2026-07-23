@@ -1,8 +1,4 @@
-use crate::{
-    AppState,
-    messages::GetEventsParams,
-    storage::InsertGetEventsPage,
-};
+use crate::{AppState, messages::GetEventsParams, storage::InsertGetEventsPage};
 use metrics::{counter, gauge};
 use std::time::Instant;
 use tokio::time::{Duration, sleep};
