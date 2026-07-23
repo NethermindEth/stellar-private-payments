@@ -79,6 +79,10 @@ pub trait Storage: Send + Sync {
     ///
     /// Historical empty runs below `cutoff_ledger` are left alone so cold
     /// clients keep a valid archive cursor chain.
+    ///
+    /// Apply must only mutate rows that are still empty (`last_event_ledger IS
+    /// NULL`). If the indexer filled a page between plan and apply, return
+    /// [`Err`] so the compressor retries on the next tick.
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats>;
 
     async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {

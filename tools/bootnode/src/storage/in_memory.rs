@@ -3,7 +3,7 @@ use super::{
     plan_empty_compression,
 };
 use crate::messages::GetEventsResponse;
-use anyhow::Result;
+use anyhow::{Result, bail};
 use async_trait::async_trait;
 use std::{
     collections::HashMap,
@@ -120,6 +120,75 @@ fn rebuild_indexes(state: &mut DeploymentState) {
     }
 }
 
+fn apply_compress_plan(
+    state: &mut DeploymentState,
+    plan: &super::compress::CompressPlan,
+) -> Result<CompressStats> {
+    // Abort if any target row is gone or no longer empty (indexer race).
+    for update in &plan.updates {
+        let keep_empty = state
+            .pages
+            .iter()
+            .find(|p| p.meta.id == update.id)
+            .is_some_and(|p| p.meta.last_event_ledger.is_none());
+        if !keep_empty {
+            bail!(
+                "compress update aborted for page id={} (missing or no longer empty)",
+                update.id
+            );
+        }
+        let source_empty = state
+            .pages
+            .iter()
+            .find(|p| p.meta.id == update.result_from_id)
+            .is_some_and(|p| p.meta.last_event_ledger.is_none());
+        if !source_empty {
+            bail!(
+                "compress update aborted for result source id={} (missing or no longer empty)",
+                update.result_from_id
+            );
+        }
+    }
+    for id in &plan.deletes {
+        let still_empty = state
+            .pages
+            .iter()
+            .find(|p| p.meta.id == *id)
+            .is_some_and(|p| p.meta.last_event_ledger.is_none());
+        if !still_empty {
+            bail!("compress delete aborted for page id={id} (missing or no longer empty)");
+        }
+    }
+
+    let delete: std::collections::HashSet<i64> = plan.deletes.iter().copied().collect();
+    let results: HashMap<i64, GetEventsResponse> = state
+        .pages
+        .iter()
+        .filter(|p| plan.updates.iter().any(|u| u.result_from_id == p.meta.id))
+        .map(|p| (p.meta.id, p.result.clone()))
+        .collect();
+    let updates: HashMap<i64, _> = plan.updates.iter().map(|u| (u.id, u)).collect();
+
+    state.pages.retain_mut(|page| {
+        if delete.contains(&page.meta.id) {
+            return false;
+        }
+        if let Some(update) = updates.get(&page.meta.id) {
+            page.meta.cursor_out = update.cursor_out.clone();
+            page.meta.latest_ledger = update.latest_ledger;
+            let mut result = results
+                .get(&update.result_from_id)
+                .cloned()
+                .expect("compress result_from_id");
+            apply_result_cursor(&mut result, &update.cursor_out);
+            page.result = result;
+        }
+        true
+    });
+    rebuild_indexes(state);
+    Ok(plan.stats())
+}
+
 #[async_trait]
 impl Storage for InMemory {
     async fn ping(&self) -> Result<()> {
@@ -222,41 +291,14 @@ impl Storage for InMemory {
     }
 
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats> {
-        Ok(self.with_deployment_mut(|state| {
+        let plan = self.with_deployment(|state| {
             let meta: Vec<PageMeta> = state.pages.iter().map(|p| p.meta.clone()).collect();
-            let plan = plan_empty_compression(&meta, cutoff_ledger);
-            if plan.is_empty() {
-                return plan.stats();
-            }
-
-            let delete: std::collections::HashSet<i64> = plan.deletes.iter().copied().collect();
-            let results: HashMap<i64, GetEventsResponse> = state
-                .pages
-                .iter()
-                .filter(|p| plan.updates.iter().any(|u| u.result_from_id == p.meta.id))
-                .map(|p| (p.meta.id, p.result.clone()))
-                .collect();
-            let updates: HashMap<i64, _> = plan.updates.iter().map(|u| (u.id, u)).collect();
-
-            state.pages.retain_mut(|page| {
-                if delete.contains(&page.meta.id) {
-                    return false;
-                }
-                if let Some(update) = updates.get(&page.meta.id) {
-                    page.meta.cursor_out = update.cursor_out.clone();
-                    page.meta.latest_ledger = update.latest_ledger;
-                    let mut result = results
-                        .get(&update.result_from_id)
-                        .cloned()
-                        .expect("compress result_from_id");
-                    apply_result_cursor(&mut result, &update.cursor_out);
-                    page.result = result;
-                }
-                true
-            });
-            rebuild_indexes(state);
-            plan.stats()
-        }))
+            plan_empty_compression(&meta, cutoff_ledger)
+        });
+        if plan.is_empty() {
+            return Ok(plan.stats());
+        }
+        self.with_deployment_mut(|state| apply_compress_plan(state, &plan))
     }
 }
 
@@ -468,6 +510,69 @@ mod tests {
                 .await
                 .expect("lookup c1")
                 .is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn compress_aborts_if_delete_target_gained_events() {
+        let storage = InMemory::with_deployment_id("test");
+        let events = sample_response("e1", 550);
+        let p1 = empty_response("c1", 650);
+        let p2 = empty_response("c2", 700);
+
+        storage
+            .insert_get_events_page({
+                let mut page = sample_page(None, Some(100), "e1", &events);
+                page.last_event_ledger = Some(550);
+                page.latest_ledger = 550;
+                page
+            })
+            .await
+            .expect("insert events");
+        storage
+            .insert_get_events_page(empty_insert(Some("e1"), None, "c1", 650, &p1))
+            .await
+            .expect("insert c1");
+        storage
+            .insert_get_events_page(empty_insert(Some("c1"), None, "c2", 700, &p2))
+            .await
+            .expect("insert c2");
+
+        // Snapshot a plan that would delete the tip empty, then fill that row
+        // (simulates indexer racing after plan, before apply).
+        let plan = storage.with_deployment(|state| {
+            let meta: Vec<PageMeta> = state.pages.iter().map(|p| p.meta.clone()).collect();
+            plan_empty_compression(&meta, 600)
+        });
+        assert_eq!(plan.updates.len(), 1);
+        assert_eq!(plan.deletes.len(), 1);
+
+        let filled = sample_response("after", 700);
+        storage
+            .replace_empty_page_by_cursor_in("c1", {
+                let mut page = sample_page(Some("c1"), None, "after", &filled);
+                page.last_event_ledger = Some(700);
+                page.latest_ledger = 700;
+                page
+            })
+            .await
+            .expect("fill empty");
+
+        let err = storage
+            .with_deployment_mut(|state| apply_compress_plan(state, &plan))
+            .expect_err("must abort when delete target has events");
+        assert!(
+            err.to_string().contains("aborted"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            !storage
+                .get_cached_get_events_by_cursor("c1")
+                .await
+                .expect("lookup")
+                .expect("events must remain")
+                .events
+                .is_empty()
         );
     }
 

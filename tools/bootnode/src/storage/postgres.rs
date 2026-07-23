@@ -515,7 +515,7 @@ LIMIT 1
                     r#"
 UPDATE get_events_pages
 SET cursor_out = $1, result = $2, latest_ledger = $3
-WHERE id = $4 AND deployment_id = $5
+WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
 "#,
                     &[
                         &update.cursor_out,
@@ -527,18 +527,22 @@ WHERE id = $4 AND deployment_id = $5
                 )
                 .await?;
             if updated != 1 {
-                bail!("compress update missed page id={}", update.id);
+                // Row gone or no longer empty (indexer raced) — roll back.
+                bail!(
+                    "compress update aborted for page id={} (missing or no longer empty)",
+                    update.id
+                );
             }
         }
         for id in &plan.deletes {
             let deleted = tx
                 .execute(
-                    "DELETE FROM get_events_pages WHERE id = $1 AND deployment_id = $2",
+                    "DELETE FROM get_events_pages WHERE id = $1 AND deployment_id = $2 AND last_event_ledger IS NULL",
                     &[id, &self.deployment_id()],
                 )
                 .await?;
             if deleted != 1 {
-                bail!("compress delete missed page id={id}");
+                bail!("compress delete aborted for page id={id} (missing or no longer empty)");
             }
         }
         tx.commit().await?;
