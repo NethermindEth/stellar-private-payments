@@ -38,7 +38,7 @@ pub struct Note {
 /// masked field elements.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Ciphertext {
-    pub r: (Scalar, Scalar),        // It should be uppercase, as it's an EC point
+    pub r: (Scalar, Scalar), // the EC point `R`. Lowercase per Rust field naming
     pub c1: Scalar,
     pub c2: Scalar,
     pub c3: Scalar,

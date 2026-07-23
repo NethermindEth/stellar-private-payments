@@ -21,24 +21,36 @@ that verifying an off-circuit X25519 ciphertext would require.
 
 ## Modes
 
-| Mode | What is encrypted | Circuit |
-|---|---|---|
-| **View-only** | output notes only | `globalViewKey_2`, `tx_gvk_2_2_viewonly` |
-| **Traceable** | input **and** output notes | `globalViewKey_4`, `tx_gvk_2_2_traceable` |
+| Mode | What is encrypted |
+|---|---|
+| **View-only** | output notes only |
+| **Traceable** | input **and** output notes |
 
 Encrypting input notes as well lets the administrator link a transaction's
 inputs to the outputs of earlier transactions, tracing a note across hops.
+
+GVK composes with the policy transaction, so every ASP policy configuration is
+available in both modes:
+
+| Policy config | View-only entry | Traceable entry |
+|---|---|---|
+| Open (no ASP proofs) | `policy_tx_gvk_2_2_viewonly` | `policy_tx_gvk_2_2_traceable` |
+| Allowlist | `policy_tx_gvk_2_2_A_viewonly` | `policy_tx_gvk_2_2_A_traceable` |
+| Blocklist | `policy_tx_gvk_2_2_B_viewonly` | `policy_tx_gvk_2_2_B_traceable` |
+| Allowlist + Blocklist | `policy_tx_gvk_2_2_AB_viewonly` | `policy_tx_gvk_2_2_AB_traceable` |
+
+All entry points are 2-in/2-out. An output note's ciphertext is identical in
+both modes (outputs are always encrypted at `idx = nIns + k`), so switching
+modes never changes what an output memo looks like.
 
 ## Circuit inventory
 
 | Circuit | Description |
 |---|---|
-| `globalViewKey.circom` | `GlobalViewKeyEncryption()` (single note) and the `GlobalViewKey(nNotes)` wrapper. |
-| `globalViewKey_2` | Standalone: encrypt 2 output notes. |
-| `globalViewKey_4` | Standalone: encrypt 2 input + 2 output notes. |
-| `transactionGvk.circom` | `TransactionGvk(levels, nIns, nOuts, encryptInputs)` — composes the base `Transaction` with GVK encryption (transaction.circom is not modified). |
-| `tx_gvk_2_2_viewonly` | Transaction (2-in/2-out) + view-only encryption. |
-| `tx_gvk_2_2_traceable` | Transaction (2-in/2-out) + traceable encryption. |
+| `globalViewKey.circom` | `GlobalViewKeyEncryption()` (single-note primitive), `GlobalViewKey(nNotes)` (flat batch, used by the test circuits) and `GvkNotes(nIns, nOuts, encryptInputs)` (grouped batch used by the policy wrappers). |
+| `policyTransaction{Open,Allowlist,Blocklist,Both}Gvk.circom` | Policy transaction + GVK wrappers: each instantiates the `PolicyTransaction` core, its ASP module(s) and `GvkNotes`, feeding the encryptors the same note signals the transaction constrains (input public keys are reused from the core, not recomputed). |
+| `policy_tx_gvk_2_2*` | The 8 entry points listed above. |
+| `test/circuits/globalViewKey_{2,4}_test.circom` | Standalone encryption-only circuits for the known-answer/roundtrip tests (built with `BUILD_TESTS=1`). |
 
 `D` and `nonce` are public inputs; the note plaintexts stay private and
 `R, c1, c2, c3` are public outputs.
@@ -103,14 +115,25 @@ by the round-trip tests.
 
 ## Security notes
 
+- **The verifier must bind `D` to the registered authority key.** `D` is a
+  public *input*: the circuit proves the memos are encrypted under whatever `D`
+  the prover supplied. A prover could otherwise use their own key and produce a
+  valid proof whose memos the administrator cannot decrypt, silently evading
+  the audit. The contract must compare the public `D` signals against the
+  registered global view key.
 - **`nonce` must be unique per transaction.** A reused nonce makes identical
   notes produce identical `(R, c)` and therefore publicly linkable. This cannot
-  be enforced in-circuit and must be guaranteed by the contract.
+  be enforced in-circuit and must be guaranteed by the contract (e.g. by
+  deriving the nonce from an already-unique value such as an input nullifier).
 - **Every encryptor sharing a nonce must get a distinct `idx`.** In the combined
   circuit, inputs use `idx = 0..nIns-1` and outputs use `idx = nIns..nIns+nOuts-1`
   so keystreams never collide (in particular, never two encryptors at `idx = 0`).
 - **Determinism.** Because `r` is derived deterministically from the note and
-  context, confidentiality also rests on the entropy of `blinding`.
+  context, confidentiality also rests on the entropy of `blinding`. This applies
+  to **dummy notes too**: padding notes with predictable contents (known key,
+  constant blinding) make their ciphertexts publicly recomputable, letting an
+  observer identify which slots are dummies and fingerprint the transaction's
+  real arity. Every note fed to an encryptor must carry fresh random blinding.
 
 ---
 

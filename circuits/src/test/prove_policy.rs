@@ -1523,7 +1523,7 @@ mod tests {
         })
     }
 
-    //Policy transaction + Global View Key
+    // Policy transaction + Global View Key
     fn fr_to_scalar(fr: Fr) -> Scalar {
         Scalar::from_le_bytes_mod_order(&fr.into_bigint().to_bytes_le())
     }

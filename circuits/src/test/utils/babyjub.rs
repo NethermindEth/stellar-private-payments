@@ -1,7 +1,7 @@
 //! Baby JubJub curve helpers for the Global View Key test utilities.
 //!
 //! We reimplement here some of the logic, instead of using `ark-ed-on-bn254`
-//! directly, because Circom and `ark-ed-on-bn254` employt different curve forms.
+//! directly, because Circom and `ark-ed-on-bn254` employ different curve forms.
 
 // Finite-field arithmetic cannot overflow, adding here because of clippy
 #![allow(clippy::arithmetic_side_effects)]
@@ -48,7 +48,7 @@ pub fn identity() -> Point {
 pub fn base8() -> Point {
     Point {
         x: Scalar::from_str(BASE8_X).expect("Invalid BASE8 x coordinate"),
-        y: Scalar::from_str(BASE8_Y).expect("Invvalid BASE8 y coordinate"),
+        y: Scalar::from_str(BASE8_Y).expect("Invalid BASE8 y coordinate"),
     }
 }
 
