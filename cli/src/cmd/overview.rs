@@ -1,6 +1,8 @@
 //! `overview` — dashboard-style view of pools, balances, contracts, network,
 //! and this account's registration status.
 
+use std::collections::HashSet;
+
 use anyhow::Result;
 use serde::Serialize;
 use stellar_private_payments_sdk::types::AssetDescriptor;
@@ -9,7 +11,7 @@ use crate::{
     config::{CliConfig, validate_pool},
     explorer::Explorer,
     onboard, output,
-    session::PoolSession,
+    session::ClientSession,
 };
 
 #[derive(Serialize)]
@@ -73,37 +75,56 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
             .collect(),
     };
 
+    let session = ClientSession::new(config, &account, &network, true)?;
+    let allowed: HashSet<_> = entries
+        .iter()
+        .map(|entry| entry.pool_contract_id.as_str())
+        .collect();
+
     let mut pools = Vec::new();
     let mut errors = Vec::new();
-    for entry in entries {
-        // A read-only session: no prover is built, so we skip the ~8MB proving
-        // key deserialization + circuit-WASM compile that a transact open pays.
-        let row = (|| -> Result<PoolRow> {
-            let session =
-                PoolSession::open_readonly(config, &account, &network, &entry.pool_contract_id)?;
-            let balance = session
-                .pool()
-                .balance()
-                .map_err(|e| anyhow::anyhow!("balance: {e}"))?;
-            Ok(PoolRow {
-                pool_contract_id: entry.pool_contract_id.clone(),
-                pool_link: explorer.contract(&entry.pool_contract_id),
-                token_contract_id: entry.token_contract_id.clone(),
-                token_link: explorer.contract(&entry.token_contract_id),
-                asset: asset_label(&entry.asset),
-                balance: output::format_token_amount(
-                    u128::from(balance),
-                    &asset_symbol(&entry.asset),
-                    7,
-                ),
-            })
-        })();
-        match row {
-            Ok(row) => pools.push(row),
-            // One unreachable/misconfigured pool should not blank the whole
-            // dashboard: report it and keep rendering the rest.
-            Err(e) => {
-                log::warn!("pool {}: {e:#}", entry.pool_contract_id);
+
+    match session.account().portfolio() {
+        Ok(portfolio) => {
+            for balance in &portfolio {
+                if !allowed.contains(balance.pool_contract_id.as_str()) {
+                    continue;
+                }
+                let Some(entry) = entries
+                    .iter()
+                    .find(|entry| entry.pool_contract_id == balance.pool_contract_id)
+                else {
+                    continue;
+                };
+                pools.push(PoolRow {
+                    pool_contract_id: balance.pool_contract_id.clone(),
+                    pool_link: explorer.contract(&balance.pool_contract_id),
+                    token_contract_id: entry.token_contract_id.clone(),
+                    token_link: explorer.contract(&entry.token_contract_id),
+                    asset: asset_label(&entry.asset),
+                    balance: output::format_token_amount(
+                        u128::from(balance.amount),
+                        &asset_symbol(&entry.asset),
+                        7,
+                    ),
+                });
+            }
+            for entry in entries {
+                if portfolio
+                    .iter()
+                    .any(|balance| balance.pool_contract_id == entry.pool_contract_id)
+                {
+                    continue;
+                }
+                errors.push(PoolErrorRow {
+                    pool_contract_id: entry.pool_contract_id.clone(),
+                    error: "pool balance unavailable".into(),
+                });
+            }
+        }
+        Err(e) => {
+            log::warn!("portfolio: {e:#}");
+            for entry in entries {
                 errors.push(PoolErrorRow {
                     pool_contract_id: entry.pool_contract_id.clone(),
                     error: format!("{e:#}"),
@@ -112,11 +133,7 @@ pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
         }
     }
 
-    // Pools were just synced via balance() calls above.
-    let storage = config.open_storage()?;
-    let registered = storage
-        .lookup_public_key_by_address(&account.address)?
-        .is_some();
+    let registered = session.account().is_registered().unwrap_or(false);
 
     let dep = &config.deployment;
     let overview = Overview {

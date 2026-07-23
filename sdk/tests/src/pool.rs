@@ -3,11 +3,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-
 use stellar_private_payments_sdk::{
-    LocalProver, LocalSigner, PrivatePoolConfig, ProverArtifacts, Signer, TransferRecipient,
-    blocking::PrivatePool,
-    types::{NoteAmount, NotePublicKey, PolicyFlags},
+    Handle, LocalProver, LocalSigner, LocalStorage, Signer, TransferRecipient,
+    blocking::{Account, Client, PrivatePool},
+    types::{ContractConfig, NoteAmount, NotePublicKey, PolicyFlags},
 };
 use types::{EncryptionPublicKey, Field};
 
@@ -44,7 +43,15 @@ const TEST_SIGNER_SECRET: &str = "SADQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOBYHA4DQOB
 
 pub use crate::seed::TEST_NETWORK;
 
-pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+pub fn test_account(wallet: Option<&[u64]>) -> Result<Account> {
+    Ok(test_client_and_account(wallet)?.1)
+}
+
+pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
+    Ok(test_client_and_account(wallet)?.1.pool(POOL_CONTRACT_ID)?)
+}
+
+fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> {
     static RUN: AtomicUsize = AtomicUsize::new(0);
     let db_path = std::env::temp_dir().join(format!(
         "stellar-sdk-test-{}-{}.sqlite",
@@ -63,27 +70,29 @@ pub fn test_session(wallet: Option<&[u64]>) -> Result<PrivatePool> {
         &amounts,
     )?;
 
+    let storage_path = db_path.to_string_lossy().into_owned();
+    let storage = LocalStorage::open(&storage_path)?;
     let artifacts = test_prover_artifacts()?;
-    let pool = PrivatePool::open_local(
-        PrivatePoolConfig {
-            rpc_url: "https://soroban-testnet.stellar.org".into(),
-            contract_config: serde_json::from_str(TEST_CONFIG_JSON)?,
-            pool_contract_id: POOL_CONTRACT_ID.into(),
-            user_address: USER_ADDRESS.into(),
-            storage_path: db_path.to_string_lossy().into_owned(),
-        },
-        test_signer()?,
-        Box::new(LocalProver::from_artifacts(&[(
-            PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
-            artifacts,
-        )])?),
+    let prover = Handle::from_box(Box::new(LocalProver::from_artifacts(&[(
+        PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
+        artifacts,
+    )])?) as Box<dyn stellar_private_payments_sdk::Prover>);
+    let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
+    let mut client = Client::init(
+        "https://soroban-testnet.stellar.org",
+        storage,
+        prover,
+        contract_config,
+        None,
     )?;
+    // Mode flip only — tests do not run the indexer loop.
+    #[allow(unused_must_use)]
+    {
+        let _ = client.background_sync()?;
+    }
+    let account = client.account(USER_ADDRESS, test_signer()?)?;
 
-    Ok(pool)
-}
-
-pub fn test_pool(wallet: Option<&[u64]>) -> Result<PrivatePool> {
-    test_session(wallet)
+    Ok((client, account))
 }
 
 pub fn test_recipient() -> TransferRecipient {
@@ -97,19 +106,19 @@ pub fn test_recipient() -> TransferRecipient {
     )
 }
 
-fn test_signer() -> Result<Box<dyn Signer>> {
-    Ok(Box::new(LocalSigner::new(
+fn test_signer() -> Result<Handle<dyn Signer>> {
+    Ok(Handle::from_box(Box::new(LocalSigner::new(
         TEST_SIGNER_SECRET,
         "Test SDF Network ; September 2015",
         USER_ADDRESS,
-    )?))
+    )?) as Box<dyn Signer>))
 }
 
-fn test_prover_artifacts() -> Result<ProverArtifacts> {
+fn test_prover_artifacts() -> Result<stellar_private_payments_sdk::ProverArtifacts> {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
     let circuits = repo.join("target/circuits-artifacts").join(profile);
-    Ok(ProverArtifacts {
+    Ok(stellar_private_payments_sdk::ProverArtifacts {
         proving_key: std::fs::read(
             repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),
         )?,

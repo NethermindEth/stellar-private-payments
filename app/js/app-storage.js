@@ -6,6 +6,9 @@
 const SETTING_EXPLORER = 'explorer';
 const SETTING_BOOTNODE_CONFIG = 'bootnode_config';
 
+/** Suggested archive URL when none is stored yet (wizard + sync-gap consent). */
+export const DEFAULT_BOOTNODE_URL = 'https://bootnode.dev-nethermind.xyz';
+
 function unwrapResponse(response) {
     if (response == null) {
         throw new Error('Empty storage response');
@@ -22,7 +25,7 @@ export async function storageCall(storage, request, timeoutMs = 5_000) {
 }
 
 /**
- * App-only persistence: settings, disclaimer, operation history.
+ * App-only persistence: settings, disclaimer, operation history, onboarding key probe.
  */
 export class AppStorage {
     #storage;
@@ -66,6 +69,18 @@ export class AppStorage {
     async getDisclaimerState(address) {
         const response = await this.#call({ DisclaimerState: address });
         return response.DisclaimerState ?? null;
+    }
+
+    /** Whether privacy keys are stored locally for an address (onboarding only). */
+    async userKeysExist(address) {
+        const response = await this.#call({ UserKeys: address }, 1_000);
+        return response.UserKeys != null;
+    }
+
+    /** Public note/encryption keys only (onboarding; no ASP secret). */
+    async getUserPublicKeys(address) {
+        const response = await this.#call({ UserKeys: address }, 1_000);
+        return response.UserKeys ?? null;
     }
 
     async acceptDisclaimer(address, disclaimerHashHex) {

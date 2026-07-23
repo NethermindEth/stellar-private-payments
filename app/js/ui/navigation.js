@@ -1,6 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
-import { client, initializeRuntime, resetWalletSession } from '../wasm-facade.js';
+import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -15,14 +16,9 @@ function clearRevealedAspSecret() {
     if (revealBtn) revealBtn.dataset.revealed = 'false';
 }
 
-async function fetchAspSecretForUser(address) {
-    const asp = await client().getAspSecret(address);
-    const secret = asp?.membershipBlinding;
+async function fetchAspSecretForUser() {
+    const secret = await client().account().aspSecret();
     return secret != null ? String(secret) : null;
-}
-
-function isRpcSyncGapError(message) {
-    return typeof message === 'string' && (message.startsWith('RPC_SYNC_GAP') || message.includes('RPC sync gap'));
 }
 
 function showBootnodeConsentModal({ defaultUrl, rpcUrl, errorMessage }) {
@@ -107,27 +103,24 @@ function setMoveFlow(flow) {
     });
 }
 
-async function ensureEventSync(rpcUrl) {
-    const storage = client().storage();
-    const storedBootnodeUrl = await storage.getStoredBootnodeUrl();
-    try {
-        await client().startSync({ bootnodeUrl: storedBootnodeUrl });
-        return { bootnodeRequired: false };
-    } catch (error) {
-        const message = error?.message || 'Failed to start event sync';
-        if (!isRpcSyncGapError(message)) throw error;
+async function bootnodeCheck(rpcUrl) {
+    const storage = await ensureStorage();
+    const stored = await storage.getStoredBootnodeUrl();
+    const required = await bootnodeRequired(rpcUrl);
 
+    if (required && !stored) {
         const modal = await showBootnodeConsentModal({
-            defaultUrl: storedBootnodeUrl || '',
+            defaultUrl: stored || DEFAULT_BOOTNODE_URL,
             rpcUrl,
-            errorMessage: message,
+            errorMessage: 'RPC sync gap: configure a bootnode to sync historical events',
         });
-        if (!modal.accepted || !modal.url) throw error;
-
+        if (!modal.accepted || !modal.url) {
+            throw new Error('RPC_SYNC_GAP: bootnode required');
+        }
         await storage.setBootnodeConfig(modal.url);
-        await client().startSync({ bootnodeUrl: modal.url });
-        return { bootnodeRequired: true };
     }
+
+    return { bootnodeRequired: required };
 }
 
 async function loadRuntimeState() {
@@ -238,7 +231,7 @@ export const Shell = {
                 const address = App.state.wallet.address;
                 if (!address) return;
                 try {
-                    revealedAspSecret = await fetchAspSecretForUser(address);
+                    revealedAspSecret = await fetchAspSecretForUser();
                     if (!revealedAspSecret) {
                         Toast.show('ASP secret not found', 'error');
                         return;
@@ -262,7 +255,7 @@ export const Shell = {
                 if (revealedAspSecret) return revealedAspSecret;
                 const address = App.state.wallet.address;
                 if (!address) return null;
-                return fetchAspSecretForUser(address);
+                return fetchAspSecretForUser();
             },
         };
         Object.entries(identityCopyTargets).forEach(([id, getValue]) => {
@@ -365,8 +358,9 @@ export const Wallet = {
                 App.state.wallet.networkPassphrase = networkPassphrase;
                 renderWallet();
 
+                const { bootnodeRequired } = await bootnodeCheck(rpcUrl);
                 await initializeRuntime(rpcUrl);
-                const { bootnodeRequired } = await ensureEventSync(rpcUrl);
+                await client().backgroundSync();
 
                 await runOnboardingWizard({
                     address,
@@ -375,10 +369,10 @@ export const Wallet = {
                     signer,
                 });
 
-                await client().initializeWallet({ networkPassphrase, userAddress: address }, signer);
-                const keys = await client().loadPublicKeys(address);
-                App.state.keys.notePublicKey = keys.pubKey;
-                App.state.keys.encryptionPublicKey = keys.encryptionKeypair.publicKey;
+                await client().openAccount({ networkPassphrase, userAddress: address }, signer);
+                const keys = await client().account().userPublicKeys();
+                App.state.keys.notePublicKey = keys.notePublicKey;
+                App.state.keys.encryptionPublicKey = keys.encryptionPublicKey;
 
                 await loadRuntimeState();
                 renderSettingsDrawer();
@@ -423,7 +417,7 @@ export const Wallet = {
     disconnect() {
         this._stopWatcher?.();
         this._stopWatcher = null;
-        resetWalletSession();
+        disposeClient();
         closeAppPool();
         clearRevealedAspSecret();
         App.state.wallet = {
@@ -487,7 +481,7 @@ export const Wallet = {
             }
 
             if (btn) btn.disabled = true; // prevent duplicate registrations
-            const hash = await client().registerPublicKeys({
+            const hash = await client().account().registerPublicKeys({
                 notePublicKeyHex: App.state.keys.notePublicKey,
                 encryptionPublicKeyHex: App.state.keys.encryptionPublicKey,
             });

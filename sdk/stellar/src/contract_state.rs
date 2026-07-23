@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 use stellar_strkey::ed25519;
-use stellar_xdr::{curr as xdr, curr::ReadXdr};
+use stellar_xdr::{self as xdr, ReadXdr};
 
 use types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
@@ -85,11 +85,8 @@ impl StateFetcher {
         Ok(value)
     }
 
-    pub fn new(rpc_url: &str, config: ContractConfig) -> Result<Self> {
-        Ok(Self {
-            client: Client::new(rpc_url)?,
-            config,
-        })
+    pub fn new(client: Client, config: ContractConfig) -> Result<Self> {
+        Ok(Self { client, config })
     }
 
     pub fn contract_config(&self) -> &ContractConfig {

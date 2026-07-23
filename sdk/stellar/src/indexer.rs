@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use types::{ContractConfig, ContractsEventData, SyncMetadata};
 
 // https://developers.stellar.org/docs/data/apis/rpc/api-reference/methods/getEvents
-const PAGE_SIZE: usize = 300;
+const PAGE_SIZE: usize = 1000;
 const MAX_PAGES_PER_ROUND: usize = 10;
 
 pub struct Indexer<S: ContractDataStorage> {
@@ -57,14 +57,16 @@ impl<S: ContractDataStorage> Indexer<S> {
     }
 
     /// Fetch up to [`MAX_PAGES_PER_ROUND`] event pages from RPC into storage.
-    pub async fn fetch_contract_events(&self) -> Result<()> {
-        let _ = self.fetch_contract_events_round().await?;
-        Ok(())
-    }
-
-    /// Like [`Self::fetch_contract_events`], but returns whether another round
-    /// may be needed (used by [`Self::catch_up`]).
-    async fn fetch_contract_events_round(&self) -> Result<bool> {
+    ///
+    /// Returns `true` when another round may be needed. Returns `false` when
+    /// caught up for now:
+    /// - empty page (best-effort; sparse RPC scans can also be empty),
+    /// - non-full page with `max(event.ledger) >= latestLedger`, or
+    /// - local sync ahead of the RPC events tip (`RpcAhead`).
+    ///
+    /// A full page (`PAGE_SIZE` events) always continues, even at the tip
+    /// ledger, because more events may share that ledger.
+    pub async fn fetch_contract_events(&self) -> Result<bool> {
         let network_tip = self.client.get_latest_ledger().await?.sequence;
         let existing_sync = self.storage.get_sync_state().await?;
         let active_contract_ids: HashSet<&str> =
@@ -137,7 +139,9 @@ impl<S: ContractDataStorage> Indexer<S> {
             let new_cursor = new_cursor
                 .clone()
                 .ok_or_else(|| anyhow!("cursor is not found in the events response"))?;
-            let is_empty = events.is_empty();
+            let event_count = events.len();
+            let is_empty = event_count == 0;
+            let full_page = event_count == PAGE_SIZE;
             let progress_ledger = if is_empty {
                 latest_ledger
             } else {
@@ -147,6 +151,9 @@ impl<S: ContractDataStorage> Indexer<S> {
                     .max()
                     .unwrap_or(latest_ledger)
             };
+            // Non-full page whose newest event is at/past the RPC events tip.
+            let at_events_tip = !is_empty && !full_page && progress_ledger >= latest_ledger;
+            let fully_indexed = is_empty || at_events_tip;
 
             self.storage
                 .save_events_batch(ContractsEventData {
@@ -167,25 +174,19 @@ impl<S: ContractDataStorage> Indexer<S> {
                             last_fully_indexed_ledger: 0,
                         })
                         .collect(),
-                    is_empty,
+                    fully_indexed,
                 )
                 .await?;
 
             cursor = Some(new_cursor);
-            if is_empty {
-                return Ok(may_have_more);
+            if fully_indexed {
+                return Ok(false);
             }
+            // Full page, or partial page still behind latestLedger: keep going.
             may_have_more = true;
         }
 
         Ok(may_have_more)
-    }
-
-    /// Ingest contract events from RPC until pagination reaches the network
-    /// tip.
-    pub async fn catch_up(&self) -> Result<()> {
-        while self.fetch_contract_events_round().await? {}
-        Ok(())
     }
 }
 

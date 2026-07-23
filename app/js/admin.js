@@ -1,5 +1,5 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeWasm } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 
@@ -194,7 +194,14 @@ async function ensureCryptoReady() {
     setStatus('Loading app...', 'info');
     const { sorobanRpcUrl, ...network } = await getWalletNetwork();
     try {
-      await initializeWasm(sorobanRpcUrl);
+      const storage = await ensureStorage();
+      if (await bootnodeRequired(sorobanRpcUrl)) {
+        if (!(await storage.getStoredBootnodeUrl())) {
+          throw new Error('RPC_SYNC_GAP: bootnode required');
+        }
+      }
+      await initializeRuntime(sorobanRpcUrl);
+      await client().backgroundSync();
     } catch (e) {
       if (isDbLockedError(e?.message)) showDbLockedModal(e.message);
       throw e;
@@ -378,7 +385,10 @@ async function insertMembershipLeaf() {
     setStatus('Computing and submitting allowlist insert transaction...', 'info');
     await ensureCryptoReady();
 
-    const leafHex = await client().deriveAspUserLeaf(aspSecret, notePublicKey);
+    const leafHex = await client().account().deriveAspUserLeaf({
+        membershipBlinding: aspSecret,
+        notePublicKey,
+    });
     const leafValue = BigInt(leafHex);
 
     const mClient = await getMembershipClient(contractId);

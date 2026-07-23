@@ -1,12 +1,12 @@
 //! Submit and confirm Soroban transactions via RPC.
 
 use anyhow::{Context, Result, bail};
-use stellar_xdr::curr::TransactionEnvelope;
+use stellar_xdr::TransactionEnvelope;
 
 use crate::rpc::Client;
 
 /// Submits a signed transaction; returns the transaction hash.
-pub async fn submit_tx(signed_tx: &TransactionEnvelope, rpc: &Client) -> Result<String> {
+pub async fn submit_tx(rpc: &Client, signed_tx: &TransactionEnvelope) -> Result<String> {
     let send = rpc
         .send_transaction(signed_tx)
         .await
@@ -26,7 +26,7 @@ pub enum TxConfirmStatus {
 }
 
 /// Polls transaction status once.
-pub async fn confirm_tx(hash: &str, rpc: &Client) -> Result<TxConfirmStatus> {
+pub async fn confirm_tx(rpc: &Client, hash: &str) -> Result<TxConfirmStatus> {
     let status = rpc
         .get_transaction(hash)
         .await

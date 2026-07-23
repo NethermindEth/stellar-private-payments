@@ -1,5 +1,4 @@
-import { client, isRuntimeReady, verifySelectiveDisclosureStandalone } from './wasm-facade.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { client, isRuntimeReady, verifySelectiveDisclosure } from './wasm-facade.js';
 import {
   connectWallet,
   getConnectedAddress,
@@ -145,7 +144,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const { notes: list } = await client().getUserNotes(App.state.wallet.address, 0, LIMIT);
+    const { notes: list } = await client().account().userNotes({ limit: LIMIT });
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -789,7 +788,7 @@ async function generateReceipt(form) {
     const config = client().contractConfig();
     const poolContractId =
       state.selectedNotes[0]?.poolContractId || getActivePoolContractId(config);
-    const pool = await client().pool({ poolContract: poolContractId });
+    const pool = await client().account().pool({ poolContract: poolContractId });
 
     const receipt = await pool.disclose({
       selectedCommitments: state.selectedNotes.map((n) => n.id),
@@ -1231,7 +1230,7 @@ export function mountVerify(container) {
 
       const report = walletClient
         ? await walletClient.verifySelectiveDisclosure(JSON.stringify(receipt), expectedVkHash)
-        : await verifySelectiveDisclosureStandalone(
+        : await verifySelectiveDisclosure(
             rpcInput.value.trim() || DEFAULT_TESTNET_RPC_URL,
             JSON.stringify(receipt),
             expectedVkHash

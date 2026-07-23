@@ -82,10 +82,13 @@ export const NotesTable = {
         if (this._refreshing || !App.state.wallet.address) return;
         this._refreshing = true;
         try {
-            const address = App.state.wallet.address;
             const offset = this.page * PAGE_SIZE;
             const spent = this.spentFilter();
-            const { notes: list, total: count } = await client().getUserNotes(address, offset, PAGE_SIZE, spent);
+            const { notes: list, total: count } = await client().account().userNotes({
+                offset,
+                limit: PAGE_SIZE,
+                spent,
+            });
             this.totalCount = count ?? 0;
             App.state.notes = (Array.isArray(list) ? list : []).map(note => ({
                 id: note.id,

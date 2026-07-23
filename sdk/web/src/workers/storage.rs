@@ -12,7 +12,7 @@ use gloo_worker::{
 };
 use std::cell::RefCell;
 use stellar_private_payments_sdk::{
-    BuildDisclosureInputs, BuildTransactParams, PoolError, SpendableNote, Storage, TransactRequest,
+    BuildDisclosureInputs, BuildTransactParams, Error, SpendableNote, Storage, TransactRequest,
     build_disclosure_inputs, build_transact_params,
     chain::ContractDataStorage,
     state::{SqliteStorage, StoredUserKeys, process_local_state_batch},
@@ -22,8 +22,9 @@ use stellar_private_payments_sdk::{
         flows::TransactParams,
     },
     types::{
-        ContractConfig, ContractsEventData, EncryptionPublicKey, NotePublicKey, SyncMetadata,
-        UserNoteSummary,
+        ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
+        OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+        UserNotesPage,
     },
 };
 use wasm_bindgen::JsError;
@@ -514,36 +515,6 @@ impl StorageBridge {
             other => Err(anyhow!("unexpected response: {other:?}")),
         }
     }
-
-    pub(crate) async fn clear_indexing_cursors(&self) -> anyhow::Result<()> {
-        match self
-            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
-            .await?
-        {
-            StorageWorkerResponse::Saved => Ok(()),
-            other => Err(anyhow!("unexpected response: {other:?}")),
-        }
-    }
-
-    pub(crate) async fn stored_bootnode_url(&self) -> Option<String> {
-        match self
-            .call(
-                StorageWorkerRequest::GetSetting(
-                    stellar_private_payments_sdk::state::APP_SETTING_BOOTNODE_CONFIG.to_string(),
-                ),
-                2_000,
-            )
-            .await
-        {
-            Ok(StorageWorkerResponse::Setting(Some(json))) => {
-                serde_json::from_str::<stellar_private_payments_sdk::types::BootnodeSetting>(&json)
-                    .ok()
-                    .filter(|config| config.enabled && !config.url.is_empty())
-                    .map(|config| config.url)
-            }
-            _ => None,
-        }
-    }
 }
 
 #[async_trait::async_trait(?Send)]
@@ -588,29 +559,38 @@ impl ContractDataStorage for StorageBridge {
 
 #[async_trait::async_trait(?Send)]
 impl Storage for StorageBridge {
-    fn fork(&self) -> Result<Self, PoolError> {
+    fn fork(&self) -> Result<Self, Error> {
         Ok(Self {
             bridge: self.bridge.fork(),
         })
     }
 
-    async fn process_pending_state(&self) -> Result<(), PoolError> {
+    async fn process_pending_state(&self) -> Result<(), Error> {
         // Ingest already kicks `kick_processor()` on SaveEvents; processing runs
         // in the worker background loop without blocking this bridge.
         Ok(())
     }
 
-    async fn ensure_ready(&self) -> Result<(), PoolError> {
-        self.ping()
+    async fn clear_indexing_cursors(&self) -> Result<(), Error> {
+        match self
+            .call(StorageWorkerRequest::ClearIndexingCursors, 2_000)
             .await
-            .map_err(|e| PoolError::Other(e.to_string()))
+            .map_err(|e| Error::Other(e.to_string()))?
+        {
+            StorageWorkerResponse::Saved => Ok(()),
+            other => Err(Error::Other(format!("unexpected response: {other:?}"))),
+        }
+    }
+
+    async fn ensure_ready(&self) -> Result<(), Error> {
+        self.ping().await.map_err(|e| Error::Other(e.to_string()))
     }
 
     async fn spendable_notes(
         &self,
         pool_contract_id: &str,
         user_address: &str,
-    ) -> Result<Vec<SpendableNote>, PoolError> {
+    ) -> Result<Vec<SpendableNote>, Error> {
         match self
             .call(
                 StorageWorkerRequest::UnspentUserNotes {
@@ -628,10 +608,10 @@ impl Storage for StorageBridge {
                     amount: n.amount,
                 })
                 .collect()),
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading spendable notes: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
@@ -639,7 +619,7 @@ impl Storage for StorageBridge {
         &self,
         pool_contract_id: &str,
         user_address: &str,
-    ) -> Result<Vec<UserNoteSummary>, PoolError> {
+    ) -> Result<Vec<UserNoteSummary>, Error> {
         match self
             .call(
                 StorageWorkerRequest::PoolUserNotes {
@@ -651,62 +631,174 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading notes: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
-    async fn build_transact_params(
+    async fn list_portfolio_balances(
         &self,
-        req: &TransactRequest,
-    ) -> Result<TransactParams, PoolError> {
+        user_address: &str,
+        config: &ContractConfig,
+    ) -> Result<Vec<PortfolioBalance>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::PortfolioBalances(user_address.to_string()),
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::PortfolioBalances(balances)) => {
+                let _ = config;
+                Ok(balances)
+            }
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading portfolio balances: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn list_user_notes_page(
+        &self,
+        user_address: &str,
+        offset: u32,
+        limit: u32,
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::UserNotes {
+                    address: user_address.to_string(),
+                    offset,
+                    limit,
+                    spent,
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::UserNotesPage(page)) => Ok(page),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading user notes: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn operational_feed(
+        &self,
+        limit: u32,
+        config: &ContractConfig,
+    ) -> Result<Vec<OperationalFeedItem>, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::OperationalFeed {
+                    limit,
+                    asp_membership_contract_id: config.asp_membership.clone(),
+                    public_key_registry_contract_id: config.public_key_registry.clone(),
+                },
+                5_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::OperationalFeed(list)) => Ok(list),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading operational feed: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn recipient_lookup(
+        &self,
+        address: &str,
+        config: &ContractConfig,
+    ) -> Result<RecipientLookup, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::RecipientLookup {
+                    address: address.to_string(),
+                    public_key_registry_contract_id: config.public_key_registry.clone(),
+                },
+                2_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::RecipientLookup(lookup)) => Ok(lookup),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response looking up recipient: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
+    }
+
+    async fn build_transact_params(&self, req: &TransactRequest) -> Result<TransactParams, Error> {
         match self
             .call(StorageWorkerRequest::Transact(req.clone()), 5_000)
             .await
         {
             Ok(StorageWorkerResponse::TransactParams(params)) => Ok(params),
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
-                Err(PoolError::MembershipSync(status))
+                Err(Error::MembershipSync(status))
             }
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response building transact params: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
     async fn build_disclosure_inputs(
         &self,
         req: &DisclosureInputsRequest,
-    ) -> Result<Vec<DisclosureInputs>, PoolError> {
+    ) -> Result<Vec<DisclosureInputs>, Error> {
         match self
             .call(StorageWorkerRequest::DisclosureInputs(req.clone()), 5_000)
             .await
         {
             Ok(StorageWorkerResponse::DisclosureNotes(notes)) => Ok(notes),
             Ok(StorageWorkerResponse::AspMembershipSync(status)) => {
-                Err(PoolError::MembershipSync(status))
+                Err(Error::MembershipSync(status))
             }
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response building disclosure inputs: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
-    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, PoolError> {
+    async fn user_keys(&self, user_address: &str) -> Result<StoredUserKeys, Error> {
         let _ = user_address;
-        Err(PoolError::Other(
-            "full user keys are not available on the storage bridge; use user_public_keys".into(),
+        Err(Error::Other(
+            "full stored user keys are not available on the storage bridge; use asp_secret".into(),
         ))
+    }
+
+    async fn asp_secret(&self, user_address: &str) -> Result<Field, Error> {
+        match self
+            .call(
+                StorageWorkerRequest::AspSecret(user_address.to_string()),
+                1_000,
+            )
+            .await
+        {
+            Ok(StorageWorkerResponse::AspSecret(secret)) => secret
+                .ok_or_else(|| Error::Other("ASP secret not found in worker storage".into()))
+                .map(|asp| asp.membership_blinding),
+            Ok(other) => Err(Error::Other(format!(
+                "unexpected storage response loading ASP secret: {other:?}"
+            ))),
+            Err(e) => Err(Error::Other(e.to_string())),
+        }
     }
 
     async fn user_public_keys(
         &self,
         user_address: &str,
-    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         match self
             .call(
                 StorageWorkerRequest::UserKeys(user_address.to_string()),
@@ -715,19 +807,18 @@ impl Storage for StorageBridge {
             .await
         {
             Ok(StorageWorkerResponse::UserKeys(keys)) => {
-                let keys = keys.ok_or_else(|| {
-                    PoolError::Other("user keys not found in worker storage".into())
-                })?;
+                let keys = keys
+                    .ok_or_else(|| Error::Other("user keys not found in worker storage".into()))?;
                 Ok((keys.note_keypair.public, keys.encryption_keypair.public))
             }
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading user keys: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 
-    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, PoolError> {
+    async fn user_note_pubkey(&self, user_address: &str) -> Result<NotePublicKey, Error> {
         Ok(self.user_public_keys(user_address).await?.0)
     }
 
@@ -735,7 +826,7 @@ impl Storage for StorageBridge {
         &self,
         address: &str,
         public_key_registry_contract_id: &str,
-    ) -> Result<(NotePublicKey, EncryptionPublicKey), PoolError> {
+    ) -> Result<(NotePublicKey, EncryptionPublicKey), Error> {
         match self
             .call(
                 StorageWorkerRequest::RecipientLookup {
@@ -748,17 +839,17 @@ impl Storage for StorageBridge {
         {
             Ok(StorageWorkerResponse::RecipientLookup(lookup)) => {
                 let entry = lookup.entry.ok_or_else(|| {
-                    PoolError::Other(format!(
+                    Error::Other(format!(
                         "recipient {address} not found in the public key registry; \
                          they must register keys on-chain"
                     ))
                 })?;
                 Ok((entry.note_key, entry.encryption_key))
             }
-            Ok(other) => Err(PoolError::Other(format!(
+            Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response looking up recipient: {other:?}"
             ))),
-            Err(e) => Err(PoolError::Other(e.to_string())),
+            Err(e) => Err(Error::Other(e.to_string())),
         }
     }
 }

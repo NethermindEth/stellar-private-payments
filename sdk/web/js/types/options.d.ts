@@ -9,19 +9,20 @@ export interface ClientNewOptions {
   storage?: import('./storage.js').Storage;
   /** Used only when `storage` is omitted. */
   storageWorkerUrl?: string;
-}
-
-/** Options for {@link AccountClient.checkSync} and {@link AccountClient.startSync}. */
-export interface SyncOptions {
+  /**
+   * Absolute URL for the prover worker. Defaults to the package
+   * `dist/workers/prover-worker.js` via `import.meta.url`.
+   */
+  proverWorkerUrl?: string;
+  /** Optional historical-sync bootnode for retention gaps. */
   bootnodeUrl?: string;
 }
 
-/** Options for {@link AccountClient.initialize}. */
-export interface InitializeOptions {
+/** Options for {@link DeploymentClient.account}. */
+export interface AccountOptions {
   networkPassphrase: string;
   /** Optional when `signer.getPublicKey()` is implemented. */
   userAddress?: string;
-  proverWorkerUrl?: string;
 }
 
 /** Options for {@link AccountClient.pool}. */
@@ -35,7 +36,7 @@ export interface RegisterPublicKeysOptions {
   encryptionPublicKeyHex?: string;
 }
 
-/** Options for {@link AccountClient.verifySelectiveDisclosure}. */
+/** Options for {@link verifySelectiveDisclosure}. */
 export interface VerifyDisclosureOptions {
   proverWorkerUrl?: string;
 }
