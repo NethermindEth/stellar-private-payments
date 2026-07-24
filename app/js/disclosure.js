@@ -33,10 +33,13 @@ const DEFAULT_TESTNET_RPC_URL = 'https://soroban-testnet.stellar.org';
 
 const BN254_PRIME = 21888242871839275222246405745257275088548364400416034343698204186575808495617n;
 
+const PICKER_PAGE_SIZE = 10;
+
 const state = {
   notes: [],
   pools: [],
   selectedNotes: [],
+  pickerPage: 0,
   noteStatusFilter: 'all',
   notePoolFilter: null,
   notesLoading: false,
@@ -141,7 +144,7 @@ async function loadNotes() {
     const LIMIT = 200;
     const config = client().contractConfig();
     state.pools = Array.isArray(config?.pools) ? config.pools : [];
-    const list = await client().account().userNotes(LIMIT);
+    const { notes: list } = await client().account().userNotes({ limit: LIMIT });
     const notes = Array.isArray(list) ? list : [];
 
     state.notes = notes.map((n) => ({
@@ -344,14 +347,21 @@ export function mountGenerate(container) {
     poolId: state.notePoolFilter,
   });
 
-  // Note picker
+  // Note picker — paginated over the status/pool-filtered `notes` set.
+  const totalPickerPages = Math.max(1, Math.ceil(notes.length / PICKER_PAGE_SIZE));
+  if (state.pickerPage >= totalPickerPages) state.pickerPage = totalPickerPages - 1;
+  const pageNotes = notes.slice(
+    state.pickerPage * PICKER_PAGE_SIZE,
+    (state.pickerPage + 1) * PICKER_PAGE_SIZE,
+  );
+
   const pickerLabel = document.createElement('label');
   pickerLabel.className = 'block text-xs font-medium text-dark-400 uppercase tracking-wide mb-2';
   pickerLabel.textContent = `Select up to 4 notes (${notes.length})`;
   container.appendChild(pickerLabel);
 
   const list = document.createElement('div');
-  list.className = 'space-y-2 mb-4';
+  list.className = 'space-y-2 mb-2';
   list.setAttribute('role', 'group');
   list.setAttribute('aria-label', 'Notes');
 
@@ -363,7 +373,7 @@ export function mountGenerate(container) {
       el('div', 'text-sm text-dark-400 p-3', 'No notes match this filter.'),
     );
   } else {
-    notes.forEach((note) => {
+    pageNotes.forEach((note) => {
       const selected = isSelected(note);
       const row = createNoteRow(note, {
         symbol: tokenLabelForPool(note.poolContractId),
@@ -384,6 +394,19 @@ export function mountGenerate(container) {
   }
 
   container.appendChild(list);
+
+  if (totalPickerPages > 1) {
+    const pickerPagination = el('div', 'flex items-center justify-between mb-4');
+    const prevBtn = el('button', 'text-xs text-dark-400 hover:text-dark-200 disabled:opacity-40 disabled:cursor-not-allowed', '← Prev');
+    const nextBtn = el('button', 'text-xs text-dark-400 hover:text-dark-200 disabled:opacity-40 disabled:cursor-not-allowed', 'Next →');
+    const pageInfo = el('span', 'text-[10px] text-dark-500', `Page ${state.pickerPage + 1} of ${totalPickerPages}`);
+    prevBtn.disabled = state.pickerPage === 0;
+    nextBtn.disabled = state.pickerPage + 1 >= totalPickerPages;
+    prevBtn.addEventListener('click', () => { state.pickerPage--; mountGenerate(container); });
+    nextBtn.addEventListener('click', () => { state.pickerPage++; mountGenerate(container); });
+    pickerPagination.append(prevBtn, pageInfo, nextBtn);
+    container.appendChild(pickerPagination);
+  }
 
   // Selection summary
   const selectedChip = el('div', 'text-xs text-brand-400 mb-4');

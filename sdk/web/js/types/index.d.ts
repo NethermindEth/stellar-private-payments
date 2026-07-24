@@ -47,7 +47,7 @@ export interface AccountClient {
   portfolio(): Promise<unknown>;
   userPublicKeys(): Promise<unknown>;
   aspSecret(): Promise<string>;
-  userNotes(limit: number): Promise<unknown>;
+  userNotes(options?: UserNotesOptions | null): Promise<unknown>;
   isRegistered(): Promise<boolean>;
   deriveAspUserLeaf(options?: DeriveAspUserLeafOptions | null): Promise<string>;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
@@ -57,6 +57,12 @@ export interface AccountClient {
 export interface DeriveAspUserLeafOptions {
   notePublicKey?: string;
   membershipBlinding?: string;
+}
+
+export interface UserNotesOptions {
+  offset?: number;
+  limit?: number;
+  spent?: boolean | null;
 }
 
 /** Deployment runtime returned by {@link Client.new}. */

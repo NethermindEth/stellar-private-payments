@@ -24,6 +24,7 @@ use stellar_private_payments_sdk::{
     types::{
         ContractConfig, ContractsEventData, EncryptionPublicKey, Field, NotePublicKey,
         OperationalFeedItem, PortfolioBalance, RecipientLookup, SyncMetadata, UserNoteSummary,
+        UserNotesPage,
     },
 };
 use wasm_bindgen::JsError;
@@ -286,14 +287,22 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
                 membership_blinding: keys.membership_blinding,
             }))
         }
-        StorageWorkerRequest::UserNotes(address, limit) => {
-            log::trace!("[{WORKER_NAME}] list user notes for the account {address}");
-            let list = with_storage!(s => s.list_user_notes(&address, limit)?)?;
+        StorageWorkerRequest::UserNotes {
+            address,
+            offset,
+            limit,
+            spent,
+        } => {
             log::trace!(
-                "[{WORKER_NAME}] fetched {} notes for the account {address}",
-                list.len()
+                "[{WORKER_NAME}] list user notes for the account {address} (offset={offset}, limit={limit}, spent={spent:?})"
             );
-            StorageWorkerResponse::UserNotes(list)
+            let page = with_storage!(s => s.list_user_notes_page(&address, offset, limit, spent)?)?;
+            log::trace!(
+                "[{WORKER_NAME}] fetched {} of {} notes for the account {address}",
+                page.notes.len(),
+                page.total
+            );
+            StorageWorkerResponse::UserNotesPage(page)
         }
         StorageWorkerRequest::PortfolioBalances(address) => {
             log::trace!("[{WORKER_NAME}] list portfolio balances for the account {address}");
@@ -652,19 +661,26 @@ impl Storage for StorageBridge {
         }
     }
 
-    async fn list_user_notes(
+    async fn list_user_notes_page(
         &self,
         user_address: &str,
+        offset: u32,
         limit: u32,
-    ) -> Result<Vec<UserNoteSummary>, Error> {
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error> {
         match self
             .call(
-                StorageWorkerRequest::UserNotes(user_address.to_string(), limit),
+                StorageWorkerRequest::UserNotes {
+                    address: user_address.to_string(),
+                    offset,
+                    limit,
+                    spent,
+                },
                 5_000,
             )
             .await
         {
-            Ok(StorageWorkerResponse::UserNotes(notes)) => Ok(notes),
+            Ok(StorageWorkerResponse::UserNotesPage(page)) => Ok(page),
             Ok(other) => Err(Error::Other(format!(
                 "unexpected storage response loading user notes: {other:?}"
             ))),

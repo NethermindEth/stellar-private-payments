@@ -70,8 +70,9 @@ fn spendable_notes() {
 fn user_notes_some() {
     let account = test_account(Some(&[2, 3, 5])).expect("test account");
 
-    let notes = account.user_notes(10).expect("user notes");
-    assert_eq!(notes.len(), 3);
+    let page = account.user_notes(0, 10, None).expect("user notes");
+    assert_eq!(page.notes.len(), 3);
+    assert_eq!(page.total, 3);
 }
 
 #[test]

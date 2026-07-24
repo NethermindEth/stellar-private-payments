@@ -37,7 +37,7 @@ function wrapAccount(wasmAccount) {
     portfolio: () => wasmAccount.portfolio(),
     userPublicKeys: () => wasmAccount.userPublicKeys(),
     aspSecret: () => wasmAccount.aspSecret(),
-    userNotes: (limit) => wasmAccount.userNotes(limit),
+    userNotes: (options) => wasmAccount.userNotes(options ?? {}),
     isRegistered: () => wasmAccount.isRegistered(),
     deriveAspUserLeaf: (options) => wasmAccount.deriveAspUserLeaf(options),
     registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),

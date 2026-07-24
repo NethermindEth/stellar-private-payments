@@ -1,6 +1,6 @@
 //! Sync wrapper around [`crate::Account`] via a shared Tokio runtime.
 
-use types::{EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary};
+use types::{EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNotesPage};
 
 use crate::{
     Error, Handle, Signer, account::Account as AsyncAccount, storage::LocalStorage,
@@ -61,8 +61,13 @@ impl Account {
         )
     }
 
-    pub fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {
-        block_on(self.inner.user_notes(limit))
+    pub fn user_notes(
+        &self,
+        offset: u32,
+        limit: u32,
+        spent: Option<bool>,
+    ) -> Result<UserNotesPage, Error> {
+        block_on(self.inner.user_notes(offset, limit, spent))
     }
 
     pub fn is_registered(&self) -> Result<bool, Error> {

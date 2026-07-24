@@ -82,7 +82,7 @@ function wrapSdkClient(sdk) {
                 portfolio: () => boundAccount.portfolio(),
                 userPublicKeys: () => boundAccount.userPublicKeys(),
                 aspSecret: () => boundAccount.aspSecret(),
-                userNotes: (limit) => boundAccount.userNotes(limit),
+                userNotes: (options) => boundAccount.userNotes(options ?? {}),
                 isRegistered: () => boundAccount.isRegistered(),
                 registerPublicKeys: (options) => boundAccount.registerPublicKeys(options ?? {}),
                 deriveAspUserLeaf: (options) => boundAccount.deriveAspUserLeaf(options),

@@ -32,6 +32,21 @@ struct RegisterPublicKeysOptions {
 
 #[derive(Debug, Default, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct UserNotesOptions {
+    #[serde(default)]
+    offset: u32,
+    #[serde(default = "default_user_notes_limit")]
+    limit: u32,
+    #[serde(default)]
+    spent: Option<bool>,
+}
+
+fn default_user_notes_limit() -> u32 {
+    200
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DeriveAspUserLeafOptions {
     note_public_key: Option<String>,
     membership_blinding: Option<String>,
@@ -79,11 +94,29 @@ impl Account {
         })?)
     }
 
-    /// Notes for this account across all pools (newest first).
+    /// A page of notes for this account across all pools (newest first),
+    /// together with the total number of matching notes.
+    ///
+    /// `options`: `{ offset?: number, limit?: number, spent?: boolean|null }`.
+    /// `spent` filters to spent-only (`true`), unspent-only (`false`), or all
+    /// notes (`null`/omitted); `offset`/`limit` page over the filtered set.
     #[wasm_bindgen(js_name = userNotes)]
-    pub async fn user_notes(&self, limit: u32) -> Result<JsValue, JsError> {
-        let notes = self.inner.user_notes(limit).await.map_err(pool_err)?;
-        Ok(serde_wasm_bindgen::to_value(&notes)?)
+    pub async fn user_notes(&self, options: JsValue) -> Result<JsValue, JsError> {
+        let opts: UserNotesOptions = if options.is_null() || options.is_undefined() {
+            UserNotesOptions {
+                offset: 0,
+                limit: default_user_notes_limit(),
+                spent: None,
+            }
+        } else {
+            serde_wasm_bindgen::from_value(options)?
+        };
+        let page = self
+            .inner
+            .user_notes(opts.offset, opts.limit, opts.spent)
+            .await
+            .map_err(pool_err)?;
+        Ok(serde_wasm_bindgen::to_value(&page)?)
     }
 
     /// Locally derived ASP membership blinding for this account.

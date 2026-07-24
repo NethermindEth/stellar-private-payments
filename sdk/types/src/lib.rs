@@ -151,6 +151,18 @@ pub struct UserNoteSummary {
     pub spent: bool,
 }
 
+/// A page of [`UserNoteSummary`] together with the total number of notes
+/// matching the same filter, so callers don't need a second round trip to
+/// compute page counts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserNotesPage {
+    /// The requested page of notes.
+    pub notes: Vec<UserNoteSummary>,
+    /// Total number of notes matching the filter, across all pages.
+    pub total: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BootnodeSetting {
