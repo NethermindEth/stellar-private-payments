@@ -34,6 +34,15 @@ mkdir -p "$TMP_DIR/src/circuits"
 mkdir -p "$TMP_DIR/src/circuits/src"
 cp -R "$REPO_ROOT/circuits/src/"* "$TMP_DIR/src/circuits/src/"
 
+# circomlib's own devDependencies (snarkjs, ffjavascript, etc.) include
+# GPL-3.0-licensed packages that are excused from the JS license audit only
+# because they are build/test tooling, never distributed (see
+# .github/js-license-policy.json). If node_modules happens to exist on the
+# machine running this script (e.g. a maintainer ran `npm install` locally to
+# run circomlib's own test suite), guarantee it never ends up in this
+# redistributed source bundle, regardless of environment.
+find "$TMP_DIR/src/circuits/src" -type d -name node_modules -prune -exec rm -rf {} +
+
 # Add build instructions and license texts for redistribution.
 cat > "$TMP_DIR/src/BUILDING.md" <<EOF
 # Circuits source bundle
