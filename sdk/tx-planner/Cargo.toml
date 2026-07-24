@@ -13,6 +13,7 @@ types = { workspace = true }
 
 # external
 thiserror = { workspace = true }
+tracing = { workspace = true, features = ["attributes"] }
 
 [lints]
 workspace = true

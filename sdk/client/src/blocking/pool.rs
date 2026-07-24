@@ -29,14 +29,17 @@ impl PrivatePool {
         self.inner.config()
     }
 
+    #[tracing::instrument(name = "blocking_estimate", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new(), amount = ?types::Sensitive(&amount)))]
     pub fn estimate(&self, amount: NoteAmount) -> Result<Estimate, Error> {
         block_on(self.inner.estimate(amount))
     }
 
+    #[tracing::instrument(name = "blocking_deposit", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new(), amount = ?types::Sensitive(&amount)))]
     pub fn deposit(&self, amount: NoteAmount) -> Result<TransactionResult, Error> {
         block_on(self.inner.deposit(amount))
     }
 
+    #[tracing::instrument(name = "blocking_transfer", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new(), amount = ?types::Sensitive(&amount)))]
     pub fn transfer(
         &self,
         recipient: impl Into<TransferRecipient>,
@@ -45,6 +48,7 @@ impl PrivatePool {
         block_on(self.inner.transfer(recipient, amount))
     }
 
+    #[tracing::instrument(name = "blocking_withdraw", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new(), amount = ?types::Sensitive(&amount)))]
     pub fn withdraw(
         &self,
         amount: NoteAmount,
@@ -53,6 +57,7 @@ impl PrivatePool {
         block_on(self.inner.withdraw(amount, recipient))
     }
 
+    #[tracing::instrument(name = "blocking_transact", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new()))]
     pub fn transact(&self, step: tx_planner::Transact) -> Result<TransactionResult, Error> {
         block_on(self.inner.transact(step))
     }
@@ -110,10 +115,12 @@ impl PrivatePool {
         block_on(self.inner.simulate(prepared))
     }
 
+    #[tracing::instrument(name = "blocking_submit", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new()))]
     pub fn submit(&self, signed_tx: SignedTransaction) -> Result<String, Error> {
         block_on(self.inner.submit(signed_tx))
     }
 
+    #[tracing::instrument(name = "blocking_confirm", level = "info", skip_all, fields(correlation_id = %crate::correlation::correlation_id_or_new(), hash = %hash))]
     pub fn confirm(&self, hash: &str) -> Result<TransactionResult, Error> {
         block_on(self.inner.confirm(hash))
     }

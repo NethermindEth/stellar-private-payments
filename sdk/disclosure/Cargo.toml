@@ -16,6 +16,9 @@ types = { workspace = true }
 anyhow = { workspace = true }
 hex = { workspace = true }
 sha2 = { workspace = true }
+tracing = { workspace = true }
+# Cross-target clock (std on native, performance.now() on wasm)
+web-time = { workspace = true }
 
 [lints]
 workspace = true

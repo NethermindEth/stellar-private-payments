@@ -3,6 +3,7 @@ use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 use crate::{
     Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
+    correlation::correlation_id_or_new,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
 
@@ -27,6 +28,8 @@ impl<S: Storage> Client<S> {
         contract_config: ContractConfig,
         bootnode_url: Option<String>,
     ) -> Result<Self, Error> {
+        let _span =
+            tracing::info_span!("client_init", correlation_id = %correlation_id_or_new()).entered();
         let rpc = RpcClient::new(rpc_url.as_ref())
             .map_err(|e| Error::Other(format!("rpc error: {e:#}")))?;
         Ok(Self {
@@ -132,6 +135,9 @@ impl<S: Storage> Client<S> {
         user_address: impl Into<String>,
         signer: Handle<dyn Signer>,
     ) -> Result<Account<S>, Error> {
+        let _span =
+            tracing::info_span!("client_account", correlation_id = %correlation_id_or_new())
+                .entered();
         Ok(Account::new(
             self.rpc.clone(),
             self.storage.fork()?,

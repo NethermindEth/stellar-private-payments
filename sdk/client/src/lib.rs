@@ -88,6 +88,7 @@ mod account;
 pub mod blocking;
 mod client;
 mod core;
+mod correlation;
 mod error;
 mod handle;
 mod plan;

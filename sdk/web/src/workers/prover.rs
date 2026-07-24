@@ -3,7 +3,7 @@ use crate::{
         ensure_sha256_matches, fetch_circuit_file, fetch_circuit_file_verified,
         get_or_derive_uncompressed,
     },
-    protocol::{ProverWorkerRequest, ProverWorkerResponse},
+    protocol::{CorrelatedRequest, ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
 use futures::{FutureExt, try_join};
@@ -27,6 +27,7 @@ use stellar_private_payments_sdk::{
         SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
     },
 };
+use tracing::Instrument;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
@@ -201,7 +202,7 @@ async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
             match Groth16Prover::new_from_uncompressed_pk(&uncompressed_pk, &r1cs_bytes) {
                 Ok(prover) => prover,
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "[{WORKER_NAME}] uncompressed disclosure({n_notes}) prover build failed ({e:#}), falling back to compressed"
                     );
                     build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
@@ -209,7 +210,7 @@ async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
             }
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "[{WORKER_NAME}] uncompressed disclosure({n_notes}) proving key unavailable ({e:?}), falling back to compressed"
             );
             build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
@@ -366,14 +367,14 @@ async fn build_transact_prover(
             match ProverEngine::new_from_uncompressed_pk(&uncompressed_pk, wasm_bytes, r1cs_bytes) {
                 Ok(engine) => return Ok(engine),
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) prover build failed ({e:#}), falling back to compressed"
                     );
                 }
             }
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) proving key unavailable ({e:?}), falling back to compressed"
             );
         }
@@ -383,15 +384,22 @@ async fn build_transact_prover(
 }
 
 pub fn worker_main() {
-    console_error_panic_hook::set_once();
-    wasm_log::init(wasm_log::Config::default());
-    log::debug!("[{WORKER_NAME}] starting...");
+    let worker_span = tracing::info_span!("worker", worker = "prover");
+    {
+        let _guard = worker_span.enter();
+        crate::telemetry::init_telemetry(None);
+        crate::telemetry::install_panic_hook();
+        tracing::debug!("[{WORKER_NAME}] starting...");
+    }
     ProverWorker::registrar().register();
-    spawn_local(async {
-        if let Err(e) = init().await {
-            log::error!("[{WORKER_NAME}] init failed: {e:?}");
+    spawn_local(
+        async move {
+            if let Err(e) = init().await {
+                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
+            }
         }
-    });
+        .instrument(worker_span),
+    );
 }
 
 async fn init() -> Result<(), JsError> {
@@ -400,7 +408,7 @@ async fn init() -> Result<(), JsError> {
     match load_circuit_artifacts().await {
         Ok(()) => {
             INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-            log::debug!("[{WORKER_NAME}] initialized");
+            tracing::debug!("[{WORKER_NAME}] initialized");
             Ok(())
         }
         Err(e) => {
@@ -412,26 +420,38 @@ async fn init() -> Result<(), JsError> {
 }
 
 #[oneshot]
-pub(crate) async fn ProverWorker(req: ProverWorkerRequest) -> ProverWorkerResponse {
-    match router(req).await {
-        Ok(r) => r,
-        Err(e) => ProverWorkerResponse::Error(e.to_string()),
+pub(crate) async fn ProverWorker(
+    req: CorrelatedRequest<ProverWorkerRequest>,
+) -> ProverWorkerResponse {
+    let correlation_id = req.correlation_id;
+    let worker_span = tracing::info_span!(
+        "worker_request",
+        worker = "prover",
+        correlation_id = correlation_id.as_str()
+    );
+    async move {
+        match router(req.payload).await {
+            Ok(r) => r,
+            Err(e) => ProverWorkerResponse::Error(e.to_string()),
+        }
     }
+    .instrument(worker_span)
+    .await
 }
 
 // Main router of worker requests
 pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerResponse> {
     let resp = match req {
         ProverWorkerRequest::Ping => {
-            log::trace!("[{WORKER_NAME}] ping");
+            tracing::trace!("[{WORKER_NAME}] ping");
             loop {
                 match INIT_STATE.with(|s| s.borrow().clone()) {
                     InitState::Ready => {
-                        log::trace!("[{WORKER_NAME}] pong");
+                        tracing::trace!("[{WORKER_NAME}] pong");
                         return Ok(ProverWorkerResponse::Pong);
                     }
                     InitState::Failed(msg) => {
-                        log::debug!("[{WORKER_NAME}] ping -> init failed");
+                        tracing::debug!("[{WORKER_NAME}] ping -> init failed");
                         return Ok(ProverWorkerResponse::Error(msg));
                     }
                     InitState::Pending => {}
@@ -441,7 +461,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             }
         }
         ProverWorkerRequest::Transact(params) => {
-            log::debug!("[{WORKER_NAME}] transact");
+            tracing::debug!("[{WORKER_NAME}] transact");
             let stem = params.policy_flags.circuit_stem();
             let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
@@ -453,7 +473,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             ProverWorkerResponse::TransactPrepared(prepared)
         }
         ProverWorkerRequest::Disclosure(req) => {
-            log::debug!("[{WORKER_NAME}] disclosure");
+            tracing::debug!("[{WORKER_NAME}] disclosure");
 
             let context = req.context;
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
@@ -569,7 +589,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             ProverWorkerResponse::Disclosure(receipt)
         }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
-            log::debug!("[{WORKER_NAME}] verify disclosure proof");
+            tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
@@ -621,8 +641,13 @@ impl ProverBridge {
         req: ProverWorkerRequest,
         timeout_ms: u32,
     ) -> anyhow::Result<ProverWorkerResponse> {
+        let correlated_req = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".to_string()),
+            payload: req,
+        };
         let mut bridge = self.bridge.fork();
-        let fut = bridge.run(req).fuse();
+        let fut = bridge.run(correlated_req).fuse();
         let timeout = TimeoutFuture::new(timeout_ms).fuse();
 
         futures::pin_mut!(fut, timeout);

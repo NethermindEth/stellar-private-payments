@@ -28,6 +28,8 @@ use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_snark::SNARK;
 use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
+use types::correlation_id_or_new;
+use web_time::Instant;
 
 // Soroban-compatible encoding helpers.
 // Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering, while arkworks
@@ -249,11 +251,23 @@ impl Prover {
     /// # Arguments
     /// * `pk_bytes` - Serialized proving key (compressed)
     /// * `r1cs_bytes` - R1CS binary file contents
+    #[tracing::instrument(
+        name = "prover_new",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new(), pk_len = pk_bytes.len(), r1cs_len = r1cs_bytes.len())
+    )]
     pub fn new(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
+        let start = Instant::now();
+        tracing::debug!("loading compressed proving key and R1CS");
         // Deserialize proving key. Unchecked, proving key is trusted
-        let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
-            .map_err(|e| anyhow!("Failed to load proving key: {}", e))?;
-        Self::from_pk(pk, r1cs_bytes)
+        let result = ProvingKey::<Bn254>::deserialize_compressed_unchecked(pk_bytes)
+            .map_err(|e| anyhow!("Failed to load proving key: {}", e))
+            .and_then(|pk| Self::from_pk(pk, r1cs_bytes));
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "prover initialized"
+        );
+        result
     }
 
     /// Create a new Prover from an arkworks-*uncompressed* proving key.
@@ -271,11 +285,23 @@ impl Prover {
     /// # Arguments
     /// * `pk_bytes` - Serialized proving key (uncompressed)
     /// * `r1cs_bytes` - R1CS binary file contents
+    #[tracing::instrument(
+        name = "prover_new_uncompressed",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new(), pk_len = pk_bytes.len(), r1cs_len = r1cs_bytes.len())
+    )]
     pub fn new_from_uncompressed_pk(pk_bytes: &[u8], r1cs_bytes: &[u8]) -> Result<Prover> {
+        let start = Instant::now();
+        tracing::debug!("loading uncompressed proving key and R1CS");
         // Deserialize proving key. Unchecked, proving key is trusted.
-        let pk = ProvingKey::<Bn254>::deserialize_uncompressed_unchecked(pk_bytes)
-            .map_err(|e| anyhow!("Failed to load uncompressed proving key: {}", e))?;
-        Self::from_pk(pk, r1cs_bytes)
+        let result = ProvingKey::<Bn254>::deserialize_uncompressed_unchecked(pk_bytes)
+            .map_err(|e| anyhow!("Failed to load uncompressed proving key: {}", e))
+            .and_then(|pk| Self::from_pk(pk, r1cs_bytes));
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "prover initialized"
+        );
+        result
     }
 
     /// Shared construction tail for [`Prover::new`] and
@@ -350,7 +376,14 @@ impl Prover {
     ///
     /// # Returns
     /// * Groth16Proof struct with proof points
+    #[tracing::instrument(
+        name = "prove",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new(), witness_len = witness_bytes.len(), num_public_inputs = self.r1cs.num_public, num_constraints = self.r1cs.num_constraints())
+    )]
     pub fn prove(&self, witness_bytes: &[u8]) -> Result<Groth16Proof> {
+        let start = Instant::now();
+        tracing::debug!("generating Groth16 proof");
         // Validate witness size
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
             return Err(anyhow!(
@@ -385,10 +418,15 @@ impl Prover {
 
         // Generate proof
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
+        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
             &self.pk, circuit, &mut rng,
         )
-        .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
+        .map_err(|e| anyhow!("Proof generation failed: {}", e));
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "proof generation completed"
+        );
+        let proof = result?;
 
         // Serialize proof points
         let mut a_bytes = Vec::new();
@@ -429,7 +467,14 @@ impl Prover {
     ///
     /// Format: [A (64 bytes) || B (128 bytes) || C (64 bytes)] = 256 bytes
     /// G2 points use Soroban-compatible c1||c0 (imaginary||real) ordering.
+    #[tracing::instrument(
+        name = "prove_bytes_uncompressed",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new(), witness_len = witness_bytes.len(), num_public_inputs = self.r1cs.num_public)
+    )]
     pub fn prove_bytes_uncompressed(&self, witness_bytes: &[u8]) -> Result<Vec<u8>> {
+        let start = Instant::now();
+        tracing::debug!("generating Groth16 proof (uncompressed output)");
         // Validate witness size
         if !witness_bytes.len().is_multiple_of(FIELD_SIZE) {
             return Err(anyhow!(
@@ -460,10 +505,15 @@ impl Prover {
         };
 
         let mut rng = OsRng;
-        let proof = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
+        let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::prove(
             &self.pk, circuit, &mut rng,
         )
-        .map_err(|e| anyhow!("Proof generation failed: {}", e))?;
+        .map_err(|e| anyhow!("Proof generation failed: {}", e));
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "proof generation completed"
+        );
+        let proof = result?;
 
         Ok(proof_to_uncompressed_bytes(&proof))
     }
@@ -509,7 +559,14 @@ impl Prover {
     }
 
     /// Verify a proof (for testing purposes)
+    #[tracing::instrument(
+        name = "prover_verify",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new(), proof_len = proof_bytes.len(), num_public_inputs = public_inputs_bytes.len() / FIELD_SIZE)
+    )]
     pub fn verify(&self, proof_bytes: &[u8], public_inputs_bytes: &[u8]) -> Result<bool> {
+        let start = Instant::now();
+        tracing::debug!("verifying proof");
         let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
             .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
         let expected_inputs = self
@@ -519,7 +576,15 @@ impl Prover {
             .len()
             .checked_sub(1)
             .ok_or_else(|| anyhow!("Invalid verifying key"))?;
-        verify_proof_with_processed_vk(&self.pvk, expected_inputs, &proof, public_inputs_bytes)
+        let result =
+            verify_proof_with_processed_vk(&self.pvk, expected_inputs, &proof, public_inputs_bytes);
+        tracing::debug!(
+            elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+            "proof verification completed"
+        );
+        let valid = result?;
+        tracing::debug!(valid, "proof verification outcome");
+        Ok(valid)
     }
 }
 
@@ -528,31 +593,52 @@ impl Prover {
 /// Input: compressed proof [A || B || C]
 /// Output: uncompressed [A (64) || B (128) || C (64)] = 256 bytes
 /// G2 points use Soroban-compatible c1||c0 ordering.
+#[tracing::instrument(
+    name = "convert_proof_to_soroban",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), proof_len = proof_bytes.len())
+)]
 pub fn convert_proof_to_soroban(proof_bytes: &[u8]) -> Result<Vec<u8>> {
     let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
         .map_err(|e| anyhow!("Failed to deserialize proof: {}", e))?;
     Ok(proof_to_uncompressed_bytes(&proof))
 }
 /// Standalone verification function
+#[tracing::instrument(
+    name = "verify_proof",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), vk_len = vk_bytes.len(), proof_len = proof_bytes.len(), num_public_inputs = public_inputs_bytes.len() / FIELD_SIZE)
+)]
 pub fn verify_proof(
     vk_bytes: &[u8],
     proof_bytes: &[u8],
     public_inputs_bytes: &[u8],
 ) -> Result<bool> {
+    let start = Instant::now();
+    tracing::debug!("verifying proof with standalone verifying key");
     // Deserialize verifying key
     let vk = VerifyingKey::<Bn254>::deserialize_compressed(vk_bytes)
         .map_err(|e| anyhow!("Failed to load VK: {}", e))?;
 
-    let pvk = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&vk)
-        .map_err(|e| anyhow!("Failed to process VK: {}", e))?;
-    let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
-        .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
-    let expected_inputs = vk
-        .gamma_abc_g1
-        .len()
-        .checked_sub(1)
-        .ok_or_else(|| anyhow!("Invalid verifying key"))?;
-    verify_proof_with_processed_vk(&pvk, expected_inputs, &proof, public_inputs_bytes)
+    let result = <ark_groth16::Groth16<Bn254, CircomReduction> as SNARK<Fr>>::process_vk(&vk)
+        .map_err(|e| anyhow!("Failed to process VK: {}", e))
+        .and_then(|pvk| {
+            let proof = Proof::<Bn254>::deserialize_compressed(proof_bytes)
+                .map_err(|e| anyhow!("Failed to load proof: {}", e))?;
+            let expected_inputs = vk
+                .gamma_abc_g1
+                .len()
+                .checked_sub(1)
+                .ok_or_else(|| anyhow!("Invalid verifying key"))?;
+            verify_proof_with_processed_vk(&pvk, expected_inputs, &proof, public_inputs_bytes)
+        });
+    tracing::debug!(
+        elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX),
+        "proof verification completed"
+    );
+    let valid = result?;
+    tracing::debug!(valid, "proof verification outcome");
+    Ok(valid)
 }
 
 #[cfg(test)]

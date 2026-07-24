@@ -6,7 +6,7 @@ mod error;
 pub use combination::{CombinationResult, TRANSACTION_LIMIT, find_combination};
 pub use error::PlanError;
 
-use types::{Field, NoteAmount};
+use types::{Field, NoteAmount, correlation_id_or_new};
 
 /// Full plan: one or more on-chain `transact` calls (2-in / 2-out each).
 #[derive(Clone, Debug)]
@@ -95,6 +95,7 @@ impl<'a> IntoIterator for &'a TransactionPlan {
 }
 
 /// Build a plan from unspent notes and a target spend amount.
+#[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(&amount), note_count = notes.len()))]
 pub fn plan(
     amount: NoteAmount,
     notes: &[SpendableNote],
@@ -105,9 +106,13 @@ pub fn plan(
 
     let values: Vec<NoteAmount> = notes.iter().map(|n| n.amount).collect();
     let combo = find_combination(&values, amount)?;
+    tracing::debug!(?combo, "transaction plan combination result");
 
     let (indices, change) = match combo {
-        CombinationResult::Impossible => return Err(PlanError::NoCombination),
+        CombinationResult::Impossible => {
+            tracing::warn!("transaction planning rejected: no combination possible");
+            return Err(PlanError::NoCombination);
+        }
         CombinationResult::OneExact(i) => (vec![i], None),
         CombinationResult::TwoExact(i, j) => (vec![i, j], None),
         CombinationResult::OneOvershoot(i, excess) => (vec![i], Some(excess)),
@@ -117,6 +122,11 @@ pub fn plan(
     };
 
     if indices.len() > TRANSACTION_LIMIT {
+        tracing::warn!(
+            selected = indices.len(),
+            max_notes = TRANSACTION_LIMIT,
+            "transaction planning rejected: too many notes selected"
+        );
         return Err(PlanError::TooManyNotes {
             selected: indices.len(),
             max_notes: TRANSACTION_LIMIT,

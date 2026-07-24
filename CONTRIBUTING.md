@@ -290,3 +290,32 @@ To make a production release of CLI
 git tag v0.1.0 # with a proper new version
 git push origin v0.1.0
 ```
+
+## Instrumentation & Logging Guidelines
+
+All contributions to the SDK must adhere to the following telemetry and instrumentation guidelines to prevent credential/key leaks:
+
+### 1. Instrumentation House Rules
+* Always use `#[tracing::instrument(skip_all, fields(...))]` on public functions or functions processing transaction requests.
+* Do not log parameters by default; instead, explicitly list only **non-sensitive** fields in the `fields(...)` allowlist of the macro.
+* Wrap all **Tier-1** parameters (such as amounts, recipient/sender addresses, note commitments, nullifiers, and public keys) inside the `types::Sensitive(value)` wrapper when logging or recording them inside spans.
+
+### 2. Tier Classification
+* **Tier-0 (Private/Secret)**: Private keys, seeds, signatures, circuit witness arrays, and membership blinding factors. **Strictly forbidden from being formatted or logged.** Do not wrap them; keep them out of logs completely.
+* **Tier-1 (Sensitive/Redactable)**: Stellar addresses, token amounts, commitments, and nullifiers. **Must be wrapped in `types::Sensitive`.**
+
+See [SECURITY.md](SECURITY.md) § "Logging Security & Privacy Model" for the full two-tier model and its invariants.
+
+### 3. Correlation IDs
+* Every instrumented boundary/operation function includes `correlation_id = %types::correlation_id_or_new()` in its `fields(...)`. It inherits the ambient id when nested and mints one at operation roots — never call `new_correlation_id()` directly.
+* CLI commands open a root span (`info_span!("cmd_*", correlation_id = ...)`) so SDK calls inherit the id.
+
+### 4. Timing & Durations
+* SDK crates (must stay wasm-compatible): use `web_time::Instant`. Native-only crates (e.g. `cli`): use `std::time::Instant`.
+* Time genuinely expensive operations only (proving, witness computation, key deserialization, external processes). Emit `elapsed_ms` at `debug!` level, on **both** success and error exits of the expensive section (capture the result, log, then `?`).
+* Use `u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)` — the workspace denies `clippy::cast_possible_truncation`.
+
+### 5. Levels & Payloads
+* Boundary spans at `info`; internal "started" breadcrumbs and durations at `debug`; verbose detail at `trace`; fallback/degraded paths at `warn`; hard failures at `error`.
+* External process boundaries (e.g. shelling out to `stellar`): an `info!` breadcrumb **before** spawn (this is the hang diagnostic), outcome + duration **after** exit.
+* Large or secret byte payloads (proving keys, witnesses, R1CS, XDR): log **lengths only**, never contents.

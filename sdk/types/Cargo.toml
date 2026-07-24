@@ -13,12 +13,16 @@ rusqlite = ["dep:rusqlite"]
 [dependencies]
 # external
 anyhow = { workspace = true }
+getrandom = { workspace = true }
 hex = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true, features = ["alloc"] }
+tracing = { workspace = true }
 uint = { workspace = true }
+zeroize = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+tracing-subscriber = { workspace = true }
 # external
 rusqlite = { workspace = true, optional = true, features = ["bundled"] }
 

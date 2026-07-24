@@ -293,6 +293,8 @@ impl Client {
         method: &'static str,
         params: P,
     ) -> Result<R, Error> {
+        tracing::debug!(method = method, "rpc_call_event");
+
         let payload = JsonRpcRequest {
             jsonrpc: "2.0",
             id: 1,
@@ -617,6 +619,7 @@ impl Client {
         Ok((result, latest_ledger))
     }
 
+    #[tracing::instrument(name = "simulate_transaction", level = "info", skip_all, fields(correlation_id = %types::correlation_id_or_new()))]
     pub async fn simulate_transaction(
         &self,
         tx: &xdr::TransactionEnvelope,
@@ -645,6 +648,7 @@ impl Client {
     }
 
     /// Submits a signed transaction envelope to the network.
+    #[tracing::instrument(name = "send_transaction", level = "info", skip_all, fields(correlation_id = %types::correlation_id_or_new()))]
     pub async fn send_transaction(
         &self,
         tx: &xdr::TransactionEnvelope,
@@ -653,6 +657,7 @@ impl Client {
         let params = json!({ "transaction": transaction });
         let resp: SendTransactionResponse = self.rpc_call("sendTransaction", params).await?;
         if resp.status == "ERROR" {
+            tracing::warn!(hash = %resp.hash, status = %resp.status, "send_transaction_failed");
             return Err(Error::JsonRpc {
                 code: -1,
                 message: format!(
@@ -665,6 +670,7 @@ impl Client {
     }
 
     /// Fetches transaction status by hash.
+    #[tracing::instrument(name = "get_transaction", level = "info", skip_all, fields(correlation_id = %types::correlation_id_or_new(), hash = %hash))]
     pub async fn get_transaction(&self, hash: &str) -> Result<GetTransactionResponse, Error> {
         let params = json!({ "hash": hash });
         self.rpc_call("getTransaction", params).await

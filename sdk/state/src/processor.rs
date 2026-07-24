@@ -18,7 +18,7 @@ pub fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
                 // we shouldn't delete broken events
                 // we should fix the logic then
                 // update the software and handle them
-                log::error!("cannot process event: {e:?}");
+                tracing::error!("cannot process event: {e:?}");
                 continue;
             }
         };
@@ -27,7 +27,7 @@ pub fn process_events(storage: &mut SqliteStorage, limit: u32) -> Result<bool> {
             ProcessedEvent::Commitment(ev) => commitments.push(ev),
             ProcessedEvent::PublicKey(ev) => pubkeys.push(ev),
             ProcessedEvent::LeafAdded(ev) => leaves.push(ev),
-            _ => log::warn!("event won't be saved to the storage: {parsed:?}"),
+            _ => tracing::warn!("event won't be saved to the storage: {parsed:?}"),
         }
     }
     storage.save_nullifier_events_batch(&nullifiers)?;
