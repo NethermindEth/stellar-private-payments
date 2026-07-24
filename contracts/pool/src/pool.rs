@@ -19,7 +19,7 @@ use crate::{
 };
 use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, Map, U256, Vec, contract, contractclient, contracterror,
+    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractclient, contracterror,
     contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
     xdr::ToXdr,
 };
@@ -174,8 +174,8 @@ pub(crate) enum DataKey {
     Verifier,
     /// Maximum allowed deposit amount per transaction
     MaximumDepositAmount,
-    /// Map of spent nullifiers (nullifier -> bool)
-    Nullifiers,
+    /// Spent nullifier marker keyed by nullifier (presence-only; value unused).
+    Nullifier(U256),
     /// Address of the ASP Membership contract
     ASPMembership,
     /// Address of the ASP Non-Membership contract
@@ -273,9 +273,6 @@ impl PoolContract {
             .set(&DataKey::MaximumDepositAmount, &maximum_deposit_amount);
         env.storage()
             .persistent()
-            .set(&DataKey::Nullifiers, &Map::<U256, bool>::new(&env));
-        env.storage()
-            .persistent()
             .set(&DataKey::PolicyFlags, &policy_flags);
 
         // Initialize the Merkle tree for commitment storage
@@ -358,8 +355,8 @@ impl PoolContract {
     ///
     /// Returns `true` if the nullifier has been spent, `false` otherwise
     fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
-        let nulls = Self::get_nullifiers(env)?;
-        Ok(nulls.get(n.clone()).unwrap_or(false))
+        let key = DataKey::Nullifier(n.clone());
+        Ok(env.storage().persistent().has(&key))
     }
 
     /// Mark a nullifier as spent
@@ -369,9 +366,9 @@ impl PoolContract {
     /// * `env` - The Soroban environment
     /// * `n` - The nullifier to mark as spent
     fn mark_spent(env: &Env, n: &U256) -> Result<(), Error> {
-        let mut nulls = Self::get_nullifiers(env)?;
-        nulls.set(n.clone(), true);
-        Self::set_nullifiers(env, &nulls);
+        let key = DataKey::Nullifier(n.clone());
+        // Presence of the key is the spent flag; value is unused.
+        env.storage().persistent().set(&key, &());
         Ok(())
     }
 
@@ -664,19 +661,6 @@ impl PoolContract {
     }
 
     // ========== Storage Getters and Setters ==========
-
-    /// Get the nullifiers map from storage
-    fn get_nullifiers(env: &Env) -> Result<Map<U256, bool>, Error> {
-        env.storage()
-            .persistent()
-            .get(&DataKey::Nullifiers)
-            .ok_or(Error::NotInitialized)
-    }
-
-    /// Save the nullifiers map to storage
-    fn set_nullifiers(env: &Env, m: &Map<U256, bool>) {
-        env.storage().persistent().set(&DataKey::Nullifiers, m);
-    }
 
     /// Get the token contract address
     fn get_token(env: &Env) -> Result<Address, Error> {
