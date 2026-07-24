@@ -6,13 +6,14 @@ mod execute;
 mod pool;
 mod transact;
 
-use std::rc::Rc;
+use std::{rc::Rc, str::FromStr};
 
 use serde::Deserialize;
 use stellar_private_payments_sdk::{
     Account as NativeAccount, BackgroundSyncStop, Client as NativeClient, Error, Handle,
     chain::{RpcClient, StateFetcher},
-    types::{DisclosureReceipt, KeyDerivationSignature},
+    crypto::derive_asp_user_leaf as derive_asp_user_leaf_native,
+    types::{DisclosureReceipt, Field, KeyDerivationSignature, NotePublicKey},
     verify_disclosure_receipt,
 };
 use wasm_bindgen::prelude::*;
@@ -266,6 +267,21 @@ impl Drop for Client {
             stop.request();
         }
     }
+}
+
+/// Derive the ASP membership tree leaf from explicit public inputs.
+#[wasm_bindgen(js_name = deriveAspUserLeaf)]
+pub fn derive_asp_user_leaf(
+    note_public_key: String,
+    membership_blinding: String,
+) -> Result<String, JsError> {
+    crate::wasm_start();
+
+    let note = NotePublicKey::parse(&note_public_key).map_err(|e| JsError::new(&e.to_string()))?;
+    let blinding =
+        Field::from_str(&membership_blinding).map_err(|e| JsError::new(&e.to_string()))?;
+    let leaf = derive_asp_user_leaf_native(&note, &blinding).map_err(pool_err)?;
+    Ok(leaf.to_string())
 }
 
 /// Verify a selective-disclosure receipt with no wallet, no local storage,

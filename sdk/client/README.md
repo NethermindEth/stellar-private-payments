@@ -93,7 +93,8 @@ Method names mirror the async API; each call runs on an internal Tokio runtime.
 | `KEY_DERIVATION_MESSAGE` | Wallet message to sign for key derivation (**native / CLI** — browser apps use `Client.account()`, which signs this internally) |
 | `Account::user_public_keys()` | Note + encryption public keys for the bound account |
 | `Account::asp_secret()` | ASP membership blinding for the bound account |
-| `Account::derive_asp_user_leaf(...)` | ASP membership tree leaf |
+| `Account::derive_asp_user_leaf()` | ASP membership tree leaf from stored keys |
+| `crypto::derive_asp_user_leaf(note, blinding)` | Same leaf from explicit inputs (no session) |
 
 Private note/encryption keys stay in storage and are not exposed through the SDK.
 
