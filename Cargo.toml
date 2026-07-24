@@ -127,5 +127,10 @@ lto = true
 inherits = "release"
 debug-assertions = true
 
+# More aggresive optimization for build scripts
+# Otherwise, compiling the circuit crate takes too much time with new circuits
+[profile.dev.build-override]
+opt-level = 3
+
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }
