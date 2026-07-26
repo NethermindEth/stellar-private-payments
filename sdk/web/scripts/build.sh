@@ -113,6 +113,21 @@ wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MA
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker-module "$PROVER_WASM"
 
+echo "==> Running wasm-opt -Os on shipped wasm modules..."
+for wasm in \
+  "$WEB/dist/${WASM_OUT_NAME}_bg.wasm" \
+  "$WEB/dist/workers/storage-worker-module_bg.wasm" \
+  "$WEB/dist/workers/prover-worker-module_bg.wasm"; do
+  "$WASM_OPT" -Os \
+    --enable-bulk-memory \
+    --enable-reference-types \
+    --enable-multivalue \
+    --enable-sign-ext \
+    --enable-nontrapping-float-to-int \
+    --enable-mutable-globals \
+    "$wasm" -o "$wasm"
+done
+
 write_worker_loader() {
   local name="$1"
   cat >"$WEB/dist/workers/${name}.js" <<EOF
