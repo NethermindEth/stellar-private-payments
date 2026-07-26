@@ -36,10 +36,16 @@ fi
 SDK="$TRUNK_STAGING_DIR/js/stellar-private-payments-sdk-web"
 mkdir -p "$SDK/dist" "$SDK/js"
 cp -R sdk/web/dist/. "$SDK/dist/"
+# Dedup: footer link uses the root-level circuits/ copy (see below); the npm
+# package keeps its own source-bundle.tar.gz — only the app staging duplicate is dropped.
+rm -f "$SDK/dist/circuits/source-bundle.tar.gz"
+# The staged NOTICE still points at the just-removed local copy; repoint it at
+# the root-level footer copy (public-url is "/", so an absolute path is stable).
+sed -i 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: /circuits/source-bundle.tar.gz|' "$SDK/dist/circuits/NOTICE.txt"
 
 # Bundle SDK JS (inlines @stellar/freighter-api); wasm stays external.
 ./app/node_modules/.bin/esbuild sdk/web/js/index.js \
-  --bundle --format=esm \
+  --bundle --format=esm --minify \
   --outfile="$SDK/js/index.js" \
   --external:../dist/stellar_private_payments_sdk_web.js \
   --alias:@stellar/freighter-api=./app/node_modules/@stellar/freighter-api/build/index.min.js
@@ -50,7 +56,7 @@ cp app/admin.html "$TRUNK_STAGING_DIR/" 2>/dev/null || true
 # Top-level legal files (NOTICE, LICENSE, circuits/NOTICE for footer links).
 sh deployments/scripts/stage-dist-legal.sh "$TRUNK_STAGING_DIR"
 
-# Footer download link only — same tarball already bundled under SDK dist/circuits/.
+# Footer download link only — the SDK staging copy under dist/circuits/ is deduped away above.
 cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/source-bundle.tar.gz"
 """]
 
@@ -59,9 +65,9 @@ cp sdk/web/dist/circuits/source-bundle.tar.gz "$TRUNK_STAGING_DIR/circuits/sourc
 stage = "build"
 command = "sh"
 command_arguments = ["-c", """
-./app/node_modules/.bin/esbuild app/js/ui.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/admin.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
-./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/ui.js --bundle --minify --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/ui.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/admin.js --bundle --minify --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/admin.js" --format=esm
+./app/node_modules/.bin/esbuild app/js/disclosure.js --bundle --minify --external:stellar-private-payments-sdk-web --outfile="$TRUNK_STAGING_DIR/js/disclosure.js" --format=esm
 
 # Service worker must be served from the root (not bundled with ui.js) so it has full-page scope
 cp app/js/sw.js "$TRUNK_STAGING_DIR/sw.js"
