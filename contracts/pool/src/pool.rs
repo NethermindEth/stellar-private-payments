@@ -344,21 +344,6 @@ impl PoolContract {
         }
     }
 
-    /// Check if a nullifier has already been spent
-    ///
-    /// # Arguments
-    ///
-    /// * `env` - The Soroban environment
-    /// * `n` - The nullifier to check
-    ///
-    /// # Returns
-    ///
-    /// Returns `true` if the nullifier has been spent, `false` otherwise
-    fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
-        let key = DataKey::Nullifier(n.clone());
-        Ok(env.storage().persistent().has(&key))
-    }
-
     /// Mark a nullifier as spent
     ///
     /// # Arguments
@@ -726,6 +711,23 @@ impl PoolContract {
     /// * `root` - Pool Merkle root to check
     pub fn is_known_root(env: &Env, root: &U256) -> Result<bool, Error> {
         Ok(MerkleTreeWithHistory::is_known_root(env, root)?)
+    }
+
+    /// Check whether a nullifier has already been spent.
+    ///
+    /// Presence of the per-nullifier storage key is the spent flag.
+    ///
+    /// # Arguments
+    ///
+    /// * `env` - The Soroban environment
+    /// * `n` - The nullifier to check
+    ///
+    /// # Returns
+    ///
+    /// Returns `true` if the nullifier has been spent, `false` otherwise
+    pub fn is_spent(env: &Env, n: &U256) -> Result<bool, Error> {
+        let key = DataKey::Nullifier(n.clone());
+        Ok(env.storage().persistent().has(&key))
     }
 
     /// Update the contract administrator
