@@ -932,3 +932,57 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         Err(Ok(Error::NonCanonicalPublicInput))
     ));
 }
+
+#[test]
+fn is_spent_false_for_unseen_nullifier() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let nullifier = U256::from_u32(&env, 0xB1);
+
+    assert!(!pool.is_spent(&nullifier));
+}
+
+#[test]
+fn is_spent_true_after_nullifier_marked() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let pool = PoolContractClient::new(&env, &pool_id);
+    let spent = U256::from_u32(&env, 0xA1);
+    let other = U256::from_u32(&env, 0xA2);
+
+    assert!(!pool.is_spent(&spent));
+    assert!(!pool.is_spent(&other));
+
+    // mark spent
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&crate::pool::DataKey::Nullifier(spent.clone()), &());
+    });
+
+    assert!(pool.is_spent(&spent));
+    assert!(!pool.is_spent(&other));
+
+    // indempotency check
+    env.as_contract(&pool_id, || {
+        env.storage()
+            .persistent()
+            .set(&crate::pool::DataKey::Nullifier(spent.clone()), &());
+    });
+    assert!(pool.is_spent(&spent));
+}
