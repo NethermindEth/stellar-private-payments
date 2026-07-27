@@ -54,6 +54,15 @@ for name in "${KEYS[@]}"; do
   cp "$src" "$DIST/circuits/$name"
 done
 
+echo "==> Compressing r1cs and proving keys for portable .gz delivery..."
+for name in "${ARTIFACTS[@]}"; do
+  if [[ "$name" == *.r1cs ]]; then
+    gzip -9 -n -c "$DIST/circuits/$name" > "$DIST/circuits/$name.gz"
+  fi
+done
+for name in "${KEYS[@]}"; do
+  gzip -9 -n -c "$DIST/circuits/$name" > "$DIST/circuits/$name.gz"
+done
 
 echo "==> Packaging circuits source bundle (LGPL corresponding source)..."
 sh "$ROOT/deployments/scripts/package-circuits-source-bundle.sh" \

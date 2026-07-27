@@ -6,7 +6,10 @@ use sha2::{Digest as _, Sha256};
 use std::fmt::Write as _;
 use wasm_bindgen::{JsCast, JsError, JsValue};
 use wasm_bindgen_futures::JsFuture;
-use web_sys::{Cache, CacheStorage, Request, RequestInit, RequestMode, Response};
+use web_sys::{
+    Cache, CacheStorage, CompressionFormat, DecompressionStream, ReadableWritablePair, Request,
+    RequestInit, RequestMode, Response,
+};
 
 const CIRCUITS_BASE_GLOBAL: &str = "__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__";
 const CACHE_NAME: &str = "stellar-circuits-v1";
@@ -127,6 +130,66 @@ async fn response_to_bytes(resp: Response) -> Result<Vec<u8>, JsError> {
     Ok(uint8_array.to_vec())
 }
 
+fn compression_supported() -> bool {
+    let global = js_sys::global();
+    Reflect::get(&global, &JsValue::from_str("DecompressionStream"))
+        .map(|v| !v.is_undefined() && !v.is_null())
+        .unwrap_or(false)
+}
+
+async fn fetch_network_response(url: &str) -> Result<Response, JsError> {
+    log::debug!("[circuits] network fetch for {url}");
+    let opts = RequestInit::new();
+    opts.set_method("GET");
+    opts.set_mode(RequestMode::Cors);
+
+    let request = Request::new_with_str_and_init(url, &opts)
+        .map_err(|e| JsError::new(&format!("request failed for {url}: {e:?}")))?;
+
+    let global = js_sys::global();
+    let resp_value = if let Some(window) = web_sys::window() {
+        JsFuture::from(window.fetch_with_request(&request))
+            .await
+            .map_err(|e| JsError::new(&format!("network error: {e:?}")))?
+    } else {
+        let worker: web_sys::WorkerGlobalScope = global
+            .dyn_into()
+            .map_err(|_| JsError::new("no window or worker global scope"))?;
+        JsFuture::from(worker.fetch_with_request(&request))
+            .await
+            .map_err(|e| JsError::new(&format!("network error: {e:?}")))?
+    };
+
+    let resp: Response = resp_value
+        .dyn_into()
+        .map_err(|_| JsError::new("failed to cast response"))?;
+
+    if !resp.ok() {
+        return Err(JsError::new(&format!("HTTP {} for {}", resp.status(), url)));
+    }
+
+    Ok(resp)
+}
+
+async fn decompress_gzip_response(url: &str, resp: Response) -> Result<Vec<u8>, JsError> {
+    let decompression = DecompressionStream::new(CompressionFormat::Gzip).map_err(|e| {
+        JsError::new(&format!(
+            "failed to create DecompressionStream for {url}: {e:?}"
+        ))
+    })?;
+    let body = resp
+        .body()
+        .ok_or_else(|| JsError::new(&format!("response body missing for {url}")))?;
+    let pair = ReadableWritablePair::new(&decompression.readable(), &decompression.writable());
+    let decompressed = body.pipe_through(&pair);
+    let new_resp = Response::new_with_opt_readable_stream(Some(&decompressed)).map_err(|e| {
+        JsError::new(&format!(
+            "failed to build decompressed response for {url}: {e:?}"
+        ))
+    })?;
+    response_to_bytes(new_resp).await
+}
+
 pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsError> {
     let url_string = circuit_fetch_url(filename)?;
     log::debug!("[circuits] fetching {url_string}");
@@ -150,47 +213,56 @@ pub(crate) async fn fetch_circuit_file(filename: &str) -> Result<Vec<u8>, JsErro
         }
     }
 
-    log::debug!("[circuits] network fetch for {url_string}");
-    let opts = RequestInit::new();
-    opts.set_method("GET");
-    opts.set_mode(RequestMode::Cors);
+    // Prefer the compressed path when the runtime supports it. A 404 on the .gz
+    // file (older host / no pre-compressed artifacts) or a decode failure are
+    // normal fallbacks to the raw file. A successful decode that then fails the
+    // SHA-256 check in `fetch_circuit_file_verified` is treated as an integrity
+    // failure there and is NOT silently retried as raw.
+    let mut raw_bytes = None;
+    if compression_supported() {
+        let gz_url = format!("{url_string}.gz");
+        match fetch_network_response(&gz_url).await {
+            Ok(resp) => match decompress_gzip_response(&gz_url, resp).await {
+                Ok(bytes) => {
+                    log::debug!("[circuits] decoded {gz_url} -> {} bytes", bytes.len());
+                    raw_bytes = Some(bytes);
+                }
+                Err(e) => {
+                    log::warn!(
+                        "[circuits] gzip decode failed for {gz_url}: {e:?}; falling back to raw"
+                    );
+                }
+            },
+            Err(e) => {
+                log::debug!(
+                    "[circuits] compressed fetch failed for {gz_url}: {e:?}; falling back to raw"
+                );
+            }
+        }
+    }
 
-    let request = Request::new_with_str_and_init(&url_string, &opts)
-        .map_err(|e| JsError::new(&format!("request failed for {url_string}: {e:?}")))?;
-
-    let global = js_sys::global();
-    let resp_value = if let Some(window) = web_sys::window() {
-        JsFuture::from(window.fetch_with_request(&request))
-            .await
-            .map_err(|e| JsError::new(&format!("network error: {e:?}")))?
-    } else {
-        let worker: web_sys::WorkerGlobalScope = global
-            .dyn_into()
-            .map_err(|_| JsError::new("no window or worker global scope"))?;
-        JsFuture::from(worker.fetch_with_request(&request))
-            .await
-            .map_err(|e| JsError::new(&format!("network error: {e:?}")))?
+    let bytes = match raw_bytes {
+        Some(bytes) => bytes,
+        None => {
+            let resp = fetch_network_response(&url_string).await?;
+            response_to_bytes(resp).await?
+        }
     };
 
-    let resp: Response = resp_value
-        .dyn_into()
-        .map_err(|_| JsError::new("failed to cast response"))?;
-
-    if !resp.ok() {
-        return Err(JsError::new(&format!(
-            "HTTP {} for {}",
-            resp.status(),
-            url_string
-        )));
+    // Cache-API stores decompressed bytes under the canonical (raw) URL so the
+    // semantics of a cache hit are unchanged: raw bytes are returned directly.
+    if let Some(cache) = &cache_opt {
+        match Response::new_with_opt_u8_array(Some(&mut bytes.clone()[..])) {
+            Ok(resp) => {
+                let _ = JsFuture::from(cache.put_with_str(&url_string, &resp)).await;
+            }
+            Err(e) => {
+                log::warn!("[circuits] failed to build cache response for {url_string}: {e:?}");
+            }
+        }
     }
 
-    if let Some(cache) = &cache_opt
-        && let Ok(resp_clone) = resp.clone()
-    {
-        let _ = JsFuture::from(cache.put_with_str(&url_string, &resp_clone)).await;
-    }
-
-    response_to_bytes(resp).await
+    Ok(bytes)
 }
 
 pub(crate) async fn fetch_circuit_file_verified(
