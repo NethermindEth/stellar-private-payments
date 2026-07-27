@@ -13,8 +13,10 @@ pragma circom 2.2.2;
 //   0x05 - ephemeral scalar `r` derivation
 //   0x06 - keystream KDF
 //
-// Encryption is deterministic: R = H(note, D, nonce, idx)*G, so confidentiality also rests on the entropy of
-// `blinding`.
+// R = H(note, salt, D, nonce, idx)*G is derived from a dedicated per-note secret
+// `salt`, so the encryption randomness is independent of the note fields. Given a
+// unique (nonce, idx) the derivation still binds r to the full context, so
+// keystreams never collide even under a weak or repeated salt.
 // Some of the requirements that cannot be enforced in-circuit and need to be 
 // done at the contract level:
 //   - `nonce` must be unique per transaction; a reused nonce makes identical
@@ -41,6 +43,7 @@ template GlobalViewKeyEncryption() {
     signal input pk;            // pk of note
     signal input amount;        // amount of note
     signal input blinding;      // note blinding
+    signal input salt;          // fresh per-note secret
 
     /** OUTPUTS **/
     signal output R[2]; // ephemeral public key R = r * G
@@ -50,13 +53,17 @@ template GlobalViewKeyEncryption() {
 
     // 1. Validate the authority public key D
     // D is a non-validated public input. Enforce it satisfies the curve equation.
+    // Needs to be verified on the smart contract level. We need to accept the correct pk, not any valid curve point. 
     component dCheck = BabyCheck();
     dCheck.x <== D[0];
     dCheck.y <== D[1];
 
 
     // 2. Derive the ephemeral scalar r
-    // Chained absorb over all context to bind r and prevent nonce/keystream reuse.
+    // Chained absorb over a dedicated secret `salt` plus all context. The salt
+    // makes the encryption randomness independent of the note fields (r no longer
+    // rests only on `blinding`'s entropy), while the remaining context keeps r bound to
+    // (note, D, nonce, idx) so keystreams never collide even under a weak salt.
     // TODO: Support larger Poseidon2 sizes to reduce the chaining
     component h1 = Poseidon2(3);
     h1.inputs[0] <== pk;
@@ -66,14 +73,20 @@ template GlobalViewKeyEncryption() {
 
     component h2 = Poseidon2(3);
     h2.inputs[0] <== h1.out;
-    h2.inputs[1] <== D[0];
-    h2.inputs[2] <== D[1];
+    h2.inputs[1] <== salt;
+    h2.inputs[2] <== D[0];
     h2.domainSeparation <== 0x05;
 
+    component h3 = Poseidon2(3);
+    h3.inputs[0] <== h2.out;
+    h3.inputs[1] <== D[1];
+    h3.inputs[2] <== nonce;
+    h3.domainSeparation <== 0x05;
+
     component hr = Poseidon2(3);
-    hr.inputs[0] <== h2.out;
-    hr.inputs[1] <== nonce;
-    hr.inputs[2] <== idx;
+    hr.inputs[0] <== h3.out;
+    hr.inputs[1] <== idx;
+    hr.inputs[2] <== 0;
     hr.domainSeparation <== 0x05;
 
     signal r;
@@ -133,6 +146,13 @@ template GlobalViewKeyEncryption() {
     S[0] <== mulD.out[0];
     S[1] <== mulD.out[1];
 
+    // Reject a degenerate shared secret S = (0,1). The 8*D check above rules out
+    // identity on the D side. This additionally rules out r = 0 (mod l), which
+    // would independently force S = (0,1) regardless of D and make the keystream
+    // publicly computable.
+    component sCheck = IsZero();
+    sCheck.in <== S[0];
+    sCheck.out === 0;
 
     // 5. Keystream
     // One Poseidon2 permutation over (S.x, S.y, 0, dom) yields all three pads
@@ -163,6 +183,7 @@ template GlobalViewKey(nNotes) {
     signal input pk[nNotes];
     signal input amount[nNotes];
     signal input blinding[nNotes];
+    signal input salt[nNotes];
 
     /** OUTPUTS **/
     signal output R[nNotes][2];
@@ -180,6 +201,7 @@ template GlobalViewKey(nNotes) {
         enc[i].pk <== pk[i];
         enc[i].amount <== amount[i];
         enc[i].blinding <== blinding[i];
+        enc[i].salt <== salt[i];
 
         R[i][0] <== enc[i].R[0];
         R[i][1] <== enc[i].R[1];
@@ -208,6 +230,8 @@ template GvkNotes(nIns, nOuts, encryptInputs) {
     signal input outPubkey[nOuts];
     signal input outAmount[nOuts];
     signal input outBlinding[nOuts];
+    signal input inSalt[nIns];
+    signal input outSalt[nOuts];
 
     /** OUTPUTS **/
     var nEnc = encryptInputs ? (nIns + nOuts) : nOuts;
@@ -228,6 +252,7 @@ template GvkNotes(nIns, nOuts, encryptInputs) {
         encOut[k].pk <== outPubkey[k];
         encOut[k].amount <== outAmount[k];
         encOut[k].blinding <== outBlinding[k];
+        encOut[k].salt <== outSalt[k];
 
         R[outBase + k][0] <== encOut[k].R[0];
         R[outBase + k][1] <== encOut[k].R[1];
@@ -248,6 +273,7 @@ template GvkNotes(nIns, nOuts, encryptInputs) {
             encIn[k].pk <== inPubkey[k];
             encIn[k].amount <== inAmount[k];
             encIn[k].blinding <== inBlinding[k];
+            encIn[k].salt <== inSalt[k];
 
             R[k][0] <== encIn[k].R[0];
             R[k][1] <== encIn[k].R[1];

@@ -24,6 +24,7 @@ mod tests {
             pk: Scalar::from(0xABCDu64),
             amount: Scalar::from(1_000_000u64),
             blinding: Scalar::from(0xDEAD_BEEFu64),
+            salt: Scalar::from(0xCAFE_F00Du64),
         }
     }
 
@@ -38,6 +39,7 @@ mod tests {
                     pk: Scalar::from(100u64 + i),
                     amount: Scalar::from(1_000u64 + i),
                     blinding: Scalar::from(7u64 + i),
+                    salt: Scalar::from(0x5A17_0000u64 + i),
                 }
             })
             .collect()
@@ -56,6 +58,7 @@ mod tests {
             "blinding",
             notes.iter().map(|n| n.blinding).collect::<Vec<_>>(),
         );
+        inputs.set("salt", notes.iter().map(|n| n.salt).collect::<Vec<_>>());
         inputs
     }
 
@@ -90,7 +93,7 @@ mod tests {
         let ct = encrypt_note(&note, d, Scalar::from(42u64), Scalar::from(0u64));
         assert_eq!(
             decrypt_note(&ct, d_priv),
-            note,
+            note.recovered(),
             "decryption must recover the note"
         );
     }
@@ -138,7 +141,7 @@ mod tests {
         ct.c1 = Scalar::from(0x1234_5678u64); // overwrite with an unrelated value
         assert_ne!(
             decrypt_note(&ct, d_priv),
-            note,
+            note.recovered(),
             "tampered ciphertext must not decrypt to the original note",
         );
     }
@@ -166,7 +169,7 @@ mod tests {
             let ct = encrypt_note(note, d, nonce, idx);
             assert_eq!(
                 decrypt_note(&ct, d_priv),
-                *note,
+                note.recovered(),
                 "admin must recover note {i}"
             );
             expected.extend([ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3]);

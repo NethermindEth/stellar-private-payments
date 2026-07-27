@@ -26,9 +26,32 @@ const DOM_R: u64 = 0x05;
 /// Domain separation for the keystream KDF.
 const DOM_KDF: u64 = 0x06;
 
-/// A note's plaintext secrets.
+/// A note's plaintext secrets, plus the fresh per-note `salt` that seeds the
+/// ephemeral scalar derivation (see `derive_r`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Note {
+    pub pk: Scalar,
+    pub amount: Scalar,
+    pub blinding: Scalar,
+    pub salt: Scalar,
+}
+
+impl Note {
+    /// The subset of secrets an admin recovers by decryption. `salt` is never
+    /// transmitted or encrypted, so it is intentionally excluded.
+    pub fn recovered(&self) -> RecoveredNote {
+        RecoveredNote {
+            pk: self.pk,
+            amount: self.amount,
+            blinding: self.blinding,
+        }
+    }
+}
+
+/// The plaintext an admin recovers from a ciphertext. Mirrors `Note` minus the
+/// `salt`, which decryption cannot (and need not) recover.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct RecoveredNote {
     pub pk: Scalar,
     pub amount: Scalar,
     pub blinding: Scalar,
@@ -46,12 +69,16 @@ pub struct Ciphertext {
 
 /// Derive the ephemeral scalar `r` via the chained Poseidon2 absorb (dom 0x05).
 ///
-/// `r = H(H(H(pk, amount, blinding), D.x, D.y), nonce, idx)`.
+/// `r = H(H(H(H(pk, amount, blinding), salt, D.x), D.y, nonce), idx, 0)`.
+///
+/// The `salt` lane makes `r` independent of the note fields' entropy. The
+/// remaining context keeps `r` bound to `(note, D, nonce, idx)`.
 pub fn derive_r(note: &Note, d: (Scalar, Scalar), nonce: Scalar, idx: Scalar) -> Scalar {
     let dom = Some(Scalar::from(DOM_R));
     let h1 = poseidon2_hash3(note.pk, note.amount, note.blinding, dom);
-    let h2 = poseidon2_hash3(h1, d.0, d.1, dom);
-    poseidon2_hash3(h2, nonce, idx, dom)
+    let h2 = poseidon2_hash3(h1, note.salt, d.0, dom);
+    let h3 = poseidon2_hash3(h2, d.1, nonce, dom);
+    poseidon2_hash3(h3, idx, Scalar::from(0u64), dom)
 }
 
 /// The ephemeral public key `R = r * BASE8`.
@@ -93,11 +120,11 @@ pub fn encrypt_note(note: &Note, d: (Scalar, Scalar), nonce: Scalar, idx: Scalar
 ///
 /// The circuit computes `S = r * (8*D)`, so with `D = d * BASE8` the admin must
 /// recover `S = 8d * R`. We compute it as `8 * (d * R)` to keep `d` in range.
-pub fn decrypt_note(ct: &Ciphertext, d_priv: Scalar) -> Note {
+pub fn decrypt_note(ct: &Ciphertext, d_priv: Scalar) -> RecoveredNote {
     let big_r = point_from_coords(ct.r.0, ct.r.1);
     let s = mul8(scalar_mul(big_r, d_priv));
     let k = keystream(s);
-    Note {
+    RecoveredNote {
         pk: ct.c1 - k[0],
         amount: ct.c2 - k[1],
         blinding: ct.c3 - k[2],

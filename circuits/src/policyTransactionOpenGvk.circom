@@ -31,6 +31,10 @@ template PolicyTransactionOpenGvk(nIns, nOuts, levels, encryptInputs) {
     signal input outPubkey[nOuts];
     signal input outBlinding[nOuts];
 
+    /** PRIVATE INPUTS (Global View Key) **/
+    signal input inSalt[nIns];   // fresh per-note secrets
+    signal input outSalt[nOuts];
+
     /** OUTPUTS (GVK ciphertext) **/
     var nEnc = encryptInputs ? (nIns + nOuts) : nOuts;
     signal output R[nEnc][2];
@@ -68,11 +72,13 @@ template PolicyTransactionOpenGvk(nIns, nOuts, levels, encryptInputs) {
         gvk.inPubkey[k] <== core.inPublicKey[k];
         gvk.inAmount[k] <== inAmount[k];
         gvk.inBlinding[k] <== inBlinding[k];
+        gvk.inSalt[k] <== inSalt[k];
     }
     for (var k = 0; k < nOuts; k++) {
         gvk.outPubkey[k] <== outPubkey[k];
         gvk.outAmount[k] <== outAmount[k];
         gvk.outBlinding[k] <== outBlinding[k];
+        gvk.outSalt[k] <== outSalt[k];
     }
     for (var e = 0; e < nEnc; e++) {
         R[e][0] <== gvk.R[e][0];

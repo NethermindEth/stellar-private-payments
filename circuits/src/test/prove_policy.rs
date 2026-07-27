@@ -1582,6 +1582,14 @@ mod tests {
         ];
         let n_ins = in_notes.len();
 
+        // Fresh per-note salts seeding the GVK encryption.
+        let in_salts: Vec<Scalar> = (0..n_ins)
+            .map(|i| Scalar::from(0xDEADBEEFu64 + u64::try_from(i).expect("idx")))
+            .collect();
+        let out_salts: Vec<Scalar> = (0..out_notes.len())
+            .map(|i| Scalar::from(0xC0FFEu64 + u64::try_from(i).expect("idx")))
+            .collect();
+
         let case = TxCase::new(in_notes.clone(), out_notes.clone());
         let leaves = prepopulated_leaves(LEVELS, 0xABCDu64, &[3, 8], 20);
         let membership_trees = default_membership_trees(&case, 0x1234_5678u64);
@@ -1600,6 +1608,8 @@ mod tests {
         )?;
         inputs.set("D", vec![d.0, d.1]);
         inputs.set("nonce", nonce);
+        inputs.set("inSalt", in_salts.clone());
+        inputs.set("outSalt", out_salts.clone());
 
         let res = prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)?;
         assert!(res.verified, "{} proof did not verify", circuit.stem);
@@ -1621,7 +1631,7 @@ mod tests {
             );
             assert_eq!(
                 decrypt_note(&ct, d_priv),
-                note,
+                note.recovered(),
                 "admin must recover the note"
             );
             for v in [ct.r.0, ct.r.1, ct.c1, ct.c2, ct.c3] {
@@ -1639,6 +1649,7 @@ mod tests {
                     pk: out.pub_key,
                     amount: out.amount,
                     blinding: out.blinding,
+                    salt: out_salts[k],
                 },
                 n_ins + k,
             );
@@ -1650,6 +1661,7 @@ mod tests {
                         pk: derive_public_key(inp.priv_key),
                         amount: inp.amount,
                         blinding: inp.blinding,
+                        salt: in_salts[k],
                     },
                     k,
                 );
