@@ -39,6 +39,33 @@ fn read_file(path: &Path) -> Vec<u8> {
         .unwrap_or_else(|e| panic!("sdk/web/build.rs: failed to read {}: {e}", path.display()))
 }
 
+fn wasm_path(repo_root: &Path, circuits_out: &Path, stem: &str) -> PathBuf {
+    let staged = repo_root
+        .join("sdk/web/dist/circuits")
+        .join(format!("{stem}.wasm"));
+    let raw = circuits_out.join(format!("{stem}.wasm"));
+
+    // Watch BOTH paths unconditionally: cargo's rerun-if-changed only tracks
+    // paths printed on the *previous* run, so if only the chosen path were
+    // watched, a change to the other one (e.g. `cargo build -p circuits`
+    // regenerating `raw` while a stale `staged` sits untouched) would never
+    // even trigger a rerun of this script — the guard below would never get
+    // a chance to evaluate.
+    println!("cargo:rerun-if-changed={}", staged.display());
+    println!("cargo:rerun-if-changed={}", raw.display());
+
+    // Prefer the staged (wasm-opt'd) copy, but only if it's at least as fresh
+    // as the raw artifact — otherwise a stale dist/circuits/ from a prior
+    // build.sh run would silently win.
+    let staged_is_fresh = fs::metadata(&staged).and_then(|s| s.modified()).is_ok_and(|staged_mtime| {
+        fs::metadata(&raw)
+            .and_then(|r| r.modified())
+            .is_ok_and(|raw_mtime| staged_mtime >= raw_mtime)
+    });
+
+    if staged_is_fresh { staged } else { raw }
+}
+
 fn copy_artifact(src: &Path, out_dir: &Path, name: &str) -> Vec<u8> {
     let bytes = read_file(src);
     fs::write(out_dir.join(name), &bytes).unwrap_or_else(|e| {
@@ -88,11 +115,10 @@ fn main() {
         let proving_key_path = repo_root
             .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}_proving_key.bin"));
-        let wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let wasm_path = wasm_path(&repo_root, &circuits_out, &stem);
         let r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", proving_key_path.display());
-        println!("cargo:rerun-if-changed={}", wasm_path.display());
         println!("cargo:rerun-if-changed={}", r1cs_path.display());
 
         let proving_key_bytes = read_file(&proving_key_path);
@@ -187,11 +213,10 @@ pub fn policy_transact_artifact_hashes(stem: &str) -> Option<PolicyTransactArtif
         let pk_path = repo_root
             .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}_proving_key.bin"));
-        let disc_wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let disc_wasm_path = wasm_path(&repo_root, &circuits_out, &stem);
         let disc_r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", pk_path.display());
-        println!("cargo:rerun-if-changed={}", disc_wasm_path.display());
         println!("cargo:rerun-if-changed={}", disc_r1cs_path.display());
 
         let pk_bytes = read_file(&pk_path);
