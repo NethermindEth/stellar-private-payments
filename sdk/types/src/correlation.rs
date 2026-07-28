@@ -14,8 +14,8 @@ use std::sync::{
 // extensions. Unlike a plain push/pop stack of correlation-id *strings*,
 // correctness doesn't depend on every enter/exit pair staying in sync: each
 // span's correlation id and parent pointer are set once at creation and
-// never mutated, so an improperly nested `exit_span` call can only affect which span
-// is considered "current" — it can't corrupt another span's own recorded
+// never mutated, so an improperly nested `exit_span` call can only affect which
+// span is considered "current" — it can't corrupt another span's own recorded
 // correlation id or ancestry.
 //
 // The parent/correlation maps are kept for every target (a native unit test
@@ -55,8 +55,8 @@ pub fn enter_span(id: u64) {
 }
 
 /// Mark `id` as no longer entered. Removes the innermost matching entry
-/// (rather than blindly popping the top) so an improperly nested exit can't evict a
-/// still-active ancestor span from the "current" chain.
+/// (rather than blindly popping the top) so an improperly nested exit can't
+/// evict a still-active ancestor span from the "current" chain.
 #[cfg(target_arch = "wasm32")]
 pub fn exit_span(id: u64) {
     CURRENT_SPAN_STACK.with(|stack| {
