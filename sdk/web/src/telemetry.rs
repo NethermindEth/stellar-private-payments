@@ -16,6 +16,14 @@ use tracing::{
     span::{Attributes, Record},
 };
 
+use crate::{
+    protocol::{
+        ProverWorkerRequest, ProverWorkerResponse, StorageWorkerRequest, StorageWorkerResponse,
+        WorkerTelemetryConfig,
+    },
+    workers::{prover::ProverBridge, storage::StorageBridge},
+};
+
 #[cfg(target_arch = "wasm32")]
 use tracing::Level;
 
@@ -339,6 +347,123 @@ pub fn dump_recent_logs() -> String {
         .as_ref()
         .map(|rb| rb.dump())
         .unwrap_or_default()
+}
+
+/// Timeout for telemetry commands (config push, log dump) sent to workers.
+/// Short on purpose: diagnostics must never stall application I/O.
+const TELEMETRY_CMD_TIMEOUT_MS: u32 = 2_000;
+
+/// A registered worker bridge that receives telemetry configuration pushes
+/// and serves log dumps.
+#[derive(Clone)]
+enum WorkerSink {
+    Storage(StorageBridge),
+    Prover(ProverBridge),
+}
+
+thread_local! {
+    static WORKER_SINKS: RefCell<Vec<WorkerSink>> = const { RefCell::new(Vec::new()) };
+}
+
+/// Register worker bridges so telemetry configuration and log dumps reach
+/// their isolates. Replaces any previously registered sink of the same kind
+/// (a new Client means new worker instances) and pushes the current
+/// configuration to the freshly registered workers.
+pub(crate) fn register_worker_sinks(storage: Option<StorageBridge>, prover: Option<ProverBridge>) {
+    WORKER_SINKS.with(|sinks| {
+        let mut sinks = sinks.borrow_mut();
+        if let Some(storage) = storage {
+            sinks.retain(|sink| !matches!(sink, WorkerSink::Storage(_)));
+            sinks.push(WorkerSink::Storage(storage));
+        }
+        if let Some(prover) = prover {
+            sinks.retain(|sink| !matches!(sink, WorkerSink::Prover(_)));
+            sinks.push(WorkerSink::Prover(prover));
+        }
+    });
+    broadcast_config(current_worker_config());
+}
+
+/// The configuration pushed to worker isolates: level and reveal only.
+/// Sink targets and ring-buffer sizing stay per-isolate defaults.
+pub(crate) fn current_worker_config() -> WorkerTelemetryConfig {
+    let level = LOG_LEVEL
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .to_string();
+    WorkerTelemetryConfig {
+        level,
+        reveal_sensitive: stellar_private_payments_sdk::types::reveal_sensitive(),
+    }
+}
+
+/// Push telemetry configuration to all registered worker isolates.
+/// Fire-and-forget: diagnostics must never block or break the caller.
+pub(crate) fn broadcast_config(config: WorkerTelemetryConfig) {
+    let sinks: Vec<WorkerSink> = WORKER_SINKS.with(|s| s.borrow().clone());
+    for sink in sinks {
+        let config = config.clone();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = match sink {
+                WorkerSink::Storage(bridge) => bridge
+                    .call(
+                        StorageWorkerRequest::ConfigureTelemetry(config),
+                        TELEMETRY_CMD_TIMEOUT_MS,
+                    )
+                    .await
+                    .map(|_| ()),
+                WorkerSink::Prover(bridge) => bridge
+                    .call(
+                        ProverWorkerRequest::ConfigureTelemetry(config),
+                        TELEMETRY_CMD_TIMEOUT_MS,
+                    )
+                    .await
+                    .map(|_| ()),
+            };
+            if let Err(e) = result {
+                tracing::debug!("telemetry config push to worker failed: {e:#}");
+            }
+        });
+    }
+}
+
+/// Aggregate recent logs from the main thread and every registered worker
+/// isolate into one string with per-isolate section headers.
+pub async fn dump_all_logs() -> String {
+    let mut out = String::from("== main ==\n");
+    out.push_str(&dump_recent_logs());
+
+    let sinks: Vec<WorkerSink> = WORKER_SINKS.with(|s| s.borrow().clone());
+    for sink in sinks {
+        let (label, result) = match sink {
+            WorkerSink::Storage(bridge) => (
+                "storage-worker",
+                bridge
+                    .call(StorageWorkerRequest::DumpLogs, TELEMETRY_CMD_TIMEOUT_MS)
+                    .await
+                    .map(|resp| match resp {
+                        StorageWorkerResponse::Logs(logs) => logs,
+                        other => format!("<unexpected response: {other:?}>"),
+                    }),
+            ),
+            WorkerSink::Prover(bridge) => (
+                "prover-worker",
+                bridge
+                    .call(ProverWorkerRequest::DumpLogs, TELEMETRY_CMD_TIMEOUT_MS)
+                    .await
+                    .map(|resp| match resp {
+                        ProverWorkerResponse::Logs(logs) => logs,
+                        other => format!("<unexpected response: {other:?}>"),
+                    }),
+            ),
+        };
+        out.push_str(&format!("\n== {label} ==\n"));
+        match result {
+            Ok(logs) => out.push_str(&logs),
+            Err(e) => out.push_str(&format!("<unavailable: {e:#}>\n")),
+        }
+    }
+    out
 }
 
 /// Install a panic hook that records the active correlation ID.

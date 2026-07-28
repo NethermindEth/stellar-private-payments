@@ -467,6 +467,14 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
             tracing::trace!("[{WORKER_NAME}] derived user leaf from the pubkey for the admin");
             StorageWorkerResponse::DeriveASPleaf(user_leaf)
         }
+        StorageWorkerRequest::ConfigureTelemetry(config) => {
+            let _ = crate::telemetry::set_log_level(&config.level);
+            stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+            StorageWorkerResponse::Saved
+        }
+        StorageWorkerRequest::DumpLogs => {
+            StorageWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
+        }
         StorageWorkerRequest::Transact(req) => {
             tracing::trace!("[{WORKER_NAME}] transact");
             with_storage_mut!(storage => match build_transact_params(storage, &req)? {
@@ -893,5 +901,20 @@ impl Storage for StorageBridge {
             ))),
             Err(e) => Err(Error::Other(e.to_string())),
         }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dump_logs_returns_ring_buffer_contents() {
+        crate::telemetry::init_telemetry(None);
+        let resp = futures::executor::block_on(router(StorageWorkerRequest::DumpLogs))
+            .expect("dump logs succeeds");
+        let StorageWorkerResponse::Logs(_) = resp else {
+            panic!("expected Logs response, got: {resp:?}");
+        };
     }
 }

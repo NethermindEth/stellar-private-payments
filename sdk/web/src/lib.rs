@@ -79,15 +79,22 @@ pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
         }
     };
 
+    let worker_config = crate::protocol::WorkerTelemetryConfig {
+        level: final_config.level.clone(),
+        reveal_sensitive: final_config.reveal_sensitive,
+    };
+
     if crate::telemetry::is_telemetry_initialized() {
-        // If already initialized, dynamically update runtime settings
+        // Already initialized: dynamically update runtime settings.
         let _ = crate::telemetry::set_log_level(&final_config.level);
         stellar_private_payments_sdk::types::set_reveal_sensitive(final_config.reveal_sensitive);
-        return Ok(());
+    } else {
+        crate::telemetry::init_telemetry(Some(final_config));
+        crate::telemetry::install_panic_hook();
     }
 
-    crate::telemetry::init_telemetry(Some(final_config));
-    crate::telemetry::install_panic_hook();
+    // Propagate to the storage/prover worker isolates.
+    crate::telemetry::broadcast_config(worker_config);
     Ok(())
 }
 
@@ -97,7 +104,10 @@ pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
 /// `"trace"` (target directives like `"crate=debug"` are not supported).
 #[wasm_bindgen]
 pub fn set_log_level(level: &str) -> Result<(), JsValue> {
-    crate::telemetry::set_log_level(level).map_err(JsValue::from)
+    crate::telemetry::set_log_level(level).map_err(JsValue::from)?;
+    // Propagate to the storage/prover worker isolates.
+    crate::telemetry::broadcast_config(crate::telemetry::current_worker_config());
+    Ok(())
 }
 
 /// Whether this build supports debug/trace logging and Tier-1 sensitive
@@ -109,10 +119,11 @@ pub fn debug_logs_enabled() -> bool {
     cfg!(debug_assertions)
 }
 
-/// Return the recent formatted log output stored in the in-memory ring buffer.
+/// Return recent formatted log output aggregated from the in-memory ring
+/// buffers of the main thread and the storage/prover worker isolates.
 #[wasm_bindgen]
-pub fn dump_recent_logs() -> String {
-    crate::telemetry::dump_recent_logs()
+pub async fn dump_recent_logs() -> String {
+    crate::telemetry::dump_all_logs().await
 }
 
 #[cfg(test)]

@@ -142,6 +142,9 @@ impl Client {
         )
         .map_err(pool_err)?;
 
+        // Let telemetry config pushes and log dumps reach the worker isolates.
+        crate::telemetry::register_worker_sinks(Some(storage.bridge()), Some(prover.clone()));
+
         Ok(Self {
             storage,
             inner,

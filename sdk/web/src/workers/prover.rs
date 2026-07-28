@@ -588,6 +588,14 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::Disclosure(receipt)
         }
+        ProverWorkerRequest::ConfigureTelemetry(config) => {
+            let _ = crate::telemetry::set_log_level(&config.level);
+            stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+            ProverWorkerResponse::Pong
+        }
+        ProverWorkerRequest::DumpLogs => {
+            ProverWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
+        }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
             tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 

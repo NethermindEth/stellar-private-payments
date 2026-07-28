@@ -130,8 +130,8 @@ configureTelemetry({
   revealSensitive: true       // Reveal Tier-1 values (debug profile only)
 });
 
-// Dump current ring buffer logs for diagnostic reports
-const logs = dump_recent_logs();
+// Dump recent logs (main thread + storage/prover workers) for diagnostic reports
+const logs = await dump_recent_logs();
 
 // Update log level filter on the fly
 set_log_level('info');

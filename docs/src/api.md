@@ -53,5 +53,5 @@ Initializes or dynamically updates the active subscriber's logging filter, targe
 ### 2. `set_log_level(level: string): void`
 Dynamically overrides the active log level filter directive at runtime (e.g., changes to `"debug"`).
 
-### 3. `dump_recent_logs(): string`
-Dumps the current contents of the log ring buffer as a single formatted string for diagnostic reports.
+### 3. `dump_recent_logs(): Promise<string>`
+Dumps the recent formatted logs as a single string for diagnostic reports, aggregated from the main thread and the storage/prover worker isolates (one section per isolate).
