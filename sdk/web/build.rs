@@ -85,14 +85,13 @@ fn main() {
     let mut bundled_proving_key_arms = String::new();
 
     for stem in PolicyFlags::all_stems() {
-        let proving_key_path = repo_root
-            .join("deployments/testnet/circuit_keys")
-            .join(format!("{stem}_proving_key.bin"));
-        let wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let keys_dir = repo_root.join("deployments/testnet/circuit_keys");
+        let proving_key_path = keys_dir.join(format!("{stem}_proving_key.bin"));
+        let graph_path = keys_dir.join(format!("{stem}.graph.bin"));
         let r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", proving_key_path.display());
-        println!("cargo:rerun-if-changed={}", wasm_path.display());
+        println!("cargo:rerun-if-changed={}", graph_path.display());
         println!("cargo:rerun-if-changed={}", r1cs_path.display());
 
         let proving_key_bytes = read_file(&proving_key_path);
@@ -101,29 +100,29 @@ fn main() {
             &out_dir,
             &format!("{stem}_proving_key.bin"),
         );
-        let wasm_bytes = copy_artifact(&wasm_path, &out_dir, &format!("{stem}.wasm"));
+        let graph_bytes = copy_artifact(&graph_path, &out_dir, &format!("{stem}.graph.bin"));
         let r1cs_bytes = copy_artifact(&r1cs_path, &out_dir, &format!("{stem}.r1cs"));
 
         let proving_key_hash = sha256(&proving_key_bytes);
-        let wasm_hash = sha256(&wasm_bytes);
+        let graph_hash = sha256(&graph_bytes);
         let r1cs_hash = sha256(&r1cs_bytes);
         let const_prefix = stem.to_ascii_uppercase();
 
         out.push_str(&format!(
             "
 pub const EXPECTED_{const_prefix}_PROVING_KEY_SHA256: [u8; 32] = {proving_key_hash};
-pub const EXPECTED_{const_prefix}_WASM_SHA256: [u8; 32] = {wasm_hash};
+pub const EXPECTED_{const_prefix}_GRAPH_SHA256: [u8; 32] = {graph_hash};
 pub const EXPECTED_{const_prefix}_R1CS_SHA256: [u8; 32] = {r1cs_hash};
 
 pub const EXPECTED_{const_prefix}_PROVING_KEY_LEN: usize = {proving_key_len};
-pub const EXPECTED_{const_prefix}_WASM_LEN: usize = {wasm_len};
+pub const EXPECTED_{const_prefix}_GRAPH_LEN: usize = {graph_len};
 pub const EXPECTED_{const_prefix}_R1CS_LEN: usize = {r1cs_len};
 ",
             proving_key_hash = fmt_u8_array(&proving_key_hash),
-            wasm_hash = fmt_u8_array(&wasm_hash),
+            graph_hash = fmt_u8_array(&graph_hash),
             r1cs_hash = fmt_u8_array(&r1cs_hash),
             proving_key_len = proving_key_bytes.len(),
-            wasm_len = wasm_bytes.len(),
+            graph_len = graph_bytes.len(),
             r1cs_len = r1cs_bytes.len(),
         ));
         policy_lookup_arms.push_str(&format!(
@@ -131,8 +130,8 @@ pub const EXPECTED_{const_prefix}_R1CS_LEN: usize = {r1cs_len};
         \"{stem}\" => Some(PolicyTransactArtifactHashes {{
             proving_key_len: EXPECTED_{const_prefix}_PROVING_KEY_LEN,
             proving_key_sha256: EXPECTED_{const_prefix}_PROVING_KEY_SHA256,
-            wasm_len: EXPECTED_{const_prefix}_WASM_LEN,
-            wasm_sha256: EXPECTED_{const_prefix}_WASM_SHA256,
+            graph_len: EXPECTED_{const_prefix}_GRAPH_LEN,
+            graph_sha256: EXPECTED_{const_prefix}_GRAPH_SHA256,
             r1cs_len: EXPECTED_{const_prefix}_R1CS_LEN,
             r1cs_sha256: EXPECTED_{const_prefix}_R1CS_SHA256,
         }}),",
@@ -163,8 +162,8 @@ pub fn bundled_policy_proving_key(stem: &str) -> Option<&'static [u8]> {{
 pub struct PolicyTransactArtifactHashes {
     pub proving_key_len: usize,
     pub proving_key_sha256: [u8; 32],
-    pub wasm_len: usize,
-    pub wasm_sha256: [u8; 32],
+    pub graph_len: usize,
+    pub graph_sha256: [u8; 32],
     pub r1cs_len: usize,
     pub r1cs_sha256: [u8; 32],
 }
@@ -184,22 +183,22 @@ pub fn policy_transact_artifact_hashes(stem: &str) -> Option<PolicyTransactArtif
 
     for n_notes in 1..=4 {
         let stem = format!("selectiveDisclosure_{n_notes}");
-        let pk_path = repo_root
-            .join("deployments/testnet/circuit_keys")
-            .join(format!("{stem}_proving_key.bin"));
-        let disc_wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let keys_dir = repo_root.join("deployments/testnet/circuit_keys");
+        let pk_path = keys_dir.join(format!("{stem}_proving_key.bin"));
+        let disc_graph_path = keys_dir.join(format!("{stem}.graph.bin"));
         let disc_r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", pk_path.display());
-        println!("cargo:rerun-if-changed={}", disc_wasm_path.display());
+        println!("cargo:rerun-if-changed={}", disc_graph_path.display());
         println!("cargo:rerun-if-changed={}", disc_r1cs_path.display());
 
         let pk_bytes = read_file(&pk_path);
-        let disc_wasm_bytes = copy_artifact(&disc_wasm_path, &out_dir, &format!("{stem}.wasm"));
+        let disc_graph_bytes =
+            copy_artifact(&disc_graph_path, &out_dir, &format!("{stem}.graph.bin"));
         let disc_r1cs_bytes = copy_artifact(&disc_r1cs_path, &out_dir, &format!("{stem}.r1cs"));
 
         let pk_hash = sha256(&pk_bytes);
-        let disc_wasm_hash = sha256(&disc_wasm_bytes);
+        let disc_graph_hash = sha256(&disc_graph_bytes);
         let disc_r1cs_hash = sha256(&disc_r1cs_bytes);
 
         let suffix = stem
@@ -210,18 +209,18 @@ pub fn policy_transact_artifact_hashes(stem: &str) -> Option<PolicyTransactArtif
         out.push_str(&format!(
             "
 pub const EXPECTED_{const_prefix}_PROVING_KEY_SHA256: [u8; 32] = {pk_hash};
-pub const EXPECTED_{const_prefix}_WASM_SHA256: [u8; 32] = {disc_wasm_hash};
+pub const EXPECTED_{const_prefix}_GRAPH_SHA256: [u8; 32] = {disc_graph_hash};
 pub const EXPECTED_{const_prefix}_R1CS_SHA256: [u8; 32] = {disc_r1cs_hash};
 
 pub const EXPECTED_{const_prefix}_PROVING_KEY_LEN: usize = {pk_len};
-pub const EXPECTED_{const_prefix}_WASM_LEN: usize = {disc_wasm_len};
+pub const EXPECTED_{const_prefix}_GRAPH_LEN: usize = {disc_graph_len};
 pub const EXPECTED_{const_prefix}_R1CS_LEN: usize = {disc_r1cs_len};
 ",
             pk_hash = fmt_u8_array(&pk_hash),
-            disc_wasm_hash = fmt_u8_array(&disc_wasm_hash),
+            disc_graph_hash = fmt_u8_array(&disc_graph_hash),
             disc_r1cs_hash = fmt_u8_array(&disc_r1cs_hash),
             pk_len = pk_bytes.len(),
-            disc_wasm_len = disc_wasm_bytes.len(),
+            disc_graph_len = disc_graph_bytes.len(),
             disc_r1cs_len = disc_r1cs_bytes.len(),
         ));
     }

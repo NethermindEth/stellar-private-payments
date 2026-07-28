@@ -99,8 +99,8 @@ pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] = &[
 /// Artifact file names for a registered disclosure circuit.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CircuitArtifacts {
-    /// Circuit WASM file name.
-    pub wasm: &'static str,
+    /// Precomputed `circom-witness-rs` operation graph file name.
+    pub graph: &'static str,
     /// Circuit R1CS file name.
     pub r1cs: &'static str,
     /// Groth16 proving-key file name.
@@ -290,7 +290,7 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_1.wasm",
+        graph: "selectiveDisclosure_1.graph.bin",
         r1cs: "selectiveDisclosure_1.r1cs",
         proving_key: "selectiveDisclosure_1_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_1_vk.json",
@@ -304,7 +304,7 @@ pub const SELECTIVE_DISCLOSURE_2: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_2_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_2.wasm",
+        graph: "selectiveDisclosure_2.graph.bin",
         r1cs: "selectiveDisclosure_2.r1cs",
         proving_key: "selectiveDisclosure_2_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_2_vk.json",
@@ -318,7 +318,7 @@ pub const SELECTIVE_DISCLOSURE_3: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_3_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_3.wasm",
+        graph: "selectiveDisclosure_3.graph.bin",
         r1cs: "selectiveDisclosure_3.r1cs",
         proving_key: "selectiveDisclosure_3_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_3_vk.json",
@@ -332,7 +332,7 @@ pub const SELECTIVE_DISCLOSURE_4: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_4_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_4.wasm",
+        graph: "selectiveDisclosure_4.graph.bin",
         r1cs: "selectiveDisclosure_4.r1cs",
         proving_key: "selectiveDisclosure_4_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_4_vk.json",

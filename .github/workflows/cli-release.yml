@@ -48,7 +48,7 @@ jobs:
           cp deployments/testnet/circuit_keys/*.bin testdata/
           cp deployments/testnet/circuit_keys/*.json testdata/
 
-      - name: Build circuits (release) — produces r1cs/wasm
+      - name: Build circuits (release) — produces r1cs
         run: cargo build -p circuits --release
 
       - name: Assemble dist
@@ -62,18 +62,15 @@ jobs:
           # The CLI dist mirrors the app layout minus the disclaimer file.
           rm -f "$STAGING/DISCLAIMER.txt"
 
-          # Compiled circuit artifacts + proving keys the CLI loads at runtime.
+          # Compiled circuit artifacts + proving keys / witness graphs the CLI loads.
           CIRCUITS="target/circuits-artifacts/release"
-          cp "$CIRCUITS/policy_tx_2_2.r1cs" "$CIRCUITS/policy_tx_2_2.wasm" "$STAGING/circuits/"
-          cp "$CIRCUITS/policy_tx_2_2_A.r1cs" "$CIRCUITS/policy_tx_2_2_A.wasm" "$STAGING/circuits/"
-          cp "$CIRCUITS/policy_tx_2_2_B.r1cs" "$CIRCUITS/policy_tx_2_2_B.wasm" "$STAGING/circuits/"
-          cp "$CIRCUITS/policy_tx_2_2_AB.r1cs" "$CIRCUITS/policy_tx_2_2_AB.wasm" "$STAGING/circuits/"
-          cp "$CIRCUITS/selectiveDisclosure_1.r1cs" "$CIRCUITS/selectiveDisclosure_1.wasm" "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/policy_tx_2_2_proving_key.bin "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/policy_tx_2_2_A_proving_key.bin "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/policy_tx_2_2_B_proving_key.bin "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin "$STAGING/circuits/"
-          cp deployments/testnet/circuit_keys/selectiveDisclosure_1_proving_key.bin "$STAGING/circuits/"
+          KEYS="deployments/testnet/circuit_keys"
+          for stem in policy_tx_2_2 policy_tx_2_2_A policy_tx_2_2_B policy_tx_2_2_AB \
+                      selectiveDisclosure_1; do
+            cp "$CIRCUITS/${stem}.r1cs" "$STAGING/circuits/"
+            cp "$KEYS/${stem}.graph.bin" "$STAGING/circuits/"
+            cp "$KEYS/${stem}_proving_key.bin" "$STAGING/circuits/"
+          done
 
           # Corresponding Source bundle (LGPL-3.0).
           sh deployments/scripts/package-circuits-source-bundle.sh "$STAGING/circuits/source-bundle.tar.gz"

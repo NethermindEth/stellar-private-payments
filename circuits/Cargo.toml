@@ -20,10 +20,11 @@ std = [
     "num-bigint",
     "num-integer",
 ]
+# Enables circom-witness-rs C++ graph generation (`make witness-graphs`).
+regen-graphs = ["dep:circom-witness-rs"]
 
 [dependencies]
 # workspace
-# Core dependencies (no_std compatible)
 zkhash = { workspace = true }
 
 # external
@@ -61,6 +62,8 @@ ark-groth16 = { workspace = true }
 ark-serialize = "0.6.0"
 ark-snark = { workspace = true }
 ark-std = { workspace = true }
+# Optional: C++ witness graph generation (`--features regen-graphs`).
+circom-witness-rs = { workspace = true, optional = true, features = ["build-witness"] }
 compiler = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 constraint_generation = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 constraint_writers = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }

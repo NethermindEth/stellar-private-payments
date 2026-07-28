@@ -16,7 +16,7 @@
 //! `selectiveDisclosure_*` below) and outputs them to `testdata/`.
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
-use anyhow::{Context, Result, anyhow, bail};
+use anyhow::{Context, Result, anyhow, bail, ensure};
 use ark_bn254::Bn254;
 use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
@@ -156,6 +156,11 @@ fn main() -> Result<()> {
     );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
+    println!("cargo:rerun-if-env-changed=REGEN_GRAPHS");
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_dir.join("circom.lock").display()
+    );
 
     let groth16_key_circuits = groth16_key_circuits();
 
@@ -325,12 +330,12 @@ fn main() -> Result<()> {
         Report::print_reports(&report_warns, program_archive.get_file_library());
 
         // === BUILD CONFIG ===
-        // Controls which outputs to generate (R1CS + SYM). The WASM is done later
+        // Circom --O2. Must match circom-witness-rs graph gen.
         let build_config = BuildConfig {
-            no_rounds: 1,
+            no_rounds: usize::MAX,
             flag_json_sub: false,
             json_substitutions: "Not used".to_string(),
-            flag_s: true,
+            flag_s: false,
             flag_f: false,
             flag_p: false,
             flag_verbose: false,
@@ -411,6 +416,13 @@ fn main() -> Result<()> {
                 }
             }
         }
+    }
+
+    // === WITNESS GRAPH REGENERATION ===
+    // Committed graphs: deployments/testnet/circuit_keys/<stem>.graph.bin
+    // Regen via `make witness-graphs` (REGEN_GRAPHS=1 + --features regen-graphs).
+    if env::var("REGEN_GRAPHS").is_ok() {
+        regenerate_witness_graphs(&crate_dir)?;
     }
 
     Ok(())
@@ -802,6 +814,7 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if head == locked_rev {
             println!("cargo:warning=circomlib already at locked revision {locked_rev}");
+            inject_black_box_hints(&circomlib_path)?;
             return Ok(());
         }
     }
@@ -833,6 +846,163 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
     }
 
+    inject_black_box_hints(&circomlib_path)?;
+    Ok(())
+}
+
+/// Run circom-witness-rs graph generation and publish `*.graph.bin` artifacts.
+///
+/// Requires `--features regen-graphs` (so the C++ generator is linked) plus
+/// `WITNESS_CPP` / `CIRCOM_LIBRARY_PATH` (see `make witness-graphs`).
+/// Circom CLI must match `circuits/circom.lock`.
+fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
+    #[cfg(not(feature = "regen-graphs"))]
+    {
+        let _ = crate_dir;
+        bail!(
+            "REGEN_GRAPHS=1 requires `cargo build -p circuits --features regen-graphs` \
+             (see `make witness-graphs`)"
+        );
+    }
+
+    #[cfg(feature = "regen-graphs")]
+    {
+        let expected = fs::read_to_string(crate_dir.join("circom.lock"))
+            .context("read circuits/circom.lock")?
+            .trim()
+            .to_string();
+        let ver = Command::new("circom")
+            .arg("--version")
+            .output()
+            .context("run `circom --version` (is Circom on PATH?)")?;
+        let ver_text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ver.stdout),
+            String::from_utf8_lossy(&ver.stderr)
+        );
+        ensure!(
+            ver.status.success() && ver_text.contains(&expected),
+            "Circom CLI must be {expected} (circuits/circom.lock); got:\n{ver_text}"
+        );
+
+        println!("cargo:warning=REGEN_GRAPHS=1 detected - regenerating witness graphs");
+        circom_witness_rs::generate::build_witness()
+            .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
+
+        // circom-witness-rs (single-circuit) writes `graph.bin` into the circuits
+        // crate dir (build-script cwd). Map it to the stem from WITNESS_CPP.
+        let stem = env::var("WITNESS_CPP")
+            .map_err(|_| anyhow!("WITNESS_CPP must be set when REGEN_GRAPHS=1"))?;
+        let stem = stem
+            .split(':')
+            .next()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow!("WITNESS_CPP is empty"))?;
+        let stem = Path::new(stem)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("invalid WITNESS_CPP circuit path: {stem}"))?;
+
+        let src = crate_dir.join("graph.bin");
+        ensure!(
+            src.is_file(),
+            "expected circom-witness-rs to write {}; not found",
+            src.display()
+        );
+        let dst = crate_dir
+            .join("../deployments/testnet/circuit_keys")
+            .join(format!("{stem}.graph.bin"));
+        copy(&src, &dst)?;
+        fs::remove_file(&src)?;
+        println!("cargo:warning=Wrote witness graph {}", dst.display());
+        Ok(())
+    }
+}
+
+/// Inject the `bbf_inv` / `bbf_bit` black-box hint functions into
+/// circomlib and route the non-quadratic (`<--`) assignments through them.
+///
+/// circom-witness-rs only hooks unconstrained/dynamic control flow when it
+/// lives in a `bbf*`-prefixed circom *function*. Stock circomlib computes
+/// `1/in` (`IsZero`) and the bit decomposition (`Num2Bits`) inline inside
+/// templates, which the graph runtime cannot evaluate.
+fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
+    let circuits_dir = circomlib_path.join("circuits");
+
+    inject_hint(
+        &circuits_dir.join("comparators.circom"),
+        "function bbf_inv",
+        "include \"binsum.circom\";",
+        "\n\nfunction bbf_inv(in) {\n    return in!=0 ? 1/in : 0;\n}",
+        &[("    inv <-- in!=0 ? 1/in : 0;", "    inv <-- bbf_inv(in);")],
+    )?;
+
+    inject_hint(
+        &circuits_dir.join("bitify.circom"),
+        "function bbf_bit",
+        "include \"aliascheck.circom\";",
+        "\n\nfunction bbf_bit(in, bit) {\n    return (in >> bit) & 1;\n}",
+        &[
+            (
+                "        out[i] <-- (in >> i) & 1;",
+                "        out[i] <-- bbf_bit(in, i);",
+            ),
+            (
+                "        out[i] <-- (neg >> i) & 1;",
+                "        out[i] <-- bbf_bit(neg, i);",
+            ),
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// Apply a single circomlib black-box hint patch (one `bbf_*` function).
+fn inject_hint(
+    file: &Path,
+    marker: &str,
+    anchor: &str,
+    fn_def: &str,
+    rewrites: &[(&str, &str)],
+) -> Result<()> {
+    let content =
+        fs::read_to_string(file).with_context(|| format!("Failed to read {}", file.display()))?;
+
+    if content.contains(marker) {
+        return Ok(());
+    }
+
+    let anchor_idx = content
+        .find(anchor)
+        .ok_or_else(|| anyhow!("anchor {anchor:?} not found in {}", file.display()))?;
+    let insert_at = content[anchor_idx..]
+        .find('\n')
+        .map(|nl| anchor_idx.checked_add(nl).expect("anchor lines overflow"))
+        .ok_or_else(|| anyhow!("no newline after anchor {anchor:?} in {}", file.display()))?;
+
+    let mut patched = String::with_capacity(
+        content
+            .len()
+            .checked_add(fn_def.len())
+            .expect("circomlib patch size overflow"),
+    );
+    patched.push_str(&content[..=insert_at]);
+    patched.push_str(fn_def);
+    patched.push_str(&content[insert_at.checked_add(1).expect("insert_at overflow")..]);
+
+    for (from, to) in rewrites {
+        if !patched.contains(from) {
+            bail!(
+                "rewrite source {from:?} not found in {} (upstream circomlib changed?)",
+                file.display()
+            );
+        }
+        patched = patched.replace(from, to);
+    }
+
+    fs::write(file, patched).with_context(|| format!("Failed to write {}", file.display()))?;
+    println!("cargo:warning=Injected {marker} into {}", file.display());
     Ok(())
 }
 
