@@ -6,7 +6,8 @@
  * @module ui/transactions
  */
 
-import { client } from '../wasm-facade.js';
+import { client, isRuntimeReady } from '../wasm-facade.js';
+import { friendlyErrorMessage } from '../facade-errors.js';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
@@ -40,6 +41,9 @@ function parseAmount(value, { allowNegative = false } = {}) {
 function requireWallet() {
     if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
         throw new Error('Connect your wallet first');
+    }
+    if (!isRuntimeReady()) {
+        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
     }
 }
 
@@ -205,7 +209,7 @@ function wireAdvancedOutputRow(row) {
             try {
                 await lookupRecipient(value, refs);
             } catch (error) {
-                refs.warning.textContent = error?.message || 'Lookup failed';
+                refs.warning.textContent = friendlyErrorMessage(error?.message) || 'Lookup failed';
             }
         } else {
             lookupRecipient('', refs);
@@ -303,7 +307,7 @@ export const Transactions = {
                 try {
                     await lookupRecipient(value, transferRefs);
                 } catch (error) {
-                    transferRefs.warning.textContent = error?.message || 'Lookup failed';
+                    transferRefs.warning.textContent = friendlyErrorMessage(error?.message) || 'Lookup failed';
                 }
             } else {
                 lookupRecipient('', transferRefs);

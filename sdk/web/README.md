@@ -93,9 +93,17 @@ const chain = await client.allContractsData();
 | `aspSecret()` | ASP membership blinding |
 | `userNotes(limit)` | Notes across pools (newest first) |
 | `isRegistered()` | On-chain public key registry entry exists |
-| `deriveAspUserLeaf({ notePublicKey?, membershipBlinding? })` | ASP membership tree leaf |
+| `deriveAspUserLeaf()` | ASP membership tree leaf from stored keys |
 | `registerPublicKeys(options?)` | On-chain key registry |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
+
+### Free functions
+
+| Function | Description |
+|----------|-------------|
+| `deriveAspUserLeaf(notePublicKey, membershipBlinding)` | ASP membership leaf from explicit hex inputs |
+| `bootnodeRequired(rpcUrl, storage)` | Whether historical-sync bootnode is needed |
+| `verifySelectiveDisclosure(...)` | Walletless disclosure verification |
 
 ### `PrivatePool`
 

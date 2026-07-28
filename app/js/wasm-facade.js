@@ -13,6 +13,7 @@ import init, {
   FreighterSigner,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
+  deriveAspUserLeaf as sdkDeriveAspUserLeaf,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
 } from 'stellar-private-payments-sdk-web';
 
@@ -85,7 +86,7 @@ function wrapSdkClient(sdk) {
                 userNotes: (limit) => boundAccount.userNotes(limit),
                 isRegistered: () => boundAccount.isRegistered(),
                 registerPublicKeys: (options) => boundAccount.registerPublicKeys(options ?? {}),
-                deriveAspUserLeaf: (options) => boundAccount.deriveAspUserLeaf(options),
+                deriveAspUserLeaf: () => boundAccount.deriveAspUserLeaf(),
                 pool: (options) => boundAccount.pool(options),
             };
         },
@@ -174,6 +175,17 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
     }
 
     return client();
+}
+
+/**
+ * Derive the ASP membership leaf from explicit public inputs (no account session).
+ * @param {string} notePublicKey `0x`-prefixed 32-byte hex
+ * @param {string} membershipBlinding `0x`-prefixed 32-byte hex field
+ * @returns {Promise<string>} leaf as `0x` hex
+ */
+export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
+    await ensureWasmInit();
+    return sdkDeriveAspUserLeaf(notePublicKey, membershipBlinding);
 }
 
 /**

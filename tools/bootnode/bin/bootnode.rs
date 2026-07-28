@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use bootnode::{
     Bootnode, Postgres,
     config::{Config, OtelConfig, TlsConfig},
-    metrics, otel,
+    current_deployment_storage_id, metrics, otel,
     storage::Storage,
 };
 use clap::Parser;
@@ -178,8 +178,13 @@ impl Cli {
     }
 
     async fn open_storage(&self) -> Result<Arc<dyn Storage>> {
-        let backend =
-            Postgres::connect(&self.database_url, self.db_max_connections as usize).await?;
+        let deployment_id = current_deployment_storage_id()?;
+        let backend = Postgres::connect(
+            &self.database_url,
+            self.db_max_connections as usize,
+            deployment_id,
+        )
+        .await?;
         backend.init().await?;
         Ok(Arc::new(backend))
     }

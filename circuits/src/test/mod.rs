@@ -9,6 +9,7 @@ mod prove_merkle;
 mod prove_poseidon2;
 mod prove_sparse;
 
+mod prove_global_view_key;
 mod prove_keypair;
 mod prove_policy;
 mod prove_selective_disclosure;

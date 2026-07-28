@@ -55,9 +55,15 @@ pub fn cutoff_ledgers(redirect_days: u32, ledger_seconds: u32) -> u32 {
     seconds.saturating_div(denom)
 }
 
+/// Ledgers in one 24h day at the configured close interval.
+#[allow(clippy::arithmetic_side_effects)]
+pub fn ledgers_per_day(ledger_seconds: u32) -> u32 {
+    cutoff_ledgers(1, ledger_seconds)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::cutoff_ledgers;
+    use super::{cutoff_ledgers, ledgers_per_day};
 
     #[test]
     fn five_day_default_cutoff() {
@@ -73,5 +79,10 @@ mod tests {
     #[test]
     fn custom_window() {
         assert_eq!(cutoff_ledgers(2, 10), 17_280);
+    }
+
+    #[test]
+    fn one_day_at_five_seconds() {
+        assert_eq!(ledgers_per_day(5), 17_280);
     }
 }

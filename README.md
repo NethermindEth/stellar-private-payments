@@ -20,7 +20,7 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 ## Features
 
 - **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
-- **Zero-Knowledge Proofs**: Groth16 proofs generated via Circom circuits
+- **Zero-Knowledge Proofs**: Groth16 (over BN254) proofs generated via Circom circuits.
 - **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
 - **Stellar Integration**: Built on Soroban smart contracts
@@ -74,7 +74,7 @@ The main transaction circuit proves:
 #### Smart Contracts
 
 - **Pool**: Main contract handling deposits, transfers, and withdrawals
-- **Circom Groth16 Verifier**: On-chain verification of ZK proofs
+- **Circom Groth16 (BN254) Verifier**: On-chain verification of ZK proofs
 - **ASP Membership**: Merkle tree of approved public keys
 - **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
 - **Public key registry**: A public address book mapping Stellar addresses to user's SPP public keys. \
