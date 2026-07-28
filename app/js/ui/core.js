@@ -2,6 +2,8 @@
  * Core UI utilities and shared state.
  */
 
+import { friendlyErrorMessage } from '../facade-errors.js';
+
 const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
 
 export const App = {
@@ -133,8 +135,9 @@ export const Toast = {
         const msgEl = toast.querySelector('.toast-message');
         const link = toast.querySelector('.toast-link');
 
-        msgEl.textContent = String(message ?? '');
-        msgEl.title = String(message ?? '');
+        const friendlyMessage = friendlyErrorMessage(message);
+        msgEl.textContent = String(friendlyMessage ?? '');
+        msgEl.title = String(friendlyMessage ?? '');
 
         const dot = type === 'info' ? 'bg-slate-300' : type === 'error' ? 'bg-rose-400' : 'bg-cyan-300';
         const border = type === 'info' ? 'border-slate-400/40' : type === 'error' ? 'border-rose-400/40' : 'border-cyan-400/40';

@@ -1,6 +1,7 @@
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
+import { friendlyErrorMessage } from '../facade-errors.js';
 import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
@@ -55,7 +56,7 @@ function setError(message) {
         el.classList.add('hidden');
         return;
     }
-    el.textContent = message;
+    el.textContent = friendlyErrorMessage(message);
     el.classList.remove('hidden');
 }
 

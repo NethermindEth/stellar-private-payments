@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, isRuntimeReady } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -17,6 +17,9 @@ function clearRevealedAspSecret() {
 }
 
 async function fetchAspSecretForUser() {
+    if (!App.state.keys.notePublicKey) {
+        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
+    }
     const secret = await client().account().aspSecret();
     return secret != null ? String(secret) : null;
 }
@@ -449,6 +452,9 @@ export const Wallet = {
 
     async saveSettings() {
         try {
+            if (!isRuntimeReady()) {
+                throw new Error('Still connecting. Please wait a moment and try again.');
+            }
             const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
