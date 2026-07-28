@@ -8,6 +8,8 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
 import { filterNotes, createNoteRow } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
+import { confirmAction } from './ui/confirm.js';
+import { onEnter } from './ui/keys.js';
 
 // ---------------------------------------------------------------------------
 // Canonical constants
@@ -487,6 +489,10 @@ export function mountGenerate(container) {
   nonceField.input.value = generateRandomNonce();
   formWrap.appendChild(nonceField.wrap);
 
+  onEnter(authorityField.input, () => payloadField.input.focus());
+  onEnter(payloadField.input, () => purposeField.input.focus());
+  onEnter(purposeField.input, () => nonceField.input.focus());
+
   // Validation helpers matching DisclosureContext::validate
   const validateHex = (value, label) => {
     if (!value.startsWith('0x')) return `${label}: must start with 0x`;
@@ -695,15 +701,12 @@ export function mountGenerate(container) {
   generateBtn.disabled = state.selectedNotes.length === 0 || state.selectedNotes.length > 4;
   formWrap.appendChild(generateBtn);
 
-  generateBtn.addEventListener('click', async () => {
-    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
-      Toast.show('Please select 1 to 4 notes', 'error');
-      return;
-    }
+  // Enter in the nonce field bypasses `generateBtn.disabled`, so track the
+  // in-flight state separately to keep a second generate from starting.
+  let generating = false;
 
-    const form = validateForm();
-    if (!form) return;
-
+  async function executeGenerate(form) {
+    generating = true;
     generateBtn.disabled = true;
     generateBtn.textContent = 'Generating…';
     resultArea.classList.add('hidden');
@@ -724,8 +727,37 @@ export function mountGenerate(container) {
     } catch (err) {
       console.error('Generate failed:', err);
       showGenerateError(err.message || 'Generation failed');
+    } finally {
+      generating = false;
     }
-  });
+  }
+
+  async function runGenerate() {
+    if (generating) return;
+    if (state.selectedNotes.length === 0 || state.selectedNotes.length > 4) {
+      Toast.show('Please select 1 to 4 notes', 'error');
+      return;
+    }
+
+    const form = validateForm();
+    if (!form) return;
+
+    const confirmed = await confirmAction({
+      title: 'Confirm disclosure receipt',
+      rows: [
+        { label: 'Authority', value: form.authority },
+        { label: 'Purpose', value: form.purpose },
+        { label: 'Notes', value: `${state.selectedNotes.length} note${state.selectedNotes.length === 1 ? '' : 's'}` },
+      ],
+      confirmLabel: 'Generate',
+    });
+    if (!confirmed) return;
+
+    await executeGenerate(form);
+  }
+
+  onEnter(nonceField.input, runGenerate);
+  generateBtn.addEventListener('click', runGenerate);
 
   container.appendChild(formWrap);
 }
