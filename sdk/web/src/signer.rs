@@ -113,7 +113,7 @@ impl WalletSigner {
             .map_err(|_| JsError::new(&format!("signer.{method} must return a Promise")))?;
         let result = JsFuture::from(promise)
             .await
-            .map_err(|e| wallet_js_error(method, "rejected", e))?;
+            .map_err(|e| wallet_js_error(method, "failed", e))?;
 
         normalize_sign_result(method, result)
     }
