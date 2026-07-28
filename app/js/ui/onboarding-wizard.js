@@ -11,7 +11,7 @@ import {
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
-const STEP_ORDER = ['disclaimer', 'storage', 'keys', 'retention', 'explorer', 'registration'];
+const STEP_ORDER = ['disclaimer', 'retention', 'storage', 'keys', 'explorer', 'registration'];
 
 function hasStorageManager() {
     return (
@@ -287,9 +287,9 @@ export async function runOnboardingWizard({
 
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),
-        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
@@ -578,6 +578,9 @@ export async function runOnboardingWizard({
                             }
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
+                            }
+                            if (enableNotifications && Notification.permission === 'default') {
+                                await requestNotificationPermission();
                             }
                             await storage.setSetting('bootnode_config', { enabled, url });
                             state.bootnode = { enabled, url };
