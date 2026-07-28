@@ -130,6 +130,13 @@ fn copy_js_error_fields(from: &JsValue, to: &JsValue) {
     }
 }
 
+/// Wrap a JS signer rejection, preserving `code`/`cause` from the original.
+///
+/// `stage` is interpolated into the message, which crosses the wasm/JS boundary
+/// and is consumed by the app's cancellation classifier — which falls back to
+/// substring matching when a wallet does not set code -4. Keep `stage` (and any
+/// other wording composed here) free of "rejected"/"denied"/"cancelled", or
+/// every signer failure will be reported to the user as a user cancellation.
 fn wallet_js_error(method: &str, stage: &str, rejection: JsValue) -> JsError {
     let message = rejection
         .dyn_ref::<js_sys::Error>()

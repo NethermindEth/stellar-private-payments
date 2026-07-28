@@ -24,7 +24,7 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 - **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
 - **Stellar Integration**: Built on Soroban smart contracts
-- **SEP-0043 Wallet Interface**: Standardized `getAddress`, `signTransaction`, `signAuthEntry`, and `signMessage` wallet calls with structured user-rejection codes
+- **SEP-0043 Wallet Interface**: Standardized wallet signing calls with structured user-rejection codes; connect/permission calls remain wallet-specific while SEP-0043 is Draft (see [app/ARCHITECTURE.md](app/ARCHITECTURE.md))
 
 Learn more in [the blogpost](https://www.nethermind.io/blog/stellar-private-payments-confidential-and-compliant-transfers-on-public-rails).
 

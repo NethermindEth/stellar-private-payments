@@ -67,7 +67,7 @@ async function ensureFreighterReady(opts = {}) {
     if (!allowed?.isAllowed) {
         const set = await setAllowed();
         if (set?.error) {
-            throw normalizeWalletError(set.error, "Freighter access rejected");
+            throw normalizeWalletError(set.error, "Freighter access could not be granted");
         }
     }
 
@@ -190,6 +190,11 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     // SEP-0043 v1.2.1 defines code -4 as user rejection. Check the structured
     // code first, then fall back to the message regex for wallets/versions that
     // do not yet set it.
+    //
+    // NOTE: the regex below runs against `fallbackMessage` too whenever the
+    // wallet payload carries no message of its own. Callers must therefore keep
+    // their fallback strings free of reject/declin/denied/cancel wording, or an
+    // arbitrary wallet failure will be reported to the user as a cancellation.
     if (error?.code === -4) {
         err.code = 'USER_REJECTED';
     } else if (/reject|declin|denied|cancel/.test(lower)) {
@@ -274,9 +279,14 @@ export async function signWalletMessage(message, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
     }
-    // If SignMessage returns null
+    // If SignMessage returns null. Older Freighter versions return a null
+    // signature instead of an error payload when the user declines, so classify
+    // this as a rejection via the structured code rather than by wording the
+    // message so that a substring matcher happens to catch it.
     if (!signedMessage) {
-        throw new Error('No signature returned. User may have rejected the request.');
+        const err = new Error('No signature returned by the wallet.');
+        err.code = 'USER_REJECTED';
+        throw err;
     }
 
     return { signedMessage, signerAddress };

@@ -26,7 +26,7 @@ export class FreighterSigner {
     const allowed = await isAllowed();
     if (!allowed?.isAllowed) {
       const set = await setAllowed();
-      if (set?.error) throwFreighterError(set.error, 'Freighter access rejected');
+      if (set?.error) throwFreighterError(set.error, 'Freighter access could not be granted');
     }
   }
 
@@ -72,6 +72,11 @@ export class FreighterSigner {
  * "[object Object]" string), preserves the original error as `cause`, and
  * carries the SEP-0043 user-rejection code (-4) so callers and the SDK's
  * wasm signer wrapper can detect it.
+ *
+ * `fallbackMessage` must not contain rejection wording ("rejected", "denied",
+ * "cancelled"): app-side classifiers fall back to substring matching when a
+ * wallet does not set code -4, so such wording would make an arbitrary wallet
+ * failure self-classify as a user cancellation.
  */
 function throwFreighterError(error, fallbackMessage) {
   const message = error?.message || fallbackMessage;
