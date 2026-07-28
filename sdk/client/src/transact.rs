@@ -275,7 +275,8 @@ fn build_pool_inputs(
             storage.get_unspent_user_note_by_commitment(pool_address, user_address, commitment)?
         else {
             tracing::info!(
-                "unspent note not found for commitment {commitment}; waiting for note derivation"
+                commitment = ?types::Sensitive(commitment),
+                "unspent note not found for commitment; waiting for note derivation"
             );
             return Ok(Err(AspMembershipSync::SyncRequired(None)));
         };

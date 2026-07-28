@@ -91,10 +91,10 @@ pub fn configure_telemetry(config: JsValue) -> Result<(), JsValue> {
     Ok(())
 }
 
-/// Replace the active tracing [`EnvFilter`] with `level`.
+/// Replace the active log level filter with `level`.
 ///
-/// `level` must be a valid tracing directive such as `"info"` or
-/// `"stellar_private_payments_sdk_web=debug"`.
+/// `level` must be a bare level name such as `"info"`, `"debug"`, or
+/// `"trace"` (target directives like `"crate=debug"` are not supported).
 #[wasm_bindgen]
 pub fn set_log_level(level: &str) -> Result<(), JsValue> {
     crate::telemetry::set_log_level(level).map_err(JsValue::from)

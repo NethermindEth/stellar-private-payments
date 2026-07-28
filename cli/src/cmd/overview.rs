@@ -51,12 +51,12 @@ struct Overview {
     public_key_registry: ContractRef,
 }
 
+#[tracing::instrument(
+    name = "cmd_overview",
+    skip_all,
+    fields(correlation_id = %types::correlation_id_or_new())
+)]
 pub fn run(config: &CliConfig, pool: Option<&str>, json: bool) -> Result<()> {
-    let _span = tracing::info_span!(
-        "cmd_overview",
-        correlation_id = %types::correlation_id_or_new()
-    )
-    .entered();
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
     let network = config.resolve_network()?;

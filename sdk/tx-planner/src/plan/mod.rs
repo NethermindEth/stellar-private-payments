@@ -94,6 +94,19 @@ impl<'a> IntoIterator for &'a TransactionPlan {
     }
 }
 
+/// Tier label for a [`CombinationResult`], safe to log (carries no amounts).
+fn combo_tier(combo: &CombinationResult) -> &'static str {
+    match combo {
+        CombinationResult::TwoExact(..) => "two-exact",
+        CombinationResult::OneExact(_) => "one-exact",
+        CombinationResult::TwoOvershoot(..) => "two-overshoot",
+        CombinationResult::OneOvershoot(..) => "one-overshoot",
+        CombinationResult::ExactK(_) => "exact-k",
+        CombinationResult::Overshoot(..) => "overshoot",
+        CombinationResult::Impossible => "impossible",
+    }
+}
+
 /// Build a plan from unspent notes and a target spend amount.
 #[tracing::instrument(skip_all, fields(stage = "transaction_planning", correlation_id = %correlation_id_or_new(), amount = ?types::Sensitive(&amount), note_count = notes.len()))]
 pub fn plan(
@@ -106,7 +119,10 @@ pub fn plan(
 
     let values: Vec<NoteAmount> = notes.iter().map(|n| n.amount).collect();
     let combo = find_combination(&values, amount)?;
-    tracing::debug!(?combo, "transaction plan combination result");
+    tracing::debug!(
+        combo_tier = combo_tier(&combo),
+        "transaction plan combination result"
+    );
 
     let (indices, change) = match combo {
         CombinationResult::Impossible => {

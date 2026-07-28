@@ -97,17 +97,9 @@ impl<T: fmt::Display> fmt::Display for Sensitive<T> {
     }
 }
 
-impl<T: Serialize> Serialize for Sensitive<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de, T: Deserialize<'de>> Deserialize<'de> for Sensitive<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        T::deserialize(deserializer).map(Sensitive)
-    }
-}
+// NOTE: `Sensitive` intentionally does NOT implement Serialize/Deserialize —
+// redaction must not be silently bypassed by serde paths (JSON configs, log
+// fields). Convert explicitly if a legitimate serialization is ever needed.
 
 /// A wrapper for Tier-0 secrets (keys, seeds, etc.) that ALWAYS redacts its
 /// `Debug` and `Display` output, and zeroizes its memory when dropped.
@@ -146,17 +138,8 @@ impl<T: zeroize::Zeroize> fmt::Display for Secret<T> {
     }
 }
 
-impl<T: zeroize::Zeroize + Serialize> Serialize for Secret<T> {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        self.0.serialize(serializer)
-    }
-}
-
-impl<'de, T: zeroize::Zeroize + Deserialize<'de>> Deserialize<'de> for Secret<T> {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        T::deserialize(deserializer).map(Secret)
-    }
-}
+// NOTE: `Secret` intentionally does NOT implement Serialize/Deserialize —
+// Tier-0 values must never be emitted through serde paths.
 
 impl<T: zeroize::Zeroize> Drop for Secret<T> {
     fn drop(&mut self) {

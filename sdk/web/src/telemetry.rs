@@ -173,6 +173,15 @@ impl Subscriber for CustomTelemetrySubscriber {
         });
     }
 
+    fn try_close(&self, id: Id) -> bool {
+        // Evict the span's cached data when its refcount reaches zero, so
+        // SPAN_TABLE stays bounded in long-lived tabs.
+        SPAN_TABLE.with(|table| {
+            table.borrow_mut().remove(&id.into_u64());
+        });
+        false
+    }
+
     fn event(&self, event: &Event<'_>) {
         let mut visitor = MessageVisitor::default();
         event.record(&mut visitor);
@@ -348,4 +357,21 @@ pub fn is_telemetry_initialized() -> bool {
         .lock()
         .expect("ring buffer lock poisoned")
         .is_some()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn span_table_evicts_entry_on_span_close() {
+        let subscriber = CustomTelemetrySubscriber::new(None, false);
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("operation", correlation_id = "test-correlation-id");
+            SPAN_TABLE.with(|table| assert_eq!(table.borrow().len(), 1));
+
+            drop(span);
+            SPAN_TABLE.with(|table| assert!(table.borrow().is_empty()));
+        });
+    }
 }

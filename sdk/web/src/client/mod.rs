@@ -93,12 +93,14 @@ impl Client {
         prover_worker_url: String,
         bootnode_url: Option<String>,
     ) -> Result<Client, JsError> {
-        with_correlation_id(new_correlation_id(), async {
-            Self::new_inner(rpc_url, storage, prover_worker_url, bootnode_url).await
-        })
-        .await
+        Self::new_inner(rpc_url, storage, prover_worker_url, bootnode_url).await
     }
 
+    #[tracing::instrument(
+        name = "web_client_new",
+        skip_all,
+        fields(correlation_id = %new_correlation_id())
+    )]
     async fn new_inner(
         rpc_url: String,
         storage: &Storage,

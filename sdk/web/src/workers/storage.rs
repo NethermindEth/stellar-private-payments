@@ -446,7 +446,7 @@ pub(crate) async fn router(req: StorageWorkerRequest) -> Result<StorageWorkerRes
         StorageWorkerRequest::DisclosureInputs(req) => {
             tracing::trace!(
                 "[{WORKER_NAME}] build selective disclosure inputs for {}",
-                req.user_address
+                Sensitive(&req.user_address)
             );
 
             with_storage_mut!(storage => match build_disclosure_inputs(storage, &req)? {
