@@ -324,6 +324,10 @@ pub fn set_log_level(directive: &str) -> Result<(), String> {
     let filter =
         tracing::level_filters::LevelFilter::from_str(directive).map_err(|e| e.to_string())?;
     *LOG_LEVEL.lock().map_err(|e| e.to_string())? = filter;
+    // tracing caches each callsite's enabled() verdict, so a runtime level
+    // change (e.g. the UI log-level select) would otherwise leave already-
+    // visited callsites stuck at their old verdict.
+    tracing::callsite::rebuild_interest_cache();
     Ok(())
 }
 
@@ -363,8 +367,12 @@ pub fn is_telemetry_initialized() -> bool {
 mod tests {
     use super::*;
 
+    /// Serializes tests that touch the process-global LOG_LEVEL static.
+    static TEST_MUTEX: Mutex<()> = Mutex::new(());
+
     #[test]
     fn span_table_evicts_entry_on_span_close() {
+        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
         let subscriber = CustomTelemetrySubscriber::new(None, false);
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("operation", correlation_id = "test-correlation-id");
@@ -372,6 +380,33 @@ mod tests {
 
             drop(span);
             SPAN_TABLE.with(|table| assert!(table.borrow().is_empty()));
+        });
+    }
+
+    #[test]
+    fn level_change_applies_to_already_visited_callsites() {
+        let _guard = TEST_MUTEX.lock().expect("test mutex poisoned");
+        let ring_buffer = Arc::new(RingBuffer::new(4096));
+        let subscriber = CustomTelemetrySubscriber::new(Some(ring_buffer.clone()), false);
+        tracing::subscriber::with_default(subscriber, || {
+            set_log_level("error").expect("set level to error");
+            // The loop body is a single callsite visited twice: the first
+            // visit is filtered out at error level, the second must be
+            // emitted after raising the level to debug.
+            for round in 0..2 {
+                if round == 1 {
+                    set_log_level("debug").expect("set level to debug");
+                }
+                tracing::debug!("loop callsite event");
+            }
+            set_log_level("info").expect("restore level");
+
+            let dump = ring_buffer.dump();
+            assert_eq!(
+                dump.matches("loop callsite event").count(),
+                1,
+                "only the post-change event should be emitted, got:\n{dump}"
+            );
         });
     }
 }

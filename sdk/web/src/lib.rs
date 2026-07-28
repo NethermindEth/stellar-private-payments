@@ -100,6 +100,15 @@ pub fn set_log_level(level: &str) -> Result<(), JsValue> {
     crate::telemetry::set_log_level(level).map_err(JsValue::from)
 }
 
+/// Whether this build supports debug/trace logging and Tier-1 sensitive
+/// reveal. Both are compiled out when `debug_assertions` is off (the
+/// production `release` profile); the UI should hide or disable the
+/// corresponding settings in that case.
+#[wasm_bindgen(js_name = debugLogsEnabled)]
+pub fn debug_logs_enabled() -> bool {
+    cfg!(debug_assertions)
+}
+
 /// Return the recent formatted log output stored in the in-memory ring buffer.
 #[wasm_bindgen]
 pub fn dump_recent_logs() -> String {

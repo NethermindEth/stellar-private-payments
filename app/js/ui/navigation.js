@@ -1,7 +1,7 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
 import { FreighterSigner } from 'stellar-private-payments-sdk-web';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
-import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs } from '../wasm-facade.js';
+import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
 import { closeAppPool, createAppPool } from './pool.js';
 import { runOnboardingWizard } from './onboarding-wizard.js';
@@ -216,6 +216,20 @@ function renderSettingsDrawer() {
     document.getElementById('settings-bootnode-url').value = App.state.settings.bootnode?.url || '';
     document.getElementById('settings-log-level').value = App.state.settings.telemetry?.level || 'info';
     document.getElementById('settings-reveal-sensitive').checked = !!App.state.settings.telemetry?.revealSensitive;
+    // Production release compiles out debug/trace logging and sensitive
+    // reveal; disable those controls when the build doesn't support them.
+    const debugSupported = debugLogsEnabled();
+    document.querySelectorAll('#settings-log-level option').forEach((opt) => {
+        if (opt.value !== 'info') {
+            opt.disabled = !debugSupported;
+            opt.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
+        }
+    });
+    const revealSensitiveInput = document.getElementById('settings-reveal-sensitive');
+    if (revealSensitiveInput) {
+        revealSensitiveInput.disabled = !debugSupported;
+        revealSensitiveInput.title = debugSupported ? '' : 'Requires a debug (release-with-logs) build';
+    }
 }
 
 export const Shell = {
@@ -491,8 +505,9 @@ export const Wallet = {
             const explorerBaseUrl = document.getElementById('settings-explorer-input')?.value?.trim() || Utils.defaultExplorerBaseUrl;
             const bootnodeEnabled = document.getElementById('settings-bootnode-enabled')?.checked;
             const bootnodeUrl = document.getElementById('settings-bootnode-url')?.value?.trim() || '';
-            const logLevel = document.getElementById('settings-log-level')?.value || 'info';
-            const revealSensitive = !!document.getElementById('settings-reveal-sensitive')?.checked;
+            const debugSupported = debugLogsEnabled();
+            const logLevel = debugSupported ? (document.getElementById('settings-log-level')?.value || 'info') : 'info';
+            const revealSensitive = debugSupported && !!document.getElementById('settings-reveal-sensitive')?.checked;
 
             const storage = client().storage();
             await storage.setSetting('explorer', { baseUrl: explorerBaseUrl });

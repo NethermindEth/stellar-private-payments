@@ -17,6 +17,7 @@ import init, {
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
   configureTelemetry,
   dump_recent_logs,
+  debugLogsEnabled as sdkDebugLogsEnabled,
 } from 'stellar-private-payments-sdk-web';
 
 import { AppStorage } from './app-storage.js';
@@ -223,4 +224,9 @@ export async function configureTelemetrySettings(config) {
 export async function dumpTelemetryLogs() {
     await ensureWasmInit();
     return dump_recent_logs();
+}
+
+/** Whether the WASM build supports debug/trace logging and sensitive reveal. */
+export function debugLogsEnabled() {
+    return sdkDebugLogsEnabled();
 }
