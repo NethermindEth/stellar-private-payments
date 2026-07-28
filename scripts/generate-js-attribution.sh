@@ -36,7 +36,11 @@ generate() {
             if type == "object" then (.type // "UNKNOWN")
             elif type == "array" then (map(tostring) | join(" OR "))
             else . end;
-        [.packages | to_entries[] | select(.key != "") | {
+        [.packages | to_entries[]
+            | select(.key != "")
+            | select(.value.link != true)
+            | select(.key | startswith("../") | not)
+            | {
             name: (.key | sub("node_modules/"; ""; "g")),
             version: (.value.version // ""),
             license: ((.value.license // "UNKNOWN") | normlic),
@@ -78,8 +82,8 @@ generate() {
 }
 
 # circuits/src/circomlib is intentionally excluded here: its npm dependencies
-# are build/test-time-only tooling (see the GPL-3.0/LGPL-3.0 exceptions in
-# .github/js-license-policy.json), never shipped in a distributed artifact —
-# do not add a third `generate` call for it without re-checking that.
+# are build/test-time-only tooling (mirroring deny.toml's circuits exclusion),
+# never shipped in a distributed artifact — do not add a third `generate` call
+# for it without re-checking that.
 generate "app" "app/package-lock.json"
 generate "sdk-web" "sdk/web/package-lock.json"

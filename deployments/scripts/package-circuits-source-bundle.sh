@@ -35,13 +35,15 @@ mkdir -p "$TMP_DIR/src/circuits/src"
 cp -R "$REPO_ROOT/circuits/src/"* "$TMP_DIR/src/circuits/src/"
 
 # circomlib's own devDependencies (snarkjs, ffjavascript, etc.) include
-# GPL-3.0-licensed packages that are excused from the JS license audit only
-# because they are build/test tooling, never distributed (see
-# .github/js-license-policy.json). If node_modules happens to exist on the
-# machine running this script (e.g. a maintainer ran `npm install` locally to
-# run circomlib's own test suite), guarantee it never ends up in this
-# redistributed source bundle, regardless of environment.
-find "$TMP_DIR/src/circuits/src" -type d -name node_modules -prune -exec rm -rf {} +
+# GPL-3.0-licensed packages. They are out of scope for the JS license scan as
+# build/test tooling that is never distributed (mirroring deny.toml's circuits
+# exclusion), but also prune them here as distribution hygiene / defense in
+# depth in case node_modules exists on the machine running this script (e.g. a
+# maintainer ran `npm install` locally to run circomlib's own test suite).
+# Also drop the embedded .git history to avoid shipping ~1.7 MB of metadata
+# that recipients do not need; BUILDING.md already tells them to match the
+# pinned revision in circuits/circomlib.lock.
+find "$TMP_DIR/src/circuits/src" -type d \( -name node_modules -o -name .git \) -prune -exec rm -rf {} +
 
 # Add build instructions and license texts for redistribution.
 cat > "$TMP_DIR/src/BUILDING.md" <<EOF

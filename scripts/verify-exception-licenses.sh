@@ -5,20 +5,20 @@
 # in newer majors while older locked versions remain on their original
 # license; comparing against `latest` produces false-positive mismatches).
 #
-# Read-only: does not modify the repo. If a target lockfile is
-# circuits/src/circomlib/package-lock.json (not vendored in this repo; it's
-# git-cloned by circuits/build.rs at the SHA pinned in circuits/circomlib.lock),
-# this script clones circomlib once into a throwaway temp dir and cleans it up
-# on exit.
+# Read-only: does not modify the repo.
 #
-# Manual maintainer tool — NOT run in CI (hits the npm registry per package and
-# clones circomlib, so it's slow and not deterministic enough to gate a build).
+# Manual maintainer tool — NOT run in CI (hits the npm registry per package,
+# so it's slow and not deterministic enough to gate a build).
 # Run this whenever adding or editing an exception in .github/js-license-policy.json.
 #
 # Usage: sh scripts/verify-exception-licenses.sh [path-to-repo-root]
 #        (defaults to the current directory if omitted, e.g. run from repo root)
 #
-# Requires: jq, curl, git (only if a circomlib checkout is needed)
+# Exit codes: 0 = all exceptions verified,
+#             1 = real mismatch or registry error found,
+#             2 = policy/jq/curl missing.
+#
+# Requires: jq, curl
 set -eu
 
 REPO_ROOT="${1:-$(pwd)}"
@@ -37,40 +37,10 @@ if ! command -v curl >/dev/null 2>&1; then
     exit 2
 fi
 
-TMP_CIRCOMLIB=""
-cleanup() { [ -n "$TMP_CIRCOMLIB" ] && rm -rf "$TMP_CIRCOMLIB"; }
-trap cleanup EXIT INT TERM
-
-CIRCOMLIB_LOCKFILE=""
-# Clone circomlib ONCE up front (not lazily inside a $() subshell, which would
-# silently discard the cached path — command substitution always runs in a
-# subshell, so any variable set there never survives to the caller).
-ensure_circomlib() {
-    if [ -f "$REPO_ROOT/circuits/src/circomlib/package-lock.json" ]; then
-        CIRCOMLIB_LOCKFILE="$REPO_ROOT/circuits/src/circomlib/package-lock.json"
-        CIRCOMLIB_PKGJSON="$REPO_ROOT/circuits/src/circomlib/package.json"
-        return
-    fi
-    if [ -n "$TMP_CIRCOMLIB" ]; then
-        return
-    fi
-    TMP_CIRCOMLIB="$(mktemp -d)"
-    lock_sha="$(tr -d '[:space:]' < "$REPO_ROOT/circuits/circomlib.lock")"
-    echo "(cloning circomlib @ $lock_sha into a throwaway temp dir...)" >&2
-    git clone --quiet https://github.com/iden3/circomlib.git "$TMP_CIRCOMLIB/circomlib" >&2
-    git -C "$TMP_CIRCOMLIB/circomlib" fetch --quiet --depth 1 origin "$lock_sha" >&2
-    git -C "$TMP_CIRCOMLIB/circomlib" checkout --quiet --detach FETCH_HEAD >&2
-    CIRCOMLIB_LOCKFILE="$TMP_CIRCOMLIB/circomlib/package-lock.json"
-    CIRCOMLIB_PKGJSON="$TMP_CIRCOMLIB/circomlib/package.json"
-}
-
-# Correctly derive the REAL npm package name from a lockfile key — this is
-# NOT the same as check-js-licenses.sh's own (buggy — see review finding S2)
-# derivation. For a nested copy under a non-scope directory
-# (node_modules/foo/node_modules/@scope/bar or .../node_modules/bar), the true
-# published package is "@scope/bar" or "bar" respectively — the scanner's
-# basename-only logic drops the scope in the former case. We want the real
-# identity here, since we're checking against the actual registry.
+# Derive the REAL npm package name from a lockfile key. For a nested copy
+# under a scope directory (node_modules/foo/node_modules/@scope/bar), the true
+# published package is "@scope/bar"; for a bare nested copy
+# (node_modules/foo/node_modules/bar) it is "bar".
 derive_name() {
     jq -Rr '
         sub("node_modules/"; ""; "g") as $s
@@ -106,15 +76,7 @@ while [ "$i" -lt "$exception_count" ]; do
         continue
     fi
 
-    case "$target" in
-        circuits/src/circomlib/package-lock.json)
-            ensure_circomlib   # called directly (not via $()), so its cache persists
-            lockfile="$CIRCOMLIB_LOCKFILE"
-            ;;
-        *)
-            lockfile="$REPO_ROOT/$target"
-            ;;
-    esac
+    lockfile="$REPO_ROOT/$target"
     if [ ! -f "$lockfile" ]; then
         echo "[ERROR] lockfile not found for target $target ($lockfile)"
         errors=$((errors + 1))
@@ -131,7 +93,7 @@ while [ "$i" -lt "$exception_count" ]; do
     while IFS= read -r pkg_path; do
         [ -z "$pkg_path" ] && continue
 
-        # Special case 1: local workspace package (file: reference), not a
+        # Special case: local workspace package (file: reference), not a
         # real published npm package — verify its OWN package.json instead of
         # the registry.
         if [ "$pkg_path" = "stellar-private-payments-sdk-web" ]; then
@@ -141,23 +103,6 @@ while [ "$i" -lt "$exception_count" ]; do
                 ok=$((ok + 1))
             else
                 echo "  [MISMATCH] $pkg_path (workspace package.json) declared=$declared_license actual=$actual"
-                mismatch=$((mismatch + 1))
-            fi
-            continue
-        fi
-
-        # Special case 2: a singular "package" entry that is the TARGET
-        # lockfile's own root package (e.g. the "circomlib" exception itself),
-        # not a node_modules dependency — verify via its own package.json.
-        if ! jq -e --arg k "node_modules/$pkg_path" '.packages[$k] // empty' "$lockfile" >/dev/null 2>&1 \
-           && [ -n "${CIRCOMLIB_PKGJSON:-}" ] && [ -f "$CIRCOMLIB_PKGJSON" ] \
-           && [ "$(jq -r '.name // empty' "$CIRCOMLIB_PKGJSON" 2>/dev/null)" = "$pkg_path" ]; then
-            actual="$(jq -r '.license // "MISSING"' "$CIRCOMLIB_PKGJSON")"
-            if [ "$actual" = "$declared_license" ]; then
-                echo "  [OK]  $pkg_path (own package.json, root of $target) -> $actual"
-                ok=$((ok + 1))
-            else
-                echo "  [MISMATCH] $pkg_path (own package.json) declared=$declared_license actual=$actual"
                 mismatch=$((mismatch + 1))
             fi
             continue
@@ -213,5 +158,10 @@ done
 echo
 echo "=== Summary: $ok ok / $mismatch mismatch / $ambiguous ambiguous / $skipped skipped / $errors error ==="
 [ "$mismatch" -gt 0 ] && echo "Real mismatches found — review the [MISMATCH] lines above before trusting the policy's justification text."
+[ "$errors" -gt 0 ] && echo "Errors found — some exceptions could not be verified against the registry."
 [ "$ambiguous" -gt 0 ] && echo "Ambiguous entries found — the registry only has a generic/legacy license tag; confirm manually against the package's bundled license file."
+
+if [ "$mismatch" -gt 0 ] || [ "$errors" -gt 0 ]; then
+    exit 1
+fi
 exit 0

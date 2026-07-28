@@ -1,18 +1,21 @@
 #!/bin/sh
 # Full-tree JS license scan (sh+jq port of the former check-js-licenses.py).
 #
-# Scans every package in the npm lockfiles of all footprints against
-# .github/js-license-policy.json (allowlist / denylist / exceptions) and writes
-# js-license-scan-report.json to the repo root.
+# Scans every package in the npm lockfiles of the shipped JS workspaces
+# (app/, sdk/web/) against .github/js-license-policy.json
+# (allowlist / denylist / exceptions) and writes js-license-scan-report.json
+# to the repo root.
 #
 # Exit codes: 0 = compliant, 1 = violations found, 2 = policy/jq missing or a
 # target lockfile is missing (a missing target would otherwise silently drop
 # coverage while still reporting SUCCESS).
 #
 # Matching semantics (must stay in sync with the policy file's exceptions):
-#   - package name = lockfile path with all "node_modules/" stripped; if the
-#     result still contains "/" and does not start with "@", only the basename
-#     is used (covers nested copies like chalk/node_modules/supports-color);
+#   - package name = lockfile path with all "node_modules/" stripped, then the
+#     last path segment for bare packages, or the last TWO segments when the
+#     second-to-last starts with "@" (preserves scope for nested copies like
+#     foo/node_modules/@scope/bar -> "@scope/bar", and chalk/node_modules/
+#     supports-color -> "supports-color");
 #   - an exception matches on either that derived name or the full lockfile path;
 #   - an exception applies only to the lockfile named by its "target" field
 #     (an exception without "target" applies repo-wide — avoid unless intended);
@@ -41,8 +44,7 @@ if [ ! -f "$POLICY_PATH" ]; then
 fi
 
 TARGETS="app/package-lock.json
-sdk/web/package-lock.json
-circuits/src/circomlib/package-lock.json"
+sdk/web/package-lock.json"
 
 PARTS_DIR="$(mktemp -d)"
 trap 'rm -rf "$PARTS_DIR"' EXIT
@@ -79,8 +81,11 @@ for target in $TARGETS; do
             | map(select(.key != "")
                 | .key as $path
                 | ($path | sub("node_modules/"; ""; "g")) as $stripped
-                | (if ($stripped | contains("/")) and ($stripped | startswith("@") | not)
-                   then ($stripped | split("/")[-1])
+                | ($stripped | split("/")) as $segs
+                | (if ($segs | length) >= 2 and ($segs[-2] | startswith("@"))
+                   then ($segs[-2:] | join("/"))
+                   elif ($segs | length) >= 2
+                   then $segs[-1]
                    else $stripped end) as $name
                 | ((.value.license // "UNKNOWN") | normlic) as $lic
                 | {path: $path, name: $name, lic: $lic})) as $pkgs

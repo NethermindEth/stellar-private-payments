@@ -5,8 +5,6 @@ on:
     types: [opened, synchronize, reopened]
   push:
     branches: [main]
-  schedule:
-    - cron: '0 3 * * *'
   workflow_dispatch:
 
 permissions:
@@ -71,21 +69,24 @@ jobs:
       - name: Check out
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
-      - name: Check out circomlib
-        # circomlib is not vendored in this repo (circuits/build.rs clones it
-        # at build time); check-js-licenses.sh scans its package-lock.json as
-        # one of its three targets, and treats a missing target as a hard
-        # failure (not just reduced coverage) — so it must be present here.
-        # Mirrors cli-release.yml's build-cli "Prepare circuits inputs" step.
+      - name: circomlib license tripwire
+        # circomlib's .circom sources are compiled into shipped dist/circuits/
+        # artifacts, so its LGPL-3.0 license is a distribution concern. Its
+        # devDependencies (GPL-3.0 build tooling) are intentionally out of
+        # scope for this scanner, mirroring deny.toml's circuits exclusion.
+        # This tripwire catches a license change without scanning the full tree.
         shell: bash
         run: |
           set -eu
           LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
-          if [ ! -d circuits/src/circomlib/.git ]; then
-            git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
+          LICENSE="$(curl -sfL "https://raw.githubusercontent.com/iden3/circomlib/${LOCK}/package.json" | jq -r '.license // "UNKNOWN"')"
+          if [ "$LICENSE" != "LGPL-3.0" ]; then
+            echo "ERROR: circomlib license changed to '${LICENSE}' at ${LOCK}." >&2
+            echo "circomlib .circom sources are compiled into shipped artifacts." >&2
+            echo "Redistribution obligations (source bundle + NOTICE) must be re-reviewed." >&2
+            exit 1
           fi
-          git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
-          git -C circuits/src/circomlib checkout --detach FETCH_HEAD
+          echo "circomlib license OK: LGPL-3.0"
 
       - name: Run Full-Tree License Audit
         run: |
