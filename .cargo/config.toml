@@ -5,9 +5,6 @@
 [env]
 VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_AB_vk.json", relative = true }
 
-[build]
-rustflags = ["--cfg=web_sys_unstable_apis"]
-
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"
 rustflags = [
