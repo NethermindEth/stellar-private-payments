@@ -30,7 +30,6 @@ use wasm_bindgen::prelude::*;
 pub(crate) fn wasm_start() {
     crate::telemetry::init_telemetry(None);
     crate::telemetry::install_panic_hook();
-    tracing::info!("SDK telemetry initialized");
 }
 
 /// Configure the SDK telemetry settings (log level, sink targets, buffer sizes,

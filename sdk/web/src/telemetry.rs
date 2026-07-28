@@ -5,7 +5,6 @@
 
 use std::{
     cell::RefCell,
-    collections::HashMap,
     sync::{
         Arc, Mutex, Once,
         atomic::{AtomicU64, Ordering},
@@ -32,15 +31,6 @@ static PANIC_HOOK_INIT: Once = Once::new();
 static RING_BUFFER: Mutex<Option<Arc<RingBuffer>>> = Mutex::new(None);
 static LOG_LEVEL: Mutex<tracing::level_filters::LevelFilter> =
     Mutex::new(tracing::level_filters::LevelFilter::INFO);
-
-#[allow(dead_code)]
-struct SpanData {
-    correlation_id: Option<String>,
-}
-
-thread_local! {
-    static SPAN_TABLE: RefCell<HashMap<u64, SpanData>> = RefCell::new(HashMap::new());
-}
 
 /// Bounded in-memory byte buffer used as a recent-log sink.
 pub struct RingBuffer {
@@ -141,16 +131,20 @@ impl Subscriber for CustomTelemetrySubscriber {
             .saturating_add(1);
         let id = Id::from_u64(id_val);
 
-        if visitor.correlation_id.is_some() {
-            SPAN_TABLE.with(|table| {
-                table.borrow_mut().insert(
-                    id_val,
-                    SpanData {
-                        correlation_id: visitor.correlation_id,
-                    },
-                );
-            });
-        }
+        let parent = attrs.parent().map(|p| p.into_u64()).or_else(|| {
+            #[cfg(target_arch = "wasm32")]
+            {
+                attrs
+                    .is_contextual()
+                    .then(crate::correlation::current_span_id)
+                    .flatten()
+            }
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                None
+            }
+        });
+        crate::correlation::register_span(id_val, parent, visitor.correlation_id);
 
         id
     }
@@ -161,32 +155,19 @@ impl Subscriber for CustomTelemetrySubscriber {
 
     fn enter(&self, _id: &Id) {
         #[cfg(target_arch = "wasm32")]
-        SPAN_TABLE.with(|table| {
-            if let Some(data) = table.borrow().get(&_id.into_u64()) {
-                if let Some(ref corr) = data.correlation_id {
-                    crate::correlation::push_active_correlation_id(corr.clone());
-                }
-            }
-        });
+        crate::correlation::enter_span(_id.into_u64());
     }
 
     fn exit(&self, _id: &Id) {
         #[cfg(target_arch = "wasm32")]
-        SPAN_TABLE.with(|table| {
-            if let Some(data) = table.borrow().get(&_id.into_u64()) {
-                if data.correlation_id.is_some() {
-                    crate::correlation::pop_active_correlation_id();
-                }
-            }
-        });
+        crate::correlation::exit_span(_id.into_u64());
     }
 
     fn try_close(&self, id: Id) -> bool {
-        // Evict the span's cached data when its refcount reaches zero, so
-        // SPAN_TABLE stays bounded in long-lived tabs.
-        SPAN_TABLE.with(|table| {
-            table.borrow_mut().remove(&id.into_u64());
-        });
+        // Evict the span's cached bookkeeping when its refcount reaches
+        // zero, so the parent/correlation maps stay bounded in long-lived
+        // tabs.
+        crate::correlation::evict_span(id.into_u64());
         false
     }
 
@@ -323,6 +304,8 @@ pub fn init_telemetry(config: Option<stellar_private_payments_sdk::types::Teleme
         let _ = tracing::subscriber::set_global_default(subscriber);
 
         *RING_BUFFER.lock().expect("ring buffer lock poisoned") = Some(ring_buffer);
+
+        tracing::info!("SDK telemetry initialized");
     });
 }
 
@@ -501,10 +484,11 @@ mod tests {
         let subscriber = CustomTelemetrySubscriber::new(None, false);
         tracing::subscriber::with_default(subscriber, || {
             let span = tracing::info_span!("operation", correlation_id = "test-correlation-id");
-            SPAN_TABLE.with(|table| assert_eq!(table.borrow().len(), 1));
+            let id = span.id().expect("span registered").into_u64();
+            assert!(crate::correlation::has_span(id));
 
             drop(span);
-            SPAN_TABLE.with(|table| assert!(table.borrow().is_empty()));
+            assert!(!crate::correlation::has_span(id));
         });
     }
 

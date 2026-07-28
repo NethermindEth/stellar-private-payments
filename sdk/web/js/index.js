@@ -132,7 +132,7 @@ export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
 };
-export { PrivatePool, bootnodeRequired, verifySelectiveDisclosure };
+export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
 export { configureTelemetry, set_log_level, dump_recent_logs, debugLogsEnabled };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';

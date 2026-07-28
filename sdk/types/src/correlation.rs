@@ -5,21 +5,79 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+// Per-span bookkeeping used to propagate correlation ids on wasm's
+// single-threaded executor. Each span records its parent (as resolved at
+// creation time) and, if present, its own correlation id;
+// `current_correlation_id` walks the parent chain from the currently
+// entered span outward — the same "self + ancestors, innermost first"
+// lookup the native path does via `tracing_subscriber::Registry`
+// extensions. Unlike a plain push/pop stack of correlation-id *strings*,
+// correctness doesn't depend on every enter/exit pair staying in sync: each
+// span's correlation id and parent pointer are set once at creation and
+// never mutated, so a mis-nested `exit_span` call can only affect which span
+// is considered "current" — it can't corrupt another span's own recorded
+// correlation id or ancestry.
+//
+// The parent/correlation maps are kept for every target (a native unit test
+// exercises registration/eviction directly); only the "currently entered
+// span" stack below is wasm32-only, since native correlation lookups go
+// through `CorrelationIdLayer` + `tracing_subscriber::Registry` instead.
+thread_local! {
+    static SPAN_PARENTS: std::cell::RefCell<std::collections::HashMap<u64, Option<u64>>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+    static SPAN_CORRELATION: std::cell::RefCell<std::collections::HashMap<u64, String>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
 #[cfg(target_arch = "wasm32")]
 thread_local! {
-    static ACTIVE_CORRELATION_STACK: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+    static CURRENT_SPAN_STACK: std::cell::RefCell<Vec<u64>> = const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_arch = "wasm32")]
-pub fn push_active_correlation_id(id: String) {
-    ACTIVE_CORRELATION_STACK.with(|stack| stack.borrow_mut().push(id));
+/// Whether `id` currently has bookkeeping recorded (test/diagnostic use).
+pub fn has_span(id: u64) -> bool {
+    SPAN_PARENTS.with(|p| p.borrow().contains_key(&id))
 }
 
+/// Record a newly created span's parent and, if present, its own
+/// correlation id, keyed by the subscriber-assigned numeric span id.
+pub fn register_span(id: u64, parent: Option<u64>, correlation_id: Option<String>) {
+    SPAN_PARENTS.with(|p| p.borrow_mut().insert(id, parent));
+    if let Some(corr) = correlation_id {
+        SPAN_CORRELATION.with(|c| c.borrow_mut().insert(id, corr));
+    }
+}
+
+/// Mark `id` as the currently entered span.
 #[cfg(target_arch = "wasm32")]
-pub fn pop_active_correlation_id() {
-    ACTIVE_CORRELATION_STACK.with(|stack| {
-        stack.borrow_mut().pop();
+pub fn enter_span(id: u64) {
+    CURRENT_SPAN_STACK.with(|stack| stack.borrow_mut().push(id));
+}
+
+/// Mark `id` as no longer entered. Removes the innermost matching entry
+/// (rather than blindly popping the top) so a mis-nested exit can't evict a
+/// still-active ancestor span from the "current" chain.
+#[cfg(target_arch = "wasm32")]
+pub fn exit_span(id: u64) {
+    CURRENT_SPAN_STACK.with(|stack| {
+        let mut stack = stack.borrow_mut();
+        if let Some(pos) = stack.iter().rposition(|&x| x == id) {
+            stack.remove(pos);
+        }
     });
+}
+
+/// Return the numeric id of the currently entered span, if any.
+#[cfg(target_arch = "wasm32")]
+pub fn current_span_id() -> Option<u64> {
+    CURRENT_SPAN_STACK.with(|stack| stack.borrow().last().copied())
+}
+
+/// Drop bookkeeping for a closed span so long-lived tabs don't grow these
+/// maps unboundedly.
+pub fn evict_span(id: u64) {
+    SPAN_PARENTS.with(|p| p.borrow_mut().remove(&id));
+    SPAN_CORRELATION.with(|c| c.borrow_mut().remove(&id));
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -81,7 +139,14 @@ pub fn current_correlation_id() -> Option<String> {
     }
     #[cfg(target_arch = "wasm32")]
     {
-        ACTIVE_CORRELATION_STACK.with(|stack| stack.borrow().last().cloned())
+        let mut next = current_span_id();
+        while let Some(id) = next {
+            if let Some(corr) = SPAN_CORRELATION.with(|c| c.borrow().get(&id).cloned()) {
+                return Some(corr);
+            }
+            next = SPAN_PARENTS.with(|p| p.borrow().get(&id).copied().flatten());
+        }
+        None
     }
 }
 
