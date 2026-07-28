@@ -131,7 +131,7 @@ impl Subscriber for CustomTelemetrySubscriber {
             .saturating_add(1);
         let id = Id::from_u64(id_val);
 
-        let parent = attrs.parent().map(|p| p.into_u64()).or_else(|| {
+        let parent = attrs.parent().map(|p| p.into_u64()).or({
             #[cfg(target_arch = "wasm32")]
             {
                 attrs

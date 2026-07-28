@@ -68,7 +68,7 @@ clap = { version = "4.6.3", default-features = false, features = ["std", "color"
   "error-context",
   "suggestions", "derive", "env"] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
-futures = { version = "0.3.32", default-features = false, features = ["async-await"] }
+futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
 getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }

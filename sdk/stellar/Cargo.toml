@@ -16,7 +16,7 @@ async-trait = { workspace = true }
 base64 = { workspace = true }
 ed25519-dalek = { version = "2.2", default-features = false, features = ["digest", "zeroize"] }
 futures = { workspace = true, features = ["executor"] }
-http = "1.4.0"
+http = "1.4.2"
 tracing = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
