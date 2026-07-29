@@ -50,6 +50,13 @@ pub struct PoolConfigEntry {
     pub asset: AssetDescriptor,
     /// ASP policy flags for transact proofs.
     pub policy_flags: PolicyFlags,
+    /// Global View Key mode for this pool. Defaults to [`GvkMode::Off`] for backwards compatibility
+    #[serde(default)]
+    pub gvk_mode: GvkMode,
+    /// Pool administrator's Baby JubJub public key `D`, informational only
+    /// not verified. `None` when `gvk_mode` is [`GvkMode::Off`].
+    #[serde(default)]
+    pub gvk_authority_pub_key: Option<BabyJubJubPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
