@@ -2,12 +2,14 @@ mod amounts;
 mod chain_data;
 mod disclosure;
 mod ext_data;
+mod gvk;
 mod policy_tx;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
 pub use disclosure::*;
 pub use ext_data::*;
+pub use gvk::*;
 pub use policy_tx::*;
 
 use serde::{Deserialize, Serialize};
