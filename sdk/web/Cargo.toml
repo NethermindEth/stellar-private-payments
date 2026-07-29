@@ -45,6 +45,7 @@ sqlite-wasm-rs = { workspace = true }
 sqlite-wasm-vfs = { workspace = true }
 
 [build-dependencies]
+serde_json = { workspace = true }
 sha2 = { workspace = true }
 types = { workspace = true }
 

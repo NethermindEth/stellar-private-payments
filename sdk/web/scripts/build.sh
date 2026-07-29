@@ -88,16 +88,29 @@ installed_opt="$("$WASM_OPT" --version | awk '{print $3}')"
 echo "==> Staging raw circuit artifacts..."
 bash "$WEB/scripts/stage-circuits-dist.sh"
 
+# Derive the expected wasm count from the canonical ARTIFACTS list so the check
+# stays correct when new circuits (e.g. GVK variants) are added.
+STAGE_CIRCUITS_DIST_SOURCE_ONLY=1
+source "$WEB/scripts/stage-circuits-dist.sh"
+unset STAGE_CIRCUITS_DIST_SOURCE_ONLY
+expected_wasm_count=0
+for name in "${CIRCUIT_ARTIFACTS[@]}"; do
+  [[ "$name" == *.wasm ]] && expected_wasm_count=$((expected_wasm_count + 1))
+done
+
 # Optimize the staged witness wasm files in place. build.rs reads wasm from
 # sdk/web/dist/circuits/ when available, so it will hash these optimized bytes.
 # wasm-opt -Os is not idempotent on these modules, so we cache the optimized
 # output keyed by the raw input sha256. The cache lives outside the shipped
 # dist/ tree so it never ships with the npm package.
-OPT_CACHE_DIR="$ROOT/target/tmp/witness-opt-cache/$PROFILE"
+#
+# Keyed on `installed_opt` (the version wasm-opt itself reports, verified
+# above) rather than the requested $WASM_OPT_VERSION, so the cache path is
+# tied to the binary that actually ran, not to the env var that asked for it.
+WASM_OPT_FLAGS="--enable-bulk-memory --enable-reference-types --enable-multivalue --enable-sign-ext --enable-nontrapping-float-to-int --enable-mutable-globals"
+WASM_OPT_FLAGS_ID="bulk-memory,reference-types,multivalue,sign-ext,nontrapping-float-to-int,mutable-globals"
+OPT_CACHE_DIR="$ROOT/target/tmp/witness-opt-cache/$installed_opt/$PROFILE/$WASM_OPT_FLAGS_ID"
 mkdir -p "$OPT_CACHE_DIR"
-
-# Remove any stale in-tree cache files from earlier design iterations.
-rm -f "$WEB/dist/circuits/"*.opt-cache "$WEB/dist/circuits/"*.raw-sha256
 
 echo "==> Running wasm-opt -Os on staged circuit witness modules..."
 
@@ -117,29 +130,23 @@ optimized=0
 for wasm in "$WEB/dist/circuits/"*.wasm; do
   [[ -f "$wasm" ]] || continue
   wasm_count=$((wasm_count + 1))
-  basename="$(basename "$wasm")"
-  raw_stamp="$OPT_CACHE_DIR/${basename}.raw-sha256"
-  opt_cache="$OPT_CACHE_DIR/${basename}.opt-cache"
+  wasm_name="$(basename "$wasm")"
+  raw_stamp="$OPT_CACHE_DIR/${wasm_name}.raw-sha256"
+  opt_cache="$OPT_CACHE_DIR/${wasm_name}.opt-cache"
   raw_hash="$(sha256_file "$wasm")"
   if [[ -f "$raw_stamp" ]] && [[ "$raw_hash" == "$(cat "$raw_stamp")" ]] && [[ -f "$opt_cache" ]]; then
     cp "$opt_cache" "$wasm"
     continue
   fi
-  "$WASM_OPT" -Os \
-    --enable-bulk-memory \
-    --enable-reference-types \
-    --enable-multivalue \
-    --enable-sign-ext \
-    --enable-nontrapping-float-to-int \
-    --enable-mutable-globals \
-    "$wasm" -o "$wasm"
+  # shellcheck disable=SC2086
+  "$WASM_OPT" -Os $WASM_OPT_FLAGS "$wasm" -o "$wasm"
   cp "$wasm" "$opt_cache"
   echo "$raw_hash" > "$raw_stamp"
   optimized=$((optimized + 1))
 done
-[[ "$wasm_count" -eq 8 ]] || {
-  echo "error: expected 8 witness wasm files, found $wasm_count" >&2; exit 1; }
-echo "    optimized $optimized / 8 modules (others reused from cache)"
+[[ "$wasm_count" -eq "$expected_wasm_count" ]] || {
+  echo "error: expected $expected_wasm_count witness wasm files, found $wasm_count" >&2; exit 1; }
+echo "    optimized $optimized / $expected_wasm_count modules (others reused from cache)"
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
@@ -152,6 +159,10 @@ if [[ "${installed_version}" != "${WASM_BINDGEN_VERSION}" ]]; then
   echo "  cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2
   exit 1
 fi
+
+# Tell sdk/web/build.rs to use the optimized, staged circuit wasm instead of the
+# raw artifacts. The fallback in build.rs handles direct cargo builds.
+export CIRCUIT_WASM_DIR="$WEB/dist/circuits"
 
 echo "==> Building stellar-private-payments-sdk-web ($PROFILE)..."
 cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET"

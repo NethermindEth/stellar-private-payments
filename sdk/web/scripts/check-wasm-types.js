@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /**
- * Verify wasm-bindgen artifacts exist before `tsc` (CI / prepublish).
+ * Verify wasm-bindgen artifacts exist and that the shipped circuit wasm files
+ * match the hashes baked into the compiled sdk-web code.
  */
-import { access } from 'node:fs/promises';
+import { access, readFile } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 
@@ -45,3 +47,26 @@ for (const rel of required) {
     process.exit(1);
   }
 }
+
+const sidecarPath = path.join(root, '..', 'dist/circuits/artifact_hashes.json');
+let expectedHashes;
+try {
+  expectedHashes = JSON.parse(await readFile(sidecarPath, 'utf8'));
+} catch {
+  console.error('missing dist/circuits/artifact_hashes.json — run npm run build');
+  process.exit(1);
+}
+
+for (const [stem, expectedHex] of Object.entries(expectedHashes)) {
+  const wasmPath = path.join(root, '..', 'dist/circuits', `${stem}.wasm`);
+  const bytes = await readFile(wasmPath);
+  const actualHex = createHash('sha256').update(bytes).digest('hex');
+  if (actualHex !== expectedHex) {
+    console.error(
+      `sha256 mismatch for dist/circuits/${stem}.wasm: expected ${expectedHex}, got ${actualHex}`
+    );
+    process.exit(1);
+  }
+}
+
+console.log('sdk/web artifact checks passed');
