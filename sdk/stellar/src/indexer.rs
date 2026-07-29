@@ -90,7 +90,7 @@ impl<S: ContractDataStorage> Indexer<S> {
             .len()
             > 1
         {
-            log::warn!(
+            tracing::warn!(
                 "[INDEXER] sync ledger divergence detected for {} active contracts; using min last_indexed_ledger={start_ledger}",
                 active_sync.len()
             );
@@ -105,7 +105,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                 .first()
                 .and_then(|meta| (!meta.cursor.is_empty()).then(|| meta.cursor.clone()))
         } else {
-            log::warn!(
+            tracing::warn!(
                 "[INDEXER] sync cursor divergence detected for {} active contracts; resetting cursor and replaying from ledger={start_ledger}",
                 active_sync.len()
             );
@@ -115,7 +115,7 @@ impl<S: ContractDataStorage> Indexer<S> {
         let mut may_have_more = false;
 
         for page in 0..MAX_PAGES_PER_ROUND {
-            log::trace!(
+            tracing::trace!(
                 "[INDEXER] bulk page {page}/{MAX_PAGES_PER_ROUND}, start_ledger={start_ledger}, network_tip={network_tip}, cursor={cursor:?}"
             );
 
@@ -128,7 +128,7 @@ impl<S: ContractDataStorage> Indexer<S> {
                 // We are ahead of the RPC's events tip: nothing to fetch until
                 // it indexes further. Idle this round instead of erroring.
                 Err(RpcError::RpcAhead(newest)) => {
-                    log::debug!(
+                    tracing::debug!(
                         "[INDEXER] local sync (start_ledger={start_ledger}) is ahead of RPC events tip (newest={newest}); waiting for RPC to catch up"
                     );
                     return Ok(false);

@@ -50,15 +50,8 @@ impl Account {
         block_on(self.inner.asp_secret())
     }
 
-    pub fn derive_asp_user_leaf(
-        &self,
-        note_public_key: Option<NotePublicKey>,
-        membership_blinding: Option<Field>,
-    ) -> Result<Field, Error> {
-        block_on(
-            self.inner
-                .derive_asp_user_leaf(note_public_key, membership_blinding),
-        )
+    pub fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
+        block_on(self.inner.derive_asp_user_leaf())
     }
 
     pub fn user_notes(&self, limit: u32) -> Result<Vec<UserNoteSummary>, Error> {

@@ -3,7 +3,12 @@ import init, {
   PrivatePool,
   Storage as WasmStorage,
   bootnodeRequired as wasmBootnodeRequired,
+  deriveAspUserLeaf as wasmDeriveAspUserLeaf,
   verifySelectiveDisclosure as wasmVerifySelectiveDisclosure,
+  configureTelemetry,
+  set_log_level,
+  dump_recent_logs,
+  debugLogsEnabled,
 } from '../dist/stellar_private_payments_sdk_web.js';
 
 const storageWorkerUrl = new URL('../dist/workers/storage-worker.js', import.meta.url).href;
@@ -29,6 +34,16 @@ async function bootnodeRequired(rpcUrl, storage) {
   return wasmBootnodeRequired(rpcUrl, storage);
 }
 
+/**
+ * Derive the ASP membership leaf from explicit public inputs.
+ * @param {string} notePublicKey `0x`-prefixed 32-byte hex
+ * @param {string} membershipBlinding `0x`-prefixed 32-byte hex field
+ * @returns {string} leaf as `0x` hex
+ */
+function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
+  return wasmDeriveAspUserLeaf(notePublicKey, membershipBlinding);
+}
+
 function wrapAccount(wasmAccount) {
   return {
     get userAddress() {
@@ -39,7 +54,7 @@ function wrapAccount(wasmAccount) {
     aspSecret: () => wasmAccount.aspSecret(),
     userNotes: (limit) => wasmAccount.userNotes(limit),
     isRegistered: () => wasmAccount.isRegistered(),
-    deriveAspUserLeaf: (options) => wasmAccount.deriveAspUserLeaf(options),
+    deriveAspUserLeaf: () => wasmAccount.deriveAspUserLeaf(),
     registerPublicKeys: (options) => wasmAccount.registerPublicKeys(options),
     pool: (options) => wasmAccount.pool(options),
   };
@@ -117,6 +132,7 @@ export const Client = {
   new: newClient,
   contractConfig: WasmClient.contractConfig,
 };
-export { PrivatePool, bootnodeRequired, verifySelectiveDisclosure };
+export { PrivatePool, bootnodeRequired, deriveAspUserLeaf, verifySelectiveDisclosure };
+export { configureTelemetry, set_log_level, dump_recent_logs, debugLogsEnabled };
 export { default } from '../dist/stellar_private_payments_sdk_web.js';
 export { FreighterSigner } from './freighter.js';
