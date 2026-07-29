@@ -66,11 +66,11 @@ pub enum GlobalViewKeyMode {
 /// regardless of mode. Its *public output array*, however, is laid out
 /// differently per mode, and does not always match `idx`:
 ///
-/// - Traceable (`encryptInputs == 1`): the array holds `nIns + nOuts`
-///   entries, inputs first, so array position equals `idx` exactly.
-/// - View-only (`encryptInputs == 0`): the array holds only `nOuts`
-///   entries — output `k` sits at array position `k`, even though its `idx`
-///   is still `nIns + k`. There is no input segment at all.
+/// - Traceable (`encryptInputs == 1`): the array holds `nIns + nOuts` entries,
+///   inputs first, so array position equals `idx` exactly.
+/// - View-only (`encryptInputs == 0`): the array holds only `nOuts` entries —
+///   output `k` sits at array position `k`, even though its `idx` is still
+///   `nIns + k`. There is no input segment at all.
 ///
 /// This type deliberately splits the circuit's array back into two
 /// independently `0..N`-indexed fields (`inputs`, `outputs`), which follow

@@ -15,13 +15,13 @@ anyhow = { workspace = true }
 async-trait = { workspace = true }
 disclosure = { workspace = true }
 futures = { workspace = true }
-tracing = { workspace = true }
 prover = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 state = { workspace = true }
 stellar = { workspace = true }
 thiserror = { workspace = true }
+tracing = { workspace = true }
 tx-planner = { workspace = true }
 types = { workspace = true, features = ["rusqlite"] }
 witness = { workspace = true }
