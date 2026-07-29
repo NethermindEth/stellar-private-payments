@@ -12,11 +12,13 @@ use std::{
     io::Write,
     path::Path,
     process::{Command, Stdio},
+    time::Instant,
 };
 
 use anyhow::{Context, Result, bail};
 
 use stellar_private_payments_sdk::{chain::Signature, types::KeyDerivationSignature};
+use types::correlation_id_or_new;
 
 /// Env var to override the `stellar` binary path (default: `stellar` on PATH).
 const STELLAR_BIN_ENV: &str = "STELLAR_BIN";
@@ -28,19 +30,45 @@ fn stellar_bin() -> String {
 
 /// Run `stellar <args…>` (with an optional `--config-dir`) and return trimmed
 /// stdout. Info logs go to stderr and are ignored on success.
+#[tracing::instrument(
+    name = "stellar_cli_run",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new())
+)]
 fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
+    let start = Instant::now();
     let bin = stellar_bin();
+    // Full args are Sensitive-wrapped: some call sites (e.g. `message sign`)
+    // pass payload/Tier-1 values in args, so they stay redacted by default.
+    tracing::info!(
+        bin = %bin,
+        subcommand = %args.first().map(String::as_str).unwrap_or(""),
+        args = ?types::Sensitive(&args),
+        "running external stellar command"
+    );
     let mut cmd = Command::new(&bin);
     cmd.args(args);
     if let Some(dir) = config_dir {
         cmd.arg("--config-dir").arg(dir);
     }
-    let output = cmd.output().with_context(|| {
+    let result = cmd.output().with_context(|| {
         format!(
             "failed to run `{bin}`; install the Stellar CLI (https://stellar.org/cli) \
              or set {STELLAR_BIN_ENV} to its path"
         )
-    })?;
+    });
+    let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match &result {
+        Ok(output) => tracing::debug!(
+            exit_status = %output.status,
+            stdout_len = output.stdout.len(),
+            stderr_len = output.stderr.len(),
+            elapsed_ms,
+            "external stellar command exited"
+        ),
+        Err(_) => tracing::debug!(elapsed_ms, "external stellar command failed to start"),
+    }
+    let output = result?;
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!("`{bin} {}` failed: {}", args.join(" "), stderr.trim());
@@ -52,6 +80,11 @@ fn run(args: &[String], config_dir: Option<&Path>) -> Result<String> {
 
 /// Resolve an alias to its Stellar address (`G…`) via `stellar keys
 /// public-key`.
+#[tracing::instrument(
+    name = "stellar_public_key",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), alias = ?types::Sensitive(&alias))
+)]
 pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
     let args = vec![
         "keys".to_string(),
@@ -70,11 +103,22 @@ pub fn public_key(alias: &str, config_dir: Option<&Path>) -> Result<String> {
 /// The Stellar CLI prefixes `"Stellar Signed Message:\n"`, SHA-256 hashes, then
 /// Ed25519-signs — matching the web app / Freighter derivation exactly. Output
 /// is base64 of the 64-byte signature.
+#[tracing::instrument(
+    name = "stellar_sign_message",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), alias = ?types::Sensitive(&alias), message_len = message.len())
+)]
 pub fn sign_message(
     alias: &str,
     message: &str,
     config_dir: Option<&Path>,
 ) -> Result<KeyDerivationSignature> {
+    // The message contents and the produced signature are never logged.
+    tracing::info!(
+        alias = ?types::Sensitive(&alias),
+        message_len = message.len(),
+        "awaiting external signer (may prompt for key)"
+    );
     let args = vec![
         "message".to_string(),
         "sign".to_string(),
@@ -93,6 +137,11 @@ pub fn sign_message(
 /// Works for identities stored in the config file or OS secure store. The
 /// unsigned envelope XDR is passed on stdin; signed envelope XDR is returned
 /// from stdout.
+#[tracing::instrument(
+    name = "stellar_sign_tx",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), alias = ?types::Sensitive(&alias), xdr_len = tx_xdr.len(), network = %network_passphrase)
+)]
 pub fn sign_tx(
     alias: &str,
     tx_xdr: &str,
@@ -100,6 +149,23 @@ pub fn sign_tx(
     network_passphrase: &str,
     config_dir: Option<&Path>,
 ) -> Result<String> {
+    let start = Instant::now();
+    // Host part of the RPC URL (scheme and path stripped); the envelope XDR
+    // and the signed XDR output are never logged.
+    let rpc_host = rpc_url
+        .split("://")
+        .nth(1)
+        .unwrap_or(rpc_url)
+        .split('/')
+        .next()
+        .unwrap_or("");
+    tracing::info!(
+        alias = ?types::Sensitive(&alias),
+        xdr_len = tx_xdr.len(),
+        network = %network_passphrase,
+        rpc_host,
+        "awaiting external signer (--auto-sign may block on hardware/secure-store prompt)"
+    );
     let bin = stellar_bin();
     let mut cmd = Command::new(&bin);
     cmd.args([
@@ -134,9 +200,19 @@ pub fn sign_tx(
         .write_all(tx_xdr.as_bytes())
         .context("write transaction XDR to stellar tx sign")?;
 
-    let output = child
-        .wait_with_output()
-        .context("wait for stellar tx sign")?;
+    let result = child.wait_with_output().context("wait for stellar tx sign");
+    let elapsed_ms = u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX);
+    match &result {
+        Ok(output) => tracing::debug!(
+            exit_status = %output.status,
+            stdout_len = output.stdout.len(),
+            stderr_len = output.stderr.len(),
+            elapsed_ms,
+            "external stellar command exited"
+        ),
+        Err(_) => tracing::debug!(elapsed_ms, "external stellar command failed"),
+    }
+    let output = result?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
@@ -170,6 +246,11 @@ pub fn ensure_installed() -> Result<String> {
 /// Resolve a network's RPC URL and passphrase from the Stellar CLI's own
 /// network config (built-in networks like `testnet` and any custom ones added
 /// via `stellar network add`), by parsing `stellar network ls --long`.
+#[tracing::instrument(
+    name = "stellar_network_lookup",
+    skip_all,
+    fields(correlation_id = %correlation_id_or_new(), network = %name)
+)]
 pub fn network(name: &str, config_dir: Option<&Path>) -> Result<StellarNetwork> {
     let listing = run(
         &[

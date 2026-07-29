@@ -1,7 +1,7 @@
 //! Coin selection: pick note indices that reach a target amount.
 
 use super::PlanError;
-use types::NoteAmount;
+use types::{NoteAmount, correlation_id_or_new};
 
 /// Upper bound on combination size explored by [`find_combination`].
 pub const TRANSACTION_LIMIT: usize = 10;
@@ -27,6 +27,7 @@ pub enum CombinationResult {
 /// Find a combination of elements with sum equal to or larger than the goal,
 /// prioritizing the lowest combination count (with two-note pairs preferred
 /// over single-note exact matches).
+#[tracing::instrument(level = "trace", skip_all, fields(correlation_id = %correlation_id_or_new(), note_count = values.len(), goal = ?types::Sensitive(&goal)))]
 pub fn find_combination(
     values: &[NoteAmount],
     goal: NoteAmount,
@@ -40,25 +41,59 @@ pub fn find_combination(
 
     let two = TwoScan::scan(&sorted_vals, goal)?;
     if let TwoScan::Exact(i, j) = two {
+        tracing::trace!(
+            tier = "two-exact",
+            count = 2,
+            "find_combination tier succeeded"
+        );
         return Ok(CombinationResult::TwoExact(i, j));
     }
 
     let one = OneScan::scan(&sorted_vals, goal);
     if let OneScan::Exact(i) = one {
+        tracing::trace!(
+            tier = "one-exact",
+            count = 1,
+            "find_combination tier succeeded"
+        );
         return Ok(CombinationResult::OneExact(i));
     }
 
     if let TwoScan::Overshoot(i, j, excess) = two {
+        tracing::trace!(
+            tier = "two-overshoot",
+            count = 2,
+            "find_combination tier succeeded"
+        );
         return Ok(CombinationResult::TwoOvershoot(i, j, excess));
     }
 
     if let OneScan::Overshoot(i, excess) = one {
+        tracing::trace!(
+            tier = "one-overshoot",
+            count = 1,
+            "find_combination tier succeeded"
+        );
         return Ok(CombinationResult::OneOvershoot(i, excess));
     }
 
     match KScan::scan(&sorted_vals, goal)? {
-        KScan::Exact(indices) => Ok(CombinationResult::ExactK(indices)),
-        KScan::Overshoot(indices, excess) => Ok(CombinationResult::Overshoot(indices, excess)),
+        KScan::Exact(indices) => {
+            tracing::trace!(
+                tier = "k-scan-exact",
+                count = indices.len(),
+                "find_combination tier succeeded"
+            );
+            Ok(CombinationResult::ExactK(indices))
+        }
+        KScan::Overshoot(indices, excess) => {
+            tracing::trace!(
+                tier = "k-scan-overshoot",
+                count = indices.len(),
+                "find_combination tier succeeded"
+            );
+            Ok(CombinationResult::Overshoot(indices, excess))
+        }
         KScan::Miss => Ok(CombinationResult::Impossible),
     }
 }

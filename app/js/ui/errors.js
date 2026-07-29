@@ -90,17 +90,11 @@ const ERROR_PATTERNS = [
         },
         message: 'Network error. Please check your connection and try again.',
     },
-    {
-        // User rejected signature
-        test: (msg) => {
-            const lower = msg.toLowerCase();
-            return lower.includes('rejected') || 
-                   lower.includes('denied') ||
-                   lower.includes('cancelled') ||
-                   lower.includes('user_rejected');
-        },
-        message: 'Transaction was cancelled.',
-    },
+    // NOTE: user rejection is deliberately NOT a pattern here. It is decided by
+    // isUserCancelledError(), which prefers the structured SEP-0043 code over
+    // substring matching; getFriendlyErrorMessage() consults it before this
+    // list. A pattern here could only match the composed message, including
+    // prefixes we author ourselves, and would drift from that logic.
     {
         // Merkle proof not found
         test: (msg) => {
@@ -133,6 +127,30 @@ export function getErrorMessage(error) {
 }
 
 /**
+ * Extracts the wallet-authored portion of an error message.
+ *
+ * Wallet adapters wrap the original wallet error and expose it as `cause`
+ * (`normalizeWalletError` in wallet.js, `throwFreighterError` in the SDK's
+ * freighter.js, `copy_js_error_fields` in sdk/web/src/signer.rs). The composed
+ * `message` therefore mixes the wallet's text with prefixes we author
+ * ourselves, e.g. "signer.signTransaction failed: <wallet text>".
+ *
+ * Substring classification must only see the wallet's own words — otherwise any
+ * message we write that happens to contain "rejected"/"denied"/"cancelled"
+ * silently classifies itself as a user cancellation. Falls back to the composed
+ * message when no cause text is available.
+ *
+ * @param {Error|string|unknown} error - The error to extract text from
+ * @returns {string} Wallet-provided message when present, else the full message
+ */
+function walletProvidedMessage(error) {
+    const cause = error?.cause;
+    if (typeof cause === 'string' && cause) return cause;
+    if (cause && typeof cause === 'object' && cause.message) return String(cause.message);
+    return getErrorMessage(error);
+}
+
+/**
  * Checks if an error message indicates a proof verification failure.
  * @param {string} message - Error message to check
  * @returns {boolean} True if this is a proof verification error
@@ -150,8 +168,16 @@ export function isProofVerificationError(message) {
  * @returns {boolean} True if user cancelled
  */
 export function isUserCancelledError(error) {
-    const msg = getErrorMessage(error).toLowerCase();
-    return msg.includes('rejected') || 
+    // SEP-0043 v1.2.1 defines -4 as the user-rejection code. Some adapters
+    // also expose a string 'USER_REJECTED' code for app-level compatibility.
+    // The structured code is authoritative; the substring check below is only a
+    // fallback for wallets/versions that do not set it, and deliberately looks
+    // at the wallet's own text rather than the full composed message.
+    if (error && (error.code === -4 || error.code === 'USER_REJECTED')) {
+        return true;
+    }
+    const msg = walletProvidedMessage(error).toLowerCase();
+    return msg.includes('rejected') ||
            msg.includes('denied') ||
            msg.includes('cancelled') ||
            msg.includes('user_rejected');
@@ -166,7 +192,15 @@ export function isUserCancelledError(error) {
 export function getFriendlyErrorMessage(error, operationType = 'Transaction') {
     const rawMessage = getErrorMessage(error);
     if (!rawMessage) return `${operationType} failed. Please try again.`;
-    
+
+    // Single-source the cancellation decision (structured code first, wallet
+    // text as fallback) instead of duplicating a substring pattern in
+    // ERROR_PATTERNS. Checked before the pattern list to match
+    // getTransactionErrorMessage, which also short-circuits on cancellation.
+    if (isUserCancelledError(error)) {
+        return 'Transaction was cancelled.';
+    }
+
     // Check against known error patterns
     for (const pattern of ERROR_PATTERNS) {
         if (pattern.test(rawMessage)) {
