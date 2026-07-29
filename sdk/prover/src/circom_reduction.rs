@@ -1,11 +1,6 @@
 //! Circom's Groth16 QAP reduction.
 //!
-//! Ported logic from arkworks `circom-compat`, so we can drop the `ark-circom`
-//! dependency (Wasmer / browser packaging).
-//!
-//! Native builds keep upstream's `rayon` parallel iterators. Wasm builds use
-//! the equivalent serial loops (browser workers typically cannot use rayon's
-//! thread pool).
+//! Ported logic from arkworks `circom-compat`.
 
 use ark_ff::PrimeField;
 use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP, evaluate_constraint};
@@ -23,6 +18,8 @@ use rayon::prelude::*;
 /// in that domain. This serves as HZ when computing the C proof element.
 pub struct CircomReduction;
 
+// Native builds keep use `rayon` parallel iterators.
+// WASM builds use the equivalent serial loops.
 impl R1CSToQAP for CircomReduction {
     #[allow(clippy::type_complexity)]
     fn instance_map_with_evaluation<F: PrimeField, D: EvaluationDomain<F>>(
@@ -154,10 +151,12 @@ impl R1CSToQAP for CircomReduction {
         let mut scalars = (0..2 * max_power + 1)
             .map(|i| delta_inverse * t.pow([i as u64]))
             .collect::<Vec<_>>();
+
         let domain_size = scalars.len();
         let domain = D::new(domain_size).ok_or(SynthesisError::PolynomialDegreeTooLarge)?;
         // generate the lagrange coefficients
         domain.ifft_in_place(&mut scalars);
+
         #[cfg(not(target_arch = "wasm32"))]
         {
             Ok(scalars.into_par_iter().skip(1).step_by(2).collect())

@@ -40,13 +40,22 @@ impl WitnessCalculator {
 
     /// Compute the witness from JSON inputs, returning little-endian bytes
     /// (32 bytes per field element) compatible with the prover module.
+    ///
+    /// Rejects any input signal name the graph does not declare
+    /// (circom-witness-rs would otherwise panic on unknowns).
     pub fn compute_witness(&self, inputs_json: &str) -> Result<Vec<u8>> {
-        let mut inputs = parse_inputs(inputs_json)?;
-        // Drop keys the graph does not know. circom-witness-rs panics on an
-        // unknown input signal; the wasmer path this replaces silently ignored
-        // them, so we match that leniency. A genuinely missing signal still
-        // surfaces downstream as a failed proof, not a worker crash
-        inputs.retain(|key, _| self.input_hashes.contains(&fnv1a(key)));
+        let inputs = parse_inputs(inputs_json)?;
+        let mut unknown: Vec<&str> = inputs
+            .keys()
+            .filter(|key| !self.input_hashes.contains(&fnv1a(key)))
+            .map(String::as_str)
+            .collect();
+        unknown.sort_unstable();
+        ensure!(
+            unknown.is_empty(),
+            "unknown circuit input signal(s): {}",
+            unknown.join(", ")
+        );
         let witness = calculate_witness(inputs, &self.graph, Some(&self.bbfs))
             .map_err(|e| anyhow::anyhow!("Witness calculation failed: {e}"))?;
         Ok(witness_to_bytes(&witness))
@@ -113,8 +122,7 @@ fn parse_inputs(inputs_json: &str) -> Result<HashMap<String, Vec<U256>>> {
 }
 
 /// FNV-1a hash of a signal name, matching `circom-witness-rs`'s input mapping
-/// (`init_graph`/`get_input_mapping`). Used to drop input keys the graph does
-/// not declare before they reach the panicking lookup upstream.
+/// (`init_graph`/`get_input_mapping`).
 fn fnv1a(s: &str) -> u64 {
     let mut hash: u64 = 0xCBF2_9CE4_8422_2325;
     for byte in s.bytes() {
@@ -256,6 +264,27 @@ mod tests {
         let bytes = std::fs::read(path).expect("committed policy_tx_2_2.graph.bin");
         let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
         assert!(calc.witness_size() > 1);
+    }
+
+    #[test]
+    fn compute_witness_rejects_unknown_signal() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin"
+        );
+        let bytes = std::fs::read(path).expect("committed policy_tx_2_2.graph.bin");
+        let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
+        let err = calc
+            .compute_witness(r#"{"notARealSignal":"0x01"}"#)
+            .expect_err("unknown signal must fail");
+        assert!(
+            err.to_string().contains("unknown circuit input signal"),
+            "unexpected error: {err:#}"
+        );
+        assert!(
+            err.to_string().contains("notARealSignal"),
+            "error should name the unknown signal: {err:#}"
+        );
     }
 
     #[test]

@@ -2,13 +2,13 @@
 //!
 //! Handles loading proving keys and generating ZK proofs from witness data.
 //!
-//! Witnesses are produced separately by the graph-based `witness` crate
-//! (no Wasmer). This module:
+//! Witnesses are produced separately by the graph-based `witness` crate. This
+//! module:
 //! 1. Loads the proving key
 //! 2. Parses the R1CS file to get constraint matrices (see r1cs.rs)
 //! 3. Accepts pre-computed witness bytes
-//! 4. Replays constraints and generates proofs using ark-groth16 with a
-//!    Circom-compatible R1CS→QAP reduction (see circom_reduction.rs)
+//! 4. Replays constraints and generates proofs using `ark-groth16` with a
+//!    Circom-compatible R1CS→QAP reduction (see `circom_reduction.rs`)
 
 use crate::{
     r1cs::R1CS,

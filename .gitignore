@@ -57,4 +57,3 @@ ceremony/
 *.ptau
 artifacts.zip
 circuits/graph*.bin
-circuits/*_cpp/

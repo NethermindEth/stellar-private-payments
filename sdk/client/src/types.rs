@@ -7,7 +7,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct ProverArtifacts {
     pub proving_key: Vec<u8>,
-    /// Precomputed `circom-witness-rs` operation graph (`.graph.bin`).
     pub circuit_graph: Vec<u8>,
     pub circuit_r1cs: Vec<u8>,
 }

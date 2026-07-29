@@ -2,9 +2,8 @@
 //!
 //! Provides merkle tree operations matching the Circom circuit implementations.
 //!
-//! Canonical Poseidon2 merkle helpers live in this module. `circuits` keeps a
-//! duplicated copy for its tests (no SDK dependency) — keep them in sync via
-//! the e2e coherence test `merkle_helpers_match_prover`.
+//! `circuits` crate keeps a duplicated copy of this logic, so we can avoid
+//! inter-dependency. Coherence tests in `e2e-tests` keep them in sync.
 
 use alloc::vec::Vec;
 use core::ops::Add;

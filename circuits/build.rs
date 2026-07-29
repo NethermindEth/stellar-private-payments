@@ -16,7 +16,7 @@
 //! `selectiveDisclosure_*` below) and outputs them to `testdata/`.
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
-use anyhow::{Context, Result, anyhow, bail, ensure};
+use anyhow::{Context, Result, anyhow, bail};
 use ark_bn254::Bn254;
 use ark_circom::{CircomBuilder, CircomConfig, CircomReduction};
 use ark_groth16::{Groth16, ProvingKey, VerifyingKey};
@@ -885,7 +885,7 @@ fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
             String::from_utf8_lossy(&ver.stdout),
             String::from_utf8_lossy(&ver.stderr)
         );
-        ensure!(
+        anyhow::ensure!(
             ver.status.success() && ver_text.contains(&expected),
             "Circom CLI must be {expected} (circuits/circom.lock); got:\n{ver_text}"
         );
@@ -903,7 +903,7 @@ fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
 
         // circom-witness-rs writes `graph.bin` into the circuits crate dir (cwd).
         let src = crate_dir.join("graph.bin");
-        ensure!(
+        anyhow::ensure!(
             src.is_file(),
             "expected circom-witness-rs to write {}; not found",
             src.display()

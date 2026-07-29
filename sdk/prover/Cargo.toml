@@ -34,15 +34,12 @@ x25519-dalek = { version = "2.0", default-features = false, features = ["static_
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # external
-getrandom = { workspace = true, features = ["std"] }
-# Match main's native prove speed: ark-circom's `parallel` feature (pulled in via
-# `circuits` on main) turns these on through feature unification. Wasm stays
-# serial — browser workers do not use rayon's thread pool.
-rayon = "1.10"
 ark-ff = { workspace = true, features = ["parallel"] }
 ark-groth16 = { workspace = true, features = ["parallel"] }
 ark-poly = { workspace = true, features = ["parallel"] }
 ark-std = { workspace = true, features = ["parallel"] }
+getrandom = { workspace = true, features = ["std"] }
+rayon = { version = "1.10", default-features = false }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # external
