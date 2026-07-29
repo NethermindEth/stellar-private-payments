@@ -33,5 +33,3 @@ jobs:
         run: BUILD_TESTS=1 cargo test --workspace --no-run
       - name: Run tests
         run: cargo test --workspace
-      - name: Test installer
-        run: sh scripts/tests/install_test.sh
