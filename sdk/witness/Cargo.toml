@@ -19,9 +19,5 @@ ruint = { workspace = true }
 # JSON parsing
 serde_json = { workspace = true, default-features = false, features = ["alloc", "std"] }
 
-[target.'cfg(target_arch = "wasm32")'.dependencies]
-# circom-witness-rs pulls rand -> getrandom 0.2, which needs the "js" feature for web
-getrandom = { workspace = true, features = ["js"] }
-
 [lints]
 workspace = true
