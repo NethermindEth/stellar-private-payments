@@ -156,7 +156,8 @@ fn main() -> Result<()> {
     );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
-    println!("cargo:rerun-if-env-changed=REGEN_GRAPHS");
+    println!("cargo:rerun-if-env-changed=WITNESS_CPP");
+    println!("cargo:rerun-if-env-changed=CIRCOM_LIBRARY_PATH");
     println!(
         "cargo:rerun-if-changed={}",
         crate_dir.join("circom.lock").display()
@@ -420,8 +421,9 @@ fn main() -> Result<()> {
 
     // === WITNESS GRAPH REGENERATION ===
     // Committed graphs: deployments/testnet/circuit_keys/<stem>.graph.bin
-    // Regen via `make witness-graphs` (REGEN_GRAPHS=1 + --features regen-graphs).
-    if env::var("REGEN_GRAPHS").is_ok() {
+    // Regen via `make witness-graphs` / `--features regen-graph` with
+    // `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` for one circuit at a time.
+    if env::var("WITNESS_CPP").is_ok() {
         regenerate_witness_graphs(&crate_dir)?;
     }
 
@@ -850,22 +852,25 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
     Ok(())
 }
 
-/// Run circom-witness-rs graph generation and publish `*.graph.bin` artifacts.
+/// Run circom-witness-rs graph generation and publish a `*.graph.bin` artifact.
 ///
-/// Requires `--features regen-graphs` (so the C++ generator is linked) plus
+/// Requires `--features regen-graph` (so the C++ generator is linked) plus
 /// `WITNESS_CPP` / `CIRCOM_LIBRARY_PATH` (see `make witness-graphs`).
 /// Circom CLI must match `circuits/circom.lock`.
+///
+/// Expects a single `.circom` path in `WITNESS_CPP`. Writes
+/// `deployments/testnet/circuit_keys/<stem>.graph.bin`.
 fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
-    #[cfg(not(feature = "regen-graphs"))]
+    #[cfg(not(feature = "regen-graph"))]
     {
         let _ = crate_dir;
         bail!(
-            "REGEN_GRAPHS=1 requires `cargo build -p circuits --features regen-graphs` \
+            "WITNESS_CPP requires `cargo build -p circuits --features regen-graph` \
              (see `make witness-graphs`)"
         );
     }
 
-    #[cfg(feature = "regen-graphs")]
+    #[cfg(feature = "regen-graph")]
     {
         let expected = fs::read_to_string(crate_dir.join("circom.lock"))
             .context("read circuits/circom.lock")?
@@ -885,25 +890,18 @@ fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
             "Circom CLI must be {expected} (circuits/circom.lock); got:\n{ver_text}"
         );
 
-        println!("cargo:warning=REGEN_GRAPHS=1 detected - regenerating witness graphs");
+        let witness_cpp = env::var("WITNESS_CPP")
+            .map_err(|_| anyhow!("WITNESS_CPP must be set for graph regeneration"))?;
+        let stem = Path::new(witness_cpp.trim())
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("invalid WITNESS_CPP circuit path: {witness_cpp}"))?;
+
+        println!("cargo:warning=WITNESS_CPP detected - regenerating witness graph for {stem}");
         circom_witness_rs::generate::build_witness()
             .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
 
-        // circom-witness-rs (single-circuit) writes `graph.bin` into the circuits
-        // crate dir (build-script cwd). Map it to the stem from WITNESS_CPP.
-        let stem = env::var("WITNESS_CPP")
-            .map_err(|_| anyhow!("WITNESS_CPP must be set when REGEN_GRAPHS=1"))?;
-        let stem = stem
-            .split(':')
-            .next()
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .ok_or_else(|| anyhow!("WITNESS_CPP is empty"))?;
-        let stem = Path::new(stem)
-            .file_stem()
-            .and_then(|s| s.to_str())
-            .ok_or_else(|| anyhow!("invalid WITNESS_CPP circuit path: {stem}"))?;
-
+        // circom-witness-rs writes `graph.bin` into the circuits crate dir (cwd).
         let src = crate_dir.join("graph.bin");
         ensure!(
             src.is_file(),

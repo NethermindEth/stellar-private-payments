@@ -35,8 +35,8 @@ asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
-# `main` branch: graph gen via `circom --c --O2` (matches circuits/build.rs BuildConfig).
-circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs.git", rev = "6cafc436bc5c57895606aa11a45b987f0070c473", default-features = false }
+# circom-witness-rs (single-circuit graph gen via circom --c --O2).
+circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs", rev = "537f9c9cca18fada33d717e634af831ac101a6f1", default-features = false }
 contract-types = { path = "contracts/types" }
 disclosure = { path = "sdk/disclosure" }
 pool = { path = "contracts/pool" }

@@ -55,19 +55,18 @@ WITNESS_GRAPH_STEMS := \
 
 # Regenerates committed circom-witness-rs graphs under
 # deployments/testnet/circuit_keys/*.graph.bin. Requires Circom CLI matching
-# circuits/circom.lock and a C++ toolchain.
+# circuits/circom.lock and a C++ toolchain. One stem per cargo build (single-
+# circuit circom-witness-rs); clean between stems so WITNESS_CPP is re-read.
 .PHONY: witness-graphs
 witness-graphs:
 	@echo "Regenerating witness graphs (Circom $$(tr -d '[:space:]' < circuits/circom.lock))..."
-	cargo build -p circuits
 	@for entry in $(WITNESS_GRAPH_STEMS); do \
 		stem=$${entry%.circom}; \
 		echo "===== $$stem ====="; \
 		cargo clean -p circom-witness-rs >/dev/null; \
 		CIRCOM_LIBRARY_PATH="$(CURDIR)/circuits/src" \
 		WITNESS_CPP="$(CURDIR)/circuits/src/$$entry" \
-		REGEN_GRAPHS=1 \
-		cargo build -p circuits --features regen-graphs || exit 1; \
+		cargo build -p circuits --features regen-graph || exit 1; \
 	done
 	@echo "Done. Graphs in deployments/testnet/circuit_keys/"
 
