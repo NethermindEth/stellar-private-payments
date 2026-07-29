@@ -60,14 +60,24 @@ pub enum GlobalViewKeyMode {
 ///
 /// # Note ordering vs. the circuit
 ///
-/// The circuit's own public outputs (`GvkNotes` in
-/// `circuits/src/globalViewKey.circom`) are a single flat array ordered
-/// inputs-first-then-outputs, with per-note index `idx = k` for input `k` and
-/// `idx = nIns + k` for output `k`. This type deliberately splits that flat
-/// array back into two independently-indexed fields (`inputs`, `outputs`)
-/// for clarity. Code that talks to the circuit's public inputs/outputs
-/// directly must re-flatten using that same `idx` formula rather than assume
-/// a 1:1 array layout with this struct.
+/// The circuit (`GvkNotes` in `circuits/src/globalViewKey.circom`)
+/// binds every note's keystream to a per-note encryption index `idx` that is
+/// **always** `idx = k` for input `k` and `idx = nIns + k` for output `k`,
+/// regardless of mode. Its *public output array*, however, is laid out
+/// differently per mode, and does not always match `idx`:
+///
+/// - Traceable (`encryptInputs == 1`): the array holds `nIns + nOuts`
+///   entries, inputs first, so array position equals `idx` exactly.
+/// - View-only (`encryptInputs == 0`): the array holds only `nOuts`
+///   entries — output `k` sits at array position `k`, even though its `idx`
+///   is still `nIns + k`. There is no input segment at all.
+///
+/// This type deliberately splits the circuit's array back into two
+/// independently `0..N`-indexed fields (`inputs`, `outputs`), which follow
+/// the *position* convention above, not the `idx` one. Code that talks to
+/// the circuit's public inputs/outputs directly must re-derive `idx` with
+/// the formula above rather than read it off the array position, since the
+/// two coincide only in traceable mode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct GlobalViewKeyMemo {
