@@ -86,7 +86,7 @@ stellar-private-payments/
 
 ## Prerequisites
 
-- [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
+- [**Rust**](https://www.rust-lang.org/tools/install) 1.97.1 or later (see `rust-toolchain.toml`).
 - [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.

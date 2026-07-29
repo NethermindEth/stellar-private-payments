@@ -22,8 +22,6 @@ jobs:
           persist-credentials: false
 
       - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
-        with:
-          toolchain: stable
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
 
       - name: Setup pages
@@ -31,7 +29,7 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Install mdBook
-        run: cargo install mdbook --no-default-features
+        run: cargo install mdbook --no-default-features --locked --version 0.5.4
 
       - name: Install wasm build prerequisites
         run: |

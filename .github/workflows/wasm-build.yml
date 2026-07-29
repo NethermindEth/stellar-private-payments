@@ -26,7 +26,6 @@ jobs:
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           profile: minimal
-          toolchain: stable
           targets: wasm32-unknown-unknown
           override: true
 
@@ -71,7 +70,7 @@ jobs:
         run: npm ci --prefix app
 
       - name: Install Trunk
-        run: cargo install trunk --locked
+        run: cargo install trunk --locked --version 0.21.14
 
       - name: Smoke-test Trunk app build
         run: trunk build --release --dist /tmp/app-dist
@@ -87,7 +86,6 @@ jobs:
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           profile: minimal
-          toolchain: stable
           targets: wasm32-unknown-unknown
           override: true
 
