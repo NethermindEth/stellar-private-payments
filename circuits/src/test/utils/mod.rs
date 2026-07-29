@@ -1,5 +1,7 @@
+pub mod babyjub;
 pub mod circom_tester;
 pub mod general;
+pub mod global_view_key;
 pub mod keypair;
 pub mod merkle_tree;
 pub mod sparse_merkle_tree;

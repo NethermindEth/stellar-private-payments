@@ -2,8 +2,6 @@ use types::{
     ContractConfig, EncryptionPublicKey, Field, NotePublicKey, PortfolioBalance, UserNoteSummary,
 };
 
-use prover::crypto::asp_membership_leaf;
-
 use stellar::{Limits, ReadXdr, StateFetcher, TransactionEnvelope, submit_tx};
 
 use crate::{
@@ -91,20 +89,10 @@ impl<S: Storage> Account<S> {
     }
 
     /// Derive the ASP membership tree leaf for this account's note public key.
-    pub async fn derive_asp_user_leaf(
-        &self,
-        note_public_key: Option<NotePublicKey>,
-        membership_blinding: Option<Field>,
-    ) -> Result<Field, Error> {
-        let note = match note_public_key {
-            Some(note) => note,
-            None => self.storage.user_public_keys(&self.user_address).await?.0,
-        };
-        let blinding = match membership_blinding {
-            Some(blinding) => blinding,
-            None => self.storage.asp_secret(&self.user_address).await?,
-        };
-        asp_membership_leaf(&note, &blinding).map_err(|e| Error::Other(e.to_string()))
+    pub async fn derive_asp_user_leaf(&self) -> Result<Field, Error> {
+        let note = self.storage.user_public_keys(&self.user_address).await?.0;
+        let blinding = self.storage.asp_secret(&self.user_address).await?;
+        crate::crypto::derive_asp_user_leaf(&note, &blinding)
     }
 
     /// Notes for this account across all pools (newest first).

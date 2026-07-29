@@ -41,7 +41,7 @@ The WASM layer exposes four JS handles with different scope:
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
-`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. Free helpers such as `deriveAspUserLeaf(notePublicKey, membershipBlinding)` need neither wallet nor storage.
 
 **JS UI (main thread)**
 
