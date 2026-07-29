@@ -4,7 +4,9 @@ mod error;
 
 pub use error::SpendSessionError;
 
-use types::{EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey};
+use types::{
+    EncryptionPublicKey, ExtAmount, Field, NoteAmount, NotePublicKey, correlation_id_or_new,
+};
 
 use crate::plan::{PlannedStep, SpendableNote, StepAction, plan};
 
@@ -75,6 +77,8 @@ pub struct SpendSession {
 }
 
 impl SpendSession {
+    /// Create a new SpendSession from a wallet, amount, and target.
+    #[tracing::instrument(skip_all, fields(stage = "spend_session_setup", correlation_id = %correlation_id_or_new(), wallet_size = wallet.len(), amount = ?types::Sensitive(&amount), target = ?types::Sensitive(&target)))]
     pub fn setup(
         wallet: Vec<SpendableNote>,
         amount: NoteAmount,
@@ -114,23 +118,33 @@ impl SpendSession {
             .is_some_and(|s| matches!(s.action, StepAction::Consolidate { .. }))
     }
 
+    /// Materialize the next planned step into a transaction payload.
+    #[tracing::instrument(skip_all, fields(stage = "spend_session_step", correlation_id = %correlation_id_or_new(), step_index = self.step_index, is_done = self.is_done()))]
     pub fn step(&self) -> Result<Option<Transact>, SpendSessionError> {
         if self.is_done() {
+            tracing::debug!(
+                step_index = self.step_index,
+                outcome = "done",
+                "spend session step: no more steps"
+            );
             return Ok(None);
         }
 
         let step = &self.steps[self.step_index];
         let resolved = step.resolve(&self.wallet)?;
-        Ok(Some(materialize_step(
-            step,
-            &self.pool_address,
-            &self.target,
-            &resolved,
-        )?))
+        let tx = materialize_step(step, &self.pool_address, &self.target, &resolved)?;
+        tracing::debug!(
+            step_index = self.step_index,
+            is_consolidate_step = self.is_consolidate_step(),
+            outcome = "materialized",
+            "spend session step transition"
+        );
+        Ok(Some(tx))
     }
 
     /// Advance after a successful submit (`output_commitments` from prove
     /// result).
+    #[tracing::instrument(skip_all, name = "spend_session_complete_step", fields(correlation_id = %correlation_id_or_new(), step_index = self.step_index))]
     pub fn complete_step(
         &mut self,
         output_commitments: &[Field; 2],
@@ -141,6 +155,7 @@ impl SpendSession {
 
         let step = self.steps[self.step_index].clone();
         let spent = step.resolve(&self.wallet)?;
+        let spent_count = spent.len();
 
         let merge_output = match step.action {
             StepAction::Consolidate { output } => Some(SpendableNote {
@@ -149,6 +164,7 @@ impl SpendSession {
             }),
             StepAction::Final { .. } => None,
         };
+        let merged_output = merge_output.is_some();
 
         match step.action {
             StepAction::Consolidate { .. } => {
@@ -164,6 +180,12 @@ impl SpendSession {
             .step_index
             .checked_add(1)
             .expect("step_index stays within plan length");
+        tracing::debug!(
+            spent_count,
+            merged_output,
+            outcome = "completed",
+            "spend session step completed"
+        );
         Ok(())
     }
 }

@@ -8,12 +8,25 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target}"
 PROFILE="${WASM_PROFILE:-release}"
 TARGET="wasm32-unknown-unknown"
 ARTIFACTS="$ROOT/target/$TARGET/$PROFILE"
+
+# Cargo uses `--release` for the release profile and `--profile <name>` for custom profiles.
+case "$PROFILE" in
+  release)
+    CARGO_PROFILE_FLAG="--release"
+    ;;
+  *)
+    CARGO_PROFILE_FLAG="--profile $PROFILE"
+    ;;
+esac
+
 WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
 WASM_OUT_NAME="stellar_private_payments_sdk_web"
 
 echo "==> Building circuit artifacts (if needed)..."
-if [[ ! -d "$ROOT/target/circuits-artifacts/$PROFILE" ]]; then
-  cargo build -p circuits --"$PROFILE"
+# Circuit artifacts are profile-independent and are only published for release
+# (and debug test circuits). Always use the release circuit artifacts.
+if [[ ! -d "$ROOT/target/circuits-artifacts/release" ]]; then
+  cargo build -p circuits --release
 fi
 
 # --- Binaryen provisioning (moved here so sdk/web/build.rs hashes optimized ---
@@ -165,9 +178,9 @@ fi
 export CIRCUIT_WASM_DIR="$WEB/dist/circuits"
 
 echo "==> Building stellar-private-payments-sdk-web ($PROFILE)..."
-cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET"
-cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET" --bin storage-worker
-cargo build -p stellar-private-payments-sdk-web --"$PROFILE" --target "$TARGET" --bin prover-worker
+cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET"
+cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
+cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
 
 MAIN_WASM="$ARTIFACTS/${WASM_OUT_NAME}.wasm"
 STORAGE_WASM="$ARTIFACTS/storage-worker.wasm"
@@ -186,6 +199,21 @@ mkdir -p "$WEB/dist/workers"
 wasm-bindgen --target web --out-dir "$WEB/dist" --out-name "$WASM_OUT_NAME" "$MAIN_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name storage-worker-module "$STORAGE_WASM"
 wasm-bindgen --target web --out-dir "$WEB/dist/workers" --out-name prover-worker-module "$PROVER_WASM"
+
+echo "==> Running wasm-opt -Os on shipped wasm modules..."
+for wasm in \
+  "$WEB/dist/${WASM_OUT_NAME}_bg.wasm" \
+  "$WEB/dist/workers/storage-worker-module_bg.wasm" \
+  "$WEB/dist/workers/prover-worker-module_bg.wasm"; do
+  "$WASM_OPT" -Os \
+    --enable-bulk-memory \
+    --enable-reference-types \
+    --enable-multivalue \
+    --enable-sign-ext \
+    --enable-nontrapping-float-to-int \
+    --enable-mutable-globals \
+    "$wasm" -o "$wasm"
+done
 
 write_worker_loader() {
   local name="$1"

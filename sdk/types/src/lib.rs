@@ -1,13 +1,17 @@
 mod amounts;
 mod chain_data;
+mod correlation;
 mod disclosure;
 mod ext_data;
+mod logging;
 mod policy_tx;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
+pub use correlation::*;
 pub use disclosure::*;
 pub use ext_data::*;
+pub use logging::*;
 pub use policy_tx::*;
 
 use serde::{Deserialize, Serialize};
@@ -207,12 +211,37 @@ pub struct OperationalFeedItem {
 }
 
 /// Wallet signature used to derive both privacy keypairs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KeyDerivationSignature(pub Vec<u8>);
 
+impl std::fmt::Debug for KeyDerivationSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KeyDerivationSignature(<redacted>)")
+    }
+}
+
+impl Drop for KeyDerivationSignature {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 /// Encryption private key
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EncryptionPrivateKey(pub [u8; 32]);
+
+impl std::fmt::Debug for EncryptionPrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EncryptionPrivateKey(<redacted>)")
+    }
+}
+
+impl Drop for EncryptionPrivateKey {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 /// Encryption public key
 #[derive(Debug, Clone)]
 pub struct EncryptionPublicKey(pub [u8; 32]);
@@ -227,8 +256,20 @@ pub struct EncryptionKeyPair {
 }
 
 /// Note ownership private key
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NotePrivateKey(pub [u8; 32]);
+
+impl std::fmt::Debug for NotePrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NotePrivateKey(<redacted>)")
+    }
+}
+
+impl Drop for NotePrivateKey {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
 
 /// Note ownership public key
 #[derive(Debug, Clone)]

@@ -3,7 +3,7 @@
  * @module ui/pool
  */
 
-import { client } from '../wasm-facade.js';
+import { client, isRuntimeReady } from '../wasm-facade.js';
 import { App } from './core.js';
 
 App.events.addEventListener('pool:selected', () => {
@@ -41,6 +41,10 @@ export async function createAppPool() {
     }
     if (!App.state.wallet.networkPassphrase) {
         throw new Error('Wallet network passphrase unavailable');
+    }
+    // wallet.connected flips true before the runtime finishes initializing
+    if (!isRuntimeReady()) {
+        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
     }
 
     closeAppPool();

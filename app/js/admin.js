@@ -2,6 +2,7 @@ import { contract } from '@stellar/stellar-sdk';
 import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { friendlyErrorMessage } from './facade-errors.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -74,7 +75,7 @@ function showToast(message, type = 'success', duration = 4000) {
   if (!toastContainer || !toastTemplate) return;
   const toastWrapper = toastTemplate.content.cloneNode(true).firstElementChild;
 
-  toastWrapper.querySelector('.toast-message').textContent = message;
+  toastWrapper.querySelector('.toast-message').textContent = friendlyErrorMessage(message);
 
   const icon = toastWrapper.querySelector('.toast-icon');
   if (type === 'success') {
