@@ -114,10 +114,21 @@ fn test_signer() -> Result<Handle<dyn Signer>> {
     )?) as Box<dyn Signer>))
 }
 
+/// Cargo profile for the current test binary.
+///
+/// Cargo does not set `PROFILE` at test runtime, so we use `debug_assertions`
+/// as the debug/release proxy.
+fn cargo_profile() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
+}
+
 fn test_prover_artifacts() -> Result<stellar_private_payments_sdk::ProverArtifacts> {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-    let profile = std::env::var("PROFILE").unwrap_or_else(|_| "debug".into());
-    let circuits = repo.join("target/circuits-artifacts").join(profile);
+    let circuits = repo.join("target/circuits-artifacts").join(cargo_profile());
     Ok(stellar_private_payments_sdk::ProverArtifacts {
         proving_key: std::fs::read(
             repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),

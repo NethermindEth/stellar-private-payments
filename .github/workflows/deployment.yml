@@ -33,6 +33,14 @@ jobs:
       - name: Install mdBook
         run: cargo install mdbook --no-default-features
 
+      - name: Cache binaryen and wasm-opt output
+        uses: actions/cache@0c45773b623bea8c8e75f6c82b208c3cf94ea4f9 # v4
+        with:
+          path: |
+            target/tmp/binaryen
+            target/tmp/witness-opt-cache
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory,reference-types,multivalue,sign-ext,nontrapping-float-to-int,mutable-globals
+
       - name: Install wasm build prerequisites
         run: |
           rustup target add wasm32-unknown-unknown

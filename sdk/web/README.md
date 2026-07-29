@@ -132,7 +132,7 @@ npm run check:types
 
 ## Build & publish (maintainers)
 
-Building the npm package from source requires the monorepo and `wasm-bindgen-cli` (see CONTRIBUTING.md):
+Building the npm package from source requires the monorepo, `wasm-bindgen-cli`, and [Binaryen](https://github.com/WebAssembly/binaryen) `wasm-opt` (see CONTRIBUTING.md):
 
 ```bash
 cargo build -p circuits --release
@@ -141,6 +141,17 @@ npm pack
 ```
 
 Published tarball: `dist/` (WASM, workers, **bundled circuits** + LGPL source bundle) and `js/` (entry + types).
+
+### Binaryen / `wasm-opt`
+
+The build script (`sdk/web/scripts/build.sh`) optimizes every shipped circuit witness module with `wasm-opt -Os`. It pins Binaryen **`version_131`** and downloads the matching release tarball for `x86_64-linux`, `aarch64-linux`, `x86_64-macos`, or `arm64-macos` when `wasm-opt` is not already on `PATH`. The download requires `curl`, `tar`, and `sha256sum` (or `shasum` on macOS).
+
+- To skip the automatic download, install Binaryen 131 locally and point `WASM_OPT` at the binary:
+  ```bash
+  export WASM_OPT=/usr/local/bin/wasm-opt
+  npm run build
+  ```
+- The optimization cache lives under `target/tmp/witness-opt-cache/` and is keyed by the actual `wasm-opt` version, the cargo profile, and the enabled feature flags. It is safe to delete at any time.
 
 ## npm install (app developers)
 

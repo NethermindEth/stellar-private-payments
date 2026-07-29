@@ -15,6 +15,7 @@ use anyhow::{Context, Result, ensure};
 use ark_bn254::Fr;
 use ark_circom::{WitnessCalculator as ArkWitnessCalculator, circom::R1CSFile};
 use num_bigint::BigInt;
+use types::PolicyFlags;
 use wasmer::{Module, Store};
 use zkhash::{ark_ff::Zero, fields::bn256::FpBN256 as Scalar};
 
@@ -44,11 +45,17 @@ fn workspace_root() -> PathBuf {
         .to_path_buf()
 }
 
-/// Cargo profile passed to the test runner (`release` by default, `debug` when
-/// running normal `cargo test`). Matches the pattern used in
+/// Cargo profile for the current test binary.
+///
+/// Cargo does not set `PROFILE` at test runtime, so we use `debug_assertions`
+/// as the debug/release proxy. This matches the pattern used in
 /// `sdk/tests/pool.rs`.
-fn cargo_profile() -> String {
-    std::env::var("PROFILE").unwrap_or_else(|_| "debug".into())
+fn cargo_profile() -> &'static str {
+    if cfg!(debug_assertions) {
+        "debug"
+    } else {
+        "release"
+    }
 }
 
 fn circuit_artifacts_dir() -> PathBuf {
@@ -145,7 +152,16 @@ fn assert_witness_identity(stem: &str, inputs: &Inputs) -> Result<()> {
     let opt = optimized_wasm_path(stem);
     let r1cs = r1cs_path(stem);
 
-    if !(unopt.exists() && opt.exists() && r1cs.exists()) {
+    let require_artifacts = std::env::var("REQUIRE_WITNESS_ARTIFACTS").is_ok_and(|v| !v.is_empty());
+    if require_artifacts {
+        ensure!(
+            unopt.exists(),
+            "missing unoptimized wasm: {}",
+            unopt.display()
+        );
+        ensure!(opt.exists(), "missing optimized wasm: {}", opt.display());
+        ensure!(r1cs.exists(), "missing r1cs: {}", r1cs.display());
+    } else if !(unopt.exists() && opt.exists() && r1cs.exists()) {
         eprintln!(
             "skipping {stem}: optimized/unoptimized wasm artifacts not built (run cargo build -p circuits + sdk-web build)"
         );
@@ -176,6 +192,20 @@ enum PolicyAspWitness {
     Membership,
     NonMembership,
     Both,
+}
+
+impl From<PolicyFlags> for PolicyAspWitness {
+    fn from(flags: PolicyFlags) -> Self {
+        match (
+            flags.requires_membership_proofs(),
+            flags.requires_non_membership_proofs(),
+        ) {
+            (false, false) => Self::None,
+            (true, false) => Self::Membership,
+            (false, true) => Self::NonMembership,
+            (true, true) => Self::Both,
+        }
+    }
 }
 
 struct MembershipTree {
@@ -464,13 +494,10 @@ fn run_policy_identity(stem: &str, asp: PolicyAspWitness) -> Result<()> {
 #[ignore = "needs circuits + sdk-web-build artifacts"]
 #[test]
 fn test_witness_identity_policy_tx_all() -> Result<()> {
-    for (stem, asp) in [
-        ("policy_tx_2_2", PolicyAspWitness::None),
-        ("policy_tx_2_2_A", PolicyAspWitness::Membership),
-        ("policy_tx_2_2_B", PolicyAspWitness::NonMembership),
-        ("policy_tx_2_2_AB", PolicyAspWitness::Both),
-    ] {
-        run_policy_identity(stem, asp)
+    for flags in PolicyFlags::all_flags() {
+        let stem = flags.circuit_stem();
+        let asp = PolicyAspWitness::from(flags);
+        run_policy_identity(&stem, asp)
             .with_context(|| format!("policy identity check failed for {stem}"))?;
     }
     Ok(())
