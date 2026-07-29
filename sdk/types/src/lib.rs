@@ -50,7 +50,8 @@ pub struct PoolConfigEntry {
     pub asset: AssetDescriptor,
     /// ASP policy flags for transact proofs.
     pub policy_flags: PolicyFlags,
-    /// Global View Key mode for this pool. Defaults to [`GvkMode::Off`] for backwards compatibility
+    /// Global View Key mode for this pool. Defaults to [`GvkMode::Off`] for
+    /// backwards compatibility
     #[serde(default)]
     pub gvk_mode: GvkMode,
     /// Pool administrator's Baby JubJub public key `D`, informational only
@@ -549,3 +550,94 @@ impl_byte_wrapper!(EncryptionPrivateKey);
 impl_byte_wrapper!(EncryptionPublicKey);
 impl_byte_wrapper!(NotePrivateKey);
 impl_byte_wrapper!(NotePublicKey);
+
+#[cfg(test)]
+mod pool_config_gvk_tests {
+    use super::*;
+
+    /// A snapshot of a real pre-GVK deployment config
+    const LEGACY_PRE_GVK_DEPLOYMENTS: &str = r#"{
+        "network": "testnet",
+        "deployer": "GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG",
+        "admin": "GCBU2YCJGVLRSPPFK3ADYNUEH2W6ZFNNJLX6IHCEZT54VOHZZNYNHXDG",
+        "asp_membership": "CDEFDJPNVWDWUUHGHGGZ56FEPSSJHQLGRKS6OWIRKGRYRWSBNMLW7J5K",
+        "asp_non_membership": "CBEPJBHP6X4K7KWLRPFUGPRS3OM6HWXTWIVN3M2LCGZZHCCTHHSYAAF3",
+        "verifiers": {
+            "B": "CCNOLQUUPEZTPNZ7LMS3PYE5NVYNNTKTHJP7HDK4NJMH4JPKFP7HOHD4",
+            "AB": "CACW63UB56MYFBPEOU2HSWLUH6ZME3CGFIZNK6AZYGVUHDNR3Q3TTK3L"
+        },
+        "public_key_registry": "CDK75EQA2G4E4N34CWY7ALJ4EIQMNVBOFMHAVIF3BBY7IUDNHKHNDA36",
+        "pools": [
+            {
+                "poolContractId": "CAWCZ6EO4PM5EZOH5K7XSW3R46DGLOT3XSEH36OA5EOZUSJ5XS7BX6XI",
+                "tokenContractId": "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC",
+                "deploymentLedger": 3773948,
+                "enabled": true,
+                "policyFlags": ["blocklist"],
+                "asset": {"kind": "native"}
+            },
+            {
+                "poolContractId": "CAJJT5YV4BMFTHEOO5FGO2G56TEJKM4G4FW7FS4DYBLLLLHSAYUZWT74",
+                "tokenContractId": "CCUUDM434BMZMYWYDITHFXHDMIVTGGD6T2I5UKNX5BSLXLW7HVR4MCGZ",
+                "deploymentLedger": 3773952,
+                "enabled": true,
+                "policyFlags": ["allowlist", "blocklist"],
+                "asset": {
+                    "kind": "classic",
+                    "code": "EURC",
+                    "issuer": "GB3Q6QDZYTHWT7E5PVS3W7FUT5GVAFC5KSZFFLPU25GO7VTC3NM2ZTVO"
+                }
+            }
+        ]
+    }"#;
+
+    #[test]
+    fn legacy_pre_gvk_deployments_json_parses_with_gvk_off() -> Result<()> {
+        let config: ContractConfig = serde_json::from_str(LEGACY_PRE_GVK_DEPLOYMENTS)?;
+
+        assert!(
+            !config.pools.is_empty(),
+            "fixture must have pools to be a meaningful test"
+        );
+        for pool in &config.pools {
+            assert_eq!(pool.gvk_mode, GvkMode::Off);
+            assert_eq!(pool.gvk_authority_pub_key, None);
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn pool_config_entry_round_trips_with_gvk_fields_set() -> Result<()> {
+        let json = r#"{
+            "poolContractId": "CPOOL",
+            "tokenContractId": "CTOKEN",
+            "deploymentLedger": 1,
+            "enabled": true,
+            "asset": {"kind": "native"},
+            "policyFlags": [],
+            "gvkMode": "traceable",
+            "gvkAuthorityPubKey": {
+                "x": "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "y": "0x0000000000000000000000000000000000000000000000000000000000000002"
+            }
+        }"#;
+
+        let pool: PoolConfigEntry = serde_json::from_str(json)?;
+        assert_eq!(pool.gvk_mode, GvkMode::Traceable);
+        assert_eq!(
+            pool.gvk_authority_pub_key,
+            Some(BabyJubJubPoint {
+                x: Field(U256::from(1)),
+                y: Field(U256::from(2)),
+            })
+        );
+
+        let round_tripped = serde_json::to_string(&pool)?;
+        let parsed: PoolConfigEntry = serde_json::from_str(&round_tripped)?;
+        assert_eq!(parsed.gvk_mode, pool.gvk_mode);
+        assert_eq!(parsed.gvk_authority_pub_key, pool.gvk_authority_pub_key);
+
+        Ok(())
+    }
+}

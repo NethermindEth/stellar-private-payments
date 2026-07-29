@@ -81,8 +81,8 @@ pub struct GlobalViewKeyMemo {
     /// This is informational only and is not verified by
     /// [`GlobalViewKeyMemo::validate`]: the memo is a portable artifact that may be
     /// inspected apart from live pool configuration. Callers that need the
-    /// security guarantee must cross-check this value against the pool's registered GVK authority
-    /// key themselves.
+    /// security guarantee must cross-check this value against the pool's
+    /// registered GVK authority key themselves.
     pub admin_pub_key: BabyJubJubPoint,
     /// Per-transaction nonce bound into every ciphertext in this memo.
     pub nonce: Field,
@@ -130,7 +130,8 @@ impl GlobalViewKeyMemo {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum GvkMode {
-    /// No Global View Key encryption. Pool uses the vanila policy-transact circuits.
+    /// No Global View Key encryption. Pool uses the vanilla policy-transact
+    /// circuits.
     #[default]
     Off,
     /// Output notes only.
