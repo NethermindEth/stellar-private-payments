@@ -13,6 +13,7 @@ import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { getTransactionErrorMessage } from './errors.js';
 import { confirmAction } from './confirm.js';
 import { onEnter } from './keys.js';
 
@@ -357,7 +358,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitDeposit(button, amount.value, pool);
             } catch (error) {
-                Toast.show(error?.message || 'Deposit failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -400,7 +401,7 @@ export const Transactions = {
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
-                const pool = selectedPool();
+                const  pool = selectedPool();
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
                     : Utils.shortAddress(noteKey);
@@ -415,7 +416,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
-                Toast.show(error?.message || 'Transfer failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -474,7 +475,7 @@ export const Transactions = {
                 if (!confirmed) return;
                 await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
-                Toast.show(error?.message || 'Withdraw failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -544,7 +545,7 @@ export const Transactions = {
                     document.getElementById('advanced-public-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Advanced transaction failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -565,7 +566,7 @@ export const Transactions = {
             if (Array.isArray(result.hashes) && result.hashes.length) {
                 this.showSubmittedToasts(result.hashes, label);
             }
-            Toast.show(result.message || `${label} failed`, 'error', 7000);
+            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000);
             return false;
         }
         if (result?.status === 'ok') {

@@ -7,6 +7,11 @@ use serde::Serialize;
 
 use crate::{config::CliConfig, onboard, output, session::ClientSession};
 
+#[tracing::instrument(
+    name = "cmd_register",
+    skip_all,
+    fields(correlation_id = %types::correlation_id_or_new())
+)]
 pub fn run(config: &CliConfig, json: bool) -> Result<()> {
     let account = config.require_account()?;
     onboard::ensure_ready(config, &account)?;
@@ -40,7 +45,10 @@ pub fn register_account(
     account: &crate::account::Account,
     network: &crate::stellar_cli::StellarNetwork,
 ) -> Result<String> {
-    log::info!("Preparing address registration for {}", account.address);
+    log::info!(
+        "Preparing address registration for {}",
+        types::Sensitive(&account.address)
+    );
     let result = ClientSession::new(config, account, network, true)?.register_public_keys()?;
     log::info!("Registration confirmed: {}", result.tx_hash);
     Ok(result.tx_hash)

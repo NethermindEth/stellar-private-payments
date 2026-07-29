@@ -4,6 +4,8 @@
   - [Install the CLI](./introduction.md#install-the-cli)
 - [Contributing](./contributing.md)
 - [Security](./security.md)
+  - [Privacy & Event Trade-offs](./privacy-tradeoffs.md)
+
 - [Selective Disclosure](./disclosure.md)
 - [Global View Key](./global_view_key.md)
 - [App](./app.md)
