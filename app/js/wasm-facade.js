@@ -18,7 +18,7 @@ import init, {
   configureTelemetry,
   dump_recent_logs,
   debugLogsEnabled as sdkDebugLogsEnabled,
-} from 'stellar-private-payments-sdk-web';
+} from 'stellar-private-payments';
 
 import { AppStorage } from './app-storage.js';
 

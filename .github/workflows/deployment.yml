@@ -41,7 +41,7 @@ jobs:
           path: |
             target/tmp/binaryen
             target/tmp/witness-opt-cache
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory,reference-types,multivalue,sign-ext,nontrapping-float-to-int,mutable-globals
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory-reference-types-multivalue-sign-ext-nontrapping-float-to-int-mutable-globals
 
       - name: Install wasm-bindgen-cli
         uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
