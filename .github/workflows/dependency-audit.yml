@@ -40,7 +40,10 @@ jobs:
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: cargo-deny@0.18.9
+
       - name: Run audit-check action
-        run: |
-          which cargo-deny || cargo install cargo-deny --locked --version 0.18.9
-          cargo deny check
+        run: cargo deny check

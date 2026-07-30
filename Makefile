@@ -9,6 +9,10 @@ RELEASE ?=
 # e.g. `make serve LOGS=1`, `make build LOGS=1`.
 LOGS ?=
 
+# CI is set by most CI runners (including GitHub Actions). Use `npm ci` there for
+# reproducible, faster installs; keep `npm install` for local development.
+NPM_CMD := $(if $(CI),npm ci,npm install)
+
 .PHONY: release
 release: RELEASE := 1
 release: build
@@ -60,8 +64,8 @@ sdk-web-build-debug:
 .PHONY: install
 install:
 	@echo "Installing frontend dependencies..."
-	@npm install --prefix app
-	@npm install --prefix sdk/web
+	@$(NPM_CMD) --prefix app
+	@$(NPM_CMD) --prefix sdk/web
 	@rustup target add wasm32v1-none
 	@command -v trunk >/dev/null 2>&1 || cargo install trunk --locked
 

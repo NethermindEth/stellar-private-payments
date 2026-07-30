@@ -31,7 +31,9 @@ jobs:
         uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5
 
       - name: Install mdBook
-        run: cargo install mdbook --no-default-features
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: mdbook@0.5.4
 
       - name: Cache binaryen and wasm-opt output
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -41,10 +43,18 @@ jobs:
             target/tmp/witness-opt-cache
           key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory,reference-types,multivalue,sign-ext,nontrapping-float-to-int,mutable-globals
 
-      - name: Install wasm build prerequisites
-        run: |
-          rustup target add wasm32-unknown-unknown
-          cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+      - name: Install wasm-bindgen-cli
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.126
+
+      - name: Add wasm32 target
+        run: rustup target add wasm32-unknown-unknown
+
+      - name: Install Trunk
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: trunk@0.21.14
 
       - name: Build app (Trunk)
         run: |
@@ -69,7 +79,7 @@ jobs:
         run: mdbook build docs/
 
       - name: Build API documentation
-        run: cargo doc --no-deps --workspace --release
+        run: cargo doc --no-deps --workspace
 
       - name: Combine outputs
         run: |

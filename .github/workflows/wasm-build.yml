@@ -39,7 +39,9 @@ jobs:
         run: cargo build -p circuits --release
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.126
 
       - name: Setup Node.js
         uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
@@ -79,7 +81,9 @@ jobs:
         run: npm ci --prefix app
 
       - name: Install Trunk
-        run: cargo install trunk --locked
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: trunk@0.21.14
 
       - name: Smoke-test Trunk app build
         run: trunk build --release --dist /tmp/app-dist
@@ -105,7 +109,9 @@ jobs:
           cache-targets: "true"
 
       - name: Install wasm-bindgen-cli
-        run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: wasm-bindgen-cli@0.2.126
 
       - name: Run wasm tests
         run: cargo test --target wasm32-unknown-unknown -p stellar
