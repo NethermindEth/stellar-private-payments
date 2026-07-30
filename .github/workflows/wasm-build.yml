@@ -67,7 +67,6 @@ jobs:
       # excluded from Miri runs so other workflows do not try to execute them.
       - name: Run witness-identity tests
         env:
-          PROFILE: release
           REQUIRE_WITNESS_ARTIFACTS: "1"
         run: cargo test -p e2e-tests --release test_witness_identity -- --ignored
 
