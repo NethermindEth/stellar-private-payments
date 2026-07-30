@@ -10,7 +10,7 @@ use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
 use std::{collections::HashMap, str::FromStr};
 use stellar_strkey::ed25519;
-use stellar_xdr::{curr as xdr, curr::ReadXdr};
+use stellar_xdr::{self as xdr, ReadXdr};
 
 use types::{
     AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
@@ -230,7 +230,7 @@ impl StateFetcher {
 
             if !drift.is_empty() {
                 last_drift = drift.join(", ");
-                log::debug!(
+                tracing::debug!(
                     "snapshot drift detected while fetching pool roots (attempt {attempt}/{MAX_SNAPSHOT_ATTEMPTS}): {last_drift}"
                 );
                 if attempt < MAX_SNAPSHOT_ATTEMPTS {

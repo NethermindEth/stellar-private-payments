@@ -93,9 +93,17 @@ const chain = await client.allContractsData();
 | `aspSecret()` | ASP membership blinding |
 | `userNotes(limit)` | Notes across pools (newest first) |
 | `isRegistered()` | On-chain public key registry entry exists |
-| `deriveAspUserLeaf({ notePublicKey?, membershipBlinding? })` | ASP membership tree leaf |
+| `deriveAspUserLeaf()` | ASP membership tree leaf from stored keys |
 | `registerPublicKeys(options?)` | On-chain key registry |
 | `pool({ poolContract })` | Open a `PrivatePool` session |
+
+### Free functions
+
+| Function | Description |
+|----------|-------------|
+| `deriveAspUserLeaf(notePublicKey, membershipBlinding)` | ASP membership leaf from explicit hex inputs |
+| `bootnodeRequired(rpcUrl, storage)` | Whether historical-sync bootnode is needed |
+| `verifySelectiveDisclosure(...)` | Walletless disclosure verification |
 
 ### `PrivatePool`
 
@@ -106,6 +114,28 @@ Matches `stellar_private_payments_sdk::PrivatePool`: `balance`, `notes`, `estima
 ### Signer
 
 Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
+
+## Logging & Diagnostics
+
+The SDK provides integrated telemetry logging using `tracing` in Rust. You can configure and control logging from JavaScript:
+
+```js
+import { configureTelemetry, dump_recent_logs, set_log_level } from 'stellar-private-payments-sdk-web';
+
+// Initialize or update telemetry settings
+configureTelemetry({
+  level: 'debug',             // 'info' | 'debug' | 'trace'
+  sink: 'both',               // 'console' | 'ringBuffer' | 'both'
+  ringBufferBytes: 256 * 1024, // 256 KiB buffer
+  revealSensitive: true       // Reveal Tier-1 values (debug profile only)
+});
+
+// Dump recent logs (main thread + storage/prover workers) for diagnostic reports
+const logs = await dump_recent_logs();
+
+// Update log level filter on the fly
+set_log_level('info');
+```
 
 ## TypeScript
 

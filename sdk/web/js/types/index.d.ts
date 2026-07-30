@@ -49,14 +49,9 @@ export interface AccountClient {
   aspSecret(): Promise<string>;
   userNotes(limit: number): Promise<unknown>;
   isRegistered(): Promise<boolean>;
-  deriveAspUserLeaf(options?: DeriveAspUserLeafOptions | null): Promise<string>;
+  deriveAspUserLeaf(): Promise<string>;
   registerPublicKeys(options?: RegisterPublicKeysOptions | null): Promise<string>;
   pool(options: PoolOptions): Promise<PrivatePool>;
-}
-
-export interface DeriveAspUserLeafOptions {
-  notePublicKey?: string;
-  membershipBlinding?: string;
 }
 
 /** Deployment runtime returned by {@link Client.new}. */
@@ -83,6 +78,16 @@ export declare function bootnodeRequired(
   rpcUrl: string,
   storage: Storage,
 ): Promise<boolean>;
+
+/**
+ * Derive the ASP membership leaf from explicit public inputs.
+ * @param notePublicKey `0x`-prefixed 32-byte hex
+ * @param membershipBlinding `0x`-prefixed 32-byte hex field
+ */
+export declare function deriveAspUserLeaf(
+  notePublicKey: string,
+  membershipBlinding: string,
+): string;
 
 /** Walletless selective-disclosure verification (no storage / Client). */
 export declare function verifySelectiveDisclosure(

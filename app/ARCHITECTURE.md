@@ -41,7 +41,7 @@ The WASM layer exposes four JS handles with different scope:
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
-`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. Free helpers such as `deriveAspUserLeaf(notePublicKey, membershipBlinding)` need neither wallet nor storage.
 
 **JS UI (main thread)**
 
@@ -184,7 +184,7 @@ App-only persistence on top of `Storage.call`: explorer settings, bootnode confi
 
 **`app/js/wallet.js`**
 
-Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`.
+Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Freighter-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. The network-URL call (`getNetworkDetails` for `sorobanRpcUrl`) is a separate, permanent exception rather than a Draft gap: SEP-0043's `getNetwork` has no RPC-URL field at all, standard or Draft, so there is no SEP path to migrate to.
 
 **Build (Trunk)**
 

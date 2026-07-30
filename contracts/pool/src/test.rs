@@ -932,3 +932,49 @@ fn transact_does_not_reject_boundary_canonical_public_input() {
         Err(Ok(Error::NonCanonicalPublicInput))
     ));
 }
+
+#[test]
+fn test_pool_events_exact_shapes() {
+    use crate::pool::{NewCommitmentEvent, NewNullifierEvent};
+    use soroban_sdk::{events::Event, testutils::Events};
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let contract_id = register_pool(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        policy::ALLOWLIST_BIT | policy::BLOCKLIST_BIT,
+    );
+    let commitment = U256::from_u32(&env, 123);
+    let nullifier = U256::from_u32(&env, 456);
+    let encrypted_output = Bytes::from_array(&env, &[0u8; 120]);
+
+    env.as_contract(&contract_id, || {
+        let event1 = NewCommitmentEvent {
+            commitment: commitment.clone(),
+            index: 0,
+            encrypted_output: encrypted_output.clone(),
+        };
+        event1.publish(&env);
+
+        let event2 = NewNullifierEvent {
+            nullifier: nullifier.clone(),
+        };
+        event2.publish(&env);
+    });
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 2);
+
+    let expected_commitment = NewCommitmentEvent {
+        commitment,
+        index: 0,
+        encrypted_output,
+    }
+    .to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[0], expected_commitment);
+
+    let expected_nullifier = NewNullifierEvent { nullifier }.to_xdr(&env, &contract_id);
+    assert_eq!(events.events()[1], expected_nullifier);
+}

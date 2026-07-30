@@ -1,7 +1,7 @@
 //! Build and simulate pool contract transactions for signing/submission.
 
 use anyhow::{Result, anyhow};
-use stellar_xdr::curr::{self as xdr};
+use stellar_xdr::{self as xdr};
 use types::ExtData;
 
 use crate::{
@@ -116,7 +116,7 @@ mod tests {
     use futures::executor::block_on;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use stellar_strkey::ed25519;
-    use stellar_xdr::curr::{Limits, ReadXdr, WriteXdr};
+    use stellar_xdr::{Limits, ReadXdr, WriteXdr};
     use types::ContractConfig;
 
     const TEST_CONFIG_JSON: &str = r#"{

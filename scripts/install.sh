@@ -131,4 +131,8 @@ case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) echo "note: $BIN_DIR is not on your PATH; add it, e.g. export PATH=\"$BIN_DIR:\$PATH\"" ;;
 esac
+if ! command -v stellar >/dev/null 2>&1; then
+  echo "note: Stellar CLI is required by 'spp' but was not found. Install it with:"
+  echo "  curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh"
+fi
 echo "Try: spp --help   |   spp license"

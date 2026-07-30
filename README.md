@@ -20,10 +20,11 @@ The system incorporates **Association Set Provider (ASPs)** as a control mechani
 ## Features
 
 - **Private Payments**: Deposit, transfer, and withdraw tokens without revealing transaction amounts or sender/receiver relationships
-- **Zero-Knowledge Proofs**: Groth16 proofs generated via Circom circuits
+- **Zero-Knowledge Proofs**: Groth16 (over BN254) proofs generated via Circom circuits.
 - **Administrative Controls**: ASP-based membership and non-membership proofs for illicit activity safeguards
 - **Browser-Based Proving**: Client-side proof generation using WebAssembly
 - **Stellar Integration**: Built on Soroban smart contracts
+- **SEP-0043 Wallet Interface**: Standardized wallet signing calls with structured user-rejection codes; connect/permission calls remain wallet-specific while SEP-0043 is Draft (see [app/ARCHITECTURE.md](app/ARCHITECTURE.md))
 
 Learn more in [the blogpost](https://www.nethermind.io/blog/stellar-private-payments-confidential-and-compliant-transfers-on-public-rails).
 
@@ -74,7 +75,7 @@ The main transaction circuit proves:
 #### Smart Contracts
 
 - **Pool**: Main contract handling deposits, transfers, and withdrawals
-- **Circom Groth16 Verifier**: On-chain verification of ZK proofs
+- **Circom Groth16 (BN254) Verifier**: On-chain verification of ZK proofs
 - **ASP Membership**: Merkle tree of approved public keys
 - **ASP Non-Membership**: Sparse Merkle tree for exclusion proofs
 - **Public key registry**: A public address book mapping Stellar addresses to user's SPP public keys. \
@@ -91,6 +92,13 @@ curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh |
 This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64),
 verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
 data dir (circuits, policy proving keys, license/notice texts). Then run `spp --help`.
+
+The [Stellar CLI](https://developers.stellar.org/docs/tools/cli/install-cli) is required.
+Install it separately with the official command:
+
+```bash
+curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+```
 
 To install a specific release
 

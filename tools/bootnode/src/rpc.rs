@@ -67,11 +67,11 @@ impl BootnodeRpc {
     //    ▼             ▼                  ┌─────┴─────┐
     //  200 OK        in_sync?            hit         miss
     //                │yes   │no           │           │
-    //                ▼      ▼             ▼           ▼
-    //             handoff   -32004      200 OK      in_sync?
-    //             (tip==0: -32004 warming up)       │yes   │no
-    //                                               ▼      ▼
-    //                                            handoff  -32004
+    //                ▼      ▼     terminal empty     in_sync?
+    //             handoff   -32004   +in_sync?       │yes   │no
+    //             (tip==0: -32004)  yes│    │no      ▼      ▼
+    //                                  ▼    ▼     handoff -32004
+    //                               handoff 200
     async fn get_events_handler(&self, params: &GetEventsParams) -> RpcResult<GetEventsResponse> {
         let parsed = params.parsed().map_err(|e| invalid_params(e.to_string()))?;
         if !params.is_allowed_filters(self.state.contract_ids.as_ref()) {
@@ -81,6 +81,7 @@ impl BootnodeRpc {
         let tip = self.state.ledger_tip.load(Ordering::Relaxed);
         let tip_known = tip > 0;
         let cutoff_ledger = tip.saturating_sub(self.state.cfg.cutoff_ledgers());
+        let in_sync = tip_known && self.state.in_sync.load(Ordering::Relaxed);
 
         let handoff_ledger = match (parsed.start_ledger, parsed.cursor.as_deref()) {
             (Some(start_ledger), None) => Some(start_ledger),
@@ -113,10 +114,16 @@ impl BootnodeRpc {
                         internal_error(e)
                     })?
                 else {
-                    return self
-                        .cache_miss_or_handoff(tip, tip_known, cutoff_ledger)
-                        .await;
+                    return self.cache_miss_or_handoff(tip, tip_known, cutoff_ledger, in_sync);
                 };
+
+                // Terminal empty while caught up: tip self-loop or no next
+                // cached page. Mid-history quiet gaps still have a next page
+                // and must return 200 so clients can keep walking the chain.
+                if tip_known && self.is_terminal_empty(cursor, &result, in_sync).await? {
+                    counter!("bootnode_handoffs_total").increment(1);
+                    return Err(retention_handoff(cutoff_ledger));
+                }
 
                 counter!("bootnode_cache_hits_total").increment(1);
                 return Ok(result);
@@ -147,36 +154,24 @@ impl BootnodeRpc {
         })?;
 
         let Some(result) = cached else {
-            return self
-                .cache_miss_or_handoff(tip, tip_known, cutoff_ledger)
-                .await;
+            return self.cache_miss_or_handoff(tip, tip_known, cutoff_ledger, in_sync);
         };
 
         counter!("bootnode_cache_hits_total").increment(1);
         Ok(result)
     }
 
-    async fn cache_miss_or_handoff(
+    fn cache_miss_or_handoff(
         &self,
         tip: u32,
         tip_known: bool,
         cutoff_ledger: u32,
+        in_sync: bool,
     ) -> RpcResult<GetEventsResponse> {
         if !tip_known {
             counter!("bootnode_cache_misses_total").increment(1);
             return Err(cache_miss_for_tip(tip));
         }
-
-        let in_sync = self
-            .state
-            .storage
-            .load_kv()
-            .await
-            .map_err(|e| {
-                counter!("bootnode_handler_errors_total").increment(1);
-                internal_error(e)
-            })?
-            .in_sync;
 
         if in_sync {
             counter!("bootnode_handoffs_total").increment(1);
@@ -185,6 +180,34 @@ impl BootnodeRpc {
 
         counter!("bootnode_cache_misses_total").increment(1);
         Err(cache_miss_for_tip(tip))
+    }
+
+    /// True when an empty cached page is the end of the archive chain while
+    /// the indexer is caught up (tip self-loop, or no next page cached).
+    async fn is_terminal_empty(
+        &self,
+        request_cursor: &str,
+        result: &GetEventsResponse,
+        in_sync: bool,
+    ) -> RpcResult<bool> {
+        if !result.events.is_empty() || !in_sync {
+            return Ok(false);
+        }
+        // Tip empties typically echo the same cursor; nothing further to serve.
+        if result.cursor == request_cursor {
+            return Ok(true);
+        }
+        // Mid-history quiet gap: next cursor still has a cached page.
+        let next = self
+            .state
+            .storage
+            .get_cached_get_events_by_cursor(&result.cursor)
+            .await
+            .map_err(|e| {
+                counter!("bootnode_handler_errors_total").increment(1);
+                internal_error(e)
+            })?;
+        Ok(next.is_none())
     }
 }
 

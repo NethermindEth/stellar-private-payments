@@ -6,11 +6,13 @@
  * @module ui/transactions
  */
 
-import { client } from '../wasm-facade.js';
+import { client, isRuntimeReady } from '../wasm-facade.js';
+import { friendlyErrorMessage } from '../facade-errors.js';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
+import { getTransactionErrorMessage } from './errors.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -39,6 +41,9 @@ function parseAmount(value, { allowNegative = false } = {}) {
 function requireWallet() {
     if (!App.state.wallet.address || !App.state.wallet.networkPassphrase) {
         throw new Error('Connect your wallet first');
+    }
+    if (!isRuntimeReady()) {
+        throw new Error('Still connecting to your wallet. Please wait a moment and try again.');
     }
 }
 
@@ -204,7 +209,7 @@ function wireAdvancedOutputRow(row) {
             try {
                 await lookupRecipient(value, refs);
             } catch (error) {
-                refs.warning.textContent = error?.message || 'Lookup failed';
+                refs.warning.textContent = friendlyErrorMessage(error?.message) || 'Lookup failed';
             }
         } else {
             lookupRecipient('', refs);
@@ -280,7 +285,7 @@ export const Transactions = {
                     document.getElementById('deposit-amount').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Deposit failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -302,7 +307,7 @@ export const Transactions = {
                 try {
                     await lookupRecipient(value, transferRefs);
                 } catch (error) {
-                    transferRefs.warning.textContent = error?.message || 'Lookup failed';
+                    transferRefs.warning.textContent = friendlyErrorMessage(error?.message) || 'Lookup failed';
                 }
             } else {
                 lookupRecipient('', transferRefs);
@@ -342,7 +347,7 @@ export const Transactions = {
                     transferRefs.manual.classList.add('hidden');
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Transfer failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -374,7 +379,7 @@ export const Transactions = {
                     document.getElementById('withdraw-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Withdraw failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -433,7 +438,7 @@ export const Transactions = {
                     document.getElementById('advanced-public-recipient').value = '';
                 }
             } catch (error) {
-                Toast.show(error?.message || 'Advanced transaction failed', 'error');
+                Toast.show(getTransactionErrorMessage(error, 'Advanced transaction'), 'error');
             } finally {
                 setLoading(button, false);
             }
@@ -454,7 +459,7 @@ export const Transactions = {
             if (Array.isArray(result.hashes) && result.hashes.length) {
                 this.showSubmittedToasts(result.hashes, label);
             }
-            Toast.show(result.message || `${label} failed`, 'error', 7000);
+            Toast.show(getTransactionErrorMessage({ message: result.message, code: result.code }, label) || `${label} failed`, 'error', 7000);
             return false;
         }
         if (result?.status === 'ok') {

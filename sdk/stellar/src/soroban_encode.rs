@@ -1,7 +1,7 @@
 //! Off-chain Soroban `ScVal` encoding for pool contract calls.
 
 use anyhow::{Result, anyhow};
-use stellar_xdr::curr::{self as xdr, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal};
+use stellar_xdr::{self as xdr, ScAddress, ScMap, ScMapEntry, ScSymbol, ScVal};
 use types::{ExtData, Field};
 
 use crate::conversions::{bytes_to_scval, field_to_scval_u256, i128_to_i256_scval};
@@ -134,7 +134,7 @@ mod tests {
     };
 
     const TEST_ACCOUNT: &str = "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF";
-    use stellar_xdr::curr::{Limits, WriteXdr};
+    use stellar_xdr::{Limits, WriteXdr};
     use types::{ExtAmount, U256};
 
     fn scval_xdr(sc: &ScVal) -> std::vec::Vec<u8> {

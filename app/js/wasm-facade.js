@@ -13,7 +13,11 @@ import init, {
   FreighterSigner,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
+  deriveAspUserLeaf as sdkDeriveAspUserLeaf,
   verifySelectiveDisclosure as sdkVerifySelectiveDisclosure,
+  configureTelemetry,
+  dump_recent_logs,
+  debugLogsEnabled as sdkDebugLogsEnabled,
 } from 'stellar-private-payments-sdk-web';
 
 import { AppStorage } from './app-storage.js';
@@ -85,7 +89,7 @@ function wrapSdkClient(sdk) {
                 userNotes: (limit) => boundAccount.userNotes(limit),
                 isRegistered: () => boundAccount.isRegistered(),
                 registerPublicKeys: (options) => boundAccount.registerPublicKeys(options ?? {}),
-                deriveAspUserLeaf: (options) => boundAccount.deriveAspUserLeaf(options),
+                deriveAspUserLeaf: () => boundAccount.deriveAspUserLeaf(),
                 pool: (options) => boundAccount.pool(options),
             };
         },
@@ -177,6 +181,17 @@ export async function initializeRuntime(rpcUrl, { bootnodeUrl } = {}) {
 }
 
 /**
+ * Derive the ASP membership leaf from explicit public inputs (no account session).
+ * @param {string} notePublicKey `0x`-prefixed 32-byte hex
+ * @param {string} membershipBlinding `0x`-prefixed 32-byte hex field
+ * @returns {Promise<string>} leaf as `0x` hex
+ */
+export async function deriveAspUserLeaf(notePublicKey, membershipBlinding) {
+    await ensureWasmInit();
+    return sdkDeriveAspUserLeaf(notePublicKey, membershipBlinding);
+}
+
+/**
  * Verify a selective-disclosure receipt with no wallet, no local storage, and
  * no prior `initializeRuntime` call — skips the OPFS/SQLite storage worker
  * entirely, since verification never reads local state.
@@ -197,4 +212,21 @@ export function client() {
 /** Whether a runtime (wallet-bound or anonymous) is already open. */
 export function isRuntimeReady() {
     return wrappedClient !== null;
+}
+
+/** Configure telemetry settings in the WASM SDK. */
+export async function configureTelemetrySettings(config) {
+    await ensureWasmInit();
+    configureTelemetry(config);
+}
+
+/** Dump recent logs from the WASM SDK ring buffer. */
+export async function dumpTelemetryLogs() {
+    await ensureWasmInit();
+    return dump_recent_logs();
+}
+
+/** Whether the WASM build supports debug/trace logging and sensitive reveal. */
+export function debugLogsEnabled() {
+    return sdkDebugLogsEnabled();
 }

@@ -1,16 +1,24 @@
-use super::{InsertGetEventsPage, KvState, Storage};
+use super::{
+    CompressStats, InsertGetEventsPage, KvState, PageMeta, Storage, apply_result_cursor,
+    plan_empty_compression,
+};
 use crate::messages::GetEventsResponse;
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use async_trait::async_trait;
-use deadpool_postgres::Pool;
+use deadpool_postgres::{Client, Pool};
 use tokio_postgres::types::Json;
 
 pub struct Postgres {
     pool: Pool,
+    deployment_id: String,
 }
 
 impl Postgres {
-    pub async fn connect(database_url: &str, max_connections: usize) -> Result<Self> {
+    pub async fn connect(
+        database_url: &str,
+        max_connections: usize,
+        deployment_id: impl Into<String>,
+    ) -> Result<Self> {
         let pg_cfg: tokio_postgres::Config = database_url
             .parse()
             .context("failed to parse DATABASE_URL")?;
@@ -19,27 +27,149 @@ impl Postgres {
             .max_size(max_connections)
             .build()
             .expect("pool build cannot fail");
-        Ok(Self { pool })
+        Ok(Self {
+            pool,
+            deployment_id: deployment_id.into(),
+        })
     }
 
     pub async fn init(&self) -> Result<()> {
-        let client = self.pool.get().await?;
+        let mut client = self.pool.get().await?;
+        migrate(&mut client).await?;
         client
-            .batch_execute(
+            .execute(
                 r#"
-CREATE TABLE IF NOT EXISTS indexer_state (
-  id SMALLINT PRIMARY KEY,
+INSERT INTO indexer_state (deployment_id) VALUES ($1)
+ON CONFLICT (deployment_id) DO NOTHING
+"#,
+                &[&self.deployment_id],
+            )
+            .await?;
+        Ok(())
+    }
+
+    fn deployment_id(&self) -> &str {
+        &self.deployment_id
+    }
+
+    async fn list_page_meta(&self, client: &Client) -> Result<Vec<PageMeta>> {
+        let rows = client
+            .query(
+                r#"
+SELECT id, cursor_in, start_ledger, cursor_out, last_event_ledger, latest_ledger
+FROM get_events_pages
+WHERE deployment_id = $1
+ORDER BY id
+"#,
+                &[&self.deployment_id()],
+            )
+            .await?;
+
+        let mut pages = Vec::with_capacity(rows.len());
+        for row in rows {
+            let id: i64 = row.get(0);
+            let cursor_in: Option<String> = row.get(1);
+            let start_ledger: Option<i32> = row.get(2);
+            let cursor_out: String = row.get(3);
+            let last_event_ledger: Option<i32> = row.get(4);
+            let latest_ledger: i32 = row.get(5);
+            pages.push(PageMeta {
+                id,
+                cursor_in,
+                start_ledger: start_ledger
+                    .map(|v| u32::try_from(v.max(0)).context("start_ledger exceeds u32"))
+                    .transpose()?,
+                cursor_out,
+                last_event_ledger: last_event_ledger
+                    .map(|v| u32::try_from(v.max(0)).context("last_event_ledger exceeds u32"))
+                    .transpose()?,
+                latest_ledger: u32::try_from(latest_ledger.max(0))
+                    .context("latest_ledger exceeds u32")?,
+            });
+        }
+        Ok(pages)
+    }
+
+    async fn load_result(&self, client: &Client, id: i64) -> Result<GetEventsResponse> {
+        let row = client
+            .query_one(
+                "SELECT result FROM get_events_pages WHERE id = $1 AND deployment_id = $2",
+                &[&id, &self.deployment_id()],
+            )
+            .await
+            .with_context(|| format!("load result for page id={id}"))?;
+        let Json(result): Json<GetEventsResponse> = row.get(0);
+        Ok(result)
+    }
+}
+
+async fn migrate(client: &mut Client) -> Result<()> {
+    client
+        .batch_execute(
+            r#"
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INTEGER PRIMARY KEY,
+  applied_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+"#,
+        )
+        .await?;
+
+    let applied = applied_versions(client).await?;
+    for (version, sql) in MIGRATIONS {
+        if applied.contains(version) {
+            continue;
+        }
+        let tx = client.transaction().await?;
+        tx.batch_execute(sql)
+            .await
+            .with_context(|| format!("failed applying schema migration {version}"))?;
+        tx.execute(
+            "INSERT INTO schema_migrations (version) VALUES ($1)",
+            &[version],
+        )
+        .await?;
+        tx.commit().await?;
+        tracing::info!(version, "applied schema migration");
+    }
+    Ok(())
+}
+
+async fn applied_versions(client: &Client) -> Result<std::collections::HashSet<i32>> {
+    let rows = client
+        .query("SELECT version FROM schema_migrations", &[])
+        .await?;
+    let mut versions = std::collections::HashSet::with_capacity(rows.len());
+    for row in rows {
+        versions.insert(row.get(0));
+    }
+    Ok(versions)
+}
+
+/// Ordered schema migrations. Each runs at most once inside a transaction.
+///
+/// Version 1 introduces deployment-namespaced pages + KV. Pre-v1 tables are
+/// dropped (no data migration).
+/// Version 2 tracks how far empty-page compression has advanced.
+const MIGRATIONS: &[(i32, &str)] = &[
+    (
+        1,
+        r#"
+DROP TABLE IF EXISTS get_events_pages CASCADE;
+DROP TABLE IF EXISTS indexer_state CASCADE;
+
+CREATE TABLE indexer_state (
+  deployment_id TEXT PRIMARY KEY,
   last_cursor TEXT,
   last_fully_indexed_ledger INTEGER NOT NULL DEFAULT 0,
   ledger_tip INTEGER NOT NULL DEFAULT 0,
   in_sync BOOLEAN NOT NULL DEFAULT false,
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-INSERT INTO indexer_state (id) VALUES (1)
-ON CONFLICT (id) DO NOTHING;
 
-CREATE TABLE IF NOT EXISTS get_events_pages (
+CREATE TABLE get_events_pages (
   id BIGSERIAL PRIMARY KEY,
+  deployment_id TEXT NOT NULL,
   cursor_in TEXT,
   start_ledger INTEGER,
   request JSONB NOT NULL,
@@ -50,21 +180,28 @@ CREATE TABLE IF NOT EXISTS get_events_pages (
   oldest_ledger INTEGER NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-CREATE UNIQUE INDEX IF NOT EXISTS get_events_pages_cursor_in_uniq
-  ON get_events_pages(cursor_in) WHERE cursor_in IS NOT NULL;
-CREATE UNIQUE INDEX IF NOT EXISTS get_events_pages_start_ledger_uniq
-  ON get_events_pages(start_ledger) WHERE cursor_in IS NULL;
-CREATE INDEX IF NOT EXISTS get_events_pages_latest_ledger_idx
+
+CREATE UNIQUE INDEX get_events_pages_deployment_cursor_in_uniq
+  ON get_events_pages(deployment_id, cursor_in) WHERE cursor_in IS NOT NULL;
+CREATE UNIQUE INDEX get_events_pages_deployment_start_ledger_uniq
+  ON get_events_pages(deployment_id, start_ledger) WHERE cursor_in IS NULL;
+CREATE INDEX get_events_pages_latest_ledger_idx
   ON get_events_pages(latest_ledger);
-CREATE INDEX IF NOT EXISTS get_events_pages_cursor_out_ledger_idx
-  ON get_events_pages(cursor_out)
+CREATE INDEX get_events_pages_cursor_out_ledger_idx
+  ON get_events_pages(deployment_id, cursor_out)
   WHERE last_event_ledger IS NOT NULL;
+CREATE INDEX get_events_pages_deployment_id_idx
+  ON get_events_pages(deployment_id);
 "#,
-            )
-            .await?;
-        Ok(())
-    }
-}
+    ),
+    (
+        2,
+        r#"
+ALTER TABLE indexer_state
+  ADD COLUMN IF NOT EXISTS last_empty_compress_ledger INTEGER NOT NULL DEFAULT 0;
+"#,
+    ),
+];
 
 #[async_trait]
 impl Storage for Postgres {
@@ -78,8 +215,11 @@ impl Storage for Postgres {
         let client = self.pool.get().await?;
         let row = client
             .query_one(
-                "SELECT last_cursor, last_fully_indexed_ledger, ledger_tip, in_sync FROM indexer_state WHERE id = 1",
-                &[],
+                r#"
+SELECT last_cursor, last_fully_indexed_ledger, ledger_tip, in_sync, last_empty_compress_ledger
+FROM indexer_state WHERE deployment_id = $1
+"#,
+                &[&self.deployment_id()],
             )
             .await?;
 
@@ -87,6 +227,7 @@ impl Storage for Postgres {
         let last_fully_indexed_ledger: i32 = row.get(1);
         let ledger_tip: i32 = row.get(2);
         let in_sync: bool = row.get(3);
+        let last_empty_compress_ledger: i32 = row.get(4);
 
         Ok(KvState {
             last_cursor,
@@ -94,29 +235,43 @@ impl Storage for Postgres {
                 .context("last_fully_indexed_ledger exceeds u32 range")?,
             ledger_tip: u32::try_from(ledger_tip.max(0)).context("ledger_tip exceeds u32 range")?,
             in_sync,
+            last_empty_compress_ledger: u32::try_from(last_empty_compress_ledger.max(0))
+                .context("last_empty_compress_ledger exceeds u32 range")?,
         })
     }
 
     async fn update_cursor(&self, cursor: &str) -> Result<()> {
         let client = self.pool.get().await?;
-        client
+        let updated = client
             .execute(
-                "UPDATE indexer_state SET last_cursor = $1, updated_at = now() WHERE id = 1",
-                &[&cursor],
+                "UPDATE indexer_state SET last_cursor = $1, updated_at = now() WHERE deployment_id = $2",
+                &[&cursor, &self.deployment_id()],
             )
             .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
         Ok(())
     }
 
     async fn set_last_fully_indexed_ledger(&self, ledger: u32) -> Result<()> {
         let ledger = i32::try_from(ledger).context("ledger exceeds postgres INTEGER range")?;
         let client = self.pool.get().await?;
-        client
+        let updated = client
             .execute(
-                "UPDATE indexer_state SET last_fully_indexed_ledger = $1, updated_at = now() WHERE id = 1",
-                &[&ledger],
+                "UPDATE indexer_state SET last_fully_indexed_ledger = $1, updated_at = now() WHERE deployment_id = $2",
+                &[&ledger, &self.deployment_id()],
             )
             .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
         Ok(())
     }
 
@@ -124,23 +279,54 @@ impl Storage for Postgres {
         let ledger_tip =
             i32::try_from(ledger_tip).context("ledger_tip exceeds postgres INTEGER range")?;
         let client = self.pool.get().await?;
-        client
+        let updated = client
             .execute(
-                "UPDATE indexer_state SET ledger_tip = $1, updated_at = now() WHERE id = 1",
-                &[&ledger_tip],
+                "UPDATE indexer_state SET ledger_tip = $1, updated_at = now() WHERE deployment_id = $2",
+                &[&ledger_tip, &self.deployment_id()],
             )
             .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
         Ok(())
     }
 
     async fn set_in_sync(&self, in_sync: bool) -> Result<()> {
         let client = self.pool.get().await?;
-        client
+        let updated = client
             .execute(
-                "UPDATE indexer_state SET in_sync = $1, updated_at = now() WHERE id = 1",
-                &[&in_sync],
+                "UPDATE indexer_state SET in_sync = $1, updated_at = now() WHERE deployment_id = $2",
+                &[&in_sync, &self.deployment_id()],
             )
             .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
+        Ok(())
+    }
+
+    async fn set_last_empty_compress_ledger(&self, ledger: u32) -> Result<()> {
+        let ledger = i32::try_from(ledger)
+            .context("last_empty_compress_ledger exceeds postgres INTEGER range")?;
+        let client = self.pool.get().await?;
+        let updated = client
+            .execute(
+                "UPDATE indexer_state SET last_empty_compress_ledger = $1, updated_at = now() WHERE deployment_id = $2",
+                &[&ledger, &self.deployment_id()],
+            )
+            .await?;
+        if updated != 1 {
+            bail!(
+                "indexer_state row missing for deployment_id={}",
+                self.deployment_id()
+            );
+        }
         Ok(())
     }
 
@@ -167,11 +353,12 @@ impl Storage for Postgres {
             .execute(
                 r#"
 INSERT INTO get_events_pages
-  (cursor_in, start_ledger, request, result, cursor_out, last_event_ledger, latest_ledger, oldest_ledger)
+  (deployment_id, cursor_in, start_ledger, request, result, cursor_out, last_event_ledger, latest_ledger, oldest_ledger)
 VALUES
-  ($1, $2, $3, $4, $5, $6, $7, $8)
+  ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 "#,
                 &[
+                    &self.deployment_id(),
                     &page.cursor_in,
                     &start_ledger,
                     &Json(page.request),
@@ -186,16 +373,66 @@ VALUES
         Ok(())
     }
 
+    async fn replace_empty_page_by_cursor_in(
+        &self,
+        cursor_in: &str,
+        page: InsertGetEventsPage<'_>,
+    ) -> Result<()> {
+        let last_event_ledger: Option<i32> = page
+            .last_event_ledger
+            .map(|ledger| {
+                i32::try_from(ledger).context("last_event_ledger exceeds postgres INTEGER range")
+            })
+            .transpose()?;
+        let latest_ledger = i32::try_from(page.latest_ledger)
+            .context("latest_ledger exceeds postgres INTEGER range")?;
+        let oldest_ledger = i32::try_from(page.oldest_ledger)
+            .context("oldest_ledger exceeds postgres INTEGER range")?;
+
+        let client = self.pool.get().await?;
+        let updated = client
+            .execute(
+                r#"
+UPDATE get_events_pages
+SET request = $1,
+    result = $2,
+    cursor_out = $3,
+    last_event_ledger = $4,
+    latest_ledger = $5,
+    oldest_ledger = $6
+WHERE deployment_id = $7 AND cursor_in = $8
+"#,
+                &[
+                    &Json(page.request),
+                    &Json(page.result),
+                    &page.cursor_out,
+                    &last_event_ledger,
+                    &latest_ledger,
+                    &oldest_ledger,
+                    &self.deployment_id(),
+                    &cursor_in,
+                ],
+            )
+            .await?;
+        if updated != 1 {
+            bail!(
+                "replace empty page missed cursor_in={cursor_in} deployment_id={}",
+                self.deployment_id()
+            );
+        }
+        Ok(())
+    }
+
     async fn lookup_last_event_ledger_for_cursor(&self, cursor: &str) -> Result<Option<u32>> {
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
                 r#"
 SELECT last_event_ledger FROM get_events_pages
-WHERE cursor_out = $1 AND last_event_ledger IS NOT NULL
+WHERE deployment_id = $1 AND cursor_out = $2 AND last_event_ledger IS NOT NULL
 LIMIT 1
 "#,
-                &[&cursor],
+                &[&self.deployment_id(), &cursor],
             )
             .await?;
         let Some(row) = row else {
@@ -214,8 +451,8 @@ LIMIT 1
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM get_events_pages WHERE cursor_in = $1 LIMIT 1",
-                &[&cursor],
+                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in = $2 LIMIT 1",
+                &[&self.deployment_id(), &cursor],
             )
             .await?;
         Ok(row.map(|r| {
@@ -233,13 +470,82 @@ LIMIT 1
         let client = self.pool.get().await?;
         let row = client
             .query_opt(
-                "SELECT result FROM get_events_pages WHERE cursor_in IS NULL AND start_ledger = $1 LIMIT 1",
-                &[&start_ledger],
+                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in IS NULL AND start_ledger = $2 LIMIT 1",
+                &[&self.deployment_id(), &start_ledger],
             )
             .await?;
         Ok(row.map(|r| {
             let Json(v): Json<GetEventsResponse> = r.get(0);
             v
         }))
+    }
+
+    async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats> {
+        let mut client = self.pool.get().await?;
+        let pages = self.list_page_meta(&client).await?;
+        let plan = plan_empty_compression(&pages, cutoff_ledger);
+        if plan.is_empty() {
+            return Ok(plan.stats());
+        }
+
+        // Load JSONB only for pages whose result will be copied onto a kept row
+        // (before deletes in the transaction).
+        let mut results = std::collections::HashMap::new();
+        for update in &plan.updates {
+            if results.contains_key(&update.result_from_id) {
+                continue;
+            }
+            results.insert(
+                update.result_from_id,
+                self.load_result(&client, update.result_from_id).await?,
+            );
+        }
+
+        let tx = client.transaction().await?;
+        for update in &plan.updates {
+            let mut result = results
+                .get(&update.result_from_id)
+                .cloned()
+                .context("missing compress result")?;
+            apply_result_cursor(&mut result, &update.cursor_out);
+            let latest_ledger = i32::try_from(update.latest_ledger)
+                .context("latest_ledger exceeds postgres INTEGER range")?;
+            let updated = tx
+                .execute(
+                    r#"
+UPDATE get_events_pages
+SET cursor_out = $1, result = $2, latest_ledger = $3
+WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
+"#,
+                    &[
+                        &update.cursor_out,
+                        &Json(result),
+                        &latest_ledger,
+                        &update.id,
+                        &self.deployment_id(),
+                    ],
+                )
+                .await?;
+            if updated != 1 {
+                // Row gone or no longer empty (indexer raced) — roll back.
+                bail!(
+                    "compress update aborted for page id={} (missing or no longer empty)",
+                    update.id
+                );
+            }
+        }
+        for id in &plan.deletes {
+            let deleted = tx
+                .execute(
+                    "DELETE FROM get_events_pages WHERE id = $1 AND deployment_id = $2 AND last_event_ledger IS NULL",
+                    &[id, &self.deployment_id()],
+                )
+                .await?;
+            if deleted != 1 {
+                bail!("compress delete aborted for page id={id} (missing or no longer empty)");
+            }
+        }
+        tx.commit().await?;
+        Ok(plan.stats())
     }
 }
