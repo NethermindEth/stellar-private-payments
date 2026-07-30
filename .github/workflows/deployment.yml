@@ -39,7 +39,7 @@ jobs:
           path: |
             target/tmp/binaryen
             target/tmp/witness-opt-cache
-          key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory,reference-types,multivalue,sign-ext,nontrapping-float-to-int,mutable-globals
+          key: binaryen-${{ runner.os }}-${{ runner.arch }}-version_131-bulk-memory-reference-types-multivalue-sign-ext-nontrapping-float-to-int-mutable-globals
 
       - name: Install wasm build prerequisites
         run: |
