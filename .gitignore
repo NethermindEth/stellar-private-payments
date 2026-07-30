@@ -56,3 +56,9 @@ docs/book/
 ceremony/
 *.ptau
 artifacts.zip
+
+# Build profile markers
+sdk/web/.trunk-wasm-profile
+
+# JS license tooling
+js-license-scan-report.json

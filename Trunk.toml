@@ -57,7 +57,9 @@ cp -R sdk/web/dist/. "$SDK/dist/"
 rm -f "$SDK/dist/circuits/source-bundle.tar.gz"
 # The staged NOTICE still points at the just-removed local copy; repoint it at
 # the root-level footer copy via a relative path so it works on the demo deployment.
-sed -i 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circuits/source-bundle.tar.gz|' "$SDK/dist/circuits/NOTICE.txt"
+sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circuits/source-bundle.tar.gz|' \
+    "$SDK/dist/circuits/NOTICE.txt" > "$SDK/dist/circuits/NOTICE.txt.tmp" \
+    && mv "$SDK/dist/circuits/NOTICE.txt.tmp" "$SDK/dist/circuits/NOTICE.txt"
 
 # Bundle SDK JS (inlines @stellar/freighter-api); wasm stays external.
 ./app/node_modules/.bin/esbuild sdk/web/js/index.js \

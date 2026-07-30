@@ -1969,6 +1969,8 @@ name = "e2e-tests"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254 0.6.0",
+ "ark-circom",
  "asp-membership",
  "asp-non-membership",
  "circom-groth16-verifier",
@@ -1979,6 +1981,7 @@ dependencies = [
  "soroban-utils",
  "tx-planner",
  "types",
+ "wasmer",
  "zkhash",
 ]
 

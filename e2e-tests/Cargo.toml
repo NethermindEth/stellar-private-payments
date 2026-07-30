@@ -26,5 +26,10 @@ anyhow = { workspace = true }
 num-bigint = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
 
+[dev-dependencies]
+ark-bn254 = { workspace = true }
+ark-circom = { workspace = true }
+wasmer = { workspace = true }
+
 [lints]
 workspace = true
