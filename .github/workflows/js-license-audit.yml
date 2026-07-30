@@ -37,22 +37,11 @@ jobs:
           # allow-dependencies-licenses. (Verified against the action's actual
           # source and its @onebeyond/spdx-license-satisfies@1.0.1 dependency
           # at the pinned SHA — this is not hypothetical.)
-          #
-          # ALSO: the action's own config validation rejects any allow-licenses
-          # entry that its bundled spdx-expression-parse@3.0.1 (via
-          # spdx-license-ids@3.0.16, both pinned at this action's SHA) doesn't
-          # recognize as a real SPDX id — confirmed live in CI with
-          # "Invalid license(s) in allow-licenses: Unicode-3.0" (that id was
-          # added to the official SPDX list after this pinned version was
-          # published). Checked every remaining allowlist entry against these
-          # exact pinned versions locally; Unicode-3.0 is the only failure.
-          # No dependency in app/ or sdk/web/ actually uses Unicode-3.0, so
-          # dropping it here has no effect on real coverage.
-          ALLOWLIST=$(jq -r '[.allowlist[] | select(test(" AND | OR ") | not) | select(. != "Unicode-3.0")] | join(", ")' .github/js-license-policy.json)
+          ALLOWLIST=$(jq -r '[.allowlist[] | select(test(" AND | OR ") | not)] | join(", ")' .github/js-license-policy.json)
           echo "allowlist=$ALLOWLIST" >> $GITHUB_OUTPUT
 
       - name: Dependency Review Action
-        uses: actions/dependency-review-action@3b139cfc5fae8b618d3eae3675e383bb1769c019 # v4.3.4
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           # Wire allowlist into the action. Any license not on this list fails the PR.
           allow-licenses: ${{ steps.policy.outputs.allowlist }}
