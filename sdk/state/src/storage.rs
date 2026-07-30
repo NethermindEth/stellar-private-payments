@@ -15,6 +15,7 @@ use types::{
 const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
+pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
@@ -366,8 +367,8 @@ impl Storage {
         Ok(self
             .get_setting_json(APP_SETTING_BOOTNODE_CONFIG)?
             .unwrap_or(BootnodeSetting {
-                enabled: false,
-                url: String::new(),
+                enabled: true,
+                url: DEFAULT_BOOTNODE_URL.to_string(),
             }))
     }
 

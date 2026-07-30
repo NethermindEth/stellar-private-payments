@@ -10,7 +10,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use stellar_private_payments_sdk::{
-    state::SqliteStorage,
+    state::{DEFAULT_BOOTNODE_URL, SqliteStorage},
     tx::encryption::{
         KEY_DERIVATION_MESSAGE, derive_encryption_and_note_keypairs, derive_membership_blinding,
     },
@@ -165,17 +165,16 @@ fn configure_bootnode(
     }
     let current = storage.get_bootnode_setting()?;
     println!("\nBootnode fallback (optional):\n{BOOTNODE_RISKS}\n{BOOTNODE_TEXT}");
-    let hint = if current.enabled && !current.url.is_empty() {
-        format!(" [{}]", current.url)
+    let hint = if current.url.is_empty() {
+        DEFAULT_BOOTNODE_URL
     } else {
-        String::new()
+        &current.url
     };
-    let input = prompt_line(&format!("Bootnode archive URL{hint} (blank to skip): "))?;
-    if !input.is_empty() {
-        storage.set_bootnode_setting(true, &input)?;
-    } else if !current.enabled {
-        storage.set_bootnode_setting(false, "")?;
-    }
+    let input = prompt_line(&format!(
+        "Bootnode archive URL [{hint}] (enter to accept): "
+    ))?;
+    let url = if input.is_empty() { hint } else { &input };
+    storage.set_bootnode_setting(true, url)?;
     Ok(())
 }
 
