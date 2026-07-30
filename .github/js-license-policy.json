@@ -62,11 +62,11 @@
   ],
   "exceptions": [
     {
-      "package": "stellar-private-payments-sdk-web",
+      "package": "stellar-private-payments",
       "version": "*",
       "license": "UNKNOWN",
       "target": "app/package-lock.json",
-      "justification": "Local workspace package loaded via file reference. Actual package is Apache-2.0.",
+      "justification": "Local workspace package loaded via file: link. The link lockfile entry has no license field; sdk/web/package.json declares Apache-2.0 and the published tarball ships dist/LICENSE.txt.",
       "approver": "marko.cupic@nethermind.io"
     }
   ]

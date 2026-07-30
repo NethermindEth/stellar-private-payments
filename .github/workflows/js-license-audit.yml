@@ -49,7 +49,7 @@ jobs:
           # which cannot be expressed in allow-licenses (see comment above) —
           # excuse it by package identity instead, which uses a separate code
           # path unaffected by the same-array conjunction restriction.
-          allow-dependencies-licenses: "pkg:npm/sha.js"
+          allow-dependencies-licenses: "pkg:npm/sha.js, pkg:npm/stellar-private-payments"
 
   full-tree-scan:
     name: Full-Tree License Scan

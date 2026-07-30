@@ -96,7 +96,7 @@ while [ "$i" -lt "$exception_count" ]; do
         # Special case: local workspace package (file: reference), not a
         # real published npm package — verify its OWN package.json instead of
         # the registry.
-        if [ "$pkg_path" = "stellar-private-payments-sdk-web" ]; then
+        if [ "$pkg_path" = "stellar-private-payments" ]; then
             actual="$(jq -r '.license // "MISSING"' "$REPO_ROOT/sdk/web/package.json" 2>/dev/null || echo MISSING)"
             if [ "$actual" = "$declared_license" ] || [ "$declared_license" = "UNKNOWN" ]; then
                 echo "  [OK]  $pkg_path (workspace package.json) -> $actual"
