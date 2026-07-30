@@ -93,6 +93,13 @@ This downloads the release binary for your platform (Linux/macOS, x86_64/aarch64
 verifies its checksum, installs `spp` to `~/.local/bin`, and provisions the runtime
 data dir (circuits, policy proving keys, license/notice texts). Then run `spp --help`.
 
+The [Stellar CLI](https://developers.stellar.org/docs/tools/cli/install-cli) is required.
+Install it separately with the official command:
+
+```bash
+curl -fsSL https://github.com/stellar/stellar-cli/raw/main/install.sh | sh
+```
+
 To install a specific release
 
 ```bash

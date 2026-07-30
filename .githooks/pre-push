@@ -22,6 +22,12 @@ if ! cargo deny check; then
     exit 2
 fi
 
+# JS dependency license audit
+if ! sh scripts/check-js-licenses.sh; then
+    echo "❌ JS license policy violations detected (see report above)"
+    exit 11
+fi
+
 # Formatting check
 if ! cargo +nightly fmt --all -- --check --config-path rustfmt.toml; then
     echo "❌ Formatting issues (run 'cargo +nightly fmt --all')"

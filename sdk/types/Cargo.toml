@@ -22,9 +22,9 @@ uint = { workspace = true }
 zeroize = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-tracing-subscriber = { workspace = true }
 # external
 rusqlite = { workspace = true, optional = true, features = ["bundled"] }
+tracing-subscriber = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 # external

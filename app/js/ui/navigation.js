@@ -1,5 +1,5 @@
 import { connectWallet, getWalletNetwork, startWalletWatcher } from '../wallet.js';
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { FreighterSigner } from 'stellar-private-payments';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client, initializeRuntime, disposeClient, bootnodeRequired, ensureStorage, configureTelemetrySettings, dumpTelemetryLogs, debugLogsEnabled, isRuntimeReady } from '../wasm-facade.js';
 import { App, Toast, Utils } from './core.js';
