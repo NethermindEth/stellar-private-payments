@@ -188,7 +188,7 @@ Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freigh
 
 **Build (Trunk)**
 
-`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` as an external package via import maps in `index.html`.
+`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/freighter.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/freighter` as external packages via import maps in `index.html`.
 
 Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
 

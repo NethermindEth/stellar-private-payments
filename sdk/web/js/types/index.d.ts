@@ -34,8 +34,6 @@ export type {
   WalletSigner,
 } from './signer.js';
 
-export { FreighterSigner } from './freighter.js';
-
 /** Wallet session returned by {@link Client.account}. */
 export interface Account {
   readonly userAddress: string;

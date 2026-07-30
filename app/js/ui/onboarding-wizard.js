@@ -1,4 +1,4 @@
-import { FreighterSigner } from 'stellar-private-payments';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
