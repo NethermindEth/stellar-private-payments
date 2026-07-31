@@ -12,10 +12,10 @@ Browser SDK for Stellar Private Payments.
 import init, {
   Storage,
   Client,
-  FreighterSigner,
   bootnodeRequired,
   verifySelectiveDisclosure,
 } from 'stellar-private-payments';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 const networkPassphrase = 'Test SDF Network ; September 2015';
 const rpcUrl = 'https://soroban-testnet.stellar.org';
@@ -141,7 +141,8 @@ Matches `stellar_private_payments_sdk::PrivatePool`. Amount parameters and `bala
 
 ### Signer
 
-Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`. See [`FreighterSigner`](./js/freighter.js).
+Bound at `client.account()`. Must implement `signMessage`, `signTransaction`, `signAuthEntry`.
+Optional Freighter adapter: `import { FreighterSigner } from 'stellar-private-payments/freighter'` (requires peer `@stellar/freighter-api`).
 
 ## Logging & Diagnostics
 
@@ -173,11 +174,11 @@ Public types live in [`js/types/`](./js/types/). The package entry (`import { Cl
 import init, {
   Storage,
   Client,
-  FreighterSigner,
   verifySelectiveDisclosure,
   type Account,
   type WalletSigner,
 } from 'stellar-private-payments';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 ```
 
 After building WASM:
