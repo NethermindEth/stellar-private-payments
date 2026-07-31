@@ -1,6 +1,14 @@
-//! Circom's Groth16 QAP reduction.
+//! Circom/snarkjs Groth16 QAP reduction (`R1CSToQAP`).
 //!
-//! Ported logic from arkworks `circom-compat`.
+//! Implements the witness map used by snarkjs rather than arkworks' default
+//! `LibsnarkReduction`: Circom prepares powers-of-tau in Lagrange form over a
+//! doubled domain, and the H contribution is taken as the odd coefficients of
+//! `(AB − C)` in that domain.  Vendored (WASM builds swap `rayon` for serial
+//! loops only) so upgrades to `circom-compat` / ark-groth16 can be re-audited
+//! against a pinned upstream source.
+//!
+//! Upstream reference (`arkworks-rs/circom-compat` @ `7344c75`):
+//!   - `src/circom/qap.rs` (`CircomReduction`)
 
 use ark_ff::PrimeField;
 use ark_groth16::r1cs_to_qap::{LibsnarkReduction, R1CSToQAP, evaluate_constraint};
