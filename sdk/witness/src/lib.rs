@@ -256,17 +256,6 @@ mod tests {
     }
 
     #[test]
-    fn loads_policy_tx_2_2_graph() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../deployments/testnet/circuit_keys/policy_tx_2_2.graph.bin"
-        );
-        let bytes = std::fs::read(path).expect("committed policy_tx_2_2.graph.bin");
-        let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
-        assert!(calc.witness_size() > 1);
-    }
-
-    #[test]
     fn compute_witness_rejects_unknown_signal() {
         let path = concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -287,36 +276,31 @@ mod tests {
         );
     }
 
+    /// Smoke: every `.graph.bin` must deserialize and report a
+    /// non-trivial witness size.
     #[test]
-    fn loads_policy_tx_2_2_b_graph() {
-        let path = concat!(
+    fn loads_all_committed_graphs() {
+        let dir = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../deployments/testnet/circuit_keys/policy_tx_2_2_B.graph.bin"
+            "/../../deployments/testnet/circuit_keys"
         );
-        let bytes = std::fs::read(path).expect("committed policy_tx_2_2_B.graph.bin");
-        let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
-        assert!(calc.witness_size() > 1);
-    }
 
-    #[test]
-    fn loads_policy_tx_2_2_ab_graph() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../deployments/testnet/circuit_keys/policy_tx_2_2_AB.graph.bin"
-        );
-        let bytes = std::fs::read(path).expect("committed policy_tx_2_2_AB.graph.bin");
-        let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
-        assert!(calc.witness_size() > 1);
-    }
+        let mut loaded = 0usize;
+        for entry in std::fs::read_dir(dir).expect("circuit_keys") {
+            let path = entry.expect("dir entry").path();
+            if !path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.ends_with(".graph.bin"))
+            {
+                continue;
+            }
 
-    #[test]
-    fn loads_selective_disclosure_1_graph() {
-        let path = concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../../deployments/testnet/circuit_keys/selectiveDisclosure_1.graph.bin"
-        );
-        let bytes = std::fs::read(path).expect("committed selectiveDisclosure_1.graph.bin");
-        let calc = WitnessCalculator::from_graph(&bytes).expect("init graph");
-        assert!(calc.witness_size() > 1);
+            let calc = WitnessCalculator::from_graph(&std::fs::read(&path).expect("read graph"))
+                .unwrap_or_else(|e| panic!("init {}: {e}", path.display()));
+            assert!(calc.witness_size() > 1, "{}: empty witness", path.display());
+            loaded += 1;
+        }
+        assert!(loaded > 0, "no *.graph.bin under {dir}");
     }
 }
