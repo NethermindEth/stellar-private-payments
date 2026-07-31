@@ -16,10 +16,8 @@ circuits = { workspace = true, features = ["std"] }
 # Contract dependencies
 pool = { workspace = true }
 # Shared deps
-prover = { workspace = true }
 soroban-utils = { workspace = true }
-tx-planner = { workspace = true }
-types = { workspace = true }
+stellar-private-payments = { workspace = true }
 zkhash = { workspace = true }
 
 # external

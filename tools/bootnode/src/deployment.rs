@@ -1,4 +1,4 @@
-use types::ContractConfig;
+use stellar_private_payments::types::ContractConfig;
 
 // TODO make it dependent on the network during the compilation
 const DEPLOYMENT: &str = include_str!("../../../deployments/testnet/deployments.json");

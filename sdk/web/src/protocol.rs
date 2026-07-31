@@ -8,18 +8,18 @@ pub struct CorrelatedRequest<T> {
     pub payload: T,
 }
 
-pub use stellar_private_payments_sdk::{
+pub use stellar_private_payments::{
     DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
     TransactRequest,
 };
 
-use stellar_private_payments_sdk::{
-    tx::flows::TransactParams,
+use stellar_private_payments::{
     types::{
         AspMembershipSync, ContractsEventData, DisclosureReceipt, EncryptionPublicKey, Field,
         KeyDerivationSignature, NotePublicKey, OperationalFeedItem, PortfolioBalance,
         RecipientLookup, SyncMetadata, UserNoteSummary, UserOperation,
     },
+    zk::flows::TransactParams,
 };
 
 pub type Address = String;

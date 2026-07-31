@@ -11,21 +11,21 @@ use tracing::Instrument;
 // shared with the native SDK; they live in `types` so both crates use one
 // implementation. Reached via the client crate re-export so the path
 // resolves on native and wasm targets alike.
-pub use stellar_private_payments_sdk::types::{
+pub use stellar_private_payments::types::{
     current_correlation_id, evict_span, new_correlation_id, register_span,
 };
 
 // Only used from the `#[cfg(test)]` module in `telemetry.rs` (a test/diagnostic
 // accessor), so it's otherwise unused in a non-test build.
 #[allow(unused_imports)]
-pub use stellar_private_payments_sdk::types::has_span;
+pub use stellar_private_payments::types::has_span;
 
 #[cfg(not(target_arch = "wasm32"))]
 #[allow(unused_imports)]
-pub use stellar_private_payments_sdk::types::CorrelationIdLayer;
+pub use stellar_private_payments::types::CorrelationIdLayer;
 
 #[cfg(target_arch = "wasm32")]
-pub use stellar_private_payments_sdk::types::{current_span_id, enter_span, exit_span};
+pub use stellar_private_payments::types::{current_span_id, enter_span, exit_span};
 
 /// Run a future with `correlation_id` active. Supports nested operations.
 pub async fn with_correlation_id<F, R>(id: String, f: F) -> R

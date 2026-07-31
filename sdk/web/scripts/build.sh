@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build stellar-private-payments-sdk-web into sdk/web/dist/ (needs wasm-bindgen on PATH).
+# Build stellar-private-payments-web into sdk/web/dist/ (needs wasm-bindgen on PATH).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
@@ -20,7 +20,7 @@ case "$PROFILE" in
 esac
 
 WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
-WASM_OUT_NAME="stellar_private_payments_sdk_web"
+WASM_OUT_NAME="stellar_private_payments_web"
 
 echo "==> Building circuit artifacts (if needed)..."
 # Circuit artifacts are profile-independent and are only published for release
@@ -29,10 +29,10 @@ if [[ ! -d "$ROOT/target/circuits-artifacts/release" ]]; then
   cargo build -p circuits --release
 fi
 
-echo "==> Building stellar-private-payments-sdk-web ($PROFILE)..."
-cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET"
-cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
-cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
+echo "==> Building stellar-private-payments-web ($PROFILE)..."
+cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET"
+cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin storage-worker
+cargo build -p stellar-private-payments-web $CARGO_PROFILE_FLAG --target "$TARGET" --bin prover-worker
 
 if ! command -v wasm-bindgen >/dev/null 2>&1; then
   echo "error: wasm-bindgen not found — cargo install wasm-bindgen-cli --version ${WASM_BINDGEN_VERSION} --locked --force" >&2

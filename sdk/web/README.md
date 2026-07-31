@@ -122,7 +122,7 @@ Walletless verification — no `Storage` / `Client`. Prover worker URL defaults 
 
 ### `PrivatePool`
 
-Matches `stellar_private_payments_sdk::PrivatePool`. Amount parameters and `balance` use **stroops** as JavaScript `bigint`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up.
+Matches `stellar_private_payments::PrivatePool`. Amount parameters and `balance` use **stroops** as JavaScript `bigint`. There is **no** `pool.sync()` — use `backgroundSync` for background indexing and `client.sync()` when you need an explicit catch-up.
 
 | Method | Description |
 |--------|-------------|

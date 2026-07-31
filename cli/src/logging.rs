@@ -31,7 +31,7 @@ pub fn init(verbose: u8, json: bool) {
     //    minting an unrelated one.
     let subscriber = tracing_subscriber::registry()
         .with(filter)
-        .with(stellar_private_payments_sdk::types::CorrelationIdLayer);
+        .with(stellar_private_payments::types::CorrelationIdLayer);
 
     if json {
         let fmt_layer = tracing_subscriber::fmt::layer()

@@ -13,10 +13,8 @@ use gloo_worker::{
     oneshot::{OneshotBridge, oneshot},
 };
 use std::{cell::RefCell, collections::HashMap, fmt::Write as _};
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Error, PreparedProverTx, Prover, ProverEngine, disclosure,
-    proving::{Prover as Groth16Prover, WitnessCalculator},
-    tx::flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
     types::{
         DISCLOSURE_RECEIPT_VERSION, DisclosureCircuitMetadata, DisclosurePublicInputs,
         DisclosureReceipt, SELECTIVE_DISCLOSURE_1_CIRCUIT, SELECTIVE_DISCLOSURE_1_LEVELS,
@@ -25,6 +23,11 @@ use stellar_private_payments_sdk::{
         SELECTIVE_DISCLOSURE_3_CIRCUIT, SELECTIVE_DISCLOSURE_3_LEVELS,
         SELECTIVE_DISCLOSURE_3_N_NOTES, SELECTIVE_DISCLOSURE_4_CIRCUIT,
         SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
+    },
+    zk::{
+        flows::{DisclosureNote, SelectiveDisclosureParams, TransactParams, selective_disclosure},
+        prover::Prover as Groth16Prover,
+        witness::WitnessCalculator,
     },
 };
 use tracing::Instrument;
@@ -591,7 +594,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
         }
         ProverWorkerRequest::ConfigureTelemetry(config) => {
             let _ = crate::telemetry::set_log_level(&config.level);
-            stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+            stellar_private_payments::types::set_reveal_sensitive(config.reveal_sensitive);
             ProverWorkerResponse::Pong
         }
         ProverWorkerRequest::DumpLogs => {
@@ -702,7 +705,7 @@ impl Prover for ProverBridge {
 
     async fn prove_disclosure(
         &self,
-        params: stellar_private_payments_sdk::DisclosureProveParams,
+        params: stellar_private_payments::DisclosureProveParams,
     ) -> Result<DisclosureReceipt, Error> {
         match self
             .call(ProverWorkerRequest::Disclosure(params), PROVE_TIMEOUT_MS)

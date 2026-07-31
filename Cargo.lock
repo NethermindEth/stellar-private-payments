@@ -1186,7 +1186,6 @@ dependencies = [
  "program_structure",
  "regex",
  "type_analysis",
- "types",
  "wast",
  "zkhash",
 ]
@@ -2191,19 +2190,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "disclosure"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hex",
- "prover",
- "sha2 0.11.0",
- "tracing",
- "types",
- "web-time",
-]
-
-[[package]]
 name = "displaydoc"
 version = "0.2.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2258,11 +2244,9 @@ dependencies = [
  "circuits",
  "num-bigint",
  "pool",
- "prover",
  "soroban-sdk",
  "soroban-utils",
- "tx-planner",
- "types",
+ "stellar-private-payments",
  "zkhash",
 ]
 
@@ -4447,31 +4431,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prover"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "ark-groth16",
- "ark-poly 0.6.0",
- "ark-relations",
- "ark-serialize 0.6.0",
- "ark-snark",
- "ark-std 0.6.0",
- "crypto_secretbox",
- "getrandom 0.2.17",
- "rayon",
- "serde",
- "sha2 0.11.0",
- "tracing",
- "types",
- "web-time",
- "x25519-dalek",
- "zkhash",
-]
-
-[[package]]
 name = "ptr_meta"
 version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5211,10 +5170,9 @@ dependencies = [
  "anyhow",
  "rusqlite",
  "serde_json",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "tracing",
  "tracing-subscriber",
- "types",
 ]
 
 [[package]]
@@ -5800,43 +5758,43 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6ce2be8dc25455e1f91df71bfa12ad37d7af1092ae736f3a6cd0e37bc7810596"
 
 [[package]]
-name = "state"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "hex",
- "prover",
- "rusqlite",
- "rusqlite_migration",
- "serde",
- "serde_json",
- "sha2 0.11.0",
- "stellar",
- "tracing",
- "types",
-]
-
-[[package]]
 name = "static_assertions"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
-name = "stellar"
+name = "stellar-private-payments"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "ark-bn254 0.6.0",
+ "ark-ff 0.6.0",
+ "ark-groth16",
+ "ark-poly 0.6.0",
+ "ark-relations",
+ "ark-serialize 0.6.0",
+ "ark-snark",
+ "ark-std 0.6.0",
  "async-trait",
  "base64",
+ "circom-witness-rs",
  "contract-types",
+ "crypto_secretbox",
  "ed25519-dalek",
  "futures",
+ "futures-timer",
+ "getrandom 0.2.17",
  "gloo-timers",
+ "hex",
  "http",
  "pool",
  "public-key-registry",
+ "rayon",
  "reqwest",
+ "ruint",
+ "rusqlite",
+ "rusqlite_migration",
  "serde",
  "serde-aux",
  "serde_json",
@@ -5846,9 +5804,16 @@ dependencies = [
  "stellar-strkey 0.0.18",
  "stellar-xdr",
  "thiserror 2.0.19",
+ "tokio",
  "tracing",
- "types",
+ "tracing-subscriber",
+ "uint 0.10.0",
  "wasm-bindgen-test",
+ "web-time",
+ "wiremock",
+ "x25519-dalek",
+ "zeroize",
+ "zkhash",
 ]
 
 [[package]]
@@ -5862,40 +5827,15 @@ dependencies = [
  "reqwest",
  "serde",
  "serde_json",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "toml",
  "tracing",
  "tracing-log",
  "tracing-subscriber",
- "types",
 ]
 
 [[package]]
-name = "stellar-private-payments-sdk"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "async-trait",
- "disclosure",
- "futures",
- "futures-timer",
- "gloo-timers",
- "prover",
- "serde",
- "serde_json",
- "state",
- "stellar",
- "thiserror 2.0.19",
- "tokio",
- "tracing",
- "tx-planner",
- "types",
- "wiremock",
- "witness",
-]
-
-[[package]]
-name = "stellar-private-payments-sdk-web"
+name = "stellar-private-payments-web"
 version = "0.1.0"
 dependencies = [
  "anyhow",
@@ -5912,11 +5852,10 @@ dependencies = [
  "sha2 0.11.0",
  "sqlite-wasm-rs",
  "sqlite-wasm-vfs",
- "stellar-private-payments-sdk",
+ "stellar-private-payments",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "types",
  "wasm-bindgen",
  "wasm-bindgen-futures",
  "wasm-bindgen-test",
@@ -6488,15 +6427,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8464ec13c3691491391d9fce00f6416c9a48e46972f72d7865688be2080192c9"
 
 [[package]]
-name = "tx-planner"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.19",
- "tracing",
- "types",
-]
-
-[[package]]
 name = "type_analysis"
 version = "2.2.3"
 source = "git+https://github.com/iden3/circom?tag=v2.2.3#ad44e915a12bb047b05745c2884aad9cc8326bc6"
@@ -6511,22 +6441,6 @@ name = "typenum"
 version = "1.20.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b6f5e870be6c3b371b77fe0ee0bafb859fa4964b4404c27de1d380043c4dda20"
-
-[[package]]
-name = "types"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "getrandom 0.2.17",
- "hex",
- "rusqlite",
- "serde",
- "serde_json",
- "tracing",
- "tracing-subscriber",
- "uint 0.10.0",
- "zeroize",
-]
 
 [[package]]
 name = "ucd-trie"
@@ -7309,18 +7223,6 @@ name = "wit-bindgen"
 version = "0.57.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1ebf944e87a7c253233ad6766e082e3cd714b5d03812acc24c318f549614536e"
-
-[[package]]
-name = "witness"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "ark-bn254 0.6.0",
- "ark-ff 0.6.0",
- "circom-witness-rs",
- "ruint",
- "serde_json",
-]
 
 [[package]]
 name = "writeable"

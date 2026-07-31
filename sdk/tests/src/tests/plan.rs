@@ -1,7 +1,7 @@
 //! PrivatePool per-step planning.
 
 use crate::pool::{test_pool, test_recipient};
-use stellar_private_payments_sdk::{Error, types::NoteAmount};
+use stellar_private_payments::{Error, types::NoteAmount};
 
 #[test]
 fn transfer_two_steps() {

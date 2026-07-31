@@ -2,7 +2,7 @@
 //! construction.
 
 use js_sys::{Array, Function, Object, Promise, Reflect};
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{
         Limits, PreparedSorobanTx, ReadXdr, Signature, TransactionEnvelope, WriteXdr,

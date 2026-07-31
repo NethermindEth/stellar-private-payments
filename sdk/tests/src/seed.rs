@@ -4,15 +4,15 @@ use std::path::Path;
 
 use anyhow::{Context, Result};
 use rusqlite::{Connection, params};
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     TransactChainContext,
     state::SqliteStorage,
-    tx::{crypto, encryption, merkle::MerklePrefixTree},
-};
-use types::{
-    AspNonMembershipProof, ContractEvent, ContractsEventData, Field, KeyDerivationSignature,
-    LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyFlags, SMT_DEPTH,
-    SyncMetadata,
+    types::{
+        AspNonMembershipProof, ContractEvent, ContractsEventData, Field, KeyDerivationSignature,
+        LeafAddedEvent, NewCommitmentEvent, NoteAmount, NoteKeyPair, PolicyFlags, SMT_DEPTH,
+        SyncMetadata,
+    },
+    zk::{crypto, encryption, merkle::MerklePrefixTree},
 };
 
 pub const POOL_MERKLE_LEVELS: u32 = 10;
@@ -23,7 +23,10 @@ fn test_derivation_signature() -> KeyDerivationSignature {
     KeyDerivationSignature(vec![42u8; 64])
 }
 
-pub fn seeded_user_public_keys() -> Result<(types::NotePublicKey, types::EncryptionPublicKey)> {
+pub fn seeded_user_public_keys() -> Result<(
+    stellar_private_payments::types::NotePublicKey,
+    stellar_private_payments::types::EncryptionPublicKey,
+)> {
     let signature = test_derivation_signature();
     let (note_keypair, encryption_keypair) =
         encryption::derive_encryption_and_note_keypairs(signature)?;
@@ -172,9 +175,9 @@ pub fn apply_proved_step(
     asp_membership_contract_id: &str,
     user_address: &str,
     network: &str,
-    prepared: &stellar_private_payments_sdk::PreparedTransaction,
+    prepared: &stellar_private_payments::PreparedTransaction,
 ) -> Result<TransactChainContext> {
-    use stellar_private_payments_sdk::tx::notes;
+    use stellar_private_payments::zk::notes;
 
     let signature = test_derivation_signature();
     let (note_keypair, encryption_keypair) =
