@@ -40,12 +40,13 @@ impl EmptyPageCompressor {
             .ledger_tip
             .load(Ordering::Relaxed)
             .max(kv.ledger_tip);
-        let day = ledgers_per_day(self.state.cfg.ledger_seconds);
-        let through_ledger = tip.saturating_sub(day);
-        if through_ledger == 0 {
+        if tip == 0 {
             return Ok(());
         }
-        if kv.last_empty_compress_ledger >= through_ledger {
+
+        let day = ledgers_per_day(self.state.cfg.ledger_seconds);
+        let through_ledger = tip.saturating_sub(day);
+        if through_ledger == 0 || kv.last_empty_compress_ledger >= through_ledger {
             return Ok(());
         }
 
