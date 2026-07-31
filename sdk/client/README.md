@@ -61,6 +61,44 @@ let client = Client::init_readonly(rpc_url, storage, deployment, None)?;
 
 The SDK does not read circuit files from disk — callers supply [`ProverArtifacts`] (or a custom [`Prover`] implementation). The CLI loads artifacts from its data directory; browser apps use worker-backed provers.
 
+## Examples
+
+The `examples/` directory demonstrates the blocking SDK API surface. Each example uses the shared `examples/common` bootstrap and exits 0 with instructions when a prerequisite is missing.
+
+| Example | What it shows | Run |
+|---------|---------------|-----|
+| `account_pool` | Account identity, registration, keys, portfolio, and pool state reads | `cargo run --example account_pool` |
+| `sync` | Deployment-level sync, background sync, and operational feed | `cargo run --example sync` |
+| `estimate` | Transaction-count estimation and plan introspection | `cargo run --example estimate` |
+| `deposit` | Full proving + submission of a deposit | `cargo run --example deposit` |
+| `transfer` | Private transfer to a recipient | `cargo run --example transfer` |
+| `withdraw` | Withdraw from the pool to a public Stellar address | `cargo run --example withdraw` |
+
+See the header comment in each example for its exact env-var contract. The shared contract is:
+
+| Variable | Default | Required by |
+|----------|---------|-------------|
+| `STELLAR_SECRET_KEY` | — | `account_pool`, `estimate`, `deposit`, `transfer`, `withdraw` |
+| `SPP_RPC_URL` | `https://soroban-testnet.stellar.org` | all examples |
+| `SPP_WALLET_PATH` | `./spp-example-wallet.sqlite` | all examples |
+| `SPP_DEPLOYMENT_JSON` | `deployments/testnet/deployments.json` | all examples |
+| `SPP_POOL_CONTRACT_ID` | first enabled pool in deployment config | account/pool/transact examples |
+| `SPP_CIRCUIT_KEYS_DIR` | `deployments/testnet/circuit_keys` | `deposit`, `transfer`, `withdraw` |
+| `SPP_CIRCUIT_ARTIFACTS_DIR` | `target/circuits-artifacts/{debug\|release}` | `deposit`, `transfer`, `withdraw` |
+| `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | `estimate`, `deposit`, `transfer`, `withdraw` |
+| `SPP_BOOTNODE_URL` | `https://bootnode.dev-nethermind.xyz` | `sync` |
+
+### Prerequisites
+
+- The examples target the checked-in **testnet** deployment by default.
+- Transact examples (`deposit`, `transfer`, `withdraw`) need circuit artifacts. Build them first with `cargo build -p circuits`.
+- Transact examples need a **funded, onboarded** testnet account: onboard the wallet (for example with the `spp` CLI) and ensure the account holds the pool asset.
+- Missing prerequisites print a skip message and exit 0 instead of failing; set the required env vars and re-run.
+
+### Sync caveat
+
+The checked-in testnet deployment is older than the public Soroban RPC retention window, so a fresh wallet sometimes cannot sync the full historical range. When this happens, `sync.rs` and the transact examples print an explanation and exit 0. Remedies: point `SPP_BOOTNODE_URL` at a bootnode with a fresher handoff, use a full-history `SPP_RPC_URL`, or retry later.
+
 ## Blocking API
 
 For CLI and synchronous hosts, use `stellar_private_payments_sdk::blocking`:

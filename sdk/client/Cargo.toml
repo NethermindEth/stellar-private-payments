@@ -7,6 +7,9 @@ license.workspace = true
 publish.workspace = true
 description = "Stellar Private Payments Rust SDK"
 
+[package.metadata.cargo-shear]
+ignored = ["reqwest"]
+
 [lib]
 name = "stellar_private_payments_sdk"
 
@@ -34,7 +37,11 @@ tokio = { workspace = true, features = ["rt-multi-thread"] }
 gloo-timers = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Not referenced directly, but pulls in reqwest's rustls TLS backend for the
+# example binaries (the `stellar` crate depends on reqwest without a TLS feature).
+reqwest = { workspace = true, features = ["rustls"] }
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 wiremock = { workspace = true }
 
 [lints]
