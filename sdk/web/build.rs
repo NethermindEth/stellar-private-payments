@@ -1,5 +1,6 @@
 use sha2::{Digest, Sha256};
 use std::{
+    collections::HashMap,
     env, fs,
     path::{Path, PathBuf},
 };
@@ -26,6 +27,14 @@ fn fmt_u8_array(bytes: &[u8]) -> String {
     out
 }
 
+fn fmt_hex(bytes: &[u8]) -> String {
+    let mut out = String::with_capacity(bytes.len().saturating_mul(2));
+    for b in bytes {
+        out.push_str(&format!("{b:02x}"));
+    }
+    out
+}
+
 fn repo_root_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
     manifest_dir
         .ancestors()
@@ -37,6 +46,18 @@ fn repo_root_from_manifest_dir(manifest_dir: &Path) -> PathBuf {
 fn read_file(path: &Path) -> Vec<u8> {
     fs::read(path)
         .unwrap_or_else(|e| panic!("sdk/web/build.rs: failed to read {}: {e}", path.display()))
+}
+
+fn wasm_path(circuits_out: &Path, stem: &str) -> PathBuf {
+    // When invoked via sdk/web/scripts/build.sh, CIRCUIT_WASM_DIR points at the
+    // optimized, staged circuit wasm. For direct `cargo build` invocations it is
+    // unset and we fall back to the raw artifacts from the circuits crate.
+    let chosen = env::var("CIRCUIT_WASM_DIR")
+        .map(|dir| PathBuf::from(dir).join(format!("{stem}.wasm")))
+        .unwrap_or_else(|_| circuits_out.join(format!("{stem}.wasm")));
+
+    println!("cargo:rerun-if-changed={}", chosen.display());
+    chosen
 }
 
 fn copy_artifact(src: &Path, out_dir: &Path, name: &str) -> Vec<u8> {
@@ -70,6 +91,7 @@ fn main() {
     }
 
     println!("cargo:rerun-if-env-changed=PROFILE");
+    println!("cargo:rerun-if-env-changed=CIRCUIT_WASM_DIR");
     println!("cargo:rerun-if-changed=build.rs");
     println!(
         "cargo:rerun-if-changed={}",
@@ -83,16 +105,16 @@ fn main() {
     let mut policy_lookup_arms = String::new();
     let mut policy_stem_literals = String::new();
     let mut bundled_proving_key_arms = String::new();
+    let mut wasm_hashes: HashMap<String, String> = HashMap::new();
 
     for stem in PolicyFlags::all_stems() {
         let proving_key_path = repo_root
             .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}_proving_key.bin"));
-        let wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let wasm_path = wasm_path(&circuits_out, &stem);
         let r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", proving_key_path.display());
-        println!("cargo:rerun-if-changed={}", wasm_path.display());
         println!("cargo:rerun-if-changed={}", r1cs_path.display());
 
         let proving_key_bytes = read_file(&proving_key_path);
@@ -107,6 +129,7 @@ fn main() {
         let proving_key_hash = sha256(&proving_key_bytes);
         let wasm_hash = sha256(&wasm_bytes);
         let r1cs_hash = sha256(&r1cs_bytes);
+        wasm_hashes.insert(stem.to_string(), fmt_hex(&wasm_hash));
         let const_prefix = stem.to_ascii_uppercase();
 
         out.push_str(&format!(
@@ -187,11 +210,10 @@ pub fn policy_transact_artifact_hashes(stem: &str) -> Option<PolicyTransactArtif
         let pk_path = repo_root
             .join("deployments/testnet/circuit_keys")
             .join(format!("{stem}_proving_key.bin"));
-        let disc_wasm_path = circuits_out.join(format!("{stem}.wasm"));
+        let disc_wasm_path = wasm_path(&circuits_out, &stem);
         let disc_r1cs_path = circuits_out.join(format!("{stem}.r1cs"));
 
         println!("cargo:rerun-if-changed={}", pk_path.display());
-        println!("cargo:rerun-if-changed={}", disc_wasm_path.display());
         println!("cargo:rerun-if-changed={}", disc_r1cs_path.display());
 
         let pk_bytes = read_file(&pk_path);
@@ -200,6 +222,7 @@ pub fn policy_transact_artifact_hashes(stem: &str) -> Option<PolicyTransactArtif
 
         let pk_hash = sha256(&pk_bytes);
         let disc_wasm_hash = sha256(&disc_wasm_bytes);
+        wasm_hashes.insert(stem.clone(), fmt_hex(&disc_wasm_hash));
         let disc_r1cs_hash = sha256(&disc_r1cs_bytes);
 
         let suffix = stem
@@ -233,4 +256,19 @@ pub const EXPECTED_{const_prefix}_R1CS_LEN: usize = {disc_r1cs_len};
             out_path.display()
         )
     });
+
+    // When invoked via build.sh, CIRCUIT_WASM_DIR contains the wasm files that
+    // will be shipped. Write a sidecar so CI can verify the shipped bytes against
+    // the hashes baked into the compiled code.
+    if let Ok(circuit_wasm_dir) = env::var("CIRCUIT_WASM_DIR") {
+        let sidecar_path = PathBuf::from(&circuit_wasm_dir).join("artifact_hashes.json");
+        let sidecar = serde_json::to_string_pretty(&wasm_hashes)
+            .expect("sdk/web/build.rs: failed to serialize wasm hashes");
+        fs::write(&sidecar_path, sidecar).unwrap_or_else(|e| {
+            panic!(
+                "sdk/web/build.rs: failed to write sidecar {}: {e}",
+                sidecar_path.display()
+            )
+        });
+    }
 }

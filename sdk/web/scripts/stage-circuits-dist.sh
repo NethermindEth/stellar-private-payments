@@ -8,7 +8,7 @@ PROFILE="release"
 CIRCUITS_OUT="$ROOT/target/circuits-artifacts/$PROFILE"
 DIST="$WEB/dist"
 
-ARTIFACTS=(
+CIRCUIT_ARTIFACTS=(
   policy_tx_2_2.wasm
   policy_tx_2_2.r1cs
   policy_tx_2_2_A.wasm
@@ -27,6 +27,11 @@ ARTIFACTS=(
   selectiveDisclosure_4.r1cs
 )
 
+# Allow other scripts to source this file just to read the CIRCUIT_ARTIFACTS array.
+if [[ "${STAGE_CIRCUITS_DIST_SOURCE_ONLY:-}" == "1" ]]; then
+  return 0
+fi
+
 if [[ ! -d "$CIRCUITS_OUT" ]]; then
   if [[ "$PROFILE" == "release" ]]; then
     echo "error: missing $CIRCUITS_OUT — run cargo build -p circuits --release" >&2
@@ -36,9 +41,12 @@ if [[ ! -d "$CIRCUITS_OUT" ]]; then
   exit 1
 fi
 
+# Start from a clean circuits directory so stale files from earlier builds (e.g.
+# old cache sidecars or renamed circuits) cannot leak into the npm package.
+rm -rf "$DIST/circuits"
 mkdir -p "$DIST/circuits" "$DIST/licenses"
 
-for name in "${ARTIFACTS[@]}"; do
+for name in "${CIRCUIT_ARTIFACTS[@]}"; do
   src="$CIRCUITS_OUT/$name"
   [[ -f "$src" ]] || { echo "error: missing circuit artifact $src" >&2; exit 1; }
   cp "$src" "$DIST/circuits/$name"
