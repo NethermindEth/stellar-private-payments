@@ -49,7 +49,11 @@ jobs:
           # which cannot be expressed in allow-licenses (see comment above) —
           # excuse it by package identity instead, which uses a separate code
           # path unaffected by the same-array conjunction restriction.
-          allow-dependencies-licenses: "pkg:npm/sha.js, pkg:npm/stellar-private-payments"
+          #
+          # Swatinem/rust-cache is a CI-only GitHub Action (build caching); its
+          # LGPL-3.0 license does not affect distributed artifacts, so it is
+          # excused by package identity rather than added to the broad allowlist.
+          allow-dependencies-licenses: "pkg:npm/sha.js, pkg:npm/stellar-private-payments, pkg:githubactions/Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab"
 
   full-tree-scan:
     name: Full-Tree License Scan
