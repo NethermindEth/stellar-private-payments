@@ -235,8 +235,8 @@ impl Subscriber for CustomTelemetrySubscriber {
 
 /// Helper to resolve the default configuration based on build profile and
 /// environment.
-pub fn resolve_default_config() -> stellar_private_payments_sdk::types::TelemetryConfig {
-    use stellar_private_payments_sdk::types::{TelemetryConfig, TelemetrySink};
+pub fn resolve_default_config() -> stellar_private_payments::types::TelemetryConfig {
+    use stellar_private_payments::types::{TelemetryConfig, TelemetrySink};
 
     let is_wasm = cfg!(target_arch = "wasm32");
     let is_test = cfg!(test);
@@ -268,11 +268,11 @@ pub fn resolve_default_config() -> stellar_private_payments_sdk::types::Telemetr
 }
 
 /// Initialize the tracing subscriber once for the current WASM isolate.
-pub fn init_telemetry(config: Option<stellar_private_payments_sdk::types::TelemetryConfig>) {
+pub fn init_telemetry(config: Option<stellar_private_payments::types::TelemetryConfig>) {
     TELEMETRY_INIT.call_once(|| {
         let config = config.unwrap_or_else(resolve_default_config);
 
-        stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+        stellar_private_payments::types::set_reveal_sensitive(config.reveal_sensitive);
 
         let level_directive = std::env::var("SPP_LOG_LEVEL")
             .ok()
@@ -284,12 +284,11 @@ pub fn init_telemetry(config: Option<stellar_private_payments_sdk::types::Teleme
         let ring_buffer = Arc::new(RingBuffer::new(config.ring_buffer_bytes));
 
         let use_ring_buffer = config.sink
-            == stellar_private_payments_sdk::types::TelemetrySink::RingBuffer
-            || config.sink == stellar_private_payments_sdk::types::TelemetrySink::Both;
+            == stellar_private_payments::types::TelemetrySink::RingBuffer
+            || config.sink == stellar_private_payments::types::TelemetrySink::Both;
 
-        let use_console = config.sink
-            == stellar_private_payments_sdk::types::TelemetrySink::Console
-            || config.sink == stellar_private_payments_sdk::types::TelemetrySink::Both;
+        let use_console = config.sink == stellar_private_payments::types::TelemetrySink::Console
+            || config.sink == stellar_private_payments::types::TelemetrySink::Both;
 
         let subscriber = CustomTelemetrySubscriber {
             ring_buffer: if use_ring_buffer {
@@ -376,7 +375,7 @@ pub(crate) fn current_worker_config() -> WorkerTelemetryConfig {
         .to_string();
     WorkerTelemetryConfig {
         level,
-        reveal_sensitive: stellar_private_payments_sdk::types::reveal_sensitive(),
+        reveal_sensitive: stellar_private_payments::types::reveal_sensitive(),
     }
 }
 

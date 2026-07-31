@@ -6,15 +6,10 @@ Detailed API documentation generated from source code via `rustdoc`.
 
 - [circuits](api/circuits/index.html)
 
-## App (WASM)
+## SDK
 
-- [types](api/types/index.html)
-- [state](api/state/index.html)
-- [stellar](api/stellar/index.html)
-- [prover](api/prover/index.html)
-- [witness](api/witness/index.html)
-- [web](api/web/index.html)
-- [stellar-private-payments-sdk-web](api/stellar_private_payments_sdk_web/index.html)
+- [stellar-private-payments](api/stellar_private_payments/index.html)
+- [stellar-private-payments-web](api/stellar_private_payments_web/index.html)
 
 ## Contracts
 
@@ -31,7 +26,7 @@ Detailed API documentation generated from source code via `rustdoc`.
 
 ## Logging & Telemetry JS API
 
-The browser-based WASM package (`stellar-private-payments-sdk-web`) exposes three public telemetry functions:
+The browser-based WASM package (`stellar-private-payments-web`) exposes three public telemetry functions:
 
 ### 1. `configureTelemetry(config?: TelemetryConfig): void`
 Initializes or dynamically updates the active subscriber's logging filter, target sinks, and diagnostic buffers.

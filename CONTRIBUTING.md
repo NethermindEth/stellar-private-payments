@@ -110,7 +110,7 @@ Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
 `vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in
 the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
 This patch remains for **circuits / ceremony** builds that still use ark-circom → Wasmer + Cranelift.
-The native SDK (`stellar-private-payments-sdk`) no longer depends on Wasmer; witness generation uses
+The native SDK (`stellar-private-payments`) no longer depends on Wasmer; witness generation uses
 committed `circom-witness-rs` graphs (see `make witness-graphs`).
 
 ### Running WASM tests
@@ -123,8 +123,8 @@ so you need it available on your `PATH` (typically by installing `wasm-bindgen-c
 # Install wasm-bindgen-cli (version must match `wasm-bindgen` in Cargo.lock)
 cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
-# Example: run wasm tests for the Stellar core crate
-cargo test --target wasm32-unknown-unknown -p stellar
+# Example: run wasm tests for the Stellar Private Payments SDK
+cargo test --target wasm32-unknown-unknown -p stellar-private-payments --lib
 ```
 
 ### Building Circuits

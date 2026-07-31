@@ -12,7 +12,7 @@
 //! To Build the test circuits use `BUILD_TESTS=1 cargo build`
 //!
 //! The script also generates Groth16 proving and verification keys for selected
-//! entry-point circuits (see `types::PolicyFlags::all_stems` and
+//! entry-point circuits (see `PolicyFlags::all_stems` and
 //! `selectiveDisclosure_*` below) and outputs them to `testdata/`.
 //! `std::env::var("CIRCUIT_OUT_DIR")`
 
@@ -37,7 +37,6 @@ use std::{
     string::ToString,
 };
 use type_analysis::check_types::check_types;
-use types::PolicyFlags;
 
 const CURVE_ID: &str = "bn128";
 
@@ -70,7 +69,13 @@ fn circuit_needs_groth16_keys(name: &str, groth16_key_circuits: &[String]) -> bo
 }
 
 fn groth16_key_circuits() -> Vec<String> {
-    let mut circuits = PolicyFlags::all_stems();
+    // Keep in sync with `stellar_private_payments::types::PolicyFlags::all_stems`.
+    let mut circuits = vec![
+        "policy_tx_2_2".to_owned(),
+        "policy_tx_2_2_A".to_owned(),
+        "policy_tx_2_2_B".to_owned(),
+        "policy_tx_2_2_AB".to_owned(),
+    ];
     circuits.extend(
         SELECTIVE_DISCLOSURE_CIRCUITS
             .iter()
@@ -152,7 +157,9 @@ fn main() -> Result<()> {
     println!("cargo:rerun-if-changed=build.rs");
     println!(
         "cargo:rerun-if-changed={}",
-        crate_dir.join("../sdk/types/src/policy_tx.rs").display()
+        crate_dir
+            .join("../sdk/native/src/types/policy_tx.rs")
+            .display()
     );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");

@@ -19,7 +19,7 @@ use soroban_sdk::{
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
-use types::PolicyFlags;
+use stellar_private_payments::types::PolicyFlags;
 
 use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
 

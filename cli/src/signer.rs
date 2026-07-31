@@ -6,7 +6,7 @@
 
 use std::path::PathBuf;
 
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Error, PreparedTransaction, Signer,
     chain::{Limits, PreparedSorobanTx, ReadXdr, TransactionEnvelope, WriteXdr},
     types::SignedTransaction,

@@ -38,8 +38,8 @@ fi
 
 PROFILE_MARKER="sdk/web/.trunk-wasm-profile"
 LAST_PROFILE="$(cat "$PROFILE_MARKER" 2>/dev/null || echo "")"
-if [ ! -f "sdk/web/dist/stellar_private_payments_sdk_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ]; then
-    echo "trunk: building stellar-private-payments-sdk-web (WASM_PROFILE=$WASM_PROFILE)..."
+if [ ! -f "sdk/web/dist/stellar_private_payments_web.js" ] || [ "$LAST_PROFILE" != "$WASM_PROFILE" ]; then
+    echo "trunk: building stellar-private-payments-web (WASM_PROFILE=$WASM_PROFILE)..."
     npm run build --prefix sdk/web
     echo "$WASM_PROFILE" > "$PROFILE_MARKER"
 fi
@@ -65,7 +65,7 @@ sed 's|^Source bundle: ./source-bundle.tar.gz$|Source bundle: ../../../../circui
 ./app/node_modules/.bin/esbuild sdk/web/js/index.js \
   --bundle --format=esm --minify \
   --outfile="$SDK/js/index.js" \
-  --external:../dist/stellar_private_payments_sdk_web.js
+  --external:../dist/stellar_private_payments_web.js
 ./app/node_modules/.bin/esbuild sdk/web/js/freighter.js \
   --bundle --format=esm --minify \
   --outfile="$SDK/js/freighter.js" \

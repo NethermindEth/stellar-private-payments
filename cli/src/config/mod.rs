@@ -3,7 +3,7 @@ mod toml;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use stellar_private_payments_sdk::{state::SqliteStorage, types::ContractConfig};
+use stellar_private_payments::{state::SqliteStorage, types::ContractConfig};
 
 use crate::{
     account::{Account, resolve},

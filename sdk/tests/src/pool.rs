@@ -1,14 +1,13 @@
-//! Test fixtures for [`stellar_private_payments_sdk::blocking::PrivatePool`].
+//! Test fixtures for [`stellar_private_payments::blocking::PrivatePool`].
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use anyhow::Result;
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     Handle, LocalProver, LocalSigner, LocalStorage, Signer, TransferRecipient,
     blocking::{Account, Client, PrivatePool},
-    types::{ContractConfig, NoteAmount, NotePublicKey, PolicyFlags},
+    types::{ContractConfig, EncryptionPublicKey, Field, NoteAmount, NotePublicKey, PolicyFlags},
 };
-use types::{EncryptionPublicKey, Field};
 
 use crate::seed::{self, POOL_MERKLE_LEVELS};
 
@@ -76,7 +75,7 @@ fn test_client_and_account(wallet: Option<&[u64]>) -> Result<(Client, Account)> 
     let prover = Handle::from_box(Box::new(LocalProver::from_artifacts(&[(
         PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST,
         artifacts,
-    )])?) as Box<dyn stellar_private_payments_sdk::Prover>);
+    )])?) as Box<dyn stellar_private_payments::Prover>);
     let contract_config: ContractConfig = serde_json::from_str(TEST_CONFIG_JSON)?;
     let mut client = Client::init(
         "https://soroban-testnet.stellar.org",
@@ -126,11 +125,11 @@ fn cargo_profile() -> &'static str {
     }
 }
 
-fn test_prover_artifacts() -> Result<stellar_private_payments_sdk::ProverArtifacts> {
+fn test_prover_artifacts() -> Result<stellar_private_payments::ProverArtifacts> {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let circuits = repo.join("target/circuits-artifacts").join(cargo_profile());
     let keys = repo.join("deployments/testnet/circuit_keys");
-    Ok(stellar_private_payments_sdk::ProverArtifacts {
+    Ok(stellar_private_payments::ProverArtifacts {
         proving_key: std::fs::read(keys.join("policy_tx_2_2_AB_proving_key.bin"))?,
         circuit_graph: std::fs::read(keys.join("policy_tx_2_2_AB.graph.bin"))?,
         circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,

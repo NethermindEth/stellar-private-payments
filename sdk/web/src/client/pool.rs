@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use stellar_private_payments_sdk::{
+use stellar_private_payments::{
     DisclosureRequest, PrivatePool as NativePrivatePool,
     types::{DisclosureReceipt, EncryptionPublicKey, NoteAmount, NotePublicKey, TransferRecipient},
 };

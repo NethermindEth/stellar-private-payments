@@ -8,7 +8,7 @@ This document describes how the application manages local state, including persi
 
 | Layer | Location | Role |
 |-------|----------|------|
-| **Rust SDK** | `sdk/client` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
+| **Rust SDK** | `sdk/native` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
 | **Web SDK** | `sdk/web` | npm package `stellar-private-payments` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
 | **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
@@ -16,7 +16,7 @@ Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx
 
 **Storage**
 
-Local storage is SQLite (`sdk/state/src/storage.rs`, schema in `sdk/state/src/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
+Local storage is SQLite (`sdk/native/src/state/storage.rs`, schema in `sdk/native/src/state/schema.sql`), shared across platforms. In the browser the database file (`spp.db`) lives on OPFS behind the storage worker.
 
 ## Browser SDK (`sdk/web`)
 
@@ -57,7 +57,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 - Generic over a storage backend (`Indexer<S: ContractDataStorage>`).
 - On web, the backend is **`StorageBridge`**, implementing `ContractDataStorage` and the client SDK `Storage` trait by forwarding to the storage worker.
-- `BackgroundSync::run` (`sdk/client/src/sync.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap. `bootnodeRequired` (native `bootnode_required`, wasm in `sdk/web/src/bootnode.rs`) is a one-shot probe only.
+- `BackgroundSync::run` (`sdk/native/src/sync.rs`) owns the long-running loop: `Indexer::init`, periodic `fetch_contract_events`, bootnode handoff when the wallet RPC has a retention gap. `bootnodeRequired` (native `bootnode_required`, wasm in `sdk/web/src/bootnode.rs`) is a one-shot probe only.
 - Background sync is owned by that loop. Pool sessions do not expose `sync()`; use `client.sync()` for an explicit catch-up when needed.
 
 **`Storage` (WASM, wasm-bindgen API)**
@@ -196,7 +196,7 @@ Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.
 
 Keys are derived deterministically from Freighter wallet signatures:
 
-1. User signs `KEY_DERIVATION_MESSAGE` from `sdk/prover/src/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`).
+1. User signs `KEY_DERIVATION_MESSAGE` from `sdk/native/src/zk/encryption.rs` (`"Privacy Pool Key Derivation [v1]"`).
 2. The worker derives the BN254 note identity keypair and the X25519 encryption keypair from that signature using domain-separated hashes.
 3. Derived keys are stored in SQLite; the signature is not persisted.
 
