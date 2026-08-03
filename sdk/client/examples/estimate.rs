@@ -51,6 +51,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             println!("Estimate unavailable: {e}");
             println!("(This usually means the wallet has no spendable notes yet.)");
         }
+        Err(e) if common::is_retention_gap_error(&e) => common::skip_on_retention_gap(&e),
         Err(e) => return Err(Box::new(e)),
     }
 
@@ -59,7 +60,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let deposit_plan = pool.prepare_deposit(amount)?;
     print_plan_cursor(&deposit_plan);
 
-    let notes = pool.spendable_notes()?;
+    let notes = pool.spendable_notes().map_err(|e| {
+        if common::is_retention_gap_error(&e) {
+            common::skip_on_retention_gap(&e);
+        }
+        Box::new(e) as Box<dyn std::error::Error>
+    })?;
     println!();
     if notes.is_empty() {
         println!("No spendable notes available; skipping transfer-plan demo.");

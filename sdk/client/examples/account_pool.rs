@@ -35,7 +35,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!();
 
     println!("Syncing account state...");
-    account.sync()?;
+    account.sync().map_err(|e| {
+        if common::is_retention_gap_error(&e) {
+            common::skip_on_retention_gap(&e);
+        }
+        Box::new(e) as Box<dyn std::error::Error>
+    })?;
 
     let registered = account.is_registered()?;
     println!("Registered on-chain: {registered}");

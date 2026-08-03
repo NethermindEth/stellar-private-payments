@@ -19,7 +19,15 @@
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
-//! Missing prerequisites print a skip message and exit with code 0.
+//! Four prerequisite classes print a skip message and exit with code 0: a
+//! missing `STELLAR_SECRET_KEY` ([`require_env`]), a wallet without privacy
+//! keys ([`require_onboarded`]), an underfunded account
+//! ([`require_funded_for_pool`]), and an RPC retention gap
+//! ([`skip_on_retention_gap`]). Other misconfiguration returns `Err` and
+//! surfaces as a hard failure — an unreadable `SPP_DEPLOYMENT_JSON`, an
+//! unopenable `SPP_WALLET_PATH`, or a `SPP_POOL_CONTRACT_ID` that is not in the
+//! deployment config. Missing circuit artifacts also return `Err`, which the
+//! transact examples convert into a skip by matching the message.
 
 #![allow(dead_code)] // shared module: each helper is used by some example
 
@@ -89,9 +97,16 @@ pub fn network_passphrase(network: &str) -> Option<String> {
 ///
 /// Defaults to the project bootnode used by the web app. Set
 /// `SPP_BOOTNODE_URL` to override, or to an empty string to disable it.
+///
+/// Reads the variable directly rather than through [`env_or`], which treats an
+/// empty value as unset and would make the disable case unreachable.
 pub fn bootnode_url() -> Option<String> {
-    let value = env_or("SPP_BOOTNODE_URL", "https://bootnode.dev-nethermind.xyz");
-    if value.is_empty() { None } else { Some(value) }
+    match std::env::var("SPP_BOOTNODE_URL") {
+        // Explicitly set to empty: disable the bootnode fallback.
+        Ok(value) if value.is_empty() => None,
+        Ok(value) => Some(value),
+        Err(_) => Some("https://bootnode.dev-nethermind.xyz".to_string()),
+    }
 }
 
 /// Default path to the SQLite wallet file.
@@ -302,9 +317,35 @@ pub fn require_onboarded(account: &Account) -> Result<(), String> {
 /// The public Soroban RPC retention window can be shorter than the deployment
 /// history, and the default bootnode handoff can be stale. This detector is
 /// used by examples to turn the failure into a graceful skip message.
+///
+/// Two distinct failure shapes mean "the required history is unavailable":
+///
+/// 1. No bootnode configured: the SDK reports `RPC sync gap: main RPC lacks
+///    history ...`, matched by `sync gap`.
+/// 2. A bootnode is configured but cannot serve the requested range either. The
+///    SDK wraps the indexer's JSON-RPC failure as `bootnode indexer: jsonrpc
+///    error: -32602 - unsupported filters (requested startLedger=...)`, which
+///    contains neither `sync gap` nor `retention`.
+///
+/// Shape 2 is the default path, because the examples configure a bootnode
+/// unless one is explicitly disabled, so it must be matched too or an aged
+/// deployment surfaces a raw JSON-RPC error instead of the skip message.
+///
+/// Matching on message text is unavoidably brittle. The robust alternative is a
+/// dedicated error variant in the SDK, which is deliberately out of scope here:
+/// these examples are fixed without touching production code.
 pub fn is_retention_gap_error(e: &dyn std::error::Error) -> bool {
-    let msg = e.to_string().to_lowercase();
-    msg.contains("sync gap") || msg.contains("retention")
+    is_retention_gap_message(&e.to_string())
+}
+
+/// Substring test behind [`is_retention_gap_error`], also usable for errors
+/// that have already been flattened to a `String`.
+pub fn is_retention_gap_message(msg: &str) -> bool {
+    let msg = msg.to_lowercase();
+    msg.contains("sync gap")
+        || msg.contains("retention")
+        || msg.contains("unsupported filters")
+        || msg.contains("bootnode indexer")
 }
 
 /// Print the retention-gap skip message and exit 0.

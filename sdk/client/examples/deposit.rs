@@ -54,14 +54,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Address:   {}", account.user_address());
     println!();
 
-    println!("Estimating transaction count...");
-    let estimate = pool.estimate(amount).map_err(|e| {
+    // Plan the deposit to report its transaction count. Deliberately *not*
+    // `pool.estimate()`: that is a spend-side estimator which loads the wallet's
+    // spendable notes and asks the planner to cover `amount` from them, so on a
+    // wallet with no notes it fails with `NoSpendableNotes`. A deposit is
+    // input-only and needs no existing notes -- hence `prepare_deposit`, which
+    // takes no wallet at all. This is the same call the web client's deposit
+    // path uses.
+    println!("Planning deposit...");
+    let plan = pool.prepare_deposit(amount).map_err(|e| {
         if common::is_retention_gap_error(&e) {
             common::skip_on_retention_gap(&e);
         }
         Box::new(e) as Box<dyn std::error::Error>
     })?;
-    println!("Expected on-chain transactions: {}", estimate.tx_count);
+    println!("Expected on-chain transactions: {}", plan.tx_count());
 
     println!();
     if common::env_or("SPP_VERBOSE_PLAN", "") == "1" {

@@ -79,12 +79,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
+/// Delegates to [`common::is_retention_gap_error`] so both detectors stay in
+/// step; keeping a second copy here is what let them drift apart.
 fn is_retention_gap_error(e: &dyn std::error::Error) -> bool {
-    is_retention_gap_error_str(&e.to_string())
+    common::is_retention_gap_error(e)
 }
 
 fn is_retention_gap_error_str(msg: &str) -> bool {
-    msg.contains("sync gap") || msg.contains("retention")
+    common::is_retention_gap_message(msg)
 }
 
 fn print_retention_gap_note() {
