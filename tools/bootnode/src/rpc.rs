@@ -121,6 +121,22 @@ impl BootnodeRpc {
                 // cached page. Mid-history quiet gaps still have a next page
                 // and must return 200 so clients can keep walking the chain.
                 if tip_known && self.is_terminal_empty(cursor, &result, in_sync).await? {
+                    if result.latest_ledger < cutoff_ledger {
+                        // Sealed below cutoff: persist bump, return empty so the
+                        // wallet advances; the next request handoffs.
+                        self.state
+                            .storage
+                            .bump_empty_latest_ledger(cursor, cutoff_ledger)
+                            .await
+                            .map_err(|e| {
+                                counter!("bootnode_handler_errors_total").increment(1);
+                                internal_error(e)
+                            })?;
+                        counter!("bootnode_cache_hits_total").increment(1);
+                        let mut page = result;
+                        page.latest_ledger = cutoff_ledger;
+                        return Ok(page);
+                    }
                     counter!("bootnode_handoffs_total").increment(1);
                     return Err(retention_handoff(cutoff_ledger));
                 }

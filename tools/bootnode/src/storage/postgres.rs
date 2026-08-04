@@ -548,4 +548,35 @@ WHERE id = $4 AND deployment_id = $5 AND last_event_ledger IS NULL
         tx.commit().await?;
         Ok(plan.stats())
     }
+
+    async fn bump_empty_latest_ledger(&self, cursor_in: &str, latest_ledger: u32) -> Result<()> {
+        let latest =
+            i32::try_from(latest_ledger).context("latest_ledger exceeds postgres INTEGER range")?;
+        let client = self.pool.get().await?;
+        let row = client
+            .query_opt(
+                "SELECT result FROM get_events_pages WHERE deployment_id = $1 AND cursor_in = $2 AND last_event_ledger IS NULL LIMIT 1",
+                &[&self.deployment_id(), &cursor_in],
+            )
+            .await?;
+        let Some(row) = row else {
+            return Ok(());
+        };
+        let Json(mut result): Json<GetEventsResponse> = row.get(0);
+        result.latest_ledger = latest_ledger;
+        let updated = client
+            .execute(
+                r#"
+UPDATE get_events_pages
+SET result = $1, latest_ledger = $2
+WHERE deployment_id = $3 AND cursor_in = $4 AND last_event_ledger IS NULL
+"#,
+                &[&Json(result), &latest, &self.deployment_id(), &cursor_in],
+            )
+            .await?;
+        if updated != 1 {
+            bail!("bump empty page missed cursor_in={cursor_in}");
+        }
+        Ok(())
+    }
 }

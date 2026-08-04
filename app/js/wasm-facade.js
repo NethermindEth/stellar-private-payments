@@ -10,7 +10,6 @@
 
 import init, {
   Client,
-  FreighterSigner,
   Storage,
   bootnodeRequired as sdkBootnodeRequired,
   deriveAspUserLeaf as sdkDeriveAspUserLeaf,
@@ -19,6 +18,7 @@ import init, {
   dump_recent_logs,
   debugLogsEnabled as sdkDebugLogsEnabled,
 } from 'stellar-private-payments';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 
 import { AppStorage } from './app-storage.js';
 
