@@ -93,11 +93,17 @@
                     <!-- Contracts -->
                     <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-5 space-y-4">
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="membershipContract">ASP Membership Contract ID</label>
+                            <div class="flex items-center justify-between gap-2">
+                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="membershipContract">ASP Membership Contract ID</label>
+                                <a id="membershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                            </div>
                             <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="membershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                         <div>
-                            <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+                            <div class="flex items-center justify-between gap-2">
+                                <label class="text-xs font-medium uppercase tracking-[0.22em] text-slate-500" for="nonMembershipContract">ASP Non-Membership Contract ID</label>
+                                <a id="nonMembershipContractLink" href="#" target="_blank" rel="noopener noreferrer" title="Open in block explorer" class="shrink-0 text-[10px] font-medium uppercase tracking-wide text-cyan-300/80 transition hover:text-cyan-100 hover:underline">View &#8599;</a>
+                            </div>
                             <input class="mt-2 w-full rounded-xl border border-white/10 bg-ink-950 px-4 py-3 font-mono text-sm text-slate-100 outline-none transition focus:border-cyan-300/40" id="nonMembershipContract" type="text" placeholder="C..." autocomplete="off" spellcheck="false" />
                         </div>
                     </div>
@@ -106,19 +112,19 @@
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
                             <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Root</div>
-                            <div class="mt-1 font-mono text-xs text-cyan-200/80 break-all" id="membershipRoot">--</div>
+                            <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="membershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
                             <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Levels</div>
-                            <div class="mt-1 font-mono text-xs text-cyan-200/80" id="membershipLevels">--</div>
+                            <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipLevels" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
                             <div class="text-[10px] uppercase tracking-wide text-slate-500">Membership Next Index</div>
-                            <div class="mt-1 font-mono text-xs text-cyan-200/80" id="membershipNextIndex">--</div>
+                            <a class="mt-1 block font-mono text-xs text-cyan-200/80 transition hover:text-cyan-100 hover:underline" id="membershipNextIndex" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                         <div class="rounded-2xl border border-white/8 bg-ink-900/70 p-4">
                             <div class="text-[10px] uppercase tracking-wide text-slate-500">Non-Membership Root</div>
-                            <div class="mt-1 font-mono text-xs text-cyan-200/80 break-all" id="nonMembershipRoot">--</div>
+                            <a class="mt-1 block font-mono text-xs text-cyan-200/80 break-all transition hover:text-cyan-100 hover:underline" id="nonMembershipRoot" href="#" target="_blank" rel="noopener noreferrer" title="View stored data on block explorer">--</a>
                         </div>
                     </div>
                 </div>

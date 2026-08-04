@@ -85,6 +85,9 @@ pub trait Storage: Send + Sync {
     /// [`Err`] so the compressor retries on the next tick.
     async fn compress_empty_pages(&self, cutoff_ledger: u32) -> Result<CompressStats>;
 
+    /// Set `latest_ledger` on the empty page keyed by `cursor_in`.
+    async fn bump_empty_latest_ledger(&self, cursor_in: &str, latest_ledger: u32) -> Result<()>;
+
     async fn mark_caught_up(&self, cursor: &str, latest_ledger: u32) -> Result<()> {
         self.update_cursor(cursor).await?;
         self.set_last_fully_indexed_ledger(latest_ledger).await?;
