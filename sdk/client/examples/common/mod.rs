@@ -176,7 +176,8 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
 ///
 /// The key is read from `SPP_CIRCUIT_KEYS_DIR`; wasm/r1cs from
 /// `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that points at
-/// `cargo build -p circuits`.
+/// `cargo build -p circuits --release`; other I/O errors (e.g. permissions)
+/// are reported without rebuild advice.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let keys_dir = env_or(
         "SPP_CIRCUIT_KEYS_DIR",
@@ -194,24 +195,24 @@ pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts
     let wasm_path = Path::new(&artifacts_dir).join(format!("{stem}.wasm"));
     let r1cs_path = Path::new(&artifacts_dir).join(format!("{stem}.r1cs"));
 
-    let proving_key = std::fs::read(&proving_key_path).map_err(|e| {
-        format!(
-            "read proving key {proving_key_path:?}: {e}\n\
-             Run `cargo build -p circuits` to generate circuit keys and artifacts."
-        )
-    })?;
-    let circuit_wasm = std::fs::read(&wasm_path).map_err(|e| {
-        format!(
-            "read circuit wasm {wasm_path:?}: {e}\n\
-             Run `cargo build -p circuits` to generate circuit artifacts."
-        )
-    })?;
-    let circuit_r1cs = std::fs::read(&r1cs_path).map_err(|e| {
-        format!(
-            "read circuit r1cs {r1cs_path:?}: {e}\n\
-             Run `cargo build -p circuits` to generate circuit artifacts."
-        )
-    })?;
+    // Only genuinely missing files get the rebuild hint; unreadable-but-present
+    // files surface the raw I/O error so the advice stays accurate.
+    let read_artifact = |path: &Path, what: &str| {
+        std::fs::read(path).map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                format!(
+                    "read {what} {path:?}: {e}\n\
+                     Run `cargo build -p circuits --release` to generate circuit keys and artifacts."
+                )
+            } else {
+                format!("read {what} {path:?}: {e}")
+            }
+        })
+    };
+
+    let proving_key = read_artifact(&proving_key_path, "proving key")?;
+    let circuit_wasm = read_artifact(&wasm_path, "circuit wasm")?;
+    let circuit_r1cs = read_artifact(&r1cs_path, "circuit r1cs")?;
 
     Ok(ProverArtifacts {
         proving_key,
@@ -370,6 +371,9 @@ pub fn amount() -> Result<NoteAmount, String> {
     let stroops: u128 = raw
         .parse()
         .map_err(|e| format!("invalid SPP_AMOUNT_STROOPS `{raw}`: {e}"))?;
+    if stroops == 0 {
+        return Err("invalid SPP_AMOUNT_STROOPS `0`: amount must be greater than zero".to_string());
+    }
     Ok(NoteAmount::from(stroops))
 }
 
@@ -434,11 +438,16 @@ pub fn require_funded_for_pool(
                 }
             };
             let balance = i128::from(entry.balance);
+            // A deposit also pays base/resource fees; require a margin so an
+            // exactly-funded account does not pass this precheck and then fail
+            // on-chain. 0.1 XLM is far above typical Soroban fees.
+            const FEE_BUFFER_STROOPS: i128 = 1_000_000;
             let needed = i128::try_from(u128::from(amount))
-                .map_err(|_| format!("deposit amount {amount} exceeds native balance range"))?;
+                .map_err(|_| format!("deposit amount {amount} exceeds native balance range"))?
+                .saturating_add(FEE_BUFFER_STROOPS);
             if balance < needed {
                 eprintln!(
-                    "Skipping: account {address} has {balance} stroops but needs at least {needed} stroops to deposit."
+                    "Skipping: account {address} has {balance} stroops but needs at least {needed} stroops to deposit (amount plus a {FEE_BUFFER_STROOPS}-stroop fee buffer)."
                 );
                 eprintln!("Fund the account with XLM on testnet and re-run this example.");
                 std::process::exit(0);

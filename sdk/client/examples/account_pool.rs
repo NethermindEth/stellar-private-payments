@@ -5,7 +5,7 @@
 //! notes, then opens the selected pool and prints its balance and notes.
 //!
 //! Run:
-//!   cargo run --example account_pool
+//!   cargo run --release --example account_pool
 //!
 //! Required env var:
 //!   STELLAR_SECRET_KEY   Stellar secret key for the account.

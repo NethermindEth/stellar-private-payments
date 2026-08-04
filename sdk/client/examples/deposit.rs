@@ -6,7 +6,7 @@
 //! and that circuit artifacts have been generated.
 //!
 //! Run:
-//!   cargo run --example deposit
+//!   cargo run --release --example deposit
 //!
 //! Required env vars:
 //!   STELLAR_SECRET_KEY  Stellar secret key for the funded testnet account.
@@ -140,7 +140,7 @@ fn print_result(result: &stellar_private_payments_sdk::types::TransactionResult,
     );
     println!();
     println!(
-        "Check the updated pool balance with: cargo run --example account_pool -- SPP_POOL_CONTRACT_ID={pool_id}"
+        "Check the updated pool balance with: SPP_POOL_CONTRACT_ID={pool_id} cargo run --release --example account_pool"
     );
 }
 

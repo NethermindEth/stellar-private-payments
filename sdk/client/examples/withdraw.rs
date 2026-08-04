@@ -6,7 +6,7 @@
 //! spendable notes in the selected pool.
 //!
 //! Run:
-//!   cargo run --example withdraw
+//!   cargo run --release --example withdraw
 //!
 //! Required env var:
 //!   STELLAR_SECRET_KEY   Stellar secret key for the sending account.
@@ -74,6 +74,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         notes.len(),
         total
     );
+    if u128::from(amount) > total {
+        println!(
+            "Skipping: requested amount ({} stroops) exceeds available notes ({} stroops).",
+            u128::from(amount),
+            total
+        );
+        println!("Lower SPP_AMOUNT_STROOPS or deposit more, then re-run this example.");
+        std::process::exit(0);
+    }
     println!();
 
     let recipient = common::env_or("SPP_RECIPIENT_ADDRESS", account.user_address());
@@ -84,6 +93,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Estimating transaction count...");
+    // Intentional duplicate work: `pool.withdraw` below re-fetches spendable
+    // notes and re-runs `prepare_withdraw` internally. We build the plan here
+    // only to show the expected tx count before committing to the real submit.
     let plan = pool.prepare_withdraw(&notes, amount, &recipient)?;
     println!("Expected on-chain transactions: {}", plan.tx_count());
 

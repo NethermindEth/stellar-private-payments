@@ -6,7 +6,7 @@
 //! plans transactions; no proof is built and nothing is submitted.
 //!
 //! Run:
-//!   cargo run --example estimate
+//!   cargo run --release --example estimate
 //!
 //! Required env var:
 //!   STELLAR_SECRET_KEY   Stellar secret key for the account (used to derive
@@ -71,13 +71,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         println!("No spendable notes available; skipping transfer-plan demo.");
         println!("Deposit first, then re-run this example to see a multi-tx spend plan.");
     } else {
+        let total: u128 = notes
+            .iter()
+            .map(|n| u128::from(n.amount))
+            .fold(0u128, u128::saturating_add);
         println!(
-            "Spend plan introspection ({} spendable note(s) available):",
-            notes.len()
+            "Spend plan introspection ({} spendable note(s) totaling {} stroops):",
+            notes.len(),
+            total
         );
-        let recipient = TransferRecipient::from(account.user_address());
-        let transfer_plan = pool.prepare_transfer(&notes, recipient, amount)?;
-        print_plan_cursor(&transfer_plan);
+        if u128::from(amount) > total {
+            println!(
+                "Skipping: requested amount ({} stroops) exceeds available notes ({} stroops).",
+                u128::from(amount),
+                total
+            );
+            println!("Lower SPP_AMOUNT_STROOPS or deposit more to see a spend plan.");
+        } else {
+            let recipient = TransferRecipient::from(account.user_address());
+            let transfer_plan = pool.prepare_transfer(&notes, recipient, amount)?;
+            print_plan_cursor(&transfer_plan);
+        }
     }
 
     println!();

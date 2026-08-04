@@ -17,7 +17,7 @@ artifacts from `target/circuits-artifacts/release`.
 4. [Build circuit artifacts](#build-circuit-artifacts)
 5. [Onboard the wallets](#onboard-the-wallets)
 6. [Local bootnode](#local-bootnode)
-7. [ASP membership for allowlist pools](#asp-membership-for-allowlist-pools)
+7. [ASP membership for allowlist pools](#asp-membership-for-allowlist-pools) (EURC pool only — skip for the default XLM pool)
 8. [Environment variables](#environment-variables)
 9. [Run the examples](#run-the-examples)
 10. [Troubleshooting](#troubleshooting)
@@ -76,6 +76,9 @@ Export Alice's secret in your shell (the examples sign with it directly):
 export STELLAR_SECRET_KEY="S..."   # Alice's secret key
 export SPP_RECIPIENT_ADDRESS="G..." # Bob's public address
 ```
+
+> Use a throwaway testnet key only — never export a secret that controls real
+> mainnet funds.
 
 ## Fund the accounts
 
@@ -186,10 +189,15 @@ http://127.0.0.1:8080`) and when running the examples by setting
 
 ## ASP membership for allowlist pools
 
-The default testnet pool is configured with an `allowlist` policy flag. Before a
-wallet can `deposit` or `transfer` through an allowlist pool, the pool admin
-must insert that wallet's ASP membership leaf into the `asp_membership`
-contract.
+> **You can skip this section for the default pool.** The default testnet pool
+> (native XLM) is configured with only a `blocklist` policy flag, so it needs
+> no ASP membership setup. This step applies only to the second testnet pool
+> (EURC), which adds an `allowlist` flag — select it with
+> `SPP_POOL_CONTRACT_ID=CAJJT5YV4BMFTHEOO5FGO2G56TEJKM4G4FW7FS4DYBLLLLHSAYUZWT74`.
+
+Before a wallet can `deposit` or `transfer` through an allowlist pool, the
+pool admin must insert that wallet's ASP membership leaf into the
+`asp_membership` contract.
 
 1. Obtain the ASP membership contract ID from the deployment config:
 

@@ -5,7 +5,7 @@
 //! selected pool; run the `deposit` example first if it does not.
 //!
 //! Run:
-//!   cargo run --example transfer
+//!   cargo run --release --example transfer
 //!
 //! Required env vars:
 //!   STELLAR_SECRET_KEY    Stellar secret key for the sending account.
@@ -78,6 +78,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         notes.len(),
         total
     );
+    if u128::from(amount) > total {
+        println!(
+            "Skipping: requested amount ({} stroops) exceeds available notes ({} stroops).",
+            u128::from(amount),
+            total
+        );
+        println!("Lower SPP_AMOUNT_STROOPS or deposit more, then re-run this example.");
+        std::process::exit(0);
+    }
     println!();
 
     let recipient = resolve_recipient(&client)?;
@@ -85,6 +94,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!();
     println!("Estimating transaction count...");
+    // Intentional duplicate work: `pool.transfer` below re-fetches spendable
+    // notes and re-runs `prepare_transfer` internally. We build the plan here
+    // only to show the expected tx count before committing to the real submit.
     let plan = pool.prepare_transfer(&notes, recipient.clone(), amount)?;
     println!("Expected on-chain transactions: {}", plan.tx_count());
 
@@ -129,7 +141,13 @@ fn resolve_recipient(
                 println!("  encryption key:  {:?}", entry.encryption_key);
             }
             None => {
-                println!("  (address not yet registered in the on-chain key registry)");
+                eprintln!(
+                    "Skipping: {address} is not yet registered in the on-chain key registry."
+                );
+                eprintln!(
+                    "Onboard the recipient with registration enabled (e.g. `spp onboard --register`, or SPP_REGISTER=1 cargo run --release --example account_pool), then retry."
+                );
+                std::process::exit(0);
             }
         }
         return Ok(TransferRecipient::from(address));

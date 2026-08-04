@@ -5,7 +5,7 @@
 //! configured Soroban RPC endpoint (testnet by default).
 //!
 //! Run:
-//!   cargo run --example sync
+//!   cargo run --release --example sync
 //!
 //! Env vars:
 //!   SPP_RPC_URL          default: https://soroban-testnet.stellar.org
@@ -44,7 +44,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("Running inline sync...");
     match client.sync() {
         Ok(()) => println!("Inline sync complete."),
-        Err(e) if is_retention_gap_error(&e) => print_retention_gap_note(),
+        Err(e) if is_retention_gap_error(&e) => {
+            print_retention_gap_note();
+            return Ok(());
+        }
         Err(e) => return Err(Box::new(e)),
     }
 
