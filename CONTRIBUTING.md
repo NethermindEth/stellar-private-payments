@@ -139,7 +139,7 @@ The circuit crate also exposes these flags:
 - **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
 For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
 - **REGEN_KEYS**: Forces the generation of new verification keys. R1CS compilation uses Circom `--O2` (same as `make witness-graphs`).
-- **`make witness-graphs`**: Regenerates committed `*.graph.bin` witness graphs (`--features regen-graph` with `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` per circuit). Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain.
+- **`make witness-graphs`**: Regenerates committed `*.graph.bin` witness graphs (`--features regen-graph` with `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` per circuit). Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain. Note: running with `--features regen-graph` and `WITNESS_CPP` set writes generated `*.graph.bin` files directly into `circuits/` and `deployments/testnet/circuit_keys/` (outside `OUT_DIR`), dirtying source-tree files.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash

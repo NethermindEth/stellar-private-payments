@@ -4,6 +4,17 @@
 //! directory into R1CS constraint systems, symbol files and WASM for witness
 //! generation.
 //!
+//! > [!WARNING]
+//! > **Source Tree Writes Outside `OUT_DIR`**:
+//! > When compiled with `--features regen-graph` and `WITNESS_CPP` set,
+//! > `regenerate_witness_graphs`
+//! > generates binary witness graphs (`*.graph.bin`) directly into the
+//! > `circuits/` crate root
+//! > and copies them into `deployments/testnet/circuit_keys/` (outside standard
+//! > `OUT_DIR`).
+//! > This intentionally mutates committed source-tree artifacts during `make
+//! > witness-graphs`.
+//!
 //! ## Usage
 //! The build script runs automatically when you run `cargo build`. It will:
 //! 1. Find all `.circom` files in `src/` directory
@@ -184,6 +195,7 @@ fn main() -> Result<()> {
         crate_dir.join("circomlib.lock").display()
     );
     get_circomlib(&crate_dir, &src_dir)?;
+    let _circomlib_guard = CircomlibRestoreGuard::new_and_patch(&src_dir.join("circomlib"))?;
 
     // === FIND CIRCOM FILES ===
     // Find all .circom files with a main component
@@ -816,7 +828,6 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         let head = String::from_utf8_lossy(&out.stdout).trim().to_string();
         if head == locked_rev {
             println!("cargo:warning=circomlib already at locked revision {locked_rev}");
-            inject_black_box_hints(&circomlib_path)?;
             return Ok(());
         }
     }
@@ -848,8 +859,71 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
     }
 
-    inject_black_box_hints(&circomlib_path)?;
     Ok(())
+}
+
+/// Scope guard that ensures `circomlib` BBF patches are transient.
+///
+/// On creation, resets `comparators.circom` and `bitify.circom` to pristine,
+/// saves their pristine byte contents, and applies `inject_black_box_hints`.
+/// On drop (or build completion), restores the pristine byte contents and
+/// runs `git checkout` so `circuits/src/circomlib` git status remains clean.
+struct CircomlibRestoreGuard {
+    circomlib_path: PathBuf,
+    files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl CircomlibRestoreGuard {
+    fn new_and_patch(circomlib_path: &Path) -> Result<Self> {
+        let comparators_path = circomlib_path.join("circuits/comparators.circom");
+        let bitify_path = circomlib_path.join("circuits/bitify.circom");
+
+        // Guarantee starting from clean/pristine files
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(circomlib_path)
+            .arg("checkout")
+            .arg("--")
+            .arg("circuits/comparators.circom")
+            .arg("circuits/bitify.circom")
+            .status();
+
+        let mut files = Vec::new();
+        if let Ok(b) = fs::read(&comparators_path) {
+            files.push((comparators_path.clone(), b));
+        }
+        if let Ok(b) = fs::read(&bitify_path) {
+            files.push((bitify_path.clone(), b));
+        }
+
+        // Apply black box hints patch
+        inject_black_box_hints(circomlib_path)?;
+
+        Ok(Self {
+            circomlib_path: circomlib_path.to_path_buf(),
+            files,
+        })
+    }
+
+    fn restore(&self) {
+        for (path, content) in &self.files {
+            let _ = fs::write(path, content);
+        }
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&self.circomlib_path)
+            .arg("checkout")
+            .arg("--")
+            .arg("circuits/comparators.circom")
+            .arg("circuits/bitify.circom")
+            .status();
+    }
+}
+
+impl Drop for CircomlibRestoreGuard {
+    fn drop(&mut self) {
+        self.restore();
+    }
 }
 
 /// Run circom-witness-rs graph generation and publish a `*.graph.bin` artifact.
