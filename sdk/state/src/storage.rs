@@ -367,8 +367,8 @@ impl Storage {
         Ok(self
             .get_setting_json(APP_SETTING_BOOTNODE_CONFIG)?
             .unwrap_or(BootnodeSetting {
-                enabled: true,
-                url: DEFAULT_BOOTNODE_URL.to_string(),
+                enabled: false,
+                url: String::new(),
             }))
     }
 

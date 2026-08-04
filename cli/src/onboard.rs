@@ -165,16 +165,17 @@ fn configure_bootnode(
     }
     let current = storage.get_bootnode_setting()?;
     println!("\nBootnode fallback (optional):\n{BOOTNODE_RISKS}\n{BOOTNODE_TEXT}");
-    let hint = if current.url.is_empty() {
-        DEFAULT_BOOTNODE_URL
-    } else {
+    let hint = if current.enabled && !current.url.is_empty() {
         &current.url
+    } else {
+        DEFAULT_BOOTNODE_URL
     };
-    let input = prompt_line(&format!(
-        "Bootnode archive URL [{hint}] (enter to accept): "
-    ))?;
-    let url = if input.is_empty() { hint } else { &input };
-    storage.set_bootnode_setting(true, url)?;
+    let input = prompt_line_prefill(&format!("Bootnode archive URL (blank to skip)"), &hint)?;
+    if !input.is_empty() {
+        storage.set_bootnode_setting(true, &input)?;
+    } else {
+        storage.set_bootnode_setting(true, &input)?;
+    }
     Ok(())
 }
 
@@ -246,4 +247,14 @@ fn prompt_yes_no(prompt: &str, default: bool) -> Result<bool> {
         "y" | "yes" => true,
         _ => false,
     })
+}
+
+fn prompt_line_prefill(prompt: &str, initial: &str) -> Result<String> {
+    let input = dialoguer::Input::<String>::new()
+        .with_prompt(prompt)
+        .with_initial_text(initial)
+        .allow_empty(true)
+        .interact_text()
+        .context("read from strdin")?;
+    Ok(input.trim().to_string())
 }

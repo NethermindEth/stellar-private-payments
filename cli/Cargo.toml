@@ -18,6 +18,7 @@ path = "src/main.rs"
 anyhow.workspace = true
 async-trait.workspace = true
 clap.workspace = true
+dialoguer.workspace = true
 log.workspace = true
 # Not referenced directly, but pulls in reqwest's rustls TLS backend for the
 # binary (the `stellar` crate depends on reqwest without a TLS feature).
