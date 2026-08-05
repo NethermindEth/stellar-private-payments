@@ -19,7 +19,7 @@ A receipt is a JSON object with the following schema:
     "name": "selectiveDisclosure_2",
     "levels": 10,
     "nNotes": 2,
-    "vkHash": "0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d"
+    "vkHash": "0x937c4ee647d7747f90ec6eff0dcc67f4b00772e8239a87a973267ff15f2dd327"
   },
   "context": {
     "network": "testnet",
@@ -104,10 +104,10 @@ Anyone with the receipt JSON can verify it in the **Disclosure** view's Verify s
 
 | Circuit | Canonical `vk_hash` |
 |---|---|
-| `selectiveDisclosure_1` | `0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e` |
-| `selectiveDisclosure_2` | `0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d` |
-| `selectiveDisclosure_3` | `0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62` |
-| `selectiveDisclosure_4` | `0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9` |
+| `selectiveDisclosure_1` | `0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107` |
+| `selectiveDisclosure_2` | `0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd` |
+| `selectiveDisclosure_3` | `0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f` |
+| `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
 | `deployments/testnet/circuit_keys/README.md` | Canonical hashes + artifact provenance |
 | `app/js/disclosure.js` | `CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES` lookup table |
 

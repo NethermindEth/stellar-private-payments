@@ -6,24 +6,25 @@ ROOT="$(cd "$(dirname "$0")/../../.." && pwd)"
 WEB="$ROOT/sdk/web"
 PROFILE="release"
 CIRCUITS_OUT="$ROOT/target/circuits-artifacts/$PROFILE"
+KEYS_DIR="$ROOT/deployments/testnet/circuit_keys"
 DIST="$WEB/dist"
 
 CIRCUIT_ARTIFACTS=(
-  policy_tx_2_2.wasm
+  policy_tx_2_2.graph.bin
   policy_tx_2_2.r1cs
-  policy_tx_2_2_A.wasm
+  policy_tx_2_2_A.graph.bin
   policy_tx_2_2_A.r1cs
-  policy_tx_2_2_B.wasm
+  policy_tx_2_2_B.graph.bin
   policy_tx_2_2_B.r1cs
-  policy_tx_2_2_AB.wasm
+  policy_tx_2_2_AB.graph.bin
   policy_tx_2_2_AB.r1cs
-  selectiveDisclosure_1.wasm
+  selectiveDisclosure_1.graph.bin
   selectiveDisclosure_1.r1cs
-  selectiveDisclosure_2.wasm
+  selectiveDisclosure_2.graph.bin
   selectiveDisclosure_2.r1cs
-  selectiveDisclosure_3.wasm
+  selectiveDisclosure_3.graph.bin
   selectiveDisclosure_3.r1cs
-  selectiveDisclosure_4.wasm
+  selectiveDisclosure_4.graph.bin
   selectiveDisclosure_4.r1cs
 )
 
@@ -47,13 +48,20 @@ rm -rf "$DIST/circuits"
 mkdir -p "$DIST/circuits" "$DIST/licenses"
 
 for name in "${CIRCUIT_ARTIFACTS[@]}"; do
-  src="$CIRCUITS_OUT/$name"
+  if [[ "$name" == *.graph.bin ]]; then
+    src="$KEYS_DIR/$name"
+  else
+    src="$CIRCUITS_OUT/$name"
+  fi
   [[ -f "$src" ]] || { echo "error: missing circuit artifact $src" >&2; exit 1; }
   cp "$src" "$DIST/circuits/$name"
 done
 
 KEYS=(
   policy_tx_2_2_proving_key.bin
+  policy_tx_2_2_A_proving_key.bin
+  policy_tx_2_2_B_proving_key.bin
+  policy_tx_2_2_AB_proving_key.bin
   selectiveDisclosure_1_proving_key.bin
   selectiveDisclosure_2_proving_key.bin
   selectiveDisclosure_3_proving_key.bin
@@ -61,7 +69,7 @@ KEYS=(
 )
 
 for name in "${KEYS[@]}"; do
-  src="$ROOT/deployments/testnet/circuit_keys/$name"
+  src="$KEYS_DIR/$name"
   [[ -f "$src" ]] || { echo "error: missing proving key $src" >&2; exit 1; }
   cp "$src" "$DIST/circuits/$name"
 done

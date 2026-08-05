@@ -8,6 +8,16 @@ This directory contains the Groth16 key material used by the testnet deployment.
 - `policy_tx_2_2_AB` — allowlist + blocklist pools (`PolicyFlags::ALLOWLIST | PolicyFlags::BLOCKLIST`).
 - `selectiveDisclosure_{1,2,3,4}_*` — off-chain selective-disclosure receipt circuits.
 
+## Witness graphs (`*.graph.bin`)
+
+Native and browser witness generation uses committed `circom-witness-rs` operation
+graphs (not Circom WASM / Wasmer). Regenerate with `make witness-graphs`.
+The Circom CLI must match `circuits/circom.lock` (pinned to the same release as
+the Rust circom crates used for R1CS).
+
+Committed for all production stems: `policy_tx_2_2`, `policy_tx_2_2_{A,B,AB}`,
+and `selectiveDisclosure_{1..4}`.
+
 Policy entry points (`policy_tx_2_2*.circom`) compose a shared base transact circuit
 (`policyTransaction.circom`) with optional ASP modules (`aspMembership.circom`,
 `aspNonMembership.circom`).
@@ -51,10 +61,10 @@ disclosure receipts only.
 
 | Circuit | `vk_hash` |
 |---|---|
-| `selectiveDisclosure_1` | `0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e` |
-| `selectiveDisclosure_2` | `0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d` |
-| `selectiveDisclosure_3` | `0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62` |
-| `selectiveDisclosure_4` | `0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9` |
+| `selectiveDisclosure_1` | `0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107` |
+| `selectiveDisclosure_2` | `0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd` |
+| `selectiveDisclosure_3` | `0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f` |
+| `selectiveDisclosure_4` | `0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0` |
 
 Each hash is `disclosure::vk_hash_hex` over the **compressed arkworks verifying-key bytes** (`VerifyingKey::serialize_compressed`) for that circuit, not the SHA-256 of the JSON file. The same values are pinned in `app/js/disclosure.js` and `docs/src/disclosure.md`.
 

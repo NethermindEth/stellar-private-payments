@@ -50,7 +50,8 @@ cat > "$TMP_DIR/src/BUILDING.md" <<EOF
 # Circuits source bundle
 
 This bundle is provided to help recipients rebuild the compiled artifacts
-shipped under \`dist/circuits/\` and to satisfy LGPL-3.0 expectations.
+shipped under \`dist/circuits/\` (\`*.r1cs\` and \`*.graph.bin\`) and to satisfy
+LGPL-3.0 expectations.
 
 ## Contents
 - \`circuits/src/\`: Circom sources from this repository (including the vendored \`circomlib\`)
@@ -76,14 +77,19 @@ cp -R circuits/src/ <REPO_ROOT>/circuits/src/
 At minimum, ensure:
 \`<REPO_ROOT>/circuits/src/circomlib\` matches revision: $LOCK_SHA
 
-3) Build the circuits crate from the repository root:
+3) From the repository root, build R1CS artifacts and regenerate witness graphs.
+   Requires Circom CLI matching \`circuits/circom.lock\` and a C++ toolchain for
+   graphs:
 
 \`\`\`
 cargo build -p circuits --release
+make witness-graphs
 \`\`\`
 
-The build produces circuit artifacts under Cargo \`OUT_DIR\` and the frontend
-build copies them into \`dist/circuits/\` via Trunk hooks.
+R1CS files land under \`target/circuits-artifacts/release/\`. Graph files
+(\`*.graph.bin\`) are written to \`deployments/testnet/circuit_keys/\`. The web
+SDK staging script (\`sdk/web/scripts/stage-circuits-dist.sh\`) copies both into
+\`dist/circuits/\` for redistribution.
 EOF
 
 mkdir -p "$TMP_DIR/src/licenses"

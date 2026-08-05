@@ -28,8 +28,8 @@ pub struct ProverEngine {
 }
 
 impl ProverEngine {
-    pub fn new(proving_key: &[u8], circuit_wasm: &[u8], r1cs: &[u8]) -> Result<Self> {
-        let witness = WitnessCalculator::new(circuit_wasm, r1cs)
+    pub fn new(proving_key: &[u8], circuit_graph: &[u8], r1cs: &[u8]) -> Result<Self> {
+        let witness = WitnessCalculator::from_graph(circuit_graph)
             .context("failed to init witness calculator")?;
         let prover = Groth16Prover::new(proving_key, r1cs).context("failed to init prover")?;
         Ok(Self { witness, prover })
@@ -43,10 +43,10 @@ impl ProverEngine {
     /// warm circuit cache.
     pub fn new_from_uncompressed_pk(
         proving_key: &[u8],
-        circuit_wasm: &[u8],
+        circuit_graph: &[u8],
         r1cs: &[u8],
     ) -> Result<Self> {
-        let witness = WitnessCalculator::new(circuit_wasm, r1cs)
+        let witness = WitnessCalculator::from_graph(circuit_graph)
             .context("failed to init witness calculator")?;
         let prover = Groth16Prover::new_from_uncompressed_pk(proving_key, r1cs)
             .context("failed to init prover from uncompressed proving key")?;

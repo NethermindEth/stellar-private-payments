@@ -87,7 +87,7 @@ stellar-private-payments/
 ## Prerequisites
 
 - [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
-- [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
+- [**Circom**](https://github.com/iden3/circom) **2.2.3** for circuit / graph builds (`circuits/circom.lock`; same tag as the Rust circom crates in `circuits/Cargo.toml`).
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
 - [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
@@ -107,8 +107,11 @@ stellar-private-payments/
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
-`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in 
+`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in
 the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
+This patch remains for **circuits / ceremony** builds that still use ark-circom → Wasmer + Cranelift.
+The native SDK (`stellar-private-payments-sdk`) no longer depends on Wasmer; witness generation uses
+committed `circom-witness-rs` graphs (see `make witness-graphs`).
 
 ### Running WASM tests
 
@@ -132,10 +135,11 @@ To explicitly build them:
 cargo build -p circuits
 ```
 
-The circuit crate also exposes 2 flags:
+The circuit crate also exposes these flags:
 - **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
 For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
-- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist.
+- **REGEN_KEYS**: Forces the generation of new verification keys. R1CS compilation uses Circom `--O2` (same as `make witness-graphs`).
+- **`make witness-graphs`**: Regenerates committed `*.graph.bin` witness graphs (`--features regen-graph` with `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` per circuit). Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain. Note: running with `--features regen-graph` and `WITNESS_CPP` set writes generated `*.graph.bin` files directly into `circuits/` and `deployments/testnet/circuit_keys/` (outside `OUT_DIR`), dirtying source-tree files.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash

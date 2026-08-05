@@ -13,15 +13,16 @@ import { App, Toast } from './ui/core.js';
 // Canonical constants
 // ---------------------------------------------------------------------------
 
+// Source of truth: sdk/disclosure/src/lib.rs (test: vk_hash_matches_committed_keys)
 const CANONICAL_SELECTIVE_DISCLOSURE_VK_HASHES = {
   selectiveDisclosure_1:
-    '0xdd3c59093d4d75ff72dc63cdc8385d35db8f90f0b66c98c533084bd60c3e456e',
+    '0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107',
   selectiveDisclosure_2:
-    '0x5b53adca376d68cd3dc83a02ab9113b3f52cffffe329fdb788d6fe983153584d',
+    '0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd',
   selectiveDisclosure_3:
-    '0x46c216ed017af23d5cdd17ce825ebf3180aa3e26481cd2314720f6bac5a49c62',
+    '0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f',
   selectiveDisclosure_4:
-    '0xf1346d412fcf9943ccf6774b8648d248918055c68a4d7d9c2a4e417bac5b7cc9',
+    '0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0',
 };
 
 // Public testnet endpoint used to verify a receipt when no wallet is connected.
@@ -775,8 +776,34 @@ async function generateReceipt(form) {
       contextNonce: form.nonce,
     });
 
-    // Receipt is a JS object (already deserialized by wasm_bindgen) or null.
-    return receipt || null;
+    if (!receipt) {
+      return null;
+    }
+
+    // Fail-closed validation: ensure receipt contains valid proof bytes and circuit metadata
+    if (
+      !receipt.proofCompressedHex ||
+      typeof receipt.proofCompressedHex !== 'string' ||
+      !receipt.proofCompressedHex.startsWith('0x') ||
+      receipt.proofCompressedHex.length <= 2
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing proof bytes');
+    }
+
+    if (
+      !receipt.circuit ||
+      !receipt.circuit.vkHash ||
+      typeof receipt.circuit.vkHash !== 'string' ||
+      !receipt.circuit.vkHash.startsWith('0x')
+    ) {
+      throw new Error('Generated disclosure receipt has invalid or missing circuit metadata');
+    }
+
+    if (!receipt.publicInputs) {
+      throw new Error('Generated disclosure receipt has missing public inputs');
+    }
+
+    return receipt;
   } finally {
     window.removeEventListener(TX_PROGRESS_EVENT, handler);
   }
