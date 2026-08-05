@@ -1,0 +1,9 @@
+{
+  "name": "e2e-freighter",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "devDependencies": {
+    "playwright": "^1.62.1"
+  }
+}

@@ -46,6 +46,11 @@ app/e2e/.freighter-extension/
 app/e2e/test-results/
 app/e2e/playwright-report/
 
+# e2e-freighter: vendored third-party extension, not for committing
+e2e-freighter/vendor/freighter/
+e2e-freighter/node_modules/
+e2e-freighter/.chrome-profile/
+
 # Testdata
 testdata/*
 
