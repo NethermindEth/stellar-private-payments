@@ -3,6 +3,10 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "scripts": {
+    "demo": "HEADFUL=1 APPROVE=human bash scripts/run-e2e.sh",
+    "ci": "APPROVE=auto bash scripts/run-e2e.sh"
+  },
   "devDependencies": {
     "playwright": "^1.62.1"
   }
