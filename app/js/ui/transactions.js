@@ -94,6 +94,23 @@ function onEnterUnlessBusy(input, button, handler) {
     });
 }
 
+// Builds a confirmation-dialog row with the number of transactions the action
+// requires. Best-effort only: a failed estimate must not block the action.
+async function txCountRow(amountValue) {
+    try {
+        const session = await ensureAppPool();
+        const estimate = await session.estimate(amountValue);
+        const txCount = estimate?.txCount;
+        if (!txCount) return null;
+        return {
+            label: 'Transactions',
+            value: `${txCount} transaction${txCount === 1 ? '' : 's'}`,
+        };
+    } catch {
+        return null;
+    }
+}
+
 async function submitDeposit(button, amountValue, pool) {
     setLoading(button, true, 'Preparing deposit…');
     const session = await ensureAppPool();
@@ -348,11 +365,14 @@ export const Transactions = {
                 const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
                 const pool = selectedPool();
+                const rows = [
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
                 const confirmed = await confirmAction({
                     title: 'Confirm deposit',
-                    rows: [
-                        { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
-                    ],
+                    rows,
                     confirmLabel: 'Deposit',
                 });
                 if (!confirmed) return;
@@ -405,12 +425,15 @@ export const Transactions = {
                 const recipientLabel = transferAddress.value.trim()
                     ? Utils.shortAddress(transferAddress.value.trim())
                     : Utils.shortAddress(noteKey);
+                const rows = [
+                    { label: 'Recipient', value: recipientLabel },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
                 const confirmed = await confirmAction({
                     title: 'Confirm transfer',
-                    rows: [
-                        { label: 'Recipient', value: recipientLabel },
-                        { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
-                    ],
+                    rows,
                     confirmLabel: 'Transfer',
                 });
                 if (!confirmed) return;
@@ -464,12 +487,15 @@ export const Transactions = {
                     throw new Error('Invalid Stellar address');
                 }
                 const pool = selectedPool();
+                const rows = [
+                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
                 const confirmed = await confirmAction({
                     title: 'Confirm withdrawal',
-                    rows: [
-                        { label: 'Recipient', value: Utils.shortAddress(recipient) },
-                        { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
-                    ],
+                    rows,
                     confirmLabel: 'Withdraw',
                 });
                 if (!confirmed) return;
@@ -517,6 +543,26 @@ export const Transactions = {
                 const pool = selectedPool();
                 const recipient = document.getElementById('advanced-public-recipient')?.value?.trim()
                     || App.state.wallet.address;
+
+                const rows = [
+                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
+                    { label: 'Input notes', value: `${inputNoteIds.length}` },
+                    { label: 'Outputs', value: `${amounts.length}` },
+                ];
+                if (deposit.value > 0n) {
+                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool)) });
+                }
+                if (withdraw.value > 0n) {
+                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool)) });
+                }
+                // Advanced transact always executes as a single transaction.
+                rows.push({ label: 'Transactions', value: '1 transaction' });
+                const confirmed = await confirmAction({
+                    title: 'Confirm advanced transaction',
+                    rows,
+                    confirmLabel: 'Transact',
+                });
+                if (!confirmed) return;
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();

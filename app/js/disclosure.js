@@ -8,7 +8,6 @@ import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { getActivePoolContractId } from './ui/pool.js';
 import { filterNotes, createNoteRow } from './ui/notes-view.js';
 import { App, Toast } from './ui/core.js';
-import { confirmAction } from './ui/confirm.js';
 import { onEnter } from './ui/keys.js';
 
 // ---------------------------------------------------------------------------
@@ -743,17 +742,8 @@ export function mountGenerate(container) {
     const form = validateForm();
     if (!form) return;
 
-    const confirmed = await confirmAction({
-      title: 'Confirm disclosure receipt',
-      rows: [
-        { label: 'Authority', value: form.authority },
-        { label: 'Purpose', value: form.purpose },
-        { label: 'Notes', value: `${state.selectedNotes.length} note${state.selectedNotes.length === 1 ? '' : 's'}` },
-      ],
-      confirmLabel: 'Generate',
-    });
-    if (!confirmed) return;
-
+    // No confirmation dialog here: receipt generation is a purely off-chain
+    // action (local proving only), so there is nothing on-chain to confirm.
     await executeGenerate(form);
   }
 
