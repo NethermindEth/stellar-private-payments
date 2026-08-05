@@ -70,3 +70,8 @@ js-license-scan-report.json
 spp-example-wallet.sqlite
 spp-example-wallet.sqlite-*
 spp-*-wallet/
+
+# E2E test account material written by deployments/scripts/e2e-accounts-setup.sh.
+# Contains testnet secret keys — must never be committed.
+deployments/*/.e2e-accounts.env
+deployments/scripts/.e2e-wallet-*/
