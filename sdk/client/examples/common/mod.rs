@@ -172,12 +172,12 @@ pub fn select_pool(config: &ContractConfig) -> Result<&PoolConfigEntry, String> 
     }
 }
 
-/// Read the proving key, wasm, and r1cs for `pool`'s policy flags.
+/// Read the proving key, witness graph, and r1cs for `pool`'s policy flags.
 ///
-/// The key is read from `SPP_CIRCUIT_KEYS_DIR`; wasm/r1cs from
-/// `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that points at
-/// `cargo build -p circuits --release`; other I/O errors (e.g. permissions)
-/// are reported without rebuild advice.
+/// The proving key and witness graph are read from `SPP_CIRCUIT_KEYS_DIR`;
+/// r1cs from `SPP_CIRCUIT_ARTIFACTS_DIR`. Missing files produce a message that
+/// points at `cargo build -p circuits --release`; other I/O errors (e.g.
+/// permissions) are reported without rebuild advice.
 pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts, String> {
     let keys_dir = env_or(
         "SPP_CIRCUIT_KEYS_DIR",
@@ -192,7 +192,7 @@ pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts
     let stem = pool.policy_flags.circuit_stem();
 
     let proving_key_path = Path::new(&keys_dir).join(format!("{stem}_proving_key.bin"));
-    let wasm_path = Path::new(&artifacts_dir).join(format!("{stem}.wasm"));
+    let graph_path = Path::new(&keys_dir).join(format!("{stem}.graph.bin"));
     let r1cs_path = Path::new(&artifacts_dir).join(format!("{stem}.r1cs"));
 
     // Only genuinely missing files get the rebuild hint; unreadable-but-present
@@ -211,12 +211,12 @@ pub fn read_artifacts_for_pool(pool: &PoolConfigEntry) -> Result<ProverArtifacts
     };
 
     let proving_key = read_artifact(&proving_key_path, "proving key")?;
-    let circuit_wasm = read_artifact(&wasm_path, "circuit wasm")?;
+    let circuit_graph = read_artifact(&graph_path, "circuit graph")?;
     let circuit_r1cs = read_artifact(&r1cs_path, "circuit r1cs")?;
 
     Ok(ProverArtifacts {
         proving_key,
-        circuit_wasm,
+        circuit_graph,
         circuit_r1cs,
     })
 }
