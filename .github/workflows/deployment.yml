@@ -2,18 +2,11 @@ name: Deployment
 
 on:
   workflow_dispatch:
-    inputs:
-      e2e_only:
-        description: "Run only the Browser e2e job (skip the docs build and Pages deploy; for iterating on the e2e job)"
-        type: boolean
-        default: false
   push:
     branches: ["main"]
 
 jobs:
   docs:
-    # Skipped only for manual e2e_only dispatches; always runs on push.
-    if: ${{ !inputs.e2e_only }}
     permissions:
       contents: read
       pages: write
@@ -197,8 +190,6 @@ jobs:
             -- --include-ignored
 
   publish:
-    # Skipped only for manual e2e_only dispatches; always runs on push.
-    if: ${{ !inputs.e2e_only }}
     name: Deploy the app and publish docs
     permissions:
       pages: write
