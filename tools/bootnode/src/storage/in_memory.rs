@@ -300,6 +300,25 @@ impl Storage for InMemory {
         }
         self.with_deployment_mut(|state| apply_compress_plan(state, &plan))
     }
+
+    async fn bump_empty_latest_ledger(&self, cursor_in: &str, latest_ledger: u32) -> Result<()> {
+        self.with_deployment_mut(|state| {
+            let Some(page) = state
+                .pages
+                .iter_mut()
+                .find(|p| p.meta.cursor_in.as_deref() == Some(cursor_in))
+            else {
+                return;
+            };
+            if page.meta.last_event_ledger.is_some() {
+                return;
+            }
+            page.meta.latest_ledger = latest_ledger;
+            page.result.latest_ledger = latest_ledger;
+            rebuild_indexes(state);
+        });
+        Ok(())
+    }
 }
 
 #[cfg(test)]

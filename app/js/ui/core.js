@@ -112,6 +112,10 @@ export const Utils = {
         return `${this.explorerBaseUrl()}/contract/${contractId}`;
     },
 
+    explorerContractStorageUrl(contractId) {
+        return `${this.explorerContractUrl(contractId)}/storage`;
+    },
+
     async copyToClipboard(text) {
         try {
             await navigator.clipboard.writeText(text);

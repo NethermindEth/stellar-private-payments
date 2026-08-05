@@ -187,7 +187,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.json);
     let json = cli.json;
-    let config_flag = cli.config.clone();
+    let config_flag = cli.config;
 
     let config_path = resolve_config_path(config_flag.clone());
     let file_config = match config_path.as_deref() {

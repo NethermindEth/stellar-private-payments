@@ -36,7 +36,7 @@ pub fn commitment(amount: Scalar, pubkey: Scalar, blinding: Scalar) -> Scalar {
 ///
 /// Returns the nullifier scalar value.
 #[inline]
-pub(crate) fn nullifier(commitment: Scalar, path_indices: Scalar, signature: Scalar) -> Scalar {
+pub fn nullifier(commitment: Scalar, path_indices: Scalar, signature: Scalar) -> Scalar {
     poseidon2_hash3(commitment, path_indices, signature, Some(Scalar::from(2))) // We use 2 as domain separation for Nullifier
 }
 

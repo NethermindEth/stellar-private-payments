@@ -32,13 +32,13 @@ jobs:
 
       - name: Verify tag matches crate version
         run: |
-          crate_ver="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
+          crate_ver="$(sed -n 's/^version = "\(.*\)"/\1/p' cli/Cargo.toml | head -1)"
           tag="${GITHUB_REF_NAME}"
           core="${tag#v}"
           core="${core%%-*}"
           echo "tag=$tag crate_version=$crate_ver core=$core"
           if [ "$core" != "$crate_ver" ]; then
-            echo "::error::tag $tag does not match workspace crate version $crate_ver (expected v$crate_ver[-pre])"
+            echo "::error::tag $tag does not match cli crate version $crate_ver (expected v$crate_ver[-pre])"
             exit 1
           fi
 

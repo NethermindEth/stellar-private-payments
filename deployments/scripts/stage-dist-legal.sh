@@ -18,6 +18,10 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 mkdir -p "$STAGING_DIR/licenses"
 mkdir -p "$STAGING_DIR/circuits"
 
+# Per-dependency third-party attribution for the npm footprints. Generated from
+# the lockfiles so it cannot drift out of sync with the actual shipped deps.
+sh "$REPO_ROOT/scripts/generate-js-attribution.sh" "$STAGING_DIR/licenses"
+
 # Top-level distribution license (Apache-2.0 for this project's code/assets).
 cp "$REPO_ROOT/LICENSE" "$STAGING_DIR/LICENSE.txt"
 

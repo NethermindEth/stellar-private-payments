@@ -9,7 +9,7 @@ import {
 } from '@stellar/freighter-api';
 
 /**
- * Freighter wallet adapter for {@link DeploymentClient.account}.
+ * Freighter wallet adapter for {@link Client.account}.
  *
  * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
  * signMessage, and getNetwork. The permission/connection methods used below

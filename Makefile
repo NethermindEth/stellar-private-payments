@@ -47,7 +47,7 @@ circuits-build:
 # matching marker and skips its own redundant rebuild.
 .PHONY: sdk-web-build
 sdk-web-build:
-	@echo "Building stellar-private-payments-sdk-web (sdk/web/dist)..."
+	@echo "Building browser SDK (npm: stellar-private-payments → sdk/web/dist)..."
 	@npm run build --prefix sdk/web
 	@echo "release" > sdk/web/.trunk-wasm-profile
 
