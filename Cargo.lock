@@ -3903,7 +3903,10 @@ dependencies = [
 name = "pool-gvk"
 version = "0.1.0"
 dependencies = [
+ "asp-membership",
+ "asp-non-membership",
  "soroban-sdk",
+ "soroban-utils",
 ]
 
 [[package]]

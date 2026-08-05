@@ -11,10 +11,17 @@ crate-type = ["lib", "cdylib"]
 doctest = false
 
 [dependencies]
+# workspace
+soroban-utils.workspace = true
+
 # external
 soroban-sdk.workspace = true
 
 [dev-dependencies]
+# workspace
+asp-membership = { workspace = true }
+asp-non-membership = { workspace = true }
+
 # external
 soroban-sdk = { workspace = true, features = ["testutils"] }
 

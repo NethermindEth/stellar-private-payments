@@ -29,7 +29,7 @@ pub fn requires_input_encryption(mode: u32) -> bool {
 /// needed here — the same precedent `public-key-registry` sets by storing
 /// raw, unvalidated key bytes.
 #[contracttype]
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BabyJubJubPoint {
     pub x: U256,
     pub y: U256,
