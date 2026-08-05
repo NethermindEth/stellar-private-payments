@@ -3,6 +3,7 @@ import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUs
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
 import { friendlyErrorMessage } from './facade-errors.js';
+import { App, Utils } from './ui/core.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -18,6 +19,8 @@ const toastTemplate = document.getElementById('tpl-toast');
 // Contract/state display
 const membershipContractInput = document.getElementById('membershipContract');
 const nonMembershipContractInput = document.getElementById('nonMembershipContract');
+const membershipContractLinkEl = document.getElementById('membershipContractLink');
+const nonMembershipContractLinkEl = document.getElementById('nonMembershipContractLink');
 const membershipRootEl = document.getElementById('membershipRoot');
 const membershipLevelsEl = document.getElementById('membershipLevels');
 const membershipNextIndexEl = document.getElementById('membershipNextIndex');
@@ -213,6 +216,24 @@ async function ensureCryptoReady() {
 }
 
 // -----------------------------
+// Block explorer links
+// -----------------------------
+async function loadExplorerSetting() {
+  try {
+    const storage = await ensureStorage();
+    const explorerSetting = await storage.getExplorerSetting();
+    App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
+  } catch (err) {
+    console.warn('Explorer setting unavailable, using default explorer:', err);
+  }
+}
+
+function updateContractLink(linkEl, contractId) {
+  if (!linkEl) return;
+  linkEl.href = contractId ? Utils.explorerContractUrl(contractId) : '#';
+}
+
+// -----------------------------
 // Wallet actions
 // -----------------------------
 async function connect() {
@@ -295,12 +316,25 @@ async function refreshState() {
 
     if (membershipContractInput) membershipContractInput.value = membershipState.contractId;
     if (nonMembershipContractInput) nonMembershipContractInput.value = nonMembershipState.contractId;
+    updateContractLink(membershipContractLinkEl, membershipState.contractId);
+    updateContractLink(nonMembershipContractLinkEl, nonMembershipState.contractId);
+
+    const membershipStorageUrl = membershipState.contractId
+      ? Utils.explorerContractStorageUrl(membershipState.contractId)
+      : '#';
+    const nonMembershipStorageUrl = nonMembershipState.contractId
+      ? Utils.explorerContractStorageUrl(nonMembershipState.contractId)
+      : '#';
 
     membershipRootEl.textContent = membershipState.root || '--';
+    membershipRootEl.href = membershipStorageUrl;
     membershipLevelsEl.textContent = membershipState.levels ?? '--';
+    membershipLevelsEl.href = membershipStorageUrl;
     membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
+    membershipNextIndexEl.href = membershipStorageUrl;
     updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
     nonMembershipRootEl.textContent = nonMembershipState.root || '--';
+    nonMembershipRootEl.href = nonMembershipStorageUrl;
 
     setStatus('State loaded', 'ok');
   } catch (err) {
@@ -512,8 +546,16 @@ addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
 addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);
 removeFromBlocklistBtn.addEventListener('click', removeNonMembershipLeaf);
 
+membershipContractInput?.addEventListener('input', () => {
+  updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
+});
+nonMembershipContractInput?.addEventListener('input', () => {
+  updateContractLink(nonMembershipContractLinkEl, nonMembershipContractInput.value.trim());
+});
+
 async function init() {
   setStatus('Initializing...', 'info');
+  await loadExplorerSetting();
   await ensureCryptoReady();
   await refreshState();
   setStatus('Ready', 'ok');

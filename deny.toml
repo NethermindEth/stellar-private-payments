@@ -77,6 +77,11 @@ wildcards = "deny"
 allow-wildcard-paths = true
 multiple-versions = "warn"
 highlight = "all"
+deny = [
+    # MPL-2.0 crate pulled in by an unused feature gate. Allowed to exist in
+    # Cargo.lock, but must never be part of the compiled dependency graph.
+    { name = "fastrlp", reason = "MPL-2.0; allowed only behind an unused feature gate" }
+]
 
 [bans.workspace-dependencies]
 duplicates = 'deny'

@@ -4,13 +4,14 @@
 #   curl -fsSL https://nethermindeth.github.io/stellar-private-payments/install.sh | sh
 #
 # Picks the release binary for this platform, installs it, and provisions the
-# data dir (circuits, policy proving keys, license/notice texts) that the CLI reads at
-# runtime.
+# data dir (circuits, policy proving keys, license/notice texts, deployment
+# config) that the CLI reads at runtime.
 #
 # Environment overrides:
 #   SPP_VERSION    release tag to install (default: latest non-prerelease)
 #   SPP_BIN_DIR    where to install the `spp` binary (default: $HOME/.local/bin)
 #   SPP_DATA_DIR   data dir root (default: $HOME/.local/share/stellar-private-payments)
+#   SPP_DEPLOYMENT_REF git ref to take deployments.json from main
 # Flags:
 #   --pre          allow installing the latest prerelease
 #   --version TAG  same as SPP_VERSION=TAG
@@ -22,6 +23,7 @@ BIN_DIR="${SPP_BIN_DIR:-$HOME/.local/bin}"
 DATA_DIR="${SPP_DATA_DIR:-$HOME/.local/share/stellar-private-payments}"
 VERSION="${SPP_VERSION:-}"
 ALLOW_PRE="${SPP_PRERELEASE:-0}"
+DEPLOYMENT_REF="${SPP_DEPLOYMENT_REF:-main}"
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -29,7 +31,7 @@ while [ $# -gt 0 ]; do
     --version) VERSION="${2:-}"; shift ;;
     --version=*) VERSION="${1#--version=}" ;;
     -h|--help)
-      sed -n '2,20p' "$0"
+      sed -n '2,17p' "$0"
       exit 0
       ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
@@ -124,9 +126,20 @@ fetch_verified "dist.tar.gz"
 mkdir -p "$DATA_DIR"
 tar -xzf "$tmp/dist.tar.gz" -C "$DATA_DIR"
 
+# --- deployment config ------------------------------------------------------
+deployment_url="https://raw.githubusercontent.com/$REPO/$DEPLOYMENT_REF/deployments/testnet/deployments.json"
+deployment_status="$DEPLOYMENT_REF"
+if dl "$deployment_url" "$tmp/deployments.json"; then
+  mv "$tmp/deployments.json" "$DATA_DIR/deployments.json"
+else
+  deployment_status="unavailable"
+  echo "warning: could not download deployment config from $deployment_url" >&2
+fi
+
 echo "Installed:"
 echo "  binary: $BIN_DIR/spp"
 echo "  data:   $DATA_DIR"
+echo "  config: $deployment_status"
 case ":$PATH:" in
   *":$BIN_DIR:"*) : ;;
   *) echo "note: $BIN_DIR is not on your PATH; add it, e.g. export PATH=\"$BIN_DIR:\$PATH\"" ;;

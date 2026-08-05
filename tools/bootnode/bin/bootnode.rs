@@ -74,11 +74,11 @@ struct Cli {
     page_size: u32,
 
     /// Rate limit per IP (requests per second).
-    #[arg(long, env = "BOOTNODE_RATE_LIMIT_RPS", default_value_t = 10)]
+    #[arg(long, env = "BOOTNODE_RATE_LIMIT_RPS", default_value_t = 50)]
     rate_limit_rps: u32,
 
     /// Rate limit burst per IP.
-    #[arg(long, env = "BOOTNODE_RATE_LIMIT_BURST", default_value_t = 20)]
+    #[arg(long, env = "BOOTNODE_RATE_LIMIT_BURST", default_value_t = 100)]
     rate_limit_burst: u32,
 
     /// Enable OpenTelemetry tracing export.

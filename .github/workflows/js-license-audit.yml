@@ -1,4 +1,7 @@
 name: JS License Audit
+# JS-only license and dependency checks. Rust/Cargo licensing is enforced by
+# dependency-audit.yml via cargo-deny, which is feature-aware and checks the
+# compiled dependency graph.
 
 on:
   pull_request:
@@ -11,46 +14,6 @@ permissions:
   contents: read
 
 jobs:
-  dependency-review:
-    name: Dependency Review PR Gate
-    if: github.event_name == 'pull_request'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check out
-        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
-
-      - name: Load License Policy
-        id: policy
-        run: |
-          # Parse the shared JS license policy JSON to extract the allowlist for
-          # the dependency-review action, which expects a comma-separated string.
-          # Only allow-licenses is wired; deny-licenses is intentionally omitted
-          # because the two inputs are mutually exclusive upstream.
-          #
-          # IMPORTANT: dependency-review-action's allow-licenses matcher
-          # (@onebeyond/spdx-license-satisfies, via parseLicensesArray) throws
-          # if ANY entry in the list is a compound AND/OR SPDX expression —
-          # and that exception is caught internally and silently treated as
-          # "no match", which would fail EVERY dependency in the PR, not just
-          # the one with a compound license. Filter those entries out here;
-          # the affected package is excused individually below instead via
-          # allow-dependencies-licenses. (Verified against the action's actual
-          # source and its @onebeyond/spdx-license-satisfies@1.0.1 dependency
-          # at the pinned SHA — this is not hypothetical.)
-          ALLOWLIST=$(jq -r '[.allowlist[] | select(test(" AND | OR ") | not)] | join(", ")' .github/js-license-policy.json)
-          echo "allowlist=$ALLOWLIST" >> $GITHUB_OUTPUT
-
-      - name: Dependency Review Action
-        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
-        with:
-          # Wire allowlist into the action. Any license not on this list fails the PR.
-          allow-licenses: ${{ steps.policy.outputs.allowlist }}
-          # app's sha.js reports the compound license "(MIT AND BSD-3-Clause)",
-          # which cannot be expressed in allow-licenses (see comment above) —
-          # excuse it by package identity instead, which uses a separate code
-          # path unaffected by the same-array conjunction restriction.
-          allow-dependencies-licenses: "pkg:npm/sha.js, pkg:npm/stellar-private-payments"
-
   full-tree-scan:
     name: Full-Tree License Scan
     runs-on: ubuntu-latest
