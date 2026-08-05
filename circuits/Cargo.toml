@@ -20,6 +20,8 @@ std = [
     "num-bigint",
     "num-integer",
 ]
+# Enables circom-witness-rs C++ graph generation (`make witness-graphs`).
+regen-graph = ["dep:circom-witness-rs"]
 
 [dependencies]
 # workspace
@@ -70,6 +72,9 @@ program_structure = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 regex = "1"
 type_analysis = { git = "https://github.com/iden3/circom", tag = "v2.2.3" }
 wast = "248.0.0"
+
+# optional
+circom-witness-rs = { workspace = true, optional = true, features = ["build-witness"] }
 
 [lints]
 workspace = true

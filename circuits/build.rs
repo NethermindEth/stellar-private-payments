@@ -4,6 +4,17 @@
 //! directory into R1CS constraint systems, symbol files and WASM for witness
 //! generation.
 //!
+//! > [!WARNING]
+//! > **Source Tree Writes Outside `OUT_DIR`**:
+//! > When compiled with `--features regen-graph` and `WITNESS_CPP` set,
+//! > `regenerate_witness_graphs`
+//! > generates binary witness graphs (`*.graph.bin`) directly into the
+//! > `circuits/` crate root
+//! > and copies them into `deployments/testnet/circuit_keys/` (outside standard
+//! > `OUT_DIR`).
+//! > This intentionally mutates committed source-tree artifacts during `make
+//! > witness-graphs`.
+//!
 //! ## Usage
 //! The build script runs automatically when you run `cargo build`. It will:
 //! 1. Find all `.circom` files in `src/` directory
@@ -156,6 +167,12 @@ fn main() -> Result<()> {
     );
     println!("cargo:rerun-if-env-changed=BUILD_TESTS");
     println!("cargo:rerun-if-env-changed=REGEN_KEYS");
+    println!("cargo:rerun-if-env-changed=WITNESS_CPP");
+    println!("cargo:rerun-if-env-changed=CIRCOM_LIBRARY_PATH");
+    println!(
+        "cargo:rerun-if-changed={}",
+        crate_dir.join("circom.lock").display()
+    );
 
     let groth16_key_circuits = groth16_key_circuits();
 
@@ -178,6 +195,7 @@ fn main() -> Result<()> {
         crate_dir.join("circomlib.lock").display()
     );
     get_circomlib(&crate_dir, &src_dir)?;
+    let _circomlib_guard = CircomlibRestoreGuard::new_and_patch(&src_dir.join("circomlib"))?;
 
     // === FIND CIRCOM FILES ===
     // Find all .circom files with a main component
@@ -325,12 +343,12 @@ fn main() -> Result<()> {
         Report::print_reports(&report_warns, program_archive.get_file_library());
 
         // === BUILD CONFIG ===
-        // Controls which outputs to generate (R1CS + SYM). The WASM is done later
+        // Circom --O2. Must match circom-witness-rs graph gen.
         let build_config = BuildConfig {
-            no_rounds: 1,
+            no_rounds: usize::MAX,
             flag_json_sub: false,
             json_substitutions: "Not used".to_string(),
-            flag_s: true,
+            flag_s: false,
             flag_f: false,
             flag_p: false,
             flag_verbose: false,
@@ -411,6 +429,14 @@ fn main() -> Result<()> {
                 }
             }
         }
+    }
+
+    // === WITNESS GRAPH REGENERATION ===
+    // Committed graphs: deployments/testnet/circuit_keys/<stem>.graph.bin
+    // Regen via `make witness-graphs` / `--features regen-graph` with
+    // `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` for one circuit at a time.
+    if env::var("WITNESS_CPP").is_ok() {
+        regenerate_witness_graphs(&crate_dir)?;
     }
 
     Ok(())
@@ -833,6 +859,222 @@ fn get_circomlib(crate_dir: &Path, src_dir: &Path) -> Result<()> {
         return Err(anyhow!("git checkout failed for circomlib dependency"));
     }
 
+    Ok(())
+}
+
+/// Scope guard that ensures `circomlib` BBF patches are transient.
+///
+/// On creation, resets `comparators.circom` and `bitify.circom` to pristine,
+/// saves their pristine byte contents, and applies `inject_black_box_hints`.
+/// On drop (or build completion), restores the pristine byte contents and
+/// runs `git checkout` so `circuits/src/circomlib` git status remains clean.
+struct CircomlibRestoreGuard {
+    circomlib_path: PathBuf,
+    files: Vec<(PathBuf, Vec<u8>)>,
+}
+
+impl CircomlibRestoreGuard {
+    fn new_and_patch(circomlib_path: &Path) -> Result<Self> {
+        let comparators_path = circomlib_path.join("circuits/comparators.circom");
+        let bitify_path = circomlib_path.join("circuits/bitify.circom");
+
+        // Guarantee starting from clean/pristine files
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(circomlib_path)
+            .arg("checkout")
+            .arg("--")
+            .arg("circuits/comparators.circom")
+            .arg("circuits/bitify.circom")
+            .status();
+
+        let mut files = Vec::new();
+        if let Ok(b) = fs::read(&comparators_path) {
+            files.push((comparators_path.clone(), b));
+        }
+        if let Ok(b) = fs::read(&bitify_path) {
+            files.push((bitify_path.clone(), b));
+        }
+
+        // Apply black box hints patch
+        inject_black_box_hints(circomlib_path)?;
+
+        Ok(Self {
+            circomlib_path: circomlib_path.to_path_buf(),
+            files,
+        })
+    }
+
+    fn restore(&self) {
+        for (path, content) in &self.files {
+            let _ = fs::write(path, content);
+        }
+        let _ = Command::new("git")
+            .arg("-C")
+            .arg(&self.circomlib_path)
+            .arg("checkout")
+            .arg("--")
+            .arg("circuits/comparators.circom")
+            .arg("circuits/bitify.circom")
+            .status();
+    }
+}
+
+impl Drop for CircomlibRestoreGuard {
+    fn drop(&mut self) {
+        self.restore();
+    }
+}
+
+/// Run circom-witness-rs graph generation and publish a `*.graph.bin` artifact.
+///
+/// Requires `--features regen-graph` (so the C++ generator is linked) plus
+/// `WITNESS_CPP` / `CIRCOM_LIBRARY_PATH` (see `make witness-graphs`).
+/// Circom CLI must match `circuits/circom.lock`.
+///
+/// Expects a single `.circom` path in `WITNESS_CPP`. Writes
+/// `deployments/testnet/circuit_keys/<stem>.graph.bin`.
+fn regenerate_witness_graphs(crate_dir: &Path) -> Result<()> {
+    #[cfg(not(feature = "regen-graph"))]
+    {
+        let _ = crate_dir;
+        bail!(
+            "WITNESS_CPP requires `cargo build -p circuits --features regen-graph` \
+             (see `make witness-graphs`)"
+        );
+    }
+
+    #[cfg(feature = "regen-graph")]
+    {
+        let expected = fs::read_to_string(crate_dir.join("circom.lock"))
+            .context("read circuits/circom.lock")?
+            .trim()
+            .to_string();
+        let ver = Command::new("circom")
+            .arg("--version")
+            .output()
+            .context("run `circom --version` (is Circom on PATH?)")?;
+        let ver_text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&ver.stdout),
+            String::from_utf8_lossy(&ver.stderr)
+        );
+        anyhow::ensure!(
+            ver.status.success() && ver_text.contains(&expected),
+            "Circom CLI must be {expected} (circuits/circom.lock); got:\n{ver_text}"
+        );
+
+        let witness_cpp = env::var("WITNESS_CPP")
+            .map_err(|_| anyhow!("WITNESS_CPP must be set for graph regeneration"))?;
+        let stem = Path::new(witness_cpp.trim())
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .ok_or_else(|| anyhow!("invalid WITNESS_CPP circuit path: {witness_cpp}"))?;
+
+        println!("cargo:warning=WITNESS_CPP detected - regenerating witness graph for {stem}");
+        circom_witness_rs::generate::build_witness()
+            .map_err(|e| anyhow!("witness graph generation failed: {e}"))?;
+
+        // circom-witness-rs writes `graph.bin` into the circuits crate dir (cwd).
+        let src = crate_dir.join("graph.bin");
+        anyhow::ensure!(
+            src.is_file(),
+            "expected circom-witness-rs to write {}; not found",
+            src.display()
+        );
+        let dst = crate_dir
+            .join("../deployments/testnet/circuit_keys")
+            .join(format!("{stem}.graph.bin"));
+        copy(&src, &dst)?;
+        fs::remove_file(&src)?;
+        println!("cargo:warning=Wrote witness graph {}", dst.display());
+        Ok(())
+    }
+}
+
+/// Inject the `bbf_inv` / `bbf_bit` black-box hint functions into
+/// circomlib and route the non-quadratic (`<--`) assignments through them.
+///
+/// circom-witness-rs only hooks unconstrained/dynamic control flow when it
+/// lives in a `bbf*`-prefixed circom *function*. Stock circomlib computes
+/// `1/in` (`IsZero`) and the bit decomposition (`Num2Bits`) inline inside
+/// templates, which the graph runtime cannot evaluate.
+fn inject_black_box_hints(circomlib_path: &Path) -> Result<()> {
+    let circuits_dir = circomlib_path.join("circuits");
+
+    inject_hint(
+        &circuits_dir.join("comparators.circom"),
+        "function bbf_inv",
+        "include \"binsum.circom\";",
+        "\n\nfunction bbf_inv(in) {\n    return in!=0 ? 1/in : 0;\n}",
+        &[("    inv <-- in!=0 ? 1/in : 0;", "    inv <-- bbf_inv(in);")],
+    )?;
+
+    inject_hint(
+        &circuits_dir.join("bitify.circom"),
+        "function bbf_bit",
+        "include \"aliascheck.circom\";",
+        "\n\nfunction bbf_bit(in, bit) {\n    return (in >> bit) & 1;\n}",
+        &[
+            (
+                "        out[i] <-- (in >> i) & 1;",
+                "        out[i] <-- bbf_bit(in, i);",
+            ),
+            (
+                "        out[i] <-- (neg >> i) & 1;",
+                "        out[i] <-- bbf_bit(neg, i);",
+            ),
+        ],
+    )?;
+
+    Ok(())
+}
+
+/// Apply a single circomlib black-box hint patch (one `bbf_*` function).
+fn inject_hint(
+    file: &Path,
+    marker: &str,
+    anchor: &str,
+    fn_def: &str,
+    rewrites: &[(&str, &str)],
+) -> Result<()> {
+    let content =
+        fs::read_to_string(file).with_context(|| format!("Failed to read {}", file.display()))?;
+
+    if content.contains(marker) {
+        return Ok(());
+    }
+
+    let anchor_idx = content
+        .find(anchor)
+        .ok_or_else(|| anyhow!("anchor {anchor:?} not found in {}", file.display()))?;
+    let insert_at = content[anchor_idx..]
+        .find('\n')
+        .map(|nl| anchor_idx.checked_add(nl).expect("anchor lines overflow"))
+        .ok_or_else(|| anyhow!("no newline after anchor {anchor:?} in {}", file.display()))?;
+
+    let mut patched = String::with_capacity(
+        content
+            .len()
+            .checked_add(fn_def.len())
+            .expect("circomlib patch size overflow"),
+    );
+    patched.push_str(&content[..=insert_at]);
+    patched.push_str(fn_def);
+    patched.push_str(&content[insert_at.checked_add(1).expect("insert_at overflow")..]);
+
+    for (from, to) in rewrites {
+        if !patched.contains(from) {
+            bail!(
+                "rewrite source {from:?} not found in {} (upstream circomlib changed?)",
+                file.display()
+            );
+        }
+        patched = patched.replace(from, to);
+    }
+
+    fs::write(file, patched).with_context(|| format!("Failed to write {}", file.display()))?;
+    println!("cargo:warning=Injected {marker} into {}", file.display());
     Ok(())
 }
 

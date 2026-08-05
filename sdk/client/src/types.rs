@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone)]
 pub struct ProverArtifacts {
     pub proving_key: Vec<u8>,
-    pub circuit_wasm: Vec<u8>,
+    pub circuit_graph: Vec<u8>,
     pub circuit_r1cs: Vec<u8>,
 }
 
@@ -15,7 +15,7 @@ impl ProverArtifacts {
     pub fn empty() -> Self {
         Self {
             proving_key: Vec::new(),
-            circuit_wasm: Vec::new(),
+            circuit_graph: Vec::new(),
             circuit_r1cs: Vec::new(),
         }
     }

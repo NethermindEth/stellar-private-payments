@@ -129,11 +129,10 @@ fn cargo_profile() -> &'static str {
 fn test_prover_artifacts() -> Result<stellar_private_payments_sdk::ProverArtifacts> {
     let repo = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let circuits = repo.join("target/circuits-artifacts").join(cargo_profile());
+    let keys = repo.join("deployments/testnet/circuit_keys");
     Ok(stellar_private_payments_sdk::ProverArtifacts {
-        proving_key: std::fs::read(
-            repo.join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin"),
-        )?,
-        circuit_wasm: std::fs::read(circuits.join("policy_tx_2_2_AB.wasm"))?,
+        proving_key: std::fs::read(keys.join("policy_tx_2_2_AB_proving_key.bin"))?,
+        circuit_graph: std::fs::read(keys.join("policy_tx_2_2_AB.graph.bin"))?,
         circuit_r1cs: std::fs::read(circuits.join("policy_tx_2_2_AB.r1cs"))?,
     })
 }

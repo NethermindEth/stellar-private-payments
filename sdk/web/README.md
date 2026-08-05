@@ -223,7 +223,7 @@ One package — no separate circuit hosting or Cargo build. Circuit artifacts sh
 
 ### Licensing (compiled circuits)
 
-Compiled `.wasm` / `.r1cs` files incorporate [iden3/circomlib](https://github.com/iden3/circomlib) (LGPL-3.0). The npm package includes:
+Compiled `.graph.bin` / `.r1cs` files incorporate [iden3/circomlib](https://github.com/iden3/circomlib) (LGPL-3.0). The npm package includes:
 
 | Path | Purpose |
 |------|---------|

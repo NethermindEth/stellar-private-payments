@@ -33,6 +33,7 @@ publish = false
 asp-membership = { path = "contracts/asp-membership" }
 asp-non-membership = { path = "contracts/asp-non-membership" }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs", rev = "537f9c9cca18fada33d717e634af831ac101a6f1", default-features = false }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 contract-types = { path = "contracts/types" }
@@ -55,6 +56,7 @@ ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] 
 ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
 ark-ff = { version = "0.6.0", default-features = false }
 ark-groth16 = { version = "0.6.0", default-features = false }
+ark-poly = { version = "0.6.0", default-features = false }
 ark-relations = { version = "0.6.0", default-features = false }
 ark-serialize = { version = "0.6.0", default-features = false }
 ark-snark = { version = "0.6.0", default-features = false }
@@ -82,7 +84,9 @@ js-sys = "0.3"
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.8", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
+proptest = "1"
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
+ruint = { version = "1.20", default-features = false, features = ["num-bigint"] } # match circom-witness-rs
 rusqlite = { version = "0.40.1", default-features = false, features = ["ffi-sqlite-wasm-rs"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
@@ -100,8 +104,6 @@ uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
-# see also https://github.com/NethermindEth/stellar-private-payments/issues/192
-wasmer = { version = "7.2", default-features = false }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
 web-time = "1"
 wiremock = "0.6"

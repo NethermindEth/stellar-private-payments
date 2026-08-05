@@ -2,12 +2,13 @@
 //!
 //! Handles loading proving keys and generating ZK proofs from witness data.
 //!
-//! We cannot use ark_circom directly because it depends on
-//! wasmer which doesn't work in browser WASM. Instead, we:
-//! 1. Load the proving key
-//! 2. Parse the R1CS file to get constraint matrices (see r1cs.rs)
-//! 3. Accept pre-computed witness bytes from the JS witness calculator
-//! 4. Replay constraints and generate proofs using ark-groth16
+//! Witnesses are produced separately by the graph-based `witness` crate. This
+//! module:
+//! 1. Loads the proving key
+//! 2. Parses the R1CS file to get constraint matrices (see r1cs.rs)
+//! 3. Accepts pre-computed witness bytes
+//! 4. Replays constraints and generates proofs using `ark-groth16` with a
+//!    Circom-compatible R1CS→QAP reduction (see `circom_reduction.rs`)
 
 use crate::{
     r1cs::R1CS,
@@ -17,7 +18,6 @@ use crate::{
 use alloc::vec::Vec;
 use anyhow::{Result, anyhow};
 use ark_bn254::{Bn254, Fr, G1Affine, G2Affine};
-use ark_circom::CircomReduction;
 use ark_ff::{AdditiveGroup, BigInteger, Field, PrimeField};
 use ark_groth16::{PreparedVerifyingKey, Proof, ProvingKey, VerifyingKey};
 use ark_relations::{
@@ -30,6 +30,8 @@ use ark_std::rand::rngs::OsRng;
 use core::ops::AddAssign;
 use types::correlation_id_or_new;
 use web_time::Instant;
+
+use crate::circom_reduction::CircomReduction;
 
 // Soroban-compatible encoding helpers.
 // Soroban's BN254 G2 uses c1||c0 (imaginary||real) ordering, while arkworks
