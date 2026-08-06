@@ -38,5 +38,8 @@ sha2 = { workspace = true }
 # workspace
 prover = { workspace = true }
 
+# external
+stellar-xdr = { workspace = true }
+
 [lints]
 workspace = true

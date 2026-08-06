@@ -182,6 +182,40 @@ pub fn scval_to_policy_flags(val: &xdr::ScVal) -> Result<types::PolicyFlags, Err
     Err(Error::UnexpectedScVal(format!("{val:?}")))
 }
 
+/// Decode a `pool-gvk::gvk::BabyJubJubPoint` (`{ x: U256, y: U256 }`) from
+/// contract storage. Soroban encodes a plain-field `#[contracttype]` struct
+/// as `ScVal::Map` with `ScVal::Symbol` field names.
+pub fn scval_to_baby_jub_jub_point(val: &xdr::ScVal) -> Result<types::BabyJubJubPoint, Error> {
+    let xdr::ScVal::Map(Some(map)) = val else {
+        return Err(Error::UnexpectedScVal(format!(
+            "BabyJubJubPoint: expected ScVal::Map, found: {val:?}"
+        )));
+    };
+
+    let mut x = None;
+    let mut y = None;
+    for xdr::ScMapEntry { key, val } in map.iter() {
+        let xdr::ScVal::Symbol(name) = key else {
+            continue;
+        };
+        match name.to_utf8_string_lossy().as_str() {
+            "x" => x = Some(scval_to_u256(val)?),
+            "y" => y = Some(scval_to_u256(val)?),
+            _ => {}
+        }
+    }
+
+    let x = x.ok_or_else(|| Error::UnexpectedScVal("BabyJubJubPoint missing field: x".into()))?;
+    let y = y.ok_or_else(|| Error::UnexpectedScVal("BabyJubJubPoint missing field: y".into()))?;
+
+    Ok(types::BabyJubJubPoint {
+        x: Field::try_from_u256(x)
+            .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.x: {e}")))?,
+        y: Field::try_from_u256(y)
+            .map_err(|e| Error::UnexpectedScVal(format!("BabyJubJubPoint.y: {e}")))?,
+    })
+}
+
 #[derive(Debug)]
 pub struct ParsedContractEvent {
     // Unique identifier for this event, based on the TOID format.
@@ -291,5 +325,60 @@ mod tests {
         // Round-trip back to the original nullifier.
         let roundtripped = scval_to_u256(&parsed).expect("decode parsed u256");
         assert_eq!(roundtripped, nullifier.0);
+    }
+
+    fn baby_jub_jub_point_scval(x: xdr::ScVal, y: xdr::ScVal) -> xdr::ScVal {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let entries = xdr::ScMap(
+            vec![
+                xdr::ScMapEntry {
+                    key: sym("x"),
+                    val: x,
+                },
+                xdr::ScMapEntry {
+                    key: sym("y"),
+                    val: y,
+                },
+            ]
+            .try_into()
+            .expect("map entries"),
+        );
+        xdr::ScVal::Map(Some(entries))
+    }
+
+    #[test]
+    fn baby_jub_jub_point_decodes_x_and_y() {
+        let x = Field(U256::from(7u64));
+        let y = Field(U256::from(11u64));
+        let scval = baby_jub_jub_point_scval(field_to_scval_u256(x), field_to_scval_u256(y));
+
+        let point = scval_to_baby_jub_jub_point(&scval).expect("decode BabyJubJubPoint");
+
+        assert_eq!(point.x, x);
+        assert_eq!(point.y, y);
+    }
+
+    #[test]
+    fn baby_jub_jub_point_rejects_missing_field() {
+        let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
+        let entries = xdr::ScMap(
+            vec![xdr::ScMapEntry {
+                key: sym("x"),
+                val: field_to_scval_u256(Field(U256::from(1u64))),
+            }]
+            .try_into()
+            .expect("map entries"),
+        );
+        let scval = xdr::ScVal::Map(Some(entries));
+
+        let err = scval_to_baby_jub_jub_point(&scval).expect_err("missing y must be rejected");
+        assert!(matches!(err, Error::UnexpectedScVal(_)));
+    }
+
+    #[test]
+    fn baby_jub_jub_point_rejects_non_map_scval() {
+        let err = scval_to_baby_jub_jub_point(&xdr::ScVal::Void)
+            .expect_err("non-map ScVal must be rejected");
+        assert!(matches!(err, Error::UnexpectedScVal(_)));
     }
 }
