@@ -372,7 +372,9 @@ mod pool_info_gvk_tests {
     fn pool_info_decodes_json_written_before_the_gvk_fields_existed() {
         let mut value =
             serde_json::to_value(pool_info_with_gvk()).expect("serialize PoolInfo to value");
-        let object = value.as_object_mut().expect("PoolInfo serializes as object");
+        let object = value
+            .as_object_mut()
+            .expect("PoolInfo serializes as object");
         assert!(object.remove("adminViewKey").is_some(), "field was present");
         assert!(object.remove("gvkMode").is_some(), "field was present");
 
@@ -383,7 +385,6 @@ mod pool_info_gvk_tests {
         assert_eq!(decoded.contract_id, "CPOOL");
         assert_eq!(decoded.merkle_levels, 10);
     }
-
 
     #[test]
     fn pool_info_round_trips_with_gvk_fields_set() {

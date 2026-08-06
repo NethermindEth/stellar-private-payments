@@ -38,6 +38,7 @@ circuits = { path = "circuits", default-features = false }
 contract-types = { path = "contracts/types" }
 disclosure = { path = "sdk/disclosure" }
 pool = { path = "contracts/pool" }
+pool-core = { path = "contracts/pool-core" }
 prover = { path = "sdk/prover" }
 public-key-registry = { path = "contracts/public-key-registry" }
 soroban-utils = { path = "contracts/soroban-utils" }
@@ -91,6 +92,7 @@ sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] }
 sqlite-wasm-rs = { version = "0.5.5", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
+stellar-xdr = { version = "27.0.0", features = ["base64", "std", "alloc"] }
 thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false }
 tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }

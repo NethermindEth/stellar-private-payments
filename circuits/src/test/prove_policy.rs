@@ -1658,6 +1658,7 @@ mod tests {
     /// traceable also encrypts inputs.
     /// Checks the public signals as a multiset only. See
     /// `run_policy_gvk_public_input_order` below for the exact-order pin.
+    #[allow(clippy::arithmetic_side_effects)]
     fn run_policy_gvk(circuit: PolicyGvkCircuit) -> Result<()> {
         let proof = prove_policy_gvk_case(circuit)?;
         let n_ins = proof.in_notes.len();
@@ -1799,6 +1800,7 @@ mod tests {
     /// above (which only checks the public signals as a sorted multiset),
     /// this is the load-bearing fact the pool-gvk contract's `verify_proof`
     /// public-input assembly will depend on.
+    #[allow(clippy::arithmetic_side_effects)]
     fn run_policy_gvk_public_input_order(circuit: PolicyGvkCircuit) -> Result<()> {
         let proof = prove_policy_gvk_case(circuit)?;
         let n_ins = proof.in_notes.len();

@@ -13,17 +13,22 @@
 //! - Token integration for deposits and withdrawals
 
 #![allow(clippy::too_many_arguments)]
-use crate::{
+use contract_types::Groth16Proof;
+use pool_core::{
+    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient,
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
-use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractclient, contracterror,
-    contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
-    xdr::ToXdr,
+    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
+    contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
 use soroban_utils::constants::bn256_modulus;
+
+// Re-exported rather than merely imported so `pool::ExtData` and
+// `pool::hash_ext_data` keep resolving for existing consumers (`e2e-tests`,
+// the SDK encoding tests) after the move into `pool-core`.
+pub use pool_core::{ExtData, hash_ext_data};
 
 /// Contract error types for the privacy pool
 #[contracterror]
@@ -99,67 +104,6 @@ pub struct Proof {
     pub asp_membership_root: U256,
     /// Merkle root the policy NON-membership proof was generated against
     pub asp_non_membership_root: U256,
-}
-
-/// External data for a transaction
-///
-/// Contains public information about the transaction that is hashed and
-/// included in the zero-knowledge proof to bind the proof to specific
-/// transaction parameters (e.g. recipient address).
-#[contracttype]
-#[derive(Clone)]
-pub struct ExtData {
-    /// Recipient address for withdrawals
-    pub recipient: Address,
-    /// External amount: positive for deposits, negative for withdrawals
-    pub ext_amount: I256,
-    /// Encrypted data for the first output UTXO
-    pub encrypted_output0: Bytes,
-    /// Encrypted data for the second output UTXO
-    pub encrypted_output1: Bytes,
-}
-
-/// Hash external data using Keccak256
-///
-/// Serializes the external data to XDR, hashes it with Keccak256,
-/// and reduces the result modulo the BN256 field size.
-///
-/// # Arguments
-///
-/// * `env` - The Soroban environment
-/// * `ext` - The external data to hash
-///
-/// # Returns
-///
-/// Returns the 32-byte hash of the external data
-pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
-}
-
-// Contract clients for cross-contract dependencies
-#[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
-pub trait ASPMembershipInterface {
-    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
-}
-
-#[contractclient(crate_path = "soroban_sdk", name = "ASPNonMembershipClient")]
-pub trait ASPNonMembershipInterface {
-    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
-}
-
-#[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
-pub trait CircomGroth16VerifierInterface {
-    fn verify(
-        env: Env,
-        proof: Groth16Proof,
-        public_inputs: Vec<Bn254Fr>,
-    ) -> Result<bool, Groth16Error>;
 }
 
 /// Storage keys for contract persistent data

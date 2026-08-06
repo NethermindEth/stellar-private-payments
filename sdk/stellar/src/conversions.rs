@@ -331,8 +331,14 @@ mod tests {
         let sym = |s: &str| xdr::ScVal::Symbol(xdr::ScSymbol(s.try_into().expect("symbol")));
         let entries = xdr::ScMap(
             vec![
-                xdr::ScMapEntry { key: sym("x"), val: x },
-                xdr::ScMapEntry { key: sym("y"), val: y },
+                xdr::ScMapEntry {
+                    key: sym("x"),
+                    val: x,
+                },
+                xdr::ScMapEntry {
+                    key: sym("y"),
+                    val: y,
+                },
             ]
             .try_into()
             .expect("map entries"),

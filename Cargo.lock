@@ -3895,6 +3895,16 @@ dependencies = [
  "asp-non-membership",
  "circom-groth16-verifier",
  "contract-types",
+ "pool-core",
+ "soroban-sdk",
+ "soroban-utils",
+]
+
+[[package]]
+name = "pool-core"
+version = "0.1.0"
+dependencies = [
+ "contract-types",
  "soroban-sdk",
  "soroban-utils",
 ]
@@ -3913,6 +3923,7 @@ dependencies = [
  "asp-non-membership",
  "circom-groth16-verifier",
  "contract-types",
+ "pool-core",
  "soroban-sdk",
  "soroban-utils",
 ]
@@ -5340,6 +5351,7 @@ dependencies = [
  "serde_json",
  "sha2 0.11.0",
  "stellar",
+ "stellar-xdr",
  "tracing",
  "types",
 ]

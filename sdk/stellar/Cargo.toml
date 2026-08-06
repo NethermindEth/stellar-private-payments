@@ -24,7 +24,7 @@ serde_json = { workspace = true }
 sha2 = { workspace = true }
 sha3 = { version = "0.11", default-features = false }
 stellar-strkey = "0.0.18"
-stellar-xdr = { version = "27.0.0", features = ["serde", "base64", "std", "alloc"] }
+stellar-xdr = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

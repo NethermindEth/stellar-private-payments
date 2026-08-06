@@ -3,51 +3,33 @@
 //! Same shape as `pool::pool::PoolContract`, extended with an immutable
 //! admin view key and GVK mode stored at construction time.
 //!
-//! `merkle_with_history`/`policy` are local copies of `pool`'s modules
-//! rather than a Cargo dependency on the `pool` crate: Soroban's
-//! `#[contractimpl]` exports are never dead-code-eliminated, so depending on
-//! `pool` at all would drag `PoolContract`'s own exported symbols (`get_root`,
-//! `is_known_root`, ...) into this crate's wasm binary and collide at link
-//! time with `PoolGvkContract`'s identically-named methods (required for
-//! cross-pool-variant SDK/indexer compatibility). Duplicating this
-//! infrastructure module is what keeps `contracts/pool` byte-for-byte
-//! untouched.
+//! The Merkle tree, policy flags, `ExtData`, and the cross-contract client
+//! traits come from `pool-core`, shared with `contracts/pool`. They live there
+//! rather than in either contract crate because Soroban's `#[contractimpl]`
+//! exports are never dead-code-eliminated: a dependency edge onto `pool`
+//! itself would drag `PoolContract`'s exported symbols (`get_root`,
+//! `is_known_root`, ...) into this crate's wasm and collide at link time with
+//! `PoolGvkContract`'s identically-named methods, which must keep those names
+//! for cross-pool-variant SDK/indexer compatibility. `pool-core` declares no
+//! `#[contract]`/`#[contractimpl]`, so it carries no exports to collide.
 #![allow(clippy::too_many_arguments)]
-use crate::{
-    gvk::{self, BabyJubJubPoint, GvkCiphertext},
+use crate::gvk::{self, BabyJubJubPoint, GvkCiphertext};
+use contract_types::Groth16Proof;
+use pool_core::{
+    ASPMembershipClient, ASPNonMembershipClient, CircomGroth16VerifierClient,
     merkle_with_history::{Error as MerkleError, MerkleTreeWithHistory},
     policy,
 };
-use contract_types::{Groth16Error, Groth16Proof};
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractclient, contracterror,
-    contractevent, contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
-    xdr::ToXdr,
+    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contracterror, contractevent,
+    contractimpl, contracttype, crypto::bn254::Bn254Fr, token::TokenClient,
 };
 use soroban_utils::constants::bn256_modulus;
 
-// Contract clients for cross-contract dependencies. Declared locally rather
-// than reused from `pool` for the same reason as `merkle_with_history`/
-// `policy` above: `#[contractclient]` itself exports nothing, but importing
-// it from `pool` would still pull in the whole `pool` crate.
-#[contractclient(crate_path = "soroban_sdk", name = "ASPMembershipClient")]
-pub trait ASPMembershipInterface {
-    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
-}
-
-#[contractclient(crate_path = "soroban_sdk", name = "ASPNonMembershipClient")]
-pub trait ASPNonMembershipInterface {
-    fn get_root(env: Env) -> Result<U256, soroban_sdk::Error>;
-}
-
-#[contractclient(crate_path = "soroban_sdk", name = "CircomGroth16VerifierClient")]
-pub trait CircomGroth16VerifierInterface {
-    fn verify(
-        env: Env,
-        proof: Groth16Proof,
-        public_inputs: Vec<Bn254Fr>,
-    ) -> Result<bool, Groth16Error>;
-}
+// Re-exported rather than merely imported so `pool_gvk::ExtData` and
+// `pool_gvk::hash_ext_data` stay part of this crate's surface, mirroring
+// `pool`.
+pub use pool_core::{ExtData, hash_ext_data};
 
 /// Contract error types for the GVK privacy pool.
 ///
@@ -126,6 +108,14 @@ pub(crate) enum DataKey {
     /// Pool ASP policy flags (bitset; see `crate::policy`).
     PolicyFlags,
     /// Admin's Global View Key public point `D`, set once at construction.
+    ///
+    /// Immutable by design (issue #220): there is no setter, and
+    /// `update_admin` rotates only the admin *address*. A rotated-out admin
+    /// therefore keeps the ability to decrypt every future note, and a leaked
+    /// private `d` retroactively deanonymizes the pool's whole history — the
+    /// only recovery is deploying a new pool and migrating. `D` is a circuit
+    /// public input, so forward-only rotation would be circuit-compatible if
+    /// this trade is ever revisited.
     AdminViewKey,
     /// Global View Key mode (`gvk::VIEW_ONLY` or `gvk::TRACEABLE`).
     GvkMode,
@@ -162,35 +152,6 @@ pub struct Proof {
     /// GVK ciphertexts for the input notes: present iff `gvk_mode ==
     /// TRACEABLE`, empty otherwise.
     pub input_gvk_ciphertexts: Vec<GvkCiphertext>,
-}
-
-/// External data for a transaction.
-///
-/// Structurally copied from `pool::ExtData`.
-#[contracttype]
-#[derive(Clone)]
-pub struct ExtData {
-    /// Recipient address for withdrawals
-    pub recipient: Address,
-    /// External amount: positive for deposits, negative for withdrawals
-    pub ext_amount: I256,
-    /// Encrypted data for the first output UTXO
-    pub encrypted_output0: Bytes,
-    /// Encrypted data for the second output UTXO
-    pub encrypted_output1: Bytes,
-}
-
-/// Hash external data using Keccak256, reduced modulo the BN256 field size.
-///
-/// Copied from `pool::hash_ext_data`.
-pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
-    let payload = ext.clone().to_xdr(env);
-    let digest: BytesN<32> = env.crypto().keccak256(&payload).into();
-    let digest_u256 = U256::from_be_bytes(env, &Bytes::from(digest));
-    let reduced = digest_u256.rem_euclid(&bn256_modulus(env));
-    let mut buf = [0u8; 32];
-    reduced.to_be_bytes().copy_into_slice(&mut buf);
-    BytesN::from_array(env, &buf)
 }
 
 /// Event emitted when a new commitment is added to the Merkle tree.
@@ -289,6 +250,10 @@ impl PoolGvkContract {
     }
 
     /// Get the admin's Global View Key public point `D`.
+    ///
+    /// Read-only and unauthenticated on purpose: `D` is a circuit public
+    /// input and is published in every proof, so it is not secret. There is
+    /// no corresponding setter — see [`DataKey::AdminViewKey`].
     pub fn get_admin_view_key(env: &Env) -> Result<BabyJubJubPoint, Error> {
         env.storage()
             .persistent()
@@ -345,6 +310,12 @@ impl PoolGvkContract {
     }
 
     // ========== ASP Contract Functions ==========
+    //
+    // `pool` also exports `update_asp_membership`/`update_asp_non_membership`;
+    // this crate deliberately does not. A `pool-gvk` pool can therefore never
+    // repoint its ASP contracts after construction, unlike a `pool` one — a
+    // deployment-time constraint, not an oversight. Nothing in the repo calls
+    // those two methods today; add them here if that changes.
 
     /// Get the ASP Membership contract address.
     fn get_asp_membership(env: &Env) -> Result<Address, Error> {
@@ -684,7 +655,17 @@ impl PoolGvkContract {
         }
         // 3. External data hash check. This is also the value the circuit's
         // `nonce` public input is required to equal (see `verify_proof`),
-        // making every transaction's nonce unique.
+        // which *binds* the nonce to this transaction's parameters. It does
+        // not make the nonce unique: `hash_ext_data` is a deterministic
+        // function of caller-chosen `ExtData`, so two transactions with
+        // identical `ExtData` share a nonce. `globalViewKey.circom` asks the
+        // contract for uniqueness, and this does not provide it — but the
+        // property that matters is upheld elsewhere: the ciphertext's
+        // ephemeral scalar is derived as
+        // `H(pk, amount, blinding, salt, D, nonce, idx)`, and `blinding` is
+        // fresh per output note, so colliding `(R, c)` additionally requires
+        // an identical note *and* salt. Only a prover can arrange that, and
+        // only against their own privacy.
         let ext_hash = hash_ext_data(env, &ext_data);
         if ext_hash != proof.ext_data_hash {
             return Err(Error::WrongExtHash);
