@@ -70,6 +70,8 @@ pub enum Error {
     InvalidGvkMode = 15,
     /// Wrong number of GVK ciphertexts for the configured mode.
     WrongGvkCiphertextCount = 16,
+    /// Admin view key `D` is unusable as a circuit public input.
+    InvalidAdminViewKey = 17,
 }
 
 impl From<MerkleError> for Error {
@@ -222,6 +224,7 @@ impl PoolGvkContract {
         if !gvk::is_valid(gvk_mode) {
             return Err(Error::InvalidGvkMode);
         }
+        Self::validate_admin_view_key(&env, &admin_view_key)?;
         env.storage().persistent().set(&DataKey::Admin, &admin);
         env.storage().persistent().set(&DataKey::Token, &token);
         env.storage()
@@ -246,6 +249,32 @@ impl PoolGvkContract {
 
         MerkleTreeWithHistory::init(&env, levels)?;
 
+        Ok(())
+    }
+
+    /// Reject an admin view key that could never produce a verifiable proof.
+    ///
+    /// Checked once here rather than in `verify_proof`, since `AdminViewKey`
+    /// is written only by the constructor and has no setter.
+    ///
+    /// Two cheap checks:
+    /// - canonical range
+    /// - `x != 0`: the only on-curve points with `x == 0` are `(0, 1)` and `(0,
+    ///   -1)`, both low-order and both already rejected in-circuit, so this
+    ///   excludes nothing legitimate. It does catch the likely mistake of
+    ///   deploying with an all-zero point.
+    ///
+    /// Full on-curve/subgroup validation is deliberately *not* done here: `D`
+    /// is a circuit public input, so `BabyCheck` and the low-order guard
+    /// already run on every proof.
+    fn validate_admin_view_key(env: &Env, key: &BabyJubJubPoint) -> Result<(), Error> {
+        let modulus = bn256_modulus(env);
+        if key.x >= modulus || key.y >= modulus {
+            return Err(Error::InvalidAdminViewKey);
+        }
+        if key.x == U256::from_u32(env, 0) {
+            return Err(Error::InvalidAdminViewKey);
+        }
         Ok(())
     }
 

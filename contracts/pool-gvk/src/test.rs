@@ -193,6 +193,111 @@ fn pool_gvk_constructor_rejects_invalid_gvk_mode() {
     );
 }
 
+/// `AdminViewKey` is immutable and has no setter, so a key that can never
+/// satisfy the circuit permanently bricks the pool: every `transact` would
+/// fail at proof verification with no way to fix it. These four cases are the
+/// ones catchable without on-chain curve arithmetic.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_non_canonical_admin_view_key_x() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let key = BabyJubJubPoint {
+        x: bn256_modulus(&env),
+        y: U256::from_u32(&env, 2),
+    };
+    register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT,
+        key,
+        VIEW_ONLY,
+    );
+}
+
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_non_canonical_admin_view_key_y() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let key = BabyJubJubPoint {
+        x: U256::from_u32(&env, 1),
+        y: bn256_modulus(&env),
+    };
+    register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT,
+        key,
+        VIEW_ONLY,
+    );
+}
+
+/// The likely deployment mistake: an all-zero point, which is not even on the
+/// curve.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_zero_admin_view_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT,
+        mk_point(&env, 0, 0),
+        VIEW_ONLY,
+    );
+}
+
+/// `x == 0` also covers the identity `(0, 1)`, which passes `BabyCheck` but is
+/// low-order and would be rejected in-circuit on every proof.
+#[test]
+#[should_panic(expected = "Error(Contract, #17)")] // InvalidAdminViewKey = 17
+fn pool_gvk_constructor_rejects_identity_admin_view_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT,
+        mk_point(&env, 0, 1),
+        VIEW_ONLY,
+    );
+}
+
+/// The check must not be over-tight: `modulus - 1` is a canonical field
+/// element and has to be accepted.
+#[test]
+fn pool_gvk_constructor_accepts_boundary_canonical_admin_view_key() {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let max = bn256_modulus(&env).sub(&U256::from_u32(&env, 1));
+    let key = BabyJubJubPoint {
+        x: max.clone(),
+        y: max.clone(),
+    };
+    let pool = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 100),
+        8,
+        policy::ALLOWLIST_BIT,
+        key,
+        VIEW_ONLY,
+    );
+
+    let client = PoolGvkContractClient::new(&env, &pool);
+    assert_eq!(client.get_admin_view_key().x, max);
+}
+
 #[test]
 fn pool_gvk_getters_round_trip() {
     let env = test_env();
