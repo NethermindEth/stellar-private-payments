@@ -1,0 +1,113 @@
+// Compound test: deposit 0.01 XLM, then transfer 0.01 XLM to account B
+// ($E2E_ACCOUNT_D_ADDRESS — provisioned, funded, and registered in the
+// public-key registry by the "Deposit-then-transfer to B" plan's step 1.1;
+// see deployments/testnet/.e2e-accounts.env). Uses the same shared
+// submitAndConfirm (../src/moveFunds.mjs) as tests/04-deposit-withdraw.mjs
+// — the runtime confirmation dialog, .btn-loading progress-stage tracking,
+// sequential Freighter approval handling, and toast-link hash capture +
+// on-chain confirmation.
+//
+// Transfer discovery (not in this checkout's app/js source — same
+// build/deploy drift 02-deposit and 04-deposit-withdraw found): the
+// recipient field is `#transfer-address` (NOT "transfer-recipient" — don't
+// guess from the withdraw/deposit naming pattern). Its own runtime dialog
+// is titled "Confirm transfer" with a "Transfer" confirm button. Typing a
+// full 56-char address triggers an on-input registry lookup
+// (app/js/ui/transactions.js's addressInput listener) that fills
+// `#transfer-lookup-status` with "Found local registration" once resolved
+// — this test waits for that before submitting, since RECIPIENT LOOKUP
+// RESOLUTION IS THE POINT of using a registered account here (an
+// unregistered recipient would fail deterministically at this stage,
+// before any signing, not with a timeout).
+//
+// SYNC-WAIT: exactly the same situation 04-deposit-withdraw documents for
+// withdraw — transfer needs the just-deposited note visible to the client
+// before it can build its plan. Not gated on here either; the SDK's own
+// internal retry (sdk/client/src/sync.rs) surfaces through the same
+// .btn-loading progress-stage tracking submitAndConfirm already does.
+
+import { submitAndConfirm } from '../src/moveFunds.mjs';
+
+function assert(condition, message) {
+  if (!condition) throw new Error(`05-deposit-transfer: ${message}`);
+}
+
+async function assertNoOnboardingWizard(page) {
+  const wizardVisible = await page.evaluate(
+    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
+  );
+  if (wizardVisible) {
+    throw new Error(
+      '05-deposit-transfer: the onboarding wizard rendered on a profile that should be wizard-proof — ' +
+        'this invalidates step 1.1\'s premise from the wizard-proof-snapshot plan. ' +
+        'Report via `plan deviate` rather than driving the wizard from here.',
+    );
+  }
+}
+
+export async function run(helpers) {
+  const { page } = helpers;
+
+  await assertNoOnboardingWizard(page);
+
+  const recipient = process.env.E2E_ACCOUNT_D_ADDRESS;
+  assert(recipient, 'E2E_ACCOUNT_D_ADDRESS is not set — source deployments/testnet/.e2e-accounts.env first');
+
+  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const logTag = '05-deposit-transfer';
+
+  const depositHash = await submitAndConfirm(helpers, {
+    logTag,
+    flowName: 'deposit',
+    amountSelector: '#deposit-amount',
+    submitSelector: '#btn-deposit',
+    confirmDialogTitle: 'Confirm deposit',
+    confirmButtonLabel: 'Deposit',
+    amount: '0.01',
+    rpcUrl,
+  });
+
+  // Switch tabs via the stable data attribute — plain text "Transfer" is
+  // safe here (no known duplicate elsewhere), but stay consistent with
+  // deposit/withdraw's proven pattern.
+  await page.locator('[data-move-flow="transfer"]').click();
+  await page.waitForTimeout(500);
+
+  const transferHash = await submitAndConfirm(helpers, {
+    logTag,
+    flowName: 'transfer',
+    amountSelector: '#transfer-amount',
+    submitSelector: '#btn-transfer',
+    confirmDialogTitle: 'Confirm transfer',
+    confirmButtonLabel: 'Transfer',
+    amount: '0.01',
+    rpcUrl,
+    // Generous: the just-deposited note may need the SDK's own sync-wait
+    // retry before a transfer plan can build (same as withdraw).
+    progressTimeoutMs: 180000,
+    fillBeforeSubmit: async () => {
+      await page.fill('#transfer-address', recipient);
+      const statusLocator = page.locator('#transfer-lookup-status');
+      const resolved = await statusLocator
+        .filter({ hasText: 'Found local registration' })
+        .waitFor({ state: 'visible', timeout: 15000 })
+        .then(() => true)
+        .catch(() => false);
+      if (!resolved) {
+        const status = await statusLocator.innerText().catch(() => '(unavailable)');
+        const warning = await page.locator('#transfer-lookup-warning').innerText().catch(() => '(unavailable)');
+        assert(
+          false,
+          `recipient registry lookup did not resolve to "Found local registration" within 15s ` +
+            `(status: "${status}", warning: "${warning}") — this points at a registration problem with ` +
+            `${recipient}, not a timing issue; verify step 1.1's provisioning rather than retrying blindly`,
+        );
+      }
+    },
+  });
+
+  assert(depositHash !== transferHash, 'deposit and transfer somehow produced the same transaction hash');
+  console.log(
+    `[${logTag}] OK: deposit ${depositHash} and transfer ${transferHash} both confirmed SUCCESS on-chain`,
+  );
+}

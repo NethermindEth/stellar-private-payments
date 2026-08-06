@@ -150,6 +150,9 @@ a tight loop.
 | `tests/02-deposit.mjs` | Deposit 0.01 XLM: proving/signing/submitting stages, real Freighter signTransaction approval(s), transaction confirmed `SUCCESS` via direct Soroban RPC lookup (not the UI balance display — see the file's header comment for why). |
 | `tests/03-rejection.mjs` | Rejecting a deposit's signing prompt: the app surfaces it as "Deposit cancelled." (not a crash or generic error) and returns to idle. |
 | `tests/04-deposit-withdraw.mjs` | Deposit then withdraw to self back-to-back: two distinct transactions, both confirmed `SUCCESS` on-chain. |
+| `tests/05-deposit-transfer.mjs` | Deposit then transfer to a second, registered account (`E2E_ACCOUNT_D_ADDRESS`): recipient resolves through the public-key registry, two distinct transactions, both confirmed `SUCCESS` on-chain. |
+| `tests/06-disclose-basic.mjs` | Deposit twice, generate a 1-note selective-disclosure receipt for an unspent note, then verify that receipt through the app's own verify flow: proof and context check out, and the note's status shows unspent. Single account throughout — see the file's header comment for why. |
+| `tests/07-disclose-spent.mjs` | Deposit three times, withdraw once (spending one note), then generate and verify disclosure receipts for BOTH a spent note (proof/context/root still pass, but no "Fully verified" badge, status shows spent) and a still-unspent note (fully verified, status shows unspent) — the second guards against an overcorrected check that marks everything spent. Also accepts `APP_URL` pointing at a locally-served build, driving the onboarding wizard on first connect if needed. |
 
 ## Rebuilding the profile snapshot
 

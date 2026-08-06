@@ -128,6 +128,29 @@ export async function unlockFreighter(context, password = process.env.E2E_FREIGH
   return page;
 }
 
+// Switch Freighter's active wallet, e.g. between multiple imported accounts
+// in the same profile ("Account 1", "Account 2", ...) — the generic labels
+// Freighter assigns on creation/import, not anything app- or user-defined.
+// Selectors: the current account's name (data-testid="account-view-account-
+// name") opens the account list; each row in that list is a WalletRow whose
+// name text (class "detail-name") both displays the account and, per its own
+// onClick, selects it when clicked — so clicking the target row's name text
+// is the switch action itself, no separate "confirm" step.
+export async function switchFreighterAccount(context, accountName) {
+  const page = await extensionHomePage(context);
+  await page.waitForTimeout(500);
+
+  await page.click('[data-testid="account-view-account-name"]', { force: true });
+  await page.waitForTimeout(600);
+
+  const row = page.locator('.detail-name', { hasText: accountName }).first();
+  await row.waitFor({ state: 'visible', timeout: 10000 });
+  await row.click({ force: true });
+  await page.waitForTimeout(800);
+
+  return page;
+}
+
 // Surface-agnostic finder: scans every open target browser-wide (never
 // assumes one window) and matches on the approval's hash route regardless
 // of whether "?mode=sidebar" precedes it.

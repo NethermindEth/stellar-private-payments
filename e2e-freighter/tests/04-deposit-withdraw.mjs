@@ -1,9 +1,8 @@
 // Compound test: deposit 0.01 XLM, then withdraw 0.01 XLM back to the same
-// (connected) wallet. Reuses 02-deposit.mjs's proven machinery — the
-// deployed app's runtime confirmation dialog, .btn-loading progress-stage
-// tracking, sequential Freighter approval handling, and toast-link hash
-// capture + on-chain confirmation via ../src/chain.mjs — parameterized here
-// as submitAndConfirm() so both legs share it instead of duplicating it.
+// (connected) wallet. submitAndConfirm (../src/moveFunds.mjs) — the runtime
+// confirmation dialog, .btn-loading progress-stage tracking, sequential
+// Freighter approval handling, and toast-link hash capture + on-chain
+// confirmation — is shared with tests/05-deposit-transfer.mjs.
 //
 // Withdraw discovery (not in this checkout's app/js source — same
 // build/deploy drift 02-deposit found): switching to the Withdraw tab is
@@ -27,7 +26,7 @@
 // will show up as a withdraw progress-stage timeout, not a silent wrong
 // result.
 
-import { waitForTransactionSuccess } from '../src/chain.mjs';
+import { submitAndConfirm } from '../src/moveFunds.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`04-deposit-withdraw: ${message}`);
@@ -46,89 +45,16 @@ async function assertNoOnboardingWizard(page) {
   }
 }
 
-// Fill amount, click submit, handle the runtime confirmation dialog, drive
-// every sequential Freighter approval, capture the submitted tx hash from
-// the toast's explorer link, then confirm SUCCESS on-chain. Shared by both
-// the deposit and withdraw legs below — only the selectors/labels differ.
-async function submitAndConfirm(
-  { page, context, waitForAnyFreighterApproval, approveOrWatch },
-  { flowName, amountSelector, submitSelector, confirmDialogTitle, confirmButtonLabel, amount, rpcUrl, progressTimeoutMs = 120000 },
-) {
-  const approve = (kind, opts) => approveOrWatch(context, kind, opts);
-
-  // A prior toast (e.g. the deposit leg's) can still be visible for a few
-  // seconds after its flow finished — capture whatever href is showing
-  // right now so this leg only ever accepts a DIFFERENT (i.e. genuinely
-  // new) one, never a stale leftover from an earlier submission.
-  const toastLink = page.locator('#toast-container .toast-link:not(.hidden)').first();
-  const previousHref = await toastLink.getAttribute('href').catch(() => null);
-
-  await page.fill(amountSelector, amount);
-  const submitBtn = page.locator(submitSelector);
-  await submitBtn.click();
-
-  const confirmDialog = page.getByRole('dialog').filter({ hasText: confirmDialogTitle });
-  const dialogAppeared = await confirmDialog
-    .waitFor({ state: 'visible', timeout: 5000 })
-    .then(() => true)
-    .catch(() => false);
-  if (dialogAppeared) {
-    await confirmDialog.getByRole('button', { name: confirmButtonLabel, exact: true }).click();
-  }
-
-  const seenStages = new Set();
-  const progressDeadline = Date.now() + progressTimeoutMs;
-  let txHash = null;
-
-  while (Date.now() < progressDeadline) {
-    const stageText = await submitBtn.locator('.btn-loading').innerText().catch(() => '');
-    if (stageText) seenStages.add(stageText);
-
-    const pending = await waitForAnyFreighterApproval(context, ['signMessage', 'signAuthEntry', 'signTransaction'], {
-      timeoutMs: 2000,
-    }).catch(() => null);
-    if (pending) {
-      await approve(pending.kind, { timeoutMs: 15000 });
-      await page.waitForTimeout(500);
-      continue;
-    }
-
-    const href = await toastLink.getAttribute('href').catch(() => null);
-    if (href && href !== previousHref) {
-      txHash = href.split('/').filter(Boolean).pop();
-      break;
-    }
-
-    const stillLoading = await submitBtn.isDisabled().catch(() => false);
-    if (!stillLoading && seenStages.size > 0) {
-      const lateHref = await toastLink.getAttribute('href').catch(() => null);
-      if (lateHref && lateHref !== previousHref) txHash = lateHref.split('/').filter(Boolean).pop();
-      break;
-    }
-
-    await page.waitForTimeout(500);
-  }
-
-  assert(seenStages.size > 0, `${flowName}: submit button never showed a progress stage — the click may not have started anything`);
-  console.log(`[04-deposit-withdraw] ${flowName} progress stages seen: ${[...seenStages].join(' -> ')}`);
-  assert(txHash, `${flowName}: no transaction hash was captured from the submitted-transaction toast's explorer link`);
-  console.log(`[04-deposit-withdraw] ${flowName} captured transaction hash: ${txHash}`);
-
-  const status = await waitForTransactionSuccess(txHash, { rpcUrl, timeoutMs: 60000 });
-  assert(status === 'SUCCESS', `${flowName}: transaction ${txHash} resolved with status ${status}, not SUCCESS`);
-  console.log(`[04-deposit-withdraw] ${flowName} transaction ${txHash} confirmed SUCCESS on-chain`);
-
-  return txHash;
-}
-
 export async function run(helpers) {
   const { page } = helpers;
 
   await assertNoOnboardingWizard(page);
 
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const logTag = '04-deposit-withdraw';
 
   const depositHash = await submitAndConfirm(helpers, {
+    logTag,
     flowName: 'deposit',
     amountSelector: '#deposit-amount',
     submitSelector: '#btn-deposit',
@@ -144,6 +70,7 @@ export async function run(helpers) {
   await page.waitForTimeout(500);
 
   const withdrawHash = await submitAndConfirm(helpers, {
+    logTag,
     flowName: 'withdraw',
     amountSelector: '#withdraw-amount',
     submitSelector: '#btn-withdraw',
@@ -158,6 +85,6 @@ export async function run(helpers) {
 
   assert(depositHash !== withdrawHash, 'deposit and withdraw somehow produced the same transaction hash');
   console.log(
-    `[04-deposit-withdraw] OK: deposit ${depositHash} and withdraw ${withdrawHash} both confirmed SUCCESS on-chain`,
+    `[${logTag}] OK: deposit ${depositHash} and withdraw ${withdrawHash} both confirmed SUCCESS on-chain`,
   );
 }
