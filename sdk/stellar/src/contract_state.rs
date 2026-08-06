@@ -856,13 +856,15 @@ mod tests {
         // Ground truth: a live withdraw transaction's emitted contractEventsXdr
         // (decoded via stellar-xdr from the raw event bytes returned by
         // Soroban RPC's getTransaction), containing a genuine NewNullifierEvent
-        // for nullifier 0x136df617a7176ef26d48afe2c4a423319f853357cc12a70fdcf54b26959f42e1.
+        // for nullifier
+        // 0x136df617a7176ef26d48afe2c4a423319f853357cc12a70fdcf54b26959f42e1.
         // Its on-chain topic list is two segments: the event name, snake_cased
         // ("new_nullifier_event" — soroban-sdk's #[contractevent] macro default
         // when no explicit `topics` override is given), then the nullifier.
         const REAL_EVENT_XDR_B64: &str = "AAAAAAAAAAF8STO8BLst2Ct3llRlk+hZeOh0MzBaWHej2f2F56nPAAAAAAEAAAAAAAAAAgAAAA8AAAATbmV3X251bGxpZmllcl9ldmVudAAAAAALE232F6cXbvJtSK/ixKQjMZ+FM1fMEqcP3PVLJpWfQuEAAAARAAAAAQAAAAA=";
-        let real_event = xdr::ContractEvent::from_xdr_base64(REAL_EVENT_XDR_B64, xdr::Limits::none())
-            .expect("valid ContractEvent XDR");
+        let real_event =
+            xdr::ContractEvent::from_xdr_base64(REAL_EVENT_XDR_B64, xdr::Limits::none())
+                .expect("valid ContractEvent XDR");
         let xdr::ContractEventBody::V0(real_event_body) = real_event.body;
         let real_topics: Vec<xdr::ScVal> = real_event_body.topics.into();
 
@@ -882,7 +884,9 @@ mod tests {
         for (i, (filter_segment_b64, real_topic)) in
             filters[0].iter().zip(real_topics.iter()).enumerate()
         {
-            let real_topic_xdr = real_topic.to_xdr_base64(xdr::Limits::none()).expect("encodable");
+            let real_topic_xdr = real_topic
+                .to_xdr_base64(xdr::Limits::none())
+                .expect("encodable");
             assert_eq!(
                 filter_segment_b64, &real_topic_xdr,
                 "topic filter segment {i} must byte-for-byte match the real event's topic {i}"
