@@ -36,17 +36,21 @@ const SEL = {
 // start a connection.
 const APP_CONNECT_BUTTON_TEXT = 'Connect Freighter';
 
-// Approval hash routes proven reachable as ordinary page targets in U1.
+// Approval hash routes proven reachable as ordinary page targets in U1
+// (connect/signMessage/signTransaction), plus sign-auth-entry (same family,
+// route confirmed present in the vendored extension build).
 const APPROVAL_ROUTES = {
   connect: 'grant-access',
   signMessage: 'sign-message',
   signTransaction: 'sign-transaction',
+  signAuthEntry: 'sign-auth-entry',
 };
 
 const APPROVE_BUTTON_TEXT = {
   connect: 'Connect',
   signMessage: 'Confirm',
   signTransaction: 'Confirm',
+  signAuthEntry: 'Confirm',
 };
 
 function isFreighterApprovalUrl(url, kind) {
@@ -69,11 +73,36 @@ export async function launch({ userDataDir, headless = true, video = false } = {
       `--load-extension=${EXT_PATH}`,
       '--no-first-run',
     ],
+    // The app's onboarding wizard offers a notification permission prompt
+    // (retention step) via Notification.requestPermission(); a scripted,
+    // non-genuine-gesture click never resolves that in real Chrome, which
+    // stalls the step's resolve() forever. Pre-granting it here is the
+    // supported Playwright equivalent of a human clicking "Allow" — not a
+    // workaround of app behavior, just letting an automated run get past a
+    // permission prompt with no human present to click it.
+    permissions: ['notifications'],
   };
   if (video) {
     contextOptions.recordVideo = { dir: path.join(PKG_ROOT, 'test-results', 'videos') };
   }
-  return chromium.launchPersistentContext(userDataDir, contextOptions);
+  const context = await chromium.launchPersistentContext(userDataDir, contextOptions);
+
+  // Same reasoning as the 'notifications' grant above, for the wizard's
+  // storage step: navigator.storage.persist() never resolves true for a
+  // scripted session without this — there is no Playwright-level
+  // 'persistent-storage' permission name, so this goes through the raw CDP
+  // permission Playwright doesn't expose (Browser.grantPermissions
+  // "durableStorage"), same effect as a human clicking "Allow".
+  try {
+    const appOrigin = new URL(process.env.APP_URL || DEFAULT_APP_URL).origin;
+    const page = context.pages()[0] || (await context.newPage());
+    const cdp = await context.newCDPSession(page);
+    await cdp.send('Browser.grantPermissions', { origin: appOrigin, permissions: ['durableStorage'] });
+  } catch (err) {
+    console.warn(`[runner] launch: could not grant durableStorage permission: ${err.message}`);
+  }
+
+  return context;
 }
 
 async function extensionHomePage(context) {
@@ -113,8 +142,34 @@ export async function waitForFreighterApproval(context, kind, { timeoutMs = 3000
   throw new Error(`waitForFreighterApproval: no '${kind}' approval target appeared within ${timeoutMs}ms`);
 }
 
+// For flows that can raise more than one kind of approval in an order the
+// caller doesn't control in advance (e.g. deposit may prompt signAuthEntry
+// and/or signTransaction) — scans for the first of any listed kind.
+export async function waitForAnyFreighterApproval(context, kinds, { timeoutMs = 30000 } = {}) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    for (const page of context.pages()) {
+      for (const kind of kinds) {
+        if (isFreighterApprovalUrl(page.url(), kind)) return { page, kind };
+      }
+    }
+    await new Promise((r) => setTimeout(r, 300));
+  }
+  throw new Error(`waitForAnyFreighterApproval: none of [${kinds.join(', ')}] appeared within ${timeoutMs}ms`);
+}
+
 async function clickByText(page, text) {
-  await page.getByText(text, { exact: true }).first().click({ force: true });
+  try {
+    await page.getByText(text, { exact: true }).first().click({ force: true });
+  } catch (err) {
+    // A multi-transaction flow (e.g. deposit raising several sequential
+    // signTransaction prompts) can have the popup we found already closing
+    // by the time we act on it — Freighter auto-advances/closes it once its
+    // own state resolves. Treat "already gone" as already-handled rather
+    // than a hard failure; anything else still propagates.
+    if (page.isClosed() || /closed/i.test(err.message)) return;
+    throw err;
+  }
 }
 
 // APPROVE=auto clicks the text-matched approve button. APPROVE=human is a
@@ -221,6 +276,7 @@ async function main() {
       page,
       connectApp,
       waitForFreighterApproval,
+      waitForAnyFreighterApproval,
       approveOrWatch,
       rejectInFreighter,
     });
