@@ -21,6 +21,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
 
+      # Runs before the toolchain setup: it is a text diff, so drift should
+      # fail in seconds rather than after a full contract build.
+      - name: Check duplicated contract modules are in sync
+        run: scripts/check-duplicated-contract-modules.sh
+
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
@@ -45,7 +50,7 @@ jobs:
       - name: Build contracts
         run: |
           mkdir -p target/stellar
-          for pkg in asp-membership asp-non-membership circom-groth16-verifier pool; do
+          for pkg in asp-membership asp-non-membership circom-groth16-verifier pool pool-gvk; do
             stellar contract build --manifest-path Cargo.toml --out-dir target/stellar --optimize \
               --package "$pkg"
           done
