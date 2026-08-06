@@ -161,11 +161,11 @@ impl StateFetcher {
                     "NextIndex",
                     "MaximumDepositAmount",
                     "PolicyFlags",
-                    // Only present on `contracts/pool-gvk` deployments; read
-                    // as optional below, not through `get_state!`.
-                    "AdminViewKey",
-                    "GvkMode",
                 ],
+                // Only written by `contracts/pool-gvk`, never by
+                // `contracts/pool`, so a missing entry is expected rather
+                // than an error. Read below with `.get(...)`, not `get_state!`.
+                optional_enum_keys: vec!["AdminViewKey", "GvkMode"],
                 valued_keys: vec![],
             });
         }
@@ -173,12 +173,14 @@ impl StateFetcher {
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_membership.as_str(),
             enum_keys: vec!["Root", "Levels", "NextIndex", "Admin", "AdminInsertOnly"],
+            optional_enum_keys: vec![],
             valued_keys: vec![],
         });
 
         requests.push(ContractDataBulkRequest {
             contract_id: self.config.asp_non_membership.as_str(),
             enum_keys: vec!["Root", "Admin"],
+            optional_enum_keys: vec![],
             valued_keys: vec![],
         });
 
@@ -210,6 +212,7 @@ impl StateFetcher {
                 root_requests.push(ContractDataBulkRequest {
                     contract_id: &pool.pool_contract_id,
                     enum_keys: vec!["CurrentRootIndex"],
+                    optional_enum_keys: vec![],
                     valued_keys: vec![("Root", current_root_index)],
                 });
             }
