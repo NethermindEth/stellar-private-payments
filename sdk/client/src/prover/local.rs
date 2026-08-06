@@ -23,7 +23,7 @@ impl LocalProver {
         for (flags, bundle) in artifacts {
             let engine = ProverEngine::new(
                 &bundle.proving_key,
-                &bundle.circuit_wasm,
+                &bundle.circuit_graph,
                 &bundle.circuit_r1cs,
             )
             .map_err(|e| Error::Other(format!("init prover for {flags:?}: {e:#}")))?;

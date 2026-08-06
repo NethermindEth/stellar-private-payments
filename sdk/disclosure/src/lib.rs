@@ -99,8 +99,8 @@ pub const SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER: &[&str] = &[
 /// Artifact file names for a registered disclosure circuit.
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct CircuitArtifacts {
-    /// Circuit WASM file name.
-    pub wasm: &'static str,
+    /// Precomputed `circom-witness-rs` operation graph file name.
+    pub graph: &'static str,
     /// Circuit R1CS file name.
     pub r1cs: &'static str,
     /// Groth16 proving-key file name.
@@ -290,7 +290,7 @@ pub const SELECTIVE_DISCLOSURE_1: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_1_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_1.wasm",
+        graph: "selectiveDisclosure_1.graph.bin",
         r1cs: "selectiveDisclosure_1.r1cs",
         proving_key: "selectiveDisclosure_1_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_1_vk.json",
@@ -304,7 +304,7 @@ pub const SELECTIVE_DISCLOSURE_2: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_2_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_2.wasm",
+        graph: "selectiveDisclosure_2.graph.bin",
         r1cs: "selectiveDisclosure_2.r1cs",
         proving_key: "selectiveDisclosure_2_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_2_vk.json",
@@ -318,7 +318,7 @@ pub const SELECTIVE_DISCLOSURE_3: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_3_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_3.wasm",
+        graph: "selectiveDisclosure_3.graph.bin",
         r1cs: "selectiveDisclosure_3.r1cs",
         proving_key: "selectiveDisclosure_3_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_3_vk.json",
@@ -332,7 +332,7 @@ pub const SELECTIVE_DISCLOSURE_4: RegisteredCircuit = RegisteredCircuit {
     n_notes: SELECTIVE_DISCLOSURE_4_N_NOTES,
     public_inputs_order: SELECTIVE_DISCLOSURE_1_PUBLIC_INPUTS_ORDER,
     artifacts: CircuitArtifacts {
-        wasm: "selectiveDisclosure_4.wasm",
+        graph: "selectiveDisclosure_4.graph.bin",
         r1cs: "selectiveDisclosure_4.r1cs",
         proving_key: "selectiveDisclosure_4_proving_key.bin",
         verifying_key_json: "selectiveDisclosure_4_vk.json",
@@ -1062,5 +1062,125 @@ mod tests {
             msg.contains("Failed to load VK") || msg.contains("Failed to load proof"),
             "expected underlying verifier error, got: {msg}"
         );
+    }
+
+    fn parse_vk_from_json(json_str: &str) -> Result<ark_groth16::VerifyingKey<ark_bn254::Bn254>> {
+        use ark_bn254::{G1Affine, G2Affine};
+        use ark_groth16::VerifyingKey;
+        use serde_json::Value;
+
+        let v: Value = serde_json::from_str(json_str)?;
+
+        let parse_g1 = |pt: &Value| -> Result<G1Affine> {
+            let arr = pt.as_array().ok_or_else(|| anyhow!("expected array"))?;
+            let x = circuit_keys::parse_fq_decimal(arr[0].as_str().ok_or_else(|| anyhow!("str"))?)?;
+            let y = circuit_keys::parse_fq_decimal(arr[1].as_str().ok_or_else(|| anyhow!("str"))?)?;
+            Ok(G1Affine::new_unchecked(x, y))
+        };
+
+        let parse_g2 = |pt: &Value| -> Result<G2Affine> {
+            let arr = pt.as_array().ok_or_else(|| anyhow!("expected array"))?;
+            let x = arr[0].as_array().ok_or_else(|| anyhow!("expected array"))?;
+            let y = arr[1].as_array().ok_or_else(|| anyhow!("expected array"))?;
+            let xf = circuit_keys::fq2_from_decimals(
+                x[0].as_str().ok_or_else(|| anyhow!("str"))?,
+                x[1].as_str().ok_or_else(|| anyhow!("str"))?,
+            )?;
+            let yf = circuit_keys::fq2_from_decimals(
+                y[0].as_str().ok_or_else(|| anyhow!("str"))?,
+                y[1].as_str().ok_or_else(|| anyhow!("str"))?,
+            )?;
+            Ok(G2Affine::new_unchecked(xf, yf))
+        };
+
+        let alpha_g1 = parse_g1(&v["vk_alpha_1"])?;
+        let beta_g2 = parse_g2(&v["vk_beta_2"])?;
+        let gamma_g2 = parse_g2(&v["vk_gamma_2"])?;
+        let delta_g2 = parse_g2(&v["vk_delta_2"])?;
+
+        let ic_arr = v["IC"]
+            .as_array()
+            .ok_or_else(|| anyhow!("expected IC array"))?;
+        let mut gamma_abc_g1 = Vec::with_capacity(ic_arr.len());
+        for pt in ic_arr {
+            gamma_abc_g1.push(parse_g1(pt)?);
+        }
+
+        Ok(VerifyingKey {
+            alpha_g1,
+            beta_g2,
+            gamma_g2,
+            delta_g2,
+            gamma_abc_g1,
+        })
+    }
+
+    #[test]
+    fn vk_hash_matches_committed_keys() {
+        use ark_bn254::Bn254;
+        use ark_groth16::ProvingKey;
+        use ark_serialize::{CanonicalDeserialize as _, CanonicalSerialize as _};
+
+        let dir = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../deployments/testnet/circuit_keys"
+        );
+
+        let cases = [
+            (
+                "selectiveDisclosure_1_vk.json",
+                "selectiveDisclosure_1_proving_key.bin",
+                "0x561b78d5dacb2f33de35c637b80c54f590ebf4b738f7af79e49375c6e4631107",
+            ),
+            (
+                "selectiveDisclosure_2_vk.json",
+                "selectiveDisclosure_2_proving_key.bin",
+                "0x29851a709399b2b96c7ce542954bd057a3ce6c042dfeb7d856d02e4624bab9fd",
+            ),
+            (
+                "selectiveDisclosure_3_vk.json",
+                "selectiveDisclosure_3_proving_key.bin",
+                "0x3f2cf64a334b4dbd143b4be11597d84b79c7a7b97a60ddd0c99710f657b8970f",
+            ),
+            (
+                "selectiveDisclosure_4_vk.json",
+                "selectiveDisclosure_4_proving_key.bin",
+                "0xfd612d1c6cd81288e23ef14bd82040e337279debdfa208da5c11ce149d16d8c0",
+            ),
+        ];
+
+        for (json_file, pk_file, expected_hash) in cases {
+            let json_path = std::path::Path::new(dir).join(json_file);
+            let json_str = std::fs::read_to_string(&json_path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", json_path.display()));
+            let vk_from_json = parse_vk_from_json(&json_str)
+                .unwrap_or_else(|e| panic!("failed to parse {}: {e}", json_path.display()));
+            let mut vk_bytes_from_json = Vec::new();
+            vk_from_json
+                .serialize_compressed(&mut vk_bytes_from_json)
+                .unwrap_or_else(|e| panic!("failed to serialize {}: {e}", json_path.display()));
+            let hash_from_json = vk_hash_hex(&vk_bytes_from_json);
+            assert_eq!(
+                hash_from_json, expected_hash,
+                "vk_hash mismatch for {json_file}"
+            );
+
+            let pk_path = std::path::Path::new(dir).join(pk_file);
+            let pk_bytes = std::fs::read(&pk_path)
+                .unwrap_or_else(|e| panic!("failed to read {}: {e}", pk_path.display()));
+            let pk = ProvingKey::<Bn254>::deserialize_compressed_unchecked(&pk_bytes[..])
+                .unwrap_or_else(|e| panic!("failed to deserialize {}: {e}", pk_path.display()));
+            let mut vk_bytes_from_pk = Vec::new();
+            pk.vk
+                .serialize_compressed(&mut vk_bytes_from_pk)
+                .unwrap_or_else(|e| {
+                    panic!("failed to serialize vk from {}: {e}", pk_path.display())
+                });
+            let hash_from_pk = vk_hash_hex(&vk_bytes_from_pk);
+            assert_eq!(
+                hash_from_pk, expected_hash,
+                "vk_hash mismatch for proving key {pk_file}"
+            );
+        }
     }
 }

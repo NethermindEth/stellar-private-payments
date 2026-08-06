@@ -62,14 +62,6 @@ jobs:
       - name: Build npm package
         run: npm run build --prefix sdk/web
 
-      # These tests need both the raw circuit artifacts and the optimized wasm
-      # produced by the sdk-web build above. They are ignored by default and
-      # excluded from Miri runs so other workflows do not try to execute them.
-      - name: Run witness-identity tests
-        env:
-          REQUIRE_WITNESS_ARTIFACTS: "1"
-        run: cargo test -p e2e-tests --release test_witness_identity -- --ignored
-
       - name: Check SDK artifacts and types
         run: |
           npm run check:artifacts --prefix sdk/web

@@ -20,8 +20,8 @@ mod tests {
     /// result, or a panic from the WASM witness calculator) counts as a
     /// rejection and yields `false`, so negative tests can assert on this
     /// uniformly regardless of which layer trips first.
-    /// This is needed because `arkworks` and `wasmer` might panic or return
-    /// depending on in which layer the error is found.
+    /// Needed because ark-circom / arkworks may panic or return `Err`
+    /// depending on which layer hits the bad input.
     fn proof_verifies(
         wasm: impl AsRef<Path>,
         r1cs: impl AsRef<Path>,

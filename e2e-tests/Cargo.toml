@@ -15,8 +15,9 @@ circom-groth16-verifier = { workspace = true }
 circuits = { workspace = true, features = ["std"] }
 # Contract dependencies
 pool = { workspace = true }
-soroban-utils = { workspace = true }
 # Shared deps
+prover = { workspace = true }
+soroban-utils = { workspace = true }
 tx-planner = { workspace = true }
 types = { workspace = true }
 zkhash = { workspace = true }
@@ -25,11 +26,6 @@ zkhash = { workspace = true }
 anyhow = { workspace = true }
 num-bigint = { workspace = true }
 soroban-sdk = { workspace = true, features = ["testutils"] }
-
-[dev-dependencies]
-ark-bn254 = { workspace = true }
-ark-circom = { workspace = true }
-wasmer = { workspace = true }
 
 [lints]
 workspace = true
