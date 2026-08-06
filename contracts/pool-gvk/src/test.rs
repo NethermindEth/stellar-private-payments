@@ -1,3 +1,7 @@
+// Needed only for the success-path tests below (`alloc::vec::Vec` feeding the
+// toy arkworks circuit); the crate itself stays `#![no_std]`.
+extern crate alloc;
+
 use crate::{
     Error, ExtData, PoolGvkContract, PoolGvkContractClient, Proof,
     gvk::{self, BabyJubJubPoint, GvkCiphertext, TRACEABLE, VIEW_ONLY},
@@ -5,13 +9,20 @@ use crate::{
     policy,
     pool_gvk::DataKey,
 };
+use ark_bn254::{Bn254, Fr as ArkFr};
+use ark_circom::CircomReduction;
+use ark_ff::PrimeField;
+use ark_groth16::{Groth16, Proof as ArkProof};
+use ark_relations::gr1cs::{ConstraintSynthesizer, ConstraintSystemRef, SynthesisError, Variable};
+use ark_std::rand::{SeedableRng, rngs::StdRng};
 use asp_membership::{ASPMembership, ASPMembershipClient};
 use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
+use contract_types::VerificationKeyBytes;
 use soroban_sdk::{
-    Address, Bytes, BytesN, Env, I256, U256, Vec,
+    Address, Bytes, BytesN, Env, I256, U256, Vec, contract, contractimpl,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
-    testutils::Address as _,
+    testutils::{Address as _, Events},
     xdr::ToXdr,
 };
 use soroban_utils::{constants::bn256_modulus, utils::MockToken};
@@ -245,8 +256,6 @@ fn pool_gvk_update_admin_transfers_control() {
     });
     assert_eq!(stored_admin, new_admin);
 }
-
-// ========== Transaction flow ==========
 
 fn mk_bytesn32(env: &Env, fill: u8) -> BytesN<32> {
     BytesN::from_array(env, &[fill; 32])
@@ -800,14 +809,8 @@ fn transact_errors_when_policy_flags_unset() {
     env.mock_all_auths();
     let sender = Address::generate(&env);
     let (member_root, non_member_root) = asp_roots(&setup);
-    let (proof, ext) = mk_transact_proof(
-        &env,
-        &pool,
-        member_root,
-        non_member_root,
-        0xB8,
-        VIEW_ONLY,
-    );
+    let (proof, ext) =
+        mk_transact_proof(&env, &pool, member_root, non_member_root, 0xB8, VIEW_ONLY);
 
     assert!(matches!(
         pool.try_transact(&proof, &ext, &sender),
@@ -1039,5 +1042,484 @@ fn transact_never_accepts_caller_supplied_admin_view_key() {
     assert_eq!(
         is_invalid_proof_a, is_invalid_proof_b,
         "changing the pool's admin view key must not change the caller-observable transact outcome"
+    );
+}
+
+// No test in this crate can drive a full `transact` success path (there's
+// no real Groth16 verifying key to prove against, same limitation `pool`'s
+// own suite has — see `test_pool_events_exact_shapes` there), so these
+// tests pin `NewCommitmentEvent`/`NewNullifierEvent`'s exact XDR shape (now
+// carrying `gvk_ciphertext` directly, no separate memo event) by publishing
+// them directly via `env.as_contract`, exactly like `pool`'s precedent.
+
+#[test]
+fn pool_gvk_commitment_event_carries_ciphertext() {
+    use crate::NewCommitmentEvent;
+    use soroban_sdk::events::Event;
+
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        VIEW_ONLY,
+    );
+    let commitment = U256::from_u32(&env, 123);
+    let encrypted_output = Bytes::from_array(&env, &[0u8; 120]);
+    let ciphertext = mk_ciphertext(&env, 20, 21, 22, 23, 24);
+
+    env.as_contract(&pool_id, || {
+        NewCommitmentEvent {
+            commitment: commitment.clone(),
+            index: 0,
+            encrypted_output: encrypted_output.clone(),
+            gvk_ciphertext: ciphertext.clone(),
+        }
+        .publish(&env);
+    });
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 1);
+
+    let expected = NewCommitmentEvent {
+        commitment,
+        index: 0,
+        encrypted_output,
+        gvk_ciphertext: ciphertext,
+    }
+    .to_xdr(&env, &pool_id);
+    assert_eq!(events.events()[0], expected);
+}
+
+#[test]
+fn pool_gvk_nullifier_event_carries_ciphertext_only_when_traceable() {
+    use crate::NewNullifierEvent;
+    use soroban_sdk::events::Event;
+
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let pool_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        3,
+        0,
+        mk_point(&env, 1, 2),
+        TRACEABLE,
+    );
+    let nullifier = U256::from_u32(&env, 456);
+    let ciphertext = mk_ciphertext(&env, 10, 11, 12, 13, 14);
+
+    env.as_contract(&pool_id, || {
+        NewNullifierEvent {
+            nullifier: nullifier.clone(),
+            gvk_ciphertext: Some(ciphertext.clone()),
+        }
+        .publish(&env);
+        NewNullifierEvent {
+            nullifier: nullifier.clone(),
+            gvk_ciphertext: None,
+        }
+        .publish(&env);
+    });
+
+    let events = env.events().all();
+    assert_eq!(events.events().len(), 2);
+
+    let expected_traceable = NewNullifierEvent {
+        nullifier: nullifier.clone(),
+        gvk_ciphertext: Some(ciphertext),
+    }
+    .to_xdr(&env, &pool_id);
+    assert_eq!(events.events()[0], expected_traceable);
+
+    let expected_view_only = NewNullifierEvent {
+        nullifier,
+        gvk_ciphertext: None,
+    }
+    .to_xdr(&env, &pool_id);
+    assert_eq!(events.events()[1], expected_view_only);
+}
+
+// Every test above either fails before `verify_proof` is reached, or checks
+// event *shapes* without going through `transact` at all — because the
+// workspace's shared `CircomGroth16Verifier` (registered by
+// `setup_test_contracts`) embeds a compile-time verification key for an
+// 11-public-input policy circuit (`testdata/policy_tx_2_2_AB_vk.json`, wired
+// via `.cargo/config.toml`'s `VERIFIER_VK_JSON`), which can never match a
+// GVK-shaped public input vector (19+ elements once the ciphertext tail is
+// included) — every call through it fails on `Groth16Error::
+// MalformedPublicInputs` before the pairing check ever runs.
+//
+// To actually observe a *successful* `transact` and its GVK-carrying events,
+// this section deploys `TestVerifier`, a minimal Groth16 verifier that stores
+// an arbitrary verification key supplied at construction (rather than one
+// baked in at compile time), and proves a real Groth16 proof against a
+// trivial toy circuit (`NInputCircuit`, generalizing
+// `circom_groth16_verifier`'s own test fixture, `ElevenInputCircuit`) whose
+// public inputs are unconstrained except the first, tied to a matching
+// witness — so it's satisfiable for any chosen values, letting the fixture
+// match `verify_proof`'s exact public-input sequence for a specific,
+// concrete transaction.
+
+/// Minimal Groth16 verifier storing an arbitrary verification key supplied at
+/// construction. Unlike `circom_groth16_verifier::CircomGroth16Verifier`
+/// (whose VK is embedded at compile time, fixed workspace-wide to an
+/// 11-public-input policy circuit), this lets each test prove against its
+/// own toy circuit sized to match a specific GVK public-input vector.
+/// Test-only scaffolding: the pairing-check logic is a duplicate of
+/// `circom_groth16_verifier::verify_with_vk`, which is private to its crate.
+#[contract]
+struct TestVerifier;
+
+#[contractimpl]
+impl TestVerifier {
+    pub fn __constructor(env: Env, vk: VerificationKeyBytes) {
+        env.storage()
+            .instance()
+            .set(&soroban_sdk::symbol_short!("vk"), &vk);
+    }
+
+    pub fn verify(
+        env: Env,
+        proof: Groth16Proof,
+        public_inputs: Vec<soroban_sdk::crypto::bn254::Bn254Fr>,
+    ) -> Result<bool, contract_types::Groth16Error> {
+        use contract_types::Groth16Error;
+
+        let vk: VerificationKeyBytes = env
+            .storage()
+            .instance()
+            .get(&soroban_sdk::symbol_short!("vk"))
+            .expect("TestVerifier not initialized");
+        let mut ic: Vec<G1Affine> = Vec::new(&env);
+        for bytes in vk.ic.iter() {
+            ic.push_back(G1Affine::from_bytes(bytes));
+        }
+        let alpha = G1Affine::from_bytes(vk.alpha);
+        let beta = G2Affine::from_bytes(vk.beta);
+        let gamma = G2Affine::from_bytes(vk.gamma);
+        let delta = G2Affine::from_bytes(vk.delta);
+
+        let bn = env.crypto().bn254();
+        if public_inputs.len().checked_add(1) != Some(ic.len()) {
+            return Err(Groth16Error::MalformedPublicInputs);
+        }
+        let mut vk_x = ic.get(0).ok_or(Groth16Error::MalformedPublicInputs)?;
+        for i in 0..public_inputs.len() {
+            let s = public_inputs
+                .get(i)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
+            let ic_idx = i
+                .checked_add(1)
+                .ok_or(Groth16Error::MalformedPublicInputs)?;
+            let v = ic.get(ic_idx).ok_or(Groth16Error::MalformedPublicInputs)?;
+            let prod = bn.g1_mul(&v, &s);
+            vk_x = bn.g1_add(&vk_x, &prod);
+        }
+
+        #[allow(clippy::arithmetic_side_effects)]
+        let neg_a = -proof.a;
+        let g1_points = soroban_sdk::vec![&env, neg_a, alpha, vk_x, proof.c];
+        let g2_points = soroban_sdk::vec![&env, proof.b, beta, gamma, delta];
+        if bn.pairing_check(g1_points, g2_points) {
+            Ok(true)
+        } else {
+            Err(Groth16Error::InvalidProof)
+        }
+    }
+}
+
+/// A toy circuit exposing `inputs.len()` public inputs. Only the first is
+/// constrained (tied to a matching witness), so it's satisfiable for any
+/// chosen values — generalizes `circom_groth16_verifier::test::
+/// ElevenInputCircuit` to an arbitrary length.
+#[derive(Clone)]
+struct NInputCircuit {
+    inputs: alloc::vec::Vec<ArkFr>,
+}
+
+impl ConstraintSynthesizer<ArkFr> for NInputCircuit {
+    fn generate_constraints(self, cs: ConstraintSystemRef<ArkFr>) -> Result<(), SynthesisError> {
+        let mut input_vars = alloc::vec::Vec::with_capacity(self.inputs.len());
+        for value in &self.inputs {
+            input_vars.push(cs.new_input_variable(|| Ok(*value))?);
+        }
+        let witness = cs.new_witness_variable(|| Ok(self.inputs[0]))?;
+        let a_lc = witness.into();
+        let b_lc = Variable::One.into();
+        let c_lc = input_vars[0].into();
+        cs.enforce_r1cs_constraint(|| a_lc, || b_lc, || c_lc)?;
+        Ok(())
+    }
+}
+
+fn seeded_rng() -> StdRng {
+    StdRng::seed_from_u64(7)
+}
+
+fn groth16_proof_from_ark(env: &Env, proof: &ArkProof<Bn254>) -> Groth16Proof {
+    Groth16Proof {
+        a: G1Affine::from_bytes(BytesN::from_array(
+            env,
+            &soroban_utils::g1_bytes_from_ark(proof.a),
+        )),
+        b: G2Affine::from_bytes(BytesN::from_array(
+            env,
+            &soroban_utils::g2_bytes_from_ark(proof.b),
+        )),
+        c: G1Affine::from_bytes(BytesN::from_array(
+            env,
+            &soroban_utils::g1_bytes_from_ark(proof.c),
+        )),
+    }
+}
+
+/// Generate a real Groth16 (VK, proof) pair proving `NInputCircuit(values)`,
+/// i.e. one that verifies if and only if the public inputs equal `values` in
+/// this exact order.
+fn groth16_fixture_for(env: &Env, values: &[ArkFr]) -> (VerificationKeyBytes, Groth16Proof) {
+    let mut rng = seeded_rng();
+    let circuit = NInputCircuit {
+        inputs: values.to_vec(),
+    };
+    let params = Groth16::<Bn254, CircomReduction>::generate_random_parameters_with_reduction(
+        circuit.clone(),
+        &mut rng,
+    )
+    .expect("toy circuit params failed to generate");
+    let proof = Groth16::<Bn254, CircomReduction>::create_random_proof_with_reduction(
+        circuit, &params, &mut rng,
+    )
+    .expect("toy circuit proof failed to generate");
+    let vk_bytes = soroban_utils::vk_bytes_from_ark(env, &params.vk);
+    (vk_bytes, groth16_proof_from_ark(env, &proof))
+}
+
+fn ark_fr_from_u256(v: &U256) -> ArkFr {
+    let mut buf = [0u8; 32];
+    v.to_be_bytes().copy_into_slice(&mut buf);
+    ArkFr::from_be_bytes_mod_order(&buf)
+}
+
+fn ark_fr_from_bytesn32(v: &BytesN<32>) -> ArkFr {
+    ArkFr::from_be_bytes_mod_order(&v.to_array())
+}
+
+/// Independently mirrors `PoolGvkContract::verify_proof`'s public-input
+/// assembly order (ciphertext tail first, then `D, nonce, root,
+/// publicAmount, extDataHash, inputNullifier[], outputCommitment[]` — no ASP
+/// roots, since every test using this helper registers with `policy_flags =
+/// 0`) so the toy-circuit fixture and the real contract call are checked
+/// against the same sequence without one implementation calling the other.
+fn expected_ark_public_inputs(
+    proof: &Proof,
+    admin_view_key: &BabyJubJubPoint,
+) -> alloc::vec::Vec<ArkFr> {
+    let mut ciphertexts: alloc::vec::Vec<GvkCiphertext> = alloc::vec::Vec::new();
+    for ct in proof.input_gvk_ciphertexts.iter() {
+        ciphertexts.push(ct);
+    }
+    for ct in proof.output_gvk_ciphertexts.iter() {
+        ciphertexts.push(ct);
+    }
+
+    let mut result: alloc::vec::Vec<ArkFr> = alloc::vec::Vec::new();
+    for ct in &ciphertexts {
+        result.push(ark_fr_from_u256(&ct.r.x));
+        result.push(ark_fr_from_u256(&ct.r.y));
+    }
+    for ct in &ciphertexts {
+        result.push(ark_fr_from_u256(&ct.c1));
+    }
+    for ct in &ciphertexts {
+        result.push(ark_fr_from_u256(&ct.c2));
+    }
+    for ct in &ciphertexts {
+        result.push(ark_fr_from_u256(&ct.c3));
+    }
+
+    result.push(ark_fr_from_u256(&admin_view_key.x));
+    result.push(ark_fr_from_u256(&admin_view_key.y));
+    result.push(ark_fr_from_bytesn32(&proof.ext_data_hash)); // nonce
+    result.push(ark_fr_from_u256(&proof.root));
+    result.push(ark_fr_from_u256(&proof.public_amount));
+    result.push(ark_fr_from_bytesn32(&proof.ext_data_hash)); // ext_data_hash
+
+    for n in proof.input_nullifiers.iter() {
+        result.push(ark_fr_from_u256(&n));
+    }
+    result.push(ark_fr_from_u256(&proof.output_commitment0));
+    result.push(ark_fr_from_u256(&proof.output_commitment1));
+
+    result
+}
+
+/// Runs a full successful `transact` for `gvk_mode`, using a `TestVerifier`
+/// proving a toy circuit matched to this exact call's public inputs, and
+/// returns the pool address for the caller to inspect emitted events on.
+fn run_successful_gvk_transact(gvk_mode: u32, nullifier: u32) -> (Env, Address /* pool_id */) {
+    let env = test_env();
+    let setup = setup_test_contracts(&env);
+    let admin_view_key = mk_point(&env, 1, 2);
+    let levels = 3u32;
+
+    // Root is a pure function of `levels` (the empty-tree root), so it can be
+    // read off a throwaway pool sharing the same `levels`, before the
+    // real, fixture-matched verifier address is known.
+    let throwaway_id = register_pool_gvk(
+        &env,
+        &setup,
+        U256::from_u32(&env, 1000),
+        levels,
+        0,
+        admin_view_key.clone(),
+        gvk_mode,
+    );
+    let root = PoolGvkContractClient::new(&env, &throwaway_id).get_root();
+
+    let ext = mk_ext_data(&env, Address::generate(&env), 0);
+    let ext_hash = compute_ext_hash(&env, &ext);
+    let input_gvk_ciphertexts = if gvk::requires_input_encryption(gvk_mode) {
+        mk_input_ciphertexts(&env, 1)
+    } else {
+        Vec::new(&env)
+    };
+
+    let mut input_nullifiers: Vec<U256> = Vec::new(&env);
+    input_nullifiers.push_back(U256::from_u32(&env, nullifier));
+
+    let mut proof = Proof {
+        proof: mk_mock_groth16_proof(&env), // placeholder, replaced below
+        root,
+        input_nullifiers,
+        output_commitment0: U256::from_u32(&env, 0x01),
+        output_commitment1: U256::from_u32(&env, 0x02),
+        public_amount: U256::from_u32(&env, 0),
+        ext_data_hash: ext_hash,
+        asp_membership_root: U256::from_u32(&env, 0),
+        asp_non_membership_root: U256::from_u32(&env, 0),
+        output_gvk_ciphertexts: mk_output_ciphertexts(&env),
+        input_gvk_ciphertexts,
+    };
+
+    let values = expected_ark_public_inputs(&proof, &admin_view_key);
+    let (vk_bytes, real_proof) = groth16_fixture_for(&env, &values);
+    proof.proof = real_proof;
+
+    let verifier_id = env.register(TestVerifier, (vk_bytes,));
+
+    let pool_id = env.register(
+        PoolGvkContract,
+        (
+            setup.admin.clone(),
+            setup.token.clone(),
+            verifier_id,
+            setup.asp_membership_address.clone(),
+            setup.asp_non_membership_address.clone(),
+            U256::from_u32(&env, 1000),
+            levels,
+            0u32,
+            admin_view_key,
+            gvk_mode,
+        ),
+    );
+    let pool = PoolGvkContractClient::new(&env, &pool_id);
+    env.mock_all_auths();
+    let sender = Address::generate(&env);
+
+    let result = pool.try_transact(&proof, &ext, &sender);
+    assert!(
+        result.is_ok(),
+        "expected transact to succeed with a matching toy-circuit proof: {result:?}"
+    );
+
+    (env, pool_id)
+}
+
+#[test]
+fn transact_accepts_correct_view_only_ciphertexts_and_emits_commitment_events() {
+    use crate::NewCommitmentEvent;
+    use soroban_sdk::events::Event;
+
+    let (env, pool_id) = run_successful_gvk_transact(VIEW_ONLY, 0xE1);
+    let events = env.events().all().filter_by_contract(&pool_id);
+    let events = events.events();
+
+    // Two output commitments, each carrying its GVK ciphertext directly; no
+    // nullifier-side ciphertext (view-only never encrypts inputs).
+    let output_ciphertexts = mk_output_ciphertexts(&env);
+    let expected0 = NewCommitmentEvent {
+        commitment: U256::from_u32(&env, 0x01),
+        index: 0,
+        encrypted_output: Bytes::new(&env),
+        gvk_ciphertext: output_ciphertexts.get(0).expect("output ct 0"),
+    }
+    .to_xdr(&env, &pool_id);
+    let expected1 = NewCommitmentEvent {
+        commitment: U256::from_u32(&env, 0x02),
+        index: 1,
+        encrypted_output: Bytes::new(&env),
+        gvk_ciphertext: output_ciphertexts.get(1).expect("output ct 1"),
+    }
+    .to_xdr(&env, &pool_id);
+
+    assert!(
+        events.contains(&expected0),
+        "missing NewCommitmentEvent+ciphertext for output_commitment0"
+    );
+    assert!(
+        events.contains(&expected1),
+        "missing NewCommitmentEvent+ciphertext for output_commitment1"
+    );
+}
+
+#[test]
+fn transact_accepts_correct_traceable_ciphertexts_and_emits_all_events() {
+    use crate::{NewCommitmentEvent, NewNullifierEvent};
+    use soroban_sdk::events::Event;
+
+    let (env, pool_id) = run_successful_gvk_transact(TRACEABLE, 0xE2);
+    let events = env.events().all().filter_by_contract(&pool_id);
+    let events = events.events();
+
+    let output_ciphertexts = mk_output_ciphertexts(&env);
+    let input_ciphertexts = mk_input_ciphertexts(&env, 1);
+
+    let expected_output0 = NewCommitmentEvent {
+        commitment: U256::from_u32(&env, 0x01),
+        index: 0,
+        encrypted_output: Bytes::new(&env),
+        gvk_ciphertext: output_ciphertexts.get(0).expect("output ct 0"),
+    }
+    .to_xdr(&env, &pool_id);
+    let expected_output1 = NewCommitmentEvent {
+        commitment: U256::from_u32(&env, 0x02),
+        index: 1,
+        encrypted_output: Bytes::new(&env),
+        gvk_ciphertext: output_ciphertexts.get(1).expect("output ct 1"),
+    }
+    .to_xdr(&env, &pool_id);
+    let expected_nullifier = NewNullifierEvent {
+        nullifier: U256::from_u32(&env, 0xE2),
+        gvk_ciphertext: Some(input_ciphertexts.get(0).expect("input ct 0")),
+    }
+    .to_xdr(&env, &pool_id);
+
+    assert!(
+        events.contains(&expected_output0),
+        "missing NewCommitmentEvent+ciphertext for output_commitment0"
+    );
+    assert!(
+        events.contains(&expected_output1),
+        "missing NewCommitmentEvent+ciphertext for output_commitment1"
+    );
+    assert!(
+        events.contains(&expected_nullifier),
+        "missing NewNullifierEvent+ciphertext for the traceable input nullifier"
     );
 }

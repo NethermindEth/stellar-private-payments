@@ -105,8 +105,7 @@ impl From<MerkleError> for Error {
 
 /// Storage keys for contract persistent data.
 ///
-/// Everything `pool` stores,
-/// plus the immutable `AdminViewKey` and `GvkMode`.
+/// Everything `pool` stores, plus the immutable `AdminViewKey` and `GvkMode`.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum DataKey {
@@ -160,13 +159,14 @@ pub struct Proof {
     pub asp_non_membership_root: U256,
     /// GVK ciphertexts for the output notes, always present.
     pub output_gvk_ciphertexts: Vec<GvkCiphertext>,
-    /// GVK ciphertexts for the input notes, optionally present (if GVK mode is set to traceable)
+    /// GVK ciphertexts for the input notes: present iff `gvk_mode ==
+    /// TRACEABLE`, empty otherwise.
     pub input_gvk_ciphertexts: Vec<GvkCiphertext>,
 }
 
 /// External data for a transaction.
 ///
-/// Copied from original pool ExtData
+/// Structurally copied from `pool::ExtData`.
 #[contracttype]
 #[derive(Clone)]
 pub struct ExtData {
@@ -195,7 +195,12 @@ pub fn hash_ext_data(env: &Env, ext: &ExtData) -> BytesN<32> {
 
 /// Event emitted when a new commitment is added to the Merkle tree.
 ///
-/// Copied from `pool::NewCommitmentEvent`.
+/// `pool::NewCommitmentEvent`'s fields plus `gvk_ciphertext`: unlike `pool`,
+/// this crate always encrypts every output note (both `VIEW_ONLY` and
+/// `TRACEABLE` modes), so the field is mandatory, not optional — there is no
+/// separate trailing "memo" event, since this local copy of
+/// `NewCommitmentEvent` isn't shared with non-GVK pools and carries no
+/// schema-compatibility risk to protect.
 #[contractevent]
 #[derive(Clone)]
 pub struct NewCommitmentEvent {
@@ -206,17 +211,24 @@ pub struct NewCommitmentEvent {
     pub index: u32,
     /// Encrypted output data (decryptable by the recipient)
     pub encrypted_output: Bytes,
+    /// GVK ciphertext of this output note, decryptable by the pool admin
+    pub gvk_ciphertext: GvkCiphertext,
 }
 
 /// Event emitted when a nullifier is spent.
 ///
-/// Structurally copied from `pool::NewNullifierEvent`.
+/// `pool::NewNullifierEvent`'s field plus `gvk_ciphertext`, present (`Some`)
+/// only in `TRACEABLE` mode — `VIEW_ONLY` never encrypts input notes. This is
+/// the one genuinely optional piece of GVK data in this crate's events.
 #[contractevent]
 #[derive(Clone)]
 pub struct NewNullifierEvent {
     /// The nullifier that was spent
     #[topic]
     pub nullifier: U256,
+    /// GVK ciphertext of this input note, decryptable by the admin;
+    /// `None` outside `TRACEABLE` mode
+    pub gvk_ciphertext: Option<GvkCiphertext>,
 }
 
 /// Privacy Pool Contract with Global View Key support.
@@ -363,7 +375,7 @@ impl PoolGvkContract {
         let client = ASPNonMembershipClient::new(env, &asp_address);
         Ok(client.get_root())
     }
-    
+
     /// Get the token contract address.
     fn get_token(env: &Env) -> Result<Address, Error> {
         env.storage()
@@ -706,10 +718,30 @@ impl PoolGvkContract {
             return Err(Error::InvalidProof);
         }
 
-        // 6. Mark nullifiers as spent
-        for n in proof.input_nullifiers.iter() {
+        // 6. Mark nullifiers as spent. `input_gvk_ciphertexts` is either empty
+        // (view-only) or exactly as long as `input_nullifiers` (traceable) —
+        // already enforced by `verify_proof`'s ciphertext-count check above —
+        // so a non-empty vec means every nullifier has a matching ciphertext
+        // at the same index.
+        let has_input_ciphertexts = !proof.input_gvk_ciphertexts.is_empty();
+        for i in 0..proof.input_nullifiers.len() {
+            let n = proof
+                .input_nullifiers
+                .get(i)
+                .expect("index within input_nullifiers bounds");
             let _ = Self::mark_spent(env, &n);
-            NewNullifierEvent { nullifier: n }.publish(env);
+            let gvk_ciphertext = if has_input_ciphertexts {
+                Some(proof.input_gvk_ciphertexts.get(i).expect(
+                    "input_gvk_ciphertexts length already validated equal to input_nullifiers",
+                ))
+            } else {
+                None
+            };
+            NewNullifierEvent {
+                nullifier: n,
+                gvk_ciphertext,
+            }
+            .publish(env);
         }
 
         // 7. Process withdrawal if ext_amount < 0
@@ -731,11 +763,17 @@ impl PoolGvkContract {
             proof.output_commitment1.clone(),
         )?;
 
-        // 9. Emit commitment events
+        // 9. Emit commitment events, each carrying its GVK ciphertext
+        // (always present: both view-only and traceable modes encrypt every
+        // output note).
         NewCommitmentEvent {
             commitment: proof.output_commitment0,
             index: idx_0,
             encrypted_output: ext_data.encrypted_output0.clone(),
+            gvk_ciphertext: proof
+                .output_gvk_ciphertexts
+                .get(0)
+                .expect("output_gvk_ciphertexts length already validated to be 2"),
         }
         .publish(env);
 
@@ -743,6 +781,10 @@ impl PoolGvkContract {
             commitment: proof.output_commitment1,
             index: idx_1,
             encrypted_output: ext_data.encrypted_output1.clone(),
+            gvk_ciphertext: proof
+                .output_gvk_ciphertexts
+                .get(1)
+                .expect("output_gvk_ciphertexts length already validated to be 2"),
         }
         .publish(env);
 

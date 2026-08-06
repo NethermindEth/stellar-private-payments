@@ -3903,6 +3903,12 @@ dependencies = [
 name = "pool-gvk"
 version = "0.1.0"
 dependencies = [
+ "ark-bn254 0.6.0",
+ "ark-circom",
+ "ark-ff 0.6.0",
+ "ark-groth16",
+ "ark-relations",
+ "ark-std 0.6.0",
  "asp-membership",
  "asp-non-membership",
  "circom-groth16-verifier",
