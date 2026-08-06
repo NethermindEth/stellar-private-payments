@@ -1,4 +1,4 @@
-use crate::{EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
+use crate::{BabyJubJubPoint, EncryptionPublicKey, ExtAmount, Field, NotePublicKey, PolicyFlags};
 use serde::{Deserialize, Serialize};
 
 /// Serde helpers for `[u8; 32]` as a `0x`-prefixed 64-hex string.
@@ -55,6 +55,14 @@ pub struct PoolInfo {
     pub merkle_capacity: u64,
     pub total_commitments: String, //num_bigint::BigUint,
     pub policy_flags: PolicyFlags,
+    /// Admin's Global View Key public point `D`. `None` for pools deployed
+    /// from `contracts/pool`.
+    /// `Some` for `contracts/pool-gvk` deployments.
+    pub admin_view_key: Option<BabyJubJubPoint>,
+    /// Global View Key mode (`1` = view-only, `2` = traceable). `None` for
+    /// pools deployed from `contracts/pool`; `Some` for `contracts/pool-gvk`
+    /// deployments.
+    pub gvk_mode: Option<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

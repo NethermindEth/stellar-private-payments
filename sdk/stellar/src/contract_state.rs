@@ -1,7 +1,8 @@
 use crate::{
     conversions::{
-        field_to_scval_u256, scval_to_address_string, scval_to_base64, scval_to_bool,
-        scval_to_policy_flags, scval_to_u32, scval_to_u64, scval_to_u256,
+        field_to_scval_u256, scval_to_address_string, scval_to_base64,
+        scval_to_baby_jub_jub_point, scval_to_bool, scval_to_policy_flags, scval_to_u32,
+        scval_to_u64, scval_to_u256,
     },
     rpc::{Client, ContractDataBulkRequest, EventStart, EventType, TopicFilter},
     soroban_encode::BASE_FEE,
@@ -13,9 +14,9 @@ use stellar_strkey::ed25519;
 use stellar_xdr::{self as xdr, ReadXdr};
 
 use types::{
-    AspMembership, AspNonMembership, AspNonMembershipProof, ContractConfig, ContractsStateData,
-    ExtAmount, Field, NotePublicKey, PoolInfo, SMT_DEPTH, TransactChainContext, U256,
-    transact_chain_context_from_state,
+    AspMembership, AspNonMembership, AspNonMembershipProof, BabyJubJubPoint, ContractConfig,
+    ContractsStateData, ExtAmount, Field, NotePublicKey, PoolInfo, SMT_DEPTH,
+    TransactChainContext, U256, transact_chain_context_from_state,
 };
 
 macro_rules! get_state {
@@ -85,6 +86,20 @@ impl StateFetcher {
         Ok(value)
     }
 
+    /// Reads the Global View Key storage keys out of a pool's fetched state,
+    /// treating both as optional: `AdminViewKey`/`GvkMode` only exist on
+    /// `contracts/pool-gvk` deployments, never on `contracts/pool` ones.
+    fn gvk_fields_from_pool_state(
+        pool_state: &HashMap<String, xdr::ScVal>,
+    ) -> Result<(Option<BabyJubJubPoint>, Option<u32>)> {
+        let admin_view_key = pool_state
+            .get("AdminViewKey")
+            .map(scval_to_baby_jub_jub_point)
+            .transpose()?;
+        let gvk_mode = pool_state.get("GvkMode").map(scval_to_u32).transpose()?;
+        Ok((admin_view_key, gvk_mode))
+    }
+
     pub fn new(client: Client, config: ContractConfig) -> Result<Self> {
         Ok(Self { client, config })
     }
@@ -146,6 +161,10 @@ impl StateFetcher {
                     "NextIndex",
                     "MaximumDepositAmount",
                     "PolicyFlags",
+                    // Only present on `contracts/pool-gvk` deployments; read
+                    // as optional below, not through `get_state!`.
+                    "AdminViewKey",
+                    "GvkMode",
                 ],
                 valued_keys: vec![],
             });
@@ -273,6 +292,7 @@ impl StateFetcher {
                     maximum_deposit_amount_u256,
                     "maximum_deposit_amount",
                 )?);
+                let (gvk_admin_view_key, gvk_mode) = Self::gvk_fields_from_pool_state(pool_state)?;
 
                 let pool_info = PoolInfo {
                     ledger: base_latest_ledger,
@@ -315,6 +335,8 @@ impl StateFetcher {
                         "PolicyFlags",
                         pool.pool_contract_id
                     )?)?,
+                    admin_view_key: gvk_admin_view_key,
+                    gvk_mode,
                 };
 
                 out.push(pool_info);
@@ -815,5 +837,52 @@ mod tests {
             err.to_string().contains("ASP non-membership proof has 3 sibling(s), but the configured policy SMT depth is 2"),
             "{err:#}"
         );
+    }
+
+    fn baby_jub_jub_point_scval(x: Field, y: Field) -> xdr::ScVal {
+        let entries = xdr::ScMap(
+            vec![
+                sc_map_entry("x", field_to_scval_u256(x)),
+                sc_map_entry("y", field_to_scval_u256(y)),
+            ]
+            .try_into()
+            .expect("point map"),
+        );
+        xdr::ScVal::Map(Some(entries))
+    }
+
+    #[test]
+    fn gvk_fields_are_none_for_a_pool_deployment() {
+        // `contracts/pool` never writes `AdminViewKey`/`GvkMode`, so a
+        // pool's fetched state simply lacks those keys.
+        let pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+
+        let (admin_view_key, gvk_mode) =
+            StateFetcher::gvk_fields_from_pool_state(&pool_state).expect("no GVK keys present");
+
+        assert!(admin_view_key.is_none());
+        assert!(gvk_mode.is_none());
+    }
+
+    #[test]
+    fn gvk_fields_are_some_for_a_pool_gvk_deployment() {
+        let mut pool_state: HashMap<String, xdr::ScVal> = HashMap::new();
+        pool_state.insert(
+            "AdminViewKey".to_string(),
+            baby_jub_jub_point_scval(field(7), field(11)),
+        );
+        pool_state.insert("GvkMode".to_string(), xdr::ScVal::U32(2));
+
+        let (admin_view_key, gvk_mode) =
+            StateFetcher::gvk_fields_from_pool_state(&pool_state).expect("GVK keys present");
+
+        assert_eq!(
+            admin_view_key,
+            Some(BabyJubJubPoint {
+                x: field(7),
+                y: field(11)
+            })
+        );
+        assert_eq!(gvk_mode, Some(2));
     }
 }
