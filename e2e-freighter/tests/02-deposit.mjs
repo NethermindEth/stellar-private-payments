@@ -8,6 +8,21 @@
 // flow. It only asserts the wizard is absent; if it unexpectedly appears,
 // that invalidates the wizard-proof-snapshot premise, so this fails loudly
 // rather than trying to drive the wizard itself — report via `plan deviate`.
+//
+// Success proof: the deposit's own confirmed transaction, not the displayed
+// pool balance. A prior version asserted a pre/post balance delta; two
+// instrumented runs (see the U3c/U4 deviation history) proved the balance
+// display (portfolio() via app/js/ui/dashboard.js) is eventually consistent
+// against a lagging backend indexer with no client-observable freshness
+// signal — the nav "Synced" indicator tracks the unrelated public-key
+// registry, not pool balances. That makes any pre/post delta assertion here
+// fundamentally flaky, so it's gone. The balance is still logged, purely
+// informationally, since it may legitimately lag the chain for a while.
+//
+// waitForTransactionSuccess now lives in ../src/chain.mjs, shared with
+// tests/04-deposit-withdraw.mjs.
+
+import { waitForTransactionSuccess } from '../src/chain.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`02-deposit: ${message}`);
@@ -26,40 +41,18 @@ async function assertNoOnboardingWizard(page) {
   }
 }
 
-function parseBalance(text) {
-  const match = /^(-?[\d.]+)/.exec((text || '').trim());
-  return match ? Number(match[1]) : 0;
-}
-
 export async function run({ page, context, waitForAnyFreighterApproval, approveOrWatch }) {
   const approve = (kind, opts) => approveOrWatch(context, kind, opts);
 
   await assertNoOnboardingWizard(page);
 
-  const balanceLocator = page.locator('#move-funds-balance');
-  await balanceLocator.waitFor({ state: 'visible', timeout: 15000 });
-  // The element is always visible, and its FIRST rendered value can be a
-  // "—" placeholder OR a stale "0 XLM" default — both get overwritten once
-  // pool config + balances finish their async load. Require the reading to
-  // be non-placeholder AND stable across two consecutive polls before
-  // trusting it (this account accumulates real balance across repeated
-  // test runs, so a too-early "0 XLM" silently under-counts the pre-value).
-  let preBalanceText = await balanceLocator.innerText();
-  let stableRepeats = 0;
-  const readyDeadline = Date.now() + 15000;
-  while (stableRepeats < 2 && Date.now() < readyDeadline) {
-    await page.waitForTimeout(500);
-    const next = await balanceLocator.innerText();
-    stableRepeats = next.trim() !== '—' && next.trim() === preBalanceText.trim() ? stableRepeats + 1 : 0;
-    preBalanceText = next;
-  }
-  assert(preBalanceText.trim() !== '—', 'pool/balance data never finished loading (still "—" after 15s)');
-  assert(stableRepeats >= 2, `pre-deposit balance never stabilized within 15s (last read: "${preBalanceText}")`);
-  const preBalance = parseBalance(preBalanceText);
-  console.log(`[02-deposit] pre-deposit balance: "${preBalanceText}" (${preBalance})`);
+  // Informational only — see the module comment on why this can't be a
+  // pre/post assertion.
+  const displayedBalance = await page.locator('#move-funds-balance').innerText().catch(() => '(unavailable)');
+  console.log(`[02-deposit] displayed balance before deposit (informational, may lag chain): "${displayedBalance}"`);
 
-  const DEPOSIT_AMOUNT = 0.01;
-  await page.fill('#deposit-amount', String(DEPOSIT_AMOUNT));
+  const DEPOSIT_AMOUNT = '0.01';
+  await page.fill('#deposit-amount', DEPOSIT_AMOUNT);
 
   const depositBtn = page.locator('#btn-deposit');
   await depositBtn.click();
@@ -82,9 +75,15 @@ export async function run({ page, context, waitForAnyFreighterApproval, approveO
   // Track the button's own progress label (bindTxProgress in
   // app/js/ui/transactions.js writes the SDK's tx-progress messages there)
   // to prove the app advances through real stages, not just "did nothing".
+  // The submitted transaction's full hash comes from the success toast's
+  // explorer link (Utils.explorerTxUrl(hash) in app/js/ui/core.js's
+  // Toast.show) — the toast's own text is truncated, but the link's href
+  // carries the full hash, and multiple sequential transactions (this
+  // deposit can raise more than one signTransaction approval) all resolve
+  // to the SAME toast pointing at the last one.
   const seenStages = new Set();
   const progressDeadline = Date.now() + 120000;
-  let submitted = false;
+  let txHash = null;
 
   while (Date.now() < progressDeadline) {
     const stageText = await depositBtn.locator('.btn-loading').innerText().catch(() => '');
@@ -104,17 +103,22 @@ export async function run({ page, context, waitForAnyFreighterApproval, approveO
       continue;
     }
 
-    const toastVisible = await page.getByText(/Transaction submitted:|transactions submitted/).isVisible().catch(() => false);
-    if (toastVisible) {
-      submitted = true;
+    const toastLink = page.locator('#toast-container .toast-link:not(.hidden)').first();
+    const href = await toastLink.getAttribute('href').catch(() => null);
+    if (href) {
+      txHash = href.split('/').filter(Boolean).pop();
       break;
     }
 
     const stillLoading = await depositBtn.isDisabled().catch(() => false);
     if (!stillLoading && seenStages.size > 0) {
-      // button re-enabled after having shown progress — treat as done even
-      // if the toast already faded before we polled for it.
-      submitted = true;
+      // Button re-enabled after showing progress, but no toast link was
+      // caught (the toast auto-hides after ~4s) — one more short grace
+      // window in case it's still visible right now.
+      const lateHref = await toastLink.getAttribute('href').catch(() => null);
+      if (lateHref) {
+        txHash = lateHref.split('/').filter(Boolean).pop();
+      }
       break;
     }
 
@@ -123,27 +127,12 @@ export async function run({ page, context, waitForAnyFreighterApproval, approveO
 
   assert(seenStages.size > 0, 'deposit button never showed a progress stage — the click may not have started anything');
   console.log(`[02-deposit] progress stages seen: ${[...seenStages].join(' -> ')}`);
-  assert(submitted, `deposit did not reach a submitted state within the timeout (stages seen: ${[...seenStages].join(', ')})`);
+  assert(txHash, 'no transaction hash was captured from the submitted-transaction toast\'s explorer link');
+  console.log(`[02-deposit] captured transaction hash: ${txHash}`);
 
-  // Balance updates on a 10s dashboard poll (app/js/ui/dashboard.js) or the
-  // 'balances:updated' event — poll for the increase rather than assuming
-  // either fired synchronously with the toast.
-  const balanceDeadline = Date.now() + 30000;
-  let postBalance = preBalance;
-  let postBalanceText = preBalanceText;
-  while (Date.now() < balanceDeadline) {
-    postBalanceText = await balanceLocator.innerText();
-    postBalance = parseBalance(postBalanceText);
-    if (postBalance > preBalance) break;
-    await page.waitForTimeout(1500);
-  }
-  console.log(`[02-deposit] post-deposit balance: "${postBalanceText}" (${postBalance})`);
+  const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
+  const status = await waitForTransactionSuccess(txHash, { rpcUrl });
+  assert(status === 'SUCCESS', `deposit transaction ${txHash} resolved with status ${status}, not SUCCESS`);
 
-  const delta = postBalance - preBalance;
-  assert(
-    Math.abs(delta - DEPOSIT_AMOUNT) < 1e-6,
-    `balance did not increase by the deposited amount (pre=${preBalance}, post=${postBalance}, delta=${delta}, expected=${DEPOSIT_AMOUNT})`,
-  );
-
-  console.log('[02-deposit] OK: deposit submitted and balance increased by the deposited amount');
+  console.log(`[02-deposit] OK: deposit transaction ${txHash} confirmed SUCCESS on-chain`);
 }
