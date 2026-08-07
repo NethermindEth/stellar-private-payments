@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../src/env.mjs';
 // Scripted, unattended Freighter provisioning in a fresh Chrome profile.
 //
 // Given env vars (E2E_ACCOUNT_C_SECRET / E2E_ACCOUNT_C_ADDRESS, sourced from

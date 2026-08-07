@@ -1,50 +1,44 @@
 // Flagship test: full deposit happy path, submitted for real (testnet).
 //
 // By the time run() is called, the runner has connected Freighter. The
-// profile snapshot is wizard-proof (e2e-freighter/scripts/complete-
-// onboarding.mjs ran once, headed, against the working profile, and that
-// state — including key derivation — was baked into the snapshot; see
-// scripts/verify-onboarded.mjs), so this test goes straight to the deposit
-// flow. It only asserts the wizard is absent; if it unexpectedly appears,
-// that invalidates the wizard-proof-snapshot premise, so this fails loudly
-// rather than trying to drive the wizard itself — report via `plan deviate`.
+// app's onboarding wizard state is per-origin: the profile snapshot has it
+// completed for the deployed app, while a fresh origin (a local build on
+// localhost, CI) shows it — so this test drives it via the shared
+// driveWizard helper (a no-op on an already-onboarded origin) and goes
+// straight to the deposit flow.
 //
 // Success proof: the deposit's own confirmed transaction, not the displayed
 // pool balance. A prior version asserted a pre/post balance delta; two
-// instrumented runs (see the U3c/U4 deviation history) proved the balance
-// display (portfolio() via app/js/ui/dashboard.js) is eventually consistent
-// against a lagging backend indexer with no client-observable freshness
-// signal — the nav "Synced" indicator tracks the unrelated public-key
-// registry, not pool balances. That makes any pre/post delta assertion here
-// fundamentally flaky, so it's gone. The balance is still logged, purely
-// informationally, since it may legitimately lag the chain for a while.
+// instrumented runs proved the balance display (portfolio() via
+// app/js/ui/dashboard.js) is eventually consistent against a lagging
+// backend indexer with no client-observable freshness signal — the nav
+// "Synced" indicator tracks the unrelated public-key registry, not pool
+// balances. That makes any pre/post delta assertion here fundamentally
+// flaky, so it's gone. The balance is still logged, purely informationally,
+// since it may legitimately lag the chain for a while.
 //
 // waitForTransactionSuccess now lives in ../src/chain.mjs, shared with
 // tests/04-deposit-withdraw.mjs.
 
 import { waitForTransactionSuccess } from '../src/chain.mjs';
+import { driveWizard } from '../src/onboarding.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`02-deposit: ${message}`);
 }
 
-async function assertNoOnboardingWizard(page) {
-  const wizardVisible = await page.evaluate(
-    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
-  );
-  if (wizardVisible) {
-    throw new Error(
-      '02-deposit: the onboarding wizard rendered on a profile that should be wizard-proof — ' +
-        'this invalidates step 1.1\'s premise (a completed, re-snapshotted profile skips the wizard). ' +
-        'Report via `plan deviate` rather than driving the wizard from here.',
-    );
-  }
-}
-
-export async function run({ page, context, waitForAnyFreighterApproval, approveOrWatch }) {
+export async function run({ page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch }) {
   const approve = (kind, opts) => approveOrWatch(context, kind, opts);
 
-  await assertNoOnboardingWizard(page);
+  // The onboarding wizard's completion state is per-origin: the profile
+  // snapshot carries it for the deployed app, but a fresh origin (local
+  // build, CI) shows the wizard — drive it; on an onboarded origin this
+  // is a no-op.
+  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '02-deposit' });
+  // A bare APP_URL (e.g. localhost) has no #move-funds hash, so the app
+  // lands on Overview with the Move Funds controls hidden — switch tabs.
+  await page.getByRole('button', { name: 'Move Funds', exact: true }).click();
+  await page.waitForTimeout(500);
 
   // Informational only — see the module comment on why this can't be a
   // pre/post assertion.

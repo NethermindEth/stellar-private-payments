@@ -45,6 +45,13 @@ need() { command -v "$1" >/dev/null 2>&1 || die "missing '$1'"; }
 need bash
 need node
 
+# Colorized results on an interactive terminal only (CI logs stay plain).
+if [ -t 1 ]; then
+  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_RESET=$'\033[0m'
+else
+  C_GREEN=""; C_RED=""; C_RESET=""
+fi
+
 tests=()
 if [ $# -gt 0 ]; then
   tests=("$@")
@@ -63,16 +70,22 @@ for t in "${tests[@]}"; do
   step "running $t"
   if bash "$SCRIPT_DIR/run-e2e.sh" "$t"; then
     passed=$((passed + 1))
+    echo "  ${C_GREEN}PASS${C_RESET}: $t"
   else
     failed=$((failed + 1))
     failed_names+=("$t")
+    echo "  ${C_RED}FAIL${C_RESET}: $t"
   fi
 done
 
 echo
-step "suite summary: $passed passed, $failed failed (${#tests[@]} total)"
+if [ "$failed" -eq 0 ]; then
+  step "suite summary: ${C_GREEN}$passed passed${C_RESET}, $failed failed (${#tests[@]} total)"
+else
+  step "suite summary: $passed passed, ${C_RED}$failed failed${C_RESET} (${#tests[@]} total)"
+fi
 for t in ${failed_names[@]+"${failed_names[@]}"}; do
-  echo "  FAILED: $t"
+  echo "  ${C_RED}FAILED${C_RESET}: $t"
 done
 
 [ "$failed" -eq 0 ]

@@ -11,15 +11,19 @@
 // rejection (this test) is what actually proves that path, not a mocked
 // error object.
 
+import { driveWizard } from '../src/onboarding.mjs';
+
 function assert(condition, message) {
   if (!condition) throw new Error(`03-rejection: ${message}`);
 }
 
-export async function run({ page, context, waitForFreighterApproval, rejectInFreighter }) {
-  const wizardVisible = await page.evaluate(
-    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
-  );
-  assert(!wizardVisible, 'onboarding wizard rendered on a profile that should be wizard-proof');
+export async function run({ page, context, waitForFreighterApproval, approveOrWatch, rejectInFreighter }) {
+  // Wizard state is per-origin: drive it on fresh origins, no-op elsewhere.
+  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '03-rejection' });
+  // Bare APP_URL lands on Overview; Move Funds controls are hidden until
+  // the tab is opened.
+  await page.getByRole('button', { name: 'Move Funds', exact: true }).click();
+  await page.waitForTimeout(500);
 
   const balanceLocator = page.locator('#move-funds-balance');
   await balanceLocator.waitFor({ state: 'visible', timeout: 15000 });

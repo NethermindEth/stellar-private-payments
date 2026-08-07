@@ -237,8 +237,8 @@ export async function run(helpers) {
     assert(
       false,
       `a deposit of 150 XLM (above the 100 XLM on-chain cap) did not produce a "Transaction simulation failed" toast within 20s ` +
-        `(toasts seen: ${JSON.stringify(allToasts)}) — a silent success above the cap is a product finding, ` +
-        'report via `plan deviate`, do not assert around it',
+        `(toasts seen: ${JSON.stringify(allToasts)}) — a silent success above the cap is a product bug to investigate, ` +
+        'not something to assert around',
     );
   }
   console.log(`[${logTag}] (4) above max-deposit: "${overCapToast}"`);

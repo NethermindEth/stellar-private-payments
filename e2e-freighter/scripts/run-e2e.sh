@@ -22,6 +22,17 @@ if [ -z "${E2E_FREIGHTER_PASSWORD:-}" ] && [ -f "$E2E_ENV_FILE" ]; then
   set -a; . "$E2E_ENV_FILE"; set +a
 fi
 
+# Colorized output on an interactive terminal only (CI logs stay plain).
+# Tests print consistent tokens: "OK:" on success, "FAILED" on failure.
+if [ -t 1 ]; then
+  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_RESET=$'\033[0m'
+else
+  C_GREEN=""; C_RED=""; C_RESET=""
+fi
+colorize() {
+  sed -uE "s/OK:/${C_GREEN}OK:${C_RESET}/g; s/FAILED/${C_RED}FAILED${C_RESET}/g"
+}
+
 SMOKE=0
 TEST_FILE=""
 
@@ -83,8 +94,8 @@ export E2E_CHROME_USER_DATA_DIR="$USER_DATA_DIR"
 
 if [ "$SMOKE" -eq 1 ]; then
   step "running smoke check"
-  node "$PKG_ROOT/src/runner.mjs" --smoke
+  node "$PKG_ROOT/src/runner.mjs" --smoke 2>&1 | colorize
 else
   step "running $TEST_FILE"
-  node "$PKG_ROOT/src/runner.mjs" "$TEST_FILE"
+  node "$PKG_ROOT/src/runner.mjs" "$TEST_FILE" 2>&1 | colorize
 fi

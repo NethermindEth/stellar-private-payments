@@ -27,28 +27,21 @@
 // .btn-loading progress-stage tracking submitAndConfirm already does.
 
 import { submitAndConfirm } from '../src/moveFunds.mjs';
+import { driveWizard } from '../src/onboarding.mjs';
 
 function assert(condition, message) {
   if (!condition) throw new Error(`05-deposit-transfer: ${message}`);
 }
 
-async function assertNoOnboardingWizard(page) {
-  const wizardVisible = await page.evaluate(
-    () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
-  );
-  if (wizardVisible) {
-    throw new Error(
-      '05-deposit-transfer: the onboarding wizard rendered on a profile that should be wizard-proof — ' +
-        'this invalidates step 1.1\'s premise from the wizard-proof-snapshot plan. ' +
-        'Report via `plan deviate` rather than driving the wizard from here.',
-    );
-  }
-}
-
 export async function run(helpers) {
-  const { page } = helpers;
+  const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;
 
-  await assertNoOnboardingWizard(page);
+  // Wizard state is per-origin: drive it on fresh origins, no-op elsewhere.
+  await driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag: '05-deposit-transfer' });
+  // Bare APP_URL lands on Overview; Move Funds controls are hidden until
+  // the tab is opened.
+  await page.getByRole('button', { name: 'Move Funds', exact: true }).click();
+  await page.waitForTimeout(500);
 
   const recipient = process.env.E2E_ACCOUNT_D_ADDRESS;
   assert(recipient, 'E2E_ACCOUNT_D_ADDRESS is not set — source deployments/testnet/.e2e-accounts.env first');

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../src/env.mjs';
 // Verify that a freshly restored profile snapshot reaches the app's Move
 // Funds deposit form with NO onboarding wizard modal — i.e. that the headed
 // completion run (scripts/complete-onboarding.mjs) actually got baked into

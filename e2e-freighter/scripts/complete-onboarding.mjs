@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../src/env.mjs';
 // Complete the app's onboarding wizard once, headed, against the LIVE
 // working profile (e2e-freighter/.chrome-profile — NOT a temp restore).
 //

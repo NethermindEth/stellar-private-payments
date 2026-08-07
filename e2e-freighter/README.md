@@ -63,39 +63,42 @@ export E2E_CHROMIUM_PATH="/Applications/Chromium.app/Contents/MacOS/Chromium"
 Add that `export` to your shell profile so it's set for every run, or
 prefix each command with it inline.
 
-## One-time setup
+## First time run
+
+Prerequisites: the Requirements above, plus the `stellar` CLI and `trunk`
+installed. Then three commands:
 
 ```bash
-cd e2e-freighter
-npm ci
+# 1. Provision the test accounts (funding + on-chain registration) and
+#    write the git-ignored env file. Idempotent; --verify re-checks.
+deployments/scripts/e2e-accounts-setup.sh
+
+# 2. Install deps, build the Freighter profile (pinned extension, test
+#    account, onboarding completed), snapshot it, verify. Idempotent;
+#    --force rebuilds. The onboarding step needs a desktop session.
+bash e2e-freighter/scripts/setup.sh
+
+# 3. Run the suite.
+bash e2e-freighter/scripts/run-all.sh
 ```
 
-The vendored Freighter extension (`vendor/freighter/`) and the Chrome
-profile snapshot (`profile-snapshot.tar.gz`) are already checked in
-(git-ignored working copies aside) — no extra setup needed unless you're
-rebuilding the profile from scratch (see "Rebuilding the profile snapshot"
-below).
+Note: until the deployed app is redeployed with the nullifier-detection
+fix, the disclosure tests (06–09) must run against a locally built app —
+start `env -u NO_COLOR trunk serve` in one terminal and add
+`APP_URL=http://localhost:8000` to the run command in the other.
 
-Every run needs the test account's secret and the Freighter unlock
-password, both stored in the git-ignored env file
-(`deployments/testnet/.e2e-accounts.env`). `run-e2e.sh` and `run-all.sh`
-source it automatically when the variables aren't already exported — no
-manual step, from any interactive shell. To override a variable for a
-run, export it first; explicit environment wins over the file.
-
-## Running the suite or a single test
-
-`scripts/run-all.sh` runs the whole suite — every `tests/*.mjs` in
-order, one fresh profile restore per test — and prints a per-test
-summary; with arguments it runs just those files:
+## Subsequent runs
 
 ```bash
 bash e2e-freighter/scripts/run-all.sh                                     # whole suite
-bash e2e-freighter/scripts/run-all.sh e2e-freighter/tests/01-connect.mjs  # subset
+bash e2e-freighter/scripts/run-all.sh e2e-freighter/tests/02-deposit.mjs  # subset
+npm run demo                                                              # headed, you approve
+npm run ci                                                                # headless, auto
 ```
 
-The npm presets wrap it: `npm run ci` (headless, auto-approve) and
-`npm run demo` (headed, human approval).
+Everything self-sources the env file — no manual exporting, any shell.
+To override a variable for a run, export it first; explicit environment
+wins over the file.
 
 Single tests go through `scripts/run-e2e.sh <TEST_FILE>` (paths relative
 to the repo root), controlled by two env vars:
@@ -163,21 +166,25 @@ a tight loop.
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account entirely through the Advanced tab (a fixed-shape single-`transact`-step composer, not a form or JSON plan builder — see the file's header for the full UI discovery): select the deposited note via its own "Use" button, fill a recipient/amount output row, execute, confirm SUCCESS on-chain. |
 | `tests/11-failure-modes.mjs` | Failure-mode battery, all pre-signing and non-submitting: over-withdraw and over-transfer (10x the deposited balance) both fail on tx-planner's local "no combination of notes" check; transferring to a freshly-generated, never-registered address fails the same local-registry lookup 05 documents ("No local registration found"); depositing above the on-chain 100 XLM cap fails during simulation with no client-side pre-check at all (confirmed live via `getLedgerEntries` — see the file's header). Ends with a real, successful recovery deposit proving the battery leaves no poisoned state. |
 
-## Rebuilding the profile snapshot
+## Building the profile snapshot
 
-The snapshot (`profile-snapshot.tar.gz`) is a pre-onboarded Chrome profile —
-Freighter unlocked, the test account imported, and the app's own onboarding
-wizard already completed — so ordinary test runs skip both. Rebuild it only
-if the vendored extension version changes or the profile gets corrupted:
+One command does the whole chain (npm deps, Freighter profile
+provisioning, the one-time headed onboarding completion, the snapshot,
+and a verification pass):
 
 ```bash
-# These standalone node scripts need the env exported first (only
-# run-e2e.sh / run-all.sh self-source). On fish, export with:
-#   for line in (grep -v '^#' deployments/testnet/.e2e-accounts.env | grep '=')
-#       set -gx (string split -m 1 '=' -- $line)
-#   end
-set -a; . deployments/testnet/.e2e-accounts.env; set +a
+bash e2e-freighter/scripts/setup.sh
+```
 
+It is idempotent: with a working existing snapshot it verifies and exits.
+Re-run with `--force` if the vendored extension version changes or the
+profile gets corrupted. The onboarding step must run headed (it can stall
+under headless rendering), so run setup on a machine with a desktop
+session. The env file is self-sourced by every step.
+
+What setup.sh does under the hood, if you ever need the pieces:
+
+```bash
 # 1. Provision a fresh Freighter profile from scratch
 node e2e-freighter/scripts/setup-freighter-profile.mjs
 

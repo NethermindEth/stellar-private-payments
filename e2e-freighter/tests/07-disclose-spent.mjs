@@ -9,8 +9,9 @@
 // Note-picker discovery: nothing in app/js/disclosure.js's mountGenerate()
 // disables the checkbox for spent notes (createNoteRow's `disabled` only
 // fires on hitting the 4-note max) — spent notes are fully selectable in
-// the generate flow, same UI as unspent ones. This increment's step called
-// for a `plan deviate` if that weren't true; it is, so no deviation needed.
+// the generate flow, same UI as unspent ones. If spent notes ever become
+// unselectable in this picker, that is a product change to investigate —
+// not a case for narrowing this test.
 //
 // Verify-outcome discovery: a disclosure receipt for an already-spent note
 // still passes proof/context/root checks (those don't care about spend

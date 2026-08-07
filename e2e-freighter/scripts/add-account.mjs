@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import '../src/env.mjs';
 // Import a second Stellar account (E2E_ACCOUNT_D_SECRET) into the LIVE
 // working Freighter profile (e2e-freighter/.chrome-profile — the same
 // profile scripts/setup-freighter-profile.mjs built and

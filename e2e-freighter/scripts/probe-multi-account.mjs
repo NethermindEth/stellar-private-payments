@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-// PROBE (step 1.1 of "Disclosure lifecycle, incrementally"): settle,
+import '../src/env.mjs';
+// PROBE (written to settle the one-profile-two-accounts question):
 // empirically, whether one Chromium profile holding two Freighter accounts
 // (A and B, both imported by scripts/setup-freighter-profile.mjs /
 // scripts/add-account.mjs) can be switched between and drive the app as
@@ -24,7 +25,7 @@
 //       approval (not skipped, not reusing A's)
 //   (c) the app's displayed identity is B's throughout — if A's address or
 //       keys ever show up while B is active, that is an app-level session
-//       leak, reported via `plan deviate`, not papered over here.
+//       leak: a product bug to report, not to paper over here.
 //
 // Run standalone (unlike tests/, which go through scripts/run-e2e.sh): it
 // restores its own fresh profile from the snapshot via prepare-profile.sh
@@ -129,7 +130,7 @@ async function main() {
     );
     assert(
       !truncatedMatches(addressB, ADDRESS_A),
-      `after switching to B, the app still shows an address matching A (${ADDRESS_A}) — this is a session leak, report via plan deviate`,
+      `after switching to B, the app still shows an address matching A (${ADDRESS_A}) — a session leak: a product bug to report`,
     );
 
     // B has never connected before: its own onboarding wizard runs fresh
@@ -146,7 +147,7 @@ async function main() {
     const bodyTextAfterWizard = await page.innerText('body');
     assert(
       !bodyTextAfterWizard.includes(ADDRESS_A.slice(0, 8)),
-      "A's address appears in the page body while B is the connected account — session leak, report via plan deviate",
+      "A's address appears in the page body while B is the connected account — a session leak: a product bug to report",
     );
 
     console.log('[probe-multi-account] OK: switching accounts in one profile shows each account\'s own session, no leakage');

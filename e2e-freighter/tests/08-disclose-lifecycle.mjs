@@ -274,7 +274,7 @@ export async function run(helpers) {
     newlySpent.length === 1,
     `expected exactly 1 newly-spent nullifier in the 4-note receipt after the second withdraw, saw ${newlySpent.length} ` +
       '— more than one suggests the second withdraw spent more than one note (unexpected for an exact 0.01 match), ' +
-      'and zero would mean re-verification did not reflect the new spend at all (report via plan deviate, do not weaken this assertion)',
+      'and zero would mean re-verification did not reflect the new spend at all (a verification-layer finding — investigate, do not weaken this assertion)',
   );
   const newlySpentNullifier = newlySpent[0].nullifier;
   console.log(`[${logTag}] withdraw-2 spent nullifier ${newlySpentNullifier} (discovered via the 4-note receipt's re-verify)`);
