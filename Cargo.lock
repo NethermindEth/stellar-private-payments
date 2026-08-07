@@ -190,6 +190,7 @@ checksum = "6bc66f96ebe2a17a499475b4f94791d379817592ef494171586967ffdc6f95db"
 dependencies = [
  "ark-ec 0.6.0",
  "ark-ff 0.6.0",
+ "ark-r1cs-std",
  "ark-std 0.6.0",
 ]
 
@@ -1135,8 +1136,9 @@ dependencies = [
 
 [[package]]
 name = "circom-witness-rs"
-version = "0.2.3"
-source = "git+https://github.com/NethermindEth/circom-witness-rs?rev=537f9c9cca18fada33d717e634af831ac101a6f1#537f9c9cca18fada33d717e634af831ac101a6f1"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3c282d3ae295c07c9bab925c76bae6d1b2726c7b0b4fc6cce5ad0d616152147b"
 dependencies = [
  "ark-bn254 0.6.0",
  "ark-ff 0.6.0",
