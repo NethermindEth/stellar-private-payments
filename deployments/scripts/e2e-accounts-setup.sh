@@ -105,17 +105,24 @@ need stellar
 need curl
 need git
 
-# `spp` if installed on PATH, else run the workspace CLI from source.
+# Resolve the spp CLI once per run: an installed binary on PATH, else the
+# workspace build. We build loudly and call the binary directly — NOT
+# `cargo run`, which re-resolves (and can silently rebuild) on every call
+# and whose failures were invisible behind swallowed stderr.
 # `type -P` (not `command -v`) because `command -v spp` would find THIS
 # function and always take the first branch.
+SPP_BIN=""
 spp() {
-  local spp_bin
-  spp_bin="$(type -P spp || true)"
-  if [ -n "$spp_bin" ]; then
-    "$spp_bin" "$@"
-  else
-    ( cd "$REPO_ROOT" && cargo run --quiet --release -p stellar-private-payments-cli -- "$@" )
+  if [ -z "$SPP_BIN" ]; then
+    SPP_BIN="$(type -P spp || true)"
+    if [ -z "$SPP_BIN" ]; then
+      step "building the spp CLI (cargo build --release -p stellar-private-payments-cli)"
+      ( cd "$REPO_ROOT" && cargo build --release -p stellar-private-payments-cli ) \
+        || die "failed to build the spp CLI"
+      SPP_BIN="$REPO_ROOT/target/release/spp"
+    fi
   fi
+  "$SPP_BIN" "$@"
 }
 
 assert_env_file_ignored() {
@@ -198,13 +205,20 @@ onboard_account() {
 }
 
 registration_status() {
-  local alias="$1"
-  spp --account "$alias" \
+  local alias="$1" out err_file
+  err_file="$(mktemp)"
+  out="$(spp --account "$alias" \
       --network "$NETWORK" \
       --data-dir "$DATA_DIR" \
       --stellar-config-dir "$DATA_DIR/stellar" \
       --json \
-      overview "$POOL_CONTRACT" 2>/dev/null || true
+      overview "$POOL_CONTRACT" 2>"$err_file")" || true
+  if [ -z "$out" ]; then
+    # Surface the real failure instead of an opaque empty result.
+    warn "overview call failed for '$alias': $(tail -3 "$err_file")"
+  fi
+  rm -f "$err_file"
+  printf '%s' "$out"
 }
 
 verify_account() {

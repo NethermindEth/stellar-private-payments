@@ -12,6 +12,15 @@ step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
+
+# Config comes from the provisioned env file when the variables are not
+# already exported, so a bare invocation works from any interactive shell
+# (the file is git-ignored and mode 600; explicit environment wins).
+E2E_ENV_FILE="$REPO_ROOT/deployments/testnet/.e2e-accounts.env"
+if [ -z "${E2E_FREIGHTER_PASSWORD:-}" ] && [ -f "$E2E_ENV_FILE" ]; then
+  set -a; . "$E2E_ENV_FILE"; set +a
+fi
 
 SMOKE=0
 TEST_FILE=""

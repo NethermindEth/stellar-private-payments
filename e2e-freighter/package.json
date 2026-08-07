@@ -4,8 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "demo": "HEADFUL=1 APPROVE=human bash scripts/run-e2e.sh",
-    "ci": "APPROVE=auto bash scripts/run-e2e.sh"
+    "demo": "HEADFUL=1 APPROVE=human bash scripts/run-all.sh",
+    "ci": "APPROVE=auto bash scripts/run-all.sh"
   },
   "devDependencies": {
     "playwright": "^1.62.1"

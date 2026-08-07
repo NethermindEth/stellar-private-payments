@@ -77,18 +77,28 @@ rebuilding the profile from scratch (see "Rebuilding the profile snapshot"
 below).
 
 Every run needs the test account's secret and the Freighter unlock
-password, both stored in the git-ignored env file. Source it before any
-run:
+password, both stored in the git-ignored env file
+(`deployments/testnet/.e2e-accounts.env`). `run-e2e.sh` and `run-all.sh`
+source it automatically when the variables aren't already exported — no
+manual step, from any interactive shell. To override a variable for a
+run, export it first; explicit environment wins over the file.
+
+## Running the suite or a single test
+
+`scripts/run-all.sh` runs the whole suite — every `tests/*.mjs` in
+order, one fresh profile restore per test — and prints a per-test
+summary; with arguments it runs just those files:
 
 ```bash
-cd /home/marko/Projects/stellar-private-payments
-set -a; . deployments/testnet/.e2e-accounts.env; set +a
+bash e2e-freighter/scripts/run-all.sh                                     # whole suite
+bash e2e-freighter/scripts/run-all.sh e2e-freighter/tests/01-connect.mjs  # subset
 ```
 
-## Running a test
+The npm presets wrap it: `npm run ci` (headless, auto-approve) and
+`npm run demo` (headed, human approval).
 
-All runs go through `scripts/run-e2e.sh <TEST_FILE>` (paths relative to the
-repo root), controlled by two env vars:
+Single tests go through `scripts/run-e2e.sh <TEST_FILE>` (paths relative
+to the repo root), controlled by two env vars:
 
 - `APPROVE=auto|human` — `auto` clicks through every Freighter approval
   popup by matching its button text; `human` leaves them alone and waits
@@ -122,13 +132,8 @@ Freighter approval popup appears — you click Confirm/Cancel yourself.
 HEADFUL=1 APPROVE=human bash e2e-freighter/scripts/run-e2e.sh e2e-freighter/tests/04-deposit-withdraw.mjs
 ```
 
-Equivalent npm shortcuts exist for the smoke check only (they don't take a
-test-file argument yet):
-
-```bash
-npm run demo   # HEADFUL=1 APPROVE=human --smoke
-npm run ci      # APPROVE=auto --smoke
-```
+(The npm presets run the whole suite via `run-all.sh`; for one test, call
+`run-e2e.sh` directly as above.)
 
 ### Mode 4 — Smoke check only (no test logic)
 
@@ -166,6 +171,11 @@ wizard already completed — so ordinary test runs skip both. Rebuild it only
 if the vendored extension version changes or the profile gets corrupted:
 
 ```bash
+# These standalone node scripts need the env exported first (only
+# run-e2e.sh / run-all.sh self-source). On fish, export with:
+#   for line in (grep -v '^#' deployments/testnet/.e2e-accounts.env | grep '=')
+#       set -gx (string split -m 1 '=' -- $line)
+#   end
 set -a; . deployments/testnet/.e2e-accounts.env; set +a
 
 # 1. Provision a fresh Freighter profile from scratch
