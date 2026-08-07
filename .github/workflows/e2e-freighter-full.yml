@@ -48,7 +48,9 @@ jobs:
             e2e-freighter/package-lock.json
 
       - name: Install Trunk
-        run: cargo install trunk --locked
+        uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
+        with:
+          tool: trunk@0.21.14
 
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
