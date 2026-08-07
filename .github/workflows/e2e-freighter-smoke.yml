@@ -1,0 +1,60 @@
+name: E2E Freighter Smoke
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+
+permissions:
+  contents: read
+
+jobs:
+  e2e-freighter-smoke:
+    name: Freighter smoke tests (selected subset)
+    timeout-minutes: 45
+    runs-on: ubuntu-latest
+    environment: e2e-testnet
+    steps:
+      - name: Checkout source code
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: e2e-freighter/package-lock.json
+
+      - name: Install test dependencies
+        run: npm ci --prefix e2e-freighter
+
+      # Pinned tag: without it gh downloads from the LATEST release, which
+      # stops having the profile asset as soon as any other release is cut.
+      - name: Restore Freighter profile snapshot
+        run: gh release download e2e-profile-snapshot --repo ${{ github.repository }} --pattern '*profile*' --dir e2e-freighter/ --clobber
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Run selected Freighter smoke tests
+        env:
+          APPROVE: auto
+          E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
+          # Transfer recipient for 05 (registered address). No env file
+          # exists in CI, so every var a test reads must be set here.
+          E2E_ACCOUNT_D_ADDRESS: ${{ secrets.E2E_ACCOUNT_D_ADDRESS }}
+        run: |
+          # Find chromium or google-chrome, exit with error if neither found
+          CHROMIUM_PATH=$(command -v chromium || command -v google-chrome || echo "")
+          if [ -z "$CHROMIUM_PATH" ]; then
+            echo "Error: Neither chromium nor google-chrome found in PATH" >&2
+            exit 1
+          fi
+          export E2E_CHROMIUM_PATH="$CHROMIUM_PATH"
+          bash e2e-freighter/scripts/run-all.sh \
+            e2e-freighter/tests/01-connect.mjs \
+            e2e-freighter/tests/03-rejection.mjs \
+            e2e-freighter/tests/05-deposit-transfer.mjs

@@ -166,6 +166,107 @@ a tight loop.
 | `tests/10-advanced-transfers.mjs` | Deposit 0.01 XLM, then transfer it to a registered second account entirely through the Advanced tab (a fixed-shape single-`transact`-step composer, not a form or JSON plan builder — see the file's header for the full UI discovery): select the deposited note via its own "Use" button, fill a recipient/amount output row, execute, confirm SUCCESS on-chain. |
 | `tests/11-failure-modes.mjs` | Failure-mode battery, all pre-signing and non-submitting: over-withdraw and over-transfer (10x the deposited balance) both fail on tx-planner's local "no combination of notes" check; transferring to a freshly-generated, never-registered address fails the same local-registry lookup 05 documents ("No local registration found"); depositing above the on-chain 100 XLM cap fails during simulation with no client-side pre-check at all (confirmed live via `getLedgerEntries` — see the file's header). Ends with a real, successful recovery deposit proving the battery leaves no poisoned state. |
 
+## CI
+
+Three GitHub Actions workflows automate e2e testing: two gates on push and
+pull request to main, plus a manual dispatch job for the full suite:
+
+### Workflows
+
+**`e2e-webclient.yml`** — Pre-signing SDK suite (push/PR to main)
+
+The sdk/web wasm-bindgen browser tests (`cargo test --target
+wasm32-unknown-unknown -p stellar-private-payments-sdk-web --
+--include-ignored`), compiled from the checked-out commit and run in
+headless Chrome against testnet. These exercise the pre-signing SDK path
+(flows signed directly with the test-account secrets — no Freighter, no
+deployed app), so they need no nullifier-detection support in the deployed
+app. Locally the same suite runs via `sdk/web/scripts/e2e-browser-test.sh`.
+
+**`e2e-freighter-smoke.yml`** — Selected smoke tests (push/PR to main)
+
+A fast gate that validates core Freighter integration: connect, rejection
+UX, and deposit+transfer (01-connect, 03-rejection, 05-deposit-transfer)
+against the deployed app on every push and PR to main.
+
+**`e2e-freighter-full.yml`** — Full Freighter suite (manual dispatch only)
+
+Comprehensive validation: all tests (01–11), built and served locally from
+the checked-out commit (to include the nullifier fix). Triggered manually
+via GitHub Actions UI or CLI:
+
+```bash
+gh workflow run e2e-freighter-full.yml --repo <OWNER/REPO>
+```
+
+### Environment and secrets
+
+All three workflows require the protected `e2e-testnet` environment,
+which provides these secrets:
+
+- `E2E_ACCOUNT_A_ADDRESS` / `E2E_ACCOUNT_A_SECRET` — test account A,
+  used by the pre-signing SDK suite (compiled into the test binary)
+- `E2E_ACCOUNT_B_ADDRESS` / `E2E_ACCOUNT_B_SECRET` — test account B,
+  used by the pre-signing SDK suite
+- `E2E_ACCOUNT_D_ADDRESS` — registered recipient address for the
+  Freighter transfer tests (05, 10, 11; address only, no secret needed)
+- `E2E_FREIGHTER_PASSWORD` — password to unlock the Freighter profile
+  snapshot
+
+Note the Freighter workflows must set every one of these explicitly: no
+`.e2e-accounts.env` file exists in CI, and once `E2E_FREIGHTER_PASSWORD`
+is set the scripts deliberately do not source one.
+
+Provision these once using the setup script:
+
+```bash
+deployments/scripts/e2e-accounts-setup.sh
+# Then copy from deployments/testnet/.e2e-accounts.env into the e2e-testnet
+# environment secrets (minus the .env shell syntax)
+```
+
+### Profile snapshot release asset
+
+The workflows download a Freighter profile snapshot (a pre-configured
+extension with the test account imported and onboarding complete) from a
+GitHub release asset. After your first local setup, release it to make it
+available to CI:
+
+```bash
+gh release create e2e-profile-snapshot \
+  e2e-freighter/profile-snapshot.tar.gz \
+  --repo <OWNER/REPO> \
+  --notes "Freighter profile snapshot (test account pre-imported, onboarding complete). Built locally with: bash e2e-freighter/scripts/setup.sh"
+```
+
+(Replace `<OWNER/REPO>` with your repository path, e.g.,
+`nethermindeth/stellar-private-payments`.)
+
+Rebuild and re-release whenever the Freighter extension version changes or
+the profile gets corrupted:
+
+```bash
+bash e2e-freighter/scripts/setup.sh --force
+gh release delete e2e-profile-snapshot --repo <OWNER/REPO> --yes
+gh release create e2e-profile-snapshot \
+  e2e-freighter/profile-snapshot.tar.gz \
+  --repo <OWNER/REPO> \
+  --notes "Freighter profile snapshot (rebuilt)."
+```
+
+### Gating
+
+The pre-signing suite gates every push and PR to main, validating the
+checked-out commit's SDK code. The smoke workflow gates the same events
+but validates the *deployed* app — it catches environment/state drift,
+not app-code regressions in the commit. The full suite does not gate — it
+is opt-in only, run manually when you want to validate against a freshly
+built app including any pending nullifier fixes.
+
+Note: `deployment.yml` (Pages build and deploy) is no longer gated by
+the e2e signal. It runs independently; the push-triggered e2e jobs
+provide visibility into integration health.
+
 ## Building the profile snapshot
 
 One command does the whole chain (npm deps, Freighter profile
