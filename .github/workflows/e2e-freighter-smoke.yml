@@ -67,3 +67,11 @@ jobs:
             e2e-freighter/tests/01-connect.mjs \
             e2e-freighter/tests/03-rejection.mjs \
             e2e-freighter/tests/05-deposit-transfer.mjs
+
+      - name: Upload test results on failure
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: failure()
+        with:
+          name: freighter-smoke-test-results
+          path: e2e-freighter/test-results/
+          retention-days: 30
