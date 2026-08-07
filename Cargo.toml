@@ -48,7 +48,7 @@ async-trait = { version = "0.1.91", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 cfg-if = { version = "1", default-features = false }
 circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs", rev = "537f9c9cca18fada33d717e634af831ac101a6f1", default-features = false }
+circom-witness-rs = { version = "0.3.0", default-features = false }
 circuit-keys = { path = "circuit-keys" }
 circuits = { path = "circuits", default-features = false }
 clap = { version = "4.6.3", default-features = false, features = [
