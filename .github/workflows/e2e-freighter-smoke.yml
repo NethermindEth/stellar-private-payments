@@ -30,7 +30,11 @@ jobs:
           cache-dependency-path: e2e-freighter/package-lock.json
 
       - name: Install test dependencies
-        run: npm ci --prefix e2e-freighter
+        run: |
+          npm ci --prefix e2e-freighter
+          # The runner records video when $CI is set (runner.mjs), and
+          # Playwright video needs its own ffmpeg build — not part of npm ci.
+          cd e2e-freighter && npx playwright install ffmpeg
 
       - name: Locate Chromium
         run: |
