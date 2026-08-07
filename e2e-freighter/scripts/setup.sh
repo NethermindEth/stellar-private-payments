@@ -58,6 +58,14 @@ else
   npm ci --prefix "$PKG_ROOT"
 fi
 
+# vendor/ is git-ignored, so a fresh checkout has no extension to load.
+if [ -f "$PKG_ROOT/vendor/freighter/manifest.json" ]; then
+  step "vendored Freighter extension present"
+else
+  step "fetching the pinned Freighter extension"
+  bash "$SCRIPT_DIR/fetch-extension.sh"
+fi
+
 if [ "$FORCE" -eq 0 ] && [ -s "$SNAPSHOT" ]; then
   step "snapshot exists; verifying instead of rebuilding (use --force to rebuild)"
   node "$SCRIPT_DIR/verify-onboarded.mjs"

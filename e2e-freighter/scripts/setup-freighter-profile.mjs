@@ -56,7 +56,7 @@ const PASSWORD = requireEnv('E2E_FREIGHTER_PASSWORD');
 
 if (!fs.existsSync(path.join(EXT_PATH, 'manifest.json'))) {
   console.error(`setup-freighter-profile: no vendored extension at ${EXT_PATH}`);
-  console.error('run: cp -r "<chrome profile>/Extensions/bcacfldlkkdogcmkkibnjlakofdplcbk/<version>" e2e-freighter/vendor/freighter');
+  console.error('run: bash e2e-freighter/scripts/fetch-extension.sh');
   process.exit(1);
 }
 

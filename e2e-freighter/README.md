@@ -239,7 +239,10 @@ xvfb-run -a bash e2e-freighter/scripts/setup.sh
 
 `setup.sh`'s provisioning and onboarding steps drive a headed browser, so
 CI provides a virtual display with `xvfb-run` (preinstalled on
-`ubuntu-latest`). The generated snapshot lands at
+`ubuntu-latest`). The same step also downloads the pinned Freighter
+extension from the upstream `stellar/freighter` GitHub release
+(`scripts/fetch-extension.sh` — `vendor/` is git-ignored, so nothing
+third-party is committed here either). The generated snapshot lands at
 `e2e-freighter/profile-snapshot.tar.gz`, exactly where `run-all.sh`
 expects it.
 
@@ -258,9 +261,9 @@ provide visibility into integration health.
 
 ## Building the profile snapshot
 
-One command does the whole chain (npm deps, Freighter profile
-provisioning, the one-time headed onboarding completion, the snapshot,
-and a verification pass):
+One command does the whole chain (npm deps, the pinned Freighter
+extension fetch, Freighter profile provisioning, the one-time headed
+onboarding completion, the snapshot, and a verification pass):
 
 ```bash
 bash e2e-freighter/scripts/setup.sh
@@ -268,13 +271,19 @@ bash e2e-freighter/scripts/setup.sh
 
 It is idempotent: with a working existing snapshot it verifies and exits.
 Re-run with `--force` if the vendored extension version changes or the
-profile gets corrupted. The onboarding step must run headed (it can stall
-under headless rendering), so run setup on a machine with a desktop
+profile gets corrupted. The extension itself comes from the upstream
+`stellar/freighter` GitHub release, pinned by version in
+`scripts/fetch-extension.sh` — bump the pin there, run it with `--force`,
+then rebuild the snapshot. The onboarding step must run headed (it can
+stall under headless rendering), so run setup on a machine with a desktop
 session. The env file is self-sourced by every step.
 
 What setup.sh does under the hood, if you ever need the pieces:
 
 ```bash
+# 0. Fetch the pinned Freighter extension into vendor/ (git-ignored)
+bash e2e-freighter/scripts/fetch-extension.sh
+
 # 1. Provision a fresh Freighter profile from scratch
 node e2e-freighter/scripts/setup-freighter-profile.mjs
 
