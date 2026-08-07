@@ -32,12 +32,24 @@ jobs:
       - name: Install test dependencies
         run: npm ci --prefix e2e-freighter
 
-      # Pinned tag: without it gh downloads from the LATEST release, which
-      # stops having the profile asset as soon as any other release is cut.
-      - name: Restore Freighter profile snapshot
-        run: gh release download e2e-profile-snapshot --repo ${{ github.repository }} --pattern '*profile*' --dir e2e-freighter/ --clobber
+      - name: Locate Chromium
+        run: |
+          CHROMIUM_PATH=$(command -v chromium || command -v google-chrome || echo "")
+          if [ -z "$CHROMIUM_PATH" ]; then
+            echo "Error: Neither chromium nor google-chrome found in PATH" >&2
+            exit 1
+          fi
+          echo "E2E_CHROMIUM_PATH=$CHROMIUM_PATH" >> "$GITHUB_ENV"
+
+      # The profile is generated fresh on every run — nothing is stored in
+      # releases, caches, or the repo. setup.sh's headed steps (Freighter
+      # provisioning, app onboarding wizard) get a virtual display from xvfb.
+      - name: Generate Freighter profile snapshot
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
+          E2E_ACCOUNT_C_SECRET: ${{ secrets.E2E_ACCOUNT_C_SECRET }}
+          E2E_ACCOUNT_C_ADDRESS: ${{ secrets.E2E_ACCOUNT_C_ADDRESS }}
+        run: xvfb-run -a bash e2e-freighter/scripts/setup.sh
 
       - name: Run selected Freighter smoke tests
         env:
@@ -47,13 +59,6 @@ jobs:
           # exists in CI, so every var a test reads must be set here.
           E2E_ACCOUNT_D_ADDRESS: ${{ secrets.E2E_ACCOUNT_D_ADDRESS }}
         run: |
-          # Find chromium or google-chrome, exit with error if neither found
-          CHROMIUM_PATH=$(command -v chromium || command -v google-chrome || echo "")
-          if [ -z "$CHROMIUM_PATH" ]; then
-            echo "Error: Neither chromium nor google-chrome found in PATH" >&2
-            exit 1
-          fi
-          export E2E_CHROMIUM_PATH="$CHROMIUM_PATH"
           bash e2e-freighter/scripts/run-all.sh \
             e2e-freighter/tests/01-connect.mjs \
             e2e-freighter/tests/03-rejection.mjs \

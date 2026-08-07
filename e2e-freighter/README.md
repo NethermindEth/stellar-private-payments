@@ -208,6 +208,8 @@ which provides these secrets:
   used by the pre-signing SDK suite (compiled into the test binary)
 - `E2E_ACCOUNT_B_ADDRESS` / `E2E_ACCOUNT_B_SECRET` — test account B,
   used by the pre-signing SDK suite
+- `E2E_ACCOUNT_C_ADDRESS` / `E2E_ACCOUNT_C_SECRET` — the wallet imported
+  into the generated Freighter profile (profile generation in CI)
 - `E2E_ACCOUNT_D_ADDRESS` — registered recipient address for the
   Freighter transfer tests (05, 10, 11; address only, no secret needed)
 - `E2E_FREIGHTER_PASSWORD` — password to unlock the Freighter profile
@@ -225,34 +227,21 @@ deployments/scripts/e2e-accounts-setup.sh
 # environment secrets (minus the .env shell syntax)
 ```
 
-### Profile snapshot release asset
+### Profile generation in CI
 
-The workflows download a Freighter profile snapshot (a pre-configured
-extension with the test account imported and onboarding complete) from a
-GitHub release asset. After your first local setup, release it to make it
-available to CI:
-
-```bash
-gh release create e2e-profile-snapshot \
-  e2e-freighter/profile-snapshot.tar.gz \
-  --repo <OWNER/REPO> \
-  --notes "Freighter profile snapshot (test account pre-imported, onboarding complete). Built locally with: bash e2e-freighter/scripts/setup.sh"
-```
-
-(Replace `<OWNER/REPO>` with your repository path, e.g.,
-`nethermindeth/stellar-private-payments`.)
-
-Rebuild and re-release whenever the Freighter extension version changes or
-the profile gets corrupted:
+Nothing is stored outside the workflow run — no release assets, no
+caches, nothing committed. Each Freighter workflow generates the profile
+snapshot fresh via the same chain used for local setup:
 
 ```bash
-bash e2e-freighter/scripts/setup.sh --force
-gh release delete e2e-profile-snapshot --repo <OWNER/REPO> --yes
-gh release create e2e-profile-snapshot \
-  e2e-freighter/profile-snapshot.tar.gz \
-  --repo <OWNER/REPO> \
-  --notes "Freighter profile snapshot (rebuilt)."
+xvfb-run -a bash e2e-freighter/scripts/setup.sh
 ```
+
+`setup.sh`'s provisioning and onboarding steps drive a headed browser, so
+CI provides a virtual display with `xvfb-run` (preinstalled on
+`ubuntu-latest`). The generated snapshot lands at
+`e2e-freighter/profile-snapshot.tar.gz`, exactly where `run-all.sh`
+expects it.
 
 ### Gating
 
