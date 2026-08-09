@@ -1,27 +1,32 @@
 //! Utility functions and types for end-to-end tests
 
-use anyhow::Result;
-use asp_membership::ASPMembership;
-use asp_non_membership::ASPNonMembership;
+use anyhow::{Context as _, Result, ensure};
+use asp_membership::{ASPMembership, ASPMembershipClient};
+use asp_non_membership::{ASPNonMembership, ASPNonMembershipClient};
 use circom_groth16_verifier::{CircomGroth16Verifier, Groth16Proof};
 use circuits::test::utils::{
-    circom_tester::{CircomResult, SignalKey, load_keys, prove_and_verify_with_keys},
+    circom_tester::{Inputs, SignalKey},
     general::{load_artifacts, poseidon2_hash2, scalar_to_bigint},
+    keypair::derive_public_key,
     merkle_tree::{merkle_proof, merkle_root},
     sparse_merkle_tree::prepare_smt_proof_with_overrides,
-    transaction::prepopulated_leaves,
-    transaction_case::{TxCase, build_base_inputs, prepare_transaction_witness},
+    transaction::{commitment, prepopulated_leaves},
+    transaction_case::{
+        TransactionWitness, TxCase, build_base_inputs, prepare_transaction_witness,
+    },
 };
 use num_bigint::{BigInt, BigUint};
-use pool::PoolContract;
+use pool::{PoolContract, PoolContractClient};
+use prover::prover::Prover;
 use soroban_sdk::{
     Address, Bytes, BytesN, Env, U256,
     crypto::bn254::{Bn254G1Affine as G1Affine, Bn254G2Affine as G2Affine},
     testutils::Address as _,
 };
 use types::PolicyFlags;
+use witness::WitnessCalculator;
 
-use soroban_utils::{g1_bytes_from_ark, g2_bytes_from_ark, utils::MockToken};
+use soroban_utils::utils::MockToken;
 
 use zkhash::{
     ark_ff::{BigInteger, PrimeField, Zero},
@@ -60,16 +65,115 @@ pub fn test_env() -> Env {
     }
 }
 
-/// Returns the path to the pre-generated proving key for the
-/// policy_tx_2_2_AB circuit. Uses CARGO_MANIFEST_DIR to find the
-/// workspace root.
-fn proving_key_path() -> std::path::PathBuf {
-    let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
-    manifest_dir
+/// Zero-value leaf of the pool commitment Merkle tree
+///
+/// The pool holds this value in the empty positions. The tests leave the last
+/// leaf pair empty, because a full tree makes `transact` revert before it can
+/// insert the new output commitments.
+pub const POOL_ZERO_LEAF: [u8; 32] = [
+    37, 48, 34, 136, 219, 153, 53, 3, 68, 151, 65, 131, 206, 49, 13, 99, 181, 58, 187, 158, 240,
+    248, 87, 87, 83, 238, 211, 110, 1, 24, 249, 206,
+];
+
+/// Transact circuit stem the pool e2e tests prove against.
+///
+/// The Groth16 verifier contract embeds this circuit's verification key (see
+/// `VERIFIER_VK_JSON` in `.cargo/config.toml`), so it is the only stem that can
+/// be verified on chain.
+pub const POLICY_STEM: &str = "policy_tx_2_2_AB";
+
+/// All transact circuit stems that ship a committed witness graph.
+pub const TRANSACT_STEMS: &[&str] = &[
+    "policy_tx_2_2",
+    "policy_tx_2_2_A",
+    "policy_tx_2_2_B",
+    POLICY_STEM,
+];
+
+/// Workspace root, derived from this crate's manifest directory.
+///
+/// `e2e-tests` sits at `<workspace>/e2e-tests`, so the parent is the root.
+pub fn workspace_root() -> std::path::PathBuf {
+    std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .expect("Failed to get workspace root")
-        .join("testdata/policy_tx_2_2_AB_proving_key.bin")
+        .to_path_buf()
+}
+
+/// Path of the committed `circom-witness-rs` operation graph for a circuit.
+///
+/// These are the same binaries the CLI, the SDK and the browser load at
+/// runtime, so proving from them is what makes these tests end to end.
+pub fn committed_graph_path(stem: &str) -> std::path::PathBuf {
+    workspace_root()
+        .join("deployments/testnet/circuit_keys")
+        .join(format!("{stem}.graph.bin"))
+}
+
+/// Path of the locally generated Groth16 proving key for a circuit.
+///
+/// `circuits/build.rs` writes these into `testdata/`, together with the
+/// verification key that the verifier contract embeds.
+pub fn proving_key_path(stem: &str) -> std::path::PathBuf {
+    workspace_root().join(format!("testdata/{stem}_proving_key.bin"))
+}
+
+/// Outcome of a Groth16 prove and verify cycle.
+///
+/// Holds everything the pool tests need: the local verification outcome, the
+/// Soroban proof bytes, and the public inputs the proof commits to.
+pub struct ProofResult {
+    /// True when the proof verifies locally against the proving key's own
+    /// verification key.
+    pub verified: bool,
+    /// Uncompressed Soroban proof bytes: `A (64) || B (128) || C (64)`.
+    pub proof_uncompressed: Vec<u8>,
+    /// Public inputs as little-endian field elements, 32 bytes each.
+    pub public_inputs: Vec<u8>,
+}
+
+impl ProofResult {
+    /// Number of public inputs the proof commits to.
+    pub fn num_public_inputs(&self) -> usize {
+        self.public_inputs.len() / 32
+    }
+}
+
+/// Prove a circuit from its committed witness graph, then verify locally.
+///
+/// This is the production pipeline: `*.graph.bin` supplies the witness, the
+/// R1CS and the proving key supply the Groth16 proof. The WASM witness path is
+/// not involved.
+pub fn prove_with_graph(stem: &str, inputs: &Inputs) -> Result<ProofResult> {
+    let graph_path = committed_graph_path(stem);
+    let graph_bytes = std::fs::read(&graph_path)
+        .with_context(|| format!("failed to read witness graph {}", graph_path.display()))?;
+    let calculator = WitnessCalculator::from_graph(&graph_bytes)?;
+    let witness_bytes = calculator.compute_witness(&inputs.to_witness_json()?)?;
+
+    let (_wasm, r1cs_path) = load_artifacts(stem)?;
+    let r1cs_bytes = std::fs::read(&r1cs_path)
+        .with_context(|| format!("failed to read R1CS {}", r1cs_path.display()))?;
+    let pk_path = proving_key_path(stem);
+    let pk_bytes = std::fs::read(&pk_path)
+        .with_context(|| format!("failed to read proving key {}", pk_path.display()))?;
+
+    let prover = Prover::new(&pk_bytes, &r1cs_bytes)?;
+    let proof_compressed = prover.prove_bytes(&witness_bytes)?;
+    let public_inputs = prover.extract_public_inputs(&witness_bytes)?;
+    let verified = prover.verify(&proof_compressed, &public_inputs)?;
+    let proof_uncompressed = prover.proof_bytes_to_uncompressed(&proof_compressed)?;
+    ensure!(
+        proof_uncompressed.len() == 256,
+        "unexpected uncompressed proof length: {}",
+        proof_uncompressed.len()
+    );
+
+    Ok(ProofResult {
+        verified,
+        proof_uncompressed,
+        public_inputs,
+    })
 }
 
 /// Addresses of deployed contracts for E2E tests
@@ -269,11 +373,11 @@ pub fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigIn
         .collect()
 }
 
-/// Generate a Groth16 proof for a transaction
+/// Build the complete input signal set for the policy transact circuit
 ///
-/// Builds the complete witness for the policy circuit and generates
-/// a Groth16 proof. This includes membership proofs, non-membership proofs,
-/// and all transaction data.
+/// Covers the transaction data, the membership proofs and the non-membership
+/// proofs. The same signal set feeds the graph witness calculator and, in the
+/// circuits crate, the WASM one.
 ///
 /// # Arguments
 ///
@@ -286,22 +390,19 @@ pub fn non_membership_overrides_from_pubs(pubs: &[Scalar]) -> Vec<(BigInt, BigIn
 ///
 /// # Returns
 ///
-/// The circuit result containing the proof and verification key
+/// The circuit input signals
 ///
 /// # Errors
 ///
-/// Returns an error if proof generation fails
-#[allow(clippy::too_many_arguments)]
-pub fn generate_proof(
+/// Returns an error if the transaction witness cannot be prepared
+pub fn build_policy_inputs(
     case: &TxCase,
     leaves: Vec<Scalar>,
     public_amount: Scalar,
     membership_trees: &[MembershipTreeProof],
     non_membership: &[NonMembership],
     ext_data_hash: Option<BigInt>,
-) -> Result<CircomResult> {
-    let (wasm, r1cs) = load_artifacts("policy_tx_2_2_AB")?;
-
+) -> Result<Inputs> {
     let n_inputs = case.inputs.len();
     let witness = prepare_transaction_witness(case, leaves, LEVELS)?;
     let mut inputs = build_base_inputs(case, &witness, public_amount);
@@ -423,16 +524,168 @@ pub fn generate_proof(
     }
     inputs.set("nonMembershipRoots", non_membership_roots);
 
-    // Load pre-generated keys from testdata
-    let keys = load_keys(proving_key_path())?;
-    prove_and_verify_with_keys(&wasm, &r1cs, &inputs, &keys)
+    Ok(inputs)
 }
 
-pub fn wrap_groth16_proof(env: &Env, result: CircomResult) -> Groth16Proof {
-    // Convert proof from Groth16 to Soroban format
-    let a_bytes = g1_bytes_from_ark(result.proof.a);
-    let b_bytes = g2_bytes_from_ark(result.proof.b);
-    let c_bytes = g1_bytes_from_ark(result.proof.c);
+/// Generate a Groth16 proof for a transaction from the committed witness graph
+///
+/// Builds the circuit inputs, computes the witness with
+/// `witness::WitnessCalculator`, then proves and verifies with the `prover`
+/// crate. This is the pipeline the CLI and the SDK use.
+///
+/// # Arguments
+///
+/// See [`build_policy_inputs`].
+///
+/// # Returns
+///
+/// The proof bytes, the public inputs, and the local verification outcome
+///
+/// # Errors
+///
+/// Returns an error if witness computation or proof generation fails
+pub fn generate_proof(
+    case: &TxCase,
+    leaves: Vec<Scalar>,
+    public_amount: Scalar,
+    membership_trees: &[MembershipTreeProof],
+    non_membership: &[NonMembership],
+    ext_data_hash: Option<BigInt>,
+) -> Result<ProofResult> {
+    let inputs = build_policy_inputs(
+        case,
+        leaves,
+        public_amount,
+        membership_trees,
+        non_membership,
+        ext_data_hash,
+    )?;
+    prove_with_graph(POLICY_STEM, &inputs)
+}
+
+/// Merkle roots of the contracts after a state sync
+pub struct SyncedRoots {
+    /// Pool commitment root, which must equal the root inside the proof
+    pub pool_root: U256,
+    /// ASP membership (allowlist) root
+    pub asp_membership_root: U256,
+    /// ASP non-membership (blocklist) root
+    pub asp_non_membership_root: U256,
+}
+
+/// Put the deployed contracts into the state that the proof was made from
+///
+/// A fresh deployment has empty trees. The proof commits to off-chain trees, so
+/// the tests must insert the same leaves before they call `transact`. The
+/// function inserts the membership leaves, the non-membership overrides and the
+/// pool commitments, then checks that the pool root equals the circuit root.
+///
+/// The last two pool leaves stay empty, so that the tree is not full and the
+/// pool accepts the two new output commitments.
+///
+/// # Arguments
+///
+/// * `env` - The Soroban environment
+/// * `contracts` - Addresses from [`deploy_contracts`]
+/// * `case` - The transaction case that the proof used
+/// * `leaves` - Pool leaves; the input commitments are written into them
+/// * `membership_trees` - Membership tree data from [`build_membership_trees`]
+/// * `witness` - Transaction witness from `prepare_transaction_witness`
+///
+/// # Panics
+///
+/// Panics if the pool root does not equal the circuit root, because the
+/// on-chain verification cannot succeed in that state.
+pub fn sync_contract_state(
+    env: &Env,
+    contracts: &DeployedContracts,
+    case: &TxCase,
+    leaves: &mut [Scalar],
+    membership_trees: &[MembershipTreeProof],
+    witness: &TransactionWitness,
+) -> SyncedRoots {
+    let asp_membership_client = ASPMembershipClient::new(env, &contracts.asp_membership);
+    let asp_non_membership_client = ASPNonMembershipClient::new(env, &contracts.asp_non_membership);
+
+    // Membership tree: rebuild the frozen leaves the proof used.
+    let mut memb_leaves = membership_trees[0].leaves;
+    for (i, tree) in membership_trees.iter().enumerate().take(case.inputs.len()) {
+        memb_leaves[tree.index] = poseidon2_hash2(
+            witness.public_keys[i],
+            tree.blinding,
+            Some(Scalar::from(1u64)),
+        );
+    }
+    for leaf in memb_leaves {
+        asp_membership_client.insert_leaf(&scalar_to_u256(env, leaf));
+    }
+
+    // Non-membership tree: insert the same sparse Merkle tree overrides.
+    for (key, value) in non_membership_overrides_from_pubs(&witness.public_keys) {
+        asp_non_membership_client
+            .insert_leaf(&bigint_to_u256(env, &key), &bigint_to_u256(env, &value));
+    }
+
+    // Pool tree: write the input commitments, then insert the leaves in pairs.
+    for note in &case.inputs {
+        let pub_key = derive_public_key(note.priv_key);
+        leaves[note.leaf_index] = commitment(note.amount, pub_key, note.blinding);
+    }
+    let len = leaves.len();
+    assert_eq!(len % 2, 0, "Leaves should be even for this test");
+    // Keep the last pair empty, so that `transact` can insert its two outputs.
+    let inserted = len.checked_sub(2).expect("pool needs at least two leaves");
+    let pool_client = PoolContractClient::new(env, &contracts.pool);
+    for (i, leaf) in leaves.iter().enumerate().take(inserted).step_by(2) {
+        let leaf_1 = scalar_to_u256(env, *leaf);
+        let second = i.checked_add(1).expect("leaf pair index");
+        let leaf_2 = scalar_to_u256(env, leaves[second]);
+        env.as_contract(&contracts.pool, || {
+            let _ = pool::merkle_with_history::MerkleTreeWithHistory::insert_two_leaves(
+                env, leaf_1, leaf_2,
+            );
+        });
+    }
+
+    let circuit_root = scalar_to_u256(env, witness.root);
+    let pool_root = pool_client.get_root();
+    assert_eq!(
+        circuit_root, pool_root,
+        "Pool root should match circuit root. Otherwise, the verification will fail"
+    );
+
+    SyncedRoots {
+        pool_root,
+        asp_membership_root: asp_membership_client.get_root(),
+        asp_non_membership_root: asp_non_membership_client.get_root(),
+    }
+}
+
+/// Convert a non-negative `BigInt` into a Soroban `U256`
+///
+/// # Panics
+///
+/// Panics if the value needs more than 32 bytes.
+pub fn bigint_to_u256(env: &Env, value: &BigInt) -> U256 {
+    let bytes = value.to_bytes_be().1;
+    let mut padded = [0u8; 32];
+    let start = padded
+        .len()
+        .checked_sub(bytes.len())
+        .expect("value exceeds 32 bytes");
+    padded[start..].copy_from_slice(&bytes);
+    U256::from_be_bytes(env, &Bytes::from_array(env, &padded))
+}
+
+/// Convert the uncompressed proof bytes into the Soroban proof type.
+///
+/// The `prover` crate already writes Soroban point ordering: `x || y` for G1,
+/// and `c1 || c0` per coordinate for G2.
+pub fn wrap_groth16_proof(env: &Env, result: ProofResult) -> Groth16Proof {
+    let bytes = &result.proof_uncompressed;
+    let a_bytes: [u8; 64] = bytes[..64].try_into().expect("proof A is 64 bytes");
+    let b_bytes: [u8; 128] = bytes[64..192].try_into().expect("proof B is 128 bytes");
+    let c_bytes: [u8; 64] = bytes[192..].try_into().expect("proof C is 64 bytes");
 
     Groth16Proof {
         a: G1Affine::from_array(env, &a_bytes),

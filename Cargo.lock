@@ -1200,6 +1200,7 @@ dependencies = [
  "parser",
  "program_structure",
  "regex",
+ "serde_json",
  "type_analysis",
  "types",
  "wast",
@@ -2276,6 +2277,7 @@ dependencies = [
  "asp-non-membership",
  "circom-groth16-verifier",
  "circuits",
+ "contract-types",
  "num-bigint",
  "pool",
  "prover",
@@ -2283,6 +2285,7 @@ dependencies = [
  "soroban-utils",
  "tx-planner",
  "types",
+ "witness",
  "zkhash",
 ]
 

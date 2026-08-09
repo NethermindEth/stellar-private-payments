@@ -123,6 +123,88 @@ impl Inputs {
     pub fn iter(&self) -> impl Iterator<Item = (&String, &InputValue)> {
         self.inner.iter()
     }
+
+    /// Serialize the inputs as the flat JSON object that the
+    /// `circom-witness-rs` graph evaluator accepts (`witness::WitnessCalculator
+    /// ::compute_witness`).
+    ///
+    /// Keys keep their Circom signal path (`membershipProofs[0][0].leaf`),
+    /// because the graph input mapping hashes that exact name. Single values
+    /// become decimal strings and arrays become arrays of decimal strings;
+    /// multi-dimensional signals must already be flattened row-major, which is
+    /// how the WASM path pushes them too.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when a value is negative. The graph evaluator only
+    /// accepts field elements in `[0, p)`.
+    pub fn to_witness_json(&self) -> Result<String> {
+        let mut map = serde_json::Map::with_capacity(self.inner.len());
+        for (key, value) in &self.inner {
+            let json = match value {
+                InputValue::Single(v) => serde_json::Value::String(decimal_string(key, v)?),
+                InputValue::Array(arr) => serde_json::Value::Array(
+                    arr.iter()
+                        .map(|v| Ok(serde_json::Value::String(decimal_string(key, v)?)))
+                        .collect::<Result<Vec<_>>>()?,
+                ),
+            };
+            map.insert(key.clone(), json);
+        }
+        serde_json::to_string(&serde_json::Value::Object(map))
+            .context("failed to serialize circuit inputs as JSON")
+    }
+}
+
+/// Render one input value as a decimal string, rejecting negative values.
+fn decimal_string(key: &str, value: &BigInt) -> Result<String> {
+    if value.sign() == num_bigint::Sign::Minus {
+        return Err(anyhow!("input signal {key} is negative: {value}"));
+    }
+    Ok(value.to_str_radix(10))
+}
+
+#[cfg(test)]
+mod witness_json_tests {
+    use super::*;
+
+    #[test]
+    fn to_witness_json_emits_decimal_strings() {
+        let mut inputs = Inputs::new();
+        inputs.set("root", BigInt::from(5u32));
+        inputs.set(
+            "inPathElements",
+            vec![BigInt::from(7u32), BigInt::from(11u32)],
+        );
+        inputs.set_key(
+            &SignalKey::new("membershipProofs")
+                .idx(0)
+                .idx(0)
+                .field("leaf"),
+            BigInt::from(9u32),
+        );
+
+        let json: serde_json::Value =
+            serde_json::from_str(&inputs.to_witness_json().expect("serialize")).expect("parse");
+
+        assert_eq!(json["root"], serde_json::json!("5"));
+        assert_eq!(json["inPathElements"], serde_json::json!(["7", "11"]));
+        assert_eq!(json["membershipProofs[0][0].leaf"], serde_json::json!("9"));
+    }
+
+    #[test]
+    fn to_witness_json_rejects_negative_values() {
+        let mut inputs = Inputs::new();
+        inputs.set("root", BigInt::from(-1i32));
+
+        let err = inputs
+            .to_witness_json()
+            .expect_err("negative values are not field elements");
+        assert!(
+            err.to_string().contains("root"),
+            "error should name the signal: {err:#}"
+        );
+    }
 }
 
 /// Represents a single Circom input value

@@ -14,12 +14,14 @@ circom-groth16-verifier = { workspace = true }
 # Circuit dependencies
 circuits = { workspace = true, features = ["std"] }
 # Contract dependencies
+contract-types = { workspace = true }
 pool = { workspace = true }
 # Shared deps
 prover = { workspace = true }
 soroban-utils = { workspace = true }
 tx-planner = { workspace = true }
 types = { workspace = true }
+witness = { workspace = true }
 zkhash = { workspace = true }
 
 # external

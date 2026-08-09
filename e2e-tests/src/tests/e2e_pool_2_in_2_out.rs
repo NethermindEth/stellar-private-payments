@@ -1,269 +1,336 @@
-//! End-to-end tests for Pool contract with real Groth16 proofs
+//! End-to-end tests for the Pool contract with real Groth16 proofs.
 //!
-//! These tests generate actual Groth16 proofs using the circuit crate
-//! and verify them through the Pool contract. This demonstrates a complete
-//! integration from proof generation to on-chain verification.
-//!
-//! It bridges the gap between the different crates and versions.
+//! Every case is 2 inputs and 2 outputs. The witness comes from the committed
+//! `*.graph.bin` graph, the proof from the `prover` crate, and the verification
+//! from the pool contract. That is the pipeline the CLI, the SDK and the
+//! browser use.
 use super::utils::{
-    LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint, deploy_contracts,
-    generate_proof, non_membership_overrides_from_pubs, scalar_to_u256, test_env, u256_to_scalar,
-    wrap_groth16_proof,
+    DeployedContracts, LEVELS, NonMembership, POOL_ZERO_LEAF, TRANSACT_STEMS,
+    build_membership_trees, build_policy_inputs, bytes32_to_bigint, deploy_contracts,
+    generate_proof, prove_with_graph, scalar_to_u256, sync_contract_state, test_env,
+    u256_to_scalar, wrap_groth16_proof,
 };
 use anyhow::Result;
-use asp_membership::ASPMembershipClient;
-use asp_non_membership::ASPNonMembershipClient;
 use circuits::test::utils::{
-    general::{poseidon2_hash2, scalar_to_bigint},
+    circom_tester::Inputs,
+    general::scalar_to_bigint,
     keypair::derive_public_key,
     transaction::{commitment, prepopulated_leaves},
     transaction_case::{InputNote, OutputNote, TxCase, prepare_transaction_witness},
 };
-use pool::{ExtData, PoolContractClient, Proof, hash_ext_data};
-use soroban_sdk::{Address, Bytes, I256, U256, Vec as SorobanVec, testutils::Address as _};
+use contract_types::Groth16Error;
+use pool::{Error, ExtData, PoolContractClient, Proof, hash_ext_data};
+use soroban_sdk::{
+    Address, Bytes, I256, InvokeError, U256, Vec as SorobanVec, testutils::Address as _,
+};
+use types::PolicyFlags;
 use zkhash::fields::bn256::FpBN256 as Scalar;
 
-/// Full E2E test: Generate a real proof, deploy contracts, and call transact
-/// which verifies the zk-proof
+/// Result of `PoolContractClient::try_transact`.
 ///
-/// This test demonstrates a complete integration:
-/// 1. Creates a transaction case (2 inputs, 2 outputs)
-/// 2. Generates a real Groth16 proof using the policy circuit
-/// 3. Deploys all contracts (Pool, ASP Membership, ASP Non-Membership,
-///    Verifier) and syncs the state
-/// 4. Initializes the verifier with the real verification key from proof
-///    generation
-/// 5. Calls the `transact` function on the pool contract
-#[test]
-#[cfg_attr(miri, ignore)]
-fn test_e2e_transact_with_real_proof() -> Result<()> {
-    // Create ExtData and compute its hash
+/// The outer error holds the contract error, and the inner one holds a return
+/// value conversion error.
+type TransactOutcome =
+    Result<Result<(), soroban_sdk::ConversionError>, Result<Error, soroban_sdk::InvokeError>>;
+
+/// A pool transaction that is ready for `transact`, with its proof made from
+/// the committed witness graph.
+struct TransactFixture {
+    env: soroban_sdk::Env,
+    contracts: DeployedContracts,
+    proof: Proof,
+    ext_data: ExtData,
+}
+
+impl TransactFixture {
+    /// Send the transaction to the pool contract.
+    fn transact(&self) -> TransactOutcome {
+        let sender = Address::generate(&self.env);
+        PoolContractClient::new(&self.env, &self.contracts.pool).try_transact(
+            &self.proof,
+            &self.ext_data,
+            &sender,
+        )
+    }
+}
+
+/// Build a 2-in/2-out pool transaction and prove it from the witness graph.
+///
+/// The amounts must balance: `inputs + ext_amount = outputs`. A positive
+/// `ext_amount` is a deposit, and zero is a private transfer.
+fn transact_fixture(
+    in_amounts: [u64; 2],
+    out_amounts: [u64; 2],
+    ext_amount: i32,
+) -> Result<TransactFixture> {
+    assert!(ext_amount >= 0, "this fixture only covers deposits");
     let env = test_env();
-    let temp_recipient = Address::generate(&env);
+    let recipient = Address::generate(&env);
 
     let ext_data = ExtData {
-        recipient: temp_recipient.clone(),
-        ext_amount: I256::from_i32(&env, 0),
+        recipient,
+        ext_amount: I256::from_i32(&env, ext_amount),
         encrypted_output0: Bytes::new(&env),
         encrypted_output1: Bytes::new(&env),
     };
-
-    // Compute ext_data_hash as the contract would
     let ext_data_hash_bytes = hash_ext_data(&env, &ext_data);
     let ext_data_hash_bigint = bytes32_to_bigint(&ext_data_hash_bytes);
 
-    // Create transaction case
-    // Private transfer: 13 units from one input to one output
     let case = TxCase::new(
         vec![
             InputNote {
                 leaf_index: 0,
                 priv_key: Scalar::from(101u64),
                 blinding: Scalar::from(201u64),
-                amount: Scalar::from(0u64), // Dummy input (amount = 0)
+                amount: Scalar::from(in_amounts[0]),
             },
             InputNote {
                 leaf_index: 1,
                 priv_key: Scalar::from(102u64),
                 blinding: Scalar::from(211u64),
-                amount: Scalar::from(13u64), // Real input
+                amount: Scalar::from(in_amounts[1]),
             },
         ],
         vec![
             OutputNote {
                 pub_key: Scalar::from(501u64),
                 blinding: Scalar::from(601u64),
-                amount: Scalar::from(13u64), // Real output
+                amount: Scalar::from(out_amounts[0]),
             },
             OutputNote {
                 pub_key: Scalar::from(502u64),
                 blinding: Scalar::from(602u64),
-                amount: Scalar::from(0u64), // Dummy output
+                amount: Scalar::from(out_amounts[1]),
             },
         ],
     );
 
-    // Prepare merkle tree leaves (Pool state)
+    // Pool state. The last leaf pair stays empty, so the tree is not full.
     let mut leaves = prepopulated_leaves(
         LEVELS,
         0xDEAD_BEEFu64,
         &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
         24,
     );
-    // Leave the last 2 position empty (zero value in Merkle tree)
-    // Otherwise when the verification succeeds, the pool will revert the
-    // transaction because the Merkle tree would be full.
-    let zero = U256::from_be_bytes(
-        &env,
-        &Bytes::from_array(
-            &env,
-            &[
-                37, 48, 34, 136, 219, 153, 53, 3, 68, 151, 65, 131, 206, 49, 13, 99, 181, 58, 187,
-                158, 240, 248, 87, 87, 83, 238, 211, 110, 1, 24, 249, 206,
-            ],
-        ),
-    );
-    let len = leaves.len();
-    leaves[len - 2] = u256_to_scalar(&zero);
-    leaves[len - 1] = u256_to_scalar(&zero);
+    let zero = U256::from_be_bytes(&env, &Bytes::from_array(&env, &POOL_ZERO_LEAF));
+    let last_pair = leaves
+        .len()
+        .checked_sub(2)
+        .expect("pool needs at least two leaves");
+    leaves[last_pair] = u256_to_scalar(&zero);
+    leaves[last_pair.checked_add(1).expect("last leaf index")] = u256_to_scalar(&zero);
 
-    // Build membership and non-membership trees
     let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
-    let keys = vec![
-        NonMembership {
-            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[0].priv_key)),
-        },
-        NonMembership {
-            key_non_inclusion: scalar_to_bigint(derive_public_key(case.inputs[1].priv_key)),
-        },
-    ];
+    let keys = case
+        .inputs
+        .iter()
+        .map(|input| NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(input.priv_key)),
+        })
+        .collect::<Vec<_>>();
 
-    // Generate the Groth16 proof using Circom
-    println!("Prepare transaction witness...");
     let witness = prepare_transaction_witness(&case, leaves.clone(), LEVELS)?;
-
-    println!("Generating Groth16 proof...");
+    let public_amount = Scalar::from(u64::try_from(ext_amount).expect("non-negative ext amount"));
     let result = generate_proof(
         &case,
         leaves.clone(),
-        Scalar::from(0u64),
+        public_amount,
         &membership_trees,
         &keys,
         Some(ext_data_hash_bigint),
     )?;
     assert!(result.verified, "Proof should verify locally");
-    // Deploy contracts. Including the verifier with the real verification key
+
     env.mock_all_auths();
     let contracts = deploy_contracts(&env);
-    println!("Contracts deployed!");
-
-    // Sync on-chain state with off-chain proof data
-    // Since contracts were just deployed, their merkle trees are basically empty.
-    // We need to insert leaves into them to have an state equivalent to what we
-    // used to generate the proof off-chain. Insert membership leaves into ASP
-    // Membership contract
-    let asp_membership_client = ASPMembershipClient::new(&env, &contracts.asp_membership);
-    let asp_non_membership_client =
-        ASPNonMembershipClient::new(&env, &contracts.asp_non_membership);
-    // For membership
-    let mut memb_leaves = membership_trees[0].leaves;
-    memb_leaves[membership_trees[0].index] = poseidon2_hash2(
-        witness.public_keys[0],
-        membership_trees[0].blinding,
-        Some(Scalar::from(1u64)),
-    );
-    memb_leaves[membership_trees[1].index] = poseidon2_hash2(
-        witness.public_keys[1],
-        membership_trees[1].blinding,
-        Some(Scalar::from(1u64)),
-    );
-    for leaf in memb_leaves {
-        let leaf_u256 = scalar_to_u256(&env, leaf);
-        asp_membership_client.insert_leaf(&leaf_u256);
-    }
-    // For non-membership
-    let overrides = non_membership_overrides_from_pubs(&witness.public_keys);
-    for (key, value) in overrides {
-        let key_bytes = key.to_bytes_be().1;
-        let mut padded_key = [0u8; 32];
-        let start = padded_key.len().saturating_sub(key_bytes.len());
-        padded_key[start..].copy_from_slice(&key_bytes);
-
-        let value_bytes = value.to_bytes_be().1;
-        let mut padded_value = [0u8; 32];
-        let start = padded_value.len().saturating_sub(value_bytes.len());
-        padded_value[start..].copy_from_slice(&value_bytes);
-        asp_non_membership_client.insert_leaf(
-            &U256::from_be_bytes(&env, &Bytes::from_array(&env, &padded_key)),
-            &U256::from_be_bytes(&env, &Bytes::from_array(&env, &padded_value)),
-        );
-    }
-    // For the main pool contract
-    // Ensure the pool contract matches the proof's merkle root
-    let pool_client = PoolContractClient::new(&env, &contracts.pool);
-    // Modify leaves as generate_proof does
-    for note in &case.inputs {
-        let pk = derive_public_key(note.priv_key);
-        let cm = commitment(note.amount, pk, note.blinding);
-        leaves[note.leaf_index] = cm;
-    }
-    // Ensure leaves is even as we insert leaves directly in pairs
-    assert_eq!(leaves.len() % 2, 0, "Leaves should be even for this test");
-    // Insert leaves directly into th Pool contract
-    for (i, leaf) in leaves.iter().enumerate().take(len - 2).step_by(2) {
-        let leaf_1 = scalar_to_u256(&env, *leaf);
-        let leaf_2 = scalar_to_u256(&env, leaves[i + 1]);
-        env.as_contract(&contracts.pool, || {
-            let _ = pool::merkle_with_history::MerkleTreeWithHistory::insert_two_leaves(
-                &env, leaf_1, leaf_2,
-            );
-        });
-    }
-    // Check if roots match
-    let circuit_root = scalar_to_u256(&env, witness.root);
-    let pool_root = pool_client.get_root();
-    assert_eq!(
-        circuit_root, pool_root,
-        "Pool root should match circuit root. Otherwise, the verification will fail"
+    let roots = sync_contract_state(
+        &env,
+        &contracts,
+        &case,
+        &mut leaves,
+        &membership_trees,
+        &witness,
     );
 
-    // Get ASP roots from deployed contracts
-    let asp_membership_root = asp_membership_client.get_root();
-    let asp_non_membership_root = asp_non_membership_client.get_root();
-
-    let groth16_proof = wrap_groth16_proof(&env, result);
-
-    // Build input nullifiers
     let mut input_nullifiers: SorobanVec<U256> = SorobanVec::new(&env);
-    for nul in &witness.nullifiers {
-        input_nullifiers.push_back(scalar_to_u256(&env, *nul));
+    for nullifier in &witness.nullifiers {
+        input_nullifiers.push_back(scalar_to_u256(&env, *nullifier));
     }
 
-    // Build output commitments
-    let output_commitment0 = scalar_to_u256(
-        &env,
-        commitment(
-            case.outputs[0].amount,
-            case.outputs[0].pub_key,
-            case.outputs[0].blinding,
-        ),
-    );
-    let output_commitment1 = scalar_to_u256(
-        &env,
-        commitment(
-            case.outputs[1].amount,
-            case.outputs[1].pub_key,
-            case.outputs[1].blinding,
-        ),
-    );
-
-    // Build the complete Proof struct
     let proof = Proof {
-        proof: groth16_proof,
-        root: circuit_root,
+        proof: wrap_groth16_proof(&env, result),
+        root: roots.pool_root,
         input_nullifiers,
-        output_commitment0,
-        output_commitment1,
-        public_amount: U256::from_u32(&env, 0),
+        output_commitment0: scalar_to_u256(&env, output_commitment(&case, 0)),
+        output_commitment1: scalar_to_u256(&env, output_commitment(&case, 1)),
+        public_amount: U256::from_u32(
+            &env,
+            u32::try_from(ext_amount).expect("non-negative ext amount"),
+        ),
         ext_data_hash: ext_data_hash_bytes,
-        asp_membership_root,
-        asp_non_membership_root,
+        asp_membership_root: roots.asp_membership_root,
+        asp_non_membership_root: roots.asp_non_membership_root,
     };
 
-    // Call transact
-    println!("Calling transact method");
-    let sender = Address::generate(&env);
-    let transact_result = pool_client.try_transact(&proof, &ext_data, &sender);
+    Ok(TransactFixture {
+        env,
+        contracts,
+        proof,
+        ext_data,
+    })
+}
 
-    match transact_result {
-        Ok(_) => {
-            println!("Transaction succeeded!");
-        }
-        Err(e) => {
-            println!("Transaction failed with error: {e:?}");
-            panic!("Transaction failed");
+/// Commitment of one output note of a case.
+fn output_commitment(case: &TxCase, index: usize) -> Scalar {
+    commitment(
+        case.outputs[index].amount,
+        case.outputs[index].pub_key,
+        case.outputs[index].blinding,
+    )
+}
+
+/// Keep only the signals that a circuit with these policy flags declares.
+///
+/// `policy_tx_2_2` has no ASP proofs, `_A` has the allowlist only and `_B` has
+/// the blocklist only. The graph rejects a signal that its circuit does not
+/// declare, so the shared input set must be reduced per stem.
+fn inputs_for_flags(all: &Inputs, flags: PolicyFlags) -> Inputs {
+    let mut out = Inputs::new();
+    for (key, value) in all.iter() {
+        let keep = if key.starts_with("nonMembership") {
+            flags.requires_non_membership_proofs()
+        } else if key.starts_with("membership") {
+            flags.requires_membership_proofs()
+        } else {
+            true
+        };
+        if keep {
+            out.set(key.clone(), value.clone());
         }
     }
+    out
+}
 
+/// A private transfer of 13 units. The public amount stays zero, so no value
+/// enters or leaves the pool.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_transfer_succeeds() -> Result<()> {
+    let fixture = transact_fixture([0, 13], [13, 0], 0)?;
+    assert!(fixture.transact().is_ok(), "transfer should succeed");
+    Ok(())
+}
+
+/// A deposit moves value into the pool, so `publicAmount` is not zero.
+///
+/// `transact_transfer_succeeds` keeps `publicAmount` at zero, so this case
+/// covers the public amount encoding as well.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_deposit_succeeds() -> Result<()> {
+    let fixture = transact_fixture([0, 0], [13, 0], 13)?;
+    assert!(fixture.transact().is_ok(), "deposit should succeed");
+    Ok(())
+}
+
+/// The on-chain verifier must reject a proof whose public inputs were changed.
+///
+/// The pool checks the root, the nullifiers, the external data hash and the
+/// public amount itself. It does not check the output commitments, so a changed
+/// commitment goes to the Groth16 verifier contract. The pairing check fails
+/// there, so the verifier answers `Groth16Error::InvalidProof` and the whole
+/// pool call fails with that code.
+#[test]
+#[cfg_attr(miri, ignore)]
+fn transact_rejects_tampered_output_commitment() -> Result<()> {
+    let mut fixture = transact_fixture([0, 13], [13, 0], 0)?;
+
+    let tampered = commitment(
+        Scalar::from(13u64),
+        Scalar::from(501u64),
+        Scalar::from(999u64),
+    );
+    fixture.proof.output_commitment0 = scalar_to_u256(&fixture.env, tampered);
+
+    let outcome = fixture.transact();
+    assert!(
+        matches!(outcome, Err(Err(InvokeError::Contract(code))) if code == Groth16Error::InvalidProof as u32),
+        "expected the verifier to reject a tampered output commitment, got {outcome:?}"
+    );
+    Ok(())
+}
+
+/// Every committed transact graph must prove and verify.
+///
+/// The verifier contract holds one verification key only, so the other three
+/// stems are checked off chain. The test is expensive (four Groth16 proofs), so
+/// it stays behind `--ignored` and runs in the release CI job.
+#[test]
+#[ignore = "expensive: proves all four transact circuits"]
+#[cfg_attr(miri, ignore)]
+fn all_transact_graphs_prove_and_verify() -> Result<()> {
+    let case = TxCase::new(
+        vec![
+            InputNote {
+                leaf_index: 0,
+                priv_key: Scalar::from(101u64),
+                blinding: Scalar::from(201u64),
+                amount: Scalar::from(0u64),
+            },
+            InputNote {
+                leaf_index: 1,
+                priv_key: Scalar::from(102u64),
+                blinding: Scalar::from(211u64),
+                amount: Scalar::from(13u64),
+            },
+        ],
+        vec![
+            OutputNote {
+                pub_key: Scalar::from(501u64),
+                blinding: Scalar::from(601u64),
+                amount: Scalar::from(13u64),
+            },
+            OutputNote {
+                pub_key: Scalar::from(502u64),
+                blinding: Scalar::from(602u64),
+                amount: Scalar::from(0u64),
+            },
+        ],
+    );
+
+    let leaves = prepopulated_leaves(
+        LEVELS,
+        0xDEAD_BEEFu64,
+        &[case.inputs[0].leaf_index, case.inputs[1].leaf_index],
+        24,
+    );
+    let membership_trees = build_membership_trees(&case, |j| 0xFEED_FACEu64 ^ ((j as u64) << 40));
+    let keys = case
+        .inputs
+        .iter()
+        .map(|input| NonMembership {
+            key_non_inclusion: scalar_to_bigint(derive_public_key(input.priv_key)),
+        })
+        .collect::<Vec<_>>();
+
+    let all_inputs = build_policy_inputs(
+        &case,
+        leaves,
+        Scalar::from(0u64),
+        &membership_trees,
+        &keys,
+        None,
+    )?;
+
+    for stem in TRANSACT_STEMS {
+        let flags = PolicyFlags::from_stem(stem)?;
+        let inputs = inputs_for_flags(&all_inputs, flags);
+        let result = prove_with_graph(stem, &inputs)?;
+        assert!(result.verified, "{stem}: proof should verify locally");
+        assert!(
+            result.num_public_inputs() > 0,
+            "{stem}: proof should commit to public inputs"
+        );
+    }
     Ok(())
 }
