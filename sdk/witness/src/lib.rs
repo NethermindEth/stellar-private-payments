@@ -131,36 +131,50 @@ impl WitnessCalculator {
             tracing::debug!(elapsed_ms = elapsed_ms(start), error = %e, "calc failed during json parsing");
             e
         })?;
+        
         let mut unknown: Vec<&str> = inputs
             .keys()
             .filter(|key| !self.input_hashes.contains(&fnv1a(key)))
             .map(String::as_str)
             .collect();
         unknown.sort_unstable();
+        
         if !unknown.is_empty() {
             let msg = format!("unknown circuit input signal(s): {}", unknown.join(", "));
             tracing::debug!(elapsed_ms = elapsed_ms(start), error = %msg, "calc rejected unknown signal");
             bail!("{msg}");
         }
+
+        // Check for missing inputs: 
+        // Since unknown inputs are filtered out, if the count is less than expected, some signals are missing.
+        if inputs.len() < self.input_hashes.len() {
+            let msg = "missing circuit input signal(s)";
+            tracing::debug!(elapsed_ms = elapsed_ms(start), error = %msg, "calc rejected missing signal(s)");
+            bail!("{msg}");
+        }
+
         for (key, values) in &inputs {
             let hash = fnv1a(key);
             if let Some(&expected_size) = self.input_sizes.get(&hash) {
                 #[allow(clippy::collapsible_if)]
-                if values.len() > expected_size {
+                // Enforce exact length to reject both short (previously zero-padded) and overlong inputs.
+                if values.len() != expected_size {
                     let msg = format!(
-                        "input signal '{key}' length {} exceeds declared size {}",
+                        "input signal '{key}' length {} does not match declared size {}",
                         values.len(),
                         expected_size
                     );
-                    tracing::debug!(elapsed_ms = elapsed_ms(start), error = %msg, "calc rejected overlong signal");
+                    tracing::debug!(elapsed_ms = elapsed_ms(start), error = %msg, "calc rejected invalid signal length");
                     bail!("{msg}");
                 }
             }
         }
+        
         let witness = calculate_witness(inputs, &self.graph, Some(&self.bbfs)).map_err(|e| {
             tracing::debug!(elapsed_ms = elapsed_ms(start), error = %e, "calc evaluator failed");
             anyhow::anyhow!("Witness calculation failed: {e}")
         })?;
+        
         let out_bytes = witness_to_bytes(&witness);
         tracing::debug!(
             elapsed_ms = elapsed_ms(start),
@@ -170,7 +184,7 @@ impl WitnessCalculator {
         );
         Ok(out_bytes)
     }
-
+    
     /// Number of field elements in the computed witness.
     pub fn witness_size(&self) -> usize {
         self.graph.signals.len()
