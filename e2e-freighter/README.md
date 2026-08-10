@@ -65,12 +65,15 @@ prefix each command with it inline.
 
 ## First time run
 
-Prerequisites: the Requirements above, plus the `stellar` CLI and `trunk`
-installed. Then three commands:
+Prerequisites: the Requirements above, plus the `stellar` CLI (27 or newer —
+`spp` passes `--auto-sign` to `stellar tx sign`, which older releases don't
+know) and `trunk` installed. Then three commands:
 
 ```bash
-# 1. Provision the test accounts (funding + on-chain registration) and
-#    write the git-ignored env file. Idempotent; --verify re-checks.
+# 1. Provision the four test accounts (A/B for the SDK suite, C/D for the
+#    Freighter tests): keypairs, friendbot funding, on-chain registration —
+#    plus a generated E2E_FREIGHTER_PASSWORD — all recorded in the
+#    git-ignored env file. Idempotent; --verify re-checks.
 deployments/scripts/e2e-accounts-setup.sh
 
 # 2. Install deps, build the Freighter profile (pinned extension, test
@@ -212,8 +215,9 @@ which provides these secrets:
   into the generated Freighter profile (profile generation in CI)
 - `E2E_ACCOUNT_D_ADDRESS` — registered recipient address for the
   Freighter transfer tests (05, 10, 11; address only, no secret needed)
-- `E2E_FREIGHTER_PASSWORD` — password to unlock the Freighter profile
-  snapshot
+- `E2E_FREIGHTER_PASSWORD` — password the generated Freighter profile is
+  created with and unlocked with (the provisioning script generates one that
+  satisfies Freighter's uppercase/lowercase/digit rules)
 
 Note the Freighter workflows must set every one of these explicitly: no
 `.e2e-accounts.env` file exists in CI, and once `E2E_FREIGHTER_PASSWORD`
