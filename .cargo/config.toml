@@ -2,8 +2,11 @@
 # `cargo test`. CI deployments can override this by exporting VERIFIER_VK_JSON
 # explicitly before building (the `force` flag is intentionally absent so the
 # env-var takes precedence when set).
+#
+# This is the committed testnet VK, and it must stay paired with the proving
+# key the e2e tests load (`proving_key_path` in e2e-tests/src/tests/utils.rs).
 [env]
-VERIFIER_VK_JSON = { value = "testdata/policy_tx_2_2_AB_vk.json", relative = true }
+VERIFIER_VK_JSON = { value = "deployments/testnet/circuit_keys/policy_tx_2_2_AB_vk.json", relative = true }
 
 [target.wasm32-unknown-unknown]
 runner = "wasm-bindgen-test-runner"

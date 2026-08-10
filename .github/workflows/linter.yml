@@ -20,7 +20,11 @@ env:
   RUSTFLAGS: "-Dwarnings"
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   linter_check:
+    needs: circuits
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -40,8 +44,11 @@ jobs:
       - name: Install nightly rustfmt
         run: rustup toolchain install nightly --component rustfmt --profile minimal
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
-      - name: Build circuit artifacts
-        run: cargo build -p circuits
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
       - name: Run Fmt
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
 

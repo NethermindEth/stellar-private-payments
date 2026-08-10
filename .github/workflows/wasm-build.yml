@@ -15,7 +15,11 @@ permissions:
   contents: read
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   wasm-build:
+    needs: circuits
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -35,8 +39,11 @@ jobs:
         with:
           cache-targets: "true"
 
-      - name: Build circuit artifacts
-        run: cargo build -p circuits --release
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
 
       - name: Install wasm-bindgen-cli
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force

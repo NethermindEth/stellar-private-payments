@@ -23,7 +23,7 @@
 //!   SPP_CIRCUIT_KEYS_DIR      default: deployments/testnet/circuit_keys
 //!
 //!   SPP_CIRCUIT_ARTIFACTS_DIR default:
-//! target/circuits-artifacts/{debug|release}
+//! target/circuits-artifacts
 //!
 //!   SPP_AMOUNT_STROOPS        default: 10000000 (1 XLM)
 //!

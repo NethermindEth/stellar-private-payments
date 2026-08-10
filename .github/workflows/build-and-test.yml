@@ -18,7 +18,11 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   build:
+    needs: circuits
     timeout-minutes: 30
     runs-on: ubuntu-latest
     steps:
@@ -27,11 +31,13 @@ jobs:
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
-      - name: Build circuit artifacts
-        run: cargo build -p circuits
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
       - name: Build examples
         run: cargo build --examples -p stellar-private-payments-sdk
       - name: Build
-        run: BUILD_TESTS=1 cargo test --workspace --no-run
+        run: cargo test --workspace --no-run
       - name: Run tests
         run: cargo test --workspace

@@ -15,7 +15,7 @@
 //! | `SPP_DEPLOYMENT_JSON` | `<CARGO_MANIFEST_DIR>/../../deployments/testnet/deployments.json` | all examples |
 //! | `SPP_POOL_CONTRACT_ID` | first enabled pool from deployment config | account/pool/transact examples |
 //! | `SPP_CIRCUIT_KEYS_DIR` | `<manifest>/../../deployments/testnet/circuit_keys` | transact examples |
-//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts/{debug\|release}` | transact examples |
+//! | `SPP_CIRCUIT_ARTIFACTS_DIR` | `<manifest>/../../target/circuits-artifacts` | transact examples |
 //! | `SPP_AMOUNT_STROOPS` | `10000000` (1 XLM) | estimate/transact examples |
 //! | `STELLAR_SECRET_KEY` | — | account/pool/transact examples |
 //!
@@ -131,14 +131,7 @@ pub fn default_circuit_keys_dir() -> PathBuf {
 
 /// Default directory containing `{stem}.wasm` / `{stem}.r1cs` build outputs.
 pub fn default_circuit_artifacts_dir() -> PathBuf {
-    let profile = if cfg!(debug_assertions) {
-        "debug"
-    } else {
-        "release"
-    };
-    manifest_dir()
-        .join("../../target/circuits-artifacts")
-        .join(profile)
+    manifest_dir().join("../../target/circuits-artifacts")
 }
 
 /// Load the deployment config from `SPP_DEPLOYMENT_JSON` or the default testnet

@@ -23,11 +23,11 @@ WASM_BINDGEN_VERSION="${WASM_BINDGEN_VERSION:-0.2.126}"
 WASM_OUT_NAME="stellar_private_payments_sdk_web"
 
 echo "==> Building circuit artifacts (if needed)..."
-# Circuit artifacts are profile-independent and are only published for release
-# (and debug test circuits). Always use the release circuit artifacts.
-if [[ ! -d "$ROOT/target/circuits-artifacts/release" ]]; then
-  cargo build -p circuits --release
-fi
+# The builder compares each entry point against its include graph, so this is a
+# no-op when nothing changed. Do not guard it on the directory merely existing:
+# that skips the rebuild after a circuit edit and bakes stale hashes into the
+# bundle.
+"$ROOT/scripts/build-circuits.sh"
 
 echo "==> Building stellar-private-payments-sdk-web ($PROFILE)..."
 cargo build -p stellar-private-payments-sdk-web $CARGO_PROFILE_FLAG --target "$TARGET"

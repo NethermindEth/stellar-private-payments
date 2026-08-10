@@ -97,9 +97,22 @@ pub fn scalar_to_bigint(s: Scalar) -> BigInt {
     BigInt::from(u)
 }
 
+/// Directory holding the artifacts written by `scripts/build-circuits.sh`.
+///
+/// Defaults to `target/circuits-artifacts`; override with
+/// `SPP_CIRCUIT_ARTIFACTS_DIR`.
+pub fn artifacts_dir() -> PathBuf {
+    if let Some(dir) = std::env::var_os("SPP_CIRCUIT_ARTIFACTS_DIR") {
+        return PathBuf::from(dir);
+    }
+    // Track CARGO_TARGET_DIR, which `scripts/build-circuits.sh` also honours.
+    std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target"))
+        .join("circuits-artifacts")
+}
+
 /// Load the compiled WASM and R1CS artifacts for a circuit by name.
-/// This expects files to be located under the `CIRCUIT_OUT_DIR` tree
-/// as produced by the build system.
 ///
 /// # Arguments
 ///
@@ -110,10 +123,18 @@ pub fn scalar_to_bigint(s: Scalar) -> BigInt {
 /// Returns `Ok((wasm_path, r1cs_path))` if both files exist, or an error
 /// if either file is not found at the expected location.
 pub fn load_artifacts(name: &str) -> anyhow::Result<(PathBuf, PathBuf)> {
-    let out_dir = PathBuf::from(env!("CIRCUIT_OUT_DIR"));
-    let wasm = out_dir.join(format!("wasm/{name}_js/{name}.wasm"));
-    let r1cs = out_dir.join(format!("{name}.r1cs"));
-    anyhow::ensure!(wasm.exists(), "WASM file not found at {}", wasm.display());
-    anyhow::ensure!(r1cs.exists(), "R1CS file not found at {}", r1cs.display());
+    let dir = artifacts_dir();
+    let wasm = dir.join(format!("{name}.wasm"));
+    let r1cs = dir.join(format!("{name}.r1cs"));
+    anyhow::ensure!(
+        wasm.exists(),
+        "WASM not found at {} - run `make circuits-build BUILD_TESTS=1`",
+        wasm.display()
+    );
+    anyhow::ensure!(
+        r1cs.exists(),
+        "R1CS not found at {} - run `make circuits-build BUILD_TESTS=1`",
+        r1cs.display()
+    );
     Ok((wasm, r1cs))
 }

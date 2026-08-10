@@ -1045,7 +1045,6 @@ dependencies = [
  "circuit-keys",
  "clap",
  "getrandom 0.2.17",
- "glob",
  "shlex 1.3.0",
  "zeroize",
 ]
@@ -1215,19 +1214,8 @@ dependencies = [
  "ark-serialize 0.6.0",
  "ark-snark",
  "ark-std 0.6.0",
- "circom-witness-rs",
- "circuit-keys",
- "compiler",
- "constraint_generation",
- "constraint_writers",
  "num-bigint",
  "num-integer",
- "parser",
- "program_structure",
- "regex",
- "type_analysis",
- "types",
- "wast",
  "zkhash",
 ]
 

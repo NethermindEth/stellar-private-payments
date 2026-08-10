@@ -15,7 +15,13 @@ targets = [
 ]
 all-features = true
 no-default-features = false
-exclude = ["circuits"] # GPL-3.0 circom dependencies are used as a tool in a build script, and are not linked in any of the artefacts
+exclude = [
+    # GPL-3.0 circom dependencies are used by build-time tools only, and are not
+    # linked into any of the artefacts. They moved here from `circuits`, whose
+    # build script these binaries replaced.
+    "circuit-builder",
+    "witness-graph-gen",
+]
 
 [output]
 feature-depth = 1

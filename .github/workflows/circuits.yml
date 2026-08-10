@@ -1,0 +1,66 @@
+name: Circuits
+
+# Builds the circuit artifacts once and shares them with the jobs that need
+# them. Callers add `jobs.circuits: uses: ./.github/workflows/circuits.yml`,
+# then `needs: circuits` plus `download-artifact` on each consumer job.
+on:
+  workflow_call:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  build:
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+      - uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
+
+      - name: Compute artifact cache key
+        id: key
+        run: |
+          echo "value=circuits-v1-${{ hashFiles(
+            'circuits/src/**/*.circom',
+            'circuits/circom.lock',
+            'circuits/circomlib.lock',
+            'tools/circuit-builder/**',
+            'Cargo.lock') }}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: cache
+        with:
+          path: target/circuits-artifacts
+          key: ${{ steps.key.outputs.value }}
+
+      # Test circuits are included so the one artifact serves every consumer,
+      # including test-ignored.yml. The builder pins circomlib itself.
+      - name: Build circuits
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: ./scripts/build-circuits.sh --include-tests
+
+      # Runs on cache hits too: unchanged sources say nothing about whether the
+      # committed key material still matches them.
+      - name: Verify artifacts and committed key material
+        run: |
+          cargo run --quiet --release -p circuit-builder -- verify \
+            --out-dir target/circuits-artifacts \
+            --keys-dir deployments/testnet/circuit_keys
+
+      # Scoped to the published files: `.work/` is the builder's scratch tree and
+      # consumers never read it.
+      - uses: actions/upload-artifact@6f51ac03b9356f520e9adb1b1b7802705f340c2b # v4
+        with:
+          name: circuits
+          path: |
+            target/circuits-artifacts/*.r1cs
+            target/circuits-artifacts/*.wasm
+            target/circuits-artifacts/manifest.json
+          retention-days: 1

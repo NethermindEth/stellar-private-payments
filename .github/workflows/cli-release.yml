@@ -16,8 +16,12 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   dist:
     name: Build dist bundle
+    needs: circuits
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
@@ -42,14 +46,11 @@ jobs:
             exit 1
           fi
 
-      - name: Provide canonical keys (skip trusted setup)
-        run: |
-          mkdir -p testdata
-          cp deployments/testnet/circuit_keys/*.bin testdata/
-          cp deployments/testnet/circuit_keys/*.json testdata/
-
-      - name: Build circuits (release) — produces r1cs
-        run: cargo build -p circuits --release
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
 
       - name: Assemble dist
         run: |
@@ -63,7 +64,7 @@ jobs:
           rm -f "$STAGING/DISCLAIMER.txt"
 
           # Compiled circuit artifacts + proving keys / witness graphs the CLI loads.
-          CIRCUITS="target/circuits-artifacts/release"
+          CIRCUITS="target/circuits-artifacts"
           KEYS="deployments/testnet/circuit_keys"
           for stem in policy_tx_2_2 policy_tx_2_2_A policy_tx_2_2_B policy_tx_2_2_AB \
                       selectiveDisclosure_1; do
@@ -118,22 +119,6 @@ jobs:
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
         with:
           key: ${{ matrix.target }}
-
-      - name: Prepare circuits inputs (avoid in-build git fetch / keygen)
-        shell: bash
-        run: |
-          set -eu
-          # Check out circomlib at the locked rev so circuits/build.rs skips fetching.
-          LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
-          if [ ! -d circuits/src/circomlib/.git ]; then
-            git clone https://github.com/iden3/circomlib.git circuits/src/circomlib
-          fi
-          git -C circuits/src/circomlib fetch --depth 1 origin "$LOCK"
-          git -C circuits/src/circomlib checkout --detach FETCH_HEAD
-          # Canonical keys so build.rs does not run a (random) trusted setup.
-          mkdir -p testdata
-          cp deployments/testnet/circuit_keys/*.bin testdata/
-          cp deployments/testnet/circuit_keys/*.json testdata/
 
       - name: Install cross
         if: matrix.cross

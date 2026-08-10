@@ -60,16 +60,18 @@ pub fn test_env() -> Env {
     }
 }
 
-/// Returns the path to the pre-generated proving key for the
-/// policy_tx_2_2_AB circuit. Uses CARGO_MANIFEST_DIR to find the
-/// workspace root.
+/// Returns the path to the committed proving key for the policy_tx_2_2_AB
+/// circuit. Uses CARGO_MANIFEST_DIR to find the workspace root.
+///
+/// These are the same keys the testnet deployment uses, so a mismatch against
+/// the current R1CS fails here rather than after a deploy.
 fn proving_key_path() -> std::path::PathBuf {
     let manifest_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     // e2e-tests is at <workspace>/e2e-tests, so workspace root is parent
     manifest_dir
         .parent()
         .expect("Failed to get workspace root")
-        .join("testdata/policy_tx_2_2_AB_proving_key.bin")
+        .join("deployments/testnet/circuit_keys/policy_tx_2_2_AB_proving_key.bin")
 }
 
 /// Addresses of deployed contracts for E2E tests

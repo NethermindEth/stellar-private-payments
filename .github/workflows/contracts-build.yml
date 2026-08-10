@@ -14,7 +14,11 @@ permissions:
   contents: read
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   build-contracts:
+    needs: circuits
     timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
@@ -39,8 +43,11 @@ jobs:
         with:
           version: v25.1.0
 
-      - name: Build circuit artifacts
-        run: cargo build -p circuits
+      - name: Download circuit artifacts
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
 
       - name: Build contracts
         run: |

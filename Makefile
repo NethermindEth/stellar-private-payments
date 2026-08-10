@@ -40,35 +40,15 @@ build-debug:
 .PHONY: circuits-build
 circuits-build:
 	@echo "Building circuits (this may take a while)..."
-	$(if $(BUILD_TESTS),BUILD_TESTS=$(BUILD_TESTS)) cargo build -p circuits $(if $(RELEASE),--release)
-
-# Production stems for circom-witness-rs graph regen (keep in sync with SDK).
-WITNESS_GRAPH_STEMS := \
-	policy_tx_2_2.circom \
-	policy_tx_2_2_A.circom \
-	policy_tx_2_2_B.circom \
-	policy_tx_2_2_AB.circom \
-	selectiveDisclosure_1.circom \
-	selectiveDisclosure_2.circom \
-	selectiveDisclosure_3.circom \
-	selectiveDisclosure_4.circom
+	@./scripts/build-circuits.sh $(if $(BUILD_TESTS),--include-tests)
 
 # Regenerates committed circom-witness-rs graphs under
 # deployments/testnet/circuit_keys/*.graph.bin. Requires Circom CLI matching
-# circuits/circom.lock and a C++ toolchain. One stem per cargo build (single-
-# circuit circom-witness-rs); clean between stems so WITNESS_CPP is re-read.
+# circuits/circom.lock and a C++ toolchain. The script brackets the run with the
+# circomlib patch, which must be on disk before cargo starts.
 .PHONY: witness-graphs
 witness-graphs:
-	@echo "Regenerating witness graphs (Circom $$(tr -d '[:space:]' < circuits/circom.lock))..."
-	@for entry in $(WITNESS_GRAPH_STEMS); do \
-		stem=$${entry%.circom}; \
-		echo "===== $$stem ====="; \
-		cargo clean -p circom-witness-rs >/dev/null; \
-		CIRCOM_LIBRARY_PATH="$(CURDIR)/circuits/src" \
-		WITNESS_CPP="$(CURDIR)/circuits/src/$$entry" \
-		cargo build -p circuits --features regen-graph || exit 1; \
-	done
-	@echo "Done. Graphs in deployments/testnet/circuit_keys/"
+	@./scripts/witness-graphs.sh
 
 # Both targets record the built profile in sdk/web/.trunk-wasm-profile so a
 # subsequent `trunk serve`/`trunk build` (which `serve`/`build` invoke) sees a

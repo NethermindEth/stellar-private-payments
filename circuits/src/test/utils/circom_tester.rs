@@ -167,7 +167,8 @@ pub fn generate_keys(
     let empty = builder.setup();
     let mut rng = thread_rng();
 
-    // Match Circom's reduction (also used in `circuits/build.rs` key generation).
+    // Match Circom's reduction (also used in `tools/circuit-builder` key
+    // generation).
     let (pk, vk) = Groth16::<Bn254, CircomReduction>::circuit_specific_setup(empty, &mut rng)
         .map_err(|e| anyhow!("circuit_specific_setup failed: {e}"))?;
 

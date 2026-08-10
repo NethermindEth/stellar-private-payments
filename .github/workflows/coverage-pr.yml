@@ -14,7 +14,11 @@ permissions:
   actions: read
 
 jobs:
+  circuits:
+    uses: ./.github/workflows/circuits.yml
+
   cov-head:
+    needs: circuits
     timeout-minutes: 45
     runs-on: ubuntu-latest
     outputs:
@@ -30,8 +34,10 @@ jobs:
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
       - uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
-      - name: Build circuit artifacts (required by web)
-        run: cargo build -p circuits
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: circuits
+          path: target/circuits-artifacts
       - run: cargo llvm-cov --workspace --lcov --output-path lcov.info --ignore-filename-regex '^examples/'
 
       - name: Upload head coverage artifact (for stacked PRs)
@@ -98,9 +104,16 @@ jobs:
         if: ${{ steps.base_art.outputs.found == 'false' }}
         uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # cargo-llvm-cov
 
+      # This step runs against the base checkout, which may predate
+      # scripts/build-circuits.sh. Drop the fallback once main carries it.
       - name: Build circuit artifacts (required by web) (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
-        run: cargo build -p circuits
+        run: |
+          if [ -x ./scripts/build-circuits.sh ]; then
+            ./scripts/build-circuits.sh --include-tests
+          else
+            cargo build -p circuits
+          fi
 
       - name: Run base coverage (fallback path)
         if: ${{ steps.base_art.outputs.found == 'false' }}
