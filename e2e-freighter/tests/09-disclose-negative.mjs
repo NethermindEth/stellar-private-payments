@@ -180,7 +180,7 @@ export async function run(helpers) {
   const isFullyVerified = () =>
     verifyPanel.getByRole('status').filter({ hasText: 'Fully verified' }).isVisible().catch(() => false);
 
-  // --- (a) GARBAGE INPUT: unparseable text must fail cleanly, at the
+  // --- (a) GARBAGE INPUT: unparsable text must fail cleanly, at the
   // import step (never reaching Verify), with no exception and no stuck
   // state — and the SAME flow must accept a valid receipt right after.
   await verifyPanel.locator('textarea').fill('{ this is not valid json at all {{{');
