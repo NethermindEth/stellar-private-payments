@@ -2,7 +2,7 @@ use anyhow::{Result, bail};
 use bootnode::{
     Bootnode, Postgres,
     config::{Config, OtelConfig, TlsConfig},
-    metrics, otel,
+    current_deployment_storage_id, metrics, otel,
     storage::Storage,
 };
 use clap::Parser;
@@ -74,11 +74,11 @@ struct Cli {
     page_size: u32,
 
     /// Rate limit per IP (requests per second).
-    #[arg(long, env = "BOOTNODE_RATE_LIMIT_RPS", default_value_t = 10)]
+    #[arg(long, env = "BOOTNODE_RATE_LIMIT_RPS", default_value_t = 50)]
     rate_limit_rps: u32,
 
     /// Rate limit burst per IP.
-    #[arg(long, env = "BOOTNODE_RATE_LIMIT_BURST", default_value_t = 20)]
+    #[arg(long, env = "BOOTNODE_RATE_LIMIT_BURST", default_value_t = 100)]
     rate_limit_burst: u32,
 
     /// Enable OpenTelemetry tracing export.
@@ -178,8 +178,13 @@ impl Cli {
     }
 
     async fn open_storage(&self) -> Result<Arc<dyn Storage>> {
-        let backend =
-            Postgres::connect(&self.database_url, self.db_max_connections as usize).await?;
+        let deployment_id = current_deployment_storage_id()?;
+        let backend = Postgres::connect(
+            &self.database_url,
+            self.db_max_connections as usize,
+            deployment_id,
+        )
+        .await?;
         backend.init().await?;
         Ok(Arc::new(backend))
     }

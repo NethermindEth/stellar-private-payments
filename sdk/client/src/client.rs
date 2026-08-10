@@ -3,6 +3,7 @@ use types::{ContractConfig, OperationalFeedItem, RecipientLookup};
 use crate::{
     Account, Error, Handle, NoopProver, Prover, Signer, Storage, SyncMode,
     chain::{RpcClient, StateFetcher},
+    correlation::correlation_id_or_new,
     sync::{BackgroundSync, SyncHandle, catch_up},
 };
 
@@ -20,6 +21,11 @@ pub struct Client<S: Storage> {
 }
 
 impl<S: Storage> Client<S> {
+    #[tracing::instrument(
+        name = "client_init",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new())
+    )]
     pub fn init(
         rpc_url: impl AsRef<str>,
         storage: S,
@@ -127,6 +133,11 @@ impl<S: Storage> Client<S> {
     }
 
     /// Create an [`Account`] session.
+    #[tracing::instrument(
+        name = "client_account",
+        skip_all,
+        fields(correlation_id = %correlation_id_or_new())
+    )]
     pub fn account(
         &self,
         user_address: impl Into<String>,

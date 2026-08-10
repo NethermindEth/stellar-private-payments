@@ -1,7 +1,9 @@
 import { contract } from '@stellar/stellar-sdk';
-import { client, initializeRuntime, bootnodeRequired, ensureStorage } from './wasm-facade.js';
+import { client, initializeRuntime, bootnodeRequired, ensureStorage, deriveAspUserLeaf } from './wasm-facade.js';
 import { connectWallet, getWalletNetwork, signWalletAuthEntry, signWalletTransaction } from './wallet.js';
 import { isDbLockedError, showDbLockedModal } from './db-locked.js';
+import { friendlyErrorMessage } from './facade-errors.js';
+import { App, Utils } from './ui/core.js';
 
 // DOM element references
 const statusEl = document.getElementById('status');
@@ -17,6 +19,8 @@ const toastTemplate = document.getElementById('tpl-toast');
 // Contract/state display
 const membershipContractInput = document.getElementById('membershipContract');
 const nonMembershipContractInput = document.getElementById('nonMembershipContract');
+const membershipContractLinkEl = document.getElementById('membershipContractLink');
+const nonMembershipContractLinkEl = document.getElementById('nonMembershipContractLink');
 const membershipRootEl = document.getElementById('membershipRoot');
 const membershipLevelsEl = document.getElementById('membershipLevels');
 const membershipNextIndexEl = document.getElementById('membershipNextIndex');
@@ -74,7 +78,7 @@ function showToast(message, type = 'success', duration = 4000) {
   if (!toastContainer || !toastTemplate) return;
   const toastWrapper = toastTemplate.content.cloneNode(true).firstElementChild;
 
-  toastWrapper.querySelector('.toast-message').textContent = message;
+  toastWrapper.querySelector('.toast-message').textContent = friendlyErrorMessage(message);
 
   const icon = toastWrapper.querySelector('.toast-icon');
   if (type === 'success') {
@@ -212,6 +216,24 @@ async function ensureCryptoReady() {
 }
 
 // -----------------------------
+// Block explorer links
+// -----------------------------
+async function loadExplorerSetting() {
+  try {
+    const storage = await ensureStorage();
+    const explorerSetting = await storage.getExplorerSetting();
+    App.state.settings.explorerBaseUrl = explorerSetting?.baseUrl || Utils.defaultExplorerBaseUrl;
+  } catch (err) {
+    console.warn('Explorer setting unavailable, using default explorer:', err);
+  }
+}
+
+function updateContractLink(linkEl, contractId) {
+  if (!linkEl) return;
+  linkEl.href = contractId ? Utils.explorerContractUrl(contractId) : '#';
+}
+
+// -----------------------------
 // Wallet actions
 // -----------------------------
 async function connect() {
@@ -294,12 +316,25 @@ async function refreshState() {
 
     if (membershipContractInput) membershipContractInput.value = membershipState.contractId;
     if (nonMembershipContractInput) nonMembershipContractInput.value = nonMembershipState.contractId;
+    updateContractLink(membershipContractLinkEl, membershipState.contractId);
+    updateContractLink(nonMembershipContractLinkEl, nonMembershipState.contractId);
+
+    const membershipStorageUrl = membershipState.contractId
+      ? Utils.explorerContractStorageUrl(membershipState.contractId)
+      : '#';
+    const nonMembershipStorageUrl = nonMembershipState.contractId
+      ? Utils.explorerContractStorageUrl(nonMembershipState.contractId)
+      : '#';
 
     membershipRootEl.textContent = membershipState.root || '--';
+    membershipRootEl.href = membershipStorageUrl;
     membershipLevelsEl.textContent = membershipState.levels ?? '--';
+    membershipLevelsEl.href = membershipStorageUrl;
     membershipNextIndexEl.textContent = membershipState.nextIndex ?? '--';
+    membershipNextIndexEl.href = membershipStorageUrl;
     updateAdminInsertOnlyDisplay(membershipState.adminInsertOnly);
     nonMembershipRootEl.textContent = nonMembershipState.root || '--';
+    nonMembershipRootEl.href = nonMembershipStorageUrl;
 
     setStatus('State loaded', 'ok');
   } catch (err) {
@@ -373,11 +408,15 @@ async function insertMembershipLeaf() {
     const contractId = membershipContractInput.value.trim();
     if (!contractId) throw new Error('Membership contract ID is required');
 
-    const notePublicKey = parseBigIntInput(allowlistPublicKeyInput.value, 'Public key');
-    if (notePublicKey === null) throw new Error('User note public key is required');
+    const notePublicKey = allowlistPublicKeyInput.value.trim();
+    if (parseBigIntInput(notePublicKey, 'Public key') === null) {
+      throw new Error('User note public key is required');
+    }
 
-    const aspSecret = parseBigIntInput(allowlistAspSecretInput.value, 'ASP secret');
-    if (aspSecret === null) throw new Error('ASP secret is required');
+    const aspSecret = allowlistAspSecretInput.value.trim();
+    if (parseBigIntInput(aspSecret, 'ASP secret') === null) {
+      throw new Error('ASP secret is required');
+    }
 
     addToAllowlistBtn.disabled = true;
     addToAllowlistBtn.textContent = 'Processing...';
@@ -385,10 +424,7 @@ async function insertMembershipLeaf() {
     setStatus('Computing and submitting allowlist insert transaction...', 'info');
     await ensureCryptoReady();
 
-    const leafHex = await client().account().deriveAspUserLeaf({
-        membershipBlinding: aspSecret,
-        notePublicKey,
-    });
+    const leafHex = await deriveAspUserLeaf(notePublicKey, aspSecret);
     const leafValue = BigInt(leafHex);
 
     const mClient = await getMembershipClient(contractId);
@@ -510,8 +546,16 @@ addToAllowlistBtn.addEventListener('click', insertMembershipLeaf);
 addToBlocklistBtn.addEventListener('click', insertNonMembershipLeaf);
 removeFromBlocklistBtn.addEventListener('click', removeNonMembershipLeaf);
 
+membershipContractInput?.addEventListener('input', () => {
+  updateContractLink(membershipContractLinkEl, membershipContractInput.value.trim());
+});
+nonMembershipContractInput?.addEventListener('input', () => {
+  updateContractLink(nonMembershipContractLinkEl, nonMembershipContractInput.value.trim());
+});
+
 async function init() {
   setStatus('Initializing...', 'info');
+  await loadExplorerSetting();
   await ensureCryptoReady();
   await refreshState();
   setStatus('Ready', 'ok');

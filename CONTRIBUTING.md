@@ -31,7 +31,7 @@ stellar-private-payments/
 │   │   ├── app-storage.js      # App-only persistence (settings, op history)
 │   │   ├── db-locked.js        # DB-locked (storage in use by another tab) modal
 │   │   ├── wallet.js           # Freighter connect/watch/sign UX
-│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments-sdk-web
+│   │   ├── wasm-facade.js      # Runtime facade over stellar-private-payments
 │   │   └── sw.js               # Service worker
 │   ├── css/                    # Stylesheets
 │   ├── assets/                 # Static assets (logo, favicon)
@@ -87,7 +87,7 @@ stellar-private-payments/
 ## Prerequisites
 
 - [**Rust**](https://www.rust-lang.org/tools/install) 1.92.0 or later (see `rust-toolchain.toml`).
-- [**Circom**](https://github.com/iden3/circom) 2.2.2 or later for circuit compilation.
+- [**Circom**](https://github.com/iden3/circom) **2.2.3** for circuit / graph builds (`circuits/circom.lock`; same tag as the Rust circom crates in `circuits/Cargo.toml`).
 - [**Stellar CLI**](https://github.com/stellar/stellar-cli) for contract deployment.
 - [**Node.js**](https://github.com/nodejs/node) for frontend dependencies.
 - [**Trunk**](https://github.com/trunk-rs/trunk) for serving the web application.
@@ -107,8 +107,11 @@ stellar-private-payments/
 in a single-threaded WASM - we don't want for now to enable multithreaded wasm support as the proving time is acceptable
 while wasm multithreading requires COOP/COEP headers and is much stricter to deploy.
 Also we delete `ethereum.rs` module to get rid of many irrelevant dependencies.
-`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in 
+`vendor/cranelift-control` is patched - the single dependency `arbitrary` is fixed at the same version as in
 the `soroban-sdk` - see https://github.com/NethermindEth/stellar-private-payments/issues/192.
+This patch remains for **circuits / ceremony** builds that still use ark-circom → Wasmer + Cranelift.
+The native SDK (`stellar-private-payments-sdk`) no longer depends on Wasmer; witness generation uses
+committed `circom-witness-rs` graphs (see `make witness-graphs`).
 
 ### Running WASM tests
 
@@ -132,10 +135,11 @@ To explicitly build them:
 cargo build -p circuits
 ```
 
-The circuit crate also exposes 2 flags:
+The circuit crate also exposes these flags:
 - **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
 For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
-- **REGEN_KEYS**: Forces the generation of new verification keys, even if they already exist.
+- **REGEN_KEYS**: Forces the generation of new verification keys. R1CS compilation uses Circom `--O2` (same as `make witness-graphs`).
+- **`make witness-graphs`**: Regenerates committed `*.graph.bin` witness graphs (`--features regen-graph` with `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` per circuit). Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain. Note: running with `--features regen-graph` and `WITNESS_CPP` set writes generated `*.graph.bin` files directly into `circuits/` and `deployments/testnet/circuit_keys/` (outside `OUT_DIR`), dirtying source-tree files.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash
@@ -248,7 +252,7 @@ make release
 
 ### Browser SDK (`sdk/web`)
 
-Standalone npm package (`stellar-private-payments-sdk-web`). See [`sdk/web/README.md`](sdk/web/README.md).
+Standalone npm package (`stellar-private-payments`, alpha). See [`sdk/web/README.md`](sdk/web/README.md).
 
 Requires [**wasm-bindgen-cli**](https://crates.io/crates/wasm-bindgen-cli) (version must match `Cargo.lock`).
 
@@ -290,3 +294,41 @@ To make a production release of CLI
 git tag v0.1.0 # with a proper new version
 git push origin v0.1.0
 ```
+
+## Instrumentation & Logging Guidelines
+
+All contributions to the SDK must adhere to the following telemetry and instrumentation guidelines to prevent credential/key leaks:
+
+### 1. Instrumentation House Rules
+* Always use `#[tracing::instrument(skip_all, fields(...))]` on public functions or functions processing transaction requests.
+* Do not log parameters by default; instead, explicitly list only **non-sensitive** fields in the `fields(...)` allowlist of the macro.
+* Wrap all **Tier-1** parameters (such as amounts, recipient/sender addresses, note commitments, nullifiers, and public keys) inside the `types::Sensitive(value)` wrapper when logging or recording them inside spans.
+
+### 2. Tier Classification
+* **Tier-0 (Private/Secret)**: Private keys, seeds, signatures, circuit witness arrays, and membership blinding factors. **Strictly forbidden from being formatted or logged.** Do not wrap them; keep them out of logs completely.
+* **Tier-1 (Sensitive/Redactable)**: Stellar addresses, token amounts, commitments, and nullifiers. **Must be wrapped in `types::Sensitive`.**
+
+See [SECURITY.md](SECURITY.md) § "Logging Security & Privacy Model" for the full two-tier model and its invariants.
+
+### 3. Correlation IDs
+* Every instrumented boundary/operation function includes `correlation_id = %types::correlation_id_or_new()` in its `fields(...)`. It inherits the ambient id when nested and mints one at operation roots — never call `new_correlation_id()` directly.
+* CLI commands open a root span (`info_span!("cmd_*", correlation_id = ...)`) so SDK calls inherit the id.
+
+### 4. Timing & Durations
+* SDK crates (must stay wasm-compatible): use `web_time::Instant`. Native-only crates (e.g. `cli`): use `std::time::Instant`.
+* Time genuinely expensive operations only (proving, witness computation, key deserialization, external processes). Emit `elapsed_ms` at `debug!` level, on **both** success and error exits of the expensive section (capture the result, log, then `?`).
+* Use `u64::try_from(start.elapsed().as_millis()).unwrap_or(u64::MAX)` — the workspace denies `clippy::cast_possible_truncation`.
+
+### 5. Levels & Payloads
+* Boundary spans at `info`; internal "started" breadcrumbs and durations at `debug`; verbose detail at `trace`; fallback/degraded paths at `warn`; hard failures at `error`.
+* External process boundaries (e.g. shelling out to `stellar`): an `info!` breadcrumb **before** spawn (this is the hang diagnostic), outcome + duration **after** exit.
+* Large or secret byte payloads (proving keys, witnesses, R1CS, XDR): log **lengths only**, never contents.
+
+## JS license policy maintenance
+
+The JS/npm license policy lives in `.github/js-license-policy.json` and is enforced by `.github/workflows/js-license-audit.yml`. The tooling is POSIX sh + jq (`scripts/check-js-licenses.sh`, `scripts/generate-js-attribution.sh`), so jq must be installed locally; GitHub runners provide it.
+
+- **Scan targets**: `scripts/check-js-licenses.sh` scans the two vendored JS workspaces only: `app/package-lock.json` and `sdk/web/package-lock.json`. It does NOT scan `circuits/src/circomlib/package-lock.json`; circomlib's GPL-3.0 npm devDependencies are build tooling, never shipped, mirroring the `circuits` exclusion in `deny.toml` (line 18). The workflow still guards circomlib's own license via a `circomlib license tripwire` step that asserts `iden3/circomlib` at the pinned SHA reports `LGPL-3.0` (its `.circom` sources compile into shipped artifacts, so redistribution obligations must be re-evaluated if the license changes).
+- **Allowlist updates**: add a new permissive SPDX identifier to `allowlist` when a PR introduces a dependency whose license is not already listed. Keep the list alphabetically sorted. Compound/dual licenses (e.g. `(MIT OR Apache-2.0)`) are matched as one exact string, not evaluated as boolean SPDX expressions — if a dependency reports one, add that literal string to the allowlist (see `(MIT AND BSD-3-Clause)`, used by app's `sha.js`) rather than expecting the scanner to parse it. Because `actions/dependency-review-action` rejects compound expressions in `allow-licenses` and silently treats them as "no match", a compound-allowlisted package must ALSO be listed in the workflow's `allow-dependencies-licenses` input as a `pkg:npm/<name>` identifier (e.g. `pkg:npm/sha.js` for `(MIT AND BSD-3-Clause)`).
+- **Exceptions**: if a dependency's license is not on the allowlist (or its `license` field is missing in `package-lock.json`), add an entry to `exceptions` with `approver: PENDING_PR_REVIEW`, a written justification, and the affected package(s). Scope every exception to its lockfile with `target` so build-tool carve-outs cannot cover the same package in a runtime footprint; omitting `target` applies the exception repo-wide — avoid unless intentional. Exceptions marked `PENDING_PR_REVIEW` must be ratified by a maintainer before merge. Before adding or editing an exception, run `sh scripts/verify-exception-licenses.sh` to confirm the declared license actually matches the npm registry at the package's *locked* version (not `latest` — some packages relicense between majors) — a manual tool, not run in CI.
+- **Attribution**: `dist/licenses/THIRD-PARTY-{app,sdk-web}.{json,txt}` are generated at build time by `scripts/generate-js-attribution.sh` (called from `deployments/scripts/stage-dist-legal.sh`). Do not edit them by hand.

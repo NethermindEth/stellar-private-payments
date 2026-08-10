@@ -51,6 +51,14 @@ jobs:
       - name: Install SDK npm dependencies
         run: npm ci --prefix sdk/web
 
+      # On a miss build.sh downloads and sha256-verifies binaryen itself; this
+      # only persists the extracted tree between runs.
+      - name: Cache binaryen
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: target/tmp/binaryen/binaryen-version_131
+          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
+
       - name: Build npm package
         run: npm run build --prefix sdk/web
 

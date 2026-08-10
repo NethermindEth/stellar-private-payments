@@ -78,8 +78,9 @@ pub mod state {
     pub use crate::core::process_local_state_batch;
     pub use ::state::{
         APP_SETTING_BOOTNODE_CONFIG, APP_SETTING_EXPLORER, AccountKeys,
-        CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD, DerivedUserNoteRow,
-        PoolCommitmentRow, SqliteStorage, StoredUserKeys, process_events, process_notes,
+        CURRENT_DISCLAIMER_HASH_HEX, CURRENT_DISCLAIMER_TEXT_MD, DEFAULT_BOOTNODE_URL,
+        DerivedUserNoteRow, PoolCommitmentRow, SqliteStorage, StoredUserKeys, process_events,
+        process_notes,
     };
 }
 
@@ -88,6 +89,8 @@ mod account;
 pub mod blocking;
 mod client;
 mod core;
+mod correlation;
+pub mod crypto;
 mod error;
 mod handle;
 mod plan;

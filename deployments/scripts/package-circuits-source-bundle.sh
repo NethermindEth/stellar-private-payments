@@ -34,12 +34,24 @@ mkdir -p "$TMP_DIR/src/circuits"
 mkdir -p "$TMP_DIR/src/circuits/src"
 cp -R "$REPO_ROOT/circuits/src/"* "$TMP_DIR/src/circuits/src/"
 
+# circomlib's own devDependencies (snarkjs, ffjavascript, etc.) include
+# GPL-3.0-licensed packages. They are out of scope for the JS license scan as
+# build/test tooling that is never distributed (mirroring deny.toml's circuits
+# exclusion), but also prune them here as distribution hygiene / defense in
+# depth in case node_modules exists on the machine running this script (e.g. a
+# maintainer ran `npm install` locally to run circomlib's own test suite).
+# Also drop the embedded .git history to avoid shipping ~1.7 MB of metadata
+# that recipients do not need; BUILDING.md already tells them to match the
+# pinned revision in circuits/circomlib.lock.
+find "$TMP_DIR/src/circuits/src" -type d \( -name node_modules -o -name .git \) -prune -exec rm -rf {} +
+
 # Add build instructions and license texts for redistribution.
 cat > "$TMP_DIR/src/BUILDING.md" <<EOF
 # Circuits source bundle
 
 This bundle is provided to help recipients rebuild the compiled artifacts
-shipped under \`dist/circuits/\` and to satisfy LGPL-3.0 expectations.
+shipped under \`dist/circuits/\` (\`*.r1cs\` and \`*.graph.bin\`) and to satisfy
+LGPL-3.0 expectations.
 
 ## Contents
 - \`circuits/src/\`: Circom sources from this repository (including the vendored \`circomlib\`)
@@ -65,14 +77,19 @@ cp -R circuits/src/ <REPO_ROOT>/circuits/src/
 At minimum, ensure:
 \`<REPO_ROOT>/circuits/src/circomlib\` matches revision: $LOCK_SHA
 
-3) Build the circuits crate from the repository root:
+3) From the repository root, build R1CS artifacts and regenerate witness graphs.
+   Requires Circom CLI matching \`circuits/circom.lock\` and a C++ toolchain for
+   graphs:
 
 \`\`\`
 cargo build -p circuits --release
+make witness-graphs
 \`\`\`
 
-The build produces circuit artifacts under Cargo \`OUT_DIR\` and the frontend
-build copies them into \`dist/circuits/\` via Trunk hooks.
+R1CS files land under \`target/circuits-artifacts/release/\`. Graph files
+(\`*.graph.bin\`) are written to \`deployments/testnet/circuit_keys/\`. The web
+SDK staging script (\`sdk/web/scripts/stage-circuits-dist.sh\`) copies both into
+\`dist/circuits/\` for redistribution.
 EOF
 
 mkdir -p "$TMP_DIR/src/licenses"

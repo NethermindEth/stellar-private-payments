@@ -21,7 +21,7 @@ env:
 
 jobs:
   linter_check:
-    timeout-minutes: 15
+    timeout-minutes: 20
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
@@ -46,7 +46,7 @@ jobs:
         run: cargo +nightly fmt --all -- --check --config-path rustfmt.toml
 
       - name: Run Clippy
-        run: cargo clippy --all-targets --all-features
+        run: cargo clippy --all-targets --features asm,rusqlite
 
       - name: Check typos
         uses: crate-ci/typos@bb4666ad77b539a6b4ce4eda7ebb6de553704021 # v1.42.0

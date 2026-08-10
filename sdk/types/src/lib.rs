@@ -1,13 +1,19 @@
 mod amounts;
 mod chain_data;
+mod correlation;
 mod disclosure;
 mod ext_data;
+mod gvk;
+mod logging;
 mod policy_tx;
 pub use amounts::*;
 use anyhow::{Result, anyhow};
 pub use chain_data::*;
+pub use correlation::*;
 pub use disclosure::*;
 pub use ext_data::*;
+pub use gvk::*;
+pub use logging::*;
 pub use policy_tx::*;
 
 use serde::{Deserialize, Serialize};
@@ -48,6 +54,14 @@ pub struct PoolConfigEntry {
     pub asset: AssetDescriptor,
     /// ASP policy flags for transact proofs.
     pub policy_flags: PolicyFlags,
+    /// Global View Key mode for this pool. Defaults to [`GvkMode::Off`] for
+    /// backwards compatibility
+    #[serde(default)]
+    pub gvk_mode: GvkMode,
+    /// Pool administrator's Baby JubJub public key `D`, informational only
+    /// not verified. `None` when `gvk_mode` is [`GvkMode::Off`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gvk_authority_pub_key: Option<BabyJubJubPoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -219,12 +233,37 @@ pub struct OperationalFeedItem {
 }
 
 /// Wallet signature used to derive both privacy keypairs
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct KeyDerivationSignature(pub Vec<u8>);
 
+impl std::fmt::Debug for KeyDerivationSignature {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "KeyDerivationSignature(<redacted>)")
+    }
+}
+
+impl Drop for KeyDerivationSignature {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 /// Encryption private key
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct EncryptionPrivateKey(pub [u8; 32]);
+
+impl std::fmt::Debug for EncryptionPrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "EncryptionPrivateKey(<redacted>)")
+    }
+}
+
+impl Drop for EncryptionPrivateKey {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
+
 /// Encryption public key
 #[derive(Debug, Clone)]
 pub struct EncryptionPublicKey(pub [u8; 32]);
@@ -239,8 +278,20 @@ pub struct EncryptionKeyPair {
 }
 
 /// Note ownership private key
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct NotePrivateKey(pub [u8; 32]);
+
+impl std::fmt::Debug for NotePrivateKey {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "NotePrivateKey(<redacted>)")
+    }
+}
+
+impl Drop for NotePrivateKey {
+    fn drop(&mut self) {
+        zeroize::Zeroize::zeroize(&mut self.0);
+    }
+}
 
 /// Note ownership public key
 #[derive(Debug, Clone)]
@@ -552,3 +603,42 @@ impl_byte_wrapper!(EncryptionPrivateKey);
 impl_byte_wrapper!(EncryptionPublicKey);
 impl_byte_wrapper!(NotePrivateKey);
 impl_byte_wrapper!(NotePublicKey);
+
+#[cfg(test)]
+mod pool_config_gvk_tests {
+    use super::*;
+
+    #[test]
+    fn pool_config_entry_round_trips_with_gvk_fields_set() -> Result<()> {
+        let json = r#"{
+            "poolContractId": "CPOOL",
+            "tokenContractId": "CTOKEN",
+            "deploymentLedger": 1,
+            "enabled": true,
+            "asset": {"kind": "native"},
+            "policyFlags": [],
+            "gvkMode": "traceable",
+            "gvkAuthorityPubKey": {
+                "x": "0x0000000000000000000000000000000000000000000000000000000000000001",
+                "y": "0x0000000000000000000000000000000000000000000000000000000000000002"
+            }
+        }"#;
+
+        let pool: PoolConfigEntry = serde_json::from_str(json)?;
+        assert_eq!(pool.gvk_mode, GvkMode::Traceable);
+        assert_eq!(
+            pool.gvk_authority_pub_key,
+            Some(BabyJubJubPoint {
+                x: Field(U256::from(1)),
+                y: Field(U256::from(2)),
+            })
+        );
+
+        let round_tripped = serde_json::to_string(&pool)?;
+        let parsed: PoolConfigEntry = serde_json::from_str(&round_tripped)?;
+        assert_eq!(parsed.gvk_mode, pool.gvk_mode);
+        assert_eq!(parsed.gvk_authority_pub_key, pool.gvk_authority_pub_key);
+
+        Ok(())
+    }
+}

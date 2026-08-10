@@ -1,9 +1,6 @@
 use crate::{
-    circuits::{
-        ensure_sha256_matches, fetch_circuit_file, fetch_circuit_file_verified,
-        get_or_derive_uncompressed,
-    },
-    protocol::{ProverWorkerRequest, ProverWorkerResponse},
+    circuits::{ensure_sha256_matches, fetch_circuit_file_verified, get_or_derive_uncompressed},
+    protocol::{CorrelatedRequest, ProverWorkerRequest, ProverWorkerResponse},
 };
 use anyhow::{Context as _, Result, anyhow};
 use futures::{FutureExt, try_join};
@@ -27,6 +24,7 @@ use stellar_private_payments_sdk::{
         SELECTIVE_DISCLOSURE_4_LEVELS, SELECTIVE_DISCLOSURE_4_N_NOTES,
     },
 };
+use tracing::Instrument;
 use wasm_bindgen::JsError;
 use wasm_bindgen_futures::spawn_local;
 
@@ -64,7 +62,7 @@ thread_local! {
 fn init_transact_prover(
     stem: &str,
     proving_key: &[u8],
-    wasm_bytes: &[u8],
+    graph_bytes: &[u8],
     r1cs_bytes: &[u8],
 ) -> Result<ProverEngine, JsError> {
     let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
@@ -77,10 +75,10 @@ fn init_transact_prover(
         hashes.proving_key_sha256,
     )?;
     ensure_sha256_matches(
-        &format!("{stem}.wasm"),
-        wasm_bytes,
-        hashes.wasm_len,
-        hashes.wasm_sha256,
+        &format!("{stem}.graph.bin"),
+        graph_bytes,
+        hashes.graph_len,
+        hashes.graph_sha256,
     )?;
     ensure_sha256_matches(
         &format!("{stem}.r1cs"),
@@ -89,15 +87,15 @@ fn init_transact_prover(
         hashes.r1cs_sha256,
     )?;
 
-    ProverEngine::new(proving_key, wasm_bytes, r1cs_bytes)
+    ProverEngine::new(proving_key, graph_bytes, r1cs_bytes)
         .map_err(|e| JsError::new(&format!("failed to init {stem} transact prover: {e:#}")))
 }
 
 struct DisclosureArtifactHashes {
     proving_key_len: usize,
     proving_key_sha256: [u8; 32],
-    wasm_len: usize,
-    wasm_sha256: [u8; 32],
+    graph_len: usize,
+    graph_sha256: [u8; 32],
     r1cs_len: usize,
     r1cs_sha256: [u8; 32],
 }
@@ -109,8 +107,8 @@ fn disclosure_hashes(n_notes: usize) -> DisclosureArtifactHashes {
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_LEN,
             proving_key_sha256:
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_PROVING_KEY_SHA256,
-            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_LEN,
-            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_WASM_SHA256,
+            graph_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_GRAPH_LEN,
+            graph_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_GRAPH_SHA256,
             r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_LEN,
             r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_1_R1CS_SHA256,
         },
@@ -119,8 +117,8 @@ fn disclosure_hashes(n_notes: usize) -> DisclosureArtifactHashes {
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_PROVING_KEY_LEN,
             proving_key_sha256:
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_PROVING_KEY_SHA256,
-            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_WASM_LEN,
-            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_WASM_SHA256,
+            graph_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_GRAPH_LEN,
+            graph_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_GRAPH_SHA256,
             r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_R1CS_LEN,
             r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_2_R1CS_SHA256,
         },
@@ -129,8 +127,8 @@ fn disclosure_hashes(n_notes: usize) -> DisclosureArtifactHashes {
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_PROVING_KEY_LEN,
             proving_key_sha256:
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_PROVING_KEY_SHA256,
-            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_WASM_LEN,
-            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_WASM_SHA256,
+            graph_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_GRAPH_LEN,
+            graph_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_GRAPH_SHA256,
             r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_R1CS_LEN,
             r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_3_R1CS_SHA256,
         },
@@ -139,8 +137,8 @@ fn disclosure_hashes(n_notes: usize) -> DisclosureArtifactHashes {
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_PROVING_KEY_LEN,
             proving_key_sha256:
                 crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_PROVING_KEY_SHA256,
-            wasm_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_WASM_LEN,
-            wasm_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_WASM_SHA256,
+            graph_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_GRAPH_LEN,
+            graph_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_GRAPH_SHA256,
             r1cs_len: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_R1CS_LEN,
             r1cs_sha256: crate::artifact_hashes::EXPECTED_SELECTIVE_DISCLOSURE_4_R1CS_SHA256,
         },
@@ -167,20 +165,20 @@ async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
     }
 
     let pk_name = format!("selectiveDisclosure_{n_notes}_proving_key.bin");
-    let wasm_name = format!("selectiveDisclosure_{n_notes}.wasm");
+    let graph_name = format!("selectiveDisclosure_{n_notes}.graph.bin");
     let r1cs_name = format!("selectiveDisclosure_{n_notes}.r1cs");
 
     let hashes = disclosure_hashes(n_notes);
 
-    // wasm + r1cs are needed on both the warm and the fallback path, so fetch
+    // graph + r1cs are needed on both the warm and the fallback path, so fetch
     // them concurrently up front. The (large) proving key is fetched lazily —
     // only on an uncompressed-cache miss or during fallback.
-    let (wasm_bytes, r1cs_bytes) = try_join!(
-        fetch_circuit_file_verified(&wasm_name, hashes.wasm_len, hashes.wasm_sha256),
+    let (graph_bytes, r1cs_bytes) = try_join!(
+        fetch_circuit_file_verified(&graph_name, hashes.graph_len, hashes.graph_sha256),
         fetch_circuit_file_verified(&r1cs_name, hashes.r1cs_len, hashes.r1cs_sha256)
     )?;
 
-    let witness_calc = WitnessCalculator::new(&wasm_bytes, &r1cs_bytes).map_err(|e| {
+    let witness_calc = WitnessCalculator::from_graph(&graph_bytes).map_err(|e| {
         JsError::new(&format!(
             "failed to init selectiveDisclosure_{n_notes} witness calculator: {e:#}"
         ))
@@ -201,7 +199,7 @@ async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
             match Groth16Prover::new_from_uncompressed_pk(&uncompressed_pk, &r1cs_bytes) {
                 Ok(prover) => prover,
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "[{WORKER_NAME}] uncompressed disclosure({n_notes}) prover build failed ({e:#}), falling back to compressed"
                     );
                     build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
@@ -209,7 +207,7 @@ async fn ensure_disclosure_prover(n_notes: usize) -> Result<(), JsError> {
             }
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "[{WORKER_NAME}] uncompressed disclosure({n_notes}) proving key unavailable ({e:?}), falling back to compressed"
             );
             build_disclosure_from_compressed(&pk_name, &hashes, &r1cs_bytes).await?
@@ -299,17 +297,31 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
     if !to_load.is_empty() {
         let transact_artifacts: Vec<(Vec<u8>, Vec<u8>)> =
             futures::future::try_join_all(to_load.iter().map(|&(stem, _)| async move {
-                let wasm = fetch_circuit_file(&format!("{stem}.wasm")).await?;
-                let r1cs = fetch_circuit_file(&format!("{stem}.r1cs")).await?;
-                Ok::<_, JsError>((wasm, r1cs))
+                let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
+                    .ok_or_else(|| {
+                        JsError::new(&format!("unsupported transact circuit stem: {stem}"))
+                    })?;
+                let graph = fetch_circuit_file_verified(
+                    &format!("{stem}.graph.bin"),
+                    hashes.graph_len,
+                    hashes.graph_sha256,
+                )
+                .await?;
+                let r1cs = fetch_circuit_file_verified(
+                    &format!("{stem}.r1cs"),
+                    hashes.r1cs_len,
+                    hashes.r1cs_sha256,
+                )
+                .await?;
+                Ok::<_, JsError>((graph, r1cs))
             }))
             .await?;
 
         let mut loaded = Vec::with_capacity(to_load.len());
-        for (&(stem, proving_key), (wasm_bytes, r1cs_bytes)) in
+        for (&(stem, proving_key), (graph_bytes, r1cs_bytes)) in
             to_load.iter().zip(transact_artifacts.iter())
         {
-            let prover = build_transact_prover(stem, proving_key, wasm_bytes, r1cs_bytes).await?;
+            let prover = build_transact_prover(stem, proving_key, graph_bytes, r1cs_bytes).await?;
             loaded.push((stem.to_owned(), prover));
         }
 
@@ -337,7 +349,7 @@ async fn load_circuit_artifacts() -> Result<(), JsError> {
 async fn build_transact_prover(
     stem: &str,
     bundled_compressed_pk: &[u8],
-    wasm_bytes: &[u8],
+    graph_bytes: &[u8],
     r1cs_bytes: &[u8],
 ) -> Result<ProverEngine, JsError> {
     let hashes = crate::artifact_hashes::policy_transact_artifact_hashes(stem)
@@ -363,35 +375,43 @@ async fn build_transact_prover(
 
     match fast_path {
         Ok(uncompressed_pk) => {
-            match ProverEngine::new_from_uncompressed_pk(&uncompressed_pk, wasm_bytes, r1cs_bytes) {
+            match ProverEngine::new_from_uncompressed_pk(&uncompressed_pk, graph_bytes, r1cs_bytes)
+            {
                 Ok(engine) => return Ok(engine),
                 Err(e) => {
-                    log::warn!(
+                    tracing::warn!(
                         "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) prover build failed ({e:#}), falling back to compressed"
                     );
                 }
             }
         }
         Err(e) => {
-            log::warn!(
+            tracing::warn!(
                 "[{WORKER_NAME}] uncompressed transact({pk_name_for_log}) proving key unavailable ({e:?}), falling back to compressed"
             );
         }
     }
 
-    init_transact_prover(stem, bundled_compressed_pk, wasm_bytes, r1cs_bytes)
+    init_transact_prover(stem, bundled_compressed_pk, graph_bytes, r1cs_bytes)
 }
 
 pub fn worker_main() {
-    console_error_panic_hook::set_once();
-    wasm_log::init(wasm_log::Config::default());
-    log::debug!("[{WORKER_NAME}] starting...");
+    let worker_span = tracing::info_span!("worker", worker = "prover");
+    {
+        let _guard = worker_span.enter();
+        crate::telemetry::init_telemetry(None);
+        crate::telemetry::install_panic_hook();
+        tracing::debug!("[{WORKER_NAME}] starting...");
+    }
     ProverWorker::registrar().register();
-    spawn_local(async {
-        if let Err(e) = init().await {
-            log::error!("[{WORKER_NAME}] init failed: {e:?}");
+    spawn_local(
+        async move {
+            if let Err(e) = init().await {
+                tracing::error!("[{WORKER_NAME}] init failed: {e:?}");
+            }
         }
-    });
+        .instrument(worker_span),
+    );
 }
 
 async fn init() -> Result<(), JsError> {
@@ -400,7 +420,7 @@ async fn init() -> Result<(), JsError> {
     match load_circuit_artifacts().await {
         Ok(()) => {
             INIT_STATE.with(|s| *s.borrow_mut() = InitState::Ready);
-            log::debug!("[{WORKER_NAME}] initialized");
+            tracing::debug!("[{WORKER_NAME}] initialized");
             Ok(())
         }
         Err(e) => {
@@ -412,26 +432,38 @@ async fn init() -> Result<(), JsError> {
 }
 
 #[oneshot]
-pub(crate) async fn ProverWorker(req: ProverWorkerRequest) -> ProverWorkerResponse {
-    match router(req).await {
-        Ok(r) => r,
-        Err(e) => ProverWorkerResponse::Error(e.to_string()),
+pub(crate) async fn ProverWorker(
+    req: CorrelatedRequest<ProverWorkerRequest>,
+) -> ProverWorkerResponse {
+    let correlation_id = req.correlation_id;
+    let worker_span = tracing::info_span!(
+        "worker_request",
+        worker = "prover",
+        correlation_id = correlation_id.as_str()
+    );
+    async move {
+        match router(req.payload).await {
+            Ok(r) => r,
+            Err(e) => ProverWorkerResponse::Error(e.to_string()),
+        }
     }
+    .instrument(worker_span)
+    .await
 }
 
 // Main router of worker requests
 pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerResponse> {
     let resp = match req {
         ProverWorkerRequest::Ping => {
-            log::trace!("[{WORKER_NAME}] ping");
+            tracing::trace!("[{WORKER_NAME}] ping");
             loop {
                 match INIT_STATE.with(|s| s.borrow().clone()) {
                     InitState::Ready => {
-                        log::trace!("[{WORKER_NAME}] pong");
+                        tracing::trace!("[{WORKER_NAME}] pong");
                         return Ok(ProverWorkerResponse::Pong);
                     }
                     InitState::Failed(msg) => {
-                        log::debug!("[{WORKER_NAME}] ping -> init failed");
+                        tracing::debug!("[{WORKER_NAME}] ping -> init failed");
                         return Ok(ProverWorkerResponse::Error(msg));
                     }
                     InitState::Pending => {}
@@ -441,7 +473,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             }
         }
         ProverWorkerRequest::Transact(params) => {
-            log::debug!("[{WORKER_NAME}] transact");
+            tracing::debug!("[{WORKER_NAME}] transact");
             let stem = params.policy_flags.circuit_stem();
             let prepared = TRANSACT_PROVERS.with(|cell| {
                 let mut borrow = cell.borrow_mut();
@@ -453,7 +485,7 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
             ProverWorkerResponse::TransactPrepared(prepared)
         }
         ProverWorkerRequest::Disclosure(req) => {
-            log::debug!("[{WORKER_NAME}] disclosure");
+            tracing::debug!("[{WORKER_NAME}] disclosure");
 
             let context = req.context;
             let ext_context_hash = disclosure::derive_ext_context_hash(&context)?;
@@ -568,8 +600,16 @@ pub(crate) async fn router(req: ProverWorkerRequest) -> Result<ProverWorkerRespo
 
             ProverWorkerResponse::Disclosure(receipt)
         }
+        ProverWorkerRequest::ConfigureTelemetry(config) => {
+            let _ = crate::telemetry::set_log_level(&config.level);
+            stellar_private_payments_sdk::types::set_reveal_sensitive(config.reveal_sensitive);
+            ProverWorkerResponse::Pong
+        }
+        ProverWorkerRequest::DumpLogs => {
+            ProverWorkerResponse::Logs(crate::telemetry::dump_recent_logs())
+        }
         ProverWorkerRequest::VerifyDisclosureProof(receipt, expected_vk_hash) => {
-            log::debug!("[{WORKER_NAME}] verify disclosure proof");
+            tracing::debug!("[{WORKER_NAME}] verify disclosure proof");
 
             disclosure::validate_registered_receipt(&receipt, &expected_vk_hash)?;
 
@@ -621,8 +661,13 @@ impl ProverBridge {
         req: ProverWorkerRequest,
         timeout_ms: u32,
     ) -> anyhow::Result<ProverWorkerResponse> {
+        let correlated_req = CorrelatedRequest {
+            correlation_id: crate::correlation::current_correlation_id()
+                .unwrap_or_else(|| "-".to_string()),
+            payload: req,
+        };
         let mut bridge = self.bridge.fork();
-        let fut = bridge.run(req).fuse();
+        let fut = bridge.run(correlated_req).fuse();
         let timeout = TimeoutFuture::new(timeout_ms).fuse();
 
         futures::pin_mut!(fut, timeout);

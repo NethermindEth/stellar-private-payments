@@ -52,7 +52,7 @@ struct Cli {
     #[arg(long, global = true)]
     stellar_config_dir: Option<PathBuf>,
 
-    /// Directory with policy_tx_2_2[_{A,B,AB}].{wasm,r1cs}
+    /// Directory with policy_tx_2_2[_{A,B,AB}].{graph.bin,r1cs}
     /// (default: target/circuits-artifacts/release in debug builds,
     /// data_dir/circuits otherwise)
     #[arg(long, global = true)]
@@ -187,7 +187,7 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
     logging::init(cli.verbose, cli.json);
     let json = cli.json;
-    let config_flag = cli.config.clone();
+    let config_flag = cli.config;
 
     let config_path = resolve_config_path(config_flag.clone());
     let file_config = match config_path.as_deref() {

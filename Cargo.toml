@@ -6,8 +6,8 @@ members = [
     "contracts/*",
     "e2e-tests",
     "poseidon2",
-    "sdk/disclosure",
     "sdk/client",
+    "sdk/disclosure",
     "sdk/prover",
     "sdk/state",
     "sdk/stellar",
@@ -29,25 +29,6 @@ license = "Apache-2.0"
 publish = false
 
 [workspace.dependencies]
-# workspace
-asp-membership = { path = "contracts/asp-membership" }
-asp-non-membership = { path = "contracts/asp-non-membership" }
-circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
-circuit-keys = { path = "circuit-keys" }
-circuits = { path = "circuits", default-features = false }
-contract-types = { path = "contracts/types" }
-disclosure = { path = "sdk/disclosure" }
-pool = { path = "contracts/pool" }
-prover = { path = "sdk/prover" }
-public-key-registry = { path = "contracts/public-key-registry" }
-soroban-utils = { path = "contracts/soroban-utils" }
-state = { path = "sdk/state" }
-stellar = { path = "sdk/stellar" }
-stellar-private-payments-sdk = { path = "sdk/client" }
-tx-planner = { path = "sdk/tx-planner" }
-types = { path = "sdk/types" }
-witness = { path = "sdk/witness" }
-zkhash = { path = "poseidon2" }
 
 # external
 anyhow = { version = "1", default-features = false }
@@ -55,21 +36,36 @@ ark-bn254 = { version = "0.6.0", default-features = false, features = ["curve"] 
 ark-circom = { git = "https://github.com/NethermindEth/circom-compat.git", default-features = false, branch = "wasm-no-parallel" }
 ark-ff = { version = "0.6.0", default-features = false }
 ark-groth16 = { version = "0.6.0", default-features = false }
+ark-poly = { version = "0.6.0", default-features = false }
 ark-relations = { version = "0.6.0", default-features = false }
 ark-serialize = { version = "0.6.0", default-features = false }
 ark-snark = { version = "0.6.0", default-features = false }
 ark-std = { version = "0.6.0", default-features = false, features = ["std"] }
+# workspace
+asp-membership = { path = "contracts/asp-membership" }
+asp-non-membership = { path = "contracts/asp-non-membership" }
 async-trait = { version = "0.1.91", default-features = false }
 base64 = { version = "0.22", default-features = false, features = ["alloc"] }
 cfg-if = { version = "1", default-features = false }
-clap = { version = "4.6.3", default-features = false, features = ["std", "color",
-  "help",
-  "usage",
-  "error-context",
-  "suggestions", "derive", "env"] }
+circom-groth16-verifier = { path = "contracts/circom-groth16-verifier" }
+circom-witness-rs = { git = "https://github.com/NethermindEth/circom-witness-rs", rev = "537f9c9cca18fada33d717e634af831ac101a6f1", default-features = false }
+circuit-keys = { path = "circuit-keys" }
+circuits = { path = "circuits", default-features = false }
+clap = { version = "4.6.3", default-features = false, features = [
+    "std",
+    "color",
+    "help",
+    "usage",
+    "error-context",
+    "suggestions",
+    "derive",
+    "env",
+] }
 console_error_panic_hook = { version = "0.1.7", default-features = false }
+contract-types = { path = "contracts/types" }
+disclosure = { path = "sdk/disclosure" }
 futures = { version = "0.3.33", default-features = false, features = ["async-await"] }
-getrandom = { version = "0.2", default-features = false }
+getrandom = { version = "0.2", default-features = false, features = ["js"] }
 gloo-timers = { version = "0.4", default-features = false, features = ["futures"] }
 gloo-worker = { version = "0.6", default-features = false, features = ["futures"] }
 hex = { version = "0.4", default-features = false, features = ["alloc"] }
@@ -77,26 +73,41 @@ js-sys = "0.3"
 log = { version = "0.4", default-features = false }
 num-bigint = { version = "0.4.8", default-features = false, features = ["serde"] }
 num-integer = { version = "0.1.46", default-features = false }
+pool = { path = "contracts/pool" }
+proptest = "1"
+prover = { path = "sdk/prover" }
+public-key-registry = { path = "contracts/public-key-registry" }
 reqwest = { version = "0.13", default-features = false, features = ["json"] }
+ruint = { version = "1.20", default-features = false, features = ["num-bigint"] } # match circom-witness-rs
 rusqlite = { version = "0.40.1", default-features = false, features = ["ffi-sqlite-wasm-rs"] }
 serde = { version = "1", default-features = false, features = ["derive", "alloc"] }
 serde-wasm-bindgen = { version = "0.6", default-features = false }
 serde_json = { version = "1", default-features = false }
 sha2 = { version = "0.11.0", default-features = false }
 soroban-sdk = { version = "27", default-features = false, features = ["hazmat"] }
+soroban-utils = { path = "contracts/soroban-utils" }
 sqlite-wasm-rs = { version = "0.5.5", default-features = false }
 sqlite-wasm-vfs = { version = "0.2.0", default-features = false }
+state = { path = "sdk/state" }
+stellar = { path = "sdk/stellar" }
+stellar-private-payments-sdk = { path = "sdk/client" }
 thiserror = { version = "2", default-features = false }
 tokio = { version = "1", default-features = false }
+tracing = { version = "0.1", default-features = false, features = ["std", "release_max_level_info", "attributes"] }
+tracing-log = { version = "0.2", default-features = false, features = ["log-tracer", "std"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
+tx-planner = { path = "sdk/tx-planner" }
+types = { path = "sdk/types" }
 uint = { version = "0.10", default-features = false }
 wasm-bindgen = { version = "0.2", default-features = false, features = ["serde-serialize"] }
 wasm-bindgen-futures = { version = "0.4", default-features = false }
 wasm-bindgen-test = { version = "0.3", default-features = false, features = ["std"] }
-wasm-log = { version = "0.3", default-features = false }
-# see also https://github.com/NethermindEth/stellar-private-payments/issues/192
-wasmer = { version = "7.2", default-features = false }
 web-sys = { version = "0.3", features = ["console", "WorkerGlobalScope", "Response", "Request", "RequestInit", "RequestMode", "Window", "Event", "Cache", "CacheStorage"] }
+web-time = "1"
 wiremock = "0.6"
+witness = { path = "sdk/witness" }
+zeroize = { version = "1.9.0", default-features = false, features = ["alloc", "derive"] }
+zkhash = { path = "poseidon2" }
 
 [workspace.lints.rust]
 missing_docs = "allow"
@@ -127,6 +138,11 @@ lto = true
 [profile.release-with-logs]
 inherits = "release"
 debug-assertions = true
+
+# More aggresive optimization for build scripts
+# Otherwise, compiling the circuit crate takes too much time with new circuits
+[profile.dev.build-override]
+opt-level = 3
 
 [patch.crates-io]
 cranelift-control = { path = "vendor/cranelift-control" }

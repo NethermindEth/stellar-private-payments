@@ -16,6 +16,7 @@ use types::{
 const DB_NAME: &str = "spp.db";
 pub const APP_SETTING_BOOTNODE_CONFIG: &str = "bootnode_config";
 pub const APP_SETTING_EXPLORER: &str = "explorer";
+pub const DEFAULT_BOOTNODE_URL: &str = "https://bootnode.dev-nethermind.xyz";
 
 const MIGRATION_ARRAY: &[M] = &[M::up(include_str!("schema.sql"))];
 const MIGRATIONS: Migrations = Migrations::from_slice(MIGRATION_ARRAY);
@@ -104,7 +105,7 @@ impl Storage {
             }
         }
         tx.commit()?;
-        log::debug!(
+        tracing::debug!(
             "[STORAGE] saved {} events and cursor {} (latest_ledger={})",
             data.events.len(),
             data.cursor,
@@ -274,9 +275,9 @@ impl Storage {
         )
         .context("failed to insert keypairs")?;
         tx.commit().context("failed to commit transaction")?;
-        log::debug!(
+        tracing::debug!(
             "[STORAGE] saved new keypairs for the account {}",
-            account_address
+            types::Sensitive(&account_address)
         );
         Ok(())
     }
@@ -1301,7 +1302,7 @@ impl Storage {
                 .checked_div(pool_count_u32)
                 .expect("pool count is not zero")
         } else {
-            log::warn!(
+            tracing::warn!(
                 "pool count {pool_count_u32} exceeds total limit {total_limit} of commitments to scan"
             );
             1

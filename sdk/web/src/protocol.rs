@@ -1,5 +1,13 @@
 use serde::{Deserialize, Serialize};
 
+/// Wrapper that carries a correlation/operation ID across the gloo-worker
+/// boundary. The worker re-attaches `correlation_id` as a tracing span field.
+#[derive(Debug, Serialize, Deserialize)]
+pub struct CorrelatedRequest<T> {
+    pub correlation_id: String,
+    pub payload: T,
+}
+
 pub use stellar_private_payments_sdk::{
     DisclosureInputs, DisclosureInputsRequest, DisclosureProveParams, PreparedProverTx,
     TransactRequest,
@@ -111,6 +119,8 @@ pub enum StorageWorkerRequest {
     DisclosureInputs(DisclosureInputsRequest),
     Transact(TransactRequest),
     DeriveASPleaf(AdminASPRequest),
+    ConfigureTelemetry(WorkerTelemetryConfig),
+    DumpLogs,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -134,6 +144,7 @@ pub enum StorageWorkerResponse {
     DisclosureNotes(Vec<DisclosureInputs>),
     TransactParams(TransactParams),
     DeriveASPleaf(Field),
+    Logs(String),
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -143,6 +154,8 @@ pub enum ProverWorkerRequest {
     Transact(TransactParams),
     Disclosure(DisclosureProveParams),
     VerifyDisclosureProof(DisclosureReceipt, String),
+    ConfigureTelemetry(WorkerTelemetryConfig),
+    DumpLogs,
 }
 
 #[allow(clippy::large_enum_variant)]
@@ -153,6 +166,7 @@ pub enum ProverWorkerResponse {
     TransactPrepared(PreparedProverTx),
     Disclosure(DisclosureReceipt),
     DisclosureProofVerified(bool),
+    Logs(String),
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -160,4 +174,14 @@ pub enum ProverWorkerResponse {
 pub struct AdminASPRequest {
     pub membership_blinding: Field,
     pub pubkey: NotePublicKey,
+}
+
+/// Telemetry configuration pushed from the main thread to worker isolates.
+/// Only the knobs that make sense per-isolate: sink targets and ring-buffer
+/// sizing stay per-isolate defaults and are not broadcast.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkerTelemetryConfig {
+    pub level: String,
+    pub reveal_sensitive: bool,
 }

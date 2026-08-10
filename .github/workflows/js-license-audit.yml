@@ -1,0 +1,52 @@
+name: JS License Audit
+# JS-only license and dependency checks. Rust/Cargo licensing is enforced by
+# dependency-audit.yml via cargo-deny, which is feature-aware and checks the
+# compiled dependency graph.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  full-tree-scan:
+    name: Full-Tree License Scan
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
+
+      - name: circomlib license tripwire
+        # circomlib's .circom sources are compiled into shipped dist/circuits/
+        # artifacts, so its LGPL-3.0 license is a distribution concern. Its
+        # devDependencies (GPL-3.0 build tooling) are intentionally out of
+        # scope for this scanner, mirroring deny.toml's circuits exclusion.
+        # This tripwire catches a license change without scanning the full tree.
+        shell: bash
+        run: |
+          set -eu
+          LOCK="$(tr -d '[:space:]' < circuits/circomlib.lock)"
+          LICENSE="$(curl -sfL "https://raw.githubusercontent.com/iden3/circomlib/${LOCK}/package.json" | jq -r '.license // "UNKNOWN"')"
+          if [ "$LICENSE" != "LGPL-3.0" ]; then
+            echo "ERROR: circomlib license changed to '${LICENSE}' at ${LOCK}." >&2
+            echo "circomlib .circom sources are compiled into shipped artifacts." >&2
+            echo "Redistribution obligations (source bundle + NOTICE) must be re-reviewed." >&2
+            exit 1
+          fi
+          echo "circomlib license OK: LGPL-3.0"
+
+      - name: Run Full-Tree License Audit
+        run: |
+          sh scripts/check-js-licenses.sh
+
+      - name: Upload Scan Report Artifact
+        if: always()
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        with:
+          name: js-license-scan-report
+          path: js-license-scan-report.json

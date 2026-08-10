@@ -9,7 +9,7 @@ This document describes how the application manages local state, including persi
 | Layer | Location | Role |
 |-------|----------|------|
 | **Rust SDK** | `sdk/client` | Rust `PrivatePool` — deposits, transfers, withdrawals, transact, disclose |
-| **Web SDK** | `sdk/web` | npm package `stellar-private-payments-sdk-web` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
+| **Web SDK** | `sdk/web` | npm package `stellar-private-payments` — WASM bindings, workers, `Storage` / `Client` / `PrivatePool` JS API |
 | **App** | `app/js` | UI, Freighter connect UX, `wasm-facade.js` lifecycle, `app-storage.js` for app-only persistence |
 
 Core application logic lives in Rust `sdk/` crates (sync primitives, indexer, tx builders, proving, SQLite schema). The browser SDK (`sdk/web`) compiles that logic to WASM and exposes a typed JavaScript API. The `app/` directory is the web UI and a thin runtime facade — it does not embed its own WASM crate.
@@ -41,7 +41,7 @@ The WASM layer exposes four JS handles with different scope:
 | **`Account`** | Wallet session (address + signer) | `portfolio`, `userPublicKeys`, `aspSecret`, `userNotes`, `isRegistered`, `deriveAspUserLeaf`, `registerPublicKeys`, `pool()` |
 | **`PrivatePool`** | One pool contract + user session | `deposit`, `transfer`, `withdraw`, `transact`, `disclose`, `balance`, `notes` |
 
-`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts.
+`Client` is the long-lived deployment shell; `Account` is created when the wallet binds; `PrivatePool` is created per active pool when the user transacts. Free helpers such as `deriveAspUserLeaf(notePublicKey, membershipBlinding)` need neither wallet nor storage.
 
 **JS UI (main thread)**
 
@@ -49,7 +49,7 @@ The UI is JavaScript. It imports the SDK package (or `wasm-facade.js` helpers) a
 
 **Main thread (WASM)**
 
-- Entry: `init()` from `stellar-private-payments-sdk-web` (wasm-bindgen module init).
+- Entry: `init()` from `stellar-private-payments` (wasm-bindgen module init).
 - `Client::new` forks a `Storage` handle and holds RPC URL + optional bootnode; wallet binding happens at `account`.
 - `Client::backgroundSync` spawns the native SDK `BackgroundSync` loop (`wasm_bindgen_futures::spawn_local`).
 
@@ -121,7 +121,7 @@ flowchart LR
     AS["AppStorage (settings, disclaimer, op history)"]
   end
 
-  subgraph PKG["stellar-private-payments-sdk-web"]
+  subgraph PKG["stellar-private-payments"]
     ST["Storage"]
     CL["Client"]
     AC["Account"]
@@ -184,11 +184,11 @@ App-only persistence on top of `Storage.call`: explorer settings, bootnode confi
 
 **`app/js/wallet.js`**
 
-Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`.
+Freighter connect/watch/sign UX for the app UI. Distinct from `sdk/web/js/freighter.js` (`FreighterSigner`), which implements the SDK `WalletSigner` interface passed to `Client.account`. Both adapters intentionally use the SEP-0043 standardized sign/get methods where they exist; the remaining Freighter-only connect/permission and watch calls are isolated at this adapter boundary because SEP-0043 (Draft) does not yet define replacements. The network-URL call (`getNetworkDetails` for `sorobanRpcUrl`) is a separate, permanent exception rather than a Draft gap: SEP-0043's `getNetwork` has no RPC-URL field at all, standard or Draft, so there is no SEP path to migrate to.
 
 **Build (Trunk)**
 
-`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` into `js/stellar-private-payments-sdk-web/`. App bundles (`ui.js`, etc.) import `stellar-private-payments-sdk-web` as an external package via import maps in `index.html`.
+`Trunk.toml` stages `sdk/web/dist/` (WASM, workers, **bundled circuits** under `dist/circuits/`) and bundles `sdk/web/js/index.js` plus the opt-in `sdk/web/js/freighter.js` into `js/stellar-private-payments/`. App bundles (`ui.js`, etc.) import `stellar-private-payments` / `stellar-private-payments/freighter` as external packages via import maps in `index.html`.
 
 Root-level `circuits/` in the deployed site holds **legal files only** (`NOTICE.txt`, `source-bundle.tar.gz` for footer links). Proving loads artifacts from the SDK copy via the prover worker loader (`__STELLAR_PRIVATE_PAYMENTS_CIRCUITS_BASE__`).
 

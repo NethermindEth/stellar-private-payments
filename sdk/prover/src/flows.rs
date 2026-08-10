@@ -755,10 +755,7 @@ where
                     .map(field_to_circuit_hex)
                     .collect::<Result<Vec<_>>>()?,
             );
-            circuit.set_single(
-                &format!("{prefix_m}root"),
-                &field_to_circuit_hex(&membership_proof.root)?,
-            );
+            // Root is supplied via `membershipRoots`, not the bus.
         }
 
         if policy_flags.requires_non_membership_proofs() {
@@ -792,10 +789,7 @@ where
                     .map(field_to_circuit_hex)
                     .collect::<Result<Vec<_>>>()?,
             );
-            circuit.set_single(
-                &format!("{prefix_n}root"),
-                &field_to_circuit_hex(&non_membership_proof.root)?,
-            );
+            // Root is supplied via `nonMembershipRoots`, not the bus.
         }
     }
 
@@ -1142,6 +1136,19 @@ mod tests {
                 .circuit_inputs
                 .signals
                 .contains_key("outputCommitment")
+        );
+        // Roots travel via membershipRoots/nonMembershipRoots — not bus fields.
+        assert!(
+            !artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("membershipProofs[0][0].root")
+        );
+        assert!(
+            !artifacts
+                .circuit_inputs
+                .signals
+                .contains_key("nonMembershipProofs[0][0].root")
         );
 
         // Encrypted outputs should be present for both slots.

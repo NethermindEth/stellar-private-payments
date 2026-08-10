@@ -1,77 +1,50 @@
 //! Progress logging for the CLI.
 //!
-//! Installs a `log` implementation so SDK sync logs (indexer/storage/transact)
+//! Installs a `tracing` subscriber so SDK sync logs (indexer/storage/transact)
 //! and the CLI's own progress lines stream to the user on **stderr**: colored
 //! human text by default, or one JSON object per line under `--json` (keeping
 //! stdout reserved for the command's JSON result).
 
-use std::{
-    io::{IsTerminal, Write},
-    sync::OnceLock,
-};
-
-use log::{Level, LevelFilter, Metadata, Record};
-
-struct CliLogger {
-    json: bool,
-    color: bool,
-}
-
-static LOGGER: OnceLock<CliLogger> = OnceLock::new();
+use std::io::IsTerminal;
+use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitExt};
 
 /// Install the logger. `verbose` is the repeat count of `-v`
 /// (0 = info, 1 = debug, 2+ = trace).
 pub fn init(verbose: u8, json: bool) {
-    let level = match verbose {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
+    // 1. Initialize LogTracer to redirect log::* calls to tracing
+    let _ = tracing_log::LogTracer::init();
+
+    // 2. Map verbose level to EnvFilter directives
+    let directive = match verbose {
+        0 => "info",
+        1 => "debug",
+        _ => "trace",
     };
+
+    // Allow overriding via RUST_LOG environment variable
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new(directive));
+
     let color = !json && std::io::stderr().is_terminal() && std::env::var_os("NO_COLOR").is_none();
-    let logger = LOGGER.get_or_init(|| CliLogger { json, color });
-    // Ignore the error if a logger was already installed (e.g. tests).
-    let _ = log::set_logger(logger);
-    log::set_max_level(level);
-}
 
-fn ansi(level: Level) -> &'static str {
-    match level {
-        Level::Error => "31",
-        Level::Warn => "33",
-        Level::Info => "32",
-        Level::Debug => "36",
-        Level::Trace => "90",
-    }
-}
+    // 3. Build the subscriber. CorrelationIdLayer lets nested SDK calls inherit an
+    //    ambient correlation_id via correlation_id_or_new() rather than each
+    //    minting an unrelated one.
+    let subscriber = tracing_subscriber::registry()
+        .with(filter)
+        .with(stellar_private_payments_sdk::types::CorrelationIdLayer);
 
-impl log::Log for CliLogger {
-    fn enabled(&self, _metadata: &Metadata) -> bool {
-        true
-    }
-
-    fn log(&self, record: &Record) {
-        let mut err = std::io::stderr().lock();
-        if self.json {
-            let obj = serde_json::json!({
-                "level": record.level().to_string(),
-                "target": record.target(),
-                "message": record.args().to_string(),
-            });
-            let _ = writeln!(err, "{obj}");
-        } else if self.color {
-            let _ = writeln!(
-                err,
-                "\x1b[{}m{:>5}\x1b[0m {}",
-                ansi(record.level()),
-                record.level(),
-                record.args()
-            );
-        } else {
-            let _ = writeln!(err, "{:>5} {}", record.level(), record.args());
-        }
-    }
-
-    fn flush(&self) {
-        let _ = std::io::stderr().flush();
+    if json {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .json()
+            .with_writer(std::io::stderr)
+            .flatten_event(true);
+        let _ = subscriber.with(fmt_layer).try_init();
+    } else {
+        let fmt_layer = tracing_subscriber::fmt::layer()
+            .with_writer(std::io::stderr)
+            .with_ansi(color)
+            .without_time()
+            .with_target(verbose >= 2); // only show targets in trace level
+        let _ = subscriber.with(fmt_layer).try_init();
     }
 }

@@ -22,6 +22,12 @@ if ! cargo deny check; then
     exit 2
 fi
 
+# JS dependency license audit
+if ! sh scripts/check-js-licenses.sh; then
+    echo "❌ JS license policy violations detected (see report above)"
+    exit 11
+fi
+
 # Formatting check
 if ! cargo +nightly fmt --all -- --check --config-path rustfmt.toml; then
     echo "❌ Formatting issues (run 'cargo +nightly fmt --all')"
@@ -34,8 +40,9 @@ if ! typos; then
     exit 4
 fi
 
-# Linting
-if ! cargo clippy --all-targets --all-features -- -D warnings; then
+# Linting (--all-features would enable regen-graph, whose build script requires
+# WITNESS_CPP; mirror .github/workflows/linter.yml with an explicit list)
+if ! cargo clippy --all-targets --features asm,rusqlite -- -D warnings; then
     echo "❌ Clippy violations (check warnings above)"
     exit 5
 fi

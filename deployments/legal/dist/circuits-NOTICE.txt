@@ -1,6 +1,6 @@
 Circuits - Licensing Notice
 
-This directory contains compiled circuit artifacts (`*.r1cs` and `*.wasm`)
+This directory contains compiled circuit artifacts (`*.r1cs` and `*.graph.bin`)
 that were generated from Circom sources in the repository
 
 https://github.com/NethermindEth/stellar-private-payments

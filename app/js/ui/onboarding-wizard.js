@@ -1,6 +1,7 @@
-import { FreighterSigner } from 'stellar-private-payments-sdk-web';
+import { FreighterSigner } from 'stellar-private-payments/freighter';
 import { DEFAULT_BOOTNODE_URL } from '../app-storage.js';
 import { client } from '../wasm-facade.js';
+import { friendlyErrorMessage } from '../facade-errors.js';
 import { Utils, Toast } from './core.js';
 import {
     hasNotificationSupport,
@@ -11,7 +12,7 @@ import {
 
 const STORAGE_PERSIST_FLAG = 'poolstellar_storage_persist_prompted';
 const DEFAULT_EXPLORER_BASE_URL = 'https://stellar.expert/explorer/testnet';
-const STEP_ORDER = ['disclaimer', 'storage', 'keys', 'retention', 'explorer', 'registration'];
+const STEP_ORDER = ['disclaimer', 'retention', 'storage', 'keys', 'explorer', 'registration'];
 
 function hasStorageManager() {
     return (
@@ -55,7 +56,7 @@ function setError(message) {
         el.classList.add('hidden');
         return;
     }
-    el.textContent = message;
+    el.textContent = friendlyErrorMessage(message);
     el.classList.remove('hidden');
 }
 
@@ -287,9 +288,9 @@ export async function runOnboardingWizard({
 
     const steps = [
         ...(!disclaimerState?.accepted ? ['disclaimer'] : []),
+        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         ...(needsStorageStep ? ['storage'] : []),
         ...(!keysExist ? ['keys'] : []),
-        ...(needsNotificationStep || !bootnodeSetting || bootnodeRequired ? ['retention'] : []),
         [explorerSetting?.baseUrl ? null : 'explorer'].filter(Boolean),
         // Only offer registration when the registry is fully synced AND there's no
         // entry. If the local registry hasn't synced yet, the lookup can't prove the
@@ -579,6 +580,9 @@ export async function runOnboardingWizard({
                             if (enabled && url && !url.startsWith('https://')) {
                                 throw new Error('Bootnode URL must start with https://');
                             }
+                            if (enableNotifications && Notification.permission === 'default') {
+                                await requestNotificationPermission();
+                            }
                             await storage.setSetting('bootnode_config', { enabled, url });
                             state.bootnode = { enabled, url };
                             if (enableNotifications) {
@@ -644,7 +648,8 @@ export async function runOnboardingWizard({
                 eyebrow: `Step ${STEP_ORDER.indexOf(stepId) + 1} of ${STEP_ORDER.length}`,
                 title: 'Register your public keys in the address book',
                 body: 'If you register now, other users can transfer to your Stellar address without asking for note and encryption public keys out of band.',
-                aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings.',
+                aside: 'If you skip this step, transfers to you require sharing your note and encryption public keys manually. Registration remains available later from settings. Note: registering publishes your public address to key binding on-chain as an opt-in public event.',
+
             });
             renderContent(panel);
 

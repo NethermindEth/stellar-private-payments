@@ -1,3 +1,21 @@
+/**
+ * Wallet adapter boundary for the Freighter browser extension.
+ *
+ * SEP-0043 v1.2.1 standardizes getAddress, signTransaction, signAuthEntry,
+ * signMessage, and getNetwork. The additional Freighter-only symbols imported
+ * below (WatchWalletChanges, getNetworkDetails, isConnected, isAllowed,
+ * requestAccess, setAllowed) are intentional adapter extensions: SEP-0043 is
+ * still Draft and defines no connect/permission-gating or watch/change API,
+ * so the app relies on Freighter's extension for those capabilities.
+ *
+ * getNetworkDetails is used in place of the SEP-0043-standard getNetwork for
+ * a different reason: the app needs the Soroban RPC URL to pick the correct
+ * endpoint per network, and no field for that exists on getNetwork's
+ * `{network, networkPassphrase}` result — RPC-URL discovery is out of scope
+ * for SEP-0043 entirely, not a temporary Draft gap. This is the one place
+ * where the app depends on a Freighter-only method with no SEP path at all;
+ * see getWalletNetwork() below.
+ */
 import {
     WatchWalletChanges,
     getAddress,
@@ -49,7 +67,7 @@ async function ensureFreighterReady(opts = {}) {
     if (!allowed?.isAllowed) {
         const set = await setAllowed();
         if (set?.error) {
-            throw normalizeWalletError(set.error, "Freighter access rejected");
+            throw normalizeWalletError(set.error, "Freighter access could not be granted");
         }
     }
 
@@ -140,6 +158,10 @@ export function startWalletWatcher(opts) {
  *
  * Useful for displaying network name and ensuring app/network alignment.
  *
+ * Uses the Freighter-only getNetworkDetails rather than SEP-0043's
+ * getNetwork because the app needs sorobanRpcUrl, which getNetwork has no
+ * field for (see the module header for why this isn't a Draft-gap issue).
+ *
  * @returns {Promise<{network: string, networkUrl: string, networkPassphrase: string, sorobanRpcUrl?: string}>}
  */
 export async function getWalletNetwork() {
@@ -165,7 +187,21 @@ function normalizeWalletError(error, fallbackMessage = "Wallet error") {
     const message = error?.message || fallbackMessage;
     const lower = String(message).toLowerCase();
     const err = new Error(message);
-    err.code = /reject|declin|denied|cancel/.test(lower) ? 'USER_REJECTED' : 'WALLET_ERROR';
+    // SEP-0043 v1.2.1 defines code -4 as user rejection. Check the structured
+    // code first, then fall back to the message regex for wallets/versions that
+    // do not yet set it.
+    //
+    // NOTE: the regex below runs against `fallbackMessage` too whenever the
+    // wallet payload carries no message of its own. Callers must therefore keep
+    // their fallback strings free of reject/declin/denied/cancel wording, or an
+    // arbitrary wallet failure will be reported to the user as a cancellation.
+    if (error?.code === -4) {
+        err.code = 'USER_REJECTED';
+    } else if (/reject|declin|denied|cancel/.test(lower)) {
+        err.code = 'USER_REJECTED';
+    } else {
+        err.code = 'WALLET_ERROR';
+    }
     err.cause = error;
     return err;
 }
@@ -243,9 +279,14 @@ export async function signWalletMessage(message, opts = {}) {
     if (error) {
         throw normalizeWalletError(error, 'Message signature failed');
     }
-    // If SignMessage returns null
+    // If SignMessage returns null. Older Freighter versions return a null
+    // signature instead of an error payload when the user declines, so classify
+    // this as a rejection via the structured code rather than by wording the
+    // message so that a substring matcher happens to catch it.
     if (!signedMessage) {
-        throw new Error('No signature returned. User may have rejected the request.');
+        const err = new Error('No signature returned by the wallet.');
+        err.code = 'USER_REJECTED';
+        throw err;
     }
 
     return { signedMessage, signerAddress };

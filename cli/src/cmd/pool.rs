@@ -22,6 +22,11 @@ fn open_pool(
     ClientSession::new(config, &account, &network, false)?.pool(pool)
 }
 
+#[tracing::instrument(
+    name = "cmd_deposit",
+    skip_all,
+    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount))
+)]
 pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Result<()> {
     let pool = open_pool(config, pool)?;
     let amount = parse_amount(amount)?;
@@ -36,6 +41,11 @@ pub fn deposit(config: &CliConfig, pool: &str, amount: &str, json: bool) -> Resu
     )
 }
 
+#[tracing::instrument(
+    name = "cmd_transfer",
+    skip_all,
+    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount), recipient = ?types::Sensitive(&to))
+)]
 pub fn transfer(
     config: &CliConfig,
     pool: &str,
@@ -54,6 +64,11 @@ pub fn transfer(
     print_tx_results(config, "Transfer submitted", &results, json)
 }
 
+#[tracing::instrument(
+    name = "cmd_withdraw",
+    skip_all,
+    fields(correlation_id = %types::correlation_id_or_new(), amount = ?types::Sensitive(&amount), recipient = ?types::Sensitive(&to))
+)]
 pub fn withdraw(
     config: &CliConfig,
     pool: &str,
