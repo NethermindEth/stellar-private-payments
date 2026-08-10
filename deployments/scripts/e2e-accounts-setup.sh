@@ -226,22 +226,31 @@ fund_account() {
 # attempt against a not-yet-visible account fails with "Account not found", so
 # retry briefly before giving up.
 onboard_account() {
-  local alias="$1" attempt=1 delay=2
+  local alias="$1" attempt=1 delay=2 err_file
   step "onboarding + registering '$alias'"
   while [ "$attempt" -le 5 ]; do
+    err_file="$(mktemp)"
     if spp --account "$alias" \
         --network "$NETWORK" \
         --data-dir "$DATA_DIR" \
         --stellar-config-dir "$DATA_DIR/stellar" \
-        onboard --accept --register --no-bootnode --explorer-url "$EXPLORER_URL" 2>&1; then
+        onboard --accept --register --no-bootnode --explorer-url "$EXPLORER_URL" 2>"$err_file"; then
+      rm -f "$err_file"
       return 0
-    fi | tee /dev/stderr | grep -q 'Account not found' || return 1
+    fi
+    local err
+    err="$(cat "$err_file")"
+    rm -f "$err_file"
+    printf '%s\n' "$err" >&2
+    if ! printf '%s' "$err" | grep -q 'Account not found'; then
+      die "onboarding '$alias' failed"
+    fi
+    [ "$attempt" -lt 5 ] || die "onboarding '$alias' failed: account still not visible to RPC after retries"
     step "account not yet visible to RPC; retrying onboard in ${delay}s ($attempt/5)"
     sleep "$delay"
     delay=$((delay * 2))
     attempt=$((attempt + 1))
   done
-  die "onboarding '$alias' failed: account still not visible to RPC after retries"
 }
 
 registration_status() {
