@@ -1166,6 +1166,31 @@ dependencies = [
 ]
 
 [[package]]
+name = "circuit-builder"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "ark-bn254 0.6.0",
+ "ark-circom",
+ "ark-groth16",
+ "ark-snark",
+ "ark-std 0.6.0",
+ "circuit-keys",
+ "clap",
+ "compiler",
+ "constraint_generation",
+ "parser",
+ "program_structure",
+ "regex",
+ "serde",
+ "serde_json",
+ "sha2 0.11.0",
+ "type_analysis",
+ "types",
+ "wast",
+]
+
+[[package]]
 name = "circuit-keys"
 version = "0.1.0"
 dependencies = [
@@ -7379,6 +7404,15 @@ dependencies = [
  "tracing",
  "types",
  "web-time",
+]
+
+[[package]]
+name = "witness-graph-gen"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "circom-witness-rs",
+ "clap",
 ]
 
 [[package]]

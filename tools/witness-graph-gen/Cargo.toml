@@ -1,0 +1,25 @@
+[package]
+name = "witness-graph-gen"
+version.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "witness-graph-gen"
+path = "src/main.rs"
+
+# Off by default: the `circom-witness-rs` build script reads `WITNESS_CPP` and
+# panics when it is unset, which would break a plain `cargo build --workspace`.
+[features]
+build-witness = ["dep:circom-witness-rs"]
+
+[dependencies]
+# external
+anyhow.workspace = true
+circom-witness-rs = { workspace = true, optional = true, features = ["build-witness"] }
+clap.workspace = true
+
+[lints]
+workspace = true
