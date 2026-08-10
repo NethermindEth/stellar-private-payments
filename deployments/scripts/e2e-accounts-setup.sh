@@ -281,12 +281,20 @@ verify_account() {
 
 # Reuse an existing password (sourced from the env file or exported) so a
 # backfill/rewrite never invalidates a Freighter profile snapshot; generate
-# one otherwise.
+# one otherwise. Freighter enforces uppercase/lowercase/digit, so the
+# generator guarantees all three classes (a bare token_hex would not).
 freighter_password() {
   if [ -n "${E2E_FREIGHTER_PASSWORD:-}" ]; then
     printf '%s' "$E2E_FREIGHTER_PASSWORD"
   else
-    python3 -c 'import secrets; print(secrets.token_hex(16))'
+    python3 -c '
+import secrets, string
+pw = [secrets.choice(string.ascii_uppercase),
+      secrets.choice(string.ascii_lowercase),
+      secrets.choice(string.digits)]
+pw += [secrets.choice(string.ascii_letters + string.digits) for _ in range(21)]
+secrets.SystemRandom().shuffle(pw)
+print("".join(pw))'
   fi
 }
 
