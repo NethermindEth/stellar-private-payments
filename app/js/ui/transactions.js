@@ -20,6 +20,9 @@ import { onEnter } from './keys.js';
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
 const TX_PROGRESS_EVENT = 'stellar-private-payments:tx-progress';
+// Amount inputs estimate on every keystroke; wait for a pause so a typed-out
+// amount costs one estimate rather than one per digit.
+const ESTIMATE_DEBOUNCE_MS = 300;
 
 function selectedPool() {
     return Utils.selectedPool();
@@ -111,6 +114,61 @@ async function txCountRow(amountValue) {
     }
 }
 
+// Re-estimate callbacks for every bound amount input, so a pool change can
+// refresh all of them without each caller holding its own element references.
+const costHintRefreshers = [];
+
+function clearCostHint(hintId) {
+    const hint = document.getElementById(hintId);
+    if (hint) hint.textContent = '';
+}
+
+// Live "this will take N transactions" hint under an amount input, refreshed as
+// the user types. Only a split is worth flagging, so a single-transaction amount
+// leaves the hint empty. Best-effort like `txCountRow`: a disconnected wallet or
+// a failed estimate clears the hint rather than reporting an error, since the
+// confirmation dialog and submit path already surface anything that truly blocks
+// the operation.
+function bindAmountCostHint(input, hint) {
+    if (!input || !hint) return;
+    let timer = null;
+    let seq = 0;
+
+    const schedule = () => {
+        clearTimeout(timer);
+        // Estimates resolve out of order, so tag each attempt and let only the
+        // newest write the hint — a stale reply describes a discarded amount.
+        const current = ++seq;
+        const amount = parseAmount(input.value, { allowNegative: false });
+        if (!amount.ok || amount.value <= 0n || !App.state.wallet.address || !isRuntimeReady()) {
+            hint.textContent = '';
+            return;
+        }
+        timer = setTimeout(async () => {
+            try {
+                const session = await ensureAppPool();
+                const estimate = await session.estimate(amount.value);
+                if (current !== seq) return;
+                const txCount = Number(estimate?.txCount ?? 0);
+                hint.textContent = txCount > 1
+                    ? `This amount requires ${txCount} transactions to complete.`
+                    : '';
+            } catch {
+                if (current === seq) hint.textContent = '';
+            }
+        }, ESTIMATE_DEBOUNCE_MS);
+    };
+
+    input.addEventListener('input', schedule);
+    costHintRefreshers.push(schedule);
+}
+
+// A pool switch invalidates whatever the hints show — the estimate depends on
+// the notes held in the selected pool — so recompute them against the new one.
+function refreshCostHints() {
+    costHintRefreshers.forEach((schedule) => schedule());
+}
+
 async function submitDeposit(button, amountValue, pool) {
     setLoading(button, true, 'Preparing deposit…');
     const session = await ensureAppPool();
@@ -145,6 +203,7 @@ async function submitTransfer(button, amountValue, pool, transferRefs, transferA
             hashes,
         });
         document.getElementById('transfer-amount').value = '';
+        clearCostHint('transfer-cost-hint');
         transferAddress.value = '';
         transferRefs.noteKey.value = '';
         transferRefs.encKey.value = '';
@@ -171,6 +230,7 @@ async function submitWithdraw(button, amountValue, pool, recipient) {
         });
         document.getElementById('withdraw-amount').value = '';
         document.getElementById('withdraw-recipient').value = '';
+        clearCostHint('withdraw-cost-hint');
     }
 }
 
@@ -325,6 +385,9 @@ export const Transactions = {
             const advancedRecipient = document.getElementById('advanced-public-recipient');
             if (withdrawRecipient) withdrawRecipient.value = address;
             if (advancedRecipient) advancedRecipient.value = address;
+            // An amount typed before connecting was skipped for want of a
+            // wallet; now that there is one, estimate what is already entered.
+            refreshCostHints();
         });
     },
 
@@ -349,6 +412,7 @@ export const Transactions = {
         App.events.addEventListener('pool:config', updateMoveFundsBalance);
         App.events.addEventListener('pool:selected', updateMoveFundsBalance);
         App.events.addEventListener('balances:updated', updateMoveFundsBalance);
+        App.events.addEventListener('pool:selected', refreshCostHints);
         App.events.addEventListener('advanced:use-note', (event) => {
             fillNextAdvancedInput(event.detail.id);
             Toast.show('Note added to advanced transact', 'success');
@@ -412,6 +476,7 @@ export const Transactions = {
 
         const transferAmountInput = document.getElementById('transfer-amount');
         const transferButton = document.getElementById('btn-transfer');
+        bindAmountCostHint(transferAmountInput, document.getElementById('transfer-cost-hint'));
 
         async function runTransfer(button) {
             try {
@@ -476,6 +541,7 @@ export const Transactions = {
         const withdrawRecipientInput = document.getElementById('withdraw-recipient');
         const withdrawAmountInput = document.getElementById('withdraw-amount');
         const withdrawButton = document.getElementById('btn-withdraw');
+        bindAmountCostHint(withdrawAmountInput, document.getElementById('withdraw-cost-hint'));
 
         async function runWithdraw(button) {
             try {
