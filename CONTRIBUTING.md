@@ -128,23 +128,32 @@ cargo test --target wasm32-unknown-unknown -p stellar
 ```
 
 ### Building Circuits
-To explicitly build them:
+`tools/circuit-builder` compiles the circuits. `cargo build` does not, so build
+them explicitly:
 
 ```bash
-# Build circuits
-cargo build -p circuits
+make circuits-build
+# or, to pass circuit-builder flags directly:
+./scripts/build-circuits.sh --include-tests
 ```
 
-The circuit crate also exposes these flags:
-- **BUILD_TESTS**: Builds the circom test circuits. Most Circom circuits simply define a template. And if you want to use it or test it, you need to instantiate it with some specific parameters.
-For efficiency, the compilation of these circuits test is gatekeeped behind this flag. When enabled, if the verifying keys are not in `testdata`, it will generate them. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
-- **REGEN_KEYS**: Forces the generation of new verification keys. R1CS compilation uses Circom `--O2` (same as `make witness-graphs`).
-- **`make witness-graphs`**: Regenerates committed `*.graph.bin` witness graphs (`--features regen-graph` with `WITNESS_CPP` + `CIRCOM_LIBRARY_PATH` per circuit). Requires Circom CLI matching `circuits/circom.lock` and a C++ toolchain. Note: running with `--features regen-graph` and `WITNESS_CPP` set writes generated `*.graph.bin` files directly into `circuits/` and `deployments/testnet/circuit_keys/` (outside `OUT_DIR`), dirtying source-tree files.
+Artifacts land in `target/circuits-artifacts/` as `{stem}.r1cs` and
+`{stem}.wasm`. R1CS compilation uses Circom `--O2` (same as `make
+witness-graphs`).
+
+- **`--include-tests`**: also compiles the circuits under `circuits/src/test/`. Most Circom circuits only define a template. Testing one needs an entry point that instantiates it with specific parameters, so those are kept out of the default build.
+- **`circuit-builder keys`**: generates Groth16 proving/verifying keys into `--keys-dir`. It writes only keys that are absent. `--force` regenerates them, which invalidates every existing proof and requires redeploying the matching on-chain verifier. Deployed testnet keys are committed under `deployments/testnet/circuit_keys`.
+- **`make witness-graphs`**: regenerates the committed `*.graph.bin` witness graphs, one stem per invocation. Requires a Circom CLI matching `circuits/circom.lock` and a C++ toolchain. It writes into `deployments/testnet/circuit_keys/`, so it changes committed files by design.
+- **`circuit-builder verify`**: re-hashes the artifacts and their `.circom` sources against `target/circuits-artifacts/manifest.json`, and checks the committed key material against `deployments/testnet/circuit_keys/keys.manifest.json`. CI runs this on every pull request. It fails when a circuit change alters the R1CS without a matching key rotation — which would otherwise only surface after a deploy.
+- **`circuit-builder snapshot`**: records the key files currently in `--keys-dir` against the current R1CS. Run it after a trusted ceremony, passing `--provenance ceremony`.
+
+Recompile before you run `verify`: it compares the sources on disk against the manifest, so any edit fails until the artifacts are rebuilt. After a rebuild, a comment-only edit passes — the R1CS is unchanged, so the keys still match it.
 
 Also, for efficiency reasons, some tests are ignored by default. To run them:
 ```bash
-# Test circuits requires the flag to be enabled
-BUILD_TESTS=1 cargo test -p circuits -- --ignored
+# Ignored circuit tests need the test circuits compiled
+./scripts/build-circuits.sh --include-tests
+cargo test -p circuits -- --ignored
 ```
 ### Building Contracts
 
