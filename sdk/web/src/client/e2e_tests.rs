@@ -130,7 +130,8 @@ const RPC_URL: &str = match option_env!("E2E_RPC_URL") {
 /// `deployments/testnet/deployments.json`).
 const POOL_CONTRACT: &str = match option_env!("E2E_POOL_CONTRACT") {
     Some(id) => id,
-    None => "CB6ESM54AS5S3WBLO6LFIZMT5BMXR2DUGMYFUWDXUPM73BPHVHHQAHKE",
+    // Current testnet native XLM pool (`deployments/testnet/deployments.json`).
+    None => "CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV",
 };
 
 const TESTNET_PASSPHRASE: &str = "Test SDF Network ; September 2015";

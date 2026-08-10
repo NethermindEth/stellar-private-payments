@@ -88,6 +88,9 @@ jobs:
           E2E_ACCOUNT_A_SECRET: ${{ secrets.E2E_ACCOUNT_A_SECRET }}
           E2E_ACCOUNT_B_ADDRESS: ${{ secrets.E2E_ACCOUNT_B_ADDRESS }}
           E2E_ACCOUNT_B_SECRET: ${{ secrets.E2E_ACCOUNT_B_SECRET }}
+          # Native XLM pool used by the SDK browser e2e tests (compile-time
+          # option_env! in sdk/web/src/client/e2e_tests.rs).
+          E2E_POOL_CONTRACT: ${{ secrets.E2E_POOL_CONTRACT || 'CCPNFGD7A6LJ7H4FGFLTBSU6XGCPFR5DN76N5WNXOTDPOKASJIU4EMFV' }}
         run: |
           export CHROMEDRIVER="${CHROMEWEBDRIVER:?CHROMEWEBDRIVER not set by the runner image}/chromedriver"
           test -x "$CHROMEDRIVER" || { echo "chromedriver not executable at $CHROMEDRIVER" >&2; exit 1; }
