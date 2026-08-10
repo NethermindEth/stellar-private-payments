@@ -221,14 +221,27 @@ fund_account() {
 # on EOF-means-default instead would be fragile in CI.
 # --no-bootnode: the provisioned account config needs no bootnode; the e2e tests
 # pass bootnode_url to Client::new themselves if they ever need one.
+# Friendbot-funded accounts are visible on Horizon immediately, but the
+# on-chain Soroban RPC node can lag behind by a few seconds. A registration
+# attempt against a not-yet-visible account fails with "Account not found", so
+# retry briefly before giving up.
 onboard_account() {
-  local alias="$1"
+  local alias="$1" attempt=1 delay=2
   step "onboarding + registering '$alias'"
-  spp --account "$alias" \
-      --network "$NETWORK" \
-      --data-dir "$DATA_DIR" \
-      --stellar-config-dir "$DATA_DIR/stellar" \
-      onboard --accept --register --no-bootnode --explorer-url "$EXPLORER_URL"
+  while [ "$attempt" -le 5 ]; do
+    if spp --account "$alias" \
+        --network "$NETWORK" \
+        --data-dir "$DATA_DIR" \
+        --stellar-config-dir "$DATA_DIR/stellar" \
+        onboard --accept --register --no-bootnode --explorer-url "$EXPLORER_URL" 2>&1; then
+      return 0
+    fi | tee /dev/stderr | grep -q 'Account not found' || return 1
+    step "account not yet visible to RPC; retrying onboard in ${delay}s ($attempt/5)"
+    sleep "$delay"
+    delay=$((delay * 2))
+    attempt=$((attempt + 1))
+  done
+  die "onboarding '$alias' failed: account still not visible to RPC after retries"
 }
 
 registration_status() {
