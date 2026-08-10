@@ -32,12 +32,26 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     // #onboarding-modal is always present in the DOM — the app toggles a
     // "hidden" class rather than removing it. A plain existence check never
     // sees completion; check that class instead.
-    const modalHidden = await page.evaluate(
+    //
+    // The app's startOnboarding runs async storage checks before deciding to
+    // show the wizard, so on first load the modal can be hidden for a short
+    // window and then appear. Don't treat the initial hidden state as
+    // "finished" until the app has had time to settle.
+    const modalHidden = async () => page.evaluate(
       () => document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true,
     );
-    if (modalHidden) {
-      console.log(`[${logTag}] wizard finished after ${step} step(s)`);
-      return;
+    if (await modalHidden()) {
+      if (step === 0) {
+        const settleDeadline = Date.now() + 5000;
+        while (Date.now() < settleDeadline) {
+          await page.waitForTimeout(300);
+          if (!await modalHidden()) break;
+        }
+      }
+      if (await modalHidden()) {
+        console.log(`[${logTag}] wizard finished after ${step} step(s)`);
+        return;
+      }
     }
     const readButtons = () =>
       page.$$eval('#onboarding-modal button', (els) =>

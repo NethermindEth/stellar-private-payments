@@ -23,9 +23,8 @@
 // (renderDisclosedNotesVerify's amber pill) — that's the UI's actual
 // spent-status signal this test asserts on, not the (absent) success badge.
 //
-// APP_URL override: this test also runs against a LOCALLY rebuilt app (see
-// the "Root-cause, fix, and end-to-end proof" plan's step 1.3) to prove the
-// sdk/stellar fix end-to-end before the deployed app — which still serves
+// APP_URL override: this test also runs against a LOCALLY rebuilt app to
+// prove the sdk/stellar fix end-to-end before the deployed app — which still serves
 // the pre-fix wasm — is redeployed. A brand-new origin (e.g.
 // http://localhost:8080) has never been onboarded, so unlike the deployed
 // app's wizard-proof snapshot, the onboarding wizard DOES appear on first

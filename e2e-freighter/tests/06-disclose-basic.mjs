@@ -2,9 +2,8 @@
 // end-to-end path, entirely as account A — deposit twice, generate a
 // 1-note selective-disclosure receipt for an unspent note, then verify
 // that SAME receipt through the app's own (walletless-capable, but here
-// wallet-backed) verify flow. No second account, no account switching —
-// see the "Disclosure lifecycle, incrementally" plan's step 1.1 deviation
-// for why: switching Freighter's active account to one never granted
+// wallet-backed) verify flow. No second account, no account switching:
+// switching Freighter's active account to one never granted
 // access to the app's origin leaves the app silently showing the PREVIOUS
 // account's session with no detectable signal, which blocks any
 // multi-account scenario until that's resolved. This increment proves the

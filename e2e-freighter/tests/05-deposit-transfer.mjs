@@ -1,6 +1,6 @@
 // Compound test: deposit 0.01 XLM, then transfer 0.01 XLM to account B
 // ($E2E_ACCOUNT_D_ADDRESS — provisioned, funded, and registered in the
-// public-key registry by the "Deposit-then-transfer to B" plan's step 1.1;
+// public-key registry by deployments/scripts/e2e-accounts-setup.sh;
 // see deployments/testnet/.e2e-accounts.env). Uses the same shared
 // submitAndConfirm (../src/moveFunds.mjs) as tests/04-deposit-withdraw.mjs
 // — the runtime confirmation dialog, .btn-loading progress-stage tracking,
@@ -93,7 +93,8 @@ export async function run(helpers) {
           false,
           `recipient registry lookup did not resolve to "Found local registration" within 15s ` +
             `(status: "${status}", warning: "${warning}") — this points at a registration problem with ` +
-            `${recipient}, not a timing issue; verify step 1.1's provisioning rather than retrying blindly`,
+            `${recipient}, not a timing issue; re-run deployments/scripts/e2e-accounts-setup.sh ` +
+            `(--verify) rather than retrying blindly`,
         );
       }
     },

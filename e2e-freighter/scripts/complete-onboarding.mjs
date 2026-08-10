@@ -52,6 +52,10 @@ async function main() {
       () => !(document.getElementById('onboarding-modal')?.classList.contains('hidden') ?? true),
     );
     if (stillVisible) throw new Error('complete-onboarding: onboarding modal still visible after driving all steps');
+    // Give the app's storage worker time to flush wizard state (settings,
+    // disclaimer, derived keys) before closing the browser; an immediate
+    // close can occasionally truncate the snapshot.
+    await page.waitForTimeout(1000);
     console.log('complete-onboarding: done — onboarding wizard fully completed and persisted');
   } finally {
     await context.close();
