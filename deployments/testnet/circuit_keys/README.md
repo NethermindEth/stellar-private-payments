@@ -30,13 +30,14 @@ would make those note public keys public inputs. Always use a wrapper entry poin
 
 ## Policy transact keys (`policy_tx_2_2*`)
 
-**All circuits stems are locally generated** (`REGEN_KEYS=1 cargo build -p circuits`).
+**All circuits stems are locally generated** (`circuit-builder keys --force`).
 None of the committed `policy_tx_2_2_*` key pairs in this directory were produced by a
 trusted ceremony on the current R1CS.
 
 Notes:
 
-- `testdata/` remains a local/generated workspace directory (and is ignored by git). Tests may still read keys from there.
+- Tests read the keys in this directory, not `testdata/`. `testdata/` is only whatever `circuit-builder keys --keys-dir testdata` writes locally, and is ignored by git.
+- `keys.manifest.json` binds each key pair to the sha256 of the R1CS its setup consumed. `circuit-builder verify` fails when the current R1CS no longer matches, so a circuit change that needs a key rotation cannot reach a deploy unnoticed. Update it with `circuit-builder snapshot` after a rotation or a ceremony.
 - Changing any `policy_tx_2_2_*` keys requires redeploying the matching on-chain verifier.
 - Before mainnet, run a new trusted ceremony on `policy_tx_2_2_AB.r1cs` (see
   `tools/ceremony-cli/README.md`) and replace the AB artifacts here.
