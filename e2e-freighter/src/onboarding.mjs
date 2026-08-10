@@ -7,6 +7,7 @@
 // goes through it fresh even on an already-onboarded profile.
 
 const WIZARD_BUTTON_PRIORITY = [
+  'Accept disclaimer', // first step; must be acknowledged before anything else
   // Storage step: "Continue without it" only sets a "prompted" flag, not
   // `persisted` — app/js/ui/onboarding-wizard.js's own gating
   // (`!persisted || !storagePrompted`) means skipping it never stops the
