@@ -19,7 +19,10 @@ FRIENDBOT_URL="https://friendbot.stellar.org"
 # no admin secret (membership proofs are Allowlist-gated —
 # sdk/types/src/policy_tx.rs; the pool's flags are in
 # deployments/testnet/deployments.json).
-POOL_CONTRACT="CB6ESM54AS5S3WBLO6LFIZMT5BMXR2DUGMYFUWDXUPM73BPHVHHQAHKE"
+# The pool address is resolved from deployments.json at runtime (after
+# argument parsing, since the file path depends on --network) — a hardcoded
+# address silently goes stale on every redeploy.
+POOL_CONTRACT=""
 # Passed explicitly to `spp onboard` so it never falls through to a prompt.
 EXPLORER_URL="https://stellar.expert/explorer/testnet"
 
@@ -95,6 +98,20 @@ esac
 
 ENV_DIR="$REPO_ROOT/deployments/$NETWORK"
 ENV_FILE="$ENV_DIR/.e2e-accounts.env"
+
+# Resolve the native XLM pool from the deployment config (the same file the
+# CLI and sdk/web compile in), so a redeploy never leaves this script
+# pointing at a pool the CLI no longer knows.
+DEPLOYMENTS_JSON="$ENV_DIR/deployments.json"
+[ -f "$DEPLOYMENTS_JSON" ] || die "no deployment config at $DEPLOYMENTS_JSON"
+POOL_CONTRACT="$(python3 - "$DEPLOYMENTS_JSON" <<'EOF'
+import json, sys
+pools = json.load(open(sys.argv[1]))["pools"]
+native = [p for p in pools if p.get("enabled") and p.get("asset", {}).get("kind") == "native"]
+assert len(native) == 1, f"expected exactly one enabled native pool, found {len(native)}"
+print(native[0]["poolContractId"])
+EOF
+)" || die "could not resolve the native pool from $DEPLOYMENTS_JSON"
 # Isolated wallet/data dir so a run never touches a developer's real spp state.
 DATA_DIR="$REPO_ROOT/deployments/scripts/.e2e-wallet-$NETWORK"
 
@@ -104,6 +121,7 @@ ALIAS_B="$ALIAS_PREFIX-b"
 need stellar
 need curl
 need git
+need python3
 
 # Resolve the spp CLI once per run: an installed binary on PATH, else the
 # workspace build. We build loudly and call the binary directly — NOT
