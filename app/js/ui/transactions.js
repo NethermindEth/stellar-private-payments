@@ -8,11 +8,14 @@
 
 import { client, isRuntimeReady } from '../wasm-facade.js';
 import { friendlyErrorMessage } from '../facade-errors.js';
+import { StrKey } from '@stellar/stellar-sdk';
 import { App, Toast, Utils } from './core.js';
 import { ensureAppPool } from './pool.js';
 import { Templates } from './templates.js';
 import { OpHistory } from './op-history.js';
 import { getTransactionErrorMessage } from './errors.js';
+import { confirmAction } from './confirm.js';
+import { onEnter } from './keys.js';
 
 const DECIMALS = 7;
 const N_OUTPUTS = 2;
@@ -79,6 +82,95 @@ async function runPoolOp(flow, button, fn) {
         return await fn();
     } finally {
         unbind();
+    }
+}
+
+// Enter in a field bypasses the button's disabled state, so guard the in-flight
+// case explicitly — otherwise Enter can fire a second op while one is running.
+function onEnterUnlessBusy(input, button, handler) {
+    onEnter(input, () => {
+        if (button?.disabled) return;
+        handler();
+    });
+}
+
+// Builds a confirmation-dialog row with the number of transactions the action
+// requires. Best-effort only: a failed estimate must not block the action.
+async function txCountRow(amountValue) {
+    try {
+        const session = await ensureAppPool();
+        const estimate = await session.estimate(amountValue);
+        const txCount = estimate?.txCount;
+        if (!txCount) return null;
+        return {
+            label: 'Transactions',
+            value: `${txCount} transaction${txCount === 1 ? '' : 's'}`,
+        };
+    } catch {
+        return null;
+    }
+}
+
+async function submitDeposit(button, amountValue, pool) {
+    setLoading(button, true, 'Preparing deposit…');
+    const session = await ensureAppPool();
+    const result = await runPoolOp('deposit', button, () => session.deposit(amountValue));
+    if (Transactions.showExecuteResult(result, 'Deposit')) {
+        const hashes = result?.hashes ?? txResultsToHashes(result);
+        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+            type: 'Deposit',
+            amount: amountValue,
+            direction: 'in',
+            hashes,
+        });
+        document.getElementById('deposit-amount').value = '';
+    }
+}
+
+async function submitTransfer(button, amountValue, pool, transferRefs, transferAddress) {
+    const noteKey = transferRefs.noteKey.value.trim();
+    const encKey = transferRefs.encKey.value.trim();
+    setLoading(button, true, 'Preparing transfer…');
+    const session = await ensureAppPool();
+    const result = await runPoolOp('transfer', button, () =>
+        session.transferToKeys(noteKey, encKey, amountValue),
+    );
+    if (Transactions.showExecuteResult(result, 'Transfer')) {
+        const hashes = result?.hashes ?? txResultsToHashes(result);
+        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+            type: 'Sent',
+            amount: amountValue,
+            direction: 'out',
+            counterparty: transferAddress.value.trim() || noteKey,
+            hashes,
+        });
+        document.getElementById('transfer-amount').value = '';
+        transferAddress.value = '';
+        transferRefs.noteKey.value = '';
+        transferRefs.encKey.value = '';
+        transferRefs.status.textContent = '';
+        transferRefs.warning.textContent = '';
+        transferRefs.manual.classList.add('hidden');
+    }
+}
+
+async function submitWithdraw(button, amountValue, pool, recipient) {
+    setLoading(button, true, 'Preparing withdrawal…');
+    const session = await ensureAppPool();
+    const result = await runPoolOp('withdraw', button, () =>
+        session.withdraw(amountValue, recipient),
+    );
+    if (Transactions.showExecuteResult(result, 'Withdrawal')) {
+        const hashes = result?.hashes ?? txResultsToHashes(result);
+        OpHistory.record(App.state.wallet.address, pool.poolContractId, {
+            type: 'Withdraw',
+            amount: amountValue,
+            direction: 'out',
+            counterparty: recipient,
+            hashes,
+        });
+        document.getElementById('withdraw-amount').value = '';
+        document.getElementById('withdraw-recipient').value = '';
     }
 }
 
@@ -264,32 +356,36 @@ export const Transactions = {
     },
 
     bindMoveFunds() {
-        document.getElementById('btn-deposit')?.addEventListener('click', async (event) => {
-            const button = event.currentTarget;
+        const depositButton = document.getElementById('btn-deposit');
+        const depositAmountInput = document.getElementById('deposit-amount');
+
+        async function runDeposit(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(document.getElementById('deposit-amount')?.value, { allowNegative: false });
+                const amount = parseAmount(depositAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a deposit amount');
-                setLoading(button, true, 'Preparing deposit…');
                 const pool = selectedPool();
-                const session = await ensureAppPool();
-                const result = await runPoolOp('deposit', button, () => session.deposit(amount.value));
-                if (this.showExecuteResult(result, 'Deposit')) {
-                    const hashes = result?.hashes ?? txResultsToHashes(result);
-                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Deposit',
-                        amount: amount.value,
-                        direction: 'in',
-                        hashes,
-                    });
-                    document.getElementById('deposit-amount').value = '';
-                }
+                const rows = [
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
+                const confirmed = await confirmAction({
+                    title: 'Confirm deposit',
+                    rows,
+                    confirmLabel: 'Deposit',
+                });
+                if (!confirmed) return;
+                await submitDeposit(button, amount.value, pool);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Deposit'), 'error');
             } finally {
                 setLoading(button, false);
             }
-        });
+        }
+
+        depositButton?.addEventListener('click', (event) => runDeposit(event.currentTarget));
+        onEnterUnlessBusy(depositAmountInput, depositButton, () => runDeposit(depositButton));
 
         const transferRefs = {
             status: document.getElementById('transfer-lookup-status'),
@@ -314,76 +410,113 @@ export const Transactions = {
             }
         });
 
-        document.getElementById('btn-transfer')?.addEventListener('click', async (event) => {
-            const button = event.currentTarget;
+        const transferAmountInput = document.getElementById('transfer-amount');
+        const transferButton = document.getElementById('btn-transfer');
+
+        async function runTransfer(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(document.getElementById('transfer-amount')?.value, { allowNegative: false });
+                const amount = parseAmount(transferAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a transfer amount');
                 const noteKey = transferRefs.noteKey.value.trim();
                 const encKey = transferRefs.encKey.value.trim();
                 if (!noteKey || !encKey) throw new Error('Recipient note key and encryption key are required');
-                setLoading(button, true, 'Preparing transfer…');
-                const pool = selectedPool();
-                const session = await ensureAppPool();
-                const result = await runPoolOp('transfer', button, () =>
-                    session.transferToKeys(noteKey, encKey, amount.value),
-                );
-                if (this.showExecuteResult(result, 'Transfer')) {
-                    const hashes = result?.hashes ?? txResultsToHashes(result);
-                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Sent',
-                        amount: amount.value,
-                        direction: 'out',
-                        counterparty: transferAddress.value.trim() || noteKey,
-                        hashes,
-                    });
-                    document.getElementById('transfer-amount').value = '';
-                    transferAddress.value = '';
-                    transferRefs.noteKey.value = '';
-                    transferRefs.encKey.value = '';
-                    transferRefs.status.textContent = '';
-                    transferRefs.warning.textContent = '';
-                    transferRefs.manual.classList.add('hidden');
-                }
+                const  pool = selectedPool();
+                const recipientLabel = transferAddress.value.trim()
+                    ? Utils.shortAddress(transferAddress.value.trim())
+                    : Utils.shortAddress(noteKey);
+                const rows = [
+                    { label: 'Recipient', value: recipientLabel },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
+                const confirmed = await confirmAction({
+                    title: 'Confirm transfer',
+                    rows,
+                    confirmLabel: 'Transfer',
+                });
+                if (!confirmed) return;
+                await submitTransfer(button, amount.value, pool, transferRefs, transferAddress);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Transfer'), 'error');
             } finally {
                 setLoading(button, false);
             }
-        });
+        }
 
-        document.getElementById('btn-withdraw')?.addEventListener('click', async (event) => {
-            const button = event.currentTarget;
+        onEnter(transferAddress, async () => {
+            const value = transferAddress.value.trim();
+            if (!value) return;
+            if (!StrKey.isValidEd25519PublicKey(value)) {
+                Toast.show('Invalid Stellar address', 'error');
+                return;
+            }
+            // The `input` handler above already looked this address up at 56 chars;
+            // only re-query when that left the keys empty.
+            if (!transferRefs.noteKey.value.trim()) {
+                try {
+                    await lookupRecipient(value, transferRefs);
+                } catch (error) {
+                    transferRefs.warning.textContent = friendlyErrorMessage(error?.message) || 'Lookup failed';
+                    return; // keep focus here so the user can retry the address
+                }
+            }
+            // No registration found: the manual key fields are now visible and empty,
+            // so send focus there rather than past them to the amount.
+            if (!transferRefs.noteKey.value.trim() && !transferRefs.manual.classList.contains('hidden')) {
+                transferRefs.noteKey.focus();
+                return;
+            }
+            transferAmountInput?.focus();
+        });
+        transferButton?.addEventListener('click', (event) => runTransfer(event.currentTarget));
+        onEnterUnlessBusy(transferAmountInput, transferButton, () => runTransfer(transferButton));
+
+        const withdrawRecipientInput = document.getElementById('withdraw-recipient');
+        const withdrawAmountInput = document.getElementById('withdraw-amount');
+        const withdrawButton = document.getElementById('btn-withdraw');
+
+        async function runWithdraw(button) {
             try {
                 requireWallet();
-                const amount = parseAmount(document.getElementById('withdraw-amount')?.value, { allowNegative: false });
+                const amount = parseAmount(withdrawAmountInput?.value, { allowNegative: false });
                 if (!amount.ok || amount.value <= 0n) throw new Error(amount.error || 'Enter a withdrawal amount');
-                const recipient = document.getElementById('withdraw-recipient')?.value?.trim() || App.state.wallet.address;
-                setLoading(button, true, 'Preparing withdrawal…');
-                const pool = selectedPool();
-                const session = await ensureAppPool();
-                const result = await runPoolOp('withdraw', button, () =>
-                    session.withdraw(amount.value, recipient),
-                );
-                if (this.showExecuteResult(result, 'Withdrawal')) {
-                    const hashes = result?.hashes ?? txResultsToHashes(result);
-                    OpHistory.record(App.state.wallet.address, pool.poolContractId, {
-                        type: 'Withdraw',
-                        amount: amount.value,
-                        direction: 'out',
-                        counterparty: recipient,
-                        hashes,
-                    });
-                    document.getElementById('withdraw-amount').value = '';
-                    document.getElementById('withdraw-recipient').value = '';
+                const recipient = withdrawRecipientInput?.value?.trim() || App.state.wallet.address;
+                if (recipient !== App.state.wallet.address && !StrKey.isValidEd25519PublicKey(recipient)) {
+                    throw new Error('Invalid Stellar address');
                 }
+                const pool = selectedPool();
+                const rows = [
+                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
+                    { label: 'Amount', value: Utils.formatTokenAmount(amount.value, Utils.poolLabel(pool)) },
+                ];
+                const countRow = await txCountRow(amount.value);
+                if (countRow) rows.push(countRow);
+                const confirmed = await confirmAction({
+                    title: 'Confirm withdrawal',
+                    rows,
+                    confirmLabel: 'Withdraw',
+                });
+                if (!confirmed) return;
+                await submitWithdraw(button, amount.value, pool, recipient);
             } catch (error) {
                 Toast.show(getTransactionErrorMessage(error, 'Withdraw'), 'error');
             } finally {
                 setLoading(button, false);
             }
+        }
+
+        onEnter(withdrawRecipientInput, () => {
+            const value = withdrawRecipientInput.value.trim();
+            if (value && !StrKey.isValidEd25519PublicKey(value)) {
+                Toast.show('Invalid Stellar address', 'error');
+                return;
+            }
+            withdrawAmountInput?.focus();
         });
+        withdrawButton?.addEventListener('click', (event) => runWithdraw(event.currentTarget));
+        onEnterUnlessBusy(withdrawAmountInput, withdrawButton, () => runWithdraw(withdrawButton));
     },
 
     bindAdvancedTransact() {
@@ -410,6 +543,26 @@ export const Transactions = {
                 const pool = selectedPool();
                 const recipient = document.getElementById('advanced-public-recipient')?.value?.trim()
                     || App.state.wallet.address;
+
+                const rows = [
+                    { label: 'Recipient', value: Utils.shortAddress(recipient) },
+                    { label: 'Input notes', value: `${inputNoteIds.length}` },
+                    { label: 'Outputs', value: `${amounts.length}` },
+                ];
+                if (deposit.value > 0n) {
+                    rows.push({ label: 'Public deposit', value: Utils.formatTokenAmount(deposit.value, Utils.poolLabel(pool)) });
+                }
+                if (withdraw.value > 0n) {
+                    rows.push({ label: 'Public withdraw', value: Utils.formatTokenAmount(withdraw.value, Utils.poolLabel(pool)) });
+                }
+                // Advanced transact always executes as a single transaction.
+                rows.push({ label: 'Transactions', value: '1 transaction' });
+                const confirmed = await confirmAction({
+                    title: 'Confirm advanced transaction',
+                    rows,
+                    confirmLabel: 'Transact',
+                });
+                if (!confirmed) return;
 
                 setLoading(button, true, 'Preparing advanced transaction…');
                 const session = await ensureAppPool();

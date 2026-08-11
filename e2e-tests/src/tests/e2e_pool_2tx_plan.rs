@@ -1,5 +1,8 @@
 //! E2E: tx-planner spend session multi-step spend (consolidate + final) with
 //! real proofs.
+//!
+//! Each step computes its witness from the committed `policy_tx_2_2_AB.graph
+//! .bin` operation graph, the same artifact the CLI and the SDK load.
 
 use super::utils::{
     DeployedContracts, LEVELS, NonMembership, build_membership_trees, bytes32_to_bigint,

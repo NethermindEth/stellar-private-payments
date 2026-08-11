@@ -251,6 +251,12 @@ export const Shell = {
         });
         document.getElementById('open-settings-btn')?.addEventListener('click', () => Wallet.openSettings());
         document.getElementById('settings-close-btn')?.addEventListener('click', () => Wallet.closeSettings());
+        document.getElementById('settings-overlay')?.addEventListener('click', () => Wallet.closeSettings());
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && App.state.ui.settingsOpen) {
+                Wallet.closeSettings();
+            }
+        });
         document.getElementById('settings-save-btn')?.addEventListener('click', () => Wallet.saveSettings());
         document.getElementById('settings-register-btn')?.addEventListener('click', () => Wallet.registerPublicKey());
         document.getElementById('wallet-disconnect-btn')?.addEventListener('click', () => Wallet.disconnect());
