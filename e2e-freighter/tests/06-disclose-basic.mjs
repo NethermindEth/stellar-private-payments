@@ -55,8 +55,14 @@
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('06-disclose-basic');
 function assert(condition, message) {
-  if (!condition) throw new Error(`06-disclose-basic: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`06-disclose-basic: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -95,7 +101,7 @@ export async function run(helpers) {
   });
 
   assert(depositHash1 !== depositHash2, 'the two deposits somehow produced the same transaction hash');
-  console.log(`[${logTag}] both deposits confirmed SUCCESS on-chain: ${depositHash1}, ${depositHash2}`);
+  log.info(`both deposits confirmed SUCCESS on-chain: ${depositHash1}, ${depositHash2}`);
 
   // Give the indexer a moment before the disclosure tab's one-shot note
   // fetch fires (see module header) — this is the only chance to see them.
@@ -154,7 +160,7 @@ export async function run(helpers) {
   }
 
   const receiptJson = await receiptPre.innerText();
-  console.log(`[${logTag}] generated a disclosure receipt (${receiptJson.length} chars of JSON)`);
+  log.info(`generated a disclosure receipt (${receiptJson.length} chars of JSON)`);
 
   const verifyPanel = page.locator('#disclosure-verify');
   await verifyPanel.locator('textarea').fill(receiptJson);
@@ -176,5 +182,5 @@ export async function run(helpers) {
   const unspentCheckVisible = await verifyPanel.getByText('Nullifiers unspent', { exact: true }).isVisible().catch(() => false);
   assert(unspentCheckVisible, 'verify results did not show "Nullifiers unspent" — the disclosed note\'s status is not UNSPENT');
 
-  console.log(`[${logTag}] OK: 1-note disclosure receipt created and verified as VALID with UNSPENT status`);
+  log.info(`OK: 1-note disclosure receipt created and verified as VALID with UNSPENT status`);
 }

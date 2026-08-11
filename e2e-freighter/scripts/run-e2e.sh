@@ -101,8 +101,8 @@ export E2E_CHROME_USER_DATA_DIR="$USER_DATA_DIR"
 
 if [ "$SMOKE" -eq 1 ]; then
   step "running smoke check"
-  node "$PKG_ROOT/src/runner.mjs" --smoke 2>&1 | colorize
+  node "$PKG_ROOT/src/runner.mjs" --smoke
 else
   step "running $TEST_FILE"
-  node "$PKG_ROOT/src/runner.mjs" "$TEST_FILE" 2>&1 | colorize
+  node "$PKG_ROOT/src/runner.mjs" "$TEST_FILE"
 fi

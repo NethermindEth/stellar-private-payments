@@ -241,7 +241,7 @@ invocation; `scripts/e2e-setup.sh` is `--fix --suite all`.
 - `E2E_SKIP_PREFLIGHT=1` bypasses it entirely from any entry point.
 - Every filesystem location it inspects has a path-override env var for
   debugging: `E2E_ENV_FILE`, `E2E_SNAPSHOT_FILE`, `E2E_VENDOR_DIR`,
-  `E2E_CIRCUITS_OUT_DIR`, `E2E_SDK_DIST_DIR`, plus the pre-existing
+  `E2E_CIRCUITS_OUT_DIR`, `E2E_SDK_DIST_DIR`, `E2E_SPP_PATH`, plus the pre-existing
   `E2E_CHROMIUM_PATH` / `E2E_PROFILE_TMPDIR` / `CHROMEDRIVER`.
 
 See `e2e-freighter/README.md` for the per-distro install instructions its

@@ -11,6 +11,7 @@
 // (approvals can land in a separate window), and never on Freighter's CSS
 // classes — only visible button text (Confirm / Cancel / Connect / Sign).
 
+import { createLogger, enableFileLogging } from './logger.mjs';
 import { chromium } from 'playwright';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -20,6 +21,7 @@ const PKG_ROOT = path.resolve(__dirname, '..');
 const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
 const EXT_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
 const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
+const log = createLogger('runner');
 const DEFAULT_APP_URL = 'https://nethermindeth.github.io/stellar-private-payments/#move-funds';
 
 // ---------------------------------------------------------------------------
@@ -99,7 +101,7 @@ export async function launch({ userDataDir, headless = true, video = false } = {
     const cdp = await context.newCDPSession(page);
     await cdp.send('Browser.grantPermissions', { origin: appOrigin, permissions: ['durableStorage'] });
   } catch (err) {
-    console.warn(`[runner] launch: could not grant durableStorage permission: ${err.message}`);
+    log.warn('launch: could not grant durableStorage permission:', err.message);
   }
 
   return context;
@@ -203,7 +205,7 @@ export async function approveOrWatch(context, kind, { timeoutMs = 30000 } = {}) 
   const mode = (process.env.APPROVE || 'auto').toLowerCase();
 
   if (mode === 'human') {
-    console.log(`[runner] APPROVE=human: waiting for you to act on the '${kind}' approval (Confirm/Cancel)...`);
+    log.info(`APPROVE=human: waiting for you to act on the '${kind}' approval (Confirm/Cancel)...`);
     await Promise.race([
       new Promise((resolve) => page.once('close', resolve)),
       new Promise((r) => setTimeout(r, timeoutMs)),
@@ -278,21 +280,24 @@ async function main() {
   const headless = process.env.HEADFUL !== '1';
   const video = !!process.env.CI;
 
+  enableFileLogging(path.join(PKG_ROOT, 'test-results', 'e2e-run.log'));
+
   const context = await launch({ userDataDir, headless, video });
   try {
     await unlockFreighter(context);
 
     const page = context.pages().find((p) => p.url().startsWith('https://')) || (await context.newPage());
     const address = await connectApp(page, { context });
-    console.log(`[runner] connected: ${address}`);
+    log.info('connected:', address);
 
     if (smoke) {
-      console.log('[runner] smoke: reached connected state, done');
+      log.info('smoke: reached connected state, done');
       return;
     }
 
     const testFile = args.find((a) => !a.startsWith('--'));
     if (!testFile) throw new Error('runner: no test file given and --smoke not set');
+    log.info('test:', testFile);
     const testModule = await import(path.resolve(testFile));
     await testModule.run({
       context,
@@ -309,8 +314,20 @@ async function main() {
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  main().catch((err) => {
-    console.error('[runner] FAILED:', err.message);
+  main().catch(async (err) => {
+    log.error('FAILED:', err.message);
+
+    // Print a formatted failure block with recent log context
+    const { getRecentLines } = await import('./logger.mjs');
+    const sep = '-'.repeat(58);
+    console.error(`\n${sep}\n  FAILURE\n${sep}`);
+    console.error('  error:  ', err.message);
+    console.error('  recent log:');
+    for (const line of getRecentLines(15)) {
+      console.error(`    ${line}`);
+    }
+    console.error(`${sep}\n`);
+
     process.exit(1);
   });
 }

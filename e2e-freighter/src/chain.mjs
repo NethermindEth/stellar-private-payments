@@ -5,6 +5,10 @@
 // displayed balance is eventually consistent against a lagging backend
 // indexer with no client-observable freshness signal).
 
+import { createLogger } from './logger.mjs';
+
+const log = createLogger('chain');
+
 // Poll Soroban RPC's getTransaction until the transaction resolves.
 // https://developers.stellar.org/docs/data/rpc/api-reference/methods/getTransaction
 export async function waitForTransactionSuccess(hash, { rpcUrl, timeoutMs = 60000 } = {}) {
@@ -18,6 +22,7 @@ export async function waitForTransactionSuccess(hash, { rpcUrl, timeoutMs = 6000
     });
     const body = await res.json();
     lastStatus = body?.result?.status || 'NOT_FOUND';
+    log.debug('polling', hash.slice(0, 8) + '...', 'status:', lastStatus);
     if (lastStatus === 'SUCCESS' || lastStatus === 'FAILED') return lastStatus;
     await new Promise((r) => setTimeout(r, 2000));
   }

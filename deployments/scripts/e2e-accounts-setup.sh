@@ -141,8 +141,13 @@ need python3
 SPP_BIN=""
 spp() {
   if [ -z "$SPP_BIN" ]; then
-    SPP_BIN="$(type -P spp || true)"
-    if [ -z "$SPP_BIN" ]; then
+    # Always use the project's own build. A generic `spp` on PATH may be a
+    # completely unrelated tool (e.g. ~/.local/bin/spp), so we never trust it.
+    if [ -n "${E2E_SPP_PATH:-}" ]; then
+      SPP_BIN="$E2E_SPP_PATH"
+    elif [ -x "$REPO_ROOT/target/release/spp" ]; then
+      SPP_BIN="$REPO_ROOT/target/release/spp"
+    else
       step "building the spp CLI (cargo build --release -p stellar-private-payments-cli)"
       ( cd "$REPO_ROOT" && cargo build --release -p stellar-private-payments-cli ) \
         || die "failed to build the spp CLI"

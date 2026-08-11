@@ -26,11 +26,17 @@
 // internal retry (sdk/client/src/sync.rs) surfaces through the same
 // .btn-loading progress-stage tracking submitAndConfirm already does.
 
+import { createLogger } from '../src/logger.mjs';
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+const log = createLogger('05-deposit-transfer');
+
 function assert(condition, message) {
-  if (!condition) throw new Error(`05-deposit-transfer: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`05-deposit-transfer: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -101,7 +107,5 @@ export async function run(helpers) {
   });
 
   assert(depositHash !== transferHash, 'deposit and transfer somehow produced the same transaction hash');
-  console.log(
-    `[${logTag}] OK: deposit ${depositHash} and transfer ${transferHash} both confirmed SUCCESS on-chain`,
-  );
+  log.info('OK: deposit', depositHash.slice(0, 8), 'and transfer', transferHash.slice(0, 8), 'both confirmed SUCCESS on-chain');
 }

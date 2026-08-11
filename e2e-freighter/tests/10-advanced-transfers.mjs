@@ -60,8 +60,14 @@ import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 import { waitForTransactionSuccess } from '../src/chain.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('10-advanced-transfers');
 function assert(condition, message) {
-  if (!condition) throw new Error(`10-advanced-transfers: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`10-advanced-transfers: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -86,7 +92,7 @@ export async function run(helpers) {
     amount: '0.01',
     rpcUrl,
   });
-  console.log(`[${logTag}] deposit confirmed SUCCESS on-chain: ${depositHash}`);
+  log.info(`deposit confirmed SUCCESS on-chain: ${depositHash}`);
 
   // Give the notes-table poll (every 8s, already running since connect —
   // see module header) and indexer time to surface the new note.
@@ -153,7 +159,7 @@ export async function run(helpers) {
     .then(() => true)
     .catch(() => false);
   if (dialogAppeared) {
-    console.log(`[${logTag}] a confirmation dialog appeared for Advanced (not in this checkout's source) — confirming it`);
+    log.info(`a confirmation dialog appeared for Advanced (not in this checkout's source) — confirming it`);
     await confirmDialog.getByRole('button', { name: /transaction|transfer|execute|confirm/i }).first().click();
   }
 
@@ -192,14 +198,14 @@ export async function run(helpers) {
   }
 
   assert(seenStages.size > 0, 'the Execute Advanced Transaction button never showed a progress stage — the click may not have started anything');
-  console.log(`[${logTag}] advanced transact progress stages seen: ${[...seenStages].join(' -> ')}`);
+  log.debug(`advanced transact progress stages seen: ${[...seenStages].join(' -> ')}`);
   assert(txHash, 'no transaction hash was captured from the submitted-transaction toast\'s explorer link');
-  console.log(`[${logTag}] advanced transact captured transaction hash: ${txHash}`);
+  log.info(`advanced transact captured transaction hash: ${txHash}`);
 
   assert(depositHash !== txHash, 'deposit and advanced-transfer somehow produced the same transaction hash');
 
   const status = await waitForTransactionSuccess(txHash, { rpcUrl, timeoutMs: 60000 });
   assert(status === 'SUCCESS', `advanced transfer transaction ${txHash} resolved with status ${status}, not SUCCESS`);
 
-  console.log(`[${logTag}] OK: 0.01 XLM transfer via the Advanced view (${txHash}) confirmed SUCCESS on-chain`);
+  log.info(`OK: 0.01 XLM transfer via the Advanced view (${txHash}) confirmed SUCCESS on-chain`);
 }

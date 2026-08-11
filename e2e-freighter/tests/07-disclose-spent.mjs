@@ -37,8 +37,14 @@
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('07-disclose-spent');
 function assert(condition, message) {
-  if (!condition) throw new Error(`07-disclose-spent: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`07-disclose-spent: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -72,7 +78,7 @@ export async function run(helpers) {
     depositHashes.push(hash);
   }
   assert(new Set(depositHashes).size === 3, 'the three deposits did not all produce distinct transaction hashes');
-  console.log(`[${logTag}] all three deposits confirmed SUCCESS on-chain: ${depositHashes.join(', ')}`);
+  log.info(`all three deposits confirmed SUCCESS on-chain: ${depositHashes.join(', ')}`);
 
   await page.locator('[data-move-flow="withdraw"]').click();
   await page.waitForTimeout(500);
@@ -88,7 +94,7 @@ export async function run(helpers) {
     rpcUrl,
     progressTimeoutMs: 180000,
   });
-  console.log(`[${logTag}] withdraw (spends one note) confirmed SUCCESS on-chain: ${withdrawHash}`);
+  log.info(`withdraw (spends one note) confirmed SUCCESS on-chain: ${withdrawHash}`);
 
   // Give the indexer a moment before the disclosure tab's one-shot note
   // fetch fires (see tests/06-disclose-basic.mjs's header for why this
@@ -158,7 +164,7 @@ export async function run(helpers) {
     }
 
     const receiptJson = await receiptPre.innerText();
-    console.log(`[${logTag}] generated a disclosure receipt for a "${filterLabel}"-filtered note (${receiptJson.length} chars of JSON)`);
+    log.info(`generated a disclosure receipt for a "${filterLabel}"-filtered note (${receiptJson.length} chars of JSON)`);
     return { receiptJson, checkbox };
   };
 
@@ -211,7 +217,7 @@ export async function run(helpers) {
   const spentBadgeVisible = await verifyPanel.getByText('Spent', { exact: true }).isVisible().catch(() => false);
   assert(spentBadgeVisible, 'the disclosed note card did not show an exact "Spent" badge');
 
-  console.log(`[${logTag}] spent-note receipt verifies with proof/context/root valid and SPENT status shown`);
+  log.info(`spent-note receipt verifies with proof/context/root valid and SPENT status shown`);
 
   // --- Unspent-note receipt: must still verify as fully valid — guards
   // against an overcorrected fix that marks every nullifier spent.
@@ -235,5 +241,5 @@ export async function run(helpers) {
   const unspentCheckVisible = await verifyPanel.getByText('Nullifiers unspent', { exact: true }).isVisible().catch(() => false);
   assert(unspentCheckVisible, 'verify results for the still-unspent note did not show "Nullifiers unspent"');
 
-  console.log(`[${logTag}] OK: spent note verifies as SPENT, still-unspent note verifies as fully valid and UNSPENT`);
+  log.info(`OK: spent note verifies as SPENT, still-unspent note verifies as fully valid and UNSPENT`);
 }

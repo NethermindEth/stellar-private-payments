@@ -20,11 +20,17 @@
 // waitForTransactionSuccess now lives in ../src/chain.mjs, shared with
 // tests/04-deposit-withdraw.mjs.
 
+import { createLogger } from '../src/logger.mjs';
 import { waitForTransactionSuccess } from '../src/chain.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+const log = createLogger('02-deposit');
+
 function assert(condition, message) {
-  if (!condition) throw new Error(`02-deposit: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`02-deposit: ${message}`);
+  }
 }
 
 export async function run({ page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch }) {
@@ -43,7 +49,7 @@ export async function run({ page, context, waitForAnyFreighterApproval, waitForF
   // Informational only — see the module comment on why this can't be a
   // pre/post assertion.
   const displayedBalance = await page.locator('#move-funds-balance').innerText().catch(() => '(unavailable)');
-  console.log(`[02-deposit] displayed balance before deposit (informational, may lag chain): "${displayedBalance}"`);
+  log.debug('displayed balance before deposit (informational, may lag chain):', displayedBalance);
 
   const DEPOSIT_AMOUNT = '0.01';
   await page.fill('#deposit-amount', DEPOSIT_AMOUNT);
@@ -120,13 +126,13 @@ export async function run({ page, context, waitForAnyFreighterApproval, waitForF
   }
 
   assert(seenStages.size > 0, 'deposit button never showed a progress stage — the click may not have started anything');
-  console.log(`[02-deposit] progress stages seen: ${[...seenStages].join(' -> ')}`);
-  assert(txHash, 'no transaction hash was captured from the submitted-transaction toast\'s explorer link');
-  console.log(`[02-deposit] captured transaction hash: ${txHash}`);
+  log.debug('progress stages:', [...seenStages].join(' -> '));
+  assert(txHash, "no transaction hash was captured from the submitted-transaction toast's explorer link");
+  log.info('captured tx hash:', txHash);
 
   const rpcUrl = process.env.E2E_RPC_URL || 'https://soroban-testnet.stellar.org';
   const status = await waitForTransactionSuccess(txHash, { rpcUrl });
   assert(status === 'SUCCESS', `deposit transaction ${txHash} resolved with status ${status}, not SUCCESS`);
 
-  console.log(`[02-deposit] OK: deposit transaction ${txHash} confirmed SUCCESS on-chain`);
+  log.info('OK: deposit tx', txHash, 'confirmed SUCCESS on-chain');
 }

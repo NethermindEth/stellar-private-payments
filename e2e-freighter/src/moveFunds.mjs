@@ -10,6 +10,7 @@
 // ./chain.mjs (never trust a UI balance display — see tests/02-deposit.mjs
 // for why).
 
+import { createLogger } from './logger.mjs';
 import { waitForTransactionSuccess } from './chain.mjs';
 
 // Fill amount, click submit, handle the runtime confirmation dialog, drive
@@ -30,6 +31,7 @@ export async function submitAndConfirm(
     progressTimeoutMs = 120000,
   },
 ) {
+  const log = createLogger(`${logTag}/moveFunds`);
   const approve = (kind, opts) => approveOrWatch(context, kind, opts);
   const fail = (message) => {
     throw new Error(`${logTag}: ${message}`);
@@ -92,15 +94,15 @@ export async function submitAndConfirm(
   if (seenStages.size === 0) {
     fail(`${flowName}: submit button never showed a progress stage — the click may not have started anything`);
   }
-  console.log(`[${logTag}] ${flowName} progress stages seen: ${[...seenStages].join(' -> ')}`);
+  log.debug(flowName, 'progress stages:', [...seenStages].join(' -> '));
   if (!txHash) {
     fail(`${flowName}: no transaction hash was captured from the submitted-transaction toast's explorer link`);
   }
-  console.log(`[${logTag}] ${flowName} captured transaction hash: ${txHash}`);
+  log.info(flowName, 'captured tx hash:', txHash);
 
   const status = await waitForTransactionSuccess(txHash, { rpcUrl, timeoutMs: 60000 });
   if (status !== 'SUCCESS') fail(`${flowName}: transaction ${txHash} resolved with status ${status}, not SUCCESS`);
-  console.log(`[${logTag}] ${flowName} transaction ${txHash} confirmed SUCCESS on-chain`);
+  log.info(flowName, 'tx', txHash, 'confirmed SUCCESS on-chain');
 
   return txHash;
 }

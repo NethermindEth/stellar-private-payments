@@ -7,8 +7,15 @@
 // just to assert the connected end state is what it actually looks like in
 // the app, proving the whole launch -> unlock -> connect pipeline works.
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('01-connect');
+
 function assert(condition, message) {
-  if (!condition) throw new Error(`01-connect: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`01-connect: ${message}`);
+  }
 }
 
 export async function run({ page }) {
@@ -24,5 +31,5 @@ export async function run({ page }) {
   const testnetVisible = await page.getByText('TESTNET', { exact: true }).isVisible().catch(() => false);
   assert(testnetVisible, 'network indicator does not show "TESTNET"');
 
-  console.log('[01-connect] OK: connected, address shown, network is TESTNET');
+  log.info('OK: connected, address shown, network is TESTNET');
 }

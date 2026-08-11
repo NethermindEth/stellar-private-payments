@@ -63,8 +63,14 @@
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('11-failure-modes');
 function assert(condition, message) {
-  if (!condition) throw new Error(`11-failure-modes: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`11-failure-modes: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -89,7 +95,7 @@ export async function run(helpers) {
     amount: '0.01',
     rpcUrl,
   });
-  console.log(`[${logTag}] baseline 0.01 XLM deposit confirmed SUCCESS on-chain: ${baselineDepositHash}`);
+  log.info(`baseline 0.01 XLM deposit confirmed SUCCESS on-chain: ${baselineDepositHash}`);
   await page.waitForTimeout(20000); // let the note become locally spendable, per 07's discovery
 
   // This is the SAME persistent Freighter/wallet profile every prior test
@@ -103,7 +109,7 @@ export async function run(helpers) {
   const displayedBalanceText = await page.locator('#move-funds-balance').innerText().catch(() => '0');
   const currentBalance = parseFloat(displayedBalanceText) || 0;
   const overAmount = String(currentBalance * 10 + 10);
-  console.log(`[${logTag}] current displayed balance: "${displayedBalanceText}" — using ${overAmount} XLM for the over-withdraw/over-transfer cases`);
+  log.info(`current displayed balance: "${displayedBalanceText}" — using ${overAmount} XLM for the over-withdraw/over-transfer cases`);
 
   // Generate a valid, never-registered Stellar address for case 3 — a
   // real ed25519 keypair via the same esm.sh dynamic-import trick already
@@ -116,7 +122,7 @@ export async function run(helpers) {
     const sdk = mod.default;
     return sdk.Keypair.random().publicKey();
   });
-  console.log(`[${logTag}] generated a never-registered address for case 3: ${unregisteredAddress}`);
+  log.info(`generated a never-registered address for case 3: ${unregisteredAddress}`);
 
   // Read the most recent toast message's text, polling briefly. Toasts
   // auto-remove ~4.2s after appearing (see module header) — this must be
@@ -155,7 +161,7 @@ export async function run(helpers) {
     assert(false, `over-withdraw did not surface the specific "no combination of notes" failure (toasts seen: ${JSON.stringify(allToasts)})`);
   }
   assert(/^withdraw failed/i.test(overWithdrawToast), `over-withdraw toast was not prefixed "Withdraw failed": "${overWithdrawToast}"`);
-  console.log(`[${logTag}] (1) over-withdraw: "${overWithdrawToast}"`);
+  log.info(`(1) over-withdraw: "${overWithdrawToast}"`);
 
   const noApprovalForOverWithdraw = await noApprovalAppeared();
   assert(noApprovalForOverWithdraw, 'over-withdraw raised a Freighter approval prompt — it should fail before any signing');
@@ -186,7 +192,7 @@ export async function run(helpers) {
   const overTransferToast = await waitForToastText((t) => /no combination of notes/i.test(t));
   assert(overTransferToast, 'over-transfer did not surface the specific "no combination of notes" failure');
   assert(/^transfer failed/i.test(overTransferToast), `over-transfer toast was not prefixed "Transfer failed": "${overTransferToast}"`);
-  console.log(`[${logTag}] (2) over-transfer: "${overTransferToast}"`);
+  log.info(`(2) over-transfer: "${overTransferToast}"`);
 
   const noApprovalForOverTransfer = await noApprovalAppeared();
   assert(noApprovalForOverTransfer, 'over-transfer raised a Freighter approval prompt — it should fail before any signing');
@@ -219,7 +225,7 @@ export async function run(helpers) {
   }
   const manualFieldsRevealed = await page.locator('#transfer-manual-fields').isVisible().catch(() => false);
   assert(manualFieldsRevealed, 'manual key-entry fields did not reveal for an unregistered recipient');
-  console.log(`[${logTag}] (3) unregistered recipient: "No local registration found" shown, manual fields revealed, no signing prompt reached`);
+  log.info(`(3) unregistered recipient: "No local registration found" shown, manual fields revealed, no signing prompt reached`);
   await page.fill('#transfer-address', '');
 
   // --- (4) ABOVE MAX-DEPOSIT: 150 XLM against a 100 XLM on-chain cap
@@ -241,7 +247,7 @@ export async function run(helpers) {
         'not something to assert around',
     );
   }
-  console.log(`[${logTag}] (4) above max-deposit: "${overCapToast}"`);
+  log.info(`(4) above max-deposit: "${overCapToast}"`);
 
   const noApprovalForOverCap = await noApprovalAppeared();
   assert(noApprovalForOverCap, 'a deposit above the max-deposit cap raised a Freighter approval prompt — it should fail during simulation, before signing');
@@ -265,7 +271,7 @@ export async function run(helpers) {
     rpcUrl,
   });
   assert(recoveryDepositHash !== baselineDepositHash, 'the recovery deposit somehow produced the same hash as the baseline deposit');
-  console.log(`[${logTag}] recovery deposit confirmed SUCCESS on-chain: ${recoveryDepositHash} — the app is back at a clean, usable idle state`);
+  log.info(`recovery deposit confirmed SUCCESS on-chain: ${recoveryDepositHash} — the app is back at a clean, usable idle state`);
 
-  console.log(`[${logTag}] OK: all four failure modes surfaced their specific mechanism, nothing submitted, clean recovery proven`);
+  log.info(`OK: all four failure modes surfaced their specific mechanism, nothing submitted, clean recovery proven`);
 }

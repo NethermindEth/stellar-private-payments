@@ -26,11 +26,17 @@
 // will show up as a withdraw progress-stage timeout, not a silent wrong
 // result.
 
+import { createLogger } from '../src/logger.mjs';
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+const log = createLogger('04-deposit-withdraw');
+
 function assert(condition, message) {
-  if (!condition) throw new Error(`04-deposit-withdraw: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`04-deposit-withdraw: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -77,7 +83,5 @@ export async function run(helpers) {
   });
 
   assert(depositHash !== withdrawHash, 'deposit and withdraw somehow produced the same transaction hash');
-  console.log(
-    `[${logTag}] OK: deposit ${depositHash} and withdraw ${withdrawHash} both confirmed SUCCESS on-chain`,
-  );
+  log.info('OK: deposit', depositHash.slice(0, 8), 'and withdraw', withdrawHash.slice(0, 8), 'both confirmed SUCCESS on-chain');
 }

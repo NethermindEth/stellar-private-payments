@@ -44,8 +44,14 @@
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('08-disclose-lifecycle');
 function assert(condition, message) {
-  if (!condition) throw new Error(`08-disclose-lifecycle: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`08-disclose-lifecycle: ${message}`);
+  }
 }
 
 export async function run(helpers) {
@@ -76,7 +82,7 @@ export async function run(helpers) {
     depositHashes.push(hash);
   }
   assert(new Set(depositHashes).size === 5, 'the five deposits did not all produce distinct transaction hashes');
-  console.log(`[${logTag}] all five deposits confirmed SUCCESS on-chain: ${depositHashes.join(', ')}`);
+  log.info(`all five deposits confirmed SUCCESS on-chain: ${depositHashes.join(', ')}`);
 
   const withdraw = async (flowName) => {
     // [data-move-flow="withdraw"] only exists on the Move Funds panel —
@@ -97,7 +103,7 @@ export async function run(helpers) {
       rpcUrl,
       progressTimeoutMs: 180000,
     });
-    console.log(`[${logTag}] ${flowName} confirmed SUCCESS on-chain: ${hash}`);
+    log.info(`${flowName} confirmed SUCCESS on-chain: ${hash}`);
     return hash;
   };
 
@@ -163,7 +169,7 @@ export async function run(helpers) {
     }
 
     const receiptJson = await receiptPre.innerText();
-    console.log(`[${logTag}] generated a ${count}-note disclosure receipt (${purposeSuffix})`);
+    log.info(`generated a ${count}-note disclosure receipt (${purposeSuffix})`);
     return receiptJson;
   }
 
@@ -254,7 +260,7 @@ export async function run(helpers) {
   await loadAndVerify(receipts.spent);
   const spentOkFirstPass = await isReportedSpent();
   assert(spentOkFirstPass, 'the spent-note receipt did not show "Nullifier already spent" on the first verification pass');
-  console.log(`[${logTag}] first verification pass: 1/2/3/4-note receipts unspent, spent-note receipt spent — as expected`);
+  log.info(`first verification pass: 1/2/3/4-note receipts unspent, spent-note receipt spent — as expected`);
 
   // --- Spend one more of the four previously-unspent notes.
   await withdraw('withdraw-2');
@@ -277,7 +283,7 @@ export async function run(helpers) {
       'and zero would mean re-verification did not reflect the new spend at all (a verification-layer finding — investigate, do not weaken this assertion)',
   );
   const newlySpentNullifier = newlySpent[0].nullifier;
-  console.log(`[${logTag}] withdraw-2 spent nullifier ${newlySpentNullifier} (discovered via the 4-note receipt's re-verify)`);
+  log.info(`withdraw-2 spent nullifier ${newlySpentNullifier} (discovered via the 4-note receipt's re-verify)`);
 
   // --- Re-verify every other receipt against its OWN previous status
   // (`previousStatus`: what the first verification pass found — 'unspent'
@@ -306,15 +312,15 @@ export async function run(helpers) {
         previousStatus === 'unspent',
         `${label}: test bookkeeping error — a receipt already known spent shouldn't newly disclose a different freshly-spent nullifier as itself`,
       );
-      console.log(`[${logTag}] ${label}: CHANGED unspent -> spent, as expected (discloses the just-spent nullifier)`);
+      log.info(`${label}: CHANGED unspent -> spent, as expected (discloses the just-spent nullifier)`);
     } else if (previousStatus === 'unspent') {
       assert(!spentNow, `${label}: does not disclose the newly-spent nullifier but showed "Nullifier already spent" anyway — an incorrect/overcorrected spent check`);
       const stillFullyVerified = await isFullyVerified();
       assert(stillFullyVerified, `${label}: expected to remain fully verified/unspent (unrelated to the second withdraw) but did not`);
-      console.log(`[${logTag}] ${label}: UNCHANGED (still unspent), as expected`);
+      log.info(`${label}: UNCHANGED (still unspent), as expected`);
     } else {
       assert(spentNow, `${label}: was already spent (from the first withdraw) but no longer shows "Nullifier already spent" on re-verify`);
-      console.log(`[${logTag}] ${label}: UNCHANGED (still spent from withdraw-1), as expected`);
+      log.info(`${label}: UNCHANGED (still spent from withdraw-1), as expected`);
     }
   };
 
@@ -326,5 +332,5 @@ export async function run(helpers) {
   // one receipt guaranteed to have changed.
   await checkReceipt('spent-note receipt', receipts.spent, 'spent');
 
-  console.log(`[${logTag}] OK: re-verification reflects current chain state — only the receipt(s) disclosing the just-spent note changed`);
+  log.info(`OK: re-verification reflects current chain state — only the receipt(s) disclosing the just-spent note changed`);
 }

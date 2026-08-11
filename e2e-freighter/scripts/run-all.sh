@@ -28,8 +28,8 @@ With no arguments, runs every tests/*.mjs in filename order. Any
 arguments are taken as the subset to run (paths from the repo root or the
 e2e-freighter directory).
 
-Environment: same as run-e2e.sh (APPROVE, HEADFUL, APP_URL, the sourced
-deployments/testnet/.e2e-accounts.env).
+Environment: same as run-e2e.sh (APPROVE, HEADFUL, APP_URL, E2E_LOG_LEVEL,
+the sourced deployments/testnet/.e2e-accounts.env).
 
 Examples:
   scripts/run-all.sh                          # whole suite
@@ -53,6 +53,8 @@ need node
 if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
   bash "$REPO_ROOT/scripts/e2e-preflight.sh" --check --suite freighter || exit 1
   export E2E_PREFLIGHT_DONE=1
+  echo >&2
+  echo '--- e2e suite ---' >&2
 fi
 
 # Colorized results on an interactive terminal only (CI logs stay plain).
@@ -97,5 +99,13 @@ fi
 for t in ${failed_names[@]+"${failed_names[@]}"}; do
   echo "  ${C_RED}FAILED${C_RESET}: $t"
 done
+
+if [ "$failed" -gt 0 ]; then
+  echo
+  echo "Run this next (headed, with human approvals):"
+  for t in ${failed_names[@]+"${failed_names[@]}"}; do
+    echo "  HEADFUL=1 APPROVE=human bash scripts/run-e2e.sh $t"
+  done
+fi
 
 [ "$failed" -eq 0 ]

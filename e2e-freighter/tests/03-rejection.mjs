@@ -11,10 +11,16 @@
 // rejection (this test) is what actually proves that path, not a mocked
 // error object.
 
+import { createLogger } from '../src/logger.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+const log = createLogger('03-rejection');
+
 function assert(condition, message) {
-  if (!condition) throw new Error(`03-rejection: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`03-rejection: ${message}`);
+  }
 }
 
 export async function run({ page, context, waitForFreighterApproval, approveOrWatch, rejectInFreighter }) {
@@ -74,7 +80,7 @@ export async function run({ page, context, waitForFreighterApproval, approveOrWa
   assert(!stillDisabled, 'deposit button is still disabled after rejection — recovery UX did not reset it');
 
   const textVisible = await depositBtn.locator('.btn-text').isVisible().catch(() => false);
-  assert(textVisible, 'deposit button\'s normal label is not visible after rejection recovery');
+  assert(textVisible, "deposit button's normal label is not visible after rejection recovery");
 
-  console.log('[03-rejection] OK: rejected deposit surfaced as "Deposit cancelled." and the app returned to idle');
+  log.info('OK: rejected deposit surfaced as "Deposit cancelled." and the app returned to idle');
 }

@@ -38,8 +38,14 @@
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
+import { createLogger } from '../src/logger.mjs';
+
+const log = createLogger('09-disclose-negative');
 function assert(condition, message) {
-  if (!condition) throw new Error(`09-disclose-negative: ${message}`);
+  if (!condition) {
+    log.error('FAIL:', message);
+    throw new Error(`09-disclose-negative: ${message}`);
+  }
 }
 
 // Flip the compressed proof's y-SIGN flag on point A, without touching any
@@ -112,7 +118,7 @@ export async function run(helpers) {
     amount: '0.01',
     rpcUrl,
   });
-  console.log(`[${logTag}] deposit confirmed SUCCESS on-chain: ${depositHash}`);
+  log.info(`deposit confirmed SUCCESS on-chain: ${depositHash}`);
 
   await page.waitForTimeout(20000);
   await page.getByRole('button', { name: 'Disclosure', exact: true }).click();
@@ -151,7 +157,7 @@ export async function run(helpers) {
     assert(false, `disclosure receipt was not generated within 120s (panel text: "${errorText}")`);
   }
   const validReceiptJson = await receiptPre.innerText();
-  console.log(`[${logTag}] generated the baseline valid disclosure receipt`);
+  log.info(`generated the baseline valid disclosure receipt`);
 
   const verifyBtn = () => verifyPanel.getByRole('button', { name: 'Verify Receipt', exact: true });
 
@@ -192,14 +198,14 @@ export async function run(helpers) {
 
   const verifyButtonVisibleAfterGarbage = await verifyBtn().isVisible().catch(() => false);
   assert(!verifyButtonVisibleAfterGarbage, 'garbage input left the Verify Receipt button visible — the summary panel should stay hidden on a failed import');
-  console.log(`[${logTag}] (a) garbage input: clean "Invalid JSON" error, no stuck state`);
+  log.info(`(a) garbage input: clean "Invalid JSON" error, no stuck state`);
 
   // Clean recovery: the exact same flow accepts a valid receipt right after.
   const recoveredLoad = await loadAndVerify(validReceiptJson);
   assert(recoveredLoad.loaded, 'the import flow did not recover after a prior garbage-input error');
   const recoveredOk = await isFullyVerified();
   assert(recoveredOk, 'the baseline valid receipt did not verify as fully valid after recovering from the garbage-input error');
-  console.log(`[${logTag}] (a) clean recovery confirmed: the same flow verified a valid receipt right after`);
+  log.info(`(a) clean recovery confirmed: the same flow verified a valid receipt right after`);
 
   // --- (b) TAMPERED PROOF: flip point A's y-sign flag (keeping it
   // syntactically valid — same length/charset — so it passes shape
@@ -219,7 +225,7 @@ export async function run(helpers) {
   }
   const fullyVerifiedAfterProofTamper = await isFullyVerified();
   assert(!fullyVerifiedAfterProofTamper, 'tampered proof still showed "Fully verified"');
-  console.log(`[${logTag}] (b) tampered proof: "Proof invalid" shown specifically, not fully verified`);
+  log.info(`(b) tampered proof: "Proof invalid" shown specifically, not fully verified`);
 
   // --- (c) WRONG CONTEXT: alter a context field (purpose) so the receipt's
   // committed context hash no longer matches what's declared — the proof
@@ -235,7 +241,7 @@ export async function run(helpers) {
   assert(proofStillOkWithTamperedContext, 'proof check should still pass when only the context is tampered — the proof bytes were untouched');
   const fullyVerifiedAfterContextTamper = await isFullyVerified();
   assert(!fullyVerifiedAfterContextTamper, 'tampered context still showed "Fully verified"');
-  console.log(`[${logTag}] (c) wrong context: "Context mismatch" shown specifically, proof still valid, not fully verified`);
+  log.info(`(c) wrong context: "Context mismatch" shown specifically, proof still valid, not fully verified`);
 
-  console.log(`[${logTag}] OK: all three negative cases (garbage input, tampered proof, wrong context) behaved correctly`);
+  log.info(`OK: all three negative cases (garbage input, tampered proof, wrong context) behaved correctly`);
 }

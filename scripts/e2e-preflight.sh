@@ -80,6 +80,8 @@ Environment:
                          run-e2e.sh, e2e-browser-test.sh) to bypass it
                          entirely; this script itself does not read it.
   E2E_PREFLIGHT_DONE     Set to 1 by this script on a successful run.
+  E2E_SPP_PATH           Override path to the spp CLI binary (default:
+                         target/release/spp).
 
 Examples:
   scripts/e2e-preflight.sh --check --suite sdk
@@ -692,13 +694,19 @@ check_tool_stellar() {
 }
 
 check_tool_spp() {
-  if command -v spp >/dev/null 2>&1; then
-    _STATUS="OK"; _DETAIL="$(command -v spp)"
+  # Never trust a generic `spp` on PATH: it may be an unrelated tool. Always
+  # require the project's own build, or an explicit E2E_SPP_PATH override.
+  if [ -n "${E2E_SPP_PATH:-}" ]; then
+    if [ -x "$E2E_SPP_PATH" ]; then
+      _STATUS="OK"; _DETAIL="$E2E_SPP_PATH (via E2E_SPP_PATH)"
+    else
+      _STATUS="MISSING"; _DETAIL="E2E_SPP_PATH=$E2E_SPP_PATH is not executable"
+    fi
   elif [ -x "$REPO_ROOT/target/release/spp" ]; then
     _STATUS="OK"; _DETAIL="$REPO_ROOT/target/release/spp"
   else
     _STATUS="MISSING"
-    _DETAIL="no 'spp' binary on PATH and no target/release/spp build"
+    _DETAIL="no target/release/spp build; run: cargo build --release -p stellar-private-payments-cli"
   fi
 }
 

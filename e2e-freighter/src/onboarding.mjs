@@ -6,6 +6,8 @@
 // keyed by address in app/js/ui/onboarding-wizard.js) mean a second account
 // goes through it fresh even on an already-onboarded profile.
 
+import { createLogger } from './logger.mjs';
+
 const WIZARD_BUTTON_PRIORITY = [
   'Accept disclaimer', // first step; must be acknowledged before anything else
   // Storage step: "Continue without it" only sets a "prompted" flag, not
@@ -29,6 +31,7 @@ const WIZARD_BUTTON_PRIORITY = [
 ];
 
 export async function driveWizard(page, context, { waitForFreighterApproval, approveOrWatch, logTag = 'onboarding' }) {
+  const log = createLogger(`${logTag}/wizard`);
   for (let step = 0; step < 10; step += 1) {
     // #onboarding-modal is always present in the DOM — the app toggles a
     // "hidden" class rather than removing it. A plain existence check never
@@ -50,7 +53,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
         }
       }
       if (await modalHidden()) {
-        console.log(`[${logTag}] wizard finished after ${step} step(s)`);
+        log.debug('wizard finished after', step, 'step(s)');
         return;
       }
     }
@@ -80,7 +83,7 @@ export async function driveWizard(page, context, { waitForFreighterApproval, app
     const choice = WIZARD_BUTTON_PRIORITY.find((text) => buttons.some((b) => b.text === text));
     if (!choice) throw new Error(`${logTag}: no recognized button among [${buttons.map((b) => b.text).join(', ')}]`);
 
-    console.log(`[${logTag}] step ${step}, clicking "${choice}"`);
+    log.debug('step', step, 'clicking', choice);
     await page.getByText(choice, { exact: true }).first().click({ force: true });
 
     if (choice === 'Derive and store keys') {
