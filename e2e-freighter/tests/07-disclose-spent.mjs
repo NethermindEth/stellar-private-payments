@@ -38,14 +38,10 @@ import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 
 const log = createLogger('07-disclose-spent');
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`07-disclose-spent: ${message}`);
-  }
-}
+
 
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;

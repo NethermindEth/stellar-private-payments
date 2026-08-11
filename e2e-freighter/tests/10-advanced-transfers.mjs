@@ -61,15 +61,9 @@ import { driveWizard } from '../src/onboarding.mjs';
 import { waitForTransactionSuccess } from '../src/chain.mjs';
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 
 const log = createLogger('10-advanced-transfers');
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`10-advanced-transfers: ${message}`);
-  }
-}
-
 export async function run(helpers) {
   const { page, context, waitForAnyFreighterApproval, approveOrWatch, waitForFreighterApproval } = helpers;
   const logTag = '10-advanced-transfers';

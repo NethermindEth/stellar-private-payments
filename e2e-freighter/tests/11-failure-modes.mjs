@@ -64,14 +64,9 @@ import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 
 const log = createLogger('11-failure-modes');
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`11-failure-modes: ${message}`);
-  }
-}
 
 export async function run(helpers) {
   const { page, context, waitForAnyFreighterApproval, approveOrWatch, waitForFreighterApproval } = helpers;

@@ -21,17 +21,13 @@
 // tests/04-deposit-withdraw.mjs.
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 import { waitForTransactionSuccess } from '../src/chain.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 const log = createLogger('02-deposit');
 
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`02-deposit: ${message}`);
-  }
-}
+
 
 export async function run({ page, context, waitForAnyFreighterApproval, waitForFreighterApproval, approveOrWatch }) {
   const approve = (kind, opts) => approveOrWatch(context, kind, opts);

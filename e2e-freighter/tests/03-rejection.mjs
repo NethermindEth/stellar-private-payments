@@ -12,16 +12,12 @@
 // error object.
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 const log = createLogger('03-rejection');
 
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`03-rejection: ${message}`);
-  }
-}
+
 
 export async function run({ page, context, waitForFreighterApproval, approveOrWatch, rejectInFreighter }) {
   // Wizard state is per-origin: drive it on fresh origins, no-op elsewhere.

@@ -27,17 +27,13 @@
 // result.
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 const log = createLogger('04-deposit-withdraw');
 
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`04-deposit-withdraw: ${message}`);
-  }
-}
+
 
 export async function run(helpers) {
   const { page, context, waitForFreighterApproval, approveOrWatch } = helpers;

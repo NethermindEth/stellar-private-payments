@@ -22,8 +22,7 @@ FRIENDBOT_URL="https://friendbot.stellar.org"
 # no admin secret (membership proofs are Allowlist-gated —
 # sdk/types/src/policy_tx.rs; the pool's flags are in
 # deployments/testnet/deployments.json).
-# The pool address is resolved from deployments.json at runtime (after
-# argument parsing, since the file path depends on --network) — a hardcoded
+# The pool address is resolved from deployments.json at runtime — a hardcoded
 # address silently goes stale on every redeploy.
 POOL_CONTRACT=""
 # Passed explicitly to `spp onboard` so it never falls through to a prompt.
@@ -60,14 +59,8 @@ pool (policyFlags ["allowlist","blocklist"]) this script is NOT sufficient: that
 needs the deployment admin secret plus an EURC trustline.
 
 Options:
-  --network NAME        Stellar CLI network name (default: testnet)
-  --rpc-url URL         Soroban RPC endpoint (default: https://soroban-testnet.stellar.org)
-  --explorer-url URL    Explorer base URL recorded during onboarding
-                        (default: https://stellar.expert/explorer/testnet)
-  --alias-prefix NAME   Keystore alias prefix (default: spp-e2e)
   --verify              Re-check existing accounts without creating anything
   --force               Recreate accounts even if the env file already exists
-  --fund-retries N      Friendbot attempts per account (default: 6)
   -h, --help            Show this help
 
 Idempotency:
@@ -80,28 +73,18 @@ Idempotency:
 Examples:
   deployments/scripts/e2e-accounts-setup.sh
   deployments/scripts/e2e-accounts-setup.sh --verify
-  deployments/scripts/e2e-accounts-setup.sh --force --alias-prefix ci-e2e
+  deployments/scripts/e2e-accounts-setup.sh --force
 USAGE
 }
 
 while [ $# -gt 0 ]; do
   case "$1" in
-    --network) [ $# -ge 2 ] || die "--network needs a value"; NETWORK="$2"; shift 2 ;;
-    --rpc-url) [ $# -ge 2 ] || die "--rpc-url needs a value"; RPC_URL="$2"; shift 2 ;;
-    --explorer-url) [ $# -ge 2 ] || die "--explorer-url needs a value"; EXPLORER_URL="$2"; shift 2 ;;
-    --alias-prefix) [ $# -ge 2 ] || die "--alias-prefix needs a value"; ALIAS_PREFIX="$2"; shift 2 ;;
-    --fund-retries) [ $# -ge 2 ] || die "--fund-retries needs a value"; FUND_RETRIES="$2"; shift 2 ;;
     --verify) VERIFY_ONLY=1; shift ;;
     --force) FORCE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     *) usage; die "unknown argument '$1'" ;;
   esac
 done
-
-case "$FUND_RETRIES" in
-  ''|*[!0-9]*) die "--fund-retries must be a positive integer" ;;
-  *) [ "$FUND_RETRIES" -ge 1 ] || die "--fund-retries must be >= 1" ;;
-esac
 
 ENV_DIR="$REPO_ROOT/deployments/$NETWORK"
 ENV_FILE="$ENV_DIR/.e2e-accounts.env"

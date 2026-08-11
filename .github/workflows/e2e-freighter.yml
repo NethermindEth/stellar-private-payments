@@ -1,17 +1,34 @@
-name: E2E Freighter Full Suite
+name: E2E Freighter
 
 on:
-  workflow_dispatch: {}
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+    inputs:
+      test-level:
+        description: 'smoke (quick subset) or full (all tests)'
+        required: true
+        default: 'full'
+        type: choice
+        options: [smoke, full]
 
 permissions:
   contents: read
 
 jobs:
-  e2e-freighter-full:
-    name: Full Freighter test suite
-    timeout-minutes: 60
+  e2e-freighter:
+    name: ${{ matrix.test-level == 'full' && 'Full Freighter test suite' || 'Freighter smoke tests (selected subset)' }}
+    timeout-minutes: ${{ matrix.test-level == 'full' && 60 || 45 }}
     runs-on: ubuntu-latest
     environment: e2e-testnet
+    strategy:
+      matrix:
+        test-level: [smoke, full]
+      # PR-time only runs smoke; full is workflow_dispatch only.
+      # This avoids building the app on every PR commit.
+      fail-fast: false
     steps:
       - name: Checkout source code
         uses: actions/checkout@692973e3d937129bcbf40652eb9f2f61becf3332 # v4
@@ -19,7 +36,9 @@ jobs:
           fetch-depth: 1
           persist-credentials: false
 
+      # Full suite only: build the app from source
       - name: Setup Rust
+        if: matrix.test-level == 'full'
         uses: dtolnay/rust-toolchain@efa25f7f19611383d5b0ccf2d1c8914531636bf9 # stable
         with:
           profile: minimal
@@ -28,45 +47,33 @@ jobs:
           override: true
 
       - name: Cache
+        if: matrix.test-level == 'full'
         uses: Swatinem/rust-cache@82a92a6e8fbeee089604da2575dc567ae9ddeaab # v2
         with:
           cache-targets: "true"
 
-      - name: Cache binaryen
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: target/tmp/binaryen/binaryen-version_131
-          key: binaryen-version_131-${{ runner.os }}-${{ runner.arch }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
-        with:
-          node-version: "22"
-          cache: npm
-          cache-dependency-path: |
-            app/package-lock.json
-            e2e-freighter/package-lock.json
-
       - name: Install Trunk
+        if: matrix.test-level == 'full'
         uses: taiki-e/install-action@541dbe11e2898b05bb65bedbd1d0c4e3092b5bdd # v2
         with:
           tool: trunk@0.21.14
 
       - name: Install wasm-bindgen-cli
+        if: matrix.test-level == 'full'
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked --force
 
       - name: Build app (Trunk)
+        if: matrix.test-level == 'full'
         run: |
           rm -rf app-dist
           make release DIST_DIR=app-dist
 
       - name: Start app server
+        if: matrix.test-level == 'full'
         run: |
           python3 -m http.server 8000 -d app-dist &
           SERVER_PID=$!
           echo "SERVER_PID=$SERVER_PID" >> $GITHUB_ENV
-
-          # Wait for server to be ready
           for i in {1..30}; do
             if curl -fs http://127.0.0.1:8000/ >/dev/null 2>&1; then
               echo "App server ready"
@@ -74,15 +81,22 @@ jobs:
             fi
             sleep 1
           done
-
           echo "App server failed to start" >&2
           exit 1
+
+      # Shared: install test dependencies
+      - name: Setup Node.js
+        uses: actions/setup-node@6a61c0375d66246de94630495909f12cf8dac84d # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: |
+            ${{ matrix.test-level == 'full' && 'app/package-lock.json' || '' }}
+            e2e-freighter/package-lock.json
 
       - name: Install test dependencies
         run: |
           npm ci --prefix e2e-freighter
-          # The runner records video when $CI is set (runner.mjs), and
-          # Playwright video needs its own ffmpeg build — not part of npm ci.
           cd e2e-freighter && npx playwright install ffmpeg
 
       - name: Locate Chromium
@@ -104,33 +118,38 @@ jobs:
           E2E_ACCOUNT_C_ADDRESS: ${{ secrets.E2E_ACCOUNT_C_ADDRESS }}
         run: xvfb-run -a bash e2e-freighter/scripts/setup.sh
 
-      # CI preflight decision (plan step 3.5, option (c) from the 1.2
-      # contract): run-all.sh runs scripts/e2e-preflight.sh --check
+      # CI preflight: run-all.sh runs scripts/e2e-preflight.sh --check
       # --suite freighter once before the loop (E2E_SKIP_PREFLIGHT=1 would
       # bypass it). No .e2e-accounts.env exists here — every var below is
       # an injected secret instead, so the preflight's env-file checks SKIP
       # when CI is detected and the vars this suite needs are already
       # exported; env.vars.required still verifies against the environment
-      # for real. The steps above (Install Trunk, Install test
-      # dependencies, Locate Chromium, Generate Freighter profile snapshot)
-      # already satisfy the tools/freighter/browser groups' checks
-      # (tool.trunk in particular, since APP_URL points at localhost
-      # below), and chain.accounts.* SKIP on CI — trusting the account
-      # state a human verified once before copying its secrets in, since
+      # for real. chain.accounts.* SKIP on CI — trusting the account state
+      # a human verified once before copying its secrets in, since
       # e2e-accounts-setup.sh --verify has no path override and would
       # otherwise `die` with no local env file to read.
-      - name: Run full Freighter test suite
+      - name: Run Freighter tests
         env:
+          APPROVE: auto
           E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}
-          # Transfer recipient for 05/10/11 (registered address). No env
-          # file exists in CI, so every var a test reads must be set here.
+          # Transfer recipient for 05/10/11 (registered address). No env file
+          # exists in CI, so every var a test reads must be set here.
           E2E_ACCOUNT_D_ADDRESS: ${{ secrets.E2E_ACCOUNT_D_ADDRESS }}
-        run: APPROVE=auto APP_URL=http://localhost:8000 bash e2e-freighter/scripts/run-all.sh
+          APP_URL: ${{ matrix.test-level == 'full' && 'http://localhost:8000' || 'https://nethermindeth.github.io/stellar-private-payments/#move-funds' }}
+        run: |
+          if [ "${{ matrix.test-level }}" = "full" ]; then
+            bash e2e-freighter/scripts/run-all.sh
+          else
+            bash e2e-freighter/scripts/run-all.sh \
+              e2e-freighter/tests/01-connect.mjs \
+              e2e-freighter/tests/03-rejection.mjs \
+              e2e-freighter/tests/05-deposit-transfer.mjs
+          fi
 
       - name: Upload test results
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: always()
+        if: ${{ matrix.test-level == 'full' && 'always()' || 'failure()' }}
         with:
-          name: freighter-test-results
+          name: ${{ matrix.test-level == 'full' && 'freighter-test-results' || 'freighter-smoke-test-results' }}
           path: e2e-freighter/test-results/
           retention-days: 30

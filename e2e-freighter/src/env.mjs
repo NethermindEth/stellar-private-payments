@@ -18,3 +18,15 @@ if (!process.env.E2E_FREIGHTER_PASSWORD && existsSync(ENV_FILE)) {
     }
   }
 }
+
+// Require APP_URL to be set explicitly — no default fallback.
+// Callers must provide APP_URL in their environment or CI workflow.
+export function requireAppUrl() {
+  if (!process.env.APP_URL) {
+    throw new Error(
+      'APP_URL is not set. Set it to the URL of the deployed app or ' +
+      'a local server (e.g. APP_URL=http://localhost:8000).'
+    );
+  }
+  return process.env.APP_URL;
+}

@@ -1,5 +1,6 @@
 // Shared "drive the app's onboarding wizard to completion" machinery.
-// Extracted from scripts/complete-onboarding.mjs (originally written to
+// Extracted from the original complete-onboarding script (now merged into
+// scripts/provision.mjs).
 // onboard account A once against the live profile) so scripts/probe-
 // multi-account.mjs can reuse it for account B's first-ever connect — the
 // wizard's per-address gates (disclaimer, registration, key derivation all

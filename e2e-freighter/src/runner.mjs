@@ -11,7 +11,8 @@
 // (approvals can land in a separate window), and never on Freighter's CSS
 // classes — only visible button text (Confirm / Cancel / Connect / Sign).
 
-import { createLogger, enableFileLogging } from './logger.mjs';
+import { createLogger } from './logger.mjs';
+import { requireAppUrl } from './env.mjs';
 import { chromium } from 'playwright';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -22,7 +23,6 @@ const EXT_PATH = path.resolve(PKG_ROOT, 'vendor', 'freighter');
 const EXT_ID = 'bcacfldlkkdogcmkkibnjlakofdplcbk';
 const CHROMIUM_PATH = process.env.E2E_CHROMIUM_PATH || '/usr/bin/chromium';
 const log = createLogger('runner');
-const DEFAULT_APP_URL = 'https://nethermindeth.github.io/stellar-private-payments/#move-funds';
 
 // ---------------------------------------------------------------------------
 // Freighter selectors — the maintenance surface. Discovered by manually
@@ -89,14 +89,15 @@ export async function launch({ userDataDir, headless = true, video = false } = {
   }
   const context = await chromium.launchPersistentContext(userDataDir, contextOptions);
 
-  // Same reasoning as the 'notifications' grant above, for the wizard's
-  // storage step: navigator.storage.persist() never resolves true for a
-  // scripted session without this — there is no Playwright-level
-  // 'persistent-storage' permission name, so this goes through the raw CDP
-  // permission Playwright doesn't expose (Browser.grantPermissions
-  // "durableStorage"), same effect as a human clicking "Allow".
+  // durableStorage cannot be baked into the profile snapshot: Chrome's
+    // Permissions API grants are per-browser-session state, not profile data
+    // that carries over in a user-data-dir tar.gz. Playwright's permission
+    // model doesn't expose 'persistent-storage', so it goes through raw CDP
+    // (Browser.grantPermissions), same effect as a human clicking "Allow".
+    // Without this, navigator.storage.persist() never resolves true in a
+    // scripted session, stalling the wizard's storage step forever.
   try {
-    const appOrigin = new URL(process.env.APP_URL || DEFAULT_APP_URL).origin;
+    const appOrigin = new URL(requireAppUrl()).origin;
     const page = context.pages()[0] || (await context.newPage());
     const cdp = await context.newCDPSession(page);
     await cdp.send('Browser.grantPermissions', { origin: appOrigin, permissions: ['durableStorage'] });
@@ -229,7 +230,7 @@ export async function rejectInFreighter(context, kind, { timeoutMs = 30000 } = {
 // it asserts the "Connect Freighter" button is gone (the app only shows it
 // while disconnected) and returns whatever truncated address text is shown,
 // for logging only.
-export async function connectApp(page, { appUrl = process.env.APP_URL || DEFAULT_APP_URL, context } = {}) {
+export async function connectApp(page, { appUrl = requireAppUrl(), context } = {}) {
   if (!context) throw new Error('connectApp: context is required (needed to watch for the connect approval)');
   await page.goto(appUrl);
   await page.waitForTimeout(1500);
@@ -280,8 +281,6 @@ async function main() {
   const headless = process.env.HEADFUL !== '1';
   const video = !!process.env.CI;
 
-  enableFileLogging(path.join(PKG_ROOT, 'test-results', 'e2e-run.log'));
-
   const context = await launch({ userDataDir, headless, video });
   try {
     await unlockFreighter(context);
@@ -316,18 +315,6 @@ async function main() {
 if (import.meta.url === `file://${process.argv[1]}`) {
   main().catch(async (err) => {
     log.error('FAILED:', err.message);
-
-    // Print a formatted failure block with recent log context
-    const { getRecentLines } = await import('./logger.mjs');
-    const sep = '-'.repeat(58);
-    console.error(`\n${sep}\n  FAILURE\n${sep}`);
-    console.error('  error:  ', err.message);
-    console.error('  recent log:');
-    for (const line of getRecentLines(15)) {
-      console.error(`    ${line}`);
-    }
-    console.error(`${sep}\n`);
-
     process.exit(1);
   });
 }

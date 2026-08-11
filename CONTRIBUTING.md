@@ -234,11 +234,11 @@ invocation; `scripts/e2e-setup.sh` is `--fix --suite all`.
 - `--check` (default) verifies only, never mutates anything; `--fix` also
   runs the safe auto-heal action for anything missing.
 - `--suite sdk|freighter|all` restricts which checks run (default `all`).
-- `--json` emits a machine-readable report instead of the human one.
 - Exit codes: `0` everything the selected suite needs is present, `1` at
   least one requirement is missing and wasn't healed in this mode, `2`
   usage error.
 - `E2E_SKIP_PREFLIGHT=1` bypasses it entirely from any entry point.
+- `E2E_SKIP_NETWORK_CHECKS=1` skips reachability and chain-state verifications.
 - Every filesystem location it inspects has a path-override env var for
   debugging: `E2E_ENV_FILE`, `E2E_SNAPSHOT_FILE`, `E2E_VENDOR_DIR`,
   `E2E_CIRCUITS_OUT_DIR`, `E2E_SDK_DIST_DIR`, `E2E_SPP_PATH`, plus the pre-existing

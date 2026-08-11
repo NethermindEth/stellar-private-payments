@@ -319,20 +319,20 @@ What setup.sh does under the hood, if you ever need the pieces:
 bash e2e-freighter/scripts/fetch-extension.sh
 
 # 1. Provision a fresh Freighter profile from scratch
-node e2e-freighter/scripts/setup-freighter-profile.mjs
+bash e2e-freighter/scripts/provision.sh
 
 # 2. Complete the app's onboarding wizard once, HEADED (it can stall
 #    under headless rendering — see the script's header comment)
-DISPLAY=:1 node e2e-freighter/scripts/complete-onboarding.mjs
+DISPLAY=:1 bash e2e-freighter/scripts/provision.sh --skip-wizard
 
 # 3. Snapshot the result
-bash e2e-freighter/scripts/snapshot-profile.sh
+bash e2e-freighter/scripts/provision.sh
 
 # 4. Verify a restored copy skips the wizard, headless
-APPROVE=auto node e2e-freighter/scripts/verify-onboarded.mjs
+APPROVE=auto bash e2e-freighter/scripts/provision.sh
 ```
 
-`scripts/prepare-profile.sh` restores the snapshot into a fresh temp
+`scripts/provision.sh` restores the snapshot into a fresh temp
 directory per run — never point two concurrent runs at the same restored
 copy (Chrome's profile storage is single-writer). `scripts/run-e2e.sh` does
 this automatically and cleans up afterward.

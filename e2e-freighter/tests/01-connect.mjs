@@ -8,15 +8,11 @@
 // the app, proving the whole launch -> unlock -> connect pipeline works.
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 
 const log = createLogger('01-connect');
 
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`01-connect: ${message}`);
-  }
-}
+
 
 export async function run({ page }) {
   const connectBtnVisible = await page

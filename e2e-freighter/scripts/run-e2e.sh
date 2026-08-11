@@ -40,7 +40,7 @@ usage() {
   cat >&2 <<'USAGE'
 Usage: run-e2e.sh [OPTIONS] [TEST_FILE]
 
-Restores a fresh Freighter profile from the snapshot (scripts/prepare-profile.sh)
+# Restores a fresh Freighter profile from the snapshot (scripts/provision.sh --restore)
 into a temp dir, runs src/runner.mjs against it — either --smoke (reach a
 connected state against the app, no test logic) or a given TEST_FILE (a
 module exporting an async run({ context, page, ... }) function) — then
@@ -54,7 +54,7 @@ Environment:
   APPROVE=auto|human    auto clicks through Freighter approvals by text;
                         human waits for you to act (the demo path)
   HEADFUL=1             Run Chrome headed instead of headless
-  APP_URL                App URL to connect to (default: the deployed app)
+  APP_URL                App URL to connect to (required; no default)
   E2E_FREIGHTER_PASSWORD, E2E_ACCOUNT_C_SECRET, E2E_ACCOUNT_C_ADDRESS
                         Sourced from deployments/testnet/.e2e-accounts.env
 
@@ -90,7 +90,7 @@ need node
 need bash
 
 step "preparing profile"
-PROFILE_SUBDIR="$(bash "$SCRIPT_DIR/prepare-profile.sh")"
+PROFILE_SUBDIR="$(bash "$SCRIPT_DIR/provision.sh" --restore)"
 USER_DATA_DIR="$(dirname "$PROFILE_SUBDIR")"
 TMP_ROOT="$(dirname "$USER_DATA_DIR")"
 

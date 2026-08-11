@@ -39,14 +39,10 @@ import { submitAndConfirm } from '../src/moveFunds.mjs';
 import { driveWizard } from '../src/onboarding.mjs';
 
 import { createLogger } from '../src/logger.mjs';
+import { assert } from '../src/assert.mjs';
 
 const log = createLogger('09-disclose-negative');
-function assert(condition, message) {
-  if (!condition) {
-    log.error('FAIL:', message);
-    throw new Error(`09-disclose-negative: ${message}`);
-  }
-}
+
 
 // Flip the compressed proof's y-SIGN flag on point A, without touching any
 // coordinate value — deterministically produces a decodable-but-wrong
