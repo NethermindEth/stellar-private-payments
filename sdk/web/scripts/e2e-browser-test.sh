@@ -167,6 +167,15 @@ cleanup() {
 trap cleanup EXIT
 
 main() {
+  # Skipped entirely with E2E_SKIP_PREFLIGHT=1. On failure, abort with the
+  # preflight's own report already printed — no extra wrapping. Its sdk
+  # group deliberately overlaps ensure_dist below (both know about
+  # dist/workers): the preflight must be able to report a missing dist
+  # without building it, so it does not replace ensure_dist here.
+  if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
+    bash "$ROOT/scripts/e2e-preflight.sh" --check --suite sdk || exit 1
+  fi
+
   ensure_dist
 
   if serves_assets; then

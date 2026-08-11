@@ -79,6 +79,13 @@ if [ "$SMOKE" -ne 1 ] && [ -z "$TEST_FILE" ]; then
   die "need --smoke or a TEST_FILE"
 fi
 
+# Skipped when a parent run-all.sh already ran it once for the whole suite
+# (E2E_PREFLIGHT_DONE), or when E2E_SKIP_PREFLIGHT=1 bypasses it entirely.
+# On failure, abort with the preflight's own report already printed.
+if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ] && [ "${E2E_PREFLIGHT_DONE:-}" != "1" ]; then
+  bash "$REPO_ROOT/scripts/e2e-preflight.sh" --check --suite freighter || exit 1
+fi
+
 need node
 need bash
 

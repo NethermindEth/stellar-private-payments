@@ -104,6 +104,21 @@ jobs:
           E2E_ACCOUNT_C_ADDRESS: ${{ secrets.E2E_ACCOUNT_C_ADDRESS }}
         run: xvfb-run -a bash e2e-freighter/scripts/setup.sh
 
+      # CI preflight decision (plan step 3.5, option (c) from the 1.2
+      # contract): run-all.sh runs scripts/e2e-preflight.sh --check
+      # --suite freighter once before the loop (E2E_SKIP_PREFLIGHT=1 would
+      # bypass it). No .e2e-accounts.env exists here — every var below is
+      # an injected secret instead, so the preflight's env-file checks SKIP
+      # when CI is detected and the vars this suite needs are already
+      # exported; env.vars.required still verifies against the environment
+      # for real. The steps above (Install Trunk, Install test
+      # dependencies, Locate Chromium, Generate Freighter profile snapshot)
+      # already satisfy the tools/freighter/browser groups' checks
+      # (tool.trunk in particular, since APP_URL points at localhost
+      # below), and chain.accounts.* SKIP on CI — trusting the account
+      # state a human verified once before copying its secrets in, since
+      # e2e-accounts-setup.sh --verify has no path override and would
+      # otherwise `die` with no local env file to read.
       - name: Run full Freighter test suite
         env:
           E2E_FREIGHTER_PASSWORD: ${{ secrets.E2E_FREIGHTER_PASSWORD }}

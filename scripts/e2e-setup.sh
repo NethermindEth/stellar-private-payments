@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # One-command setup for all E2E test suites.
 #
-# - Provisions the four testnet accounts (A/B for the SDK suite, C/D for the
-#   Freighter suite) and writes deployments/testnet/.e2e-accounts.env.
-# - Builds the circuit artifacts the pre-signing SDK tests need.
-# - Prepares the Freighter profile snapshot for the real-browser suite.
+# Delegates all provisioning to scripts/e2e-preflight.sh --fix — the single
+# source of truth for what "e2e setup" means: the testnet accounts, the
+# compiled circuit artifacts, the sdk/web dist, and the Freighter
+# node_modules + vendored extension. The one thing --fix cannot do is the
+# one-time headed Freighter onboarding; when that remains outstanding, the
+# preflight's own report already names the exact command to run — this
+# script surfaces that rather than inventing its own wording.
 #
 # Does NOT run the tests themselves — it prints the commands to run them.
 
@@ -20,15 +23,12 @@ need cargo
 need node
 need npm
 
-step "Provisioning testnet accounts (idempotent)"
-bash "$REPO_ROOT/deployments/scripts/e2e-accounts-setup.sh"
-
-step "Building circuit artifacts for the pre-signing SDK tests"
-cargo build -p circuits
-cargo build -p circuits --release
-
-step "Setting up the Freighter profile snapshot (idempotent)"
-bash "$REPO_ROOT/e2e-freighter/scripts/setup.sh"
+step "Running the unified e2e preflight in --fix mode"
+PREFLIGHT_EXIT=0
+bash "$REPO_ROOT/scripts/e2e-preflight.sh" --fix --suite all || PREFLIGHT_EXIT=$?
+if [ "$PREFLIGHT_EXIT" -ne 0 ]; then
+  step "preflight could not heal everything — see its report above for the exact remaining command (expected for the one-time headed Freighter onboarding)"
+fi
 
 cat <<'EOF'
 
@@ -55,3 +55,5 @@ command above sources it explicitly because the variables are read at compile
 time via option_env!.
 
 EOF
+
+exit "$PREFLIGHT_EXIT"

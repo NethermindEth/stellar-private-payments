@@ -13,6 +13,7 @@ step() { echo "==> $*" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PKG_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+REPO_ROOT="$(cd "$PKG_ROOT/.." && pwd)"
 
 usage() {
   cat >&2 <<'USAGE'
@@ -44,6 +45,15 @@ esac
 need() { command -v "$1" >/dev/null 2>&1 || die "missing '$1'"; }
 need bash
 need node
+
+# Run once before the loop — run-e2e.sh (invoked once per test below) skips
+# its own preflight via E2E_PREFLIGHT_DONE, so this is not repeated
+# per-test. E2E_SKIP_PREFLIGHT=1 bypasses it entirely. On failure, abort
+# with the preflight's own report already printed — no extra wrapping.
+if [ "${E2E_SKIP_PREFLIGHT:-}" != "1" ]; then
+  bash "$REPO_ROOT/scripts/e2e-preflight.sh" --check --suite freighter || exit 1
+  export E2E_PREFLIGHT_DONE=1
+fi
 
 # Colorized results on an interactive terminal only (CI logs stay plain).
 if [ -t 1 ]; then

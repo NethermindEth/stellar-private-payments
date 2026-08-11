@@ -85,3 +85,7 @@ spp-*-wallet/
 # Contains testnet secret keys — must never be committed.
 deployments/*/.e2e-accounts.env
 deployments/scripts/.e2e-wallet-*/
+
+# scripts/e2e-preflight.sh's network-check cache marker (timestamp + env
+# file fingerprint only, never a secret).
+/.e2e-preflight-cache

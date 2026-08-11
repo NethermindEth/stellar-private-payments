@@ -63,17 +63,38 @@ jobs:
           cargo build -p circuits
           cargo build -p circuits --release
 
+      # scripts/e2e-preflight.sh --check runs at the START of
+      # e2e-browser-test.sh's main(), before ensure_dist — on a fresh
+      # checkout (no cached sdk/web/dist) it would otherwise report
+      # artifact.sdk_dist.* MISSING and abort before ensure_dist gets a
+      # chance to build it on demand. Build it explicitly here instead,
+      # matching the "Build circuit artifacts" step above.
+      - name: Build sdk/web dist
+        run: |
+          npm ci --prefix sdk/web
+          npm run build --prefix sdk/web
+
       # ubuntu-latest ships Chrome and ChromeDriver preinstalled, with
       # $CHROMEWEBDRIVER pointing at the driver directory — no browser download.
       # $CHROMEWEBDRIVER is set in the runner image's OS environment, so it
       # must be expanded by the shell — `${{ env.CHROMEWEBDRIVER }}` reads the
       # workflow env context instead and would expand to an empty string.
       #
-      # e2e-browser-test.sh owns the rest of the lifecycle: it builds
-      # sdk/web/dist when missing, serves it with CORS on E2E_STATIC_ORIGIN,
-      # waits for readiness, and raises WASM_BINDGEN_TEST_TIMEOUT (the
-      # wasm-bindgen default of 20s cannot cover real proving plus testnet
-      # confirmation).
+      # e2e-browser-test.sh owns the rest of the lifecycle: it runs the
+      # preflight (--check --suite sdk; E2E_SKIP_PREFLIGHT=1 would bypass
+      # it), serves dist with CORS on E2E_STATIC_ORIGIN, waits for
+      # readiness, and raises WASM_BINDGEN_TEST_TIMEOUT (the wasm-bindgen
+      # default of 20s cannot cover real proving plus testnet confirmation).
+      #
+      # CI preflight decision (plan step 3.5, option (c) from the 1.2
+      # contract): no .e2e-accounts.env exists here — every variable below
+      # is an injected secret instead. The preflight's env-file checks SKIP
+      # when CI is detected and the vars this suite needs are already
+      # exported (scripts/e2e-preflight.sh's ci_env_already_satisfied), so
+      # this stays a real tripwire rather than permanent noise. The
+      # env.compiletime.exported/env.vars.required checks still verify
+      # against the environment for real and can fail this job if a secret
+      # is missing — that is intentional, not something this relaxes.
       #
       # --include-ignored is REQUIRED: the six e2e tests are #[ignore]d by
       # default so the PR-time wasm-test job can run this crate's other tests

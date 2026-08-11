@@ -6,6 +6,14 @@ testnet.
 
 ## Requirements
 
+Run `bash scripts/e2e-preflight.sh --fix` from the repo root first — it
+checks (and heals what it safely can) everything below, and
+`run-all.sh`/`run-e2e.sh` also run it automatically before every test
+(`E2E_SKIP_PREFLIGHT=1` opts out). It cannot do the one-time headed
+onboarding itself — see [First time run](#first-time-run) — but it will
+tell you exactly which command to run for that. The manual requirements it
+checks for:
+
 - **Node.js** (18+; tested on 26)
 - **Chromium** — the scripts launch the system browser directly via
   Playwright (`launchPersistentContext`), not Playwright's own bundled
@@ -73,7 +81,23 @@ prefix each command with it inline.
 
 Prerequisites: the Requirements above, plus the `stellar` CLI (27 or newer —
 `spp` passes `--auto-sign` to `stellar tx sign`, which older releases don't
-know) and `trunk` installed. Then three commands:
+know) and `trunk` installed.
+
+Fastest path — from the repo root:
+
+```bash
+bash scripts/e2e-preflight.sh --fix   # provisions accounts + Freighter deps
+bash e2e-freighter/scripts/run-all.sh
+```
+
+`--fix` provisions the four test accounts and the Freighter node_modules +
+vendored extension automatically. It cannot do the one-time headed
+onboarding itself (no browser automation runs from the preflight), so if
+that's still outstanding it prints the exact command to run — headed on a
+desktop session, or the `xvfb-run` form on CI/headless — and exits nonzero
+until you run it.
+
+The three commands under the hood, if you'd rather run them yourself:
 
 ```bash
 # 1. Provision the four test accounts (A/B for the SDK suite, C/D for the
