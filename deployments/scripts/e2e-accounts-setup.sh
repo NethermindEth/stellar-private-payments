@@ -491,7 +491,7 @@ main() {
     do_verify
     return
   fi
-  if [ -f "$ENV_FILE" ] && [ "$FORCE" -eq 0 ]; then
+  if [ -s "$ENV_FILE" ] && [ "$FORCE" -eq 0 ]; then
     step "$ENV_FILE exists; verifying instead of provisioning (use --force to recreate)"
     # shellcheck disable=SC1090
     . "$ENV_FILE"

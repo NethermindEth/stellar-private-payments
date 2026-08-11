@@ -31,6 +31,12 @@ sudo snap install chromium
 export E2E_CHROMIUM_PATH=/snap/bin/chromium
 ```
 
+The snap package runs Chromium in its own mount namespace with a private
+`/tmp`, so the profile snapshot is restored inside `e2e-freighter/.tmp-profiles/`
+instead of `/tmp`. If you use another sandboxed browser that cannot see the
+host `/tmp` (Flatpak, etc.), set `E2E_PROFILE_TMPDIR` to a directory that the
+browser process can see.
+
 Ubuntu's `apt` Node.js package can lag well behind current releases; if you
 hit version issues, install via [nvm](https://github.com/nvm-sh/nvm) or
 [nodesource](https://github.com/nodesource/distributions) instead.

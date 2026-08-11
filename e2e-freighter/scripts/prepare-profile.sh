@@ -57,7 +57,29 @@ need find
 
 [ -s "$SNAPSHOT_FILE" ] || die "snapshot '$SNAPSHOT_FILE' not found; run scripts/snapshot-profile.sh first"
 
-TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/e2e-freighter-profile.XXXXXX")"
+# Choose a temp base that the browser process can actually see. Snap-packaged
+# Chromium runs in its own mount namespace with a private /tmp, so a profile
+# restored under the host /tmp is invisible to it. Use a directory inside the
+# project tree in that case (or when E2E_PROFILE_TMPDIR is explicitly set).
+PROFILE_TMP_BASE="${E2E_PROFILE_TMPDIR:-}"
+if [ -z "$PROFILE_TMP_BASE" ]; then
+  CHROMIUM_PATH="${E2E_CHROMIUM_PATH:-$(command -v chromium || true)}"
+  if [ -n "$CHROMIUM_PATH" ]; then
+    CHROMIUM_PATH_RESOLVED="$(readlink -f "$CHROMIUM_PATH" 2>/dev/null || printf '%s' "$CHROMIUM_PATH")"
+    case "$CHROMIUM_PATH_RESOLVED" in
+      /snap/*|/var/snap/*|/var/lib/snapd/*) PROFILE_TMP_BASE="$PKG_ROOT/.tmp-profiles" ;;
+    esac
+  fi
+fi
+PROFILE_TMP_BASE="${PROFILE_TMP_BASE:-${TMPDIR:-/tmp}}"
+mkdir -p "$PROFILE_TMP_BASE"
+
+# Sweep stale restored copies best-effort (especially relevant for the
+# project-local snap fallback directory). The current dir is not matched by
+# -mmin +360, so a concurrent run won't be deleted.
+find "$PROFILE_TMP_BASE" -maxdepth 1 -type d -name 'e2e-freighter-profile.*' -mmin +360 -exec rm -rf {} + 2>/dev/null || true
+
+TMP_DIR="$(mktemp -d "$PROFILE_TMP_BASE/e2e-freighter-profile.XXXXXX")"
 step "restoring '$SNAPSHOT_FILE' -> '$TMP_DIR'"
 tar -xzf "$SNAPSHOT_FILE" -C "$TMP_DIR"
 
